@@ -95,6 +95,9 @@ function visit(node: Node, definitions: Map<string, string>, source: string): vo
   if (!('children' in node)) return;
   const children = node.children as Array<RootContent | PhrasingContent>;
   const transformed = children.flatMap((child): Array<RootContent | PhrasingContent> => {
+    // GFM's decoded autolink can lose its position; a standalone link occupies the exact paragraph span.
+    if (node.type === 'paragraph' && children.length === 1 && child.type === 'link' && !child.position)
+      child.position = node.position;
     if (child.type === 'inlineCode' && candidate(child.value))
       return [
         {

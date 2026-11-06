@@ -1,22 +1,24 @@
 'use client';
 
-import { type RefObject, useLayoutEffect, useMemo, useRef } from 'react';
+import { type RefObject, useLayoutEffect, useRef } from 'react';
 import styles from './composer-link-mirror.module.css';
-import { composerWebLinks } from './composer-web-links';
+import type { composerWebLinks } from './composer-web-links';
 
 /** Paints the draft while the textarea keeps its value, caret, selection and editing history. */
 export function ComposerLinkMirror({
   input,
   textareaRef,
   composing,
+  links,
 }: {
   input: string;
   textareaRef: RefObject<HTMLTextAreaElement>;
   composing: boolean;
+  links: ReturnType<typeof composerWebLinks>;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const { ranges, unmapped } = useMemo(() => composerWebLinks(input), [input]);
+  const { ranges, unmapped } = links;
   const active = ranges.length > 0 && !composing;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Synchronize after React commits each changed draft, including a change that does not resize the textarea.
@@ -80,22 +82,20 @@ export function ComposerLinkMirror({
   });
 
   return (
-    <>
-      <div
-        ref={viewportRef}
-        className={styles.viewport}
-        aria-hidden="true"
-        data-testid="composer-link-mirror"
-        data-unmapped={unmapped}
-        data-active={active}
-        style={{ visibility: active ? undefined : 'hidden' }}
-      >
-        <div ref={contentRef} className={styles.content}>
-          {spans}
-          {input.slice(end)}
-          {input.endsWith('\n') ? '\u200b' : null}
-        </div>
+    <div
+      ref={viewportRef}
+      className={styles.viewport}
+      aria-hidden="true"
+      data-testid="composer-link-mirror"
+      data-unmapped={unmapped}
+      data-active={active}
+      style={{ visibility: active ? undefined : 'hidden' }}
+    >
+      <div ref={contentRef} className={styles.content}>
+        {spans}
+        {input.slice(end)}
+        {input.endsWith('\n') ? '\u200b' : null}
       </div>
-    </>
+    </div>
   );
 }

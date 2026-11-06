@@ -42,6 +42,7 @@ import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
 import { ChatInputStickers } from './ChatInputStickers';
 import { ComposerLinkMirror } from './ComposerLinkMirror';
+import { ComposerLinkNotice } from './ComposerLinkNotice';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
 import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
@@ -53,6 +54,7 @@ import {
   isImageLifecycleBlockingSend,
 } from './chat-input-upload-state';
 import { composerAttachments } from './composer-queue';
+import { composerWebLinks } from './composer-web-links';
 import { HistorySearchModal } from './HistorySearchModal';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { projectScreeningComposerConflict } from './project-screening-composer-group';
@@ -285,6 +287,7 @@ export function ChatInput({
     () => '',
   );
   const input = threadId ? scopedInput : unscopedInput;
+  const webLinks = useMemo(() => composerWebLinks(shellV2 ? input : ''), [input, shellV2]);
   const setInput = useCallback<Dispatch<SetStateAction<string>>>(
     (next) => {
       if (!threadId) {
@@ -1139,7 +1142,12 @@ export function ChatInput({
           data-guide-id="chat.input"
         >
           {shellV2 && (
-            <ComposerLinkMirror input={input} textareaRef={textareaRef} composing={routingCompositionActive} />
+            <ComposerLinkMirror
+              input={input}
+              textareaRef={textareaRef}
+              composing={routingCompositionActive}
+              links={webLinks}
+            />
           )}
           <textarea
             ref={textareaRef}
@@ -1171,6 +1179,7 @@ export function ChatInput({
             rows={1}
             disabled={disabled}
           />
+          {shellV2 && webLinks.unmapped > 0 && <ComposerLinkNotice targets={webLinks.targets} />}
           {ghostSuggestion && !pathCompletion.isOpen && !contextPickerMode && (
             <div
               data-testid="ghost-suggestion"

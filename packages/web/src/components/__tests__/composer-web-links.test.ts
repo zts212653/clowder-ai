@@ -41,9 +41,27 @@ describe('composer web links use the eventual thread message semantics', () => {
 
   it.each([
     'https\\://example.com',
-    '说明 https\\://example.com 后',
-  ])('reports an escaped-prose source-position gap instead of guessing: %s', (source) => {
-    expect(composerWebLinks(source)).toEqual({ ranges: [], unmapped: 1 });
+    'https&#58;//example.com',
+  ])('preserves the whole source node for a decoded URL: %s', (source) => {
+    expect(composerWebLinks(source).ranges).toEqual([{ start: 0, end: source.length, href: 'https://example.com/' }]);
+    expect(composerWebLinks(source).unmapped).toBe(0);
+  });
+
+  it('exposes the actual target when a prose source range cannot be mapped', () => {
+    expect(composerWebLinks('说明 https\\://example.com 后')).toEqual({
+      ranges: [],
+      unmapped: 1,
+      targets: ['https://example.com/'],
+    });
+  });
+
+  it.each([
+    '> https\\://example.com',
+    '- https&#58;//example.com',
+  ])('keeps quote and list prefixes outside a decoded link: %s', (source) => {
+    const result = composerWebLinks(source);
+    expect(result.ranges).toEqual([{ start: 2, end: source.length, href: 'https://example.com/' }]);
+    expect(result.unmapped).toBe(0);
   });
 
   it('keeps duplicate links distinct across a selection replacement', () => {
@@ -63,6 +81,9 @@ describe('composer web links use the eventual thread message semantics', () => {
     'www.example.com https://a.com https://a.com',
     '公式 \\(https://example.com\\) 后',
     '```\nhttps://example.com\n```',
+    'https\\://example.com',
+    '说明 https\\://example.com 后',
+    '说明 https&#58;//example.com 后',
   ])('agrees with actual thread Markdown rendering: %s', (source) => {
     const container = document.createElement('div');
     container.innerHTML = renderToStaticMarkup(
@@ -75,6 +96,6 @@ describe('composer web links use the eventual thread message semantics', () => {
     const targets = [...container.querySelectorAll<HTMLAnchorElement>('a[href]')]
       .filter((link) => /^https?:/.test(link.href))
       .map((link) => link.href);
-    expect(composerWebLinks(source).ranges.map((range) => range.href)).toEqual(targets);
+    expect(composerWebLinks(source).targets).toEqual(targets);
   });
 });

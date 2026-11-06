@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863-blue');
+const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863-gap');
 await fs.mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({
   headless: true,
@@ -50,6 +50,29 @@ const marks = () =>
   page
     .locator('[data-link-href]')
     .evaluateAll((nodes) => nodes.map((node) => ({ text: node.textContent, href: node.dataset.linkHref })));
+const gapSource = '说明 https\\://example.com 后';
+await textarea.fill(gapSource);
+const notice = page.locator('[data-testid="composer-link-notice"]');
+assert.equal(await notice.count(), 1);
+assert.match(await notice.innerText(), /有链接未能标出/);
+await notice.locator('summary').click();
+assert.deepEqual(await notice.locator('code').allTextContents(), ['https://example.com/']);
+assert.equal(await textarea.inputValue(), gapSource);
+await textarea.locator('xpath=../..').screenshot({ path: path.join(evidence, '06-gap-notice.png') });
+await textarea.fill('说明 https\\://other.example/path 后');
+assert.deepEqual(await notice.locator('code').allTextContents(), ['https://other.example/path']);
+await textarea.fill('说明 https://other.example/path 后');
+assert.equal(await notice.count(), 0);
+await textarea.fill(gapSource);
+await textarea.press('Control+Enter');
+await page.locator('[data-testid="sent-messages"] a[href]').last().waitFor();
+assert.equal(
+  await page.locator('[data-testid="sent-messages"] a[href]').last().getAttribute('href'),
+  'https://example.com/',
+);
+assert.equal(await textarea.inputValue(), '');
+assert.equal(await notice.count(), 0);
+report.cases.push('visible gap notice / exact targets update / recovery / unchanged source submission');
 const url = 'https://github.com/meow-club/cat-cafe-map';
 await textarea.fill(`${url}这是链接 这不是`);
 await textarea.evaluate((node, offset) => node.setSelectionRange(0, offset), url.length);
