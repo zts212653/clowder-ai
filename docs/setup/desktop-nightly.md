@@ -23,6 +23,8 @@ created: 2026-11-07
 
 [Desktop Nightly](../../.github/workflows/desktop-nightly.yml) 进默认分支后，每天北京时间 00:00 选 `next` 跑双平台冒烟。手动入口可选源分支、平台和测试范围。触发端提交和被测源码提交分别保存。构建与下载按同一 run ID 和 attempt 配对。需要重跑时使用新的手动运行或重跑整个 workflow，避免混用部分重跑前的产物。
 
+相同触发方式、分支、平台和选集共用一个并发组。手动 Windows 全量可以独立于双平台冒烟运行。桌面测试仍按测试机独占执行。
+
 Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架构的临时 runner 上挂载真实 DMG，安装进空闲的 Applications 路径并检查两轮启动。原生脚本的覆盖限于其实际路径，普通用户下载后的系统安全弹窗和桌面首启引导另有用例。
 
 查看 Actions 的作业摘要和对应 attempt 的 `desktop-nightly-report` artifact。JSON 保留逐例原始结果和分类，Markdown 置顶 L0 新失败、L0 未完成、已知失败。报告列出的 `desktop-evidence-*` 目录名对应各平台证据 artifact。平台未构建、无法启动 runner 或缺收据的用例会保留在报告里并标为阻塞。
