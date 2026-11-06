@@ -135,6 +135,7 @@ jobs:
           desktop/runtime-web-server.test.js
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js
+          desktop/service-listener-ownership.test.js
           desktop/project-mirror-startup-recovery.test.js
           desktop/project-resource-materialization.test.js
           desktop/project-resource-redirection-guard.test.js
