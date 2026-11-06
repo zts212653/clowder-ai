@@ -32,7 +32,7 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告、平台证据和候选包，核对 SHA-256 后写出 `desktop-plan.json`。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
 2. 在 Codex 中打开该次运行的用例目录，按选集执行 `computer-use` 用例。为每条保存具体观察和截图。前置条件不满足时记录 `blocked` 和原因。人工用例可按相同方式补录。
 3. 把报告 JSON 放入证据根目录。保持 Actions 下载的 `desktop-evidence-平台-attempt-N` 目录名。在同一位置保存桌面收据 JSON，截图和收据放在一起。收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`，逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。
-4. 在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`。令 `GITHUB_SHA` 为该用例版本。输出 `report-with-desktop.md` 和 `report-with-desktop.json`，保留 Actions 的原始报告。二次汇总只补桌面和人工用例，原生执行结论不由 Agent 修改。
+4. 在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON> [其他平台的收据JSON]`。令 `GITHUB_SHA` 为该用例版本。每份收据和截图、对应平台证据目录一起保存。输出 `report-with-desktop.md` 和 `report-with-desktop.json`，保留 Actions 的原始报告和其他平台已完成的结果。
 
 Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本地定时任务触发的首启和一次桌面不可用的故障演练。定时任务能否在目标机器调用 Computer Use 和拿到新候选包，需要实际运行才能确认。
 
