@@ -447,6 +447,16 @@ export interface RouteOptions {
         activeRun: import('@cat-cafe/shared').LifecycleActiveRun;
       }>)
     | undefined;
+  /** Bind the exact live body getter after the durable response exists; returns a release. */
+  onLifecycleOutputCursorReady?:
+    | ((input: {
+        threadId: string;
+        catId: CatId;
+        invocationId: string;
+        responseMessageId: string;
+        getContent: () => string;
+      }) => (() => void) | undefined)
+    | undefined;
   /** Bind a provider-native exact-turn dispatcher after the client accepts the run. */
   onAgentClientActiveRunReady?:
     | ((input: {

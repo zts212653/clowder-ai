@@ -4,82 +4,66 @@ doc_kind: plan
 created: 2026-11-06
 ---
 
-# Issue #1890：在真实发言位置呈现接续结果
+# Issue #1890：补充输入后的接续正文
 
-来源：[Issue #1890](https://github.com/zts212653/clowder-ai/issues/1890)；用户本线程消息 `0001793962764826-000213-0e0ae9de` 明确授权共同设计、隔离实现、验证并提交目标 next 的 PR，在 PR 邀请 zts212653 与 mindfn。
+来源：[Issue #1890](https://github.com/zts212653/clowder-ai/issues/1890)。用户消息 `0001793962764826-000213-0e0ae9de` 授权共同设计、独立 worktree 实施和目标 next 的 PR，并邀请 zts212653 / mindfn 审查。Task：`0001793962844408-000215-2ffb0d41`。
 
-基线：`upstream/next@43c1c3cb7e4e2ba0285c993d5cc5bd016824a663`。Task：`0001793962844408-000215-2ffb0d41`。作者砚砚，鲸鲸参与方案与最终代码审查；创作位只做一次形状校准。首次创作调用因 provider 403 未形成结论，已换可用创作伙伴，不能把失败调用记作设计通过。
+基线 `upstream/next@43c1c3cb7e4e2ba0285c993d5cc5bd016824a663`。工位 `G:/AIwork/clowder-ai/cat-cafe-issue1890-causal-replies`。砚砚负责 Web、整体验证与 PR；鲸鲸实现 API/shared，砚砚独立审这部分；鲸鲸审 Web 与集成。作者不审批自己的代码。
 
-Architecture cell：现有 bubble-pipeline / output projection。
-Map delta：none；MessageStore、Queue、TurnExecution 与原输出正文的 owner 不变。
-Why：执行气泡固定、正文累计更新时，后来的输入与之后生成的真实文本不在同一阅读位置，用户误判未响应。
+Architecture cell：现有 bubble-pipeline / lifecycle admission。Map delta：none；Queue、MessageStore、TurnExecution、正文与执行终态的 owner 不变。
 
-## 成功条件
+## 问题与完成条件
 
-用户在同一聊天页看到：原任务前文 → reviewer 回执 S → 接收方在 S 之后产生的真实接续文本。中途追加、最终完成、刷新/重连保持一致。不是只加“已处理”提示，也不是把整个旧回复移到最后。
+旧 #1082 在完成时新写回复却插入开始时间的旧位置；当前模型在开始时预建 R、处理中接入 S、累计正文原位更新。A2A 已成功，固定排序契约造成后续正文留在 S 上方。不能恢复 completedAt 排序，也不能把整个 R 移到最后。
 
-固定 response R 的 ID、orderKey、正文与执行终态继续是唯一原始记录；复制、转发、原文与回执仍引用它。新增的发言位置是同一正文片段的显示引用，不是另一条 Agent History 消息，也不是第二套 Queue 或 receipt。
+可见结果是：R 的前文与执行记录 → S 原文与回执 → 同一 R 的接续正文。实时接入、最终完成和刷新应一致。原 R 的 ID、orderKey、完整正文、未读计数、复制/转发/删除身份继续唯一；接续是显示引用，不创建 History 消息或第二套事件存储。
 
-## 已查实的约束
+## 讨论后采用的方案
 
-- #1082 是不同旧机制，不能套旧 timestamp 修法。
-- `message-timeline.ts` 与 viewport 固定位置是当前明确策略。无需改其 orderKey 或恢复 completedAt 排序。
-- `MessageOutputLayoutV1` 已拥有正文 UTF-16 范围、native runs、通用 successful-turn tool boundaries；但其 native phase 分类在流式阶段可能是 unavailable，不能等到终局才解决接续显示。
-- 已有补充消息 footer、源消息状态与回复跳转；复用它们，不再造关联。
+鲸鲸反例 `0001793963432171-000236-4aaddefd` 证明 run 级首次 observedAt 切不开同一 native run 中途继续增长；因此撤掉初稿的 observedAt/speechRanges 与派生顶层行。逐 delta 保存范围增加体积，也不是本 issue 所需。
 
-## 输出观测与持久化
+正式 R.content 完成前可能为空；DraftStore 按时间/字符阈值异步写入。不能读取这两者猜当前切点。采用现有 InvocationTracker 的 exact-run getter：
 
-复用现有 accumulator / materializer / outputLayout / draft snapshot 路径，为 Host 实际观察到的文本 run 记录首次可见时间。
+1. route 收到 invocation_created、已有 canonical R 后，登记读取当前 textContent 的闭包。正文累积仍归现有 output projection，不逐 delta 复制正文或计算 hash。
+2. 公开补充输入被采用时读取 getter，对 `textContent.trimStart()` 计算 UTF-16 长度和 SHA-256；切点来自此时 Host 已观察的正文，不从 S 发送时间推算生成因果。
+3. 现有 append admission 的同一 lifecycle CAS 随 inputMessageIds 写可选 `appendBoundaries: [{inputMessageId, contentOffset, prefixSha256}]`。重复 admission 不覆盖原切点，私有输入不向公开 R 暴露身份。普通 message_wake 的 projected wake coverage 事务也必须传入同一证据。
+4. 未登记准确 getter 时不猜 0；展示证据缺失或超上限不能阻止合法 A2A 投递。切点不完整时保留全文。
+5. getter 按 thread/cat/invocation/response 绑定并随执行清理。已持久化切点供刷新恢复；重启的旧 run 按既有规则中断，新 run 只读取自己的正文，不建立另一份 cursor 恢复仓库。
 
-在 outputLayout 的公共部分增加可选 `speech` 范围引用（id、start/end、首次 observedAt、已有换行 glue 长度）。它独立于 native channel/identity 分类，不能声称未知 provider 的 native phase。available 和 unavailable layout 都可携带已证实的 Host 文本范围；不另存一份正文。
+使用 trimStart 坐标兼容流式前导空白与最终 trim，Web 加回当下正文的前导长度得到绝对源坐标。replace、rich/concierge 清洗若改变前缀，hash 校验失败就保持完整正文。字段不分类 native phase，不修改 outputLayout。
 
-- 首次文本观察来自 Host clock，不从 provider 自报字段或正文猜时间。
-- 同一 run 的 append、完成 snapshot 与重复回执保留首次时间；空观察不抢占真实文本的时刻。
-- Native run 边界复用现有 identity；通用 carrier 复用真实 tool boundary；不逐 token 创建发言卡。
-- 内容冲突、整体替换或不能对齐的变换不发布旧范围。持久化精确 trim 的情况只按实际 trim 重定位引用。
-- 字段缺失的旧历史保持完整原文与原关联，不推算旧时间、不迁移/改写用户历史。
-- 所有时间和范围随既有 response/draft 原子快照进入持久化；不写进 provider stdout。
+## 界面与引用
 
-## 会话投影与呈现
+墨墨一次形状校准 `0001793963288599-000231-6598d6cb` 推荐保留原执行锚点，后续正文以同猫接续呈现，复用名牌与左色边。布偶猫首次调用因 provider 403 中止，不记作设计通过。
 
-会话组件只消费当前可读的 canonical 消息。验证 layout owner、当前正文 revision/hash 与范围完整性后，派生同一 R 的发言片段：
+- R 原位保留前文、完整执行/工具/状态/作品及“查看完整原文”。S 后只显示已验证正文范围；没有前文时保留执行壳。
+- 接续块挂在 S 行之后，不新增顶层消息 ID，不参与 viewport 排序、分页 cursor、未读或批量选择。批量选择模式恢复 canonical 全文。
+- 接续块使用自己的 MessageActions，绑定原 R，位于 S 动作树之外；不需要扩展 TextSelectionAction.sourceMessageId。NativeReplyText 的绝对 UTF-16 坐标继续映射 R 正文；全条操作仍操作 R。
+- 同一 provider run 跨 S 也按 offset 精确切。切进代码围栏/行内 Markdown 时按字面原文呈现，避免解析吞字；原执行可展开完整格式化原文，不猜段落或把整段搬走。
+- S 的“看回复”在有已验证接续时聚焦接续块，接续可回到原执行。源/目标不在当前可读页、私有响应、证据不完整、body 替换或 socket 尚未追上时保持全文与原导航。
+- 工具留在原执行记录。接续无新增正文时显示真实等待/无新增事实并提供原执行入口；不声称重排工具，不伪造确认话术。
 
-1. R 原位置保留执行身份、此前文本和现有状态/回执；全文仍可从此展开。
-2. 被其他公开消息隔开的后续文本片段按真实 observedAt 出现在对应对话位置，以同猫接续发言呈现；相邻未被打断的片段合并。
-3. 片段只引用 R 的正文范围，保留文字选择到原始 source offset 的关系，不进入 store、未读计数、独立删除/转发和 History API。
-4. 新片段使用派生展示身份插入，绕过“既有消息 ID 不移动”的误修；不移动原 R 或已有输入。
-5. 现有“看回复”去除不可靠的固定向下箭头；不能用箭头修正替代主体交付。
-6. 原始全文、工具记录、富块、失败/取消事实与原动作继续属于 R。不能因为分段而遗失其尾部签名或重复显示正文。
+## 验证与限制
 
-原生输出分类或 Host 观测不足时保持全文；不得用文字相似度、完成时间或客户端 Date.now 为旧记录伪造发言。新输出须验证运行中、终局与刷新，而不只静态排序函数。
+独立 fixture 与 worktree 使用开发依赖，不连接生产 Redis，不修改安装版或真实用户历史，不通过模型调用制造输出。
 
-## 工作单元与验证
+- RED：同一累计 run 跨输入、连续 adoption、source 不可见/前缀替换；行为断言先失败，再实现通过。
+- API/shared：exact-run getter、实时正文而非正式空 body、幂等 CAS、whisper、legacy、terminal 保留、缺失/超上限切点不影响投递、full MCP read 的 message_wake coverage 入口。
+- Web：单 run、多个/相同切点、UTF16/前导 trim、取消后已输出文本、滞后 snapshot、替换、现有 native reply 与行渲染回归。
+- 浏览器：实际 ThreadChatSurface、MessageActions、NativeReplyText 和真实样式，隔离 API/socket 数据；运行中接入→续写→完成→展开全文→刷新，引用落到 R，回复跳到接续，classic/v2 与窄屏。
+- shared/API 编译、Web tsc、Biome、diff check。浏览器 fixture 验证前端，不冒充真实 provider 或部署验收。
 
-1. 输出观测：先 RED 证明时间缺失，再补 Host clock→accumulator→materializer→wire 校验。Native 与 generic 两条路径、stream/replace/replay、旧布局兼容分别验证。
-2. 派生会话：纯投影回归验证 `前文→S→接续结果`、多个追加、多猫、晚到 snapshot、无真实范围的旧历史、错误 owner/hash 和正文完整性。
-3. 真实组件：复用 ChatMessage、NativeReplyText 与既有 token，验证 live→completed→reload、正文选择/全文、原始动作和回执；不新增消息存储。
-4. 非 happy path：失败/取消后保留已观察发言；未证明范围时不截断原文。抽样 classic/v2 与窄屏，检查主对话与单猫视图不会遗失正文。
-5. 提交前跑 shared/API 编译、Web 类型检查、受影响组件和输出回归、Biome 与 diff check。鲸鲸审最终 exact HEAD；PR base=next，公开邀请 zts212653/mindfn 讨论设计、契约和代码。
+当前实际验证回执（2026-11-06，隔离工位）：
 
-已观察 RED：`node --import tsx --test test/issue1890-output-time.test.ts`，两项均因为真实输出范围没有首次 observedAt 而失败，不是环境/语法红灯。
+- `node --import tsx --test test/issue1890-append-boundary.test.ts test/f322-message-output-accumulator.test.ts`：46 通过。
+- API 的 callback-context-adoption-exposure、route-parallel-parent-invocation-id、1398-history-append-ownership、1398-append-read-observation 四套编译后测试：33 通过。含真实 Fastify 全文读取采用，以及串行/并行实时 getter 和释放断言。并行新增断言修改前以 `undefined != qwen body` 失败，修改后通过。
+- Web 六套受影响回归：32 通过；包含原输出分层、选择映射、聊天行隔离/导航与 ThreadChatSurface。
+- `pnpm --filter @cat-cafe/api exec tsc`、Web `tsc --noEmit --incremental false` 均通过；全包 build 另由鲸鲸回读记录。
+- 浏览器实际 ThreadChatSurface：实时接入/完成/展开全文/刷新/390px/classic/v2/引用/回复聚焦通过。选区引用绑定 R，源范围 13–31；canonical R 只有一条，pageerror 为 0。证据见 `artifacts/issue1890`，其 API/socket 都是隔离 fixture。
+- 额外 `1398-private-append-projection.test.js` 的 5 项被本机环境挡住：`spawn redis-server ENOENT`，夹具还要求 Unix socket。没有连接运行中的 Redis，没有把这 5 项计作通过；新增 whisper 单测通过。
 
-当前仓命令：
+旧历史没有可靠切点，保留全文，不推算或迁移。工具时间线继续由原执行承载。搜索结果仍定位 canonical R，R 提供完整原文入口。API 中断/取消沿用现有正文保留规则。
 
-```text
-node <pnpm9.15.4>/bin/pnpm.cjs --filter @cat-cafe/shared build
-node --import tsx --test test/issue1890-output-time.test.ts test/f322-message-output-accumulator.test.ts
-node <pnpm9.15.4>/bin/pnpm.cjs --filter @cat-cafe/web exec vitest run <affected-files>
-node <pnpm9.15.4>/bin/pnpm.cjs --filter @cat-cafe/web exec tsc --noEmit --incremental false
-node <pnpm9.15.4>/bin/pnpm.cjs exec biome check <changed-source-files>
-git diff --check
-```
+## 回退与交付
 
-测试和浏览器只使用 feature checkout 与隔离 fixture；不连接生产 Redis，不启动/修改运行版，不重新产生真实模型执行。UI 验证需看实际运行组件，mock 只能说明对应边界，不冒充整页或 provider 验收。
-
-## 风险与回退
-
-行为风险是正文片段的阅读位置与 canonical 动作身份，数据风险是新增可选引用与旧布局兼容。无鉴权、provider 协议或外部依赖改变。任何片段都不能获取原消息不具备的可见性。
-
-回退可撤本 PR；字段可选，旧 reader 不应因新投影而丢全文。保持原 R 和完整正文，不需要删除或重置任何历史。
-
-方案与形状反馈待回执归档；未形成真实同意前不把它记作 reviewed。最终交付仍以实际代码、测试和浏览器完整阅读路径为准。
+字段可选；撤本 PR 即回到完整正文展示，不删除或重置历史。最终 PR base=next，在正文点名维护者讨论数据契约和呈现，并取得非作者范围审查。用户未授权本轮 merge/deploy。

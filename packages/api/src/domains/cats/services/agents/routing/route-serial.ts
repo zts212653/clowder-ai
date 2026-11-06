@@ -784,6 +784,7 @@ export async function* routeSerial(
 
   const completedCatInvocationIds: Array<[string, string]> = [];
   const pushRecallPresentationsByInvocation = new Map<string, PushRecallPresentation[]>();
+  const lifecycleOutputCursorReleases: Array<() => void> = [];
   const pendingTurnCustodyShadowCloses: Array<(checkpoint: 'next_turn_boundary' | 'route_settled') => Promise<void>> =
     [];
 
@@ -2132,6 +2133,15 @@ export async function* routeSerial(
                   ) {
                     lifecyclePriorFrontierMessageId = effectiveMsg.lifecyclePriorFrontierMessageId;
                   }
+                  const release = options.onLifecycleOutputCursorReady?.({
+                    threadId,
+                    catId,
+                    invocationId: parsed.invocationId,
+                    responseMessageId: lifecycleResponseMessageId,
+                    // The route owns the live canonical body; adoption reads this once.
+                    getContent: () => textContent,
+                  });
+                  if (release) lifecycleOutputCursorReleases.push(release);
                 }
                 rememberTurnExecutionProjection(parsed.invocationId, initialExecutionKind);
                 emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
@@ -3988,6 +3998,7 @@ export async function* routeSerial(
     routeFailed = true;
     throw error;
   } finally {
+    for (const release of lifecycleOutputCursorReleases.splice(0)) release();
     await invocationServices.dispose();
     // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all

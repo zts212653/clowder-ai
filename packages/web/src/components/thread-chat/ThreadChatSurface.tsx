@@ -32,6 +32,7 @@ import { MessageSelectionToolbar } from '../MessageSelectionToolbar';
 import { messageMountPolicy } from '../message-mount-policy';
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-selection';
 import { ImportedSessionNotice } from '../new-conversation/ImportedSessionNotice';
+import { CausalReplyProvider } from '../reply-layers/CausalReplyContext';
 import { ReplyRecallRuntimeProvider } from '../reply-layers/ReplyRecallRuntimeProvider';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
 import { conversationViewCopy } from '../shell/conversation-view.shell-copy';
@@ -505,7 +506,7 @@ export function ThreadChatSurface({
           conversationView={conversationViewController}
           enabled={composerPresentation === 'v2'}
         >
-          {surface}
+          <CausalReplyProvider messages={selection.selectionMode ? [] : visibleMessages}>{surface}</CausalReplyProvider>
         </CatProfileCardScope>
       </ChatReferenceScope>
     </MessageNavigationProvider>

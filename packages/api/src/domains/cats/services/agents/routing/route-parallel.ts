@@ -198,9 +198,22 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  const outputCursorReleases: Array<() => void> = [];
   try {
-    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+    yield* routeParallelPrepared(
+      deps,
+      targetCats,
+      message,
+      userId,
+      threadId,
+      options,
+      invocationServices,
+      outputCursorReleases,
+    );
   } finally {
+    outputCursorReleases.forEach((release) => {
+      release();
+    });
     await invocationServices.dispose();
   }
 }
@@ -213,6 +226,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  outputCursorReleases: Array<() => void>,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -1378,6 +1392,15 @@ async function* routeParallelPrepared(
                 messageId: effectiveMsg.lifecycleResponseMessageId,
                 priorFrontierMessageId: effectiveMsg.lifecyclePriorFrontierMessageId,
               });
+              const catId = effectiveMsg.catId;
+              const release = options.onLifecycleOutputCursorReady?.({
+                threadId,
+                catId,
+                invocationId: parsed.invocationId,
+                responseMessageId: effectiveMsg.lifecycleResponseMessageId,
+                getContent: () => catText.get(catId) ?? '',
+              });
+              if (release) outputCursorReleases.push(release);
             }
             if (deps.invocationDeps.turnExecutionStore) {
               turnExecutionProjectionByInvocation.set(parsed.invocationId, {

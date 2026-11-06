@@ -25,6 +25,7 @@ import type {
   CustodyOfferV1,
   EntrustedWorkHumanTerminalReceiptV1,
   EvolutionPreparationSubmissionV1,
+  LifecycleAppendBoundaryInput,
   LifecycleDeliveryFailureReason,
   LifecycleDispatchRef,
   LifecycleInputReadReceipt,
@@ -43,9 +44,11 @@ import {
   entrustedWorkHumanTerminalReceiptV1Schema,
   evolutionPreparationSubmissionV1Schema,
   isCrossThreadProvenance,
+  isLifecycleAppendBoundaryInput,
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  MAX_LIFECYCLE_APPEND_BOUNDARIES,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
@@ -1081,6 +1084,8 @@ export interface LifecycleAppendAdmissionInput {
     requiresCompletion?: boolean;
     /** Exact time this source was admitted to the target response. */
     dispatchedAt: number;
+    /** Admission-time body cut for this target's response; absent for legacy callers. */
+    appendBoundary?: LifecycleAppendBoundaryInput;
   }[];
 }
 
@@ -1405,12 +1410,29 @@ export function advanceLifecycleInputDispatchMetadata(
   };
 }
 
+/** The one normalization used by both the API cut and its consumers. */
+export function computeAppendBoundary(content: string): LifecycleAppendBoundaryInput {
+  const normalized = content.trimStart();
+  return {
+    contentOffset: normalized.length,
+    prefixSha256: createHash('sha256').update(normalized, 'utf8').digest('hex'),
+  };
+}
+
+/** Read the exact live body at adoption; no getter means no cut, never a guessed zero. */
+export function boundaryFromLiveBody(
+  getter: (() => string) | undefined,
+): LifecycleAppendBoundaryInput | undefined {
+  return getter ? computeAppendBoundary(getter()) : undefined;
+}
+
 function appendLifecycleResponseInputsMetadata(
   current: LifecycleStoredMessageMetadata | undefined,
   input: Pick<LifecycleAppendAdmissionInput, 'entryId' | 'inputMessageIds'> & {
     targetId: string;
     invocationId: string;
     latestInputTimelineOrderAt: number;
+    appendBoundary?: LifecycleAppendBoundaryInput;
   },
 ): { kind: 'applied'; lifecycle: LifecycleStoredMessageMetadata } | { kind: 'replayed' } | { kind: 'conflict' } {
   if (
@@ -1435,13 +1457,41 @@ function appendLifecycleResponseInputsMetadata(
     (current.latestInputTimelineOrderAt ?? 0) >= input.latestInputTimelineOrderAt
   )
     return { kind: 'replayed' };
+  const existingBoundaries = current.appendBoundaries ?? [];
+  const existingBoundaryInputIds = new Set(existingBoundaries.map((boundary) => boundary.inputMessageId));
+  const boundary = input.appendBoundary;
+  const appendedBoundaries = boundary
+    ? [...new Set(input.inputMessageIds)]
+        .filter((inputMessageId) => !existingBoundaryInputIds.has(inputMessageId))
+        .map((inputMessageId) => ({
+          inputMessageId,
+          contentOffset: boundary.contentOffset,
+          prefixSha256: boundary.prefixSha256,
+        }))
+    : [];
+  // Keep admission order. Equal offsets are distinct causal events; sorting by
+  // offset or id would silently reassign one input's tail to another.
+  const mergedBoundaries = [...existingBoundaries, ...appendedBoundaries];
+  const hasPublicInput = input.inputMessageIds.length > 0;
+  // A new public admission without a trustworthy cut, or a cap overflow, must
+  // clear older cuts instead of leaving a stale cut that would claim this tail.
+  const verifiedBoundaries =
+    (hasPublicInput && !boundary) || mergedBoundaries.length > MAX_LIFECYCLE_APPEND_BOUNDARIES
+      ? undefined
+      : mergedBoundaries.length > 0
+        ? mergedBoundaries
+        : undefined;
+  // Drop an older partial proof instead of persisting an explicit undefined.
+  const { appendBoundaries: _previousBoundaries, ...currentWithoutBoundaries } = current;
+  void _previousBoundaries;
   return {
     kind: 'applied',
     lifecycle: {
-      ...current,
+      ...currentWithoutBoundaries,
       inputEntryIds: input.inputMessageIds.length ? [...current.inputEntryIds, input.entryId] : current.inputEntryIds,
       inputMessageIds: [...current.inputMessageIds, ...input.inputMessageIds],
       latestInputTimelineOrderAt: Math.max(current.latestInputTimelineOrderAt ?? 0, input.latestInputTimelineOrderAt),
+      ...(verifiedBoundaries ? { appendBoundaries: verifiedBoundaries } : {}),
     },
   };
 }
@@ -1459,7 +1509,12 @@ export function prepareLifecycleAppendAdmission(
     new Set(input.inputMessageIds).size !== input.inputMessageIds.length ||
     input.runs.length === 0 ||
     input.runs.some(
-      (run) => !run.targetId || !run.invocationId || !run.responseMessageId || !Number.isFinite(run.dispatchedAt),
+      (run) =>
+        !run.targetId ||
+        !run.invocationId ||
+        !run.responseMessageId ||
+        !Number.isFinite(run.dispatchedAt) ||
+        (run.appendBoundary !== undefined && !isLifecycleAppendBoundaryInput(run.appendBoundary)),
     ) ||
     new Set(input.runs.map((run) => run.targetId)).size !== input.runs.length ||
     new Set(input.runs.map((run) => run.responseMessageId)).size !== input.runs.length ||
@@ -1534,6 +1589,7 @@ export function prepareLifecycleAppendAdmission(
       targetId: run.targetId,
       invocationId: run.invocationId,
       latestInputTimelineOrderAt: Math.max(run.dispatchedAt, ...publicInputs.map(getTimelineOrderTime)),
+      ...(run.appendBoundary ? { appendBoundary: run.appendBoundary } : {}),
     });
     if (transition.kind === 'conflict') return { kind: 'conflict', reason: 'response_lifecycle_conflict' };
     if (transition.kind === 'applied') replayed = false;
