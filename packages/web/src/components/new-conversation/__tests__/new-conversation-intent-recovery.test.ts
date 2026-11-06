@@ -107,6 +107,7 @@ it('retains a failed image for recovery and accepts a newer save', async () => {
 it('uses a newer pending snapshot when it appears during an earlier database read', async () => {
   await saveNewConversationIntent(record(ALICE));
   const restoring = loadNewConversationIntent(ALICE);
+  await Promise.resolve();
   let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
   const bytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
   const file = new File(['newer'], 'newer.png', { type: 'image/png' });
