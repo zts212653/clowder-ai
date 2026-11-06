@@ -80,6 +80,18 @@
       "evidence": "脱敏请求和回复、provider 路线、原生测试会话归属"
     },
     {
+      "id": "DESKTOP-DSH-IMAGE-ROUTE",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "DSH 视觉模型切换与同会话续接",
+      "executor": "manual",
+      "setup": "使用已授权的测试账号、独立 DSH HOME 和文本默认 profile，备有视觉与文本模型及一张仅像素包含随机码的合成 PNG",
+      "steps": "在已安装客户端自动检测并添加 DSH，选择视觉模型并提交 PNG。切到文本模型再次提交图片，再切回视觉模型继续原会话",
+      "expected": "视觉路由重新握手后能读出图片随机码，文本路由明确拒绝图片，切回视觉后恢复同一原生会话。原 profile 保持原样",
+      "evidence": "脱敏的 UI 观察、两种握手图片能力、原生会话 ID 和 profile 前后哈希",
+      "issues": [1899]
+    },
+    {
       "id": "DESKTOP-INSTALL-PRESENTATION",
       "level": "L3",
       "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
