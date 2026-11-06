@@ -20,6 +20,7 @@ export interface PrestartRetirementReservation {
   invocationId?: string;
   trackerStarted?: true;
   retirementBarrier?: true;
+  retirementInProgress?: true;
 }
 
 export interface PreparedPrestartRetirement {
@@ -112,6 +113,7 @@ export function preparePrestartRetirements(input: {
     const current = input.slots.get(key);
     if (!current) continue;
     if (current.userId !== input.userId) return null;
+    if (current.retirementInProgress) return null;
     if (seenEntryIds.has(current.entryId)) continue;
     const carriers = input.queue.getProcessingGroupAcrossUsers(input.threadId, current.entryId);
     if (!carriers) return null;
