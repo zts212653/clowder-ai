@@ -3,18 +3,30 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RightStatusPanelProps } from '@/components/RightStatusPanel';
 import { __resetSessionChainCacheForTest } from '@/components/SessionChainPanel';
+import type { CatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { WorkspaceStatusPanelV2 } from '../WorkspaceStatusPanelV2';
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => fetchMock(...args) }));
-vi.mock('@/hooks/useCatData', () => ({
-  useCatData: () => ({
-    cats: ['codex61-sol', 'opus55', 'gemini'].map((id) => ({ id, displayName: id })),
-    getCatById: (id: string) => ({ id, displayName: id }),
-  }),
-  formatCatName: (cat: { displayName: string }) => cat.displayName,
-}));
+vi.mock('@/hooks/useCatData', () => {
+  const cat = (id: string): CatData => ({
+    id,
+    displayName: id,
+    color: { primary: '#9B7EBD', secondary: '#F2EDF8' },
+    mentionPatterns: [],
+    clientId: 'test-client',
+    carrier: 'cli',
+    defaultModel: 'test-model',
+    avatar: '/avatars/test.png',
+    roleDescription: 'Status test fixture',
+    personality: 'Status test fixture',
+  });
+  return {
+    useCatData: () => ({ cats: ['codex61-sol', 'opus55', 'gemini'].map(cat), getCatById: cat }),
+    formatCatName: (value: CatData) => value.displayName,
+  };
+});
 vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => <span /> }));
 vi.mock('@/components/PlanBoardPanel', () => ({ PlanBoardPanel: () => null }));
 vi.mock('@/components/CloudConversationLink', () => ({ CloudConversationLink: () => <div>ChatGPT 未绑定</div> }));

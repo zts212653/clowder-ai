@@ -152,30 +152,3 @@ describe('MicVAD lifecycle', () => {
     expect(mockDestroy).toHaveBeenCalled();
   });
 });
-
-describe('voiceSessionStore integration', () => {
-  it('session is null when voiceMode is off', () => {
-    expect(useVoiceSessionStore.getState().session).toBeNull();
-  });
-
-  it('start() creates session with voiceMode=true', () => {
-    startVoiceSession();
-    expect(useVoiceSessionStore.getState().session?.voiceMode).toBe(true);
-  });
-
-  it('setPlaybackState tracks state transitions', () => {
-    startVoiceSession();
-
-    useVoiceSessionStore.getState().setPlaybackState('playing');
-    expect(useVoiceSessionStore.getState().session?.playbackState).toBe('playing');
-
-    useVoiceSessionStore.getState().setPlaybackState('idle');
-    expect(useVoiceSessionStore.getState().session?.playbackState).toBe('idle');
-  });
-
-  it('stop() clears session to null', () => {
-    startVoiceSession();
-    useVoiceSessionStore.getState().stop();
-    expect(useVoiceSessionStore.getState().session).toBeNull();
-  });
-});

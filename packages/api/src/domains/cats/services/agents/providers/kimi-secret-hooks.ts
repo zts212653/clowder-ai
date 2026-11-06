@@ -30,21 +30,6 @@ function isManagedHook(value: unknown): boolean {
   );
 }
 
-/** Read-only qualification for member discovery; never installs hooks or logs configuration bytes. */
-export function hasManagedKimiSecretHooks(text: string): boolean {
-  try {
-    const hooks = parse(text).hooks;
-    return (
-      Array.isArray(hooks) &&
-      ['PreToolUse', 'PostToolUse'].every((event) =>
-        hooks.some((hook) => isManagedHook(hook) && (hook as Record<string, unknown>).event === event),
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
 function originalHookTables(text: string): string {
   let prefix = text;
   if (prefix.includes(START) || prefix.includes(END)) {

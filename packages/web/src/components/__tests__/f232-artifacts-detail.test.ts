@@ -1,15 +1,17 @@
-/**
- * F232 Phase A.1 — ArtifactsPanel 内容查看交互 (AC-A7) + 列表项视觉 (AC-A5)。
- * 灵魂验收：点击产物行 → panel 内进入内容详情视图（不再只是外部 url「打开」）。
- */
+// @vitest-environment jsdom
+/** F232 entries consume the shared content owner; list state does not own a second detail view. */
+import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellLanguage } from '@/components/shell/shell-language';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { F307ArtifactOwnerSurface } from '@/components/workbench/F307ArtifactOwnerSurface';
+import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 
 const { mockState } = vi.hoisted(() => ({
-  mockState: { artifacts: [] as Array<Record<string, unknown>> },
+  mockState: { artifacts: [] as ThreadArtifactDTO[] },
 }));
-
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://test.local', apiFetch: vi.fn() }));
 vi.mock('@/hooks/useThreadArtifacts', async (original) => ({
   ...(await original<object>()),
@@ -26,20 +28,56 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ArtifactsPanel } from '../ArtifactsPanel';
 
-const panelRoots = new Set<ReturnType<typeof createRoot>>();
+const roots = new Set<ReturnType<typeof createRoot>>();
+const origin = {
+  kind: 'artifact-list',
+  threadId: 'T',
+  view: { scope: 'thread', filter: 'all', query: '', grouping: 'time', catFilter: null, collapsed: [] },
+};
+const item = { kind: 'media-gallery' as const, blockId: 'original-gallery', itemIndex: 1 };
+const image: ThreadArtifactDTO = {
+  type: 'image',
+  name: 'arch.png',
+  catId: 'opus-48',
+  createdAt: 12345,
+  sourceMessageId: 'original',
+  publicationItem: item,
+  url: '/uploads/arch.png',
+};
+const source = {
+  kind: 'message',
+  threadId: 'T',
+  messageId: 'original',
+  messageRevision: '12345',
+  item,
+  expectedUrl: image.url,
+};
+const asset = {
+  contentRef: `prepared-media:${'c'.repeat(64)}`,
+  ownerRevision: 2,
+  blobDigest: `sha256:${'a'.repeat(64)}`,
+  mediaType: 'image/png',
+  media: { kind: 'image', width: 160, height: 100 },
+  sourcePublication: { artifactRef: image.url, sourceRef: 'message:T:original', revision: '12345' },
+  ownerReceiptRef: 'receipt-exact',
+};
+const landing = () => Response.json({ status: 'resolved', ownerUserId: 'operator', asset });
 
-function renderPanel() {
+function renderPanel(props: Partial<Parameters<typeof ArtifactsPanel>[0]> = {}) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  panelRoots.add(root);
-  act(() => {
-    root.render(createElement(ArtifactsPanel, { threadId: 'T' }));
-  });
+  roots.add(root);
+  act(() => root.render(createElement(ArtifactsPanel, { threadId: 'T', ...props })));
   return { container, root };
 }
+async function clickRow(container: HTMLElement) {
+  const row = container.querySelector<HTMLElement>('[data-artifact-row]');
+  expect(row).not.toBeNull();
+  await act(async () => row!.click());
+}
 
-describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
+describe('F232 AC-A7 shared content entry', () => {
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
@@ -47,182 +85,175 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    localStorage.clear();
+    writeShellPresentation('classic');
+    writeShellLanguage('zh');
     useChatStore.setState({ currentThreadId: 'T', workspaceWorktreeId: null, workspaceOpenRequest: null });
-    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch)
+      .mockReset()
+      .mockImplementation(async (url) => {
+        if (url === '/api/content-publications/resolve') return landing();
+        throw new Error(`Unexpected source read: ${url}`);
+      });
     mockState.artifacts = [];
   });
   afterEach(() => {
     act(() => {
-      for (const root of panelRoots) root.unmount();
-      panelRoots.clear();
+      for (const root of roots) root.unmount();
     });
+    roots.clear();
     document.body.innerHTML = '';
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
-  it('点击 PR 产物行 → 进入详情（GitHub 打开链接）；点返回 → 回列表', () => {
-    mockState.artifacts = [
-      {
-        type: 'pr',
-        name: 'PR #2247',
-        catId: 'opus-48',
-        createdAt: Date.now(),
-        sourceMessageId: null,
-        ref: 'example/project#2247',
-      },
-    ];
-    const { container } = renderPanel();
-
-    // 列表视图标志：搜索框存在
-    expect(container.querySelector('input')).toBeTruthy();
-
-    // 点击产物行（整行可点 = 灵魂入口）
-    const row = container.querySelector('[data-artifact-row]') as HTMLElement | null;
-    expect(row, '列表项应带 data-artifact-row 且整行可点').toBeTruthy();
-    act(() => {
-      row!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    // 详情视图标志：返回按钮 + 指向该 PR 的 GitHub 链接
-    const back = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '返回');
-    expect(back, '详情视图应有返回按钮').toBeTruthy();
-    const gh = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href')?.includes('github.com'));
-    expect(gh?.getAttribute('href')).toBe('https://github.com/example/project/pull/2247');
-
-    // 返回 → 回列表
-    act(() => {
-      back!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(container.querySelector('input'), '返回后回到列表（搜索框再现）').toBeTruthy();
+  it('opens the exact PR in the existing F307 owner and retains the list return', async () => {
+    const artifact: ThreadArtifactDTO = {
+      type: 'pr',
+      name: 'PR #2247',
+      catId: 'opus-48',
+      createdAt: 42,
+      sourceMessageId: null,
+      ref: 'example/project#2247',
+    };
+    mockState.artifacts = [artifact];
+    const selected = vi.fn();
+    const { container } = renderPanel({ onSelectArtifact: selected });
+    const search = container.querySelector('input');
+    await clickRow(container);
+    const surface = selected.mock.calls[0]?.[2] as WorkspaceSurfaceDescriptor;
+    expect(surface.navigationOrigin).toEqual(origin);
+    expect(surface.ownerStateRef).toEqual({ owner: 'f232-thread-artifacts', key: 'T' });
+    const owner = document.createElement('div');
+    document.body.appendChild(owner);
+    const root = createRoot(owner);
+    roots.add(root);
+    const detach = vi.fn();
+    await act(async () =>
+      root.render(
+        createElement(F307ArtifactOwnerSurface, {
+          surface,
+          onRequestDetach: detach,
+          onOpenSurface: vi.fn(),
+        }),
+      ),
+    );
+    expect(owner.querySelector('a')?.getAttribute('href')).toBe('https://github.com/example/project/pull/2247');
+    const back = owner.querySelector<HTMLButtonElement>('button[aria-label="返回"]');
+    expect(back).not.toBeNull();
+    await act(async () => back!.click());
+    expect(detach).toHaveBeenCalledOnce();
+    expect(container.querySelector('input')).toBe(search);
+    expect(container.querySelector('button[aria-label="返回"]')).toBeNull();
   });
 
-  it('AC-A5: 列表项显示标准成员名称 + 相对时间（不是原始 catId）', () => {
+  it('AC-A5: displays the configured member name and relative time', () => {
     mockState.artifacts = [
       { type: 'pr', name: 'PR #1', catId: 'opus-48', createdAt: Date.now(), sourceMessageId: null, ref: 'o/r#1' },
     ];
     const { container } = renderPanel();
-    expect(container.textContent).toContain('布偶猫（4.8）'); // runtime roster 标准映射
-    expect(container.textContent).not.toContain('opus-48'); // 不显示原始 catId
-    expect(container.textContent).toContain('刚刚'); // 相对时间
+    expect(container.textContent).toContain('布偶猫（4.8）');
+    expect(container.textContent).not.toContain('opus-48');
+    expect(container.textContent).toContain('刚刚');
   });
 
-  it('an image without persisted source coordinates remains unavailable instead of opening a weak preview', () => {
-    mockState.artifacts = [
-      {
-        type: 'image',
-        name: 'arch.png',
-        catId: 'opus-48',
-        createdAt: Date.now(),
-        sourceMessageId: null,
-        url: '/uploads/arch.png',
-      },
-    ];
+  it('keeps a source-less image as a preview without granting an editable owner or work mode', async () => {
+    mockState.artifacts = [{ ...image, sourceMessageId: null, publicationItem: undefined }];
     const { container } = renderPanel();
-    const row = container.querySelector('[data-artifact-row]') as HTMLElement;
-    act(() => {
-      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(container.querySelector('img')).toBeNull();
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('原发布消息没有可核验的内容坐标');
+    await clickRow(container);
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.querySelector('img')?.getAttribute('src')).toBe('http://test.local/uploads/arch.png');
+    expect(dialog?.querySelector('[data-testid="lightbox-open-workspace"]')).toBeNull();
+    expect(dialog?.querySelector('[data-testid="artwork-annotation-toolbar"]')).toBeNull();
     expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
     expect(apiFetch).not.toHaveBeenCalled();
   });
 
-  it('opens a verified published image through the shared Workspace target while preserving its exact message item', async () => {
-    const item = { kind: 'media-gallery', blockId: 'original-gallery', itemIndex: 1 };
-    mockState.artifacts = [
-      {
-        type: 'image',
-        name: 'arch.png',
-        catId: 'opus-48',
-        createdAt: 12345,
-        sourceMessageId: 'original',
-        publicationItem: item,
-        url: '/uploads/arch.png',
-      },
-    ];
-    const { container, root } = renderPanel();
-    await act(async () => {
-      container.querySelector<HTMLElement>('[data-artifact-row]')?.click();
-      for (let n = 0; n < 8; n++) await Promise.resolve();
-    });
-    // 20d39d1d: the list hands the exact artifact to the shared Workspace with its own return state;
-    // ArtifactPublicationSurface resolves the publication there (publication-surface.test.ts).
-    expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url === '/api/content-publications/resolve')).toBe(false);
+  it('resolves the exact message item before opening its publication and preserves the list origin', async () => {
+    mockState.artifacts = [image];
+    const { container } = renderPanel();
+    await clickRow(container);
+    expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
+    const action = document.querySelector<HTMLButtonElement>('[data-testid="lightbox-open-workspace"]');
+    expect(action).not.toBeNull();
+    await act(async () => action!.click());
+    expect(apiFetch).toHaveBeenCalledTimes(2); // admission, then revalidation on explicit work-mode transition
+    for (const [url, init] of vi.mocked(apiFetch).mock.calls) {
+      expect(url).toBe('/api/content-publications/resolve');
+      expect(JSON.parse(String(init?.body))).toEqual({ source, operationId: expect.any(String) });
+    }
     expect(useChatStore.getState().workspaceOpenRequest?.target).toEqual({
-      kind: 'artifact',
-      artifact: {
-        type: 'image',
-        name: 'arch.png',
-        catId: 'opus-48',
-        createdAt: 12345,
-        sourceMessageId: 'original',
-        publicationItem: item,
-        url: '/uploads/arch.png',
-      },
-      navigationOrigin: {
-        kind: 'artifact-list',
-        threadId: 'T',
-        view: { scope: 'thread', filter: 'all', query: '', grouping: 'time', catFilter: null, collapsed: [] },
-      },
+      kind: 'publication',
+      contentRef: asset.contentRef,
+      ownerRevision: 2,
+      messagePublicationSource: source,
+      title: image.name,
+      navigationOrigin: origin,
     });
-    expect(container.querySelector('img')).toBeNull();
-    act(() => root.unmount());
-    panelRoots.delete(root);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('lets the F307 adapter consume the exact owner DTO instead of creating a second selected-record store', () => {
-    const artifact = {
+  it('lets the F307 adapter consume the exact DTO and resolved descriptor without a selected-record copy', async () => {
+    const artifact: ThreadArtifactDTO = {
       type: 'pr',
       name: 'PR #4030',
       catId: 'opus-48',
-      createdAt: Date.now(),
+      createdAt: 42,
       sourceMessageId: 'message-review',
       ref: 'zts212653/clowder-ai#4030',
     };
     mockState.artifacts = [artifact];
-    const onSelectArtifact = vi.fn();
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    act(() => root.render(createElement(ArtifactsPanel, { threadId: 'T', onSelectArtifact })));
-
-    const row = container.querySelector<HTMLElement>('[data-artifact-row]');
-    act(() => row?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-
-    // F309: the exact owner DTO is passed through unchanged, with the list view to return to.
-    expect(onSelectArtifact).toHaveBeenCalledWith(artifact, {
-      kind: 'artifact-list',
-      threadId: 'T',
-      view: { scope: 'thread', filter: 'all', query: '', grouping: 'time', catFilter: null, collapsed: [] },
-    });
-    expect(onSelectArtifact.mock.calls[0]?.[0]).toBe(artifact);
-    expect(container.querySelector('input')).toBeTruthy();
-    act(() => root.unmount());
+    const selected = vi.fn();
+    const { container } = renderPanel({ onSelectArtifact: selected });
+    await clickRow(container);
+    expect(selected).toHaveBeenCalledExactlyOnceWith(
+      artifact,
+      origin,
+      expect.objectContaining({
+        renderer: 'review-summary',
+        ownerStateRef: { owner: 'f232-thread-artifacts', key: 'T' },
+        resultTargetRef: { owner: 'thread-message', key: 'T:message-review' },
+        navigationOrigin: origin,
+      }),
+    );
+    expect(selected.mock.calls[0][0]).toBe(artifact);
+    expect(container.querySelector('input')).not.toBeNull();
   });
 
-  it('P1-2: 切 thread 后清空选中详情（不串 thread）', () => {
-    mockState.artifacts = [
-      { type: 'pr', name: 'PR #A', catId: 'opus-48', createdAt: Date.now(), sourceMessageId: null, ref: 'o/r#1' },
-    ];
+  it.each([401, 403])('does not show a cached image or grant work mode after owner denial (%s)', async (status) => {
+    mockState.artifacts = [image];
+    vi.mocked(apiFetch).mockImplementation(async () => Response.json({ error: 'access_denied' }, { status }));
+    const { container } = renderPanel();
+    await clickRow(container);
+    expect(apiFetch).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('无法访问原作品');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
+  });
+
+  it('discards a late source result when the same mounted list switches threads', async () => {
+    let finish!: (value: Response) => void;
+    vi.mocked(apiFetch).mockReturnValue(
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    mockState.artifacts = [image];
     const { container, root } = renderPanel();
-    // 打开详情
-    const row = container.querySelector('[data-artifact-row]') as HTMLElement;
-    act(() => {
-      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(
-      [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '返回'),
-      '应在详情视图',
-    ).toBeTruthy();
-    // 切到 thread B（rerender 新 threadId，组件不 remount）
-    act(() => {
+    await clickRow(container);
+    expect(apiFetch).toHaveBeenCalledOnce();
+    mockState.artifacts = [
+      { type: 'pr', name: 'T2 own PR', catId: 'opus-48', createdAt: 42, sourceMessageId: null, ref: 'o/r#2' },
+    ];
+    await act(async () => {
+      useChatStore.setState({ currentThreadId: 'T2' });
       root.render(createElement(ArtifactsPanel, { threadId: 'T2' }));
     });
-    expect(container.querySelector('input'), '切 thread 后应回列表（搜索框再现）').toBeTruthy();
-    expect(
-      [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '返回'),
-      '切 thread 后不应残留旧 thread 详情',
-    ).toBeFalsy();
+    await act(async () => finish(landing()));
+    expect(container.querySelector('input')).not.toBeNull();
+    expect(container.textContent).toContain('T2 own PR');
+    expect(container.textContent).not.toContain(image.name);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { resolveCmdShimScript, resolveWindowsSpawnPlan } from '../../utils/cli-spawn-win.js';
 
 const run = promisify(execFile);
 /** First launch of a freshly installed binary can be slow (system scan); 2s used to break the whole chain. */
@@ -22,8 +23,9 @@ function fileIdentity(path: string): string {
  */
 export function codexBinaryFingerprint(executable: string): string {
   const path = realpathSync(executable);
-  const packageRoot = dirname(dirname(path));
-  const parts = [path, join(packageRoot, 'package.json')];
+  const entry = process.platform === 'win32' ? (resolveCmdShimScript(path) ?? path) : path;
+  const packageRoot = dirname(dirname(entry));
+  const parts = [...new Set([path, entry, join(packageRoot, 'package.json')])];
   parts.push(join(packageRoot, 'node_modules', '@openai', `codex-${process.platform}-${process.arch}`, 'package.json'));
   return parts
     .filter((part, index) => index === 0 || existsSync(part))
@@ -35,8 +37,13 @@ export function readCodexNativeVersion(executable: string, env: NodeJS.ProcessEn
   const key = codexBinaryFingerprint(executable);
   const cached = versions.get(key);
   if (cached) return cached;
-  const pending = run(realpathSync(executable), ['--version'], {
+  const command = realpathSync(executable);
+  const plan =
+    process.platform === 'win32' ? resolveWindowsSpawnPlan(command, ['--version']) : { command, args: ['--version'] };
+  const pending = run(plan.command, plan.args, {
     env,
+    shell: 'shell' in plan ? plan.shell : false,
+    windowsHide: true,
     encoding: 'utf8',
     timeout: CODEX_VERSION_TIMEOUT_MS,
   }).then(

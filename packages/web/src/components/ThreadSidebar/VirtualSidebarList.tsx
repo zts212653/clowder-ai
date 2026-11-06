@@ -9,24 +9,13 @@ import {
   useRef,
   useState,
 } from 'react';
+import {
+  FALLBACK_VIEWPORT_HEIGHT_PX,
+  offsetTopWithin,
+  viewportHeight,
+  visibleTopInset,
+} from './sidebar-scroll-geometry';
 import type { VirtualThreadListHandle } from './VirtualThreadList';
-
-function offsetTopWithin(element: HTMLElement, container: HTMLElement): number {
-  let top = 0;
-  let current: HTMLElement | null = element;
-  while (current && current !== container) {
-    top += current.offsetTop;
-    current = current.offsetParent as HTMLElement | null;
-  }
-  return top;
-}
-function topInset(container: HTMLElement): number {
-  const occluder = container.querySelector<HTMLElement>('[data-scroll-occluder="true"]');
-  if (!occluder) return 0;
-  const rect = occluder.getBoundingClientRect(),
-    top = container.getBoundingClientRect().top;
-  return rect.top <= top + 2 && rect.bottom > top ? rect.bottom - top : 0;
-}
 
 /** Classic keeps its fixed slots. V2 measures content, including wrapped titles, signals and groups. */
 export function VirtualSidebarList<T>({
@@ -51,7 +40,7 @@ export function VirtualSidebarList<T>({
   const heightRevision = useRef(0);
   const pendingTarget = useRef<{ key: string; center: boolean } | null>(null);
   const [revision, setRevision] = useState(0);
-  const [viewport, setViewport] = useState({ top: 0, height: 640 });
+  const [viewport, setViewport] = useState({ top: 0, height: FALLBACK_VIEWPORT_HEIGHT_PX });
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision invalidates the measured-height ref.
   const offsets = useMemo(() => {
     const result = [0];
@@ -65,7 +54,7 @@ export function VirtualSidebarList<T>({
     if (!container || !list) return;
     const next = {
       top: Math.max(0, container.scrollTop - offsetTopWithin(list, container)),
-      height: container.clientHeight || 640,
+      height: viewportHeight(container),
     };
     setViewport((old) => (old.top === next.top && old.height === next.height ? old : next));
   }, [scrollContainerRef]);
@@ -121,10 +110,10 @@ export function VirtualSidebarList<T>({
         list = listRef.current;
       if (!container || !list || index < 0 || index >= items.length) return false;
       const before = container.scrollTop,
-        height = container.clientHeight || 640;
+        height = viewportHeight(container);
       const rowTop = offsetTopWithin(list, container) + offsets[index];
       const rowBottom = rowTop + offsets[index + 1] - offsets[index];
-      const inset = topInset(container);
+      const inset = visibleTopInset(container);
       if (center) container.scrollTop = Math.max(0, (rowTop + rowBottom - height) / 2);
       else if (rowTop < before + inset || rowBottom - rowTop > height - inset)
         container.scrollTop = Math.max(0, rowTop - inset);

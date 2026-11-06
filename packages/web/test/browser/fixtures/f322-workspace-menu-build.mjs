@@ -48,6 +48,33 @@ export function routeWorkspaceMenuAssets(route, built, unexpected) {
     },
   };
   if (url.origin === menuOrigin && assets[url.pathname]) return route.fulfill(assets[url.pathname]);
+  if (url.origin === menuOrigin && url.pathname === '/api/session') {
+    assert.equal(route.request().method(), 'GET');
+    assert.equal(url.search, '');
+    return route.fulfill({ json: { userId: 'workspace-menu-owner', csrfToken: 'fixture-only' } });
+  }
+  if (url.origin === menuOrigin && url.pathname === '/api/workspace/file/actions/file-info') {
+    assert.equal(route.request().method(), 'GET');
+    assert.deepEqual(
+      [...url.searchParams],
+      [
+        ['worktreeId', 'workspace-menu-fixture'],
+        ['path', 'docs/menu.md'],
+      ],
+    );
+    return route.fulfill({
+      json: {
+        local: true,
+        path: '/fixture/docs/menu.md',
+        displayPath: 'docs/menu.md',
+        filename: 'docs/menu.md',
+        mime: 'text/markdown',
+        byteLength: 13,
+        canOpen: false,
+        canReveal: false,
+      },
+    });
+  }
   if (url.pathname === '/favicon.ico') return route.fulfill({ status: 204, body: '' });
   unexpected.push(route.request().url());
   return route.abort();

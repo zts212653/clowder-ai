@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { __resetChatScrollMemoryForTest, captureChatReadingRef, readChatReadingRef } from '@/utils/chat-scroll-memory';
 import type { MessageFindContext } from '../message-find-state';

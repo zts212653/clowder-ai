@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * The producer-stated cancelability contract, as the rendered card applies it.
  *

@@ -153,6 +153,7 @@ import {
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
 import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
+import { queueEntryId } from './queue-ledger/QueueLedger.js';
 import {
   type ContinuationOutcome,
   classifyContinuationOutcome,
@@ -574,7 +575,8 @@ export interface QueueProcessorDeps {
   freshnessEventLog?: FreshnessAttentionEventLog;
   /** F254 Phase E: typed successor preflight/adoption and crash closure. */
   /** Durable child lifecycle and causal coverage; auth registry is not historical truth. */
-  turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'clearResponsePending' | 'settleOutputFence'>;
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'clearResponsePending' | 'settleOutputFence'> &
+    Partial<Pick<ITurnExecutionStore, 'markResponseSettled'>>;
   /** F167 Phase S.1: carrier preflight plus failed/canceled runtime outcomes; success requires Evidence→Verdict. */
   taskStore?: Pick<ITaskStore, 'get'>;
   actionSuccessorLeaseStore?: Pick<
@@ -889,46 +891,33 @@ export class QueueProcessor {
     entry: QueueEntry;
     inputMessageIds: readonly string[];
     failures: readonly LifecycleAppendFailure[];
+    canResume?: (targetId: string) => boolean;
   }): Promise<string[]> {
     const { invocationTracker, messageStore } = this.deps;
     const rejected: string[] = [];
-    let restoredNextWork = false;
+    let resumed = false;
     for (const failure of input.failures) {
-      const { targetId } = failure;
-      const compensation = await this.deps.queue.recoverLifecycleAppend(messageStore, { entry: input.entry, failure });
-      if (compensation.kind === 'already_received') continue;
-      if (compensation.kind !== 'applied' && compensation.kind !== 'replayed') {
-        throw new Error(
-          `lifecycle Append rejection compensation ${compensation.kind}:${'reason' in compensation ? compensation.reason : ''}`,
-        );
-      }
-      rejected.push(targetId);
-      const unfinishedNativeRecovery =
-        compensation.entry.delivery.appendPendingByTarget?.[targetId]?.requiresCompletion &&
-        compensation.entry.delivery.appendRecoveryByTarget?.[targetId]?.acceptance === 'unknown';
-      restoredNextWork ||= !unfinishedNativeRecovery;
-      if (
-        compensation.entry.delivery.appendRecoveryByTarget?.[targetId]?.acceptance !== 'unknown' &&
-        !invocationTracker.detachLifecycleActiveRunInputs?.(
+      const result = await this.deps.queue.recoverLifecycleAppend(messageStore, {
+        entry: input.entry,
+        failure,
+        ...(input.canResume ? { canResume: () => input.canResume!(failure.targetId) } : {}),
+      });
+      if (result.kind === 'already_received') continue;
+      if (result.kind !== 'applied' && result.kind !== 'replayed')
+        throw new Error(`Append outcome did not persist: ${result.kind}`);
+      rejected.push(failure.targetId);
+      resumed ||= result.resumed;
+      if (result.resumed)
+        invocationTracker.detachLifecycleActiveRunInputs?.(
           input.entry.threadId,
-          targetId,
+          failure.targetId,
           failure,
           input.entry.id,
           input.inputMessageIds,
-        )
-      ) {
-        this.deps.log.warn(
-          { threadId: input.entry.threadId, targetId, invocationId: failure.invocationId },
-          '[QueueProcessor] compensated rejected Append after its live Active Run had already closed',
         );
-      }
-      for (const message of compensation.messages) {
-        this.emitLifecycleMessageUpdated(queueEntryOwnerId(input.entry), message);
-      }
+      for (const message of result.messages) this.emitLifecycleMessageUpdated(queueEntryOwnerId(input.entry), message);
     }
-    // The old run can finish before this transaction returns. Its completion
-    // wake may already have seen an empty Queue, so restored work owns a wake.
-    if (restoredNextWork) void this.requestDrain(input.entry.threadId);
+    if (resumed) void this.requestDrain(input.entry.threadId);
     return rejected;
   }
 
@@ -960,7 +949,6 @@ export class QueueProcessor {
         return { outcome: 'rejected', reason: 'append_unavailable' };
       }
       const remainsBoundToRequestedParent = requestedTargets.every((targetId) => {
-        if (entry.delivery.appendRecoveryByTarget?.[targetId]) return false;
         const intent = entry.delivery.authorIntentByTarget?.[targetId];
         return (
           intent?.requested === 'continue_current' &&
@@ -1172,16 +1160,26 @@ export class QueueProcessor {
       await queue.restoreClaimedEntries(input.threadId, [input.entryId]);
       return { outcome: 'rejected', reason: 'lifecycle_conflict' };
     }
-    this.appendHandoffsInFlight.add(claimed.id);
+    const originalSignals = new Map(
+      input.expectedRuns.map(
+        (run) => [run.targetId, invocationTracker.getController?.(input.threadId, run.targetId)?.signal] as const,
+      ),
+    );
+    const canResume = (targetId: string) => {
+      const signal = originalSignals.get(targetId);
+      return Boolean(signal && !signal.aborted && !this.isAutoResumeSuppressed(input.threadId, targetId));
+    };
+    const handoffIds = inputMessageIds.flatMap((messageId) =>
+      input.expectedRuns.map((run) => appendDeliveryId(messageId, run.targetId, run.invocationId)),
+    );
+    for (const id of handoffIds) this.appendHandoffsInFlight.add(id);
     let providerDispatchStarted = false;
     let sourceMessages: StoredMessage[] = [];
     try {
       const sourceMessagesBeforeAdmission = (
         await Promise.all(inputMessageIds.map((messageId) => messageStore.getById(messageId)))
       ).filter((message): message is StoredMessage => !!message);
-      // Both rejects below run before handoff custody is persisted: a claim
-      // restore does not clear appendPendingByTarget or routingHeldTargetIds,
-      // and leftovers would keep the source from ever starting a fresh turn.
+      // Before History admission, rejection only restores the short Queue claim.
       if (
         sourceMessagesBeforeAdmission.some((source) =>
           input.expectedRuns.some((run) => !canViewMessage(source, { type: 'cat', catId: run.targetId as CatId })),
@@ -1203,18 +1201,6 @@ export class QueueProcessor {
         await queue.restoreClaimedEntries(input.threadId, [input.entryId]);
         return { outcome: 'rejected', reason: 'append_unavailable' };
       }
-      const pending = Object.fromEntries(
-        input.expectedRuns.map((run, index) => [
-          run.targetId,
-          {
-            ...run,
-            at: seenAt,
-            dispatchStarted: false,
-            ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
-          },
-        ]),
-      );
-      await queue.prepareLifecycleAppendHandoff(claimed, pending);
       if (sourceMessagesBeforeAdmission.length !== inputMessageIds.length) {
         throw new Error(`lifecycle Append source vanished before admission: ${input.entryId}`);
       }
@@ -1234,6 +1220,7 @@ export class QueueProcessor {
           ...run,
           dispatchedAt: seenAt,
           awaitingAcceptance: true,
+          ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
           ...(dispatchers[index]?.capabilities.inputReadReceipt ? { inputReadSupported: true } : {}),
         })),
       });
@@ -1270,21 +1257,34 @@ export class QueueProcessor {
           input.expectedRuns.map((run) => run.targetId),
         );
       }
-      await queue.prepareLifecycleAppendHandoff(
-        claimed,
-        Object.fromEntries(
-          input.expectedRuns.map((run, index) => [
-            run.targetId,
+      for (const run of input.expectedRuns) {
+        const retired = await queue.retireClaimedLifecycleTarget(input.threadId, claimed.id, run.targetId, seenAt);
+        if (retired.outcome !== 'retired') throw new Error('Append History handoff could not retire its Queue target');
+        queue.forgetAdmittedTargets(input.threadId, claimed.id, [run.targetId]);
+        for (const source of sourceMessages) {
+          const ref = source.lifecycle?.dispatchRefs?.find((item) => item.targetId === run.targetId);
+          if (!ref?.appendDelivery) throw new Error('Append handoff facts are missing');
+          const started = await this.advanceLifecycleDispatchWithRetry(
+            source.id,
             {
-              ...run,
-              at: seenAt,
-              dispatchStarted: true,
-              ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
+              ...lifecycleInputIdentityForStoredMessage(source),
+              targetId: run.targetId,
+              statusMessageId: run.responseMessageId,
+              phase: 'dispatched',
+              dispatchedAt: seenAt,
+              appendDelivery: { ...ref.appendDelivery, dispatchStarted: true },
             },
-          ]),
-        ),
-        true,
-      );
+            {
+              threadId: input.threadId,
+              catId: run.targetId,
+              invocationId: run.invocationId,
+              purpose: 'append_handoff',
+            },
+          );
+          if (started.kind !== 'applied' && started.kind !== 'replayed')
+            throw new Error('Append dispatch intent did not persist');
+        }
+      }
 
       try {
         for (const message of admission.messages) {
@@ -1401,6 +1401,7 @@ export class QueueProcessor {
           entry: claimed,
           inputMessageIds,
           failures,
+          canResume,
         });
         await emitQueueUpdated(
           socketManager,
@@ -1454,6 +1455,7 @@ export class QueueProcessor {
               entry: claimed,
               inputMessageIds,
               failures: recovery,
+              canResume,
             });
           }
           await emitQueueUpdated(
@@ -1484,7 +1486,8 @@ export class QueueProcessor {
       this.retryDeferrals.defer(input.threadId, input.entryId);
       return { outcome: 'rejected', reason: 'lifecycle_conflict' };
     } finally {
-      this.appendHandoffsInFlight.delete(claimed.id);
+      for (const id of handoffIds) this.appendHandoffsInFlight.delete(id);
+      void this.reconcileAppendDeliveries(input.threadId);
     }
   }
 
@@ -1626,16 +1629,15 @@ export class QueueProcessor {
       invocationTracker.getUserId?.(input.threadId, input.catId) !== input.userId
     )
       return;
-    const returned = new Set(input.messageIds);
-    for (const entry of queue.list(input.threadId, input.userId)) {
-      const pending = entry.delivery.appendPendingByTarget?.[input.catId];
-      const messageId = entry.payload.messageId;
+    for (const messageId of new Set(input.messageIds)) {
+      const source = await this.deps.messageStore.getById(messageId);
+      const ref = source?.lifecycle?.dispatchRefs?.find(
+        (item) => item.targetId === input.catId && item.statusMessageId === active.responseMessageId,
+      );
       if (
-        !messageId ||
-        !returned.has(messageId) ||
-        !pending?.requiresCompletion ||
-        pending.invocationId !== input.invocationId ||
-        pending.responseMessageId !== active.responseMessageId
+        source?.threadId !== input.threadId ||
+        source.userId !== input.userId ||
+        !ref?.appendDelivery?.requiresCompletion
       )
         continue;
       await this.updateInputReadReceipt({
@@ -2475,19 +2477,6 @@ export class QueueProcessor {
         });
       }
       if (transition.kind === 'applied') this.emitLifecycleMessageUpdated(input.userId, transition.message);
-      if (
-        readAt !== undefined &&
-        (transition.kind === 'applied' || transition.kind === 'replayed') &&
-        (await this.deps.queue.retireReadAppendRecovery(input.threadId, id, input.targetId, input.responseMessageId))
-      ) {
-        await emitQueueUpdated(
-          this.deps.socketManager,
-          input.userId,
-          input.threadId,
-          this.deps.queue.list(input.threadId, input.userId),
-          'append_read_confirmed',
-        );
-      }
     }
   }
 
@@ -3059,6 +3048,11 @@ export class QueueProcessor {
     if (!message || lifecycle?.kind !== 'response' || lifecycle.status === 'processing') return;
     try {
       await this.deps.draftStore?.delete(message.userId, message.threadId, lifecycle.invocationId);
+      await this.deps.turnExecutionStore?.markResponseSettled?.(lifecycle.invocationId, {
+        kind: 'message',
+        messageId: message.id,
+        settledAt: Date.now(),
+      });
       await this.deps.turnExecutionStore?.clearResponsePending(lifecycle.invocationId);
     } catch (err) {
       log.warn(
@@ -3484,6 +3478,16 @@ export class QueueProcessor {
       if (!source || source.threadId !== input.threadId || source.userId !== input.userId)
         throw new Error('Append acceptance lost its original source binding');
       if (writeAlreadyRecovered(source)) continue;
+      if (
+        !ref &&
+        source.lifecycle?.appendFailures?.some(
+          (failure) =>
+            failure.targetId === input.targetId &&
+            failure.invocationId === input.invocationId &&
+            failure.responseMessageId === input.responseMessageId,
+        )
+      )
+        continue;
       if (!ref) throw new Error('Append acceptance lost its original source binding');
       const acceptancePatch: LifecycleInputDispatchPatch = {
         ...lifecycleInputIdentityForStoredMessage(source),
@@ -3507,14 +3511,6 @@ export class QueueProcessor {
       if (accepted.kind !== 'applied' && accepted.kind !== 'replayed')
         throw new Error('Append acceptance did not persist');
       this.emitLifecycleMessageUpdated(input.userId, accepted.message);
-      if (!input.awaitingCompletion)
-        await this.deps.queue.retireReadAppendRecovery(
-          input.threadId,
-          messageId,
-          input.targetId,
-          input.responseMessageId,
-          true,
-        );
     }
   }
 
@@ -3530,14 +3526,6 @@ export class QueueProcessor {
           try {
             await this.reconcileUncertainAppends(threadId);
           } catch (error) {
-            for (const entry of this.deps.queue.listQueuedAcrossUsers(threadId)) {
-              if (
-                Object.values(entry.delivery.appendRecoveryByTarget ?? {}).some(
-                  (failure) => failure.acceptance === 'unknown' && failure.checkedAt === undefined,
-                )
-              )
-                this.retryDeferrals.defer(threadId, entry.id);
-            }
             this.deps.log.warn({ error, threadId }, 'Append reconciliation waits for storage recovery');
           }
         } while (state.dirty);
@@ -3549,172 +3537,138 @@ export class QueueProcessor {
     return state.owner;
   }
 
-  /** Reconcile the first handoff without dispatching any body a second time. Restart uses the same durable rows. */
-  private async reconcileUncertainAppends(threadId: string): Promise<void> {
-    for (const entry of this.deps.queue.listQueuedAcrossUsers(threadId)) {
-      if (this.appendHandoffsInFlight.has(entry.id) || this.retryDeferrals.isDeferred(entry.id)) continue;
-      for (const pending of Object.values(entry.delivery.appendPendingByTarget ?? {})) {
-        if (!entry.targets.includes(pending.targetId) || !entry.payload.messageId) continue;
-        try {
-          const source = await this.deps.messageStore.getById(entry.payload.messageId);
-          const ref = source?.lifecycle?.dispatchRefs?.find(
-            (candidate) =>
-              candidate.targetId === pending.targetId && candidate.statusMessageId === pending.responseMessageId,
-          );
-          if (
-            ref?.appendAcceptance === 'accepted' ||
-            (!pending.requiresCompletion && ref?.inputRead?.status === 'read')
-          ) {
-            await this.deps.queue.retireReadAppendRecovery(
-              threadId,
-              entry.payload.messageId,
-              pending.targetId,
-              pending.responseMessageId,
-              ref?.appendAcceptance === 'accepted',
-            );
-            await emitQueueUpdated(
-              this.deps.socketManager,
-              queueEntryOwnerId(entry),
-              threadId,
-              this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
-              'append_confirmed',
-            );
-            continue;
-          }
-          if (pending.requiresCompletion && this.isExactActiveRun(threadId, pending)) continue;
-          await this.compensateLifecycleAppendTargets({
-            entry,
-            inputMessageIds: queueEntryMessageIds(entry),
-            failures: [
-              {
-                targetId: pending.targetId,
-                invocationId: pending.invocationId,
-                responseMessageId: pending.responseMessageId,
-                at: pending.at,
-                reason: 'exception',
-                acceptance:
-                  pending.requiresCompletion && pending.dispatchStarted
-                    ? 'incomplete'
-                    : pending.dispatchStarted
-                      ? 'unknown'
-                      : 'not_accepted',
-              },
-            ],
-          });
-          await emitQueueUpdated(
-            this.deps.socketManager,
-            queueEntryOwnerId(entry),
-            threadId,
-            this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
-            'append_recovered',
-          );
-        } catch (error) {
-          this.retryDeferrals.defer(threadId, entry.id);
-          this.deps.log.warn(
-            { error, threadId, entryId: entry.id },
-            'Append original handoff remains owned while storage recovers',
-          );
-        }
-      }
-    }
-    for (const entry of this.deps.queue.listQueuedAcrossUsers(threadId)) {
-      for (const failure of Object.values(entry.delivery.appendRecoveryByTarget ?? {})) {
+  /** Explicit read-only reconciliation of one original History delivery. */
+  async reconcileAppendDelivery(threadId: string, sourceMessageId: string, targetId: string): Promise<void> {
+    await this.reconcileUncertainAppends(threadId, { sourceMessageId, targetId });
+  }
+
+  private async reconcileUncertainAppends(
+    threadId: string,
+    force?: { sourceMessageId: string; targetId: string },
+  ): Promise<void> {
+    const { messageStore, invocationTracker } = this.deps;
+    const messages = force
+      ? [await messageStore.getById(force.sourceMessageId)].filter((item): item is StoredMessage => item !== null)
+      : await messageStore.listUnresolvedAppendMessages(threadId);
+    for (const source of messages) {
+      if (
+        source.threadId !== threadId ||
+        source.recall ||
+        source.deletedAt ||
+        source._tombstone ||
+        source.deliveryStatus === 'canceled'
+      )
+        continue;
+      for (const ref of source.lifecycle?.dispatchRefs ?? []) {
+        if (force && ref.targetId !== force.targetId) continue;
+        if (ref.appendAcceptance === 'accepted') continue;
+        const response = await messageStore.getById(ref.statusMessageId);
         if (
-          this.retryDeferrals.isDeferred(entry.id) ||
-          !entry.targets.includes(failure.targetId) ||
-          failure.acceptance !== 'unknown' ||
-          entry.delivery.appendPendingByTarget?.[failure.targetId]?.requiresCompletion ||
-          !entry.payload.messageId
+          response?.lifecycle?.kind !== 'response' ||
+          response.threadId !== threadId ||
+          response.userId !== source.userId ||
+          response.lifecycle.targetId !== ref.targetId
         )
           continue;
-        const original = await this.deps.messageStore.getById(entry.payload.messageId);
-        const receipt = original?.lifecycle?.dispatchRefs?.find(
-          (ref) => ref.targetId === failure.targetId && ref.statusMessageId === failure.responseMessageId,
+        const run = {
+          targetId: ref.targetId,
+          invocationId: response.lifecycle.invocationId,
+          responseMessageId: response.id,
+        };
+        if (this.appendHandoffsInFlight.has(appendDeliveryId(source.id, ref.targetId, run.invocationId))) continue;
+        const nativeCompletion = ref.appendDelivery?.requiresCompletion === true;
+        const known = source.lifecycle?.appendFailures?.find(
+          (item) =>
+            item.targetId === ref.targetId &&
+            item.invocationId === run.invocationId &&
+            item.responseMessageId === response.id,
         );
-        if (receipt?.inputRead?.status === 'read' || receipt?.appendAcceptance === 'accepted') {
-          await this.deps.queue.retireReadAppendRecovery(
+        if (!known && !['pending', 'written'].includes(ref.appendAcceptance ?? '')) continue;
+        const receivedNative =
+          nativeCompletion && (ref.appendAcceptance === 'written' || ref.inputRead?.status === 'read');
+        if (nativeCompletion && this.isExactActiveRun(threadId, run) && (!known || receivedNative)) continue;
+        if (known && known.acceptance !== 'unknown') continue;
+        if (known?.checkedAt !== undefined && !force && !receivedNative) continue;
+        const failure: LifecycleAppendFailure =
+          receivedNative && known
+            ? { ...known, acceptance: 'incomplete' }
+            : (known ?? {
+                ...run,
+                at: Math.max(Date.now(), ref.dispatchedAt ?? 0),
+                reason: 'exception',
+                acceptance:
+                  ref.appendDelivery?.dispatchStarted === false
+                    ? 'not_accepted'
+                    : receivedNative
+                      ? 'incomplete'
+                      : 'unknown',
+              });
+        if (failure.acceptance !== 'unknown') {
+          const result = await this.deps.queue.recoverLifecycleAppend(messageStore, {
+            sourceMessageId: source.id,
             threadId,
-            entry.payload.messageId,
-            failure.targetId,
-            failure.responseMessageId,
-          );
-          await emitQueueUpdated(
-            this.deps.socketManager,
-            queueEntryOwnerId(entry),
-            threadId,
-            this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
-            'append_confirmed',
-          );
+            failure,
+          });
+          if ('messages' in result)
+            for (const message of result.messages) this.emitLifecycleMessageUpdated(source.userId, message);
           continue;
         }
-        if (failure.checkedAt !== undefined) continue;
-        const dispatcher = this.deps.invocationTracker.getAgentClientActiveRunDispatcher?.(threadId, failure.targetId);
+        if (ref.inputRead?.status === 'read' && !nativeCompletion) {
+          await this.confirmLifecycleAppendAcceptance({
+            threadId,
+            userId: source.userId,
+            ...run,
+            messageIds: [source.id],
+          });
+          continue;
+        }
+        const dispatcher = invocationTracker.getAgentClientActiveRunDispatcher?.(threadId, ref.targetId);
         let proof: 'accepted' | 'not_accepted' | 'unknown' = 'unknown';
-        if (dispatcher?.invocationId === failure.invocationId && dispatcher.inspectInput) {
+        if (dispatcher?.invocationId === run.invocationId && dispatcher.inspectInput) {
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             proof = await Promise.race([
-              dispatcher.inspectInput(
-                appendDeliveryId(entry.payload.messageId, failure.targetId, failure.invocationId),
-              ),
+              dispatcher.inspectInput(appendDeliveryId(source.id, ref.targetId, run.invocationId)),
               new Promise<'unknown'>((resolve) => {
                 timer = setTimeout(() => resolve('unknown'), 3000);
               }),
             ]);
           } catch {
-            /* An unavailable read cannot prove a negative. */
+            /* A failed read cannot prove that the write was refused. */
           } finally {
             if (timer) clearTimeout(timer);
           }
         }
-        if (proof === 'accepted')
+        if (proof === 'accepted') {
           await this.confirmLifecycleAppendAcceptance({
             threadId,
-            userId: queueEntryOwnerId(entry),
-            targetId: failure.targetId,
-            invocationId: failure.invocationId,
-            responseMessageId: failure.responseMessageId,
-            messageIds: [entry.payload.messageId],
+            userId: source.userId,
+            ...run,
+            messageIds: [source.id],
+            ...(nativeCompletion ? { awaitingCompletion: true } : {}),
           });
-        const result = await this.deps.queue.recoverLifecycleAppend(this.deps.messageStore, {
-          entry,
+          if (!nativeCompletion) continue;
+        }
+        const result = await this.deps.queue.recoverLifecycleAppend(messageStore, {
+          sourceMessageId: source.id,
+          threadId,
           failure,
           checked: {
             acceptance: proof === 'not_accepted' ? 'not_accepted' : 'unknown',
             at: Math.max(Date.now(), failure.at),
           },
         });
-        if (result.kind === 'already_received') {
-          await this.deps.queue.retireReadAppendRecovery(
-            threadId,
-            entry.payload.messageId,
-            failure.targetId,
-            failure.responseMessageId,
+        if ('messages' in result)
+          for (const message of result.messages) this.emitLifecycleMessageUpdated(source.userId, message);
+        else if (result.kind !== 'not_found')
+          this.deps.log.warn(
+            { threadId, sourceMessageId: source.id, result },
+            'History Append reconciliation did not commit',
           );
-        } else if (result.kind === 'applied' || result.kind === 'replayed') {
-          if (proof === 'not_accepted')
-            this.deps.invocationTracker.detachLifecycleActiveRunInputs?.(
-              threadId,
-              failure.targetId,
-              failure,
-              entry.id,
-              queueEntryMessageIds(entry),
-            );
-          for (const message of result.messages) this.emitLifecycleMessageUpdated(queueEntryOwnerId(entry), message);
-        }
-        await emitQueueUpdated(
-          this.deps.socketManager,
-          queueEntryOwnerId(entry),
-          threadId,
-          this.deps.queue.list(threadId, queueEntryOwnerId(entry)),
-          'append_reconciled',
-        );
-        if (proof === 'not_accepted' && result.kind === 'applied') void this.requestDrain(threadId);
       }
     }
   }
 
-  /** A strict owner click spends one exact-target attempt; it never changes source provenance. */
   async retryRoutingTarget(
     threadId: string,
     userId: string,
@@ -3967,8 +3921,8 @@ export class QueueProcessor {
   /**
    * One drain starts at most one source entry, selecting the recipients that can start now in their
    * own comparator order. A busy sibling retains its pending target without holding an idle member.
-   * An entry whose recipients all wait holds back only later entries for those same recipients.
-   * Every target still receives its sources in comparator order. A targetless
+   * Future work holds later new turns for the same recipient, not guidance bound to its current run.
+   * Current guidance retains its own comparator order and cannot cross an in-flight claim. A targetless
    * input that waits for an idle thread holds back everything behind it: its target is not known yet.
    * The scan reads one snapshot and awaits target resolution, so the claim re-checks the order.
    */
@@ -3982,6 +3936,7 @@ export class QueueProcessor {
       return { started: false };
     }
     const heldTargets = new Set<string>();
+    const heldGuidanceTargets = new Set<string>();
     // The entries this scan passed over, each with the targets it asked for when it was passed over.
     const passedOver = new Map<string, string>();
     let waitingEntries = 0;
@@ -3989,7 +3944,10 @@ export class QueueProcessor {
     for (const candidate of candidates) {
       if (candidate.status === 'claimed') {
         if (candidate.targets.length === 0) return { started: false };
-        for (const target of candidate.targets) heldTargets.add(target);
+        for (const target of candidate.targets) {
+          heldTargets.add(target);
+          heldGuidanceTargets.add(target);
+        }
         passedOver.set(candidate.id, requestedTargetsKey(candidate));
         waitingEntries += 1;
         firstWaitingTarget ??= candidate.targets[0];
@@ -4026,12 +3984,15 @@ export class QueueProcessor {
       if (!this.retryDeferrals.isDeferred(candidate.id)) {
         for (const targetCatId of eligibleTargets) {
           if (
-            candidate.delivery.appendRecoveryByTarget?.[targetCatId] ||
-            heldTargets.has(targetCatId) ||
+            heldGuidanceTargets.has(targetCatId) ||
             this.automaticAppendSlots.has(QueueProcessor.slotKey(threadId, targetCatId)) ||
             this.isAutoResumeSuppressed(threadId, targetCatId)
           )
             continue;
+          if (!this.canAppendInCurrentQueueOrder(threadId, candidate.id, targetCatId)) {
+            return { started: false, progressed: true };
+          }
+          const beforeAppendRevision = this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate));
           const result = await this.appendFromDrain({
             threadId,
             userId: queueEntryOwnerId(candidate),
@@ -4040,6 +4001,12 @@ export class QueueProcessor {
           });
           if (!result || result.outcome === 'appended') appended = true;
           else if (
+            result.reason === 'state_changed' &&
+            this.deps.queue.snapshotRevision(threadId, queueEntryOwnerId(candidate)) !== beforeAppendRevision
+          ) {
+            // Reordering/claim races invalidate this scan, not the bound parent.
+            return { started: false, progressed: true };
+          } else if (
             result.reason !== 'active_run_pending' &&
             candidate.delivery.authorIntentByTarget?.[targetCatId]?.requested === 'continue_current'
           ) {
@@ -4054,6 +4021,20 @@ export class QueueProcessor {
         }
       }
       if (appended) return { started: false, progressed: true };
+      // An exact current-run input that cannot append yet must retain its place
+      // among guidance. Re-read after the attempt: a rejected/ended parent may
+      // already have changed this source to next-work through durable fallback.
+      const remaining = this.deps.queue.getEntrySnapshotAcrossUsers(threadId, candidate.id);
+      for (const targetId of eligibleTargets) {
+        const intent = remaining?.delivery.authorIntentByTarget?.[targetId];
+        if (
+          intent?.requested === 'continue_current' &&
+          intent.fallbackAt === undefined &&
+          intent.boundParentInvocationId === this.deps.invocationTracker.getExecutionId?.(threadId, targetId)
+        ) {
+          heldGuidanceTargets.add(targetId);
+        }
+      }
       const candidateForAdmission =
         routingHeld.size > 0 && eligibleTargets.length > 0
           ? { ...candidate, targets: [eligibleTargets[0]!] }
@@ -4210,6 +4191,31 @@ export class QueueProcessor {
       !this.automaticAppendSlots.has(slotKey) &&
       !this.deps.invocationTracker.has(threadId, catId)
     );
+  }
+
+  /**
+   * Routing resolution may yield after the scan passed future work. Before
+   * Append captures its revision, re-check the current prefix for this turn's
+   * inputs and claims. Future work may stay ahead without blocking guidance.
+   */
+  private canAppendInCurrentQueueOrder(threadId: string, entryId: string, targetId: string): boolean {
+    const parentId = this.deps.invocationTracker.getExecutionId?.(threadId, targetId);
+    if (!parentId) return true; // Exact Append owns missing/stale-parent rejection.
+    const pending = this.deps.queue.listPendingAcrossUsers(threadId);
+    const index = pending.findIndex((entry) => entry.id === entryId);
+    if (index < 0) return true; // The exact claim still owns source existence.
+    return pending.slice(0, index).every((entry) => {
+      if (entry.targets.length === 0) return false;
+      if (!entry.targets.includes(targetId)) return true;
+      if (entry.status === 'claimed') return false;
+      if (entry.delivery.routingHeldTargetIds?.includes(targetId)) return true;
+      const intent = entry.delivery.authorIntentByTarget?.[targetId];
+      return !(
+        intent?.requested === 'continue_current' &&
+        intent.fallbackAt === undefined &&
+        intent.boundParentInvocationId === parentId
+      );
+    });
   }
 
   /**
@@ -5076,17 +5082,19 @@ export class QueueProcessor {
           lifecycleAdmissionUnknown = true;
           throw error;
         }
-        const pendingInputReplay =
-          pendingSource?.lifecycle?.kind === 'input' &&
+        const pendingSourceReplay =
+          pendingSource !== null &&
           pendingSource.userId === userId &&
           pendingSource.threadId === threadId &&
-          pendingSource.deliveryStatus === 'queued' &&
+          pendingSource.deliveryStatus !== 'canceled' &&
+          !pendingSource.recall &&
+          !pendingSource._tombstone &&
           existing?.userMessageId === messageId &&
-          !pendingSource.lifecycle.dispatchRefs?.some((ref) => targetCats.includes(ref.targetId as CatId));
+          !pendingSource.lifecycle?.dispatchRefs?.some((ref) => targetCats.includes(ref.targetId as CatId));
         const replayEligible =
           (connectorReplayCarrier && Boolean(messageId)) ||
           Boolean(entry.execution.actionSuccessorFence) ||
-          pendingInputReplay;
+          pendingSourceReplay;
         if (
           !replayEligible ||
           !isExactReplayableQueueRecord(existing, {

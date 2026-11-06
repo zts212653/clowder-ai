@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArtworkChromeProvider } from './content-review/ArtworkChrome';
 import { ArtworkFloatingHeader } from './content-review/ArtworkFloatingHeader';
@@ -10,6 +10,7 @@ import type { ArtworkGallery } from './content-review/artwork-gallery';
 import artworkStyles from './content-review/artwork-lightbox.module.css';
 import { ContentMediaElement } from './content-review/ContentMediaElement';
 import { FileActions } from './content-review/FileActions';
+import { useLightboxFocus } from './content-review/useLightboxFocus';
 import { lightboxCopy } from './lightbox.shell-copy';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
@@ -52,43 +53,13 @@ export function Lightbox({
 }) {
   const isV2 = useShellPresentation() === 'v2';
   const t = useShellCopy(lightboxCopy);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const classicMedia = useRef<HTMLDivElement>(null);
   useArtworkGalleryNavigation(gallery, dialog);
+  useLightboxFocus(dialog, closeButton, onClose);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeButton.current?.focus({ preventScroll: true });
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || document.fullscreenElement) return;
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        closeRef.current();
-      }
-      if (e.key === 'Tab') {
-        const available = [
-          ...(dialog.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
-          ) ?? []),
-        ].filter((node) => node.getClientRects().length && !node.closest('[hidden], [inert]'));
-        const first = available[0],
-          last = available.at(-1);
-        if (first && last && (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
-          e.preventDefault();
-          (e.shiftKey ? last : first).focus({ preventScroll: true });
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('keydown', handleKey);
-      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
-    };
-  }, []);
 
   if (typeof document === 'undefined') {
     return null;

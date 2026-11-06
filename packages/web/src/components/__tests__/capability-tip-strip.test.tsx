@@ -204,7 +204,8 @@ describe('F244 CapabilityTipStrip', () => {
   });
 
   it('keeps each tip visible for at least 30 seconds', async () => {
-    const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+    const exposures = () =>
+      vi.mocked(recordCapabilityTipEvent).mock.calls.filter(([event]) => event.event === 'capability_tip_exposed');
 
     await render(
       <CapabilityTipStrip
@@ -219,18 +220,23 @@ describe('F244 CapabilityTipStrip', () => {
       await Promise.resolve();
     });
 
-    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+    expect(exposures()).toHaveLength(1);
+    const firstTip = container.querySelector('[data-tip-id]')?.getAttribute('data-tip-id');
 
     await act(async () => {
-      vi.advanceTimersByTime(12000);
+      vi.advanceTimersByTime(29999);
       await Promise.resolve();
     });
 
-    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+    expect(exposures()).toHaveLength(1);
+    expect(container.querySelector('[data-tip-id]')?.getAttribute('data-tip-id')).toBe(firstTip);
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(exposures()).toHaveLength(2);
   });
 
   it('starts rotation dwell after the first tip becomes visible', async () => {
-    const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+    const exposures = () =>
+      vi.mocked(recordCapabilityTipEvent).mock.calls.filter(([event]) => event.event === 'capability_tip_exposed');
 
     await render(
       <CapabilityTipStrip
@@ -245,14 +251,14 @@ describe('F244 CapabilityTipStrip', () => {
       vi.advanceTimersByTime(6000);
       await Promise.resolve();
     });
-    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+    expect(exposures()).toHaveLength(1);
 
     await act(async () => {
       vi.advanceTimersByTime(24000);
       await Promise.resolve();
     });
 
-    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+    expect(exposures()).toHaveLength(1);
   });
 
   it('clicking learn more opens concierge bubble with a draft and does not send', async () => {

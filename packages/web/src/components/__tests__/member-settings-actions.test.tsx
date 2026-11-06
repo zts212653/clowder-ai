@@ -5,6 +5,7 @@ import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from '../config-viewer-types';
 import { MemberSettingsHost } from '../settings/members/MemberSettingsHost';
+import { MemberSettingsPage } from '../settings/members/MemberSettingsPage';
 import { SettingsContent } from '../settings/SettingsContent';
 
 vi.mock('next/navigation', () => ({
@@ -88,6 +89,19 @@ async function render(editorOpen: boolean, error: string | null = null) {
     ),
   );
 }
+
+it('keeps the settings tool identity ACP when only its provider argument mentions DeepSeek', async () => {
+  const custom = {
+    ...cat,
+    carrier: 'acp',
+    clientId: 'acp',
+    acp: { command: 'custom-acp', startupArgs: ['--provider', 'deepseek'] },
+  } as CatData;
+  await act(async () =>
+    root.render(<MemberSettingsPage cat={custom} cats={[custom]} onSaved={vi.fn()} onBack={vi.fn()} />),
+  );
+  expect(host.querySelector('[data-testid=member-settings-page]')?.textContent).not.toContain('DSH');
+});
 it.each([false, true])('keeps action failures visible with an existing config (detail=%s)', async (detail) => {
   await render(detail, '成员状态切换失败 (503)');
   expect(host.querySelector('[role=alert]')?.textContent).toContain('成员状态切换失败 (503)');

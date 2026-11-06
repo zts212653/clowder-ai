@@ -7,6 +7,8 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+// F046 / F314-17: the A2A line-start @mention grammar (API routing + chat direction display).
+export * from './a2a-mention-grammar.js';
 // F246 Phase I: shared Approval Hub producer metadata (API + Web single source).
 export * from './approval-producer-catalog.js';
 // Export avatar size limits (shared between API route bodyLimit and frontend size gate)
@@ -55,6 +57,7 @@ export { CORE_COMMANDS } from './core-commands.js';
 export * from './deployment-defaults.js';
 // F247: one contract for the shared Remote entry and the source-bound Host.
 export * from './dot-mcp.js';
+export * from './dsh-launcher.js';
 // Export Eval Hub metric reference normalization (F248 B3)
 export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).

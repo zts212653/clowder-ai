@@ -1,4 +1,11 @@
 // Pin the existing legacy Companion ABI independently of the current manifest schema.
+
+import {
+  type CompanionCommand as DeskCompanionCommand,
+  type CompanionReply as DeskCompanionReply,
+  validateCompanionCommand as validateDeskCompanionCommand,
+  validateCompanionReply as validateDeskCompanionReply,
+} from '@clowder-ai/plugin-contract-033c0';
 import {
   type CompanionCommand,
   type CompanionReply,
@@ -44,7 +51,7 @@ import {
   validateCompanionReply as validateAppAssistReply,
 } from '@clowder-ai/plugin-contract-beta29';
 import { z } from 'zod';
-import type { CompanionArchiveContract } from './published-companion-v2.js';
+import { type CompanionContract, companionContractHas } from './published-companion-v2.js';
 
 // SDP exists only on the private pipe between the Host-owned preload/kernel/API.
 // Never use this validator on the package-facing renderer IPC handler.
@@ -196,6 +203,7 @@ export type HostCompanionCommand =
   | Exclude<PresentationCompanionCommand, { kind: `audio.${string}` }>
   | Exclude<LetterCompanionCommand, { kind: `audio.${string}` }>
   | Exclude<AppAssistCompanionCommand, { kind: `audio.${string}` }>
+  | Exclude<DeskCompanionCommand, { kind: `audio.${string}` }>
   | z.infer<typeof offer>
   | z.infer<typeof f221ConfirmTrial>;
 export type HostCompanionReply =
@@ -206,40 +214,39 @@ export type HostCompanionReply =
   | PresentationCompanionReply
   | LetterCompanionReply
   | AppAssistCompanionReply
+  | DeskCompanionReply
   | HostCompanionState
   | z.infer<typeof answer>
   | HostF221Preview
   | z.infer<typeof f221TrialReceipt>;
+/** The public command and reply schema of each admitted contract line. */
+type PublicSchema = (value: unknown) => value is { kind: string };
+const PUBLIC_COMMANDS: Record<CompanionContract, PublicSchema> = {
+  '0.1.0-beta.21': validateCompanionCommand,
+  '0.1.0-beta.23': validateModernCompanionCommand,
+  '0.1.0-beta.24': validateUnifiedCompanionCommand,
+  '0.1.0-beta.25': validateWorkCompanionCommand,
+  '0.1.0-beta.27': validatePresentationCompanionCommand,
+  '0.1.0-beta.28': validateLetterCompanionCommand,
+  '0.1.0-beta.29': validateAppAssistCommand,
+  '0.3.3-candidate.0': validateDeskCompanionCommand,
+};
+const PUBLIC_REPLIES: Record<CompanionContract, PublicSchema> = {
+  '0.1.0-beta.21': validateCompanionReply,
+  '0.1.0-beta.23': validateModernCompanionReply,
+  '0.1.0-beta.24': validateUnifiedCompanionReply,
+  '0.1.0-beta.25': validateWorkCompanionReply,
+  '0.1.0-beta.27': validatePresentationCompanionReply,
+  '0.1.0-beta.28': validateLetterCompanionReply,
+  '0.1.0-beta.29': validateAppAssistReply,
+  '0.3.3-candidate.0': validateDeskCompanionReply,
+};
 export function validateHostCompanionCommand(
   value: unknown,
-  contract: CompanionArchiveContract['contract'] = '0.1.0-beta.21',
+  contract: CompanionContract = '0.1.0-beta.21',
 ): value is HostCompanionCommand {
-  if (
-    ![
-      '0.1.0-beta.21',
-      '0.1.0-beta.23',
-      '0.1.0-beta.24',
-      '0.1.0-beta.25',
-      '0.1.0-beta.27',
-      '0.1.0-beta.28',
-      '0.1.0-beta.29',
-    ].includes(contract)
-  )
-    return false;
-  const validatePublic =
-    contract === '0.1.0-beta.29'
-      ? validateAppAssistCommand
-      : contract === '0.1.0-beta.28'
-        ? validateLetterCompanionCommand
-        : contract === '0.1.0-beta.27'
-          ? validatePresentationCompanionCommand
-          : contract === '0.1.0-beta.25'
-            ? validateWorkCompanionCommand
-            : contract === '0.1.0-beta.24'
-              ? validateUnifiedCompanionCommand
-              : contract === '0.1.0-beta.23'
-                ? validateModernCompanionCommand
-                : validateCompanionCommand;
+  const validatePublic = PUBLIC_COMMANDS[contract];
+  if (!validatePublic) return false;
   return (
     (validatePublic(value) && !value.kind.startsWith('audio.')) ||
     offer.safeParse(value).success ||
@@ -248,40 +255,17 @@ export function validateHostCompanionCommand(
 }
 export function validateHostCompanionReply(
   value: unknown,
-  contract: CompanionArchiveContract['contract'] = '0.1.0-beta.21',
+  contract: CompanionContract = '0.1.0-beta.21',
 ): value is HostCompanionReply {
-  if (
-    ![
-      '0.1.0-beta.21',
-      '0.1.0-beta.23',
-      '0.1.0-beta.24',
-      '0.1.0-beta.25',
-      '0.1.0-beta.27',
-      '0.1.0-beta.28',
-      '0.1.0-beta.29',
-    ].includes(contract)
-  )
-    return false;
-  const validatePublic =
-    contract === '0.1.0-beta.29'
-      ? validateAppAssistReply
-      : contract === '0.1.0-beta.28'
-        ? validateLetterCompanionReply
-        : contract === '0.1.0-beta.27'
-          ? validatePresentationCompanionReply
-          : contract === '0.1.0-beta.25'
-            ? validateWorkCompanionReply
-            : contract === '0.1.0-beta.24'
-              ? validateUnifiedCompanionReply
-              : contract === '0.1.0-beta.23'
-                ? validateModernCompanionReply
-                : validateCompanionReply;
+  const validatePublic = PUBLIC_REPLIES[contract];
+  if (!validatePublic) return false;
   if (value && typeof value === 'object' && 'kind' in value && value.kind === 'state') {
     const parsed = hostStateExtras.safeParse(value);
     if (!parsed.success) return false;
-    // Private API state contains only the existing base. The trusted desktop
-    // session adds its own offer and validates the complete beta.29 reply there.
-    if (contract === '0.1.0-beta.29') return !('appAssist' in parsed.data) && validateLetterCompanionReply(parsed.data);
+    // Private API state contains only the existing letter base. The trusted desktop session adds its own
+    // app-assist offer (and, from 0.3.3, the desk) and validates the complete reply of that line there.
+    if (companionContractHas(contract, 'appAssist'))
+      return !('appAssist' in parsed.data) && !('desk' in parsed.data) && validateLetterCompanionReply(parsed.data);
     const { behaviorEnabled: _nativePolicy, ...publicState } = parsed.data;
     return validatePublic(contract === '0.1.0-beta.21' ? publicState : parsed.data);
   }

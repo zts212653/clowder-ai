@@ -9,7 +9,7 @@ import {
   readCodexLaunchProjection,
 } from './codex-launch-config.js';
 import { validateCodexManagedLayout } from './codex-managed-layout.js';
-import { assertCodexSharedStateRoots } from './codex-shared-state.js';
+import { assertCodexSharedStateRoots, codexUsesSharedState } from './codex-shared-state.js';
 
 // These native inputs select another principal or its authentication transport, even with an isolated home.
 const ALTERNATIVE_CREDENTIAL_ENV = [
@@ -179,8 +179,8 @@ export function finalizeCodexAccountEnvironment(
     rpcConfig?: Record<string, unknown>;
   },
 ): CodexAccountEnvironment {
-  if (descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth'))
-    assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
+  const sharedState = codexUsesSharedState(descriptor);
+  if (sharedState) assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
   if (descriptor.managed) {
     validateCodexManagedLayout({
       kind: 'managed',
@@ -203,22 +203,10 @@ export function finalizeCodexAccountEnvironment(
     CODEX_CAT_EXPECTED_USER_ID: descriptor.identity?.userId ?? null,
     CODEX_CAT_EXPECTED_WORKSPACE_ID: descriptor.identity?.workspaceId ?? null,
     CODEX_CAT_EXPECTED_CREDENTIAL_HOME: descriptor.identity ? home : null,
-    CODEX_CAT_ACCOUNT_REF:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.accountRef
-        : null,
-    CODEX_CAT_STATE_ROOT:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.stateRoot
-        : null,
-    CODEX_CAT_SHARED_SQLITE_HOME:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.sqliteHome
-        : null,
-    CODEX_CAT_ACCOUNT_OWNER_ROOT:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.accountOwnerRoot
-        : null,
+    CODEX_CAT_ACCOUNT_REF: sharedState ? descriptor.accountRef : null,
+    CODEX_CAT_STATE_ROOT: sharedState ? descriptor.stateRoot : null,
+    CODEX_CAT_SHARED_SQLITE_HOME: sharedState ? descriptor.sqliteHome : null,
+    CODEX_CAT_ACCOUNT_OWNER_ROOT: sharedState ? descriptor.accountOwnerRoot : null,
   };
   if (descriptor.authMode === 'auto') return env;
   if (descriptor.managed && descriptor.authMode === 'oauth') Object.assign(env, withoutUnreviewedCodexEnvironment(env));

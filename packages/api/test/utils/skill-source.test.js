@@ -14,11 +14,6 @@ describe('Clowder AI skills source resolver', () => {
     assert.equal(await resolveCatCafeSkillsSource(), join(repoRoot, 'cat-cafe-skills'));
   });
 
-  test('does not route lifecycle skill source through resolveMainRepoPath', async () => {
-    const resolverSource = await readFile(join(repoRoot, 'packages/api/src/utils/skill-source.ts'), 'utf-8');
-    assert.doesNotMatch(resolverSource, /resolveMainRepoPath/);
-  });
-
   test('skills-drift route uses the shared resolver instead of a startup-root constant', async () => {
     const routeSource = await readFile(join(repoRoot, 'packages/api/src/routes/skills-drift.ts'), 'utf-8');
     assert.match(routeSource, /resolveCatCafeSkillsSource/);

@@ -1,5 +1,6 @@
 import { type RoutingContextReadModelV1, type RoutingSubjectRefV1, routingSignalClosures } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { isDshMember } from '@/lib/member-model-display';
 import { CLIENT_OPTIONS } from '../hub-cat-editor.model';
 import { providerDisplayName } from '../routing-context/team-member-projection';
 import type { NativeLoginState } from '../settings/members/native-login-state';
@@ -165,8 +166,8 @@ export function memberTransport(cat: CatData): string {
   if (cat.carrier === 'sdk') return 'SDK';
   return 'CLI';
 }
-export function memberClientName(cat: CatData): string {
-  if (cat.acp && /dsh|deepseek-harness/i.test(cat.acp.command)) return 'DSH';
+export function memberClientName(cat: CatData, dsh = isDshMember(cat)): string {
+  if (dsh) return 'DSH';
   return CLIENT_OPTIONS.find((option) => option.value === cat.clientId)?.label ?? cat.clientId;
 }
 export function routingSubjectName(

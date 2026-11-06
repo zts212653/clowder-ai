@@ -6,7 +6,7 @@ import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores
 import { queueRoutes } from '../dist/routes/queue.js';
 
 for (const mode of ['incomplete', 'empty', 'controlled', 'write-failure', 'ack-only'])
-  test(`REST stop keeps exact provider ownership until proof commits: ${mode}`, async (t) => {
+  test(`REST stop distinguishes exact provider control from inactive Host retirement: ${mode}`, async (t) => {
     const scope = {
       invocationId: 'proof-child',
       parentInvocationId: 'proof-parent',
@@ -106,6 +106,14 @@ for (const mode of ['incomplete', 'empty', 'controlled', 'write-failure', 'ack-o
       assert.equal(controls.length, 1);
       assert.equal(turns.get(scope.invocationId).status, 'canceled');
       assert.ok(turns.get(scope.invocationId).providerTeardownAt >= 0);
+      assert.equal(messages.filter((m) => m.type === 'done').length, 1);
+    } else if (mode === 'empty') {
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json(), { ok: true, cancelled: false, reconciled: true });
+      assert.equal(controls.length, 0);
+      assert.equal(turns.get(scope.invocationId).providerTeardownAt, undefined);
+      assert.equal(parent.status, 'canceled');
+      assert.deepEqual(releases, ['lock', 'slot']);
       assert.equal(messages.filter((m) => m.type === 'done').length, 1);
     } else {
       assert.equal(response.statusCode, 503, response.body);

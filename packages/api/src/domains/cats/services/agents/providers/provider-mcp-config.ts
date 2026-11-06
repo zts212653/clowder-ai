@@ -23,6 +23,7 @@ import {
   materializeNativeMcpHttp,
   resolveManagedMcpEntrypoint,
 } from '../../../../../config/capabilities/managed-mcp-config.js';
+import { resolveWorkspaceRoot } from '../../../../../config/capabilities/mcp-config-adapters.js';
 import { isManagedCatCafeSplit } from '../../../../../config/capabilities/mcp-constants.js';
 import {
   resolveMcpArgs,
@@ -37,15 +38,6 @@ import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilitie
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('provider-mcp-config');
-function resolveMcpWorkspaceRoot(workingDirectory?: string): string {
-  const explicitAllowed = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
-  if (explicitAllowed) return explicitAllowed;
-  const threadWorkspace = workingDirectory?.trim();
-  if (threadWorkspace) return resolve(threadWorkspace);
-  const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
-  if (explicitWorkspace) return explicitWorkspace;
-  return process.cwd();
-}
 
 export interface ProviderMcpConfigPlan {
   readonly servers: Record<string, Record<string, unknown>>;
@@ -87,7 +79,7 @@ export async function captureProviderMcpConfig(input: {
   const catId = input.callbackEnv.CAT_CAFE_CAT_ID;
 
   const catCafeEnvEntries = catCafeEnvironment(input, {
-    ALLOWED_WORKSPACE_DIRS: resolveMcpWorkspaceRoot(input.workingDirectory),
+    ALLOWED_WORKSPACE_DIRS: resolveWorkspaceRoot(input.workingDirectory),
   });
 
   const mcpServers: Record<string, Record<string, unknown>> = {};

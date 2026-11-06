@@ -29,9 +29,11 @@ export const developmentWorkInputSchema = {
     'Owner-issued snapshot from resolve; required for legacy adoption.',
   ),
   title: developmentWorkActionV1Schema.shape.title.describe(
-    'Human-readable title for newly admitted work; existing identity/title remain unchanged.',
+    'Human-readable title for newly admitted work; 1–200 UTF-16 code units after trimming. Existing identity/title remain unchanged.',
   ),
-  why: developmentWorkActionV1Schema.shape.why.describe('Reason for accepting this scoped development outcome.'),
+  why: developmentWorkActionV1Schema.shape.why.describe(
+    'Reason for accepting this scoped development outcome; max 1000 UTF-16 code units (JavaScript string.length).',
+  ),
   closure: developmentWorkActionV1Schema.shape.closure.describe(
     'Accepted outcome and verifiable completion signal; needed for admit/adopt.',
   ),
@@ -39,7 +41,7 @@ export const developmentWorkInputSchema = {
     'Exact-source-backed businessDeadline, reviewBy, plannedStart, actualStart or estimatedCompletion in epoch milliseconds. Preserve each meaning; omit unknown dates.',
   ),
   artifactRefs: developmentWorkActionV1Schema.shape.artifactRefs.describe(
-    'Existing Artifact-owner refs at admission/adoption; later publications use update_entrusted_work.',
+    'Existing Artifact-owner refs at admission/adoption; max 64 entries, each 1–1000 UTF-16 code units (JavaScript string.length). Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.',
   ),
   parentTaskRef: developmentWorkActionV1Schema.shape.parentTaskRef.describe(
     'Optional exact open parent Task ref for an explicitly accepted sub-work; does not transfer parent ownership.',
@@ -81,7 +83,8 @@ export const developmentWorkTools = [
       'Use when: an accepted Feature kickoff becomes authorized work, or the human says “继续 Phase C / continue this phase” in its original thread, including work without a deadline. ' +
       'Not for: casual Feature mentions, unaccepted ideas, media/research without Feature scope (use admit_entrusted_work), or moving another thread’s Task. ' +
       'Output: a typed admitted/resumed/adopted/bound receipt after an atomic Task mutation. ' +
-      'GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results.',
+      'GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results. ' +
+      'LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 without trimming. Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.',
     inputSchema: developmentWorkInputSchema,
     handler: handleDevelopmentWork,
     sourceFile: 'development-work-tools.ts',

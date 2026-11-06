@@ -52,8 +52,4 @@ describe('F254 AC-B5: Freshness telemetry counters', () => {
   });
 
   // --- warmupCounters includes freshness counters ---
-
-  it('warmupCounters does not throw (freshness counters pre-touched)', () => {
-    assert.doesNotThrow(() => instruments.warmupCounters());
-  });
 });

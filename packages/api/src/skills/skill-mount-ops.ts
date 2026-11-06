@@ -8,53 +8,25 @@
 
 import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { join } from 'node:path';
 
-import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import type { MountRules } from '@cat-cafe/shared';
 import {
-  buildSkillMountTargets,
+  buildProjectSkillMountDirs,
+  buildProjectSkillMountTargets,
   createSkillSymlink,
   ensureSharedSkillRefsMount,
   SHARED_SKILL_REFS_ALIAS,
+  symlinkTargetFor,
 } from '../utils/skill-mount.js';
 import { classifyMountPath, type MountConflict } from './skill-sync-engine.js';
 
 // ────────── Types ──────────
 
-export interface MountTarget {
-  id: string;
-  dirs: string[];
-}
-
 export interface SkillMountResult {
   mounted: Array<{ skillName: string; mountPointId: string; path: string }>;
   unmounted: Array<{ skillName: string; mountPointId: string; path: string }>;
   conflicts: MountConflict[];
-}
-
-// ────────── Internals ──────────
-
-function symlinkTargetFor(linkPath: string, sourcePath: string): string {
-  return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);
-}
-
-export function activeMountTargets(projectRoot: string, rules: MountRules): MountTarget[] {
-  const standard = STANDARD_MOUNT_POINT_IDS.filter((id) => rules.mountPoints[id].enabled).map((id) => ({
-    id,
-    dirs: [join(projectRoot, rules.mountPoints[id].path)],
-  }));
-  const custom = buildSkillMountTargets(projectRoot, homedir(), rules)
-    .filter((t) => t.kind === 'custom')
-    .map((t) => ({ id: t.id, dirs: t.candidates }));
-  return [...standard, ...custom];
-}
-
-function allMountDirs(projectRoot: string, rules: MountRules): string[] {
-  const standardDirs = STANDARD_MOUNT_POINT_IDS.map((id) => join(projectRoot, rules.mountPoints[id].path));
-  const customDirs = buildSkillMountTargets(projectRoot, homedir(), rules)
-    .filter((t) => t.kind === 'custom')
-    .flatMap((t) => t.candidates);
-  return [...new Set([...standardDirs, ...customDirs])];
 }
 
 // ────────── Public API ──────────
@@ -72,7 +44,7 @@ export async function mountSkillSymlinks(
   sharedSkillsSource = skillsSource,
 ): Promise<SkillMountResult> {
   const result: SkillMountResult = { mounted: [], unmounted: [], conflicts: [] };
-  const targets = activeMountTargets(projectRoot, mountRules);
+  const targets = buildProjectSkillMountTargets(projectRoot, homedir(), mountRules);
   const allowed = mountPaths ? new Set(mountPaths) : null;
 
   for (const target of targets) {
@@ -139,7 +111,9 @@ export async function unmountSkillSymlinks(
   mountRules: MountRules,
 ): Promise<SkillMountResult> {
   const result: SkillMountResult = { mounted: [], unmounted: [], conflicts: [] };
-  for (const dir of allMountDirs(projectRoot, mountRules)) {
+  for (const dir of buildProjectSkillMountDirs(projectRoot, homedir(), mountRules, {
+    includeDisabledStandardMountPoints: true,
+  })) {
     // Guard: skip symlinked mount dirs to avoid following into external targets
     try {
       const dirStat = await lstat(dir);

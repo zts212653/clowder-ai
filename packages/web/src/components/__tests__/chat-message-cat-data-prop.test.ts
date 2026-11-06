@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F32-b Phase 4 R24 P2-1: Regression test — ChatMessage must receive getCatById
  * as a prop, NOT call useCatData() internally.
@@ -8,6 +9,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -34,6 +36,10 @@ vi.mock('@/hooks/useTts', () => ({
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: () => React.createElement('span', null, 'avatar'),
 }));
+// The nameplate owns a separate roster subscription; this unit guards ChatMessage's injected lookup.
+vi.mock('@/components/CatNameplate', () => ({
+  CatNameplate: ({ name }: { name: string }) => React.createElement('span', null, name),
+}));
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: ({ content }: { content: string }) => React.createElement('span', null, content),
 }));
@@ -42,7 +48,7 @@ vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
 vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 
-describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
+describe.each(['classic', 'v2'] as const)('ChatMessage getCatById prop injection (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -52,6 +58,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -61,6 +68,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   afterAll(() => {

@@ -35,16 +35,21 @@ describe('Home opens the common publication owner', () => {
     expect(document.activeElement).toBe(replacement);
   });
 
-  it('leaves focus with another owner after the original Home opener was replaced', async () => {
+  it.each([
+    'connected',
+    'replaced',
+  ] as const)('leaves focus with another owner when the original opener is %s', async (opener) => {
     const readerControl = document.createElement('button');
     document.body.append(readerControl);
     try {
       await scene.render();
       await scene.open();
-      data.loading = true;
-      await scene.render();
-      data.loading = false;
-      await scene.render();
+      if (opener === 'replaced') {
+        data.loading = true;
+        await scene.render();
+        data.loading = false;
+        await scene.render();
+      }
       readerControl.focus();
       await escapePreview();
       expect(document.querySelector('[role="dialog"]')).toBeNull();
