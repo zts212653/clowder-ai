@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { CatConfig } from '@cat-cafe/shared';
+import { type CatConfig, defaultAcpPoolMaxProcesses } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   type RuntimeProviderProfile,
@@ -240,6 +240,7 @@ async function ensureAcpPool(
   preparedSpawn: NonNullable<AcpClientConfig['preparedSpawn']>,
 ): Promise<{ pool: AcpProcessPool; lease: AcpServicePoolLease }> {
   const { profileId, acpConfig, poolRegistry } = input;
+  const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? defaultAcpPoolMaxProcesses(input.config.clientId);
   const spawnSignature = createAcpPoolSpawnSignature({
     command: preparedSpawn.command,
     args: [...preparedSpawn.args],
@@ -251,7 +252,7 @@ async function ensureAcpPool(
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
-    maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+    maxLiveProcesses,
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
@@ -272,7 +273,7 @@ async function ensureAcpPool(
 
   const pool = new AcpProcessPool(
     {
-      maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+      maxLiveProcesses,
       idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
       healthCheckIntervalMs: 30_000,
     },
