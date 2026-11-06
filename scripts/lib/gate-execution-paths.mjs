@@ -88,6 +88,7 @@ export const GATE_EXECUTION_PATHS = Object.freeze([
   'scripts/plan-browser-verification.mjs',
   'scripts/lib/browser-verification-plan.mjs',
   'scripts/lib/browser-verification-catalog.mjs',
+  'scripts/lib/browser-verification-alpha.mjs',
   'scripts/lib/browser-impact-policy.mjs',
   'scripts/lib/browser-policy-registration.mjs',
   'scripts/lib/browser-impact-policy.json',

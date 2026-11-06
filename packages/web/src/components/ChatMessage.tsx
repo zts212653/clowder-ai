@@ -7,6 +7,7 @@ import {
   type LifecycleActiveRun,
 } from '@cat-cafe/shared';
 import { type CSSProperties, memo, type ReactNode } from 'react';
+import { WorkCardMessageContext } from '@/components/artifacts/work-card-message-context';
 import { formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -1221,23 +1222,31 @@ function ChatMessageContent({
         />
       )}
       {message.extra?.rich?.blocks && message.extra.rich.blocks.length > 0 && (
-        <RichBlocks
-          runtimeInteractionCard={
-            message.extra.runtimeInteractionCard?.requestKind === 'conversation_decision'
-              ? { ...message.extra.runtimeInteractionCard, requestKind: 'conversation_decision' }
-              : undefined
-          }
-          blocks={message.extra.rich.blocks}
-          publication={publication}
-          catId={message.catId}
-          messageId={message.id}
-          sourceThreadId={renderThreadId}
-          sourceMessageIds={message.projectionSourceMessageIds ?? [message.id]}
-          messageSource={message.source}
-          htmlWidgetDisclosureKeys={richHtmlDisclosureKeys}
-          sendContext={sendContext}
-          confirmations={confirmations}
-        />
+        // F335 交付三：作品卡底行写这条消息的时间；守望猫写的回话（持久的 turnExecution 标记）底行写「守望猫 · 名字」。
+        <WorkCardMessageContext.Provider
+          value={{
+            at: message.timestamp,
+            ...(message.extra?.turnExecution?.executionKind === 'watcher' ? { byline: 'watcher' as const } : {}),
+          }}
+        >
+          <RichBlocks
+            runtimeInteractionCard={
+              message.extra.runtimeInteractionCard?.requestKind === 'conversation_decision'
+                ? { ...message.extra.runtimeInteractionCard, requestKind: 'conversation_decision' }
+                : undefined
+            }
+            blocks={message.extra.rich.blocks}
+            publication={publication}
+            catId={message.catId}
+            messageId={message.id}
+            sourceThreadId={renderThreadId}
+            sourceMessageIds={message.projectionSourceMessageIds ?? [message.id]}
+            messageSource={message.source}
+            htmlWidgetDisclosureKeys={richHtmlDisclosureKeys}
+            sendContext={sendContext}
+            confirmations={confirmations}
+          />
+        </WorkCardMessageContext.Provider>
       )}
       {message.extra?.evolutionUseSourceV1 ? (
         <EvolutionUseSourceDock source={message.extra.evolutionUseSourceV1} />

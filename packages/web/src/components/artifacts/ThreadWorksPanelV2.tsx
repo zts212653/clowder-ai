@@ -7,6 +7,7 @@ import { messageFindReturnHref, requestMessageFindReturn } from '@/components/me
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
+import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { artifactCardMetadata } from '@/components/workspace-home/artifact-card-metadata';
 import { workspaceV3Copy } from '@/components/workspace-home/workspace-v3.shell-copy';
@@ -60,8 +61,9 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
   const [notice, setNotice] = useState<string | undefined>();
   const previewOrigin = useRef<HTMLButtonElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
-  const thread = useThreadArtifacts(threadId === 'default' ? undefined : threadId, 'works');
-  const global = useGlobalArtifacts(scope === 'global', { view: 'works' });
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
+  const thread = useThreadArtifacts(threadId, 'works', surfaceVisible && scope === 'thread');
+  const global = useGlobalArtifacts(scope === 'global', { view: 'works' }, undefined, { paused: !surfaceVisible });
   const active = scope === 'global' ? global : thread;
   const globalWorks = useMemo(
     () => projectThreadWorks(global.artifacts, global.workLineage === 'resolved'),
@@ -80,6 +82,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     scope === 'global' && catFilter !== null ? works.filter((item) => (item.catId ?? '—') === catFilter) : works;
   useEffect(() => {
     if (
+      surfaceVisible &&
       (scope !== 'global' || complete) &&
       !active.loading &&
       !active.error &&
@@ -88,7 +91,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     ) {
       setFilter('all');
     }
-  }, [scope, complete, active.loading, active.error, filter, byAuthor]);
+  }, [surfaceVisible, scope, complete, active.loading, active.error, filter, byAuthor]);
   const visible = byAuthor.filter(
     (item) => matches(item, filter) && item.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -103,7 +106,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
     scroll,
     required,
   );
-  useWorksViewportReturn(scroll, initialView?.viewport, !active.loading && !active.error);
+  useWorksViewportReturn(scroll, initialView?.viewport, surfaceVisible && !active.loading && !active.error);
   useEffect(() => {
     setNotice(undefined);
   }, [threadId, scope]);
@@ -258,7 +261,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
       <div ref={scroll} className="v2-works-scroll">
         {floating.error && <p role="alert">{floating.error}</p>}
         {!active.loading && !active.error && complete && !visible.length && <p className="text-xs">{t.empty}</p>}
-        {!active.loading && (!active.error || works.length > 0) && (
+        {(works.length > 0 || (!active.loading && !active.error)) && (
           <>
             <div className="v2-works-grid">
               {visible.slice(0, progressive.limit).map((artifact) => (

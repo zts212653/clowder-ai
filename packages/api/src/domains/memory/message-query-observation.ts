@@ -10,6 +10,10 @@ export function observeQueryQualification() {
     abortAfterMs?: number;
     cleanupAfterAbortMs?: number;
     outcome?: 'completed' | 'failed' | 'aborted';
+    resultStatus?: 'success' | 'error';
+    exitCode?: number | null;
+    exitSignal?: string;
+    processClosed?: boolean;
   }> = [];
   let nativeLaunches = 0;
   let costReports = 0;
@@ -35,6 +39,15 @@ export function observeQueryQualification() {
       batches.push(batch);
       return {
         trace(event: Record<string, unknown>) {
+          if (event.phase === 'native-terminal' && ['success', 'error'].includes(String(event.resultStatus)))
+            batch.resultStatus = event.resultStatus as 'success' | 'error';
+          if (event.phase === 'native-exit' || event.phase === 'native-closed') {
+            if (event.exitCode === null || Number.isSafeInteger(event.exitCode))
+              batch.exitCode = event.exitCode as number | null;
+            if (typeof event.exitSignal === 'string' && /^(none|SIG[A-Z0-9]{1,12})$/.test(event.exitSignal))
+              batch.exitSignal = event.exitSignal;
+            if (event.phase === 'native-closed') batch.processClosed = true;
+          }
           if (
             [
               'native-prepared',

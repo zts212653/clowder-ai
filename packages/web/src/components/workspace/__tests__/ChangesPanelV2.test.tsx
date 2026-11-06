@@ -166,6 +166,21 @@ describe('ChangesPanel v2', () => {
     expect(container.textContent).toContain('读取改动失败');
   });
 
+  it('shows the non-git empty state instead of no-changes in v2', async () => {
+    apiFetchMock.mockImplementation(async () => Response.json({ isGitRepository: false, changedFiles: [], diff: '' }));
+    await render();
+    expect(container.textContent).toContain('当前工作区不是 Git 仓库');
+    expect(container.textContent).not.toContain('没有未提交的改动');
+  });
+
+  it('shows the non-git empty state instead of no-changes in classic', async () => {
+    writeShellPresentation('classic');
+    apiFetchMock.mockImplementation(async () => Response.json({ isGitRepository: false, changedFiles: [], diff: '' }));
+    await render();
+    expect(container.textContent).toContain('Not a Git repository');
+    expect(container.textContent).not.toContain('No uncommitted changes');
+  });
+
   it('keeps the classic presentation untouched', async () => {
     writeShellPresentation('classic');
     await render();

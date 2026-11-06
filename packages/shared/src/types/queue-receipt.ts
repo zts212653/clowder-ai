@@ -315,13 +315,6 @@ export type QueueRecoveryAction =
   | {
       id: string;
       entryId: string;
-      kind: 'repeat_target';
-      targetCatId: string;
-      request: QueueRecoveryRequest;
-    }
-  | {
-      id: string;
-      entryId: string;
       kind: 'force_reset';
       request: QueueRecoveryRequest;
     }

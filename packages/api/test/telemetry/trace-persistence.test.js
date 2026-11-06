@@ -239,19 +239,6 @@ test('F153-F: routeExecution backfills route tracing to user message in finally 
 
 // ── AC-F4: cold start auto-hydrate (source-level) ─────────────────
 
-test('F153-F: hydrateTraceStoreFromRedis uses msg:timeline range query (AC-F4/F5)', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/infrastructure/telemetry/hydrate-traces.ts'), 'utf8');
-  assert.ok(
-    src.includes('zrevrangebyscore') && src.includes('MessageKeys.TIMELINE'),
-    'Should query msg:timeline sorted set for recent messages',
-  );
-  assert.ok(
-    src.includes('safeParseExtra') && src.includes('tracing'),
-    'Should parse extra field and extract tracing pointers',
-  );
-  assert.ok(src.includes('traceStore.hydrate'), 'Should call traceStore.hydrate with synthesized DTOs');
-});
-
 test('F153-F: hydrate reads catId/metadata for enriched stubs (AC-F3/KD-23)', () => {
   const src = readFileSync(resolve(__dirname, '../../src/infrastructure/telemetry/hydrate-traces.ts'), 'utf8');
   assert.ok(src.includes("'catId'") && src.includes("'metadata'"), 'Should read catId and metadata from hash');

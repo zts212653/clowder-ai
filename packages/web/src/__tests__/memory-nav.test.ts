@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F102 Phase J: MemoryNav logic tests
  *

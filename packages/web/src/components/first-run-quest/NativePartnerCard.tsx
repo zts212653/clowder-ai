@@ -23,6 +23,7 @@ export function NativePartnerCard({
   onValidityChange: (valid: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [opened, setOpened] = useState(false);
   const { runtime, form } = partner;
   const available = runtime.installed && (runtime.clientId !== 'acp' || Boolean(runtime.acp));
   const selectable = nativeRuntimeSelectable(runtime, form);
@@ -82,7 +83,10 @@ export function NativePartnerCard({
           <button
             type="button"
             disabled={created || disabled}
-            onClick={() => setExpanded(!expanded)}
+            onClick={() => {
+              setOpened(true);
+              setExpanded(!expanded);
+            }}
             aria-expanded={expanded}
             className="min-h-10 shrink-0 text-sm text-cafe-accent"
           >
@@ -150,8 +154,9 @@ export function NativePartnerCard({
       {available && runtime.clientId === 'opencode' && (
         <p className="mt-2 text-sm text-cafe-secondary">未选择项目时使用默认工作区；你也可以为对话选择项目目录。</p>
       )}
-      {expanded && (
+      {opened && (
         <fieldset
+          hidden={!expanded}
           disabled={disabled || created}
           className="mt-4 space-y-4 border-t border-[var(--console-border-soft)] pt-4"
         >

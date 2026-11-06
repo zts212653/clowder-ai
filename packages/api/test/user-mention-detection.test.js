@@ -64,10 +64,6 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention('@co-creator请看'), true);
   });
 
-  it('R2-P2: accepts @co-creator followed by CJK text (no space)', () => {
-    assert.equal(detectUserMention('@co-creator请看'), true);
-  });
-
   it('R2-P2: still rejects @co-creatorfoo (ASCII continuation)', () => {
     assert.equal(detectUserMention('@co-creatorfoo'), false);
   });

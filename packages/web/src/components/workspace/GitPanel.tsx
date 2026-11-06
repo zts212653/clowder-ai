@@ -157,7 +157,13 @@ function GitPanelClassic() {
           </div>
         )}
 
-        {status && totalChanges === 0 && (
+        {status && status.isGitRepository === false && (
+          <div className="px-3 py-2 text-xs text-cafe-interactive/60 border-b border-cafe-subtle/40">
+            Not a Git repository
+          </div>
+        )}
+
+        {status && status.isGitRepository !== false && totalChanges === 0 && (
           <div className="px-3 py-2 text-xs text-conn-green-text border-b border-cafe-subtle/40">
             Working tree clean
           </div>

@@ -290,6 +290,8 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
             return model
 
         def generate_audio(*, output_path: str, audio_format: str, **_kwargs) -> None:
+            if _kwargs.get("voice") is not None:
+                raise ValueError("Base models have no preset voices")
             Path(output_path, f"audio_000.{audio_format}").write_bytes(wav_bytes([0.0] * 8))
 
         modules = {

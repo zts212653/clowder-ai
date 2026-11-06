@@ -1,4 +1,8 @@
-import { DEFAULT_SUGGESTION_EXPIRY_MINUTES, type SuggestionOpenTarget } from '@cat-cafe/shared';
+import {
+  DEFAULT_SUGGESTION_EXPIRY_MINUTES,
+  type SuggestionDeskWork,
+  type SuggestionOpenTarget,
+} from '@cat-cafe/shared';
 import type { SuggestionRecord } from './SuggestionStore.js';
 import type { SuggestionActionHandler } from './suggestion-actions.js';
 import { PLAIN_RECEIPT_KIND, PLAIN_RECEIPT_LABEL } from './suggestion-projection.js';
@@ -77,5 +81,43 @@ export function receiptRecord(input: {
     createdAt: now,
     updatedAt: now,
     expiresAt: now,
+  };
+}
+
+export const BROUGHT_WORK_KIND = 'brought-work';
+export const BROUGHT_WORK_LABEL = '带来的作品';
+/** A brought work waits for the person to come back; it is not a pill that goes stale in a day. */
+const BROUGHT_WORK_EXPIRY_MS = 7 * 24 * 60 * 60_000;
+
+/** F335 交付三：a work a cat made first, brought to the desk; anchored on the message that carries its card. */
+export function broughtWorkRecord(input: {
+  id: string;
+  now: number;
+  actor: RecordActor;
+  messageId: string;
+  sentence: string;
+  work: SuggestionDeskWork;
+}): SuggestionRecord {
+  const { now, actor } = input;
+  return {
+    id: input.id,
+    userId: actor.userId,
+    threadId: actor.threadId,
+    messageId: input.messageId,
+    catId: actor.catId,
+    byline: actor.byline ?? 'cat',
+    kind: BROUGHT_WORK_KIND,
+    kindLabel: BROUGHT_WORK_LABEL,
+    label: input.sentence,
+    params: {},
+    state: 'open',
+    undo: null,
+    receiptOnly: false,
+    desk: { sentence: input.sentence, work: input.work, status: 'pending' },
+    events: [{ type: 'offered', at: now }],
+    revision: 0,
+    createdAt: now,
+    updatedAt: now,
+    expiresAt: now + BROUGHT_WORK_EXPIRY_MS,
   };
 }

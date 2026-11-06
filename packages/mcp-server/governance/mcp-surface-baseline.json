@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -983,10 +983,10 @@
         "create"
       ],
       "activeState": "canonical",
-      "description": "Ask the canonical Task owner to admit or resume explicitly entrusted work. Use when: a current user Message explicitly entrusts work, an offer was accepted, or a registered source grants admission. Not for: casual mentions, a new Task for a follow-up to known work, or replacing its owner. For a known Task, read_entrusted_work and update_entrusted_work continue that Task. GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=[\"message:<messageId>\"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. Authorized-source admission fails closed unless its producer grant is registered and current.",
-      "descriptionDigest": "sha256:c764c7b42ccd5b539cb8ea2060189712f3ad25f91499f0f6f80351a59d51f312",
-      "descriptionCharacters": 936,
-      "descriptionTokensCl100kBase": 184,
+      "description": "Ask the canonical Task owner to admit or resume explicitly entrusted work. Use when: a current user Message explicitly entrusts work, an offer was accepted, or a registered source grants admission. Not for: casual mentions, a new Task for a follow-up to known work, or replacing its owner. For a known Task, read_entrusted_work and update_entrusted_work continue that Task. GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=[\"message:<messageId>\"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. Authorized-source admission fails closed unless its producer grant is registered and current. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.",
+      "descriptionDigest": "sha256:06f16c26b8c2f8f74198534432ff489ccb8fc85f14a9f026dc5c58632b432e82",
+      "descriptionCharacters": 1142,
+      "descriptionTokensCl100kBase": 238,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1163,6 +1163,7 @@
             "description": "Explicit, accepted-offer, or registered-source admission basis with stable source and idempotency coordinates"
           },
           "artifactRefs": {
+            "description": "Initial Artifact refs; max 64 entries, each 1–1000 UTF-16 code units after trimming. Omit if none are known; never discard existing refs just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -1227,13 +1228,13 @@
             "type": "object"
           },
           "title": {
-            "description": "Title for the canonical entrusted-work Task",
+            "description": "Title for the canonical entrusted-work Task; 1–200 UTF-16 code units after trimming",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Why this work was entrusted and why the Task owns it",
+            "description": "Why this work was entrusted and why the Task owns it; max 1000 UTF-16 code units (JavaScript string.length)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -1244,7 +1245,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:2419dcdb3810693a2f466e7093a1586ccaee7c868b691584610cbde065f57f8f",
+      "inputSchemaDigest": "sha256:ca4b55fb5bb1df8bea179e33e853153c0dd1f872b430eacabc883b46962c9e22",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -1259,7 +1260,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1595,7 +1596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2344,7 +2345,77 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
+    },
+    {
+      "name": "cat_cafe_bring_to_desk",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Have the desktop cat bring a work you already made to the person (「桌面猫带来」): who brought it, one sentence, the work, 忽略 / 打开. Use when: you finished something for them nobody asked for yet, saved it with cat_cafe_work and attached its card to your reply with publish-reference. Not for: anything unsaved, decisions or approvals, progress reports, or things that need them right now. Output: ready (the reply with the card is saved) or waiting_for_card (it reaches the desk once this reply is saved). At the desk it shows at once; while they are away it waits and comes in one list when they return; unanswered, it stays in this conversation. It never enters Needs Me. GOTCHA: one row per message, so do not also offer a suggestion on that reply. Read cat_cafe_suggestion_facts kind=brought-work for how they treated earlier ones.",
+      "descriptionDigest": "sha256:45a80235d6f8b1da5e985cd21c8b64e811b1f04d4ed31fe012f1269ab3aef547",
+      "descriptionCharacters": 828,
+      "descriptionTokensCl100kBase": 200,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "messageId": {
+            "description": "The message carrying the work card, in this conversation. Omit for your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sentence": {
+            "description": "The one line on the desk bubble, said to the person: 「鲸鲸那三格，照他的头像画就行。」",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "work": {
+            "additionalProperties": false,
+            "description": "The fixed work version whose card you attached with cat_cafe_work publish-reference.",
+            "properties": {
+              "contentRef": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "ownerRevision": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "contentRef",
+              "ownerRevision"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "sentence",
+          "work"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:be525cf8f316950aba693c737d37de8bea23d790404cc82d4fb9d1b521dfbc97",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleBringToDesk",
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_capabilities_snapshot",
@@ -3025,7 +3096,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3243,7 +3314,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_correct_person_claim",
@@ -3371,7 +3442,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3501,7 +3572,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3510,11 +3581,11 @@
       "actions": [
         "create"
       ],
-      "activeState": "migration-candidate",
-      "description": "Create a new 🧶 毛线球 (yarn ball) task in the current thread. Use when: user says \"建个毛线球\", \"记一下任务\", \"track this\", or you identify persistent work items across sessions — e.g. \"fix login timeout\", \"update API docs\", \"review F160 spec\". NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:\"checklist\"). Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. TIP: Include a \"why\" to give context to whoever picks up the task. F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, provide dispatchGate with status \"dispatched\" (you already cross_posted to the owning thread) or \"not_dispatched\" (with reason). If you omit dispatchGate and external F-IDs are detected, the task is created but a warning is returned reminding you to dispatch.",
-      "descriptionDigest": "sha256:c224ac98c314369ea0d708aacbd4a9ebba742a006a187203294dc0a78b63270b",
-      "descriptionCharacters": 1077,
-      "descriptionTokensCl100kBase": 275,
+      "activeState": "canonical",
+      "description": "Create a new 🧶 毛线球 (yarn ball) task in the current thread. Use when: user says \"建个毛线球\", \"记一下任务\", \"track this\", or you identify persistent work items across sessions — e.g. \"fix login timeout\", \"update API docs\", \"review F160 spec\". NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:\"checklist\"). Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. TIP: Include a \"why\" to give context to whoever picks up the task. LIMITS: title 1–200 and why max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes). F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, provide dispatchGate with status \"dispatched\" (you already cross_posted to the owning thread) or \"not_dispatched\" (with reason). If you omit dispatchGate and external F-IDs are detected, the task is created but a warning is returned reminding you to dispatch.",
+      "descriptionDigest": "sha256:77155c3773dcca2e5178f4ef33c52768f9602d317584b1a1721a4becb5bca997",
+      "descriptionCharacters": 1181,
+      "descriptionTokensCl100kBase": 304,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3565,13 +3636,13 @@
             "type": "string"
           },
           "title": {
-            "description": "Task title — what needs to be done",
+            "description": "Task title — what needs to be done; 1–200 UTF-16 code units",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Why this task matters (context for whoever picks it up)",
+            "description": "Why this task matters; max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -3581,7 +3652,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:001098b30cdc0b6ce5a177afcd99d6f25d55713fcaacde8fe413a32b249f39ff",
+      "inputSchemaDigest": "sha256:ea1566bcfd832a024b8ece85d405ccd3299e71c83ab6b3ddf02aa1a80dc9ed9d",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -3595,7 +3666,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3931,7 +4002,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4111,7 +4182,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4238,10 +4309,10 @@
         "resume"
       ],
       "activeState": "canonical",
-      "description": "Durably accept or continue development through the original Task owner. Use when: an accepted Feature kickoff becomes authorized work, or the human says “继续 Phase C / continue this phase” in its original thread, including work without a deadline. Not for: casual Feature mentions, unaccepted ideas, media/research without Feature scope (use admit_entrusted_work), or moving another thread’s Task. Output: a typed admitted/resumed/adopted/bound receipt after an atomic Task mutation. GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results.",
-      "descriptionDigest": "sha256:f2ad47c8474461ea97e3b5eaa0a341337cf3c985eb198f1d8dcea177ae9301b1",
-      "descriptionCharacters": 707,
-      "descriptionTokensCl100kBase": 143,
+      "description": "Durably accept or continue development through the original Task owner. Use when: an accepted Feature kickoff becomes authorized work, or the human says “继续 Phase C / continue this phase” in its original thread, including work without a deadline. Not for: casual Feature mentions, unaccepted ideas, media/research without Feature scope (use admit_entrusted_work), or moving another thread’s Task. Output: a typed admitted/resumed/adopted/bound receipt after an atomic Task mutation. GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 without trimming. Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.",
+      "descriptionDigest": "sha256:c3bc2cf5a2ab0936da0d699c105bce65e27f38a94891c10910acd97ddfc39ae4",
+      "descriptionCharacters": 961,
+      "descriptionTokensCl100kBase": 206,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4427,7 +4498,7 @@
             "description": "Exact current human source and action idempotency key. New messages authorize actions, not new work identities."
           },
           "artifactRefs": {
-            "description": "Existing Artifact-owner refs at admission/adoption; later publications use update_entrusted_work.",
+            "description": "Existing Artifact-owner refs at admission/adoption; max 64 entries, each 1–1000 UTF-16 code units (JavaScript string.length). Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -4562,13 +4633,13 @@
             "type": "object"
           },
           "title": {
-            "description": "Human-readable title for newly admitted work; existing identity/title remain unchanged.",
+            "description": "Human-readable title for newly admitted work; 1–200 UTF-16 code units after trimming. Existing identity/title remain unchanged.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Reason for accepting this scoped development outcome.",
+            "description": "Reason for accepting this scoped development outcome; max 1000 UTF-16 code units (JavaScript string.length).",
             "maxLength": 1000,
             "type": "string"
           }
@@ -4581,7 +4652,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:864d1ba5840c5b5dce77982dc46879b922dc4dc57ba7ec87a1fb4cb694bd9b0a",
+      "inputSchemaDigest": "sha256:573635bff9b385deef776a6bdcac7d8227c7607ace4a6290fcb9e91381530966",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -4595,7 +4666,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/development-work-tools.js#handleDevelopmentWork",
-      "protectedImplementationDigest": "sha256:e19200aac99d2a59d0272b422d9b6a075a288d642466b82070504fed1425123d"
+      "protectedImplementationDigest": "sha256:51e4f7910be1ab412994af29955c68da881a2e8e10164fb72aabfc5e6e53155c"
     },
     {
       "name": "cat_cafe_dismiss_request_review_consumption",
@@ -4782,7 +4853,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4851,7 +4922,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4948,7 +5019,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5138,7 +5209,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5278,7 +5349,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5328,7 +5399,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5378,7 +5449,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5438,7 +5509,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5474,7 +5545,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5525,7 +5596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5664,7 +5735,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5730,7 +5801,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5779,7 +5850,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5826,7 +5897,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5877,7 +5948,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6003,7 +6074,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6060,7 +6131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6166,7 +6237,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6200,7 +6271,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6249,7 +6320,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6363,7 +6434,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6511,7 +6582,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_home_action",
@@ -7593,7 +7664,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_list_memory_matters",
@@ -7994,7 +8065,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -8066,7 +8137,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8674,7 +8745,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -8791,7 +8862,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -8868,7 +8939,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/suggestion-tools.js#handleOfferSuggestion",
-      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_open_evolution_round",
@@ -9164,7 +9235,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/suggestion-tools.js#handlePostActionReceipt",
-      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_post_message",
@@ -10772,7 +10843,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11594,7 +11665,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -11770,7 +11841,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12680,7 +12751,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -12760,7 +12831,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -12837,7 +12908,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -13025,7 +13096,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -13151,7 +13222,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -14925,7 +14996,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15332,7 +15403,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -15856,7 +15927,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -15930,7 +16001,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16388,7 +16459,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16500,7 +16571,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17106,7 +17177,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/development-work-tools.js#handleResolveDevelopmentWork",
-      "protectedImplementationDigest": "sha256:e19200aac99d2a59d0272b422d9b6a075a288d642466b82070504fed1425123d"
+      "protectedImplementationDigest": "sha256:51e4f7910be1ab412994af29955c68da881a2e8e10164fb72aabfc5e6e53155c"
     },
     {
       "name": "cat_cafe_respond_artifact_review",
@@ -17500,7 +17571,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -17510,10 +17581,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox.",
-      "descriptionDigest": "sha256:d793031aadd6292fd5795bafff891134aabd286ba7428f7cf45e8e52eb1aad80",
-      "descriptionCharacters": 559,
-      "descriptionTokensCl100kBase": 113,
+      "description": "Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.",
+      "descriptionDigest": "sha256:62206c67a214a042ae218de9092067285b1405584c8786c1dc49ca0cfca2b930",
+      "descriptionCharacters": 765,
+      "descriptionTokensCl100kBase": 167,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -17524,6 +17595,7 @@
             "type": "string"
           },
           "artifactRefs": {
+            "description": "Initial Artifact refs for this admission retry; max 64 entries, each 1–1000 UTF-16 code units after trimming. Preserve existing refs; never discard them just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -17609,11 +17681,13 @@
             "type": "object"
           },
           "title": {
+            "description": "Task title; 1–200 UTF-16 code units after trimming",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
+            "description": "Why this work was entrusted; max 1000 UTF-16 code units (JavaScript string.length)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -17628,7 +17702,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:86f38c47ead08386ae0d76f3a65e0cad96fbc19bc002e6f38fe268fc5884b672",
+      "inputSchemaDigest": "sha256:1dfbc1aa02519ef6d34f15582cb0d81ca025187fd2f56e401dfb33e28ce305e1",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -17643,7 +17717,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -18020,7 +18094,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18265,7 +18339,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18967,7 +19041,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -19045,7 +19119,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20154,7 +20228,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/suggestion-tools.js#handleSuggestionFacts",
-      "protectedImplementationDigest": "sha256:2656742a7ea15b478a6f41369b5584c09133629416c26fb11e8cb5fa503f85ba"
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_take_over_content_modification",
@@ -20783,7 +20857,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20793,16 +20867,16 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Update the current open entrusted-work Task using its exact revision. Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.",
-      "descriptionDigest": "sha256:212c22825a82e7cc3b3792b0663f66c52465ca5b6f5cd285e73a473be9779b30",
-      "descriptionCharacters": 685,
-      "descriptionTokensCl100kBase": 129,
+      "description": "Update the current open entrusted-work Task using its exact revision. Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. Artifact refs replace the complete canonical set (max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming): read_entrusted_work first and preserve existing refs when adding; never drop refs just to fit. Values are deduplicated/sorted; omitting artifactRefs preserves refs, [] clears them. progress.summary, nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming (JavaScript string.length); progress.sourceRef allows 1–1000 after trimming. Supplied progress replaces the whole object. Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress or one time fact. No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.",
+      "descriptionDigest": "sha256:239e9dfcc92479bcc5cfe504735b871908bec501349cf6afed236083b38400a4",
+      "descriptionCharacters": 1273,
+      "descriptionTokensCl100kBase": 254,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
           "artifactRefs": {
-            "description": "Optional complete replacement of canonical Artifact refs; values are deduplicated and sorted",
+            "description": "Complete replacement of canonical Artifact refs, not an append; max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming. Read read_entrusted_work first and retain all existing refs when adding. Omit to preserve the set; [] clears it. Values are deduplicated/sorted. Never drop existing refs just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -20822,19 +20896,25 @@
                 "additionalProperties": false,
                 "properties": {
                   "blockerReason": {
+                    "description": "Current blocker; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
                   },
                   "nextStep": {
+                    "description": "Next step; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
                   },
                   "sourceRef": {
-                    "$ref": "#/properties/time/properties/businessDeadline/anyOf/0/properties/sourceRef"
+                    "description": "Source for this progress note; 1–1000 UTF-16 code units after trimming",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "summary": {
+                    "description": "Current progress summary; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
@@ -20850,7 +20930,7 @@
                 "type": "null"
               }
             ],
-            "description": "Replace the short current summary, nextStep and optional blockerReason with one sourceRef; null clears it. Original Task why stays unchanged. Resuming clears blockerReason."
+            "description": "Replace the whole progress object: summary, optional nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming, with one sourceRef (1–1000 after trimming). Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress. Original Task why stays unchanged."
           },
           "status": {
             "description": "Optional Task progress: todo, doing, or blocked; completion requires close_entrusted_work",
@@ -20947,7 +21027,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:45ca65ef6bd86f4e5831b528ff177b8fd98988c0eb81f9fcf1e3001560bd65b8",
+      "inputSchemaDigest": "sha256:866d1b7ddc6bf9a5dd0bda72037a310d23ab10bcfa939ab4a5ed0311d6366bfb",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -20962,7 +21042,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21309,7 +21389,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_update_task",
@@ -21319,10 +21399,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: Include a \"why\" note when marking as blocked — it helps others understand the situation. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
-      "descriptionDigest": "sha256:c02a93b70853368eb53c8cc5555ae690f9f5bcac5eba60cf264c5abc47c5b4ef",
-      "descriptionCharacters": 1064,
-      "descriptionTokensCl100kBase": 207,
+      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
+      "descriptionDigest": "sha256:8cb78b9742c8e6b48adff55dbdc7010fded4ce7b50cbe8c6f1decf2b383967ed",
+      "descriptionCharacters": 1115,
+      "descriptionTokensCl100kBase": 221,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -21377,7 +21457,7 @@
             "type": "string"
           },
           "why": {
-            "description": "Optional note explaining the status change",
+            "description": "Optional replacement for the existing why, not an append; max 1000 UTF-16 code units (JavaScript string.length). Omit or pass an empty string to keep the existing note.",
             "maxLength": 1000,
             "type": "string"
           }
@@ -21387,7 +21467,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:48d51f2fb0667dc6abb65f3ac44fc899a5b402956891973afc9a6d55a09851b9",
+      "inputSchemaDigest": "sha256:77989aea695d67e0a6e609da2d2faedfe0c1650bd4c37d60e82a938d0442bbeb",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -21402,7 +21482,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21552,7 +21632,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22185,6 +22265,53 @@
       "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
+      "name": "cat_cafe_watcher_nudge",
+      "serverFamily": "collab",
+      "resourceFamily": "thread-message",
+      "actions": [
+        "nudge"
+      ],
+      "activeState": "canonical",
+      "description": "守望猫向刚结束工作的猫递一句有出处的提醒。Use when: 发现一个具体遗漏、先例或有帮助的下一步，值得让工作猫带进下一轮。NOT for: 派任务、找任意成员、改动原请求、代人决策或在免打扰时说话。Output: 同一对话中的一条虚线提醒与普通投递回执；忙碌的猫下一轮收到，已停下的猫由普通 @ 唤醒。",
+      "descriptionDigest": "sha256:247b05130d90527c6757b9c865ba2aa93583671ef5ad0b08a1386186b35bba66",
+      "descriptionCharacters": 153,
+      "descriptionTokensCl100kBase": 173,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sentence": {
+            "description": "一句具体提醒，不含额外 @ 路由或任务分派。",
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "description": "本线原话的 Message ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sentence",
+          "sourceMessageId"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:fc79866cb9246a77cd63f65f41fda0c240074c9a4be304359637dae6053b78da",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/watcher-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/watcher-tools.js#handleWatcherNudge",
+      "protectedImplementationDigest": "sha256:e5d4a4600893511602e546246242c08753ea8c7dcc4a67c4b57fd43da2930f14"
+    },
+    {
       "name": "cat_cafe_withdraw_deferred_person_memory",
       "serverFamily": "collab",
       "resourceFamily": "memory-write",
@@ -22225,7 +22352,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -22269,7 +22396,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:babfb3ee08a0dc80058c7fde215d07dc9eb9c054cdf448dcd06a424f8aa7dac7"
     },
     {
       "name": "cat_cafe_work",

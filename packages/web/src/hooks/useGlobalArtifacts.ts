@@ -5,9 +5,10 @@
  */
 
 import type { GlobalArtifactDTO, GlobalArtifactsResponse } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '../utils/api-client';
+import { apiSessionIdentity } from '../utils/api-session-identity';
 import { usePagedGlobalWorks } from './usePagedGlobalWorks';
 import { useWorksSourceRefresh } from './useThreadArtifacts';
 
@@ -67,9 +68,17 @@ export function useGlobalArtifacts(
   enabled: boolean,
   query?: GlobalArtifactsQuery,
   ownerKey?: string | null,
+  { paused = false }: { paused?: boolean } = {},
 ): UseGlobalArtifactsResult {
   const worksView = query?.view === 'works';
-  const paged = usePagedGlobalWorks(enabled && worksView, ownerKey);
+  const active = enabled && !paused;
+  const identity = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const ownerScope = JSON.stringify([ownerKey, identity.ownerUserId, identity.generation]);
+  const paged = usePagedGlobalWorks(enabled && worksView, ownerScope, paused);
   const [resolvedScope, setResolvedScope] = useState<string | null>(null);
   const resolvedScopeRef = useRef<string | null>(null);
   const [artifacts, setArtifacts] = useState<GlobalArtifactDTO[]>([]);
@@ -78,16 +87,17 @@ export function useGlobalArtifacts(
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const enabledRef = useRef(enabled);
+  const reading = useRef(false);
   const hostThreadId = useChatStore((state) => state.currentThreadId);
 
   const requireComplete = query !== undefined;
   const requestPath = query
     ? `/api/artifacts?view=${encodeURIComponent(query.view)}${'limit' in query ? `&limit=${encodeURIComponent(String(query.limit))}` : ''}`
     : '/api/artifacts';
-  const scope = JSON.stringify([requestPath, ownerKey]);
+  const scope = JSON.stringify([requestPath, ownerScope]);
 
   const refetch = useCallback(async () => {
+    if (!reading.current) return;
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -123,23 +133,26 @@ export function useGlobalArtifacts(
   }, [requestPath, requireComplete, worksView, scope]);
 
   useEffect(() => {
-    enabledRef.current = enabled;
-    if (enabled && !worksView) {
+    reading.current = active && !worksView;
+    if (reading.current) {
       refetch();
-    } else {
+    } else if (!enabled || worksView) {
       setArtifacts([]);
       setWorkLineage('unavailable');
       setComplete(true);
       setLoading(false);
       setError(false);
     }
-    return () => abortRef.current?.abort();
-  }, [enabled, refetch, worksView]);
+    return () => {
+      reading.current = false;
+      abortRef.current?.abort();
+    };
+  }, [active, enabled, refetch, worksView]);
 
   // The paged Works view re-reads the whole owner catalogue, so host-thread changes are coalesced.
   useWorksSourceRefresh(
     hostThreadId,
-    enabled && query !== undefined,
+    active && query !== undefined,
     worksView ? paged.scheduleRefresh : refetch,
     false,
   );
@@ -150,7 +163,7 @@ export function useGlobalArtifacts(
         artifacts: enabled && resolvedScope === scope ? artifacts : [],
         workLineage: resolvedScope === scope ? workLineage : 'unavailable',
         complete: resolvedScope === scope && complete,
-        loading: enabled && (loading || !enabledRef.current),
+        loading: active && (loading || !reading.current),
         error,
         refetch,
       };

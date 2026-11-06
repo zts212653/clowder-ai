@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AgyProfileConfig,
@@ -29,6 +29,7 @@ import {
 import { readLocalAccountSelection } from './local-account-selection.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
+import { writeFileAtomic } from './write-file-atomic.js';
 
 const runtimeCatMutationTails = new Map<string, Promise<void>>();
 
@@ -285,20 +286,10 @@ function writeAndValidateCatalog(projectRoot: string, catalog: unknown): CatCafe
   const candidate = catalog as CatCafeConfig;
   assertUniqueMentionAliases(candidate);
   const catalogPath = resolveCatCatalogPath(projectRoot);
-  const tempPath = `${catalogPath}.tmp-${process.pid}-${Date.now()}`;
   mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(tempPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf-8');
-  try {
-    loadCatConfig(tempPath);
-    renameSync(tempPath, catalogPath);
-  } catch (err) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      // best-effort cleanup
-    }
-    throw err;
-  }
+  writeFileAtomic(catalogPath, `${JSON.stringify(candidate, null, 2)}\n`, {
+    verify: (tempPath) => loadCatConfig(tempPath),
+  });
   return validatePersistedCatalog(projectRoot);
 }
 

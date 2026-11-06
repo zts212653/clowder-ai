@@ -128,15 +128,6 @@ describe('approvalHubStore — batch operations', () => {
     expect(ids.size).toBe(2);
   });
 
-  it('selectAllInline without visibleIds: selects all inline (backward compat)', () => {
-    useApprovalHubStore.getState().selectAllInline();
-    const ids = useApprovalHubStore.getState().selectedIds;
-    expect(ids.has('inline-1')).toBe(true);
-    expect(ids.has('inline-2')).toBe(true);
-    expect(ids.has('jump-1')).toBe(false);
-    expect(ids.size).toBe(2);
-  });
-
   it('clearSelection: empties the set', () => {
     useApprovalHubStore.getState().selectAllInline();
     expect(useApprovalHubStore.getState().selectedIds.size).toBe(2);

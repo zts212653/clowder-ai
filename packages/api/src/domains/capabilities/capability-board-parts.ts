@@ -15,17 +15,8 @@ import type { CapabilityBoardItem, CapabilityEntry, CatFamily, McpToolInfo, Moun
 import { catRegistry } from '@cat-cafe/shared';
 import { resolvePencilCommand } from '../../config/capabilities/capability-orchestrator.js';
 import { sanitizeCapabilityForResponse } from '../../config/capabilities/capability-redaction.js';
+import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { buildSkillMountTargets } from '../../utils/skill-mount.js';
-
-/** Walk up from CWD to find pnpm-workspace.yaml — the monorepo root. */
-export function findMonorepoRoot(): string {
-  let dir = process.cwd();
-  while (dir !== dirname(dir)) {
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
-}
 
 /**
  * Resolve Clowder AI skills source from module location (stable), not selected project path.

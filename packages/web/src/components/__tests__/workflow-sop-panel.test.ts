@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // F073 P2: WorkflowSopPanel unit tests
 
 import type { WorkflowSop } from '@cat-cafe/shared';

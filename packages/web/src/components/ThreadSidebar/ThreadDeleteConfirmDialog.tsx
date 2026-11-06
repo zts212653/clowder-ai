@@ -7,20 +7,17 @@ import { threadDeletionCopy } from './thread-deletion.shell-copy';
 
 export function ThreadDeleteConfirmDialog({
   thread,
-  canRemember,
   onCancel,
   onConfirm,
 }: {
   thread: SidebarSnapshotRow;
-  canRemember: boolean;
   onCancel: () => void;
-  onConfirm: (remember: boolean) => void;
+  onConfirm: () => void;
 }) {
   const copy = useShellCopy(threadDeletionCopy);
   const isSystem = thread.isHubThread || !!thread.systemKind;
   const title = thread.title ?? copy.unnamed;
   const [typedName, setTypedName] = useState('');
-  const [remember, setRemember] = useState(false);
   const confirmed = !isSystem || typedName === title;
   const headingId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -87,19 +84,7 @@ export function ThreadDeleteConfirmDialog({
             </label>
           </>
         ) : (
-          <>
-            <p className="text-xs text-cafe-secondary mb-4">{copy.trashNote}</p>
-            <label className="mb-5 flex items-center gap-2 text-xs text-cafe-secondary">
-              <input
-                type="checkbox"
-                checked={remember}
-                disabled={!canRemember}
-                onChange={(event) => setRemember(event.target.checked)}
-                className="h-3.5 w-3.5 accent-[var(--conn-amber-text)]"
-              />
-              {copy.remember}
-            </label>
-          </>
+          <p className="text-xs text-cafe-secondary mb-4">{copy.trashNote}</p>
         )}
         <div className="flex gap-2 justify-end">
           <button
@@ -112,7 +97,7 @@ export function ThreadDeleteConfirmDialog({
           </button>
           <button
             type="button"
-            onClick={() => onConfirm(!isSystem && remember)}
+            onClick={onConfirm}
             disabled={!confirmed}
             className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors ${isSystem ? 'bg-conn-red-text hover:bg-conn-red-hover disabled:bg-conn-red-ring disabled:cursor-not-allowed' : 'bg-conn-amber-text hover:bg-conn-amber-hover'}`}
           >

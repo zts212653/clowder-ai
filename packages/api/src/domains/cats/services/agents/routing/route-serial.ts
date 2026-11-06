@@ -198,8 +198,13 @@ import {
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
@@ -832,17 +837,32 @@ export async function* routeSerial(
           ...(catSignal ? { signal: catSignal } : {}),
         });
       try {
+        if (
+          !pinnedService &&
+          terminalExecutionBindingFailure(servicePreparationError) &&
+          options.onExecutionBindingRejected
+        )
+          throw servicePreparationError;
         if (pinnedService) {
           const admitted = await invocationServices.admit(
             pinnedService,
             () => getService(deps.services, catId, deps.unavailableServices),
             capture,
             catSignal,
+            deps.refreshServices,
           );
           pinnedService = admitted.service;
           executionBinding = admitted.executionBinding;
         } else executionBinding = await capture();
       } catch (error) {
+        const terminalReason = terminalExecutionBindingFailure(error);
+        if (
+          catSignal?.aborted ||
+          (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+        ) {
+          index++;
+          continue;
+        }
         yield {
           type: 'error',
           catId,
@@ -3911,6 +3931,25 @@ export async function* routeSerial(
         await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
       }
 
+      if (ownInvocationId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvocationId,
+            ...((turnStoredMessageId ?? lifecycleResponseMessageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleResponseMessageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleResponseMessageId && doneMsg
+              ? {
+                  noResponseReason: collectedToolEvents.length ? ('tool_only' as const) : ('empty_turn' as const),
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) =>
+          log.warn({ err, invocationId: ownInvocationId }, 'Child response settlement retained for recovery'),
+        );
+      }
       if (doneMsg) {
         if (cancellationDiagnostics) {
           const stored = turnStoredMessageId ? await deps.messageStore.getById(turnStoredMessageId) : undefined;

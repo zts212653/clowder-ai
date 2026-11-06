@@ -76,6 +76,7 @@ import {
 } from '../../agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { cursorFor, parseCursor } from '../cursor.js';
 import type { LifecycleAppendRecoveryInput, LifecycleAppendRecoveryResult } from '../lifecycle-append-recovery.js';
+import { hasUnresolvedLifecycleAppend } from '../lifecycle-append-state.js';
 import type { LifecycleWakeCoverageInput, LifecycleWakeCoverageResult } from '../lifecycle-wake-coverage.js';
 import { messageFrom } from '../message-from.js';
 import {
@@ -162,6 +163,7 @@ import {
   resolveThreadMessageVisibility,
 } from '../visibility.js';
 import { HUMAN_SOURCE_HASH_LUA, humanSourceHash } from './redis-human-source-hash.js';
+import { APPEND_INDEX_LUA } from './redis-lifecycle-append-index.js';
 import { commitRedisLifecycleAppendRecovery } from './redis-lifecycle-append-recovery.js';
 import { commitRedisLifecycleWakeCoverage } from './redis-lifecycle-wake-coverage.js';
 import { appendMessage } from './redis-message-append.js';
@@ -724,6 +726,10 @@ local idempotencyKey = kp .. ARGV[12]
 local ttlSec = tonumber(ARGV[13])
 local sourceMode = ARGV[14]
 local failureFromRaw = ARGV[15]
+local claimId = ARGV[16]
+local failedTarget = ARGV[17]
+local wakeRaw = ARGV[18]
+local wakeFingerprint = ARGV[19]
 
 if redis.call('EXISTS', sourceHash) == 0 then return {-1, ''} end
 if redis.call('HGET', sourceHash, 'threadId') ~= threadId or
@@ -736,6 +742,25 @@ end
 local existingFailureId = redis.call('GET', idempotencyKey)
 if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId) == 1 then
   return {2, existingFailureId}
+end
+
+local wakeId = nil
+if claimId ~= '' then
+  local raw = redis.call('HGET', KEYS[2], expectedEntryId)
+  if not raw then return {-4, ''} end
+  local row = cjson.decode(raw)
+  if row.status ~= 'claimed' or row.claimId ~= claimId or
+     row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+  local found = false
+  for _, target in ipairs(row.claimedTargetIds or {}) do
+    if target == failedTarget then found = true end
+  end
+  if not found then return {-4, ''} end
+  if wakeRaw ~= '' then
+    wakeId = cjson.decode(wakeRaw).id
+    if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or
+       redis.call('HEXISTS', KEYS[4], wakeId) == 1 then return {-4, ''} end
+  end
 end
 
 if redis.call('HGET', sourceHash, 'recall') or redis.call('HGET', sourceHash, '_tombstone') then
@@ -841,6 +866,11 @@ redis.call('ZADD', threadKey, failedAt, failureId)
 redis.call('ZADD', visibilityKey, failureSeq, failureId)
 redis.call('HSET', metaKey, 'hwm', tostring(failureSeq), 'migrated', '1')
 redis.call('SET', idempotencyKey, failureId)
+if wakeId then
+  redis.call('HSET', KEYS[2], wakeId, wakeRaw)
+  redis.call('RPUSH', KEYS[3], wakeId)
+  redis.call('HSET', KEYS[4], wakeId, wakeFingerprint)
+end
 
 if ttlSec > 0 then
   redis.call('EXPIRE', failureHash, ttlSec)
@@ -859,13 +889,15 @@ end
 return {1, failureId}
 `;
 
-const CAS_LIFECYCLE_METADATA_LUA = `
+const CAS_LIFECYCLE_METADATA_LUA = `${APPEND_INDEX_LUA}
+checkAppendIndex(KEYS[2], KEYS[3])
 if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
 if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return -2 end
 local current = redis.call('HGET', KEYS[1], 'lifecycle')
 if current == false then current = '' end
 if current ~= ARGV[1] then return 0 end
 redis.call('HSET', KEYS[1], 'lifecycle', ARGV[2])
+syncAppendIndex(KEYS[2], KEYS[3], ARGV[4], ARGV[5], ARGV[3])
 return 1
 `;
 
@@ -874,16 +906,18 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) end
 return 0
 `;
 
-const CAS_LIFECYCLE_APPEND_ADMISSION_LUA = `
-for index = 1, #KEYS do
+const CAS_LIFECYCLE_APPEND_ADMISSION_LUA = `${APPEND_INDEX_LUA}
+local count = #KEYS - 2
+checkAppendIndex(KEYS[count+1], KEYS[count+2])
+for index = 1, count do
   if redis.call('EXISTS', KEYS[index]) == 0 then return -1 end
   if redis.call('HGET', KEYS[index], 'recall') or redis.call('HGET', KEYS[index], '_tombstone') then return -2 end
-  local current = redis.call('HGET', KEYS[index], 'lifecycle')
-  if current == false then current = '' end
-  if current ~= ARGV[(index - 1) * 2 + 1] then return 0 end
+  local current = redis.call('HGET', KEYS[index], 'lifecycle') or ''
+  if current ~= ARGV[(index - 1) * 4 + 1] then return 0 end
 end
-for index = 1, #KEYS do
-  redis.call('HSET', KEYS[index], 'lifecycle', ARGV[(index - 1) * 2 + 2])
+for index = 1, count do
+  redis.call('HSET', KEYS[index], 'lifecycle', ARGV[(index - 1) * 4 + 2])
+  syncAppendIndex(KEYS[count+1], KEYS[count+2], ARGV[count*4+1], ARGV[(index-1)*4+4], ARGV[(index-1)*4+3])
 end
 return 1
 `;
@@ -1870,7 +1904,7 @@ export class RedisMessageStore {
     if (reservedId !== undefined && msg.reservedId !== undefined && reservedId !== msg.reservedId)
       throw new Error('reserved message id conflict');
     const id = reservedId ?? msg.reservedId ?? generateSortableId(msg.timestamp);
-    const { idempotencyKey, reservedId: mediaReservedId, ...payload } = msg;
+    const { idempotencyKey, reservedId: mediaReservedId, watcherOutputFence, ...payload } = msg;
     void mediaReservedId;
     void idempotencyKey;
     const stored: StoredMessage = {
@@ -1973,12 +2007,17 @@ export class RedisMessageStore {
           ...(queue.admissionMode === 'private' ? [QueueLedgerKeys.privateAdmissions(threadId)] : []),
         ]
       : [];
+    const fenceKeys = watcherOutputFence
+      ? [ConciergeKeys.config(watcherOutputFence.userId), ThreadKeys.detail(watcherOutputFence.threadId)]
+      : [];
     const result = await this.redis.eval(
-      APPEND_WITH_VISIBILITY_LUA,
-      queue ? queueKeys.length + 1 : 1,
+      (watcherOutputFence ? WATCHER_OUTPUT_FENCE_LUA : '') + APPEND_WITH_VISIBILITY_LUA,
+      (queue ? queueKeys.length + 1 : 1) + fenceKeys.length,
       hashKey,
       ...queueKeys,
+      ...fenceKeys,
       ...argv,
+      ...(watcherOutputFence ? [JSON.stringify(watcherOutputFence)] : []),
     );
 
     if (queue) {
@@ -2388,7 +2427,7 @@ export class RedisMessageStore {
   /**
    * F233: List messages that carry cross-post metadata (extra.crossPost.sourceThreadId).
    * Uses SCAN + pipeline HGET to check the `extra` field efficiently, then hydrates
-   * only matching messages. For the FeatTrajectoryCollectorScheduler's CrossPostCollector.
+   * only matching messages. For the feat-trajectory CrossPostCollector.
    */
   async listCrossPostMessages(): Promise<StoredMessage[]> {
     const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
@@ -3527,6 +3566,8 @@ export class RedisMessageStore {
     // but no messages (e.g. after all messages were individually deleted).
     pipeline.del(MessageKeys.threadVisibility(threadId));
     pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
+    pipeline.del(MessageKeys.appendPending(threadId));
+    pipeline.srem(MessageKeys.APPEND_PENDING_THREADS, threadId);
     pipeline.del(MessageKeys.legacyQueueExposureIndex(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
@@ -3841,7 +3882,10 @@ export class RedisMessageStore {
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
     if (!source) return { kind: 'not_found' };
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets[0] : undefined,
+    );
     const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -3896,11 +3940,17 @@ export class RedisMessageStore {
       input.failedAt < source.timestamp ||
       input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
       uniqueTargets.size !== input.requestedTargets.length ||
+      (input.claim && input.requestedTargets.length !== 1) ||
       (!isQueuedInput && input.requestedTargets.length === 0) ||
       (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
     ) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
+    if (
+      input.claim &&
+      (!(input.claim.ledger instanceof RedisQueueLedgerStore) || !input.claim.ledger.usesRedisClient(this.redis))
+    )
+      throw new Error('pre-admission failure requires the matching Redis Queue ledger');
     const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
     const assigned = assignLifecycleDispatchTargetsMetadata(source.lifecycle, inputIdentity, input.requestedTargets);
     if (assigned.kind === 'conflict') {
@@ -3947,10 +3997,20 @@ export class RedisMessageStore {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
     await this.ensureVisibilityMigrated(source.threadId);
+    const wake = input.claim?.makeWake?.(failureId);
+    if (wake) assertQueueLedgerEntry(wake);
+    const ledgerKeys = input.claim
+      ? [
+          QueueLedgerKeys.entries(source.threadId),
+          QueueLedgerKeys.order(source.threadId),
+          QueueLedgerKeys.privateAdmissions(source.threadId),
+        ]
+      : [];
     const result = (await this.redis.eval(
       COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA,
-      1,
+      1 + ledgerKeys.length,
       MessageKeys.detail(source.id),
+      ...ledgerKeys,
       this.keyPrefix,
       failureId,
       source.threadId,
@@ -3966,6 +4026,10 @@ export class RedisMessageStore {
       String(this.ttlSeconds ?? 0),
       isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
       JSON.stringify(failureInput.from),
+      input.claim?.id ?? '',
+      input.claim ? input.requestedTargets[0]! : '',
+      wake ? JSON.stringify(wake) : '',
+      wake ? queueLedgerAdmissionFingerprint(wake) : '',
     )) as [number | string, string];
     const outcome = Number(result[0]);
     if (outcome === -1) return { kind: 'not_found' };
@@ -4078,7 +4142,18 @@ export class RedisMessageStore {
       if (transition.kind === 'conflict') return { ...transition, message };
       if (transition.kind === 'replayed') return { kind: 'replayed', message };
       const outcome = Number(
-        await this.redis.eval(CAS_LIFECYCLE_METADATA_LUA, 1, key, raw ?? '', JSON.stringify(transition.lifecycle)),
+        await this.redis.eval(
+          CAS_LIFECYCLE_METADATA_LUA,
+          3,
+          key,
+          MessageKeys.appendPending(message.threadId),
+          MessageKeys.APPEND_PENDING_THREADS,
+          raw ?? '',
+          JSON.stringify(transition.lifecycle),
+          hasUnresolvedLifecycleAppend(transition.lifecycle) ? '1' : '0',
+          message.threadId,
+          id,
+        ),
       );
       if (outcome === 0) continue;
       if (outcome === -1) return { kind: 'not_found' };
@@ -4104,6 +4179,11 @@ export class RedisMessageStore {
         Promise.all(keys.map((key) => this.redis.hget(key, 'lifecycle'))),
       ]);
       if (messages.some((message) => !message)) return { kind: 'not_found' };
+      for (const [index, raw] of rawLifecycles.entries()) {
+        const lifecycle = raw ? safeParseLifecycleMetadata(raw) : undefined;
+        if (raw && !lifecycle) return { kind: 'conflict', reason: 'input_lifecycle_conflict' };
+        messages[index]!.lifecycle = lifecycle;
+      }
       const prepared = prepareLifecycleAppendAdmission(messages as StoredMessage[], input);
       if (prepared.kind !== 'prepared') return prepared;
       if (prepared.replayed) {
@@ -4112,8 +4192,20 @@ export class RedisMessageStore {
       const argv = prepared.lifecycles.flatMap((lifecycle, index) => [
         rawLifecycles[index] ?? '',
         JSON.stringify(lifecycle),
+        hasUnresolvedLifecycleAppend(lifecycle) ? '1' : '0',
+        ids[index]!,
       ]);
-      const outcome = Number(await this.redis.eval(CAS_LIFECYCLE_APPEND_ADMISSION_LUA, keys.length, ...keys, ...argv));
+      const outcome = Number(
+        await this.redis.eval(
+          CAS_LIFECYCLE_APPEND_ADMISSION_LUA,
+          keys.length + 2,
+          ...keys,
+          MessageKeys.appendPending(input.threadId),
+          MessageKeys.APPEND_PENDING_THREADS,
+          ...argv,
+          input.threadId,
+        ),
+      );
       if (outcome === 0) continue;
       if (outcome === -1) return { kind: 'not_found' };
       if (outcome === -2) return { kind: 'conflict', reason: 'scope_mismatch' };
@@ -4125,6 +4217,25 @@ export class RedisMessageStore {
       return { kind: 'applied', messages: applied as StoredMessage[] };
     }
     return { kind: 'conflict', reason: 'response_lifecycle_conflict' };
+  }
+
+  async listUnresolvedAppendMessages(threadId: string): Promise<StoredMessage[]> {
+    const ids = await this.redis.smembers(MessageKeys.appendPending(threadId));
+    const messages = await Promise.all(ids.map((id) => this.getById(id)));
+    return messages.filter((message): message is StoredMessage =>
+      Boolean(
+        message &&
+          message.threadId === threadId &&
+          !message.recall &&
+          !message._tombstone &&
+          !message.deletedAt &&
+          hasUnresolvedLifecycleAppend(message.lifecycle),
+      ),
+    );
+  }
+
+  async listUnresolvedAppendThreadIds(): Promise<string[]> {
+    return this.redis.smembers(MessageKeys.APPEND_PENDING_THREADS);
   }
 
   commitLifecycleAppendRecovery(
@@ -4353,3 +4464,7 @@ export class RedisMessageStore {
     }
   }
 }
+
+import { ConciergeKeys } from '../../../../concierge/concierge-keys.js';
+import { WATCHER_OUTPUT_FENCE_LUA } from '../../../../concierge/watcher/watcher-output-fence.js';
+import { ThreadKeys } from '../redis-keys/thread-keys.js';

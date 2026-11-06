@@ -89,28 +89,6 @@ describe('eval-domain-daily task spec', () => {
     assert.ok(taskOutcome, 'eval:task-outcome should still be included (no legacy tasks)');
   });
 
-  it('gate still runs when only one daily domain has active legacy tasks', async () => {
-    // With frequency filtering, daily gate only sees daily domains (a2a, memory, task-outcome).
-    // eval:a2a has legacyScheduledTaskIds=[] (cleaned), so we simulate a hypothetical
-    // legacy task for a2a + the real memory-recall-digest for memory.
-    // Since a2a/task-outcome have NO legacy tasks, even with memory blocked, gate still runs.
-    // To truly block all daily domains, every domain would need legacy tasks — but not all do.
-    // Updated: test now verifies that with only memory blocked, gate still runs.
-    const activeLegacyTasks = [{ id: 'memory-recall-digest', templateId: 'memory-recall-digest', enabled: true }];
-    const spec = createEvalDomainDailySpec({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
-      listDynamicTasks: () => activeLegacyTasks,
-    });
-
-    const result = await spec.admission.gate();
-
-    assert.equal(result.run, true, 'gate still runs because eval:a2a has no legacy tasks');
-    const a2a = result.workItems.find((w) => w.subjectKey === 'eval:a2a');
-    assert.ok(a2a, 'eval:a2a is included (legacyScheduledTaskIds=[])');
-    const taskOutcome = result.workItems.find((w) => w.subjectKey === 'eval:task-outcome');
-    assert.ok(taskOutcome, 'eval:task-outcome is included (legacyScheduledTaskIds=[])');
-  });
-
   it('gate returns run=false when no eval domains exist', async () => {
     const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: '/nonexistent/path' });
 

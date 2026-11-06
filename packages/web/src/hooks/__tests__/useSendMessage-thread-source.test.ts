@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { ContextAttachment } from '@cat-cafe/shared';
 import React, { act, useEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -165,6 +165,40 @@ describe('F335 回话下面那一排', () => {
     expect(useSuggestionStore.getState().byThread[THREAD]?.['sugg-1']?.state).toBe('applied');
   });
 
+  it('keeps the original action and watcher supplement together in the one shared row', async () => {
+    seed(row({ byline: 'cat', watcherSupplement: { catId: 'codex61-sol', text: '已向宪宪补了一句' } }));
+    await render(<SuggestionRow threadId={THREAD} messageId="msg-282" />);
+    expect(container.querySelectorAll('[data-testid="suggestion-row"]')).toHaveLength(1);
+    expect(button('添加 7 条视频批注')).toBeDefined();
+    expect(container.textContent).toContain('已向宪宪补了一句');
+    expect(container.querySelectorAll('.w-av .eye')).toHaveLength(1);
+
+    fetchMock.mockResolvedValueOnce(
+      reply(
+        row({
+          byline: 'cat',
+          state: 'applied',
+          revision: 2,
+          receipt: { text: '已添加 7 条批注' },
+          watcherSupplement: { catId: 'codex61-sol', text: '已向宪宪补了一句' },
+        }),
+      ),
+    );
+    await act(async () => button('添加 7 条视频批注').click());
+    expect(container.querySelectorAll('[data-testid="suggestion-row"]')).toHaveLength(1);
+    expect(container.textContent).toContain('已添加 7 条批注');
+    expect(container.textContent).toContain('已向宪宪补了一句');
+    expect(button('撤销')).toBeDefined();
+  });
+
+  it('retains the watcher receipt after the unanswered original proposal expires', async () => {
+    seed(row({ state: 'ignored', watcherSupplement: { catId: 'codex61-sol', text: '已向宪宪补了一句' } }));
+    await render(<SuggestionRow threadId={THREAD} messageId="msg-282" />);
+    expect(container.querySelector('.pill')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="suggestion-row"]')).toHaveLength(1);
+    expect(container.textContent).toBe('已向宪宪补了一句');
+  });
+
   it('shows 已隐藏的建议 only when something is hidden, and restores a row', async () => {
     fetchMock.mockResolvedValueOnce(reply({ hidden: [] }));
     await render(<HiddenSuggestionsCard />);

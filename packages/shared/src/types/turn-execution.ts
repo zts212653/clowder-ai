@@ -1,10 +1,12 @@
 import type { CatId } from './ids.js';
 
-export type TurnExecutionKind = 'ordinary' | 'routing_guard';
+export type TurnExecutionKind = 'ordinary' | 'routing_guard' | 'watcher';
 export type TurnExecutionStatus = 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted';
 export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'>;
 
 export interface TurnExecutionCausalRefs {
+  /** Observation provenance; never a work Queue or Task carrier. */
+  watcherSourceInvocationId?: string;
   /** Server-produced C provenance only; private execution binding/credentials never enter this ledger. */
   routingPreflight?: {
     stage: 'execution_preflight';
@@ -52,13 +54,29 @@ export interface CreateTurnExecutionInput {
 }
 
 export interface TurnExecutionRecord extends CreateTurnExecutionInput {
+  watcherModelAttempts?: Record<string, { startedAt: number; usage?: import('./watcher.js').WatcherUsage }>;
+  watcherUsage?: import('./watcher.js').WatcherUsage;
   status: TurnExecutionStatus;
   endedAt?: number;
   terminalReason?: string;
   /** Written only after the exact provider iterator has actually closed; a cancel receipt is insufficient. */
   providerStartedAt?: number;
   providerTeardownAt?: number;
+  /** Output settlement belongs to this child, independently of the parent route. */
+  responseSettlement?: TurnResponseSettlement;
+  /** Output may commit before a parallel provider iterator has finished teardown. */
+  pendingResponseSettlement?: TurnResponseSettlement;
+  /** Monotonic settlement commit order; endedAt is not a delivery cursor. */
+  settledSequence?: number;
 }
+
+export type TurnResponseSettlement =
+  | { readonly kind: 'message'; readonly messageId: string; readonly settledAt: number }
+  | {
+      readonly kind: 'no_response';
+      readonly reason: 'tool_only' | 'empty_turn' | 'recovered_no_response';
+      readonly settledAt: number;
+    };
 
 /** Immutable child identity safe to persist beside a visible message body. */
 export interface TurnExecutionMessageProjection {
@@ -89,6 +107,8 @@ export interface TransitionTurnExecutionResult {
 }
 
 export interface InterruptRunningTurnExecutionsInput {
+  /** Startup delegates watcher recovery to the exact native session owner. */
+  excludedExecutionKinds?: TurnExecutionKind[];
   endedAt: number;
   terminalReason: string;
   /** Exact children with a presently live external process owner. */

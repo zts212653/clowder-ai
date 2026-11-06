@@ -86,6 +86,18 @@ test('redacts PEM private key block', () => {
   assert.ok(!out.includes('MIIEpAIBAAK'));
 });
 
+test('redacts short-wrapped PEM through EOF when the end marker is absent or truncated', () => {
+  const body = 'AbCdEfGhIjKlMnOp\nQrStUvWxYz012345';
+  for (const [label, tail] of [
+    ['PRIVATE KEY', ''],
+    ['RSA PRIVATE KEY', '\n-----END RSA PRIVATE KEY---'],
+    ['OPENSSH PRIVATE KEY', '\r\n-----END OPENSSH'],
+  ]) {
+    const out = sanitizeCliStderr(`ordinary context\n-----BEGIN ${label}-----\n${body}${tail}`);
+    assert.equal(out, 'ordinary context\n[PEM_REDACTED]', label);
+  }
+});
+
 test('redacts URL query string entirely', () => {
   const input = 'GET https://api.example.com/v1/foo?api_key=sk-abc123def456ghijklmnop&user=bob HTTP/1.1';
   const out = sanitizeCliStderr(input);

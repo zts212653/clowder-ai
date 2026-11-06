@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F32-b Phase 4 R24 P2-2: Regression test — CatSelector group title must show
  * breed-level display name, not the first variant's displayName.

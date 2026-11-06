@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
 import {

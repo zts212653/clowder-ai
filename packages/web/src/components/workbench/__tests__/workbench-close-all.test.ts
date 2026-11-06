@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
 import { createArtifactReviewSurface } from '../artifact-review-surface';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';

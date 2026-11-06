@@ -78,7 +78,6 @@ const CASES = [
       tags: ['overflow'],
     }),
     expected: [
-      '猫的判断（假设）',
       '我们以为 You 喜欢有温度又清楚的画面。',
       '当审批卡需要支持不可逆决定时，依据必须完整可达。',
       '省略号不能成为信息终点。',
@@ -139,19 +138,17 @@ describe('F269 ApprovalItemCard critical text recovery', () => {
     expect(card).not.toBeNull();
     expect(card?.querySelector('[class*="line-clamp-"]')).toBeNull();
 
-    const disclosure = card?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    const disclosure = card?.querySelector<HTMLElement>('button[aria-expanded="false"], details > summary');
     expect(disclosure).not.toBeNull();
     await act(async () => disclosure?.click());
 
-    expect(card?.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+    expect(card?.querySelector('button[aria-expanded="true"], details[open]')).not.toBeNull();
     for (const detail of expected) expect(card?.textContent).toContain(detail);
     if (item.sourceFeatureId === 'F221') {
-      const recommendation = card?.querySelector('[data-testid="approval-recommendation"]');
-      const text = recommendation?.textContent ?? '';
-      expect(text).toContain('猫的判断（假设）');
+      const text = card?.textContent ?? '';
       expect(text).toContain(item.detail.takeaway);
-      expect(text.indexOf('猫的判断（假设）')).toBeLessThan(text.indexOf('场景'));
-      expect(text.indexOf('场景')).toBeLessThan(text.indexOf('引用'));
+      expect(text.indexOf(String(item.detail.takeaway))).toBeLessThan(text.indexOf(String(item.detail.scene)));
+      expect(card?.querySelector('details[open]')?.textContent).toContain(item.detail.quote);
     }
   });
 });

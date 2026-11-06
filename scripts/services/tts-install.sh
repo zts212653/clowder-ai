@@ -51,19 +51,26 @@ tts_install_arm64_warmup() {
   "${hf_proxy_env[@]+"${hf_proxy_env[@]}"}" python - "$TTS_MODEL" "$warmup_voice" "$warmup_dir" <<'PY' || status=$?
 import os
 import sys
+import wave
+from pathlib import Path
 
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 
 from mlx_audio.tts.generate import generate_audio
+from mlx_audio.tts.utils import load_model
 
-model, voice, output_dir = sys.argv[1:4]
-generate_audio(
-    text="\u4f60\u597d",
-    model=model,
-    voice=voice,
-    lang_code="z",
-    output_path=output_dir,
-)
+model_id, voice, output_dir = sys.argv[1:4]
+model = load_model(model_id)
+kwargs = dict(text="\u4f60\u597d", model=model, lang_code="z", output_path=output_dir)
+if getattr(getattr(model, "config", None), "tts_model_type", None) != "base":
+    kwargs["voice"] = voice
+generate_audio(**kwargs)
+audio_files = list(Path(output_dir).glob("*.wav"))
+if not audio_files:
+    raise RuntimeError("TTS warmup generated no audio file")
+with wave.open(str(audio_files[0])) as audio:
+    if audio.getnframes() == 0:
+        raise RuntimeError("TTS warmup generated empty audio")
 print("TTS runtime warmup complete.")
 PY
   rm -rf "$warmup_dir"

@@ -42,9 +42,8 @@ import type {
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
 import {
-  findLatestMessageByTimeline,
   findLatestMessageIndexByTimeline,
-  getMessageTimelineOrderTime,
+  getMessageTimelineCursorTime,
   isMessageTimelineActive,
 } from './message-timeline';
 
@@ -104,7 +103,6 @@ function mergeCatInvocationInfo(
 }
 
 function snapshotActive(s: ChatState): ThreadState {
-  const latestMessage = findLatestMessageByTimeline(s.messages);
   return {
     messages: s.messages,
     isLoading: s.isLoading,
@@ -124,9 +122,9 @@ function snapshotActive(s: ChatState): ThreadState {
     // Otherwise, preserve the real timestamp so a mere thread switch doesn't reorder the sidebar.
     lastActivity: s.hasActiveInvocation
       ? Date.now()
-      : Math.max(
+      : s.messages.reduce(
+          (latest, message) => Math.max(latest, getMessageTimelineCursorTime(message)),
           s.threadStates[s.currentThreadId]?.lastActivity ?? 0,
-          latestMessage ? getMessageTimelineOrderTime(latestMessage) : 0,
         ),
     queue: s.queue,
     queueFull: s.queueFull,
@@ -1052,6 +1050,7 @@ export interface ChatState {
     threadId: string,
     target: WorkspacePathOpenTarget,
     presentation?: WorkspaceOpenRequest['presentation'],
+    disposition?: WorkspaceOpenRequest['disposition'],
   ) => boolean;
   openPublication: (
     target: Extract<WorkspaceOpenRequest['target'], { kind: 'publication' | 'message-publication' }>,
@@ -1493,7 +1492,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
   // An explicit open is honoured under a presentation lock too, as the file-stamp path it replaces was.
-  openWorkspacePath: (threadId, target, presentation) => {
+  openWorkspacePath: (threadId, target, presentation, disposition = 'preview') => {
     const state = get();
     if (state.currentThreadId !== threadId) return false;
     const patch = { rightPanelOpen: true, rightPanelMode: 'workspace' as const, workspaceMode: 'dev' as const };
@@ -1506,7 +1505,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         revision,
         threadId,
         target,
-        disposition: 'preview',
+        disposition,
         ...(presentation ? { presentation } : {}),
       },
     });

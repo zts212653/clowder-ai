@@ -95,9 +95,9 @@ describe('Home consumes the original thread owner-version read', () => {
     expect(read.apiFetch.mock.calls.map(([path]) => path)).toEqual([
       '/api/threads/thread-owner-read/artifacts?view=works',
     ]);
-    expect(host.querySelector('.home-work-meta')?.textContent).toContain('小太阳·砚砚 · 第 4 版');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toContain('小太阳·砚砚 · 第 4 版');
     expect(host.textContent).not.toContain('第 9 版');
-    expect(host.querySelector('.home-work-meta')?.textContent).toContain('旧版');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toContain('旧版');
     const card = host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
     if (!card) throw new Error('The original Home card must be readable');
     vi.spyOn(card, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 288, 100));
@@ -127,8 +127,8 @@ describe('Home consumes the original thread owner-version read', () => {
     const unprepared = { ...artifact };
     delete unprepared.work;
     await render([unprepared], lineage);
-    expect(host.querySelector('.home-work-meta')?.textContent).not.toContain('版本未知');
-    expect(host.querySelector('.home-work-meta')?.textContent).toMatch(/^小太阳·砚砚 · \d+\/\d+ \d+:\d+$/);
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).not.toContain('版本未知');
+    expect(host.querySelector('.work-gallery-footer small')?.textContent).toMatch(/^小太阳·砚砚 · \d+\/\d+ \d+:\d+$/);
     expect(host.querySelector('img')?.getAttribute('src')).toBe(artifact.url);
     expect(host.textContent).not.toMatch(/第 [49] 版/);
   });

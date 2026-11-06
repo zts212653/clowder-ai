@@ -33,9 +33,7 @@ export function ordinaryWakeCoverageEligible(entry: QueueLedgerEntry, targetId: 
     !entry.execution.executionScope &&
     !entry.execution.cloudDispatchProvenance &&
     !entry.execution.requiresExactCloudDispatchProvenance &&
-    !entry.delivery.routingHeldTargetIds?.includes(targetId) &&
-    !entry.delivery.appendPendingByTarget?.[targetId] &&
-    !entry.delivery.appendRecoveryByTarget?.[targetId]
+    !entry.delivery.routingHeldTargetIds?.includes(targetId)
   );
 }
 

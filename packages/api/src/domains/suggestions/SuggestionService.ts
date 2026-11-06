@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   type HiddenSuggestionKind,
-  type SuggestionByline,
   type SuggestionEventType,
   type SuggestionKindFacts,
   type SuggestionOfferInput,
@@ -9,57 +8,29 @@ import {
   type SuggestionReceiptInput,
   type SuggestionView,
 } from '@cat-cafe/shared';
-import type { ISuggestionStore, SuggestionRecord } from './SuggestionStore.js';
-import type {
-  SuggestionActionContext,
-  SuggestionActionHandler,
-  SuggestionActionRegistry,
-  SuggestionApplyResult,
-} from './suggestion-actions.js';
+import type { SuggestionRecord } from './SuggestionStore.js';
+import type { SuggestionActionContext, SuggestionActionHandler, SuggestionApplyResult } from './suggestion-actions.js';
+import { insertSuggestion, resolveSuggestionAnchor } from './suggestion-admission.js';
 import { readSuggestionFacts } from './suggestion-facts.js';
 import { countEvents, effectiveSuggestion, toSuggestionView, withEvent } from './suggestion-projection.js';
-import { offerRecord, receiptRecord } from './suggestion-records.js';
+import { BROUGHT_WORK_KIND, offerRecord, receiptRecord } from './suggestion-records.js';
+
+import type {
+  SuggestionActor,
+  SuggestionFailureCode,
+  SuggestionResult,
+  SuggestionServiceDeps,
+} from './suggestion-service-contract.js';
 
 export { PLAIN_RECEIPT_KIND, STALE_TRANSITION_MS } from './suggestion-projection.js';
+export type {
+  SuggestionActor,
+  SuggestionFailureCode,
+  SuggestionResult,
+  SuggestionServiceDeps,
+} from './suggestion-service-contract.js';
 
 const THREAD_LIST_LIMIT = 200;
-
-export interface SuggestionActor {
-  userId: string;
-  threadId: string;
-  catId: string;
-  invocationId?: string;
-  parentInvocationId?: string;
-  byline?: SuggestionByline;
-}
-
-export interface SuggestionServiceDeps {
-  store: ISuggestionStore;
-  registry: SuggestionActionRegistry;
-  /** Looks up a message the row should hang under; null when it does not exist. */
-  loadMessage(messageId: string): Promise<{ userId: string; threadId: string } | null>;
-  /** The message id this turn's reply will be saved under. */
-  resolveTurnMessageId?(actor: SuggestionActor): string | undefined;
-  publish?(threadId: string, view: SuggestionView): void;
-  now?: () => number;
-  newId?: () => string;
-}
-
-export type SuggestionFailureCode =
-  | 'invalid'
-  | 'unknown_kind'
-  | 'kind_stopped'
-  | 'message_not_found'
-  | 'message_taken'
-  | 'not_found'
-  | 'conflict'
-  | 'action_failed'
-  /** The action did part of the work and could not take it back; the row now says what was done. */
-  | 'action_partial';
-
-export type SuggestionResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; code: SuggestionFailureCode; error: string; view?: SuggestionView };
 
 const fail = <T>(code: SuggestionFailureCode, error: string): SuggestionResult<T> => ({ ok: false, code, error });
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -67,17 +38,20 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 /**
  * F335 交付二：回话下面那一排。猫发提议 / 回执；人点用、撤销、忽略；没理的到期记「不理」；按种类的事实给猫掂量。
  * 每次点击都先用 revision 抢到这一行（applying / undoing）再执行动作，双击和两个标签页不会把一件事做两遍。
+ * `now / newId / settle / resolveAnchor / insert / step` are shared with the desk delivery (交付三); routes use the rest.
  */
 export class SuggestionService {
-  private readonly now: () => number;
-  private readonly newId: () => string;
+  readonly now: () => number;
+  readonly newId: () => string;
 
   constructor(private readonly deps: SuggestionServiceDeps) {
     this.now = deps.now ?? Date.now;
     this.newId = deps.newId ?? (() => `sugg_${randomUUID()}`);
   }
 
+  /** A brought work is drawn by its work card and carried by the desk; the page never gets a row for it. */
   private publish(record: SuggestionRecord): void {
+    if (record.kind === BROUGHT_WORK_KIND) return;
     this.deps.publish?.(record.threadId, toSuggestionView(record));
   }
 
@@ -86,7 +60,7 @@ export class SuggestionService {
   }
 
   /** Persist a lazily-derived expiry so facts and the page agree; a lost race just means someone acted first. */
-  private async settle(stored: SuggestionRecord, now: number): Promise<SuggestionRecord> {
+  async settle(stored: SuggestionRecord, now: number): Promise<SuggestionRecord> {
     const effective = effectiveSuggestion(stored, now);
     if (effective.state !== 'ignored' || stored.state === 'ignored') return effective;
     const next = { ...effective, revision: stored.revision + 1, updatedAt: now };
@@ -100,22 +74,6 @@ export class SuggestionService {
 
   // ---------- cats ----------
 
-  private async resolveAnchor(
-    actor: SuggestionActor,
-    messageId: string | undefined,
-  ): Promise<SuggestionResult<string>> {
-    if (messageId) {
-      const message = await this.deps.loadMessage(messageId);
-      if (!message || message.userId !== actor.userId || message.threadId !== actor.threadId) {
-        return fail('message_not_found', 'That message is not in this conversation');
-      }
-      return { ok: true, value: messageId };
-    }
-    const turnMessageId = this.deps.resolveTurnMessageId?.(actor);
-    if (!turnMessageId) return fail('message_not_found', 'No reply in this turn to hang the row under; pass messageId');
-    return { ok: true, value: turnMessageId };
-  }
-
   async offer(actor: SuggestionActor, input: SuggestionOfferInput): Promise<SuggestionResult<SuggestionView>> {
     const handler = this.deps.registry.get(input.action.kind);
     if (!handler) {
@@ -124,7 +82,7 @@ export class SuggestionService {
     if (await this.deps.store.isHidden(actor.userId, actor.catId, handler.kind)) {
       return fail('kind_stopped', 'You stopped offering this kind; the person can restore it in 设置 › 你');
     }
-    const anchor = await this.resolveAnchor(actor, input.messageId);
+    const anchor = await resolveSuggestionAnchor(this.deps, actor, input.messageId);
     if (!anchor.ok) return anchor;
     const id = this.newId();
     const now = this.now();
@@ -144,16 +102,21 @@ export class SuggestionService {
         params: prepared.value,
         expiresInMinutes: input.expiresInMinutes,
       }),
+      false,
+      actor,
     );
   }
 
-  private async insert(record: SuggestionRecord): Promise<SuggestionResult<SuggestionView>> {
-    const created = await this.deps.store.create(record, record.receiptOnly ? undefined : 'offered');
-    if (created.kind === 'message_taken') {
-      return fail('message_taken', 'That message already carries a suggestion or receipt; one row per message');
-    }
-    this.publish(record);
-    return { ok: true, value: toSuggestionView(record) };
+  resolveAnchor(actor: SuggestionActor, messageId: string | undefined): Promise<SuggestionResult<string>> {
+    return resolveSuggestionAnchor(this.deps, actor, messageId);
+  }
+
+  insert(
+    record: SuggestionRecord,
+    supplement = false,
+    guardActor?: SuggestionActor,
+  ): Promise<SuggestionResult<SuggestionView>> {
+    return insertSuggestion(this.deps, record, this.now, (row) => this.publish(row), supplement, guardActor);
   }
 
   /** A cat already did the thing and leaves one line, optionally undoable through a registered action. */
@@ -169,9 +132,18 @@ export class SuggestionService {
       );
       if (!owned) return fail('invalid', 'The receipt does not point at something you did in this conversation');
     }
-    const anchor = await this.resolveAnchor(actor, input.messageId);
+    const anchor = await resolveSuggestionAnchor(this.deps, actor, input.messageId);
     if (!anchor.ok) return anchor;
-    return this.insertReceipt(actor, anchor.value, input.text, handler, input.action?.appliedRef);
+    return this.insertReceipt(
+      actor,
+      anchor.value,
+      input.text,
+      handler,
+      input.action?.appliedRef,
+      undefined,
+      false,
+      actor,
+    );
   }
 
   /**
@@ -184,12 +156,21 @@ export class SuggestionService {
     text: string;
     open?: SuggestionOpenTarget;
     action?: { kind: string; appliedRef: Record<string, unknown> };
+    mergeWatcherSupplement?: boolean;
   }): Promise<SuggestionResult<SuggestionView>> {
     const handler = input.action ? this.deps.registry.get(input.action.kind) : undefined;
     if (input.action && !handler) return fail('unknown_kind', 'Unknown action kind for this receipt');
-    const anchor = await this.resolveAnchor(input.actor, input.messageId);
+    const anchor = await resolveSuggestionAnchor(this.deps, input.actor, input.messageId);
     if (!anchor.ok) return anchor;
-    return this.insertReceipt(input.actor, anchor.value, input.text, handler, input.action?.appliedRef, input.open);
+    return this.insertReceipt(
+      input.actor,
+      anchor.value,
+      input.text,
+      handler,
+      input.action?.appliedRef,
+      input.open,
+      input.mergeWatcherSupplement === true && input.actor.byline === 'watcher',
+    );
   }
 
   private insertReceipt(
@@ -199,9 +180,15 @@ export class SuggestionService {
     handler: SuggestionActionHandler | undefined,
     appliedRef: Record<string, unknown> | undefined,
     open?: SuggestionOpenTarget,
+    supplement = false,
+    guardActor?: SuggestionActor,
   ): Promise<SuggestionResult<SuggestionView>> {
     const now = this.now();
-    return this.insert(receiptRecord({ id: this.newId(), now, actor, messageId, text, handler, appliedRef, open }));
+    return this.insert(
+      receiptRecord({ id: this.newId(), now, actor, messageId, text, handler, appliedRef, open }),
+      supplement,
+      guardActor,
+    );
   }
 
   /** Per-kind facts for the asking cat; `stopOffering` records that it will not offer that kind again. */
@@ -225,9 +212,9 @@ export class SuggestionService {
     const now = this.now();
     const views: SuggestionView[] = [];
     for (const stored of await this.deps.store.listThread(threadId, THREAD_LIST_LIMIT)) {
-      if (stored.userId !== userId) continue;
+      if (stored.userId !== userId || stored.kind === BROUGHT_WORK_KIND) continue;
       const record = await this.settle(stored, now);
-      if (record.state !== 'ignored') views.push(toSuggestionView(record));
+      if (record.state !== 'ignored' || record.watcherSupplement) views.push(toSuggestionView(record));
     }
     return views;
   }
@@ -239,7 +226,7 @@ export class SuggestionService {
     return { ok: true, value: effectiveSuggestion(stored, this.now()) };
   }
 
-  private async step(
+  async step(
     record: SuggestionRecord,
     expectedRevision: number,
     patch: Partial<SuggestionRecord>,

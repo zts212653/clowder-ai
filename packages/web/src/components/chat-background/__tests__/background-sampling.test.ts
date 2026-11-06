@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { backgroundTextAreas } from '../background-sampling';

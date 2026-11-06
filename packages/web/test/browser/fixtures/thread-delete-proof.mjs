@@ -141,7 +141,7 @@ export async function createThreadDeleteProof(evidence) {
         });
       });
       await page.goto(origin + routePath);
-      await page.getByTestId('thread-quick-delete').first().waitFor({ state: 'attached' });
+      await page.getByRole('button', { name: '更多操作', exact: true }).first().waitFor({ state: 'attached' });
       return page;
     },
     async close() {

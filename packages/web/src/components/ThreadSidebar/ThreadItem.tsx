@@ -11,7 +11,6 @@ import type { SidebarPresence, SidebarSystemKind } from '@/stores/sidebarProject
 // and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.
 import { CatAvatar } from '../CatAvatar';
 import { ExportButton } from '../ExportButton';
-import { HubIcon as ActionIcon } from '../hub-icons';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { useShellCopy } from '../shell/shell-copy';
@@ -24,7 +23,6 @@ import { ThreadRowSignals } from './ThreadRowSignals';
 import { RowTip, RowTitleTip } from './ThreadRowTips';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { useOpenThreadSettings } from './ThreadSettingsProvider';
-import { threadDeletionCopy } from './thread-deletion.shell-copy';
 import { formatSidebarActivityTime, threadSignalsCopy } from './thread-signals.shell-copy';
 import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
@@ -94,7 +92,6 @@ function ThreadItemComponent({
   const isV2 = useShellPresentation() === 'v2';
   const openThreadSettings = useOpenThreadSettings();
   const copy = useShellCopy(threadSignalsCopy);
-  const deletionCopy = useShellCopy(threadDeletionCopy);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -439,24 +436,6 @@ function ThreadItemComponent({
                 </div>
               )}
             </div>
-          )}
-          {canDelete && !isHubThread && !systemKind && !isEditing && (
-            <RowTip enabled={isV2} label={deletionCopy.moveToTrash}>
-              <button
-                type="button"
-                data-testid="thread-quick-delete"
-                aria-label={deletionCopy.quickDelete(displayTitle)}
-                title={isV2 ? undefined : deletionCopy.moveToTrash}
-                disabled={isDeleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  deleteThread();
-                }}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-cafe-muted opacity-0 transition-colors hover:text-conn-red-text group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 disabled:cursor-wait disabled:opacity-40 [@media(hover:none)]:opacity-100"
-              >
-                <ActionIcon name="trash" className="h-3.5 w-3.5" />
-              </button>
-            </RowTip>
           )}
         </div>
       </div>

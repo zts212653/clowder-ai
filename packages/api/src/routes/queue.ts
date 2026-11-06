@@ -23,6 +23,7 @@ import {
   type AgentSessionMutexLike,
   agentSessionMutex,
 } from '../domains/cats/services/agents/invocation/AgentSessionMutex.js';
+import { ActiveExecutionReadRepair } from '../domains/cats/services/agents/invocation/active-execution-read-repair.js';
 import {
   type ActiveInvocationProjection,
   type InvocationTrackerLike,
@@ -52,10 +53,7 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import {
-  hasUnconfirmedProviderTeardown,
-  type ITurnExecutionStore,
-} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import { type ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
@@ -468,19 +466,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { ok: true, deferred: false };
   };
 
-  const failUncontrollableInvocation = async (input: {
-    threadId: string;
-    userId: string;
-    catId: string;
-    executionId: string;
-    invocationId?: string;
-    request: FastifyRequest;
-    reason?: ExecutionFailureReason;
-  }): Promise<{ reconciled: boolean }> => {
+  const failUncontrollableInvocation = async (
+    input: {
+      threadId: string;
+      userId: string;
+      catId: string;
+      executionId: string;
+      invocationId?: string;
+      request: FastifyRequest;
+      reason?: ExecutionFailureReason;
+    },
+    retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]),
+  ): Promise<{ reconciled: boolean }> => {
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
-    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
     const hasReplacementProducer = () =>
       queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId) &&
       !queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId, input.executionId);
@@ -777,28 +777,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       };
     }
 
-    // An empty owner snapshot cannot certify a dispatched child whose exact
-    // teardown has never been recorded (including unsupported Windows owners).
-    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
-    if (
-      children?.some(
-        (child) =>
-          child.parentInvocationId === input.executionId &&
-          child.threadId === input.threadId &&
-          child.userId === input.userId &&
-          child.catId === input.catId &&
-          child.status === 'running' &&
-          hasUnconfirmedProviderTeardown(child),
-      )
-    ) {
-      return {
-        reconciled: false,
-        controlPlaneUnavailable: true,
-        error: '原执行停止尚未确认，保留执行占用',
-        code: 'PROVIDER_TEARDOWN_UNCONFIRMED',
-      };
-    }
-
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
     if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
       return {
@@ -898,6 +876,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     };
   };
 
+  const activeReadRepair = new ActiveExecutionReadRepair();
   const resolveAndRepairLiveExecutions = async (
     threadId: string,
     userId: string,
@@ -906,23 +885,32 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const candidates = await resolveLiveExecutionCandidates(threadId, userId, request, opts);
     // Without an owner service nobody can tell whether a process owns a running record: the
     // classifier then lists it as unverified, and repairing it here would erase that.
-    if (!opts.invocationRecordStore || !opts.cliExecutionOwnerService) return candidates;
+    const invocationRecords = opts.invocationRecordStore;
+    if (!invocationRecords || !opts.cliExecutionOwnerService) return candidates;
     const processSnapshot = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
-    if (!processSnapshot.complete) return candidates;
+    if (!processSnapshot.complete) {
+      activeReadRepair.forgetThread(threadId, userId);
+      return candidates;
+    }
     const ownerExecutionTargets = new Set(
       processSnapshot.owners
         .filter((owner) => owner.threadId === threadId && owner.userId === userId)
         .map((owner) => `${owner.executionId}\u0000${owner.catId}`),
     );
     const repairedExecutionIds = new Set<string>();
-    const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, userId);
+    const runningRecords = await invocationRecords.listRunningByThread(threadId, userId);
     for (const record of runningRecords) {
-      if (Date.now() - record.updatedAt <= DEFAULT_PRESTART_RESERVATION_TTL_MS) continue;
+      if (Date.now() - record.updatedAt <= DEFAULT_PRESTART_RESERVATION_TTL_MS) {
+        activeReadRepair.forget(record);
+        continue;
+      }
       // Provider/tracker ownership can end before Queue commits the aggregate
       // terminal (outbound delivery and cursor acknowledgement still await).
       // The exact local producer owns that whole parent, including sibling cats.
-      if (record.targetCats.some((catId) => queueProcessor.hasProcessingSlotReservation(threadId, catId, record.id)))
+      if (record.targetCats.some((catId) => queueProcessor.hasProcessingSlotReservation(threadId, catId, record.id))) {
+        activeReadRepair.forget(record);
         continue;
+      }
       const repairTargets = (record.targetCats as string[]).filter((catId) => {
         const canceled = invocationTracker.getCanceledSlotIdentity?.(threadId, catId);
         const exactCanceledOwner = canceled?.executionId === record.id && canceled.userId === userId;
@@ -932,26 +920,41 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           !ownerExecutionTargets.has(`${record.id}\u0000${catId}`)
         );
       });
-      if (repairTargets.length === 0) continue;
-      try {
-        for (const catId of repairTargets) {
-          await failUncontrollableInvocation({
-            threadId,
-            userId,
-            catId,
-            executionId: record.id,
-            request,
-            reason: 'execution_owner_lost',
-          });
-        }
-        const repairedRecord = await opts.invocationRecordStore.get(record.id);
-        if (repairedRecord?.status !== 'running') repairedExecutionIds.add(record.id);
-      } catch (err) {
-        request.log.error(
-          { err, threadId, userId, executionId: record.id, targetCats: repairTargets },
-          'active execution read-repair failed closed',
-        );
+      if (repairTargets.length === 0) {
+        activeReadRepair.forget(record);
+        continue;
       }
+      // Freeze exactly the backlog owned by this repair before the retry controller awaits
+      // new child evidence. Work arriving during that observation belongs to a later operation.
+      const pendingStops = repairTargets.map((catId) => ({
+        catId,
+        retirePending: snapshotPendingPrivateStop(threadId, userId, [catId]),
+      }));
+      const repaired = await activeReadRepair.run({
+        record,
+        targetCats: repairTargets,
+        owners: processSnapshot.owners,
+        readChildren: () => opts.turnExecutionStore?.listByParent(record.id) ?? [],
+        repair: async () => {
+          for (const { catId, retirePending } of pendingStops) {
+            await failUncontrollableInvocation(
+              {
+                threadId,
+                userId,
+                catId,
+                executionId: record.id,
+                request,
+                reason: 'execution_owner_lost',
+              },
+              retirePending,
+            );
+          }
+          const repairedRecord = await invocationRecords.get(record.id);
+          return repairedRecord?.status !== 'running';
+        },
+        log: request.log,
+      });
+      if (repaired) repairedExecutionIds.add(record.id);
     }
     return candidates.filter((candidate) => !candidate.executionId || !repairedExecutionIds.has(candidate.executionId));
   };

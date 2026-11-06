@@ -59,7 +59,7 @@ export interface QueueLedgerExecution {
 export interface QueueLedgerDelivery {
   /** Optional B observation, never execution/recovery authority. No quota/account payload is retained. */
   routingAdmission?: RoutingAdmissionProvenanceV1;
-  /** Original Queue owns each Append until provider acceptance or durable recovery. */
+  /** Legacy upgrade input only. New Append writers keep these facts in History. */
   appendPendingByTarget?: Record<
     string,
     Pick<LifecycleAppendFailure, 'targetId' | 'invocationId' | 'responseMessageId' | 'at'> & {
@@ -68,7 +68,7 @@ export interface QueueLedgerDelivery {
       requiresCompletion?: boolean;
     }
   >;
-  /** Definite refusals await a new run; uncertain inputs remain held while their original handoff is checked. */
+  /** Legacy upgrade input only; not a recovery owner for new work. */
   appendRecoveryByTarget?: Record<string, LifecycleAppendFailure>;
   /** F293 policy refusals wait for an explicit owner attempt, including after restart. */
   routingHeldTargetIds?: string[];

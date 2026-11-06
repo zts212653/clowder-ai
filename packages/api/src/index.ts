@@ -54,7 +54,7 @@ import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
-import Fastify, { type FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
@@ -330,6 +330,7 @@ import { createVignetteWriter } from './domains/taste/services/writeVignette.js'
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import { createApiServer } from './infrastructure/api-server.js';
 import { createDuckCapabilityPublicAdapter } from './infrastructure/capability-evolution/adapters/microduck-exploration/duck-capability-public-adapter.js';
 import {
   createMicroduckApprovalResolver,
@@ -657,7 +658,7 @@ async function main(): Promise<void> {
   const { registerConnectionDiagnostics } = await import('./routes/connection-diagnostics.js');
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
-  const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  const app = createApiServer({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
@@ -725,22 +726,28 @@ async function main(): Promise<void> {
     backend: 'initializing' | 'redis' | 'memory';
     durability: 'initializing' | 'durable' | 'degraded_memory';
   } = { backend: 'initializing', durability: 'initializing' };
-  const healthHandler = async () => ({
-    status: 'ok' as const,
-    timestamp: Date.now(),
-    deploymentRevision: runtimeDeploymentRevision,
-    ...(runtimeDeploymentContext
-      ? {
-          deploymentSubjectRef: runtimeDeploymentSubjectRef(
-            runtimeDeploymentContext.installationId,
-            runtimeDeploymentContext.deploymentId,
-          ),
-          deploymentBootId: runtimeDeploymentContext.bootId,
-          deploymentBootSequence: runtimeDeploymentContext.bootSequence,
-        }
-      : {}),
-    callbackAuth: callbackAuthCapability,
-  });
+  const desktopStartupId = process.env.CAT_CAFE_DESKTOP_STARTUP_ID;
+  const healthHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (desktopStartupId && request.headers['x-clowder-desktop-probe'] === '1') {
+      reply.header('x-clowder-desktop-startup-id', desktopStartupId);
+    }
+    return {
+      status: 'ok' as const,
+      timestamp: Date.now(),
+      deploymentRevision: runtimeDeploymentRevision,
+      ...(runtimeDeploymentContext
+        ? {
+            deploymentSubjectRef: runtimeDeploymentSubjectRef(
+              runtimeDeploymentContext.installationId,
+              runtimeDeploymentContext.deploymentId,
+            ),
+            deploymentBootId: runtimeDeploymentContext.bootId,
+            deploymentBootSequence: runtimeDeploymentContext.bootSequence,
+          }
+        : {}),
+      callbackAuth: callbackAuthCapability,
+    };
+  };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
@@ -787,6 +794,11 @@ async function main(): Promise<void> {
   // Create invocation tracker for cancellation support
   const invocationTracker = new InvocationTracker();
   let router!: AgentRouter;
+  let watcherSupervisor: import('./domains/concierge/watcher/WatcherSupervisor.js').WatcherSupervisor | undefined;
+  let watcherReceipts:
+    | ReturnType<typeof import('./domains/concierge/watcher/watcher-receipts.js').createWatcherReceipts>
+    | undefined;
+  const { applyDirectWatcherControl } = await import('./domains/concierge/watcher/watcher-controls.js');
 
   // Initialize WebSocket manager BEFORE routes (injected via opts, no circular import).
   // IMPORTANT: Socket.io must attach to the SAME server Fastify listens on.
@@ -1052,11 +1064,14 @@ async function main(): Promise<void> {
   });
   // W2-5b: bound once the media ledger and TTS exist (below); until then media blocks publish as before.
   let outboundMediaPublication: OutboundMediaPublication | undefined;
+  // Late-bound observers of complete, visible messages (bound below once their owners exist).
+  let messagePublishedListener: ((message: StoredMessage) => void) | null = null;
   const messageStore = createPublishingMessageStore(rawMessageStore, {
     events: messagingStores.events,
     publications: messagingStores.publications,
     outboundMedia: () => outboundMediaPublication,
     onPublished: subscriptionDrainScheduler.schedule,
+    onMessagePublished: (message) => messagePublishedListener?.(message),
     onPublishFailure: (error, stored) => {
       app.log.error(
         { error, messageId: stored.id, threadId: stored.threadId },
@@ -1086,13 +1101,45 @@ async function main(): Promise<void> {
     resolveCarrierCapability: (catId) => router?.freshnessCarrierCapability(catId),
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
-    onAdmitted: ({ threadId, message, entries }) => {
+    onAdmitted: async ({ threadId, message, entries }) => {
       if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure'))
         queueProcessor.registerCallerDispatchInitialTargets(
           message,
           entries.flatMap((entry) => entry.targets),
         );
       void queueProcessor.requestDrain(threadId).catch((err) => app.log.error({ err, threadId }, 'send drain failed'));
+      if (message?.from?.kind === 'user') {
+        try {
+          const changed = await applyDirectWatcherControl(
+            threadStore,
+            { role: 'user', content: message.content, threadId, messageId: message.id },
+            message.timestamp,
+            async () => turnExecutionStore.settledHead(message.userId, threadId),
+          );
+          if (changed) {
+            watcherSupervisor?.controlChanged(threadId);
+            void conciergeConfigStoreShared
+              .readWatcherConfig?.(message.userId)
+              .then((config) =>
+                watcherReceipts?.control({
+                  userId: message.userId,
+                  threadId,
+                  catId: config.memberCatId,
+                  messageId: message.id,
+                  ...changed,
+                }),
+              )
+              .catch((error) =>
+                app.log.warn({ err: error, sourceMessageId: message.id }, 'Watcher receipt could not be saved'),
+              );
+          }
+        } catch (error) {
+          app.log.warn(
+            { error, threadId, sourceMessageId: message.id },
+            'Watcher control was not saved; original work continues',
+          );
+        }
+      }
     },
   });
   await invocationQueue.hydrateFromLedger(messageStore);
@@ -2810,6 +2857,8 @@ async function main(): Promise<void> {
     agentRegistry,
     registry,
     messageStore,
+    refreshServices: () =>
+      agentRegistry.refreshForAdmission(() => syncAgentRegistry(catRegistry.getAllConfigs(), false)),
     threadExecutionSituationSource,
     taskProgressStore,
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
@@ -3392,6 +3441,7 @@ async function main(): Promise<void> {
   // 候选进来、定性落空、presence=null，被终态回落误报成 done/error（R3 P1-1 / P1-2）。
   const activeExecutionService = createActiveExecutionService({
     invocationTracker,
+    cliExecutionOwnerService,
     recordStore: invocationRecordStore,
     responseStatus: responseStatusFromMessages(messageStore), // F117 KD-23: a terminal R is not processing
     turnExecutionStore,
@@ -4466,6 +4516,127 @@ async function main(): Promise<void> {
     }),
     isLiveConfigChangePending: (userId) => liveCompanionSessions.isChangingPreferences(userId),
   });
+  await app.register((await import('./routes/watcher.js')).watcherRoutes, {
+    configStore: conciergeConfigStoreShared,
+    threadStore,
+    labelStore,
+    turnExecutionStore,
+    capability: (catId) => router.boundedWatcherSessionCapability(catId),
+    rolloutEnabled: process.env.CAT_CAFE_WATCHER_ENABLED === '1',
+    runtimeReady: () => watcherSupervisor?.isReady() ?? false,
+    controlChanged: (threadId) => watcherSupervisor?.controlChanged(threadId),
+  });
+  const { effectiveWatcherState, readWatcherPreferences } = await import(
+    './domains/concierge/watcher/watcher-controls.js'
+  );
+  const { readWatcherOutputFence } = await import('./domains/concierge/watcher/watcher-output-fence.js');
+  const watcherOutputFence = (userId: string, threadId: string, catId: string) =>
+    process.env.CAT_CAFE_WATCHER_ENABLED === '1'
+      ? readWatcherOutputFence(
+          { configs: conciergeConfigStoreShared, threads: threadStore, labels: labelStore },
+          userId,
+          threadId,
+          catId,
+        )
+      : Promise.resolve(null);
+  const watcherMaySpeak = async (userId: string, threadId: string, catId: string) => {
+    if (process.env.CAT_CAFE_WATCHER_ENABLED !== '1') return false;
+    const [preferences, thread] = await Promise.all([
+      readWatcherPreferences(conciergeConfigStoreShared, labelStore, userId),
+      threadStore.get(threadId),
+    ]);
+    return (
+      preferences.config.memberCatId === catId &&
+      !!thread &&
+      !thread.deletedAt &&
+      effectiveWatcherState(preferences.config, thread, preferences.quietLabels).maySpeak
+    );
+  };
+  await app.register((await import('./routes/watcher-callbacks.js')).watcherCallbackRoutes, {
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    queue: invocationQueue,
+    maySpeak: watcherMaySpeak,
+    outputFence: watcherOutputFence,
+    afterNudge: async (input) =>
+      watcherReceipts?.nudge({
+        ...input,
+        targetName:
+          catRegistry.tryGet(input.targetCatId)?.config.nickname ??
+          catRegistry.tryGet(input.targetCatId)?.config.displayName ??
+          input.targetCatId,
+      }),
+    publish: (message) => {
+      if (message.from?.kind === 'agent')
+        socketManager?.broadcastAgentMessage(
+          {
+            type: 'text',
+            catId: message.from.catId as CatId,
+            content: message.content,
+            origin: 'callback',
+            messageId: message.id,
+            invocationId: message.id,
+            extra: { ...message.extra, isExplicitPost: true },
+            timestamp: message.timestamp,
+          },
+          message.threadId,
+        );
+    },
+  });
+  if (process.env.CAT_CAFE_WATCHER_ENABLED !== '1') {
+    const { reconcileWatcherRecovery } = await import('./domains/concierge/watcher/watcher-recovery.js');
+    const { finishIdleWatcherWake } = await import('./domains/concierge/watcher/watcher-finalization.js');
+    app.addHook('onReady', async () => {
+      void reconcileWatcherRecovery(
+        {
+          registry,
+          executions: turnExecutionStore,
+          sessions: sessionChainStore,
+          recoverNative: async (session, source) => {
+            // Rollout off never opens a CLI. Only the existing idle proof may settle here.
+            if (!session.watcherState?.attempt)
+              await finishIdleWatcherWake(
+                { registry, executions: turnExecutionStore, sessions: sessionChainStore },
+                session,
+                source,
+              );
+          },
+        },
+        privateUserId,
+        (error, threadId) => app.log.warn({ err: error, threadId }, 'Watcher finalization remains pending'),
+      ).catch((error) => app.log.warn({ err: error }, 'Watcher finalization reconciliation failed'));
+    });
+  }
+  if (process.env.CAT_CAFE_WATCHER_ENABLED === '1') {
+    const { WatcherSupervisor } = await import('./domains/concierge/watcher/WatcherSupervisor.js');
+    watcherSupervisor = new WatcherSupervisor({
+      maySpeak: watcherMaySpeak,
+      userId: privateUserId,
+      configs: conciergeConfigStoreShared,
+      labels: labelStore,
+      registry,
+      executions: turnExecutionStore,
+      sessions: sessionChainStore,
+      messages: messageStore,
+      threads: threadStore,
+      transcript: transcriptWriter,
+      apiUrl: `http://127.0.0.1:${PORT}`,
+      service: (catId) => router.getStrategyDeps().services[catId],
+      capability: (catId) => router.boundedWatcherSessionCapability(catId),
+      report: (error, threadId) =>
+        app.log.warn({ err: error, threadId }, 'Watcher invocation failed; ordinary work remains independent'),
+    });
+    app.addHook('onReady', async () => {
+      void watcherSupervisor!
+        .start()
+        .catch((error) => app.log.warn({ err: error }, 'Watcher startup failed; ordinary work remains independent'));
+    });
+    app.addHook('onClose', async () => {
+      await watcherSupervisor?.stop();
+    });
+  }
   const { companionDecisionRoutes } = await import('./routes/companion-decision-routes.js');
   const { readIgnoredItemPreferences } = await import('./config/user-preferences-ignored-items.js');
   const ignoredItemPreferenceProjectRoot = resolveActiveProjectRoot();
@@ -5142,11 +5313,24 @@ async function main(): Promise<void> {
       await deliveryThreadMeta(threadId),
     );
   const { DesktopWindowComponent } = await import('./domains/plugin/desktop-window-runtime/desktop-component.js');
+  const { companionContractHas } = await import('./domains/plugin/desktop-window-runtime/published-companion-v2.js');
   const { ElectronDesktopWindowExecutor } = await import(
     './domains/plugin/desktop-window-runtime/electron-executor.js'
   );
   const { CompanionHostBridge } = await import('./domains/concierge/live/CompanionHostBridge.js');
   const { CompanionAppAssistOwner } = await import('./domains/concierge/live/host/companion-app-assist-owner.js');
+  const { CompanionDeskOwner } = await import('./domains/concierge/live/host/companion-desk-owner.js');
+  const { createDeskAvatarReader } = await import('./domains/concierge/live/host/companion-desk-avatar.js');
+  const deskAvatarReader = createDeskAvatarReader(
+    createHostMediaPathResolver(
+      hostMediaPathRootsFromEnv(process.env, getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR)),
+    ),
+  );
+  // F335 交付三：set once the suggestions integration exists (below). Desktops open only after the Host listens (resume
+  // waits for `hostListening`, a fresh start comes over HTTP), so a desk-capable window always gets its desk owner.
+  const suggestionDeskHolder: {
+    current?: import('./domains/suggestions/desk-delivery.js').SuggestionDesk;
+  } = {};
   const { CompanionWorkOverview } = await import('./domains/concierge/live/work/companion-work-overview.js');
   const { resolveCompanionWorkPublication } = await import(
     './domains/concierge/live/host/home/companion-work-publication.js'
@@ -5315,8 +5499,21 @@ async function main(): Promise<void> {
             },
           }
         : undefined;
+      const suggestionDesk = suggestionDeskHolder.current;
       return new CompanionHostBridge({
-        ...(companionContract === '0.1.0-beta.29'
+        ...(suggestionDesk
+          ? {
+              desk: new CompanionDeskOwner({
+                desk: suggestionDesk,
+                ownerUserId: privateUserId,
+                assertCurrent: assertWorkCurrent,
+                messages: messageStore,
+                readAvatar: deskAvatarReader,
+                openCard: (destination) => decisions.openDecision(destination),
+              }),
+            }
+          : {}),
+        ...(companionContractHas(companionContract, 'appAssist')
           ? {
               appAssist: new CompanionAppAssistOwner({
                 store: redis ? conciergeConfigStoreShared : undefined,
@@ -6254,7 +6451,36 @@ async function main(): Promise<void> {
     './domains/suggestions/actions/video-comments-action.js'
   );
   const { registerSuggestionRoutes } = await import('./routes/suggestion-routes.js');
-  const suggestions = createSuggestionIntegration({ redis, messageStore, invocationTracker, socketManager });
+  const suggestions = createSuggestionIntegration({
+    redis,
+    messageStore,
+    invocationTracker,
+    socketManager,
+    watcherOutputFence: (actor) => watcherOutputFence(actor.userId, actor.threadId, actor.catId),
+    threadTitle: async (threadId) => (await threadStore.get(threadId))?.title ?? undefined,
+    richBlocks: (await import('./domains/cats/services/agents/invocation/RichBlockBuffer.js')).getRichBlockBuffer(),
+  });
+  watcherReceipts = (await import('./domains/concierge/watcher/watcher-receipts.js')).createWatcherReceipts({
+    threads: threadStore,
+    executions: turnExecutionStore,
+    messages: messageStore,
+    ...suggestions,
+    changed: (threadId) => watcherSupervisor?.controlChanged(threadId),
+  });
+  suggestionDeskHolder.current = suggestions.desk;
+  // F335 交付三：a brought work reaches the desk once its reply (with the work card) is complete. A cat's reply
+  // becomes complete through its terminal commit, not an append, so the desk listens where messages publish.
+  const { deskMessage } = await import('./domains/suggestions/composition.js');
+  const priorPublished = messagePublishedListener as ((message: StoredMessage) => void) | null;
+  messagePublishedListener = (message) => {
+    priorPublished?.(message);
+    suggestions.desk.observeMessage(deskMessage(message));
+  };
+  const priorDeskTimeline = messageStore.onTimelineChanged;
+  messageStore.onTimelineChanged = (message) => {
+    priorDeskTimeline?.(message);
+    suggestions.desk.observeMessage(deskMessage(message));
+  };
   suggestions.registry.register(
     createVideoCommentsSuggestionAction({
       reviews: artifactReview.ledgers,
@@ -6275,8 +6501,26 @@ async function main(): Promise<void> {
   await app.register(async (scope) => {
     registerSuggestionRoutes(scope, {
       service: suggestions.service,
+      desk: suggestions.desk,
       callbackRegistry: registry,
       agentKeyRegistry,
+      resolveByline: async (actor) => {
+        const execution = actor.invocationId ? await turnExecutionStore.get(actor.invocationId) : null;
+        return execution?.executionKind === 'watcher' &&
+          execution.userId === actor.userId &&
+          execution.threadId === actor.threadId &&
+          execution.catId === actor.catId
+          ? 'watcher'
+          : 'cat';
+      },
+      authorizeActor: async (actor, operation) => {
+        const record = actor.invocationId ? await registry.peekRecord(actor.invocationId) : null;
+        if (record?.toolExecutionPolicy?.mode !== 'watcher') return true;
+        return (
+          actor.byline === 'watcher' &&
+          (operation === 'facts' || (await watcherMaySpeak(actor.userId, actor.threadId, actor.catId)))
+        );
+      },
     });
   });
   const { createContentModificationIntegration } = await import(
@@ -7512,6 +7756,7 @@ async function main(): Promise<void> {
     ),
     speech: outboundSpeech,
     onPublished: subscriptionDrainScheduler.schedule,
+    onMessagePublished: (message) => messagePublishedListener?.(message),
     onPublishFailure: (error, messageId) => {
       app.log.error({ error, messageId }, '[messaging] outbound media publication failed; recovered at next start');
     },
@@ -7716,6 +7961,10 @@ async function main(): Promise<void> {
         });
         const startupRecovery = await reconciler.reconcileOrphans();
         registry.markStartupRecoveryComplete();
+        // History-only Append outcomes must recover even when no Queue row remains.
+        for (const threadId of await messageStore.listUnresolvedAppendThreadIds()) {
+          void queueProcessor.reconcileAppendDeliveries(threadId);
+        }
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
             await queueProcessor.requestDrain(scope.threadId);

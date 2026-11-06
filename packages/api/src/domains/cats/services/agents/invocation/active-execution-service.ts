@@ -13,11 +13,11 @@
  * |-------------------|-------------------------------|------------------------|
  * | live invocation   | record + tracker（KD-23 起不读 draft） | 认识          |
  * | managed command   | dynamicTaskStore (F295)       | **不认识**             |
- * | running child     | TurnExecution ledger (F194)   | **只从 running parent 反查** |
+ * | running child     | TurnExecution + exact live CLI owner | **只从 running parent 反查** |
  *
  * 旧代码把后两张脸只塞进“候选发现”，定性仍统一走 live classifier —— 于是候选进来、定性落空、
  * presence=null，行被终态回落误报成 done/error。所以本模块的核心是 **positive working
- * projection：谁提名，谁定性**。
+ * projection：managed command 自证；child 必须与当前精确 CLI owner 联接**。
  *
  * **R4 P1-1 的形状约束**：owner-truth 两张脸（managed / child）是 **user-scoped 全局枚举**，
  * 每次调用都是一次全量读（Redis 侧是 `SMEMBERS + pipeline HGETALL`）。因此它们每个请求
@@ -27,6 +27,7 @@
  */
 
 import type { DynamicTaskStore } from '../../../../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { CliExecutionOwnerService } from '../../../../../utils/cli-process-ownership.js';
 import {
   isPendingHoldBallWakeTask,
   isRetiredWakeWithRunningManagedCommand,
@@ -41,6 +42,7 @@ import {
   type ActiveInvocationProjection,
   type InvocationRegistryPort,
   type InvocationTrackerLike,
+  type OwnerSnapshot,
   type ResponseStatusReader,
   resolveActiveInvocations,
   resolveActiveInvocationsStrict,
@@ -131,9 +133,10 @@ export function listManagedCommandExecutions(
   return executions;
 }
 
-/** 一个 running child TurnExecution 的 owner truth 投影（F194 执行面）。 */
+/** 一个 running child TurnExecution 的候选投影；working 另需当前 owner 证据。 */
 export interface RunningChildExecutionProjection {
   readonly invocationId: string;
+  readonly parentInvocationId: string;
   readonly threadId: string;
   readonly catId: string;
   readonly startedAt: number;
@@ -156,7 +159,11 @@ export interface WorkingPresence {
  * （Redis 侧 = A 次 `SMEMBERS + pipeline HGETALL`），最坏 O(A²)。
  */
 export interface ActiveExecutionSnapshot {
-  /** 四源并集的稀疏候选。 */
+  readonly ownerSnapshot: OwnerSnapshot;
+  readonly unverifiedThreadIds: ReadonlySet<string>;
+  /** Running child candidates keep their cat coordinate for thread-level control uncertainty. */
+  runningChildCatIds(threadId: string): readonly string[];
+  /** 执行记录、当前 tracker/CLI owner 与 managed command 的稀疏候选并集。 */
   readonly threadIds: readonly string[];
   /** 是否所有候选源都成功贡献。`false` ⇒ union 可能漏报，调用方必须 fail-closed。 */
   readonly complete: boolean;
@@ -181,6 +188,7 @@ export interface ActiveExecutionServiceDeps {
   readonly responseStatus?: ResponseStatusReader;
   readonly turnExecutionStore?: Pick<ITurnExecutionStore, 'listByParent' | 'listRunningByUser'>;
   readonly invocationRegistry?: InvocationRegistryPort;
+  readonly cliExecutionOwnerService?: Pick<CliExecutionOwnerService, 'listLive'>;
   readonly dynamicTaskStore?: Pick<DynamicTaskStore, 'getAll'> &
     Partial<Pick<DynamicTaskStore, 'listManagedCommandCandidates'>>;
   readonly log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void };
@@ -191,7 +199,7 @@ export interface ActiveExecutionService {
   resolveActiveInvocations(threadId: string, userId: string): Promise<ActiveInvocationProjection[]>;
   /** managed command 面的 owner truth。 */
   listManagedCommandExecutions(userId: string): ManagedCommandExecution[];
-  /** running child 面的 owner truth（user-scoped，不经 parent 反查）。 */
+  /** running child 面的候选（user-scoped，不经 parent 反查）。 */
   listRunningChildExecutions(userId: string): Promise<RunningChildExecutionProjection[]>;
   /** **每请求一次**：候选发现 + owner truth 物化。 */
   buildSnapshot(userId: string): Promise<ActiveExecutionSnapshot>;
@@ -231,6 +239,14 @@ function earliestExecutionStart(current: number | undefined, candidate: number):
 }
 
 export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): ActiveExecutionService {
+  const readOwners = async (): Promise<OwnerSnapshot> => {
+    if (!deps.cliExecutionOwnerService) return { complete: true, owners: [] };
+    try {
+      return await deps.cliExecutionOwnerService.listLive();
+    } catch {
+      return { complete: false, owners: [] };
+    }
+  };
   // PR #3763 合流：底层枚举器 principal-blind（route 列表要显示 foreign 占用）；
   // service 消费面（Sidebar 定性/候选发现）保持 per-user 语义不变——是否把 foreign
   // 占用算进 working 是独立设计决策，不在 rebase 合流里夹带。
@@ -245,16 +261,21 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
     if (!deps.turnExecutionStore?.listRunningByUser) return [];
     const records = await deps.turnExecutionStore.listRunningByUser(userId);
     return records
-      .filter((record) => record.status === 'running' && record.userId === userId)
+      .filter((record) => record.status === 'running' && record.userId === userId && record.executionKind !== 'watcher')
       .map((record) => ({
         invocationId: record.invocationId,
+        parentInvocationId: record.parentInvocationId,
         threadId: record.threadId,
         catId: record.catId as string,
         startedAt: record.startedAt,
       }));
   };
 
-  const liveExecutions = (threadId: string, userId: string): Promise<ActiveInvocationProjection[]> =>
+  const liveExecutions = (
+    threadId: string,
+    userId: string,
+    ownerSnapshot: OwnerSnapshot,
+  ): Promise<ActiveInvocationProjection[]> =>
     resolveActiveInvocationsStrict(
       threadId,
       userId,
@@ -262,10 +283,16 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       deps.recordStore,
       deps.responseStatus,
       deps.turnExecutionStore,
+      ownerSnapshot,
+      { verifiedOnly: true },
     );
 
   const buildCandidateSnapshot = async (userId: string, includeManaged: boolean): Promise<ActiveExecutionSnapshot> => {
     const union = new Set<string>();
+    const unverifiedThreadIds = new Set<string>();
+    const childCats = new Map<string, Set<string>>();
+    let ownerSnapshot: OwnerSnapshot = { complete: false, owners: [] };
+    let children: RunningChildExecutionProjection[] = [];
     const ownerTruth = new Map<string, { catIds: Set<string>; activeSince?: number }>();
     const remember = (threadId: string, catId: string, startedAt: number) => {
       if (!threadId || !catId) return;
@@ -274,7 +301,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       truth.activeSince = earliestExecutionStart(truth.activeSince, startedAt);
       ownerTruth.set(threadId, truth);
     };
-    const [trackerOk, recordOk, managedOk, childOk] = await Promise.all([
+    const [trackerOk, recordOk, managedOk, childOk, ownerOk] = await Promise.all([
       collect(
         union,
         () => deps.invocationTracker.listActiveThreadIds?.() ?? [],
@@ -283,7 +310,10 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       collect(
         union,
         () => deps.recordStore?.listRunningThreadIds(userId) ?? [],
-        (id) => id,
+        (id) => {
+          unverifiedThreadIds.add(id);
+          return id;
+        },
       ),
       includeManaged
         ? collect(
@@ -297,15 +327,48 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
         : true,
       collect(
         union,
-        () => listRunningChildren(userId),
+        async () => {
+          children = await listRunningChildren(userId);
+          return children;
+        },
         (execution) => {
-          remember(execution.threadId, execution.catId, execution.startedAt);
+          unverifiedThreadIds.add(execution.threadId);
+          const cats = childCats.get(execution.threadId) ?? new Set<string>();
+          cats.add(execution.catId);
+          childCats.set(execution.threadId, cats);
           return execution.threadId;
         },
       ),
+      collect(
+        union,
+        async () => {
+          ownerSnapshot = await readOwners();
+          return ownerSnapshot.owners.filter((owner) => owner.userId === userId);
+        },
+        (owner) => owner.threadId,
+      ),
     ]);
-    const ownerTruthComplete = managedOk && childOk;
+    // A durable child nominates a thread, but only a live exact owner verifies it.
+    // Tracker-owned rows stay in the canonical live classifier, including its R-terminal filter.
+    const childScopes = new Set(
+      children.map((child) =>
+        JSON.stringify([child.parentInvocationId, child.invocationId, child.threadId, child.catId]),
+      ),
+    );
+    for (const owner of ownerSnapshot.owners) {
+      if (
+        owner.userId !== userId ||
+        deps.invocationTracker.getActiveSlots(owner.threadId).some((slot) => slot.catId === owner.catId)
+      )
+        continue;
+      if (childScopes.has(JSON.stringify([owner.executionId, owner.invocationId, owner.threadId, owner.catId])))
+        remember(owner.threadId, owner.catId, owner.startedAt);
+    }
+    const ownerTruthComplete = managedOk && childOk && ownerOk && ownerSnapshot.complete;
     return {
+      ownerSnapshot,
+      unverifiedThreadIds,
+      runningChildCatIds: (threadId) => [...(childCats.get(threadId) ?? [])],
       threadIds: [...union],
       complete: trackerOk && recordOk && ownerTruthComplete,
       ownerTruthComplete,
@@ -315,7 +378,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
   };
 
   const service: ActiveExecutionService = {
-    resolveActiveInvocations: (threadId, userId) =>
+    resolveActiveInvocations: async (threadId, userId) =>
       resolveActiveInvocations(
         threadId,
         userId,
@@ -324,6 +387,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
         deps.responseStatus,
         deps.turnExecutionStore,
         deps.log,
+        await readOwners(),
       ),
 
     listManagedCommandExecutions: listManaged,
@@ -345,7 +409,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       // 用 strict 版：GET /queue 的 fail-open 降级会把"读失败"伪装成"确实没有 active"。
       let liveOk = true;
       try {
-        for (const execution of await liveExecutions(threadId, userId)) {
+        for (const execution of await liveExecutions(threadId, userId, owner.ownerSnapshot)) {
           catIds.add(execution.catId);
           activeSince = earliestExecutionStart(activeSince, execution.startedAt);
         }
@@ -355,7 +419,11 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       return {
         catIds: [...catIds],
         ...(catIds.size > 0 && activeSince !== undefined ? { activeSince } : {}),
-        complete: liveOk && owner.ownerTruthComplete,
+        complete:
+          liveOk &&
+          owner.ownerTruthComplete &&
+          (catIds.size > 0 || !owner.unverifiedThreadIds.has(threadId)) &&
+          owner.runningChildCatIds(threadId).every((catId) => catIds.has(catId)),
       };
     },
   };

@@ -18,7 +18,16 @@ export interface QualificationContext {
   resultLimit?: number;
   onTrace?: (trace: Record<string, unknown>) => void;
 }
-export type QueryBatchRunner = (batch: QualificationBatch, context: QualificationContext) => Promise<string>;
+export interface QueryBatchContext extends QualificationContext {
+  /** Distinguish this batch's work deadline from cancellation by the caller. */
+  deadlineSignal?: AbortSignal;
+  requestSignal?: AbortSignal;
+  /** Seal protocol-valid output before expiry; publication still waits for normal owned exit. */
+  onResult?: (text: string) => boolean;
+  /** Resolves only on owned OS close, even if the bounded request has already failed. */
+  onTeardown?: (closed: Promise<void>) => void;
+}
+export type QueryBatchRunner = (batch: QualificationBatch, context: QueryBatchContext) => Promise<string>;
 export type QualificationMeta = NonNullable<MessageSearchResponse['meta']['qualification']>;
 
 // One Host-wide bound, shared by all UI/cat/concierge service instances; no retry queue.
@@ -107,6 +116,10 @@ export class MessageQueryQualifier {
           const onAbort = () => batchObservation.abort();
           signal.addEventListener('abort', onAbort, { once: true });
           let failed = false;
+          let resultText: string | undefined;
+          let resultOffered = false;
+          let completed = false;
+          let teardown: Promise<void> | undefined;
           const timer = setTimeout(
             () => controller.abort(new DOMException('Qualification deadline', 'TimeoutError')),
             Math.max(0, context.deadlineAt - Date.now() - 2000),
@@ -116,10 +129,34 @@ export class MessageQueryQualifier {
             const text = await this.run(batch, {
               ...context,
               signal,
+              deadlineSignal: controller.signal,
+              requestSignal: context.signal,
+              onTeardown: (closed) => {
+                teardown = closed;
+              },
+              onResult: (text) => {
+                const eligible = !resultOffered && !signal.aborted && Date.now() < context.deadlineAt - 2000;
+                resultOffered = true;
+                resultText = undefined;
+                if (!eligible) return false;
+                try {
+                  parseQualification(text, batch);
+                  resultText = text;
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
               onTrace: batchObservation.trace,
             });
-            if (!signal.aborted)
+            // A local work timeout cannot undo a result sealed before expiry
+            // once the runner has proved normal teardown. External cancellation wins.
+            if (!context.signal?.aborted && ((!resultOffered && !signal.aborted) || text === resultText)) {
               for (const [key, decision] of parseQualification(text, batch, evidence)) decisions.set(key, decision);
+              completed = true;
+            } else if (resultOffered && !signal.aborted) {
+              throw new Error('Qualification result was not accepted before the work deadline');
+            }
           } catch (error) {
             failed = true;
             batchObservation.trace({
@@ -129,8 +166,12 @@ export class MessageQueryQualifier {
           } finally {
             clearTimeout(timer);
             signal.removeEventListener('abort', onAbort);
-            batchObservation.finish(signal.aborted, failed);
-            inFlight--;
+            batchObservation.finish(signal.aborted && !completed, failed);
+            if (teardown)
+              void teardown.then(() => {
+                inFlight--;
+              });
+            else inFlight--;
           }
         }),
     );

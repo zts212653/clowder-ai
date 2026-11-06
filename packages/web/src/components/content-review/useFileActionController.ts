@@ -134,10 +134,7 @@ export function useFileActionController({
   const openMenu = (x: number, y: number, focus = true) => {
     initialFocus.current = null;
     focusOnOpen.current = focus;
-    setPosition({
-      x: Math.max(8, Math.min(x, window.innerWidth - 308)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 550)),
-    });
+    setPosition({ x, y });
     void refreshInfo();
   };
   useFileMenuHover(

@@ -94,8 +94,9 @@ describe('live member carriers', () => {
     assert.equal(first.value.type, 'session_init');
     assert.equal(registration.dispatcher.capabilities.append, true);
     assert.equal(registration.dispatcher.capabilities.steer, true);
-    assert.match(sdkOptions.systemPrompt, /compiled L0/);
-    assert.match(sdkOptions.systemPrompt, /route identity/);
+    assert.equal(sdkOptions.systemPrompt.snapshot, false);
+    assert.match(sdkOptions.systemPrompt.prompt, /compiled L0/);
+    assert.match(sdkOptions.systemPrompt.prompt, /route identity/);
     assert.equal(sdkOptions.permissionMode, 'plan');
     assert.equal(sdkOptions.extraArgs, undefined, 'the SDK carrier must not synthesize unsupported Claude CLI flags');
     assert.equal(sdkOptions.effort, 'max');

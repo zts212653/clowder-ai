@@ -1,4 +1,5 @@
 import {
+  bringToDeskInputSchema,
   restoreSuggestionKindBodySchema,
   type SuggestionByline,
   type SuggestionView,
@@ -9,6 +10,7 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { SuggestionDesk } from '../domains/suggestions/desk-delivery.js';
 import type {
   SuggestionActor,
   SuggestionFailureCode,
@@ -30,12 +32,18 @@ export interface SuggestionSocketPublisher {
   broadcastToRoom(room: string, event: string, data: unknown): void;
 }
 
+export type SuggestionCallbackOperation = 'offer' | 'receipt' | 'facts' | 'bring';
+
 export interface SuggestionRoutesOptions {
   service: SuggestionService;
+  /** F335 交付三：cats bring a finished work to the desk. */
+  desk?: SuggestionDesk;
   callbackRegistry: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
   /** Who is speaking for a callback actor; the watcher line plugs in its own check. Default: an ordinary cat. */
-  resolveByline?(actor: Omit<SuggestionActor, 'byline'>): SuggestionByline;
+  resolveByline?(actor: Omit<SuggestionActor, 'byline'>): SuggestionByline | Promise<SuggestionByline>;
+  /** `bring` (交付三 desk delivery) speaks to the person like `offer`; only `facts` is read-only. */
+  authorizeActor?(actor: SuggestionActor, operation: SuggestionCallbackOperation): Promise<boolean>;
 }
 
 /** `suggestion_updated` to the conversation's room; the open page swaps the one row in place. */
@@ -80,7 +88,7 @@ const threadParams = z.object({ threadId: z.string().trim().min(1).max(200) }).s
 
 /**
  * F335 交付二「给人的东西」：回话下面那一排。人：列出、点用、撤销 / 恢复、忽略、「设置 › 你」已隐藏的建议；
- * 猫（回调）：发提议、发回执、读按种类的事实（可顺带决定不再提某类）。
+ * 猫（回调）：发提议、发回执、把做好的作品带到桌面（交付三）、读按种类的事实（可顺带决定不再提某类）。
  */
 export function registerSuggestionRoutes(app: FastifyInstance, options: SuggestionRoutesOptions): void {
   registerCallbackAuthHook(app, options.callbackRegistry, {
@@ -162,7 +170,11 @@ export function registerSuggestionRoutes(app: FastifyInstance, options: Suggesti
     return { restored: await service.restoreKind(userId, body.data.catId, body.data.kind) };
   });
 
-  function catActor(request: FastifyRequest, reply: FastifyReply): SuggestionActor | null {
+  async function catActor(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operation: SuggestionCallbackOperation,
+  ): Promise<SuggestionActor | null> {
     const record = requireCallbackAuth(request, reply);
     if (!record) return null;
     const actor = deriveCallbackActor(record);
@@ -173,11 +185,16 @@ export function registerSuggestionRoutes(app: FastifyInstance, options: Suggesti
       invocationId: actor.invocationId,
       ...(actor.parentInvocationId ? { parentInvocationId: actor.parentInvocationId } : {}),
     };
-    return { ...base, byline: options.resolveByline?.(base) ?? 'cat' };
+    const resolved = { ...base, byline: (await options.resolveByline?.(base)) ?? 'cat' };
+    if (options.authorizeActor && !(await options.authorizeActor(resolved, operation))) {
+      reply.code(403).send({ error: 'Watcher is quiet or no longer current', code: 'watcher_quiet' });
+      return null;
+    }
+    return resolved;
   }
 
   app.post('/api/callbacks/suggestions', async (request, reply) => {
-    const actor = catActor(request, reply);
+    const actor = await catActor(request, reply, 'offer');
     if (!actor) return;
     const body = suggestionOfferInputSchema.safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: 'Invalid suggestion', details: body.error.issues });
@@ -185,15 +202,26 @@ export function registerSuggestionRoutes(app: FastifyInstance, options: Suggesti
   });
 
   app.post('/api/callbacks/suggestion-receipts', async (request, reply) => {
-    const actor = catActor(request, reply);
+    const actor = await catActor(request, reply, 'receipt');
     if (!actor) return;
     const body = suggestionReceiptInputSchema.safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: 'Invalid receipt', details: body.error.issues });
     return send(reply, await service.postReceipt(actor, body.data));
   });
 
+  const { desk } = options;
+  if (desk) {
+    app.post('/api/callbacks/desk-deliveries', async (request, reply) => {
+      const actor = await catActor(request, reply, 'bring');
+      if (!actor) return;
+      const body = bringToDeskInputSchema.safeParse(request.body);
+      if (!body.success) return reply.status(400).send({ error: 'Invalid delivery', details: body.error.issues });
+      return send(reply, await desk.bring(actor, body.data));
+    });
+  }
+
   app.post('/api/callbacks/suggestion-facts', async (request, reply) => {
-    const actor = catActor(request, reply);
+    const actor = await catActor(request, reply, 'facts');
     if (!actor) return;
     const body = suggestionFactsQuerySchema.safeParse(request.body ?? {});
     if (!body.success) return reply.status(400).send({ error: 'Invalid query', details: body.error.issues });

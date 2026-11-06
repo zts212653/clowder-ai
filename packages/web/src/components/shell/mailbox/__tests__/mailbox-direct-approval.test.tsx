@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { createApprovalSessions } from '../approval-sessions';
@@ -20,6 +21,7 @@ vi.mock('@/utils/teleport', () => ({ planTeleport: () => ({}), kickTeleportResol
 vi.mock('../../../ThreadSidebar/thread-navigation', () => ({ pushThreadRouteWithHistory: vi.fn() }));
 
 beforeEach(() => {
+  writeShellPresentation('classic');
   observeApiSessionOwner('owner-1');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 });
@@ -102,6 +104,7 @@ async function mountOriginalProposal(extra: Record<string, unknown> = {}) {
   mounted.push(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
   await act(async () =>
     root.render(
@@ -118,7 +121,7 @@ async function mountOriginalProposal(extra: Record<string, unknown> = {}) {
   return { container, detail };
 }
 
-it('hosts the original F128 reason, executor and create action without offering a list detour', async () => {
+it('hosts the classic original F128 reason, executor and create action without offering a list detour', async () => {
   const { container, detail } = await mountOriginalProposal();
   expect(container.textContent).toContain(detail.reason);
   expect(container.textContent).toContain('谁来做');
@@ -135,7 +138,7 @@ const fullScope = {
   acceptedSourceRef: 'file:docs/features/F322-everyday-work-experience.md',
   acceptedRevision: 'a'.repeat(40),
 };
-it('shows the actual parent and complete source of the development authority being granted', async () => {
+it('shows the classic actual parent and complete source of the development authority being granted', async () => {
   const { container } = await mountOriginalProposal({
     parentThreadId: 'parent-contract',
     approvedDevelopmentScope: fullScope,
@@ -165,7 +168,11 @@ it.each([
   expect(container.textContent).toContain(' · 不回报');
   expect(container.textContent).not.toContain('autonomous');
 });
-it('cannot submit a partially readable development scope without its exact accepted source', async () => {
+it.each([
+  'classic',
+  'v2',
+] as const)('cannot submit a partially readable development scope without its exact accepted source (%s)', async (presentation) => {
+  writeShellPresentation(presentation);
   const { featureRef, phaseKey, workUnitRef, acceptedRevision } = fullScope;
   const incomplete = { featureRef, phaseKey, workUnitRef, acceptedRevision };
   const { container } = await mountOriginalProposal({ approvedDevelopmentScope: incomplete });

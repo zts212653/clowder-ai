@@ -1,0 +1,96 @@
+.w-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 1;
+  white-space: nowrap;
+  height: 24px;
+  padding: 0 10px 0 4px;
+  border-radius: 12px;
+  border: 1px solid var(--shell-hairline-strong, #e5dfd5);
+  background: var(--shell-paper, #fffbf6);
+  font-size: 12px;
+  color: var(--shell-ink, #3d3d3a);
+}
+.w-dot {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4d7fa3;
+}
+.w-dot.is-reviewing::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(77, 127, 163, 0.28);
+}
+.w-line {
+  border: 1px dashed var(--shell-hairline-strong, #d8d1c6);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--shell-ink, #3d3d3a);
+  background: var(--shell-paper, #fffbf6);
+}
+.watcher-switch {
+  display: inline-block;
+  position: relative;
+  width: 30px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--cafe-border, #d8d1c6);
+}
+.watcher-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.15s ease;
+}
+.watcher-switch.is-on {
+  background: #4d7fa3;
+}
+.watcher-switch.is-on::after {
+  transform: translateX(12px);
+}
+[data-theme="dark"] .w-chip,
+[data-theme="dark"] .w-line {
+  border-color: var(--cafe-border);
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+}
+@media (max-width: 640px) {
+  .w-chip {
+    font-size: 11px;
+    gap: 5px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.watcher-config-fields > div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+.watcher-config-fields > div > div {
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .watcher-config-fields > div {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+}

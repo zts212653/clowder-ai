@@ -49,7 +49,6 @@ export function MessageDispatchAvatars({
           projection={projection}
           message={message}
           timelineMessages={timelineMessages}
-          pending={pending}
           getCatLabel={getCatLabel}
           agentSource={agentSource}
           whisper={whisper}
@@ -87,6 +86,13 @@ export function MessageDispatchAvatars({
               !source?.lifecycle?.dispatchRefs?.some((ref) => ref.targetId === target),
           );
         }).length;
+        const resumedRefusal =
+          targets.length > 0 &&
+          targets.every((target) =>
+            message.lifecycle?.appendFailures?.some(
+              (failure) => failure.targetId === target && failure.acceptance === 'not_accepted',
+            ),
+          );
         const waiting =
           !entry.autoExecute ||
           targets.length === 0 ||
@@ -95,7 +101,15 @@ export function MessageDispatchAvatars({
         return [
           ...retryRows,
           <li key={entry.id} className="inline-flex flex-wrap items-center gap-1" data-dispatch-queued={entry.id}>
-            <span>{waiting ? (agentSource ? '排队交给' : '排队中 · 等') : '发送中 ·'}</span>
+            <span>
+              {resumedRefusal
+                ? '未并进上一轮，已排入下一轮 ·'
+                : waiting
+                  ? agentSource
+                    ? '排队交给'
+                    : '排队中 · 等'
+                  : '发送中 ·'}
+            </span>
             {targets.map((target) => (
               <span key={target} className="inline-flex items-center gap-1">
                 <CatAvatar catId={target} size={16} />
@@ -103,7 +117,7 @@ export function MessageDispatchAvatars({
               </span>
             ))}
             <span>
-              {targets.length ? (waiting && !agentSource ? '接' : '') : '选择收件猫'}
+              {targets.length ? (waiting && !agentSource && !resumedRefusal ? '接' : '') : '选择收件猫'}
               {ahead > 0 ? `，前面还有 ${ahead} 条` : ''}
             </span>
           </li>,

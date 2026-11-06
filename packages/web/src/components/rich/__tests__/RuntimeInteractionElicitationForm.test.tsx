@@ -3,10 +3,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { writeShellLanguage } from '../../shell/shell-language';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import { RichBlocks } from '../RichBlocks';
 import { RuntimeInteractionCard } from '../RuntimeInteractionCard';
+import { RuntimeInteractionElicitationForm } from '../RuntimeInteractionElicitationForm';
 import {
   block,
   cardRef,
@@ -29,6 +31,7 @@ describe('RuntimeInteractionElicitationForm', () => {
   beforeAll(() => ((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true));
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    observeApiSessionOwner(owner.userId);
     vi.mocked(apiFetch).mockReset();
     writeShellPresentation('classic');
     writeShellLanguage('zh');
@@ -89,7 +92,7 @@ describe('RuntimeInteractionElicitationForm', () => {
 
   it.each([
     ['https://example.com/authorize', 'Open example.com'],
-    ['javascript:alert(1)', 'The link is unavailable; you can still decline or cancel this request.'],
+    ['javascript:alert(1)', 'Could not sync the request'],
   ])('uses English for URL elicitation controls without altering URL safety: %s', async (url, expected) => {
     vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(urlRequest(url)) }));
     writeShellPresentation('v2');
@@ -97,7 +100,8 @@ describe('RuntimeInteractionElicitationForm', () => {
     await render(root);
     expect(container.textContent).toContain(expected);
     expect(container.querySelector('a')?.href ?? null).toBe(url.startsWith('https:') ? url : null);
-    expect(container.textContent).toContain('Open the provider page, then confirm.');
+    if (url.startsWith('https:')) expect(container.textContent).toContain('Open the provider page, then confirm.');
+    else expect(container.querySelector('button')).toBeNull();
   });
 
   it('renders the required URL elicitation message and safe link', async () => {
@@ -116,8 +120,32 @@ describe('RuntimeInteractionElicitationForm', () => {
     vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(unsafe) }));
     await render(root);
     expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toContain('交互状态同步失败');
+    expect(container.querySelector('button')).toBeNull();
+    expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  it('also refuses an unsafe URL at the form boundary without disabling decline or cancel', async () => {
+    const onSubmit = vi.fn();
+    await act(async () =>
+      root.render(
+        <RuntimeInteractionElicitationForm
+          request={urlRequest('javascript:alert(1)')}
+          disabled={false}
+          onSubmit={onSubmit}
+        />,
+      ),
+    );
+    expect(container.querySelector('a')).toBeNull();
     expect(container.textContent).toContain('链接不可用');
     expect(container.textContent).toContain('Open the provider page, then confirm.');
+    const decline = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Decline');
+    const cancel = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Cancel');
+    expect(decline?.disabled).toBe(false);
+    expect(cancel?.disabled).toBe(false);
+    await act(async () => decline?.click());
+    expect(onSubmit).toHaveBeenCalledWith({ kind: 'decision', decisionId: 'decline' });
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 
   it('keeps decline and cancel available while a required field is incomplete', async () => {
@@ -201,7 +229,7 @@ async function render(root: Root): Promise<void> {
   });
 }
 
-function urlRequest(url: string): RuntimeInteractionRequest {
+function urlRequest(url: string): Extract<RuntimeInteractionRequest, { kind: 'elicitation'; mode: 'url' }> {
   return {
     version: 1,
     interactionId: 'interaction-ui',

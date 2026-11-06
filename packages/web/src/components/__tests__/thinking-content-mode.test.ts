@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F097: Thinking UI behavior — updated for CliOutputBlock architecture
  * - 🧠 Thinking: independent collapsible (ThinkingContent)
@@ -10,6 +11,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -45,6 +47,8 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  // These assertions exercise the retained classic presentation explicitly.
+  writeShellPresentation('classic');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -57,6 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
 });
 
 // Empty content + tool events → CLI Output present (toolEvents trigger it) but the

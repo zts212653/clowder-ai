@@ -1,18 +1,24 @@
 ---
 name: collaborative-thinking
-tips_exempt: "This revision clarifies natural-language discovery and existing exploration boundaries; it adds no user-openable capability."
+tips_exempt: "Renewed 2026-11-03: takes over the 「专家辩论」「多猫分析」「三猫讨论」 wording from the retired expert-panel; the existing capability-expert-panel tip already teaches 「开个专家辩论」 and now anchors to capability-wakeup-index §8, so no new tip is needed."
 description: >
   单人或多猫的创意探索、独立思考、讨论收敛。
-  Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
+  Use when: 有目标但不知道怎么做、已有方向反复不满意、头脑风暴 / brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
   Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
   Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
 triggers:
   - "不知道怎么做"
   - "怎么改都不满意"
   - "brainstorm"
+  - "头脑风暴"
   - "讨论"
   - "多猫独立思考"
+  - "专家辩论"
+  - "多猫分析"
+  - "三猫讨论"
   - "收敛"
+  - "高度深度广度"
+  - "Altitude Range Depth"
   - "讨论结束"
   - "总结一下"
 ---
@@ -37,6 +43,9 @@ triggers:
 
 1. **理解上下文**：先恢复相关事实和已有决定。结合语境理解对方是在举反例、开放探索还是委托交付；只澄清会影响当前理解的未知，不把一句想法加工成需求采访。
 2. **探索方案**：拿出理由、反例和有意义的备选，允许一起换问题。已进入交付设计时，才据真实需求判断哪些功能值得做。
+   头脑风暴时，从这几个方向打开，只展开真有收获的：这一步服务于哪个更高层的结果（高度）；还有哪些行当也在办这件事、该请哪几行一起看（广度）；这一行最好的人用什么工具、从哪份原始材料开始（深度）；哪个未知最可能推翻现在的想法（四象限）；说做不到之前，环境里有什么、能找谁（自我效能）。
+   operator只点名其中一个词时，聚焦那一个方向，按纠偏词表的同名动作回应；需要时再联动其余，不把整套重新铺开。
+   每个词的意思、不算什么和家里的案例，读 [shared-rules](../.cat-cafe-shared-refs/shared-rules.md) Magic Words 的「含义与使用边界」。不写成表。
 3. **呈现进展**：把眼前的新理解或具体稿给对方看，说明重要取舍。提问服务真实疑点，不按字数分段索要确认；对方主动参与和猫主动占用注意力的分寸见 [决策准备](../.cat-cafe-shared-refs/decision-matrix.md#交流准备与时机)。
 4. **收尾**：可以在当前对话说明所得与尚未确定之处。确有后续消费、需要留存且已有授权时，再写设计或讨论记录；讨论结束不等于授权写文件、commit 或开始实现。
 
@@ -60,6 +69,7 @@ Phase 6: 有待决事项时请operator参与；有留存需要时进入 Mode C
 **Phase 1 独立性保护规则（最重要）**：
 - 禁止互看：每只猫独立完成，不预测他人观点
 - 防锚定：有背景材料时，先形成自己想法再参考
+- 各自按 Mode A 第 2 步那几个方向（高度、广度、深度、四象限、自我效能）过一遍，写出真有收获的那几条
 - 展示推理链："我为什么这么想"，不只给结论
 - 标注不确定性：区分确信的结论和猜测
 

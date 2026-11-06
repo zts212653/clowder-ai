@@ -87,6 +87,7 @@ function fixture(t, mode = 'shared') {
   for (const name of ['.cat-cafe', 'credentials', 'data', 'tmp', 'program-data']) mkdirSync(join(root, name));
   const env = {
     CAT_CAFE_CONFIG_ROOT: root,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: root,
     CAT_CAFE_WORKSPACE_ROOT: root,
     CAT_CAFE_RUNTIME_ROOT: resolve('../..'),
     CAT_CAFE_DATA_DIR: join(root, 'data'),

@@ -9,21 +9,9 @@ import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { ChangesPanelV2 } from './ChangesPanelV2';
 import { DiffViewer } from './DiffViewer';
 import { FileIcon } from './FileIcons';
+import { getStatusInfo } from './git-file-status';
 import { PullRequestChangesEmpty, PullRequestChangesStatus } from './PullRequestChangesStatus';
 import { useChangesDiff } from './useChangesDiff';
-
-const statusLabels: Record<string, { label: string; color: string }> = {
-  M: { label: 'M', color: 'text-amber-400' },
-  A: { label: 'A', color: 'text-green-400' },
-  D: { label: 'D', color: 'text-conn-red-text' },
-  R: { label: 'R', color: 'text-blue-400' },
-  '?': { label: 'U', color: 'text-cafe-muted' },
-  '??': { label: 'U', color: 'text-cafe-muted' },
-};
-
-function getStatusInfo(status: string) {
-  return statusLabels[status] ?? { label: status, color: 'text-cafe-muted' };
-}
 
 interface ChangesPanelProps {
   worktreeId: string | null;
@@ -119,7 +107,13 @@ function ChangesPanelClassic({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : 'No uncommitted changes'}
+            {data.isGitRepository === false ? (
+              'Not a Git repository'
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              'No uncommitted changes'
+            )}
           </div>
         )}
       </div>

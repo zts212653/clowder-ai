@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { useThemeStore } from '@/stores/themeStore';
 import * as renderer from '../../dev/oklch-tuner-css';

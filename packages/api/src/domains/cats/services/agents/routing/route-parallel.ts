@@ -105,9 +105,14 @@ import {
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
@@ -256,12 +261,16 @@ async function* routeParallelPrepared(
           signal: catSignal,
         });
       const current = pinnedServices.get(catId);
+      const preparationError = servicePreparationErrors.get(catId);
+      if (!current && terminalExecutionBindingFailure(preparationError) && options.onExecutionBindingRejected)
+        throw preparationError;
       if (!current) return capture();
       const admitted = await invocationServices.admit(
         current,
         () => getService(deps.services, catId, deps.unavailableServices),
         capture,
         catSignal,
+        deps.refreshServices,
       );
       pinnedServices.set(catId, admitted.service);
       return admitted.executionBinding;
@@ -272,17 +281,23 @@ async function* routeParallelPrepared(
     const catId = targetCats[index];
     if (!catId) continue;
     if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
-    else
+    else {
+      const error = result.reason;
+      const terminalReason = terminalExecutionBindingFailure(error);
+      if (
+        executionControls.get(catId)?.signal.aborted ||
+        (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+      )
+        continue;
       yield {
         type: 'error',
         catId,
         errorCode:
-          result.reason instanceof ExecutionAdmissionConflict
-            ? 'execution_binding_conflict'
-            : 'execution_binding_unavailable',
-        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+          error instanceof ExecutionAdmissionConflict ? 'execution_binding_conflict' : 'execution_binding_unavailable',
+        error: error instanceof Error ? error.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
+    }
   }
   targetCats = targetCats.filter((catId) => executionBindings.has(catId));
   if (targetCats.length === 0) {
@@ -2660,6 +2675,23 @@ async function* routeParallelPrepared(
       // Re-querying the map here returns undefined → done event yielded without
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
+      if (ownInvId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvId,
+            ...((turnStoredMessageId ?? lifecycleAdmission?.messageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleAdmission?.messageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleAdmission
+              ? {
+                  noResponseReason: 'empty_turn' as const,
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
+      }
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the

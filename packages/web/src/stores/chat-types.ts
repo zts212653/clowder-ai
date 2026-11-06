@@ -252,6 +252,7 @@ export interface ChatMessage {
       speechContent?: string;
     };
     /** Immutable child execution identity; terminal lifecycle is read from the ledger API. */
+    watcher?: { kind: 'nudge'; sourceInvocationId: string; sourceMessageId: string; watcherInvocationId: string };
     turnExecution?: TurnExecutionMessageProjection;
     /** Non-body child executions attached to the visible turn they assisted. */
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];

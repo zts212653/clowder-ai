@@ -653,8 +653,12 @@ export const featIndexInputSchema = {
 };
 
 export const createTaskInputSchema = {
-  title: z.string().min(1).max(200).describe('Task title — what needs to be done'),
-  why: z.string().max(1000).optional().describe('Why this task matters (context for whoever picks it up)'),
+  title: z.string().min(1).max(200).describe('Task title — what needs to be done; 1–200 UTF-16 code units'),
+  why: z
+    .string()
+    .max(1000)
+    .optional()
+    .describe('Why this task matters; max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes)'),
   ownerCatId: z
     .string()
     .min(1)
@@ -725,7 +729,13 @@ export const updateTaskInputSchema = {
     .describe(
       'New task status. Entrusted work rejects status=done here; its Task owner requires an evidence-backed typed closure action.',
     ),
-  why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
+  why: z
+    .string()
+    .max(1000)
+    .optional()
+    .describe(
+      'Optional replacement for the existing why, not an append; max 1000 UTF-16 code units (JavaScript string.length). Omit or pass an empty string to keep the existing note.',
+    ),
   // F193-E1 P1-4 fix: allow patching dispatchGate on existing tasks
   dispatchGate: z
     .object({
@@ -756,8 +766,19 @@ export const updateTaskInputSchema = {
 };
 
 export const admitEntrustedWorkInputSchema = {
-  title: z.string().trim().min(1).max(200).describe('Title for the canonical entrusted-work Task'),
-  why: z.string().max(1000).optional().describe('Why this work was entrusted and why the Task owns it'),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe('Title for the canonical entrusted-work Task; 1–200 UTF-16 code units after trimming'),
+  why: z
+    .string()
+    .max(1000)
+    .optional()
+    .describe(
+      'Why this work was entrusted and why the Task owns it; max 1000 UTF-16 code units (JavaScript string.length)',
+    ),
   admission: custodyAdmissionRequestV1Schema.describe(
     'Explicit, accepted-offer, or registered-source admission basis with stable source and idempotency coordinates',
   ),
@@ -769,7 +790,13 @@ export const admitEntrustedWorkInputSchema = {
     .describe(
       'Source-backed businessDeadline/reviewBy, plannedStart, actualStart or estimatedCompletion. Preserve the stated meaning; timeHints alone never creates canonical dates.',
     ),
-  artifactRefs: z.array(z.string().trim().min(1).max(1000)).max(64).optional(),
+  artifactRefs: z
+    .array(z.string().trim().min(1).max(1000))
+    .max(64)
+    .optional()
+    .describe(
+      'Initial Artifact refs; max 64 entries, each 1–1000 UTF-16 code units after trimming. Omit if none are known; never discard existing refs just to fit the limit.',
+    ),
 };
 
 export const closeEntrustedWorkInputSchema = {
@@ -794,10 +821,10 @@ export const updateEntrustedWorkInputSchema = {
     'Source-backed deadline, review, plannedStart, actualStart or estimatedCompletion; null clears a fact. Never turn admission time, a forecast or a command timeout into a deadline.',
   ),
   progress: entrustedWorkUpdateActionV1Schema.shape.progress.describe(
-    'Replace the short current summary, nextStep and optional blockerReason with one sourceRef; null clears it. Original Task why stays unchanged. Resuming clears blockerReason.',
+    'Replace the whole progress object: summary, optional nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming, with one sourceRef (1–1000 after trimming). Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress. Original Task why stays unchanged.',
   ),
   artifactRefs: entrustedWorkUpdateActionV1Schema.shape.artifactRefs.describe(
-    'Optional complete replacement of canonical Artifact refs; values are deduplicated and sorted',
+    'Complete replacement of canonical Artifact refs, not an append; max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming. Read read_entrusted_work first and retain all existing refs when adding. Omit to preserve the set; [] clears it. Values are deduplicated/sorted. Never drop existing refs just to fit the limit.',
   ),
 };
 
@@ -813,12 +840,22 @@ export const retryCustodyAdmissionInputSchema = {
   sourceMessageId: z.string().trim().min(1).max(1_000),
   sourceMessageRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   offerId: z.string().trim().min(1).max(1_000),
-  title: z.string().trim().min(1).max(200),
-  why: z.string().max(1_000).optional(),
+  title: z.string().trim().min(1).max(200).describe('Task title; 1–200 UTF-16 code units after trimming'),
+  why: z
+    .string()
+    .max(1_000)
+    .optional()
+    .describe('Why this work was entrusted; max 1000 UTF-16 code units (JavaScript string.length)'),
   intendedOutcome: z.string().trim().min(1).max(4_000),
   closure: entrustedWorkClosureSpecV1Schema,
   time: entrustedWorkV1Schema.shape.time.optional(),
-  artifactRefs: z.array(z.string().trim().min(1).max(1_000)).max(64).optional(),
+  artifactRefs: z
+    .array(z.string().trim().min(1).max(1_000))
+    .max(64)
+    .optional()
+    .describe(
+      'Initial Artifact refs for this admission retry; max 64 entries, each 1–1000 UTF-16 code units after trimming. Preserve existing refs; never discard them just to fit the limit.',
+    ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -3938,7 +3975,7 @@ export const callbackTools = [
       'Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. ' +
       'Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. ' +
       'Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. ' +
-      'TIP: Include a "why" note when marking as blocked — it helps others understand the situation. ' +
+      'TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. ' +
       'F193-E1: Pass dispatchGate to resolve a "missing" dispatch gate (e.g. after cross_posting to the owning thread).',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,
@@ -3965,7 +4002,8 @@ export const callbackTools = [
       'GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=["message:<messageId>"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. ' +
       'The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. ' +
       'Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. ' +
-      'Authorized-source admission fails closed unless its producer grant is registered and current.',
+      'Authorized-source admission fails closed unless its producer grant is registered and current. ' +
+      'LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.',
     inputSchema: admitEntrustedWorkInputSchema,
     handler: handleAdmitEntrustedWork,
     governance: {
@@ -4010,7 +4048,7 @@ export const callbackTools = [
       'Update the current open entrusted-work Task using its exact revision. ' +
       'Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. ' +
       'Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. ' +
-      'Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. ' +
+      'Artifact refs replace the complete canonical set (max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming): read_entrusted_work first and preserve existing refs when adding; never drop refs just to fit. Values are deduplicated/sorted; omitting artifactRefs preserves refs, [] clears them. progress.summary, nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming (JavaScript string.length); progress.sourceRef allows 1–1000 after trimming. Supplied progress replaces the whole object. Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress or one time fact. ' +
       'No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.',
     inputSchema: updateEntrustedWorkInputSchema,
     handler: handleUpdateEntrustedWork,
@@ -4057,7 +4095,8 @@ export const callbackTools = [
       'Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. ' +
       'NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). ' +
       "Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. " +
-      'GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox.',
+      'GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox. ' +
+      'LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.',
     inputSchema: retryCustodyAdmissionInputSchema,
     handler: handleRetryCustodyAdmission,
     governance: {
@@ -4074,7 +4113,7 @@ export const callbackTools = [
       },
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_create_task',
     description:
       'Create a new 🧶 毛线球 (yarn ball) task in the current thread. ' +
@@ -4084,6 +4123,7 @@ export const callbackTools = [
       'Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. ' +
       'GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. ' +
       'TIP: Include a "why" to give context to whoever picks up the task. ' +
+      'LIMITS: title 1–200 and why max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes). ' +
       'F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, ' +
       'provide dispatchGate with status "dispatched" (you already cross_posted to the owning thread) ' +
       'or "not_dispatched" (with reason). If you omit dispatchGate and external F-IDs are detected, ' +

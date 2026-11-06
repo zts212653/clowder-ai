@@ -80,12 +80,6 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
   });
 
-  it('AuditExplorerPanel uses settingsResourceCardClass, not border-[var(--console-border-soft)]', () => {
-    const src = readSrc('audit/AuditExplorerPanel.tsx');
-    expect(src).toContain('settingsResourceCardClass');
-    expect(src).not.toMatch(/className="rounded-lg border border-\[var\(--console-border-soft\)\]/);
-  });
-
   it('ChatMessage bubble has no literal border class or borderColor style', () => {
     const src = readSrc('ChatMessage.tsx');
     expect(src).not.toMatch(/className=\{`border px-4/);
@@ -506,7 +500,6 @@ describe('F190 divider guard — console-scope dividers use semantic class', () 
     'UnifiedAuthModal.tsx',
     'PushSettingsPanel.tsx',
     'ThreadExecutionBar.tsx',
-    'audit/AuditExplorerPanel.tsx',
     'mission-control/WorkflowSopPanel.tsx',
     'mission-control/FeatureRowList.tsx',
     'workspace/WorldPanel.tsx',
@@ -1051,7 +1044,8 @@ describe('#723 round 6 — select/toggle/button primitive convergence', () => {
   });
 
   it('IndexStatus toggles: cafe-accent for on, no emerald/zinc hardcodes on toggle buttons', () => {
-    const src = readSrc('memory/IndexStatus.tsx');
+    expect(readSrc('memory/IndexStatus.tsx')).toContain('<EvidenceFeatureFlag');
+    const src = readSrc('memory/EvidenceFeatureFlag.tsx');
     expect(src).not.toContain('bg-emerald-600');
     expect(src).not.toContain('bg-zinc-400');
     const toggleButtons =
@@ -1348,6 +1342,7 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
   });
 
   it('console modal scrims consistently blur the page behind them', () => {
+    expect(readSrc('ThreadSidebar/ThreadSidebar.tsx')).toContain('<ThreadDeleteConfirmDialog');
     const modalOverlayFiles = [
       'Lightbox.tsx',
       'VoteConfigModal.tsx',
@@ -1369,7 +1364,7 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
       'McpConfigModal.tsx',
       'SteerQueuedEntryModal.tsx',
       'ThreadSidebar/DirectoryPickerModal.tsx',
-      'ThreadSidebar/ThreadSidebar.tsx',
+      'ThreadSidebar/ThreadDeleteConfirmDialog.tsx',
       'ThreadSidebar/ThreadOrganizerModal.tsx',
     ];
 

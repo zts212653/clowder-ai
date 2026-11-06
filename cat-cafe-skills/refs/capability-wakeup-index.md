@@ -126,16 +126,16 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：分步走动 + 视觉提示，配合 Guide Engine
 
-### 8. `collaborative-thinking` / `expert-panel` — 探索与多视角判断
+### 8. `collaborative-thinking` — 探索与多视角判断
 
 **坏直觉**：在同一个方向反复改 / 等人先把答案说清
 **场景 trigger**：
 - 有目标但不知道怎么做，或改了几版仍不满意
 - 架构决定（需要多视角校验）
 - 讨论中需要探索不同解释、方法或方向
-- operator明确要求专家团
+- operator说「头脑风暴」，或「专家辩论」「多猫分析」「三猫讨论」这类要几只猫各自想的说法
 
-**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。用户明确要求专家团时才用 `expert-panel`；普通“帮我分析一下”可以直接回答，需继续探索时走前者。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
+**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。operator说「专家辩论」这类说法时，走它的多猫独立思考（Mode B）；普通“帮我分析一下”可以直接回答，需继续探索时再走它。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
 
 ### 9. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
 
@@ -310,7 +310,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 |---|---|---|
 | 多猫意见不一就无限互 @ 辩论 | `cat_cafe_start_vote` | 结构化表决，N 票收敛，不靠口头来回（v1.1 已进 L0 §8） |
 | 一个个 @ 召集猫开会 | `cat_cafe_multi_mention` | 一次性 @ 多猫进同 thread（L0 §7 quick index 有，但 trigger 易忘） |
-| expert-panel / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
+| 讨论纪要 / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
 | 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
 | review 后 lesson 散在脑子里 | `cat_cafe_review_distillation` | 蒸馏 review 结论沉淀（配合 mark_generalizable） |
 | 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_propose_profile_update` | 提议更新 relationship primer（F231）；回答”operator是谁 / 咱们怎样相处”，不是通用质量判断；owner-wide 共享事实加 `targetLayer:'corpus'`；工具在 deferred list 需先 `tool_search` |

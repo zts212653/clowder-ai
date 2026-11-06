@@ -153,7 +153,7 @@ export async function buildSessionBootstrap(
 
   // Only the home chain determines the human-facing ordinal and count.
   const active = await sessionChainStore.getActive(catId, threadId, opts.ownerUserId);
-  const currentSeq = active ? active.seq : fullChain.length;
+  const currentSeq = active ? active.seq : chain.length;
   const activeHome = chain.find((session) => session.id === active?.id);
   const { ordinal: displaySeq, count: homeCount } = getHomeSessionPosition(fullChain, activeHome?.id);
   const { ordinal: previousDisplaySeq } = getHomeSessionPosition(fullChain, prevSession.id);

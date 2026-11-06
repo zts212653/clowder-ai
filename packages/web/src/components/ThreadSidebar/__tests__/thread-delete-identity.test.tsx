@@ -30,8 +30,6 @@ describe('thread deletion identity boundary', () => {
   let harness: ThreadSidebarHarness;
   let probeRoot: Root | undefined;
   let probeContainer: HTMLDivElement | undefined;
-  const quickDelete = () => harness.container.querySelector<HTMLButtonElement>('[data-testid="thread-quick-delete"]')!;
-  const remember = () => harness.container.querySelector<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!;
   const confirm = () =>
     Array.from(harness.container.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === '移入回收站',
@@ -71,14 +69,23 @@ describe('thread deletion identity boundary', () => {
   ])('discards an open confirmation when identity changes through $owners', async ({ owners }) => {
     await harness.render();
     const save = vi.spyOn(window.localStorage, 'setItem');
-    act(() => quickDelete().click());
-    act(() => remember().click());
+    act(() => harness.container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    act(() =>
+      Array.from(harness.container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === '删除对话')!
+        .click(),
+    );
     act(() => owners.forEach(observeApiSessionOwner));
     expect(harness.container.querySelector('[role="dialog"]')).toBeNull();
     expect(mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0);
     expect(save).not.toHaveBeenCalled();
-    act(() => quickDelete().click());
-    expect(remember().checked).toBe(false);
+    act(() => harness.container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    act(() =>
+      Array.from(harness.container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === '删除对话')!
+        .click(),
+    );
+    expect(harness.container.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it('does not execute a retained confirmation callback under a new identity', async () => {
@@ -101,12 +108,12 @@ describe('thread deletion identity boundary', () => {
     act(() => deletion!.requestDelete(thread.id));
     const oldConfirm = deletion!.confirmDelete;
     act(() => observeApiSessionOwner('another-user'));
-    await act(async () => oldConfirm(true));
+    await act(async () => oldConfirm());
     await harness.flush();
     expect(mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0);
   });
 
-  it('does not save an old choice or navigate after identity changes during deletion', async () => {
+  it('does not navigate or show feedback after identity changes during deletion', async () => {
     mockStore.currentThreadId = thread.id;
     await harness.render();
     const save = vi.spyOn(window.localStorage, 'setItem');
@@ -119,8 +126,12 @@ describe('thread deletion identity boundary', () => {
           })
         : originalFetch(path, init),
     );
-    act(() => quickDelete().click());
-    act(() => remember().click());
+    act(() => harness.container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    act(() =>
+      Array.from(harness.container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === '删除对话')!
+        .click(),
+    );
     await act(async () => confirm().click());
     act(() => observeApiSessionOwner('another-user'));
     await act(async () => finishDelete(new Response(null, { status: 204 })));
@@ -148,7 +159,12 @@ describe('thread deletion identity boundary', () => {
       }
       return originalFetch(path, init);
     });
-    act(() => quickDelete().click());
+    act(() => harness.container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    act(() =>
+      Array.from(harness.container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === '删除对话')!
+        .click(),
+    );
     await act(async () => confirm().click());
     await captured.promise;
     const trashReadsBeforeChange = mockApiFetch.mock.calls.filter(

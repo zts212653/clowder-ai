@@ -382,14 +382,14 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   ): Promise<void> {
     return this.options.inventory.transaction(async (transaction) => {
       const current = await transaction.instances.get(authority.instance.pluginInstanceId);
+      const revisionChanged = current?.lifecycleRevision !== authority.instance.lifecycleRevision;
+      const observesStopped =
+        runtimeState === 'stopped' && current?.runtimeState === 'stopped' && failure === undefined;
       if (
         !current ||
         current.lifecycleState !== 'installed' ||
         current.packageDigest !== authority.instance.packageDigest ||
-        // A cancelled start may advance its failure revision while stop joins
-        // it. The observed stop grants nothing and preserves current metadata;
-        // package identity still fences out a replacement executable.
-        (runtimeState !== 'stopped' && current.lifecycleRevision !== authority.instance.lifecycleRevision) ||
+        (revisionChanged && !observesStopped) ||
         (runtimeState !== 'stopped' && current.activationState !== 'enabled')
       ) {
         throw new ExternalPluginRuntimeError(
@@ -397,6 +397,9 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
           `${authority.instance.pluginInstanceId} authority changed`,
         );
       }
+      // Startup cancellation may already have projected stopped at a newer revision.
+      // Observe that terminal state without rewriting its owner's metadata.
+      if (revisionChanged) return;
       const base = failure
         ? withRuntimeFailure(current, failure.record)
         : runtimeState === 'starting'
