@@ -4,8 +4,10 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+vi.mock('@/components/useConfirm', async (original) => original());
 
 import { apiFetch } from '@/utils/api-client';
+import { ConfirmProvider } from '../../../useConfirm';
 import { PluginManagerConfigurationSection } from '../PluginManagerConfigurationSection';
 import { PLUGIN_MANAGER_DESIGN_FIXTURES } from '../plugin-manager-fixtures';
 
@@ -13,11 +15,15 @@ vi.mock('@/hooks/useAgentClientLibraries', () => ({
   useAgentClientLibraries: () => ({ libraries: [], loading: false, error: '' }),
 }));
 
-it('labels independent operations and refreshes status after a sibling succeeds, even after polling expires', async () => {
+it.each([
+  false,
+  true,
+])('sibling success refreshes status without borrowing confirmation (confirm=%s)', async (requiresConfirmation) => {
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.useFakeTimers();
   const host = document.createElement('div');
+  document.body.appendChild(host);
   const root = createRoot(host);
   let generated = false;
   const fields: PluginManagerConfigField[] = [
@@ -51,6 +57,7 @@ it('labels independent operations and refreshes status after a sibling succeeds,
       actions: [
         {
           id: 'status',
+          ...(requiresConfirmation ? { confirm: '此状态操作需要确认' } : {}),
           label: '刷新状态',
           render: 'status',
           resultRender: 'rows',
@@ -90,10 +97,18 @@ it('labels independent operations and refreshes status after a sibling succeeds,
     );
   }
   try {
-    await act(async () => root.render(<Harness />));
+    await act(async () =>
+      root.render(
+        <ConfirmProvider>
+          <Harness />
+        </ConfirmProvider>,
+      ),
+    );
     expect(host.textContent).toContain('订阅消息');
     expect(host.textContent).toContain('发送到目标 Work 对话');
-    expect(host.textContent).toContain('未连接');
+    const statusCalls = () => vi.mocked(apiFetch).mock.calls.filter(([url]) => String(url).endsWith('/status'));
+    if (requiresConfirmation) expect(statusCalls()).toHaveLength(0);
+    else expect(host.textContent).toContain('未连接');
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
@@ -101,10 +116,43 @@ it('labels independent operations and refreshes status after a sibling succeeds,
       [...host.querySelectorAll('button')].find((b) => b.textContent === '生成订阅消息')!.click();
     });
     expect(host.textContent).toContain('完整订阅消息');
+    if (requiresConfirmation) {
+      expect(statusCalls()).toHaveLength(0);
+      const refresh = () => [...host.querySelectorAll('button')].find((b) => b.textContent === '刷新状态')!;
+      const dialogButton = (label: string) =>
+        [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
+          (b) => b.textContent === label,
+        )!;
+      await act(async () => {
+        refresh().click();
+      });
+      expect(statusCalls()).toHaveLength(0);
+      await act(async () => {
+        dialogButton('取消').click();
+      });
+      expect(statusCalls()).toHaveLength(0);
+      await act(async () => {
+        refresh().click();
+      });
+      await act(async () => {
+        dialogButton('确认').click();
+      });
+      expect(statusCalls()).toHaveLength(1);
+      expect(new Headers(statusCalls()[0][1]?.headers).get('x-cat-cafe-owner-confirmed')).toBe('true');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(statusCalls()).toHaveLength(1);
+    } else {
+      expect(statusCalls().length).toBeGreaterThan(1);
+      for (const [, init] of statusCalls())
+        expect(new Headers(init?.headers).has('x-cat-cafe-owner-confirmed')).toBe(false);
+    }
     expect(host.textContent).toContain('等待订阅');
     expect([...host.querySelectorAll('button')].some((b) => b.textContent === '复制')).toBe(true);
   } finally {
     act(() => root.unmount());
+    host.remove();
   }
 });
 afterEach(() => {

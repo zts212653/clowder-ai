@@ -232,7 +232,8 @@ export function OperationRowsRenderer({
     if (previousRefreshRevision.current === refreshRevision) return;
     previousRefreshRevision.current = refreshRevision;
     if (ownerActionsInFlight.current.size > 0) reconcileAfterOwnerActions.current = true;
-    else void list(true);
+    // A sibling action restarts observation; its confirmation cannot authorize this action.
+    else void list(false, true);
   }, [list, refreshRevision]);
 
   useEffect(() => {
