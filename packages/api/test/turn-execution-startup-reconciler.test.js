@@ -183,30 +183,45 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.equal(result.responseLedgerError, 'Error: corrupt ledger record');
   });
 
+  // index.ts owns the listen boundary and Queue resume; the recovery order between them lives in the
+  // one function it calls, which the #1838 two-host restart test also runs.
+  const indexSource = () => readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const recoverySource = () =>
+    readFileSync(
+      new URL('../src/domains/cats/services/agents/invocation/prior-process-execution-recovery.ts', import.meta.url),
+      'utf8',
+    );
+
   test('production wiring recovers children after listen and before queue resume', () => {
-    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const source = indexSource();
     const listenBoundary = source.indexOf('address = await listenBeforeTurnExecutionRecovery');
-    const childRecovery = source.indexOf('new TurnExecutionStartupReconciler');
-    const queueRecovery = source.indexOf('await reconciler.reconcileOrphans()');
+    const recovery = source.indexOf('await recoverPriorProcessExecutions(');
+    const queueResume = source.indexOf('await queueProcessor.requestDrain(scope.threadId)');
+    const steps = recoverySource();
+    const childRecovery = steps.indexOf('new TurnExecutionStartupReconciler');
+    const queueRecovery = steps.indexOf('}).reconcileOrphans()');
 
     assert.ok(listenBoundary >= 0, 'startup must use the post-listen recovery boundary');
-    assert.ok(childRecovery > listenBoundary, 'child recovery must not run before the listen boundary');
-    assert.ok(queueRecovery > childRecovery, 'child recovery must finish before Queue recovery can resume work');
+    assert.ok(recovery > listenBoundary, 'child recovery must not run before the listen boundary');
+    assert.ok(queueResume > recovery, 'Queue scopes resume only after recovery returns');
+    assert.ok(childRecovery >= 0 && queueRecovery > childRecovery, 'child recovery must finish before Queue recovery');
   });
 
   test('production Redis callback admission opens only after startup recovery succeeds', () => {
-    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const source = indexSource();
     assert.match(source, /startupRecoveryRequired:\s*true/);
-    const recovery = source.indexOf('await turnExecutionStore.reconcileStartup');
-    const queueRecovery = source.indexOf('await reconciler.reconcileOrphans()');
-    const admissionOpen = source.indexOf('registry.markStartupRecoveryComplete()');
-    const recoveryFailure = source.indexOf('onRecoveryError:');
+    assert.match(source, /markStartupRecoveryComplete: \(\) => registry\.markStartupRecoveryComplete\(\)/);
+    assert.ok(source.indexOf('await recoverPriorProcessExecutions(') < source.indexOf('onRecoveryError:'));
+    const steps = recoverySource();
+    const recovery = steps.indexOf('await store.reconcileStartup');
+    const queueRecovery = steps.indexOf('}).reconcileOrphans()');
+    const admissionOpen = steps.indexOf('deps.markStartupRecoveryComplete()');
 
     assert.ok(recovery >= 0, 'production startup must reconcile callback auth');
     assert.ok(queueRecovery > recovery, 'Queue/History restart convergence must follow child interruption truth');
     assert.ok(admissionOpen > queueRecovery, 'callback admission cannot open before accepted Queue results converge');
+    // A throw before this line rejects the function, so the recovery error path leaves admission closed.
     assert.ok(admissionOpen > recovery, 'callback admission cannot open before durable auth recovery succeeds');
-    assert.ok(admissionOpen < recoveryFailure, 'the recovery error path must leave callback admission closed');
   });
 
   test('marks only pre-process running children interrupted and reports exact ids', async () => {
@@ -256,9 +271,13 @@ describe('TurnExecutionStartupReconciler', () => {
   });
 
   test('production startup obtains exact live process owners before child interruption', () => {
-    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-    assert.match(source, /cliExecutionOwnerService\.listLive\(\)/);
-    assert.match(source, /protectedInvocationIds:\s*liveExecutionOwners\.owners\.map/);
+    assert.match(indexSource(), /listLiveExecutionOwners: \(\) => cliExecutionOwnerService\.listLive\(\)/);
+    const steps = recoverySource();
+    assert.match(
+      steps,
+      /protectedInvocationIds:\s*\[[\s\S]*\.\.\.liveExecutionOwners\.owners\.map\(\(owner\) => owner\.invocationId\)[\s\S]*\.\.\.windowsJobTeardowns\.liveOwners/,
+    );
+    assert.ok(steps.indexOf('await deps.listLiveExecutionOwners()') < steps.indexOf('childReconciler.reconcile('));
   });
 
   test('is idempotent across duplicate startup calls', async () => {

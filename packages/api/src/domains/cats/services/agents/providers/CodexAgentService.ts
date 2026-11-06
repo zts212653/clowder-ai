@@ -1044,6 +1044,15 @@ function readInitializedProviderVersion(value: unknown): string {
 export class CodexAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
+
+  /**
+   * #1838: on Windows a turn's provider starts either through the exec_json CLI path or a direct
+   * app_server session, both with the turn's invocationId; the unix-socket pool never runs there.
+   * An injected spawnFn owns its own process.
+   */
+  get windowsProviderHosts(): boolean {
+    return this.spawnFn === undefined;
+  }
   private readonly model: string;
   private readonly auditLog: AuditLogSink;
   private readonly rawArchive: RawArchiveSink;
