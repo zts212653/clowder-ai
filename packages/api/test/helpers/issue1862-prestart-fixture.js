@@ -2,9 +2,30 @@ import assert from 'node:assert/strict';
 import { InvocationTracker } from '../../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { QueueProcessor } from '../../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { InvocationRecordStore } from '../../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { lifecycleInputIdentityForStoredMessage } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { queueHttpFixture } from './1398-queue-http-fixture.js';
 
-export async function runPrestartFailure(t, { f, reason, processing, sibling = false }) {
+export async function settlePrestartSibling(f, source, entry) {
+  const identity = lifecycleInputIdentityForStoredMessage(await f.messages.getById(source.id));
+  const patch = {
+    ...identity,
+    from: source.from,
+    targetId: 'opus',
+    statusMessageId: 'successful-opus-response',
+    dispatchedAt: Date.now(),
+  };
+  assert.equal(
+    (await f.messages.advanceLifecycleInputDispatch(source.id, { ...patch, phase: 'dispatched' })).kind,
+    'applied',
+  );
+  assert.equal(
+    (await f.messages.advanceLifecycleInputDispatch(source.id, { ...patch, phase: 'settled' })).kind,
+    'applied',
+  );
+  assert.equal((await f.queue.retireClaimedLifecycleTarget(source.threadId, entry.id, 'opus')).outcome, 'retired');
+}
+
+export async function runPrestartFailure(t, { f, reason, processing, sibling = false, prepareOnly = false }) {
   f ??= await queueHttpFixture(t);
   const threadId = f.thread.id;
   const source = await f.messages.append({
@@ -31,11 +52,22 @@ export async function runPrestartFailure(t, { f, reason, processing, sibling = f
     autoExecute: true,
     ownerAuthProvenance: 'strict',
   });
-  assert.ok(await f.queue.markProcessingByIdDurable(threadId, entry.id, 'gemini'));
+  if (sibling === 'failed' || sibling === 'settled')
+    assert.ok(
+      await f.queue.markProcessingGroupAcrossUsersDurable(
+        threadId,
+        { entryId: entry.id, targetCats: source.mentions },
+        [entry.id],
+      ),
+    );
+  else assert.ok(await f.queue.markProcessingByIdDurable(threadId, entry.id, 'gemini'));
   if (processing) assert.equal(await f.queue.commitClaimedProcessing(threadId, [entry.id]), true);
+  if (sibling === 'settled') {
+    await settlePrestartSibling(f, source, entry);
+  }
   const tracker = new InvocationTracker();
   tracker.start(threadId, 'codex', 'owner', ['codex'], 'busy-caller');
-  if (sibling) tracker.start(threadId, 'opus', 'owner', ['opus'], 'busy-sibling');
+  if (sibling && sibling !== 'failed') tracker.start(threadId, 'opus', 'owner', ['opus'], 'busy-sibling');
   const processor = new QueueProcessor({
     queue: f.queue,
     invocationTracker: tracker,
@@ -50,6 +82,8 @@ export async function runPrestartFailure(t, { f, reason, processing, sibling = f
     entryId: entry.id,
     userId: 'owner',
   });
-  const outcome = await processor.failPrestartProcessingGroup(threadId, 'gemini', 'owner', reason);
+  const outcome = prepareOnly
+    ? undefined
+    : await processor.failPrestartProcessingGroup(threadId, 'gemini', 'owner', reason);
   return { ...f, source, entry, threadId, processor, outcome };
 }

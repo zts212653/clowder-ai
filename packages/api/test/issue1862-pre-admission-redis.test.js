@@ -10,6 +10,7 @@ import { InvocationTracker } from '../dist/domains/cats/services/agents/invocati
 import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { RedisQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { RedisInvocationRecordStore } from '../dist/domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { RedisThreadStore } from '../dist/domains/cats/services/stores/redis/RedisThreadStore.js';
 import { queueHttpFixture } from './helpers/1398-queue-http-fixture.js';
@@ -25,12 +26,13 @@ function isolatedClient(keyPrefix) {
 }
 
 async function redisFixture(t, redis, threadId) {
-  return queueHttpFixture(t, {
+  const fixture = await queueHttpFixture(t, {
     messageStore: new RedisMessageStore(redis, { ttlSeconds: 0 }),
     threadStore: new RedisThreadStore(redis, { ttlSeconds: 0 }),
     ledgerStore: new RedisQueueLedgerStore(redis),
     threadId,
   });
+  return { ...fixture, invocationRecordStore: new RedisInvocationRecordStore(redis) };
 }
 
 if (process.send && process.env.ISSUE1862_CRASH_FIXTURE) {
@@ -38,21 +40,109 @@ if (process.send && process.env.ISSUE1862_CRASH_FIXTURE) {
   const socket = process.env.ISSUE1862_REDIS_SOCKET;
   const redis = socket ? new Redis({ path: socket, keyPrefix }) : isolatedClient(keyPrefix);
   const f = await redisFixture({ after() {} }, redis);
-  const commit = f.queue.terminalizeClaimedAdmissionFailure.bind(f.queue);
-  f.queue.terminalizeClaimedAdmissionFailure = async (...args) => {
-    const result = await commit(...args);
-    assert.equal(result.kind, 'applied');
-    const [, source, entry] = args;
-    process.send(
-      { threadId: source.threadId, sourceId: source.id, entryId: entry.id, failureId: result.failureMessage.id },
-      () => process.exit(0),
-    );
-    await new Promise(() => {});
-  };
-  await runDispatch({ after() {} }, { f });
+  if (process.env.ISSUE1862_CRASH_STAGE === 'caller') {
+    const dispatched = await runDispatch({ after() {} }, { f });
+    const [wake] = await f.queue.listAllDurable(dispatched.threadId);
+    f.agents.get(dispatched.caller).implementationSnapshot = () => ({
+      key: 'wrong-caller',
+      generation: 'fixture',
+      clientId: 'kimi',
+    });
+    f.router.refreshFromRegistry(f.agents);
+    dispatched.invocationTracker.complete(dispatched.threadId, dispatched.caller);
+    const remove = f.queue.removeProcessedAcrossUsersDurable.bind(f.queue);
+    f.queue.removeProcessedAcrossUsersDurable = async (...args) => {
+      const result = await remove(...args);
+      if (args[1] === wake.id) {
+        const record = (
+          await f.invocationRecordStore.listLatestTerminalByThreadIds([dispatched.threadId], dispatched.userId)
+        ).get(dispatched.threadId);
+        process.send(
+          { threadId: dispatched.threadId, failureId: wake.payload.sourceRecordId, recordId: record.id },
+          () => process.exit(0),
+        );
+        await new Promise(() => {});
+      }
+      return result;
+    };
+    await dispatched.processor.processNext(dispatched.threadId, dispatched.userId);
+  } else {
+    const commit = f.queue.terminalizeClaimedAdmissionFailure.bind(f.queue);
+    f.queue.terminalizeClaimedAdmissionFailure = async (...args) => {
+      const result = await commit(...args);
+      assert.equal(result.kind, 'applied');
+      const [, source, entry] = args;
+      process.send(
+        { threadId: source.threadId, sourceId: source.id, entryId: entry.id, failureId: result.failureMessage.id },
+        () => process.exit(0),
+      );
+      await new Promise(() => {});
+    };
+    if (process.env.ISSUE1862_CRASH_STAGE === 'prestart')
+      await runPrestartFailure({ after() {} }, { f, reason: 'prestart_timeout', processing: true, sibling: 'failed' });
+    else await runDispatch({ after() {} }, { f });
+  }
 } else {
   const isolated = !redisIsolationSkipReason(redisUrl);
   const owned = !isolated && process.platform !== 'win32' ? ownedRedisFixture('issue1862-admission') : null;
+  for (const stage of ['prestart', 'caller']) {
+    test(
+      `Redis process loss preserves ${stage === 'prestart' ? 'the complete failed cohort' : 'the retired wake diagnosis'}`,
+      {
+        skip: !isolated && !owned && 'Windows requires an isolated Redis runner',
+      },
+      async (t) => {
+        const prefix = `issue1862:${randomUUID()}:`;
+        const redis = owned ? owned.client(prefix) : isolatedClient(prefix);
+        t.after(() => redis.disconnect());
+        const child = fork(import.meta.filename, [], {
+          execArgv: [],
+          env: {
+            ...process.env,
+            ISSUE1862_CRASH_FIXTURE: prefix,
+            ISSUE1862_CRASH_STAGE: stage,
+            ISSUE1862_REDIS_SOCKET: owned ? redis.options.path : '',
+          },
+        });
+        t.after(() => {
+          if (child.exitCode === null) child.kill();
+        });
+        let receipt;
+        child.once('message', (message) => {
+          receipt = message;
+        });
+        assert.equal((await once(child, 'exit'))[0], 0);
+        assert.ok(receipt);
+        const f = await redisFixture(t, redis, receipt.threadId);
+        await f.queue.hydrateFromLedger(f.messages);
+        if (stage === 'prestart') {
+          const source = await f.messages.getById(receipt.sourceId);
+          assert.deepEqual(
+            source.lifecycle.dispatchRefs.map((ref) => [ref.targetId, ref.phase, ref.statusMessageId]),
+            [
+              ['gemini', 'settled', receipt.failureId],
+              ['opus', 'settled', receipt.failureId],
+            ],
+          );
+          const [wake, ...duplicates] = await f.queue.listAllDurable(receipt.threadId);
+          assert.deepEqual(duplicates, []);
+          assert.deepEqual(wake.targets, ['codex']);
+          assert.equal(wake.payload.sourceRecordId, receipt.failureId);
+        } else {
+          assert.deepEqual(await f.queue.listAllDurable(receipt.threadId), []);
+          const record = await f.invocationRecordStore.get(receipt.recordId);
+          assert.equal(record.status, 'failed');
+          assert.equal(record.error, `a2a_failure_undeliverable:${receipt.failureId}:execution_binding_conflict`);
+        }
+        assert.deepEqual(
+          (await f.messages.getByThread(receipt.threadId))
+            .filter((row) => row.lifecycle?.kind === 'delivery_failure')
+            .map((row) => row.id),
+          [receipt.failureId],
+        );
+      },
+    );
+  }
   for (const processing of [false, true]) {
     test(
       `Redis prestart failure commits its result and caller wake together (processing=${processing})`,

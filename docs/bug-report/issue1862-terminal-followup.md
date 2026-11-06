@@ -11,10 +11,12 @@
 
 ## 失败路径与改动
 
-1. A2A carrier 在 tracker 启动前因 `control_plane_unavailable`、`execution_owner_lost` 或 `prestart_timeout` 失败：原实现只写 History 失败和观察记录，没有 durable caller wake。现在逐目标复用既有失败事务，失败结果、精确 dispatchRef 和 caller wake 一起提交。
-2. 原 caller 的 `a2a_failure` 私有 carrier 遇到确定性执行绑定拒绝：没有公开 messageId，旧分支跳过结算，将同一通知反复退回队列。现在退休该已 claim 的私有通知，保留原 History 失败，并在本次 `InvocationRecord.error` 记录 `a2a_failure_undeliverable:<failureId>:<reason>`。不新增失败链或伪造 response。
+1. A2A carrier 在 tracker 启动前因 `control_plane_unavailable`、`execution_owner_lost` 或 `prestart_timeout` 失败：原实现只写 History 失败和观察记录，没有 durable caller wake。现在同一个未结算 group 一次提交一条 canonical `delivery_failure`、N 个精确 settled dispatchRef 和一个原 caller wake；每个 ref 指向该 group 结果。原 binding rejection 仍按单目标结算，不改变 #1871 的结果粒度。
+2. 原 caller 的 `a2a_failure` 私有 carrier 遇到确定性执行绑定拒绝：没有公开 messageId，旧分支跳过结算，将同一通知反复退回队列。现在先持久化 `InvocationRecord.error` 的 `a2a_failure_undeliverable:<failureId>:<reason>` 诊断，再退休该已 claim 的私有通知。诊断失败保留通知；诊断成功但退休失败可恢复重试。不新增失败链或伪造 response。
 
-`processing` 是进程内投影，`commitClaimedProcessing` 已从持久队列退休目标、移除 claim。因此失败事务支持两种所有权证据：当前 claim，或原队列行中已经没有这个目标。两种验证都在内存事务 / Redis Lua 内完成；仍在队列的目标不能冒充退休 attempt。同一 source 的其他 pending target 保留，已有 dispatchRef 不能被失败结算覆盖。
+`processing` 是进程内投影，`commitClaimedProcessing` 已从持久队列退休目标、移除 claim。因此失败事务支持两种所有权证据：当前 claim 包含整个 cohort，或整个 cohort 都已退出原队列。两种验证都在内存事务 / Redis Lua 内完成；仍在队列的任一目标都阻止退休分支提交。同一 source 的其他 pending target 保留，已有 dispatchRef 不能被失败结算覆盖。group 幂等键使用排序后的完整 target set，重放不依赖数组顺序。
+
+成功 sibling 已有 dispatchRef 时先排除；事务冲突后只在确实出现新 dispatchRef、cohort 严格缩小时重读并重试，不对其他冲突盲目重试。事务确认丢失后，可从已有 settled refs 恢复本进程内的 caller wake 投影。
 
 终态拒绝后的路由 `done` 收尾帧不再把已提交的 admission failure 误记为 invocation 成功。取消、临时 bootstrap 不可用、可重试绑定冲突沿用既有行为。
 
@@ -31,9 +33,10 @@
 
 初始 RED：两个 prestart 用例找不到 caller wake；永久 caller 身份冲突后 wake 仍在 queued。补丁后通过：
 
-- 141 项定向测试：本次回归、#1871 全部内存回归、MessageStore lifecycle、Queue ledger、QueueProcessor 与 zombie 恢复。
-- 32 项真实 Redis 测试：本次两种 prestart 状态的原子写、#1871 提交后进程退出恢复、生命周期事务与 Queue ledger。
+- 147 项定向测试：本次回归、#1871 全部内存回归、MessageStore lifecycle、Queue ledger、QueueProcessor 与 zombie 恢复。
+- 34 项真实 Redis 测试：本次两种 prestart 状态的原子写、多目标 group 提交后进程退出、caller 通知删除后进程退出仍有诊断、#1871 提交后进程退出恢复、生命周期事务与 Queue ledger。
 - live ledger target 省略 claim 的负例拒绝；processing 后 pending sibling 保留；重复 hydrate 不重建通知。
+- 独立审查新增 RED：逐目标事务只有第一目标 ref、成功 sibling 导致中止、删除通知时尚无诊断；再覆盖 target 顺序变化、并发 sibling 结算、prestart 确认丢失以及诊断 / 通知退休分别失败后的恢复。
 - API TypeScript 编译通过；改动文件 Biome 无 error；`git diff --check` 通过。
 
 核心命令（在 `packages/api`）：

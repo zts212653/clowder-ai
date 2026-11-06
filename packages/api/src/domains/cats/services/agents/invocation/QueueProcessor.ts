@@ -2093,21 +2093,31 @@ export class QueueProcessor {
       for (const carrier of retirement.carriers) {
         if (isPublicQueueEntry(carrier)) {
           const sourceMessageId = carrier.payload.messageId;
-          const source = sourceMessageId ? await this.deps.messageStore.getById(sourceMessageId) : null;
+          let source = sourceMessageId ? await this.deps.messageStore.getById(sourceMessageId) : null;
           if (!source) return 'terminalization_failed';
-          const requestedTargets = [...(carrier.claimedTargetIds ?? queueEntryTargetCats(carrier))];
-          const failedAt = Math.max(Date.now(), source.timestamp);
-          const reasonText =
-            reason === 'control_plane_unavailable'
-              ? '执行控制面不可用'
-              : reason === 'execution_owner_lost'
-                ? '执行进程归属已丢失'
-                : '启动阶段超时';
-          const content = `唤起${requestedTargets.join('、') || catId}失败：${reasonText}（${reason}）。来源消息：${source.id}。`;
-          // Each target updates the same source lifecycle; commit them in order.
-          for (const targetId of carrier.sourceCategory === 'a2a' ? requestedTargets : [undefined]) {
+          const attemptTargets = [...(carrier.claimedTargetIds ?? queueEntryTargetCats(carrier))];
+          while (true) {
+            const dispatchedTargets = new Set(source.lifecycle?.dispatchRefs?.map((ref) => ref.targetId));
+            const requestedTargets =
+              carrier.sourceCategory === 'a2a'
+                ? attemptTargets.filter((targetId) => !dispatchedTargets.has(targetId)).sort()
+                : attemptTargets;
+            if (carrier.sourceCategory === 'a2a' && requestedTargets.length === 0) {
+              await this.deps.queue.reprojectFailureWakes(source, attemptTargets);
+              break;
+            }
+            const failedAt = Math.max(Date.now(), source.timestamp);
+            const reasonText =
+              reason === 'control_plane_unavailable'
+                ? '执行控制面不可用'
+                : reason === 'execution_owner_lost'
+                  ? '执行进程归属已丢失'
+                  : '启动阶段超时';
+            const content = `唤起${requestedTargets.join('、') || catId}失败：${reasonText}（${reason}）。来源消息：${source.id}。`;
+            // A processing cohort has no ledger row to recover between per-target writes.
+            // Commit its complete failure result and caller wake in one transaction.
             const failure =
-              targetId === undefined
+              carrier.sourceCategory !== 'a2a'
                 ? await this.deps.messageStore.commitLifecyclePreAdmissionFailure({
                     sourceMessageId: source.id,
                     expectedEntryId: carrier.id,
@@ -2120,14 +2130,30 @@ export class QueueProcessor {
                     this.deps.messageStore,
                     source,
                     carrier,
-                    targetId,
+                    requestedTargets,
                     reason,
                     content,
                   );
-            if (failure.kind !== 'applied' && failure.kind !== 'replayed') return 'terminalization_failed';
+            if (failure.kind !== 'applied' && failure.kind !== 'replayed') {
+              if (carrier.sourceCategory === 'a2a' && failure.kind === 'conflict') {
+                const current = await this.deps.messageStore.getById(source.id);
+                // Retry only concrete sibling progress. The failed cohort strictly shrinks.
+                if (
+                  current &&
+                  requestedTargets.some((targetId) =>
+                    current.lifecycle?.dispatchRefs?.some((ref) => ref.targetId === targetId),
+                  )
+                ) {
+                  source = current;
+                  continue;
+                }
+              }
+              return 'terminalization_failed';
+            }
             this.callerDispatchObservations.registerPersistedSource(failure.inputMessage, requestedTargets);
             this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.inputMessage);
             this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.failureMessage);
+            break;
           }
         }
         const terminal = await this.deps.queue.removeProcessedAcrossUsersDurable(
@@ -4613,7 +4639,7 @@ export class QueueProcessor {
         );
     if (!claimed) return null;
     if (claimed.kind !== 'private_input' || claimed.status !== 'claimed') {
-      await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
+      if (!alreadyClaimed) await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
       throw new Error(`private pre-admission terminalization received ${claimed.kind}: ${claimed.id}`);
     }
     const removed = await this.deps.queue.removeProcessedAcrossUsersDurable(
@@ -5794,10 +5820,16 @@ export class QueueProcessor {
             if (entry.execution.actionSuccessorFence || entry.execution.liveSessionId) return false;
             if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
             if (entry.kind === 'private_input' && entry.sourceCategory === 'a2a_failure') {
+              const terminalError = `a2a_failure_undeliverable:${entry.payload.sourceRecordId}:${reason}`;
+              const diagnosed = await invocationRecordStore.update(invocationId!, {
+                status: 'failed',
+                error: terminalError,
+              });
+              if (!diagnosed) throw new Error(`failure wake diagnostic missing: ${invocationId}`);
+              undeliverableFailureWake = terminalError;
               preAdmissionSettlementAttempted = true;
               if (!(await this.terminalizeUnavailablePrivateEntry(entry, true, reason)))
                 throw new Error(`failure wake terminalization changed: ${entry.id}`);
-              undeliverableFailureWake = `a2a_failure_undeliverable:${entry.payload.sourceRecordId}:${reason}`;
             } else {
               const sources = admissionEntries.filter((candidate) => candidate.claimedTargetIds?.includes(catId));
               if (sources.length === 0 || sources.some((candidate) => !candidate.payload.messageId)) return false;
@@ -6741,7 +6773,7 @@ export class QueueProcessor {
         if (invocationId) {
           await invocationRecordStore.update(invocationId, {
             status: 'failed',
-            error: errMsg,
+            error: undeliverableFailureWake ?? errMsg,
           });
         }
         if (exposeFailure) {
