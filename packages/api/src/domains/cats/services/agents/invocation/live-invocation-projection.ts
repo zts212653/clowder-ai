@@ -324,6 +324,7 @@ export async function resolveActiveInvocations(
   turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
   log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
   ownerSnapshot?: OwnerSnapshot,
+  options: { verifiedOnly?: boolean } = {},
 ): Promise<ActiveInvocationProjection[]> {
   try {
     return await resolveActiveInvocationsStrict(
@@ -334,6 +335,7 @@ export async function resolveActiveInvocations(
       responseStatus,
       turnExecutionStore,
       ownerSnapshot,
+      options,
     );
   } catch (err) {
     // F194 AC-B13: fallback metric — split-brain protection bypassed when this fires.

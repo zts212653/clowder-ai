@@ -392,6 +392,9 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
         deps.turnExecutionStore,
         deps.log,
         await readOwners(),
+        // A degraded parent+child entry stays visible to the Queue list/Stop surface, but it is not
+        // verified active work: this control consumer must not promote it.
+        { verifiedOnly: true },
       ),
 
     listManagedCommandExecutions: listManaged,
