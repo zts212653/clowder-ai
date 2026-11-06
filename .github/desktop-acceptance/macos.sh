@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted && "$(uname -s)" == Darwin ]] || {
   echo 'DMG verification requires a disposable macOS GitHub-hosted runner.' >&2
@@ -42,9 +42,14 @@ finish() {
     status=blocked
   fi
   printf '{"status":"%s","code":"macos-%s","cleanupConfirmed":%s}\n' "$status" "$phase" "$cleanup" > "$evidence/dmg-result.json"
+  if [[ "$exit_code" != 0 ]]; then
+    cat "$evidence/dmg-result.json" >&2
+    if [[ -f "$evidence/dmg.log" ]]; then tail -n 25 "$evidence/dmg.log" >&2; fi
+  fi
   exit "$exit_code"
 }
 trap finish EXIT
+trap 'printf "macOS verification stopped in %s at line %s: %s\n" "$phase" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 assert_free() {
   for port in "$frontend" "$api" "$redis" "$debug"; do
@@ -74,12 +79,15 @@ images=("$distribution"/*.dmg)
 shasum -a 256 "${images[0]}" > "$evidence/distribution-sha256.txt"
 mkdir -p "$mount" "$state" "$root/home" "$root/temp"
 
-phase=install
+phase=attach
 hdiutil attach "${images[0]}" -nobrowse -readonly -mountpoint "$mount" > "$evidence/dmg.log" 2>&1
 mounted=1
+phase=copy
 ditto "$mount/Clowder AI.app" "$install"
+phase=unmount
 hdiutil detach "$mount" >> "$evidence/dmg.log" 2>&1
 mounted=0
+phase=installed-identity
 info="$install/Contents/Info.plist"
 resources="$install/Contents/Resources"
 executable="$install/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$info")"
