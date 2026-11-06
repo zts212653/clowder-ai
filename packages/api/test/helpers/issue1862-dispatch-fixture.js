@@ -107,7 +107,7 @@ export async function runDispatch(
     f.router.refreshFromRegistry(f.agents);
   }
   if (busyCaller) invocationTracker.start(threadId, caller, userId, [caller], 'busy-caller');
-  const records = new InvocationRecordStore();
+  const records = f.invocationRecordStore ?? new InvocationRecordStore();
   const frames = [];
   const processor = new QueueProcessor(
     {
@@ -126,7 +126,7 @@ export async function runDispatch(
   else await drain;
   await waitFor(() => !invocationTracker.getActiveSlots(threadId).some((slot) => targets.includes(slot.catId)));
   if (!unavailable)
-    assert.ok(records.listLatestTerminalByThreadIds([threadId], userId).has(threadId), JSON.stringify(frames));
+    await waitFor(async () => (await records.listLatestTerminalByThreadIds([threadId], userId)).has(threadId));
   assert.equal(captures, unavailable ? 0 : cancel ? 1 : 2, JSON.stringify(frames));
   assert.equal(launches, 0);
   return {
@@ -141,6 +141,7 @@ export async function runDispatch(
     processor,
     frames,
     siblingLaunches,
+    invocationRecordStore: records,
     invocationTracker,
   };
 }

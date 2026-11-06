@@ -105,6 +105,11 @@ import { readProcessActivity } from '../../../../../utils/process-activity-regis
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import {
+  bindWindowsProviderHostScope,
+  createWindowsProviderHostScope,
+  type WindowsProviderHostScope,
+} from '../../../../../utils/windows-provider-host.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
   type MemoryCueInvocationPromptResolver,
@@ -679,6 +684,7 @@ import {
 import { MEMBER_TIMEOUT_REASON, MemberOutputTimeout, type MemberTimeoutEvent } from './member-output-timeout.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
 import { assertToolExecutionPolicySupported, normalizeToolExecutionPolicy } from './tool-execution-policy.js';
+import { findWindowsLiveOwner } from './WindowsJobStopRecovery.js';
 
 function usesAgyNativeCarrier(service: AgentService): boolean {
   return service instanceof AgyNativeAgentService;
@@ -1770,6 +1776,30 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
   const { transport: mcpTransport, context: admittedSharedMcpContext } = sharedMcpLaunch;
   const sharedMcpContext = isScopedMember ? undefined : admittedSharedMcpContext;
+  // #1838: an earlier execution of this exact role that a Windows host job or its exact controller
+  // API still owns is a live writer on the same native session; a per-process session mutex cannot
+  // see it across API instances. Only that positive proof refuses entry, and it must refuse before
+  // registry.create, which replaces the live turn's callback credential. An unknown or unlinked one
+  // is no live owner and settles through the ordinary #1849 path, so it never blocks.
+  if (process.platform === 'win32' && deps.turnExecutionStore) {
+    callerSignal?.throwIfAborted();
+    const running = await deps.turnExecutionStore.listRunningByUser(userId);
+    const liveOwner = await findWindowsLiveOwner({
+      records: running.filter((record) => record.threadId === threadId && record.catId === catId),
+    });
+    if (liveOwner) {
+      // Refused like any admission that ends before an invocation exists: an error, then done.
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'prior_provider_live_owner',
+        error: `同一角色的上一轮执行仍有存活的 owner，暂不能开始新任务。阻塞执行 invocationId=${liveOwner.invocationId}`,
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+      return;
+    }
+  }
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -2325,6 +2355,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
   let providerTeardownUnconfirmed = false;
+  // #1838: this turn's link to the API's kernel job; removed once its terminal and teardown are durable.
+  let windowsHostScope: WindowsProviderHostScope | undefined;
   const unconfirmedTeardownMessage = () => ({
     type: 'status' as const,
     catId,
@@ -5876,6 +5908,22 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         );
         if (!identityHolds) throw new Error('session_identity_changed_before_provider_entry');
       }
+      // #1838: a covered Windows provider runs in hosts whose own kernel jobs own its tree; the API
+      // stays outside every job. The first host is owned and linked to this exact execution BEFORE
+      // the provider is marked started, so an API killed from here on leaves a stop proof the next
+      // instance can join. A host that cannot be owned fails this turn before any provider exists,
+      // while its record can still settle; nothing is launched until the seam takes the host.
+      // An opt-in tmux carrier launches the provider in a pane, never in a host: no link for it.
+      if (
+        process.platform === 'win32' &&
+        service.windowsProviderHosts &&
+        !spawnCliOverride &&
+        !agentCarrierSessionFactory &&
+        deps.turnExecutionStore?.markProviderStarted
+      )
+        windowsHostScope = await createWindowsProviderHostScope({
+          execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
+        });
       if (
         deps.turnExecutionStore?.markProviderStarted &&
         !(await deps.turnExecutionStore.markProviderStarted(invocationId, Date.now()))
@@ -5893,15 +5941,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         throw new Error('execution_boundary_changed_before_provider_entry:implementation');
       const exposureProject = pluginMcpExposureProject(threadProjectPath, workingDirectory);
       if (injectSystemPrompt && !nativeAuthContinuation) _staticIdentityDigest.delete(identityKey);
-      const serviceIter = bindInvocationPluginMcpView(
+      const serviceIter = bindWindowsProviderHostScope(
         () =>
-          (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
-            ? service.invokeWithContinuityPreflight(continuityPreflight, options)
-            : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
-        localPluginMcpView,
-        params.ownerAuthProvenance === 'strict' && exposureProject
-          ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
-          : undefined,
+          bindInvocationPluginMcpView(
+            () =>
+              (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
+                ? service.invokeWithContinuityPreflight(continuityPreflight, options)
+                : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
+            localPluginMcpView,
+            params.ownerAuthProvenance === 'strict' && exposureProject
+              ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
+              : undefined,
+          ),
+        windowsHostScope,
       );
       activeServiceIterator = serviceIter;
       unclosedServiceIterators.add(serviceIter);
@@ -6827,7 +6879,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         };
       }
       try {
-        if (unclosedServiceIterators.size === 0) {
+        // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
+        // every one of them is verifiably closed; otherwise the turn keeps its stop protection.
+        if (unclosedServiceIterators.size === 0 && (!windowsHostScope || (await windowsHostScope.close()))) {
           terminal = { ...terminal, providerTeardownAt: terminal.endedAt };
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
@@ -6863,6 +6917,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             log.warn({ invocationId, err }, 'F293 durable dispatch signal observation failed');
           }
         }
+        // #1838: a durable terminal with confirmed teardown needs no stop proof; any other state keeps it.
+        if (windowsHostScope && result.record?.status !== 'running' && result.record?.providerTeardownAt !== undefined)
+          windowsHostScope.clearEvidence();
       } catch (err) {
         // A running record is deliberately left for startup reconciliation;
         // never manufacture lifecycle truth from logs or the auth registry.

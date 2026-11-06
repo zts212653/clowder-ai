@@ -1,7 +1,7 @@
 'use client';
 
 import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
-import { deploymentDefaults } from '@cat-cafe/shared';
+import { defaultAcpPoolMaxProcesses, deploymentDefaults } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
@@ -758,7 +758,7 @@ export function AccountSection({
                       value={form.acpMaxLiveProcesses}
                       onChange={(value) => onChange({ acpMaxLiveProcesses: value })}
                       inputMode="numeric"
-                      placeholder="3"
+                      placeholder={String(defaultAcpPoolMaxProcesses(form.clientId))}
                     />
                     <TextField
                       label="ACP Idle TTL (min)"
