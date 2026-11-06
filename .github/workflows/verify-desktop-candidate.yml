@@ -1,40 +1,33 @@
-name: Verify Desktop Candidate
-
-# Consumes existing artifacts. Never builds, tags, publishes or uploads release assets.
+name: Desktop Windows same-package restore diagnosis
 on:
   workflow_dispatch:
     inputs:
       producer-run:
-        description: Artifact-only release-desktop run ID with successful Windows producer job
         required: true
         type: string
       producer-head:
-        description: Exact 40-character public source SHA of that run
         required: true
         type: string
       version:
-        description: Exact candidate semver
         required: true
         type: string
-      diagnose-private-path:
-        description: Diagnostic only, installer restore with the pinned private-path observer
-        required: false
-        default: false
-        type: boolean
-
 permissions:
   contents: read
   actions: read
-
 jobs:
-  windows:
-    name: Install, launch and restore Windows EXE and ZIP
+  restore:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [unaltered, observer]
     env:
       PRODUCER_RUN: ${{ inputs.producer-run }}
-      PRODUCER_HEAD: ${{ inputs.producer-head }}
+      CANDIDATE_SOURCE_SHA: ${{ inputs.producer-head }}
       CANDIDATE_VERSION: ${{ inputs.version }}
+      CANDIDATE_DIRECT_ARTIFACTS: '1'
+      MODE: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,27 +36,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Check candidate verifier contracts
-        run: node --test .github/desktop-acceptance/*.test.mjs
-      - name: Verify producer identity and download exact artifact bytes
+      - name: Verify the exact original producer and allocate test directories
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node .github/desktop-acceptance/input.mjs
-      - name: Exercise both actual distributions in isolated instances
-        if: ${{ !inputs.diagnose-private-path }}
-        shell: pwsh
-        run: node .github/desktop-acceptance/distributions.mjs
-      - name: Diagnose the installed private-path restore (not whole-candidate acceptance)
-        if: ${{ inputs.diagnose-private-path }}
+        run: |
+          if ($env:PRODUCER_RUN -ne '42270800297' -or $env:CANDIDATE_SOURCE_SHA -ne '12514727ac0f4e13384c0ae50607ab4899af1f40' -or $env:CANDIDATE_VERSION -ne '1.14.0') { throw 'Unexpected reproduction coordinates' }
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PRODUCER_RUN/artifacts" --jq '.artifacts[]|select(.name=="windows-installer-1.14.0-attempt-1" and .expired==false)|{id,digest}' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $artifact.id -ne 13532920124 -or $artifact.digest -ne 'sha256:fde036f1f97109c6b5466d6b008be12023ce6a63e0efa3b3f3985ce8f2b3c89d') { throw 'Unexpected original workflow artifact' }
+          $root = Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $root | Out-Null
+          "CANDIDATE_ROOT=$root" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-1.14.0-attempt-1
+          run-id: ${{ inputs.producer-run }}
+          github-token: ${{ github.token }}
+          path: ${{ env.CANDIDATE_ROOT }}/installer-distribution
+      - name: Run same-package install and restore
         shell: pwsh
         run: |
-          $attempt = [guid]::NewGuid().ToString()
-          & .github/desktop-acceptance/windows.ps1 -Distribution installer -AttemptId $attempt -ObservePrivatePath
-      - name: Preserve actual receipts, screenshots and bounded instance logs
+          $files = @(Get-ChildItem -LiteralPath (Join-Path $env:CANDIDATE_ROOT 'installer-distribution') -File)
+          if ($files.Count -ne 1 -or (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash -ne '8B43301AE4551108010D05548BD8D02BC6F0539BBB646F656B9CB56F107EDEA1') { throw 'Installer bytes differ from the original failing attempt' }
+          if ($env:MODE -eq 'observer') {
+            & .github/desktop-acceptance/windows.ps1 -Distribution installer -AttemptId ([guid]::NewGuid().ToString()) -ObservePrivatePath
+          } else {
+            node .github/desktop-acceptance/distributions.mjs installer
+          }
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
         if: always() && env.CANDIDATE_ROOT != ''
-        uses: actions/upload-artifact@v4
         with:
-          name: windows-acceptance-${{ github.run_id }}
+          name: windows-restore-${{ matrix.mode }}
           path: ${{ env.CANDIDATE_ROOT }}/evidence
-          if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
