@@ -765,23 +765,12 @@ function replaceExactLegacyString(
 
 /** Rename only when both visible-name fields are still the old default. */
 function replaceExactLegacyName(target: Record<string, unknown>, identity: NativeToolIdentity): boolean {
-  const currentName = stringField(target, 'name');
-  const currentDisplayName = stringField(target, 'displayName');
-  const legacy = identity.legacy.name;
-  const nameIsLegacy =
-    currentName === legacy &&
-    (currentDisplayName === legacy || currentDisplayName === undefined || currentDisplayName === '');
-  if (!nameIsLegacy) return false;
-  let changed = false;
-  if (currentName !== identity.name) {
-    target.name = identity.name;
-    changed = true;
-  }
-  if (currentDisplayName !== identity.name) {
-    target.displayName = identity.name;
-    changed = true;
-  }
-  return changed;
+  const { name, legacy } = identity;
+  // A missing variant displayName inherits the breed's potentially customized name.
+  if (name === legacy.name || target.name !== legacy.name || target.displayName !== legacy.name) return false;
+  target.name = name;
+  target.displayName = name;
+  return true;
 }
 
 function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: NativeToolIdentity): boolean {
@@ -804,19 +793,23 @@ function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: N
  * Idempotent: after the first successful pass every field no longer matches.
  */
 export function repairLegacyNativeToolIdentities(catalog: { breeds?: Array<Record<string, unknown>> }): boolean {
+  const identityForVariant = (variant: Record<string, unknown>) =>
+    nativeToolIdentityFor({
+      clientId: stringField(variant, 'clientId'),
+      agentProvider: variant.agentProvider === null ? null : stringField(variant, 'agentProvider'),
+      acp: variant.acp,
+    });
   let changed = false;
   for (const breed of catalog.breeds ?? []) {
     const variants = Array.isArray(breed.variants) ? (breed.variants as Array<Record<string, unknown>>) : [];
-    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId) ?? variants[0];
-    const identity = nativeToolIdentityFor({
-      clientId: defaultVariant ? stringField(defaultVariant, 'clientId') : undefined,
-      catId:
-        (defaultVariant ? stringField(defaultVariant, 'catId') : undefined) ??
-        stringField(breed, 'catId') ??
-        stringField(breed, 'id'),
-      acp: defaultVariant?.acp,
-    });
+    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId);
+    const identity = defaultVariant && identityForVariant(defaultVariant);
     if (!identity) continue;
+    const sameTool = variants.every(
+      (variant) => variant === defaultVariant || identityForVariant(variant)?.key === identity.key,
+    );
+    // Variants can inherit breed fields and the default variant's personality.
+    if (!sameTool) continue;
     changed = repairLegacyIdentityRecord(breed, identity) || changed;
     for (const variant of variants) {
       changed = repairLegacyIdentityRecord(variant, identity) || changed;
