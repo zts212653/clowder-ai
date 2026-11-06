@@ -203,14 +203,15 @@ function requestQuit(source = 'unknown') {
 }
 
 const quitApp = () => requestQuit('startup-failure');
-const handleServiceFailure = createServiceFailureHandler({
-  dialog,
-  isQuitting: () => isQuitting,
-  quitApp: () => requestQuit('service-failure'),
-  dbg,
-});
 
 const getLifecycleState = () => ({ isQuitting, quitSource, trayAvailable: Boolean(tray), startupPhase });
+const serviceOptions = {
+  frontendPort: FRONTEND_PORT,
+  apiPort: API_PORT,
+  redisPort: desktopRuntime.redisPort,
+  pluginNetworkFetch: net.fetch.bind(net),
+  onUnexpectedExit: createServiceFailureHandler({ dialog, getState: getLifecycleState, requestQuit, dbg }),
+};
 appLifecycle.installAppLifecycleDiagnostics({ app, lifecycle, requestQuit, shutdown, getState: getLifecycleState });
 
 function sendSplashStatus(msg) {
@@ -295,14 +296,7 @@ app.on('ready', async () => {
   }
   installMacApplicationMenu({ app, Menu, onManualUpdate: checkForUpdatesManually, showAbout });
 
-  services = new ServiceManager(PROJECT_ROOT, {
-    frontendPort: FRONTEND_PORT,
-    apiPort: API_PORT,
-    redisPort: desktopRuntime.redisPort,
-    onStatus: sendSplashStatus,
-    onUnexpectedExit: handleServiceFailure,
-    pluginNetworkFetch: net.fetch.bind(net),
-  });
+  services = new ServiceManager(PROJECT_ROOT, { ...serviceOptions, onStatus: sendSplashStatus });
   ({ updater, updatePrompt } = createDesktopUpdateRuntime({
     app,
     net,
@@ -323,13 +317,7 @@ app.on('ready', async () => {
       if (activeServices) await activeServices.stopAll();
     },
     startServices: async () => {
-      services = new ServiceManager(PROJECT_ROOT, {
-        frontendPort: FRONTEND_PORT,
-        apiPort: API_PORT,
-        redisPort: desktopRuntime.redisPort,
-        onUnexpectedExit: handleServiceFailure,
-        pluginNetworkFetch: net.fetch.bind(net),
-      });
+      services = new ServiceManager(PROJECT_ROOT, serviceOptions);
       await services.startAll();
       await refreshRendererLinkOrigins();
     },

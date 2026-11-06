@@ -1,7 +1,7 @@
 // Native feedback remains available when the Web or API process has already died.
-function createServiceFailureHandler({ dialog, isQuitting, quitApp, dbg }) {
+function createServiceFailureHandler({ dialog, getState, requestQuit, dbg }) {
   return ({ name, code, signal }) => {
-    if (isQuitting()) return;
+    if (getState().isQuitting) return;
     dbg(`Desktop service exited unexpectedly: ${name} code=${code} signal=${signal}`);
     void dialog
       .showMessageBox({
@@ -14,7 +14,7 @@ function createServiceFailureHandler({ dialog, isQuitting, quitApp, dbg }) {
         cancelId: 1,
       })
       .then(({ response }) => {
-        if (response === 0 && !isQuitting()) return quitApp();
+        if (response === 0 && !getState().isQuitting) return requestQuit('service-failure');
       })
       .catch((error) => dbg(`Could not show service failure or quit: ${error.message}`));
   };

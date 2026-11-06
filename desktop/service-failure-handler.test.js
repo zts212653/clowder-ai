@@ -13,8 +13,9 @@ test('native failure notice remains actionable without a renderer or HTTP servic
         return { response: 0 };
       },
     },
-    isQuitting: () => false,
-    quitApp: async () => {
+    getState: () => ({ isQuitting: false }),
+    requestQuit: async (source) => {
+      assert.equal(source, 'service-failure');
       quits += 1;
     },
     dbg: () => {},
@@ -32,8 +33,8 @@ test('dismissing the dialog does not force quit or restart services', async () =
   let quits = 0;
   createServiceFailureHandler({
     dialog: { showMessageBox: async () => ({ response: 1 }) },
-    isQuitting: () => false,
-    quitApp: () => {
+    getState: () => ({ isQuitting: false }),
+    requestQuit: () => {
       quits += 1;
     },
     dbg: () => {},
@@ -45,8 +46,8 @@ test('dismissing the dialog does not force quit or restart services', async () =
 test('quit or update in progress suppresses the runtime prompt', () => {
   createServiceFailureHandler({
     dialog: { showMessageBox: () => assert.fail('must not prompt while quitting') },
-    isQuitting: () => true,
-    quitApp: () => assert.fail('must not request another quit'),
+    getState: () => ({ isQuitting: true }),
+    requestQuit: () => assert.fail('must not request another quit'),
     dbg: () => {},
   })({ name: 'api', code: 1, signal: null });
 });
@@ -59,8 +60,8 @@ test('dialog rejection is observed without an unhandled rejection', async () => 
         throw new Error('dialog unavailable');
       },
     },
-    isQuitting: () => false,
-    quitApp: () => assert.fail('failed dialog is not consent to quit'),
+    getState: () => ({ isQuitting: false }),
+    requestQuit: () => assert.fail('failed dialog is not consent to quit'),
     dbg: (message) => logs.push(message),
   })({ name: 'api', code: 1, signal: null });
   await settle();
