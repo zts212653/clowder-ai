@@ -14,6 +14,8 @@ $parent = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')
 if ([IO.Path]::GetDirectoryName($root) -ne $parent -or [IO.Path]::GetFileName($root) -notmatch '^f330-candidate-[A-Za-z0-9_-]+$') { throw 'Candidate root must be the download-owned temporary directory' }
 $version = $env:CANDIDATE_VERSION
 if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Invalid candidate version' }
+$sourceSha = $env:CANDIDATE_SOURCE_SHA
+if ($sourceSha -and $sourceSha -notmatch '^[a-f0-9]{40}$') { throw 'Invalid candidate source SHA' }
 $evidence = Join-Path $root 'evidence'
 $browser = Join-Path $PSScriptRoot 'browser.mjs'
 $node = (Get-Command node.exe).Source
@@ -99,10 +101,13 @@ foreach ($kind in @($Distribution)) {
   if ($ObservePrivatePath) { $ports += 35474 }
   Assert-Free $ports
   $wrapper = Join-Path $root "$kind-distribution"
-  Expand-OwnedZip (Join-Path $root "$kind-artifact.zip") $wrapper $true
+  if ($env:CANDIDATE_DIRECT_ARTIFACTS -ne '1') {
+    Expand-OwnedZip (Join-Path $root "$kind-artifact.zip") $wrapper $true
+  }
   $distributionFiles = @(Get-ChildItem -LiteralPath $wrapper -File)
   if ($distributionFiles.Count -ne 1 -or $distributionFiles[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
   Get-FileHash -LiteralPath $distributionFiles[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  'install' | Set-Content (Join-Path $output 'phase.txt')
   $logsComplete = $true
   try {
     if ($kind -eq 'installer') {
@@ -117,10 +122,17 @@ foreach ($kind in @($Distribution)) {
     $executables = @(Get-ChildItem -LiteralPath (Join-Path $install 'desktop-dist') -Filter '*.exe' -File | Where-Object { $_.VersionInfo.ProductVersion -eq $version -or $_.VersionInfo.ProductVersion -eq "$version.0" })
     if ($executables.Count -ne 1) { throw 'Expected exactly one executable with the actual candidate ProductVersion' }
     $exe = $executables[0].FullName
+    if ($sourceSha) {
+      foreach ($stamp in @('packages/api/dist/.build-commit', 'packages/web/.next/.build-commit')) {
+        $actual = [IO.File]::ReadAllText((Join-Path $install $stamp)).Trim()
+        if ($actual -ne $sourceSha) { throw "Installed build stamp differs from the selected source: $stamp" }
+      }
+    }
     $executables[0].VersionInfo | Select-Object FileName,ProductVersion,FileVersion,ProductName | ConvertTo-Json | Set-Content (Join-Path $output 'executable-version.json')
     if ($kind -eq 'portable') { Quit-Owned $exe $install $state $ports }
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
     foreach ($phase in @('create','restore')) {
+      $phase | Set-Content (Join-Path $output 'phase.txt')
       Assert-Free $ports
       $observeRestore = $ObservePrivatePath -and $phase -eq 'restore'
       $phaseArgs = if ($observeRestore) { $launchArgs + @('--inspect-brk=127.0.0.1:35474') } else { $launchArgs }
@@ -192,6 +204,7 @@ foreach ($kind in @($Distribution)) {
     Assert-Free $ports
   }
   if (-not $logsComplete) { throw 'Actual startup logs exceed the evidence budget; cannot certify absence of plugin errors' }
+  'initial-plugins' | Set-Content (Join-Path $output 'phase.txt')
   & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
   if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
   @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
