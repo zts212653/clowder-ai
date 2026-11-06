@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "WIN-CLEAN-INSTALL",
+      "level": "L0",
+      "platforms": ["windows-x64"],
+      "title": "真实 EXE 首装、启动和状态回读",
+      "executor": "windows-installer",
+      "setup": "全新程序和数据目录，未被占用的测试端口，适当的安装权限",
+      "steps": "运行候选 EXE，启动安装后的应用，写入测试会话与资料，退出再启动",
+      "expected": "候选构建标识与目标 SHA 一致，渲染器和服务健康，回读同一会话、资料和默认插件状态",
+      "evidence": "安装日志、包哈希、分阶段验证、重启回读和清理记录"
+    },
+    {
+      "id": "MAC-CLEAN-INSTALL",
+      "level": "L0",
+      "platforms": ["macos-arm64", "macos-x64"],
+      "title": "真实 DMG 安装、启动和状态回读",
+      "executor": "macos-dmg",
+      "setup": "对应架构的隔离 macOS 机器，Applications 安装位置空闲",
+      "steps": "挂载候选 DMG，把应用复制到 Applications，卸载镜像，启动应用，写入测试会话与资料，退出再启动",
+      "expected": "运行对应架构的候选应用，服务可用，退出后同一测试状态可恢复",
+      "evidence": "DMG 哈希、应用版本、重启回读和卸载镜像记录"
+    },
+    {
+      "id": "DESKTOP-ONBOARDING",
+      "level": "L0",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "真实桌面首启引导和会话入口",
+      "executor": "computer-use",
+      "setup": "已校验的候选包，干净实例，独占且可交互的桌面会话",
+      "steps": "从安装后的桌面入口启动，观察首启状态，完成或跳过引导，通过主界面创建测试会话",
+      "expected": "引导可以退出，主窗口可用，所创建会话确实出现在本实例",
+      "evidence": "首启、主窗口、创建会话截图，关联同一构建和实例"
+    },
+    {
+      "id": "WIN-PORTABLE",
+      "level": "L1",
+      "platforms": ["windows-x64"],
+      "title": "便携 ZIP 首次启动和重启回读",
+      "executor": "windows-portable",
+      "setup": "全新的独立便携目录及状态目录",
+      "steps": "解压实际 ZIP，从自带入口启动，写入测试会话与资料并重启",
+      "expected": "启动的是对应版本，重启后读到原有测试状态",
+      "evidence": "ZIP 哈希、启动日志、重启回读和清理记录"
+    },
+    {
+      "id": "DESKTOP-PORT-OWNERSHIP",
+      "level": "L1",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "端口已占用时识别实例归属",
+      "executor": "manual",
+      "setup": "用专属测试实例占用候选默认监听端口，记录旧实例 PID 和构建标识",
+      "steps": "启动候选安装实例，比较两个实例的运行进程、数据目录和服务版本",
+      "expected": "候选用自己的服务，或给出可辨识的冲突状态，旧实例仍在运行",
+      "evidence": "监听 PID、程序路径、健康返回、窗口截图",
+      "issues": [1749]
+    },
+    {
+      "id": "DESKTOP-UPGRADE",
+      "level": "L1",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "覆盖升级与历史资源回读",
+      "executor": "manual",
+      "setup": "隔离旧安装和人工创建的会话、设置、工作区、上传样本",
+      "steps": "使用候选安装介质升级，记录安装过程，打开旧会话和样本资源",
+      "expected": "升级状态可辨识，重启后各历史样本可读取且仍归属于同一测试实例",
+      "evidence": "前后版本、安装阶段日志、历史资源读取证据",
+      "issues": [1788, 1789]
+    },
+    {
+      "id": "DESKTOP-PROVIDER",
+      "level": "L2",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "实际客户端回复及重启续聊",
+      "executor": "manual",
+      "setup": "专用授权测试账号与独立原生客户端 HOME",
+      "steps": "在候选包内通过指定 provider 发出测试消息，关闭应用后重新打开并续聊",
+      "expected": "完成真实调用，第二轮可使用第一轮上下文，记录 provider 和 native/ACP 路线",
+      "evidence": "脱敏请求和回复、provider 路线、原生测试会话归属"
+    },
+    {
+      "id": "DESKTOP-INSTALL-PRESENTATION",
+      "level": "L3",
+      "platforms": ["windows-x64", "macos-arm64", "macos-x64"],
+      "title": "安装界面的缩放和语言",
+      "executor": "manual",
+      "setup": "用例负责人确认的语言、显示缩放和 OS 组合",
+      "steps": "打开真实安装界面，核对主要步骤、取消入口和状态提示",
+      "expected": "主要文字与操作完整可见，缩放或翻译不遮挡关键按钮",
+      "evidence": "界面截图及平台、语言和缩放记录"
+    }
+  ],
+  "expectedFailures": []
+}
