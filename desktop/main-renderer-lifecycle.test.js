@@ -17,9 +17,34 @@ function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = fal
   assert.ok(start >= 0 && end > start, 'main window factory must exist');
   const webContents = new EventEmitter();
   let receiveHeaders;
+  let sendHeaders;
+  let currentUrl = 'about:blank';
+  let bypass = false;
+  let debuggerAttached = false;
   webContents.id = 1;
+  webContents.getURL = () => currentUrl;
+  webContents.debugger = {
+    attach: () => {
+      debuggerAttached = true;
+    },
+    isAttached: () => debuggerAttached,
+    detach: () => {
+      debuggerAttached = false;
+    },
+    async sendCommand(method, params) {
+      if (method === 'Network.setBypassServiceWorker') bypass = params.bypass;
+      if (method === 'Page.navigate') {
+        assert.equal(bypass, true);
+        await window.loadURL(params.url);
+      }
+      return {};
+    },
+  };
   webContents.session = {
     webRequest: {
+      onBeforeSendHeaders: (filter, listener) => {
+        sendHeaders = filter ? listener : null;
+      },
       onHeadersReceived: (filter, listener) => {
         receiveHeaders = filter ? listener : null;
       },
@@ -36,20 +61,23 @@ function mainWindowFixture({ assertServices = () => {}, useVisibleRenderer = fal
         window = this;
       }
       setMenu() {}
-      loadURL(url, options) {
+      loadURL(url) {
+        if (url === 'about:blank') return;
         events.push({ name: 'loadURL', url });
+        const details = { url, webContentsId: 1, resourceType: 'mainFrame' };
+        sendHeaders?.({ ...details, requestHeaders: {} }, ({ requestHeaders }) => {
+          assert.equal(requestHeaders['x-clowder-desktop-probe'], '1');
+        });
         const receive = (responseHeaders, statusCode = 200) => {
           let cancelled;
-          receiveHeaders?.(
-            { url, webContentsId: 1, resourceType: 'mainFrame', responseHeaders, statusCode },
-            (response) => {
-              cancelled = response.cancel;
-            },
-          );
+          receiveHeaders?.({ ...details, responseHeaders, statusCode }, (response) => {
+            cancelled = response.cancel;
+          });
           if (cancelled) throw new Error('net::ERR_BLOCKED_BY_CLIENT');
+          currentUrl = url;
         };
         if (navigate) {
-          return navigate(url, options).then(({ responseHeaders, statusCode }) => {
+          return navigate(url).then(({ responseHeaders, statusCode }) => {
             receive(responseHeaders, statusCode);
             this.emit('ready-to-show');
           });
@@ -166,6 +194,7 @@ test('second launch and tray cannot show the pending renderer', async () => {
     getMainWindow: publishedWindow,
   });
   const startup = start();
+  await new Promise(setImmediate);
   recovery.handleSecondInstance([], {});
   tray.emit('double-click');
   const beforeFirstFrame = events.map(({ name }) => name);
@@ -174,6 +203,7 @@ test('second launch and tray cannot show the pending renderer', async () => {
   assert.deepEqual(beforeFirstFrame, ['loadURL']);
   assert.equal(splashShown, 1);
   assert.ok(publishedWindow());
+  assert.equal(publishedWindow().webContents.debugger.isAttached(), false);
 
   phase = 'ready';
   recovery.handleSecondInstance([], {});
@@ -194,6 +224,7 @@ for (const afterNavigation of [false, true]) {
       },
     });
     const startup = start();
+    if (afterNavigation) await new Promise(setImmediate);
     exited = true;
     signalFirstFrame();
     await assert.rejects(startup, /owned Web exited/);

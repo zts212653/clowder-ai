@@ -139,9 +139,6 @@ async function createMainWindow() {
     lifecycle,
     onUnavailable: () => updatePrompt?.markRendererUnavailable(),
   });
-  mainWindow.webContents.once('dom-ready', () => startupTimeline.mark('renderer-dom-ready'));
-  mainWindow.webContents.once('did-finish-load', () => startupTimeline.mark('renderer-did-finish-load'));
-
   mainWindow.on('close', (e) => {
     const decision = decideWindowClose({
       platform: process.platform,
@@ -164,6 +161,10 @@ async function createMainWindow() {
     mainWindow = null;
     mainWindowPresentable = false;
   });
+  await mainWindow.loadURL('about:blank');
+  startupController.signal.throwIfAborted();
+  mainWindow.webContents.once('dom-ready', () => startupTimeline.mark('renderer-dom-ready'));
+  mainWindow.webContents.once('did-finish-load', () => startupTimeline.mark('renderer-did-finish-load'));
   return startupTimeline.runPhase('renderer-visible', () =>
     showVisibleRenderer({
       window: mainWindow,
