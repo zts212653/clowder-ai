@@ -70,6 +70,15 @@ describe('GitPanel shell presentations', () => {
     });
   }
 
+  it('shows the bare-worktree explanation in v2 instead of the raw 409 body', async () => {
+    apiFetchMock.mockImplementation(async () =>
+      Response.json({ error: 'Git worktree required', code: 'git_worktree_required' }, { status: 409 }),
+    );
+    await render();
+    expect(container.textContent).toContain('这是裸 Git 仓库；此视图需要工作树');
+    expect(container.textContent).not.toContain('git_worktree_required');
+  });
+
   it.each(['commit', 'behind-main'] as const)('keeps classic %s subjects in the recovery primitive', async (kind) => {
     writeShellPresentation('classic');
     await render();
