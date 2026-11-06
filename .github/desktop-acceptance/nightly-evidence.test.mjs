@@ -70,6 +70,9 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
       },
     ],
   };
+  write(path.join(root, 'report.json'), { ...JSON.parse(base), catalogDigest: 'd'.repeat(64) });
+  assert.match(run('reconcile', root, receipt).stderr, /case catalog differs from the run/);
+  fs.writeFileSync(path.join(root, 'report.json'), base);
   write(receipt, { ...desktop, attempt: '1' });
   assert.match(run('reconcile', root, receipt).stderr, /attempt does not match the run/);
   write(receipt, { ...desktop, receipts: [{ ...desktop.receipts[0], packageSha256: 'd'.repeat(64) }] });
@@ -87,5 +90,15 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
       ['macos-arm64', 'blocked'],
     ],
   );
+  const macRoot = path.join(root, 'mac-desktop');
+  const macNative = path.join(macRoot, 'desktop-evidence-macos-arm64-attempt-2');
+  fs.mkdirSync(macNative, { recursive: true });
+  fs.writeFileSync(path.join(macNative, 'distribution-sha256.txt'), `${packageSha256}  candidate.dmg\n`);
+  fs.writeFileSync(path.join(macRoot, 'onboarding.png'), 'mac-fixture');
+  const macReceipt = path.join(macRoot, 'desktop.json');
+  write(macReceipt, { ...desktop, receipts: [{ ...desktop.receipts[0], platform: 'macos-arm64' }] });
+  const all = run('reconcile', root, receipt, macReceipt);
+  assert.equal(all.status, 0, all.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8')).status, 'passed');
   assert.equal(fs.readFileSync(path.join(root, 'report.json'), 'utf8'), base);
 });

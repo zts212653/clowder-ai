@@ -17,6 +17,8 @@ created: 2026-11-07
 
 首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，只有干净首装的用例也不会制造争抢。把早期端口占用和预查后竞争补入 `DESKTOP-PORT-OWNERSHIP`，要求记录监听 PID、数据根和渲染器实际加载的内容。旧包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。已合入的源码测试覆盖归属断言，安装包全量仍须保留这一旅程。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
 
+首次合入复盘从试跑源码 `b58412451` 扫到 `12514727`，范围内只有 DSH 图片路由修复。原有续聊用例只验证文本上下文，无法发现图片握手仍绑定旧路由。新增 `DESKTOP-DSH-IMAGE-ROUTE` 为 L2，覆盖视觉、文本和恢复原会话三种结果。该用例依赖专用 DSH 和模型额度，保留在全量选集。见 [合入变更与已有证据](https://github.com/zts212653/clowder-ai/pull/1896)。
+
 ## 触发和证据
 
 [Desktop Nightly](../../.github/workflows/desktop-nightly.yml) 进默认分支后，每天北京时间 00:00 选 `next` 跑双平台冒烟。手动入口可选源分支、平台和测试范围。触发端提交和被测源码提交分别保存。构建与下载按同一 run ID 和 attempt 配对。需要重跑时使用新的手动运行或重跑整个 workflow，避免混用部分重跑前的产物。
@@ -32,8 +34,24 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告、平台证据和候选包，核对 SHA-256 后写出 `desktop-plan.json`。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
 2. 在 Codex 中打开该次运行的用例目录，按选集执行 `computer-use` 用例。为每条保存具体观察和截图。前置条件不满足时记录 `blocked` 和原因。人工用例可按相同方式补录。
 3. 把报告 JSON 放入证据根目录。保持 Actions 下载的 `desktop-evidence-平台-attempt-N` 目录名。在同一位置保存桌面收据 JSON，截图和收据放在一起。收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`，逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。
-4. 在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`。令 `GITHUB_SHA` 为该用例版本。输出 `report-with-desktop.md` 和 `report-with-desktop.json`，保留 Actions 的原始报告。二次汇总只补桌面和人工用例，原生执行结论不由 Agent 修改。
+4. 在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON> [其他平台的收据JSON]`。令 `GITHUB_SHA` 为该用例版本。每份收据和截图、对应平台证据目录一起保存。输出 `report-with-desktop.md` 和 `report-with-desktop.json`，保留 Actions 的原始报告和其他平台已完成的结果。
 
 Codex 定时接入的验收包括一次真实手动首启、一次从 Codex 本地定时任务触发的首启和一次桌面不可用的故障演练。定时任务能否在目标机器调用 Computer Use 和拿到新候选包，需要实际运行才能确认。
 
-设置定时任务时使用独立本地运行，指定专用测试机的仓库目录和单个平台。先查当天北京时间的 Desktop Nightly 定时运行，待它出具报告后执行上述步骤。为每个 run ID 和 attempt 保存一次桌面报告。若当天未触发、构建未出包、桌面锁定或权限不足，保留当轮原因。主动复跑使用同一流程，显式传入 run ID。
+设置定时任务时使用独立本地运行，指定专用测试机的仓库目录和单个平台。把准备命令的 run ID 参数设为 `today`，它只选择当天北京时间的 Desktop Nightly 定时运行。待该轮出具报告后执行上述步骤。为每个 run ID 和 attempt 保存一次桌面报告。若当天未触发、构建未出包、桌面锁定或权限不足，保留当轮原因。主动复跑使用同一流程，显式传入 run ID。
+
+### 定时任务说明
+
+在专用测试机新建 Codex 本地定时任务。按实测构建时长安排本地触发，给 00:00 启动的 GitHub 构建留出时间。将下列说明中的平台和证据根目录替换为测试机的值。
+
+```text
+在本机执行今天的 Clowder AI 桌面回归，只测试 <平台>。在 <证据根目录> 下按 run ID 和 attempt 保存证据，已有完整报告时复用它。
+
+读取仓库 docs/setup/desktop-nightly.md。用 nightly-desktop.mjs 的 today 入口选择当天候选。若该运行还在构建，等待同一运行出具报告，再准备安装包。若超过本机的运行窗口，记录 run ID、最后观察到的阶段和阻塞原因。候选准备失败时保留日志，重试使用新的准备目录。
+
+仅在获准的专用测试机和全新测试实例上安装 desktop-plan.json 中通过哈希校验的包。检查程序目录、数据目录、测试端口和桌面会话。无法确认权限、隔离或窗口时记录阻塞。
+
+按 desktop-plan.json 中的 computer-use 用例顺序实际操作安装后的窗口。逐项记录可见行为、结果和截图。把包哈希及运行身份写入收据，再使用 nightly-evidence.mjs reconcile 生成桌面报告。结束时正常退出本次实例并保存证据路径。
+```
+
+首次验收时按真实手动运行、定时运行、锁屏或无可用窗口三种状态分别留证。三次均须保留可归属的报告，阻塞场景应明确指出未执行的用例。

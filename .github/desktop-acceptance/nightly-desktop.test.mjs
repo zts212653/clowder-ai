@@ -4,7 +4,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { prepareDesktop } from './nightly-desktop.mjs';
+import { findScheduledRun, prepareDesktop } from './nightly-desktop.mjs';
+
+test('the Codex scheduled entry selects only the current Shanghai calendar day', () => {
+  const repository = 'zts212653/clowder-ai';
+  const now = new Date('2026-11-06T16:10:00Z');
+  const yesterday = { id: 100, event: 'schedule', created_at: '2026-11-05T16:08:00Z' };
+  const today = { id: 101, event: 'schedule', created_at: '2026-11-06T16:08:00Z' };
+  const gh = (workflow_runs) => (args) => {
+    assert.deepEqual(args, [
+      'api',
+      `repos/${repository}/actions/workflows/desktop-nightly.yml/runs?event=schedule&per_page=10`,
+    ]);
+    return JSON.stringify({ workflow_runs });
+  };
+  assert.equal(findScheduledRun(repository, now, gh([today, yesterday])), '101');
+  assert.throws(() => findScheduledRun(repository, now, gh([yesterday])), /2026-11-07/);
+});
 
 test('desktop preparation stages the same attempt and rejects different installer bytes', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-prepare-test-'));

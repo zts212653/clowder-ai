@@ -177,7 +177,12 @@ foreach ($kind in @($Distribution)) {
       if ($current -and $current.ExecutablePath -eq $owned.ExecutablePath) { Stop-Process -Id $owned.ProcessId -Force -ErrorAction SilentlyContinue }
     }
     $remaining | Select-Object ProcessId,ExecutablePath | ConvertTo-Json | Set-Content (Join-Path $output 'emergency-cleanup.json')
-    if (Test-Path (Join-Path $state 'logs')) { Copy-Item (Join-Path $state 'logs') (Join-Path $output 'logs') -Recurse }
+    foreach ($name in @('main.log','desktop.log','startup-state.json')) {
+      $log = Join-Path $state "data/logs/$name"
+      if (Test-Path -LiteralPath $log -PathType Leaf) {
+        Get-Content -LiteralPath $log -Tail 2000 | Set-Content -LiteralPath (Join-Path $output $name)
+      }
+    }
     if (Test-Path (Join-Path $install '.installer-logs')) { Copy-Item (Join-Path $install '.installer-logs') (Join-Path $output 'installer-logs') -Recurse }
     foreach ($record in $records) {
       foreach ($stream in @('stdout','stderr')) {
