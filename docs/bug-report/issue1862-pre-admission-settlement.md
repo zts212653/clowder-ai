@@ -9,9 +9,9 @@ created: 2026-11-06
 
 ## 范围
 
-基线为公开 `next@471b56a4bbe45f331902adeb6c03ca99d19bb30c`。Issue 已分配给当前贡献者账号。按 Issue 时间线、主仓和相关 fork 的 PR 及同步 diff 查重。
+首版基线为公开 `next@471b56a4bbe45f331902adeb6c03ca99d19bb30c`。维护者审查修正版基于 `next@016942d367bd68c6452c7eaff6021518c7c32677`。Issue 已分配给当前贡献者账号。按 Issue 时间线、主仓和相关 fork 的 PR 及同步 diff 查重。
 
-- [#1849](https://github.com/zts212653/clowder-ai/pull/1849) 在 `4f0c8983ada002ea940c83a125fbe969d4972883` 已接收 #1842 的 ACP 环境隔离、刷新重捕获和未送达重试。刷新仍失败时，串并行路由只产出错误帧，Queue 的 caller 回报仍绑定 response admission。两者在路由和 Queue 文件上有交集，职责分属触发器与终局。
+- [#1849](https://github.com/zts212653/clowder-ai/pull/1849) 已通过 `da8be4a68153b54f2b9f7cabc15ce2b5e287f9b0` 合入 `next`，包含 #1842 的 ACP 环境隔离、刷新重捕获和未送达重试。它解决触发器与未送达重领，本 PR 补最终拒绝的失败结算。修正版直接包含 #1849 合入后的代码。
 - [mindfn #255](https://github.com/mindfn/clowder-ai/pull/255) 在 `1d2c6fbdd4cc2ea9e448b5c07f9e128c81088383` 合入 fork。其主仓移植 [#1867](https://github.com/zts212653/clowder-ai/pull/1867) 在 `0365d120c6a8e04cac87e1b07d3fda9a9cd3935b` 仍为 Draft。两者的 diff 移除 teardown 对后续准入的否决权，并回收旧进程所属 execution。未接入启动前失败事务。
 
 ## 故障路径
@@ -44,3 +44,11 @@ ADR-043 D9 将 claim 定义为短暂的持久预留。D10 将 canonical 结果�
 - 退役目标在路由前丢失事务确认时，对账推进原 claim 后会重启同线程 drain。Queue 预解析和执行绑定共享已知的暂时注册不可用分类，原输入和待消费 wake 在 bootstrap 恢复前均保持 queued，沿原退避机制重试。
 - 本修复沿用现有生命周期存储和 Queue 编码，新增两个明确的失败原因。代码回退可整组 revert，旧版仍能读取系统消息正文，但可能忽略新增的 lifecycle 原因，并缺少待消费控制载体的精确失败提示。回退保留已有失败与 source ref，避免重新派发原目标。
 - 使用隔离测试 HOME、进程和 Redis。Provider 是测试替身，已装桌面及真实 DSH 会话留待部署验收。
+
+## 维护者两条 P1
+
+在合入最新 `next` 的未修正组合上运行审查原脚本。两条反例均预期零失败、实际一条失败。原队列行消失，留下了误发的 caller wake。
+
+- 同一实现跨过两次准入捕获发生代次变化时，由注册会话的快照生产点报告可重试冲突。再次捕获仍核对真实 client 身份，持续不相容会结算失败。
+- Queue 判断无诊断的服务缺席前，先核成员仍配置且允许派发。已存在服务、真正无效或已有终态诊断的目标保持原有分类。暂未注册的目标及待消费 caller wake 保留原行。
+- 维护回归核对原 source 和 Queue ID。代次稳定和服务重新登记后，原任务各完成一次。错误 client 只产生一个 canonical 失败，caller 暂缺服务时保留同一 wake，恢复后只消费一次。

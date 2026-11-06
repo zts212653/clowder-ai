@@ -108,7 +108,10 @@ export class RegisteredSessionAgentService implements AgentService {
   private snapshot(binding: PreparedBinding) {
     const failure = this.bindingFailure(binding);
     if (failure || !binding.generation)
-      throw new ExecutionAdmissionConflict(failure ?? 'session_implementation_unavailable');
+      throw new ExecutionAdmissionConflict(
+        failure ?? 'session_implementation_unavailable',
+        failure === 'session_host_generation_changed',
+      );
     const implementation = binding.service?.implementationSnapshot?.();
     return Object.freeze({
       key: this.implementationKey,

@@ -847,8 +847,9 @@ export class AgentRouter {
   }
 
   isRetryableTargetUnavailable(catId: string): boolean {
+    if (Object.hasOwn(this.services, catId) || this.resolveAdmissionTargets([catId]).length === 0) return false;
     const reason = this.unavailableServices.get(catId);
-    return reason !== undefined && isRetryableAgentRegistration(reason);
+    return reason === undefined || isRetryableAgentRegistration(reason);
   }
 
   /**
