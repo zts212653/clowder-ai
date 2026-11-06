@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-test('Windows runner evidence plus a desktop receipt for the same package completes the smoke report', (t) => {
+test('a Windows desktop receipt completes its case and preserves the remote Mac result', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-nightly-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const evidence = path.join(root, 'desktop-evidence-windows-x64-attempt-2');
@@ -25,7 +25,7 @@ test('Windows runner evidence plus a desktop receipt for the same package comple
     GITHUB_REPOSITORY: 'zts212653/clowder-ai',
     NIGHTLY_SUITE: 'smoke',
     NIGHTLY_DATE: '2026-11-07',
-    NIGHTLY_PLATFORMS: '["windows-x64"]',
+    NIGHTLY_PLATFORMS: '["windows-x64","macos-arm64"]',
     NIGHTLY_PLATFORM: 'windows-x64',
     GITHUB_STEP_SUMMARY: '',
   };
@@ -38,10 +38,21 @@ test('Windows runner evidence plus a desktop receipt for the same package comple
 
   const collect = run('collect', evidence);
   assert.equal(collect.status, 0, collect.stderr);
+  const mac = path.join(root, 'desktop-evidence-macos-arm64-attempt-2');
+  fs.mkdirSync(mac);
+  write(path.join(mac, 'receipts.json'), {
+    runId: '123',
+    attempt: '2',
+    source,
+    catalogRevision,
+    platform: 'macos-arm64',
+    receipts: [{ id: 'MAC-CLEAN-INSTALL', platform: 'macos-arm64', status: 'passed', evidence: 'dmg-result.json' }],
+  });
   const blocked = run('report', root);
   assert.equal(blocked.status, 1, blocked.stderr);
   const base = fs.readFileSync(path.join(root, 'report.json'), 'utf8');
   assert.equal(JSON.parse(base).status, 'incomplete');
+  fs.unlinkSync(path.join(mac, 'receipts.json'));
   fs.writeFileSync(path.join(root, 'onboarding.png'), 'fixture');
   const receipt = path.join(root, 'desktop.json');
   const desktop = {
@@ -65,7 +76,16 @@ test('Windows runner evidence plus a desktop receipt for the same package comple
   assert.match(run('reconcile', root, receipt).stderr, /different installation package/);
   write(receipt, desktop);
   const merged = run('reconcile', root, receipt);
-  assert.equal(merged.status, 0, merged.stderr);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8')).status, 'passed');
+  assert.equal(merged.status, 1, merged.stderr);
+  const { cases } = JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8'));
+  assert.deepEqual(
+    cases.map(({ platform, status }) => [platform, status]),
+    [
+      ['windows-x64', 'passed'],
+      ['windows-x64', 'passed'],
+      ['macos-arm64', 'passed'],
+      ['macos-arm64', 'blocked'],
+    ],
+  );
   assert.equal(fs.readFileSync(path.join(root, 'report.json'), 'utf8'), base);
 });
