@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
-import { createAcpServiceForConfig } from '../src/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
+import { createAcpServiceForConfig } from '../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
 import {
   prepareDshSecretPatch,
   verifyDshSecretPatch,
-} from '../src/domains/cats/services/agents/providers/dsh-secret-patch.js';
+} from '../dist/domains/cats/services/agents/providers/dsh-secret-patch.js';
+import { discoverDshRuntime } from '../dist/routes/native-dsh-discovery.js';
+import { probeRuntimeCatalog } from '../dist/routes/runtime-catalog-probe.js';
 
 test('DSH launch pins the selected route before initialize without editing the native profile', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-image-launch-'));
@@ -22,7 +24,7 @@ test('DSH launch pins the selected route before initialize without editing the n
     const patch = first.at(-1);
     assert.ok(patch);
     const content = await readFile(patch, 'utf8');
-    assert.deepEqual(parse(content).find((row: { id?: string }) => row.id === 'acp').config, {
+    assert.deepEqual(parse(content).find((row) => row.id === 'acp').config, {
       provider: 'deepseek-official',
       model: 'deepseek-flash',
     });
@@ -52,7 +54,30 @@ test('DSH launch inherits native defaults when no model is selected', async () =
     const patch = args.at(-1);
     assert.ok(patch);
     const rows = parse(await readFile(patch, 'utf8'));
-    assert.equal(rows.find((row: { id?: string }) => row.id === 'acp').config, undefined);
+    assert.equal(rows.find((row) => row.id === 'acp').config, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy bare model IDs and unknown selections keep the native route without breaking startup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-image-opaque-'));
+  try {
+    const args = ['--profile', 'acp'];
+    const original = await prepareDshSecretPatch('dsh', args, root);
+    for (const selected of [
+      'only-custom-model',
+      '[broken',
+      '["unknown","unknown"]',
+      '["unknown","deepseek-flash"]',
+      '["deepseek-official","unknown"]',
+      '["p"]',
+    ]) {
+      assert.deepEqual(await prepareDshSecretPatch('dsh', args, root, selected), original);
+    }
+    const patch = original.at(-1);
+    assert.ok(patch);
+    assert.equal(verifyDshSecretPatch(patch), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -78,6 +103,72 @@ test('cached Node DSH entrypoints receive the route while generic ACP commands s
   }
 });
 
+test('auto-discovered DSH arguments feed the execution route overlay', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-image-autoadd-'));
+  try {
+    const command = join(root, process.platform === 'win32' ? 'dsh.cmd' : 'dsh');
+    await writeFile(command, '// fixture; no child process is started');
+    const discovered = discoverDshRuntime({ resolveCommand: () => command, dshHome: root });
+    assert.deepEqual(discovered.acp.startupArgs, ['--profile', 'acp']);
+    const vision = '["deepseek-official","deepseek-flash"]';
+    const args = await prepareDshSecretPatch(discovered.acp.command, discovered.acp.startupArgs, root, vision);
+    const rows = parse(await readFile(args.at(-1), 'utf8'));
+    const acp = rows.find((row) => row.id === 'acp');
+    assert.deepEqual(acp.config, { provider: 'deepseek-official', model: 'deepseek-flash' });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('runtime catalog keeps the native default while selecting a member model', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-catalog-default-'));
+  try {
+    const native = [
+      {
+        id: 'model',
+        category: 'model',
+        currentValue: '["gateway","text-model"]',
+        options: [
+          { value: '["gateway","text-model"]', name: 'text-model' },
+          { value: '["deepseek-official","deepseek-flash"]', name: 'deepseek-flash' },
+        ],
+      },
+      {
+        id: 'reasoning_effort',
+        category: 'thought_level',
+        currentValue: 'high',
+        options: [
+          { value: 'high', name: 'high' },
+          { value: 'low', name: 'low' },
+        ],
+      },
+    ];
+    const script = [
+      "const readline=require('node:readline');",
+      'const input=readline.createInterface({input:process.stdin});',
+      `const native=${JSON.stringify(native)};`,
+      "const send=(id,result)=>console.log(JSON.stringify({jsonrpc:'2.0',id,result}));",
+      "input.on('line',(line)=>{const m=JSON.parse(line);",
+      "if(m.method==='initialize') send(m.id,{protocolVersion:1,agentCapabilities:{promptCapabilities:{image:false}}});",
+      "else if(m.method==='session/new') send(m.id,{sessionId:'s1',configOptions:native});",
+      "else if(m.method==='session/set_config_option'){const updated=native.map((o)=>o.id===m.params.configId?{...o,currentValue:m.params.value}:o);send(m.id,{configOptions:updated});}",
+      '});',
+    ].join('\n');
+    const target = '["deepseek-official","deepseek-flash"]';
+    const result = await probeRuntimeCatalog({
+      kind: 'acp',
+      command: process.execPath,
+      args: ['-e', script],
+      cwd: root,
+      model: target,
+    });
+    assert.equal(result.defaultModel, '["gateway","text-model"]');
+    assert.equal(result.selectedModel, target);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('DSH factory reuses an unchanged route and replaces the pool when the selected model changes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-image-factory-'));
   const pools = new Map();
@@ -85,11 +176,13 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
   try {
     const command = join(root, process.platform === 'win32' ? 'dsh.cmd' : 'dsh');
     await writeFile(command, '// fixture; no child process is started');
+    const discovered = discoverDshRuntime({ resolveCommand: () => command, dshHome: root });
+    assert.ok(discovered.acp);
     const base = {
       projectRoot: root,
       bootstrapRoot: join(root, 'bootstrap'),
       profileId: 'dsh-images',
-      acpConfig: { command, startupArgs: ['--profile', 'acp'] },
+      acpConfig: discovered.acp,
       poolRegistry: pools,
       log: { info() {}, warn() {} },
       config: {
@@ -112,7 +205,10 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
     const original = pools.get(base.profileId);
     const launch = original.clientFactory().config;
     const rows = parse(await readFile(launch.args.at(-1), 'utf8'));
-    assert.equal(rows.find((row: { id?: string }) => row.id === 'acp').config?.model, 'deepseek-flash');
+    assert.deepEqual(rows.find((row) => row.id === 'acp').config, {
+      provider: 'deepseek-official',
+      model: 'deepseek-flash',
+    });
     const same = await createAcpServiceForConfig({ ...base, effectiveModel: vision });
     assert.ok(same);
     services.push(same);
@@ -121,6 +217,12 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
     assert.ok(changed);
     services.push(changed);
     assert.notEqual(pools.get(base.profileId), original);
+    const inherited = await createAcpServiceForConfig({ ...base, effectiveModel: '' });
+    assert.ok(inherited);
+    services.push(inherited);
+    const nativeLaunch = pools.get(base.profileId).clientFactory().config;
+    const defaults = parse(await readFile(nativeLaunch.args.at(-1), 'utf8'));
+    assert.equal(defaults.find((row) => row.id === 'acp').config, undefined);
   } finally {
     await Promise.all(services.map((service) => service.disposeHostService()));
     await Promise.all([...pools.values()].map((pool) => pool.closeAll()));

@@ -13,17 +13,21 @@ const MODEL_PREFIX = '# clowder-acp-model: ';
 function template(modelSelection?: string): string {
   let route: { provider: string; model: string } | undefined;
   if (modelSelection?.trim()) {
-    const selection: unknown = JSON.parse(modelSelection);
-    if (
-      !Array.isArray(selection) ||
-      selection.length !== 2 ||
-      typeof selection[0] !== 'string' ||
-      !selection[0].trim() ||
-      typeof selection[1] !== 'string' ||
-      !selection[1].trim()
-    )
-      throw new Error('dsh_model_selection_invalid');
-    route = { provider: selection[0], model: selection[1] };
+    try {
+      const selection: unknown = JSON.parse(modelSelection);
+      if (
+        Array.isArray(selection) &&
+        selection.length === 2 &&
+        typeof selection[0] === 'string' &&
+        selection[0].trim() &&
+        typeof selection[1] === 'string' &&
+        selection[1].trim() &&
+        !selection.includes('unknown')
+      )
+        route = { provider: selection[0], model: selection[1] };
+    } catch {
+      // Existing DSH setups can expose bare model IDs; keep their native route.
+    }
   }
   const selected = route ? `${MODEL_PREFIX}${JSON.stringify([route.provider, route.model])}\n` : '';
   const config = route ? `  config: ${JSON.stringify(route)}\n` : '';
