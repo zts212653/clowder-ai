@@ -42,6 +42,21 @@ if (command === 'collect') {
   const receipts = selected
     .filter((entry) => entry.platform === platform)
     .flatMap(({ id, executor }) => {
+      if (executor === 'windows-port-preflight') {
+        const evidence = 'installer/port-conflicts.json';
+        const receipt = readJson(path.join(directory, evidence));
+        return [
+          receipt
+            ? {
+                id,
+                platform,
+                status: receipt.status,
+                code: receipt.code,
+                evidence: `${artifact(platform)}/${evidence}`,
+              }
+            : { id, platform, status: 'blocked', code: 'windows-port-preflight-unavailable' },
+        ];
+      }
       if (executor.startsWith('windows-')) {
         const kind = executor.slice('windows-'.length);
         const check = results?.checks.find(({ name }) => name === kind);

@@ -117,4 +117,21 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   );
   assert.equal(failed.code, 'windows-restore-default-plugins');
   assert.equal(failed.evidence, 'desktop-evidence-windows-x64-attempt-2/installer/restore-checks.json');
+
+  write(path.join(installer, 'port-conflicts.json'), { status: 'passed' });
+  const collectFull = spawnSync(process.execPath, [script, 'collect', evidence], {
+    env: { ...env, NIGHTLY_SUITE: 'full' },
+    encoding: 'utf8',
+  });
+  assert.equal(collectFull.status, 0, collectFull.stderr);
+  const { receipts } = JSON.parse(fs.readFileSync(path.join(evidence, 'receipts.json'), 'utf8'));
+  assert.deepEqual(
+    receipts.find(({ id }) => id === 'WIN-PORT-PREFLIGHT'),
+    {
+      id: 'WIN-PORT-PREFLIGHT',
+      platform: 'windows-x64',
+      status: 'passed',
+      evidence: 'desktop-evidence-windows-x64-attempt-2/installer/port-conflicts.json',
+    },
+  );
 });
