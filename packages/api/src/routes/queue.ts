@@ -32,6 +32,7 @@ import {
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
 import {
   type InvocationQueue,
+  isSteerableQueueEntry,
   isSystemPinnedQueueEntry,
   type QueueEntry,
   queueEntryMessageIds,
@@ -1465,13 +1466,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const anchor = invocationQueue
         .list(threadId, guard.userId)
         .find((candidate) => candidate.id === entryId && isPublicQueueEntry(candidate));
-      if (
-        !anchor ||
-        anchor.status !== 'queued' ||
-        anchor.kind !== 'conversation_input' ||
-        !anchor.payload.messageId ||
-        isSystemPinnedQueueEntry(anchor)
-      ) {
+      if (!anchor || anchor.status !== 'queued' || !isSteerableQueueEntry(anchor) || !anchor.payload.messageId) {
         reply.status(409);
         return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
       }
@@ -1671,9 +1666,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         anchor &&
         (!isPublicQueueEntry(anchor) ||
           anchor.status !== 'queued' ||
-          anchor.kind !== 'conversation_input' ||
-          anchor.payload.messageId !== sourceRecordId ||
-          isSystemPinnedQueueEntry(anchor))
+          !isSteerableQueueEntry(anchor) ||
+          anchor.payload.messageId !== sourceRecordId)
       ) {
         reply.status(409);
         return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
@@ -1755,6 +1749,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         authorIntentByCatId,
       );
       if (reconciled.outcome === 'not_found' && addTargetIds.length > 0) {
+        // An A2A row's execution/provenance cannot be rebuilt from History alone.
+        if (source.from.kind === 'agent') {
+          reply.status(409);
+          return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
+        }
         try {
           const admitted = await invocationQueue.enqueueDurable(buildQueueInput(addTargetIds));
           if (admitted.outcome === 'full') {
@@ -1903,7 +1902,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reply.status(409);
         return { error: '条目正在处理中，无法改派', code: 'ENTRY_PROCESSING' };
       }
-      if (isSystemPinnedQueueEntry(entry) || entry.kind !== 'conversation_input') {
+      if (!isSteerableQueueEntry(entry)) {
         reply.status(409);
         return { error: '该条目不支持不中断发送', code: 'ENTRY_CONTINUE_UNAVAILABLE' };
       }
