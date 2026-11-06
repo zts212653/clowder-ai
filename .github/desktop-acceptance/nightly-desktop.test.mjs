@@ -39,37 +39,45 @@ test('desktop preparation stages the same attempt and rejects different installe
     platforms: [platform],
     cases: [{ id: 'DESKTOP-ONBOARDING', platform, executor: 'computer-use' }],
   };
-  const gh = (bytes) => (args) => {
-    if (args[0] === 'api') {
-      return JSON.stringify({
-        status: 'completed',
-        path: '.github/workflows/desktop-nightly.yml',
-        head_sha: catalogRevision,
-        run_attempt: 2,
-      });
-    }
-    const [artifact, , destination] = args.slice(-3);
-    fs.mkdirSync(destination, { recursive: true });
-    if (artifact === 'desktop-nightly-report-attempt-2') {
-      fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify(report));
-    } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
-      fs.mkdirSync(path.join(destination, 'installer'));
-      fs.writeFileSync(
-        path.join(destination, 'installer', 'distribution-sha256.json'),
-        JSON.stringify({ Hash: digest.toUpperCase() }),
-      );
-    } else {
-      assert.equal(artifact, 'windows-installer-1.14.0-attempt-2');
-      fs.writeFileSync(path.join(destination, 'ClowderAI-Setup-1.14.0.exe'), bytes);
-    }
-    return '';
-  };
+  const gh =
+    (bytes, reportHasHash = false) =>
+    (args) => {
+      if (args[0] === 'api') {
+        return JSON.stringify({
+          status: 'completed',
+          path: '.github/workflows/desktop-nightly.yml',
+          head_sha: catalogRevision,
+          run_attempt: 2,
+        });
+      }
+      const [artifact, , destination] = args.slice(-3);
+      fs.mkdirSync(destination, { recursive: true });
+      if (artifact === 'desktop-nightly-report-attempt-2') {
+        fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify(report));
+        if (reportHasHash) {
+          const installer = path.join(destination, 'desktop-evidence-windows-x64-attempt-2', 'installer');
+          fs.mkdirSync(installer, { recursive: true });
+          fs.writeFileSync(path.join(installer, 'distribution-sha256.json'), JSON.stringify({ Hash: digest }));
+        }
+      } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
+        assert.equal(reportHasHash, false, 'Do not download over checksums already staged by the report');
+        fs.mkdirSync(path.join(destination, 'installer'));
+        fs.writeFileSync(
+          path.join(destination, 'installer', 'distribution-sha256.json'),
+          JSON.stringify({ Hash: digest.toUpperCase() }),
+        );
+      } else {
+        assert.equal(artifact, 'windows-installer-1.14.0-attempt-2');
+        fs.writeFileSync(path.join(destination, 'ClowderAI-Setup-1.14.0.exe'), bytes);
+      }
+      return '';
+    };
 
   const coordinator = path.join(root, 'coordinator');
   const calls = [];
   const staged = stageNightlyReport(repo, '123', coordinator, (args) => {
     calls.push(args);
-    return gh('unused')(args);
+    return gh('unused', true)(args);
   });
   assert.equal(staged.report.attempt, '2');
   assert.deepEqual(
@@ -77,6 +85,14 @@ test('desktop preparation stages the same attempt and rejects different installe
     ['desktop-nightly-report-attempt-2'],
   );
   assert.equal(fs.existsSync(path.join(coordinator, 'package')), false);
+  const stagedWorker = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'staged-worker'),
+    gh('candidate bytes', true),
+  );
+  assert.equal(stagedWorker.packageSha256, digest);
 
   const ready = await prepareDesktop(repo, '123', platform, path.join(root, 'ready'), gh('candidate bytes'));
   assert.equal(ready.packageSha256, digest);

@@ -33,7 +33,7 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 
 在专用桌面测试机或 VM 上执行。Windows 保持活跃、解锁并独占前台，macOS 核对辅助功能和屏幕录制权限。预置被允许的测试应用和测试账户。Windows 管理员安装与 macOS Gatekeeper 需要权限或人工操作时，保留阻塞，不改变系统安全设置。严禁指向日用安装、生产端口或个人 HOME。
 
-1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告、平台证据和候选包，核对 SHA-256 后写出 `desktop-plan.json`。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
+1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告与候选包，使用 Actions 的平台哈希校验后写出 `desktop-plan.json`。旧报告的哈希从同轮平台证据下载。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
 2. 在 Codex 中打开该次运行的用例目录，按选集执行 `computer-use` 用例。为每条保存具体观察和截图。前置条件不满足时记录 `blocked` 和原因。人工用例可按相同方式补录。
 3. 收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`。逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。合并单机试跑时，在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`，令 `GITHUB_SHA` 为该用例版本。桌面收据、截图和 Actions 平台证据目录一起保存。
 
