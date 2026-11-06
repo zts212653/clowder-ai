@@ -8,7 +8,7 @@ import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js
 
 const PLUGIN = secretRuntimeScript('secret-dsh-plugin.mjs');
 // Startup admission covers this exact reviewed consumer, never arbitrary YAML or !!js.
-const PLUGIN_HASH = 'c34e9b909d42d44f52d4742fcd7e94679cacd65e26f8743403121521628c8901';
+const PLUGIN_HASH = 'a71c70ba186a43d991ce209761591f5e9d4474ea78af802eda8b6e48c13f2192';
 const MODEL_PREFIX = '# clowder-acp-model: ';
 function template(modelSelection?: string): string {
   let route: { provider: string; model: string } | undefined;
