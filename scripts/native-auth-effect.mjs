@@ -1,5 +1,6 @@
 import { scriptFileCall } from './lib/shell-code-inputs.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
+import { hereDocumentView } from './native-effect-heredoc.mjs';
 import { commandName, shellInvocation } from './native-effect-shell-tokenizer.mjs';
 
 const SHELL_COMMAND_OPTIONS = new Map([
@@ -37,6 +38,16 @@ export const NATIVE_AUTH_DENIAL =
   'native_auth_mutation: Codex login/logout can revoke existing credentials, cancel another login and open the browser. ' +
   'Use Settings > Accounts to start a user-owned login; if unavailable on this platform, report that limitation. ' +
   'For diagnosis use codex login status or codex login --help. A temporary CODEX_HOME does not isolate the callback port.';
+
+/** Native shell carriers share command extraction and data-aware authentication admission. */
+export function nativeAuthenticationDenial(input) {
+  const command = typeof input === 'string' ? input : (input?.command ?? input?.cmd);
+  return typeof command === 'string' &&
+    codexAuthenticationEffect(executedInvocations(hereDocumentView(command).judged).pipelines.flat()) ===
+      'auth_mutation'
+    ? NATIVE_AUTH_DENIAL
+    : null;
+}
 
 /** Classify resolved invocations, never command-looking text in data operands. */
 export function codexAuthenticationEffect(invocations, depth = 0) {

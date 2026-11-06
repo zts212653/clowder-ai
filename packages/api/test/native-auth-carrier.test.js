@@ -1,4 +1,5 @@
 import '../../../scripts/native-auth-boundary.test.mjs';
+import '../../../scripts/native-auth-providers.test.mjs';
 import { test } from 'node:test';
 import { prepareClaudeSdkLaunch } from '../dist/domains/cats/services/agents/providers/claude-sdk-launch.js';
 import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';

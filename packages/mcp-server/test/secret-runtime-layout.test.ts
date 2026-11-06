@@ -64,6 +64,8 @@ for (const layout of ['standalone', 'node_modules'] as const) {
       });
       assert.equal(auth.status,0,auth.stderr);
       assert.equal(JSON.parse(auth.stdout).hookSpecificOutput.permissionDecision,'deny','moved runtime must load the authentication policy closure');
+      const {assertNativeAuthProvider}=await import(${JSON.stringify(new URL('../../../scripts/test-helpers/native-auth-providers.mjs', import.meta.url).href)});
+      for(const provider of ['kimi','opencode','dsh']) await assertNativeAuthProvider(provider,new URL('dist/runtime/scripts/',base),process.cwd());
       const program=runtime.secretRuntimeScript('guarded-bin/gh');
       const scoped=spawnSync(process.execPath,[program,'pr','create','--title','verdict(fixture): installation probe','--body','safe fixture'],{encoding:'utf8'});
       assert.equal(scoped.status,1);
