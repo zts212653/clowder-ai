@@ -20,7 +20,7 @@ export async function createRuntimeArchive(source, file) {
       file,
       cwd: source,
       portable: true,
-      gzip: { level: 1 },
+      gzip: { level: 9 },
       jobs: 4,
       follow: false,
     },
