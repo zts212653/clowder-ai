@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { BootstrapProgress, ExpeditionBootstrapService } from '../domains/memory/ExpeditionBootstrapService.js';
 import type { IndexStateManager } from '../domains/memory/IndexStateManager.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { resolveDirectLocalAuthorizationUserId, resolveHeaderUserId } from '../utils/request-identity.js';
 
 interface SocketManagerLike {
   emitToUser(userId: string, event: string, data: unknown): void;
@@ -45,7 +45,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
   );
 
   app.post<{ Body: { projectPath?: string } }>('/api/projects/bootstrap', async (request, reply) => {
-    const userId = resolveHeaderUserId(request);
+    const userId = resolveDirectLocalAuthorizationUserId(request);
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required' };
@@ -66,6 +66,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
     // Fire-and-forget: respond immediately, bootstrap runs async
     bootstrapService
       .bootstrap(validated, {
+        ownerUserId: userId,
         onProgress: (p: BootstrapProgress) => {
           socketManager.emitToUser(userId, 'index:progress', { projectPath: validated, ...p });
         },

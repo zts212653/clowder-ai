@@ -1664,7 +1664,7 @@ async function main(): Promise<void> {
     }
   };
   const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
-    rebuildIndex: async (projectPath: string) => {
+    rebuildIndex: async (projectPath: string, ownerUserId: string) => {
       if (isSameRepo(projectPath, repoRoot)) {
         const startMs = Date.now();
         const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
@@ -1677,6 +1677,7 @@ async function main(): Promise<void> {
         memoryServices.catalog!,
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
+        ownerUserId,
         () => memoryServices.embeddingLifecycle.getService(),
       );
     },
