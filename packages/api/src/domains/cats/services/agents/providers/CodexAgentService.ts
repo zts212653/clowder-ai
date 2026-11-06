@@ -1046,7 +1046,7 @@ export class CodexAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
 
   /**
-   * #1838: on Windows a turn's provider starts either through spawnCli (exec_json) or a direct
+   * #1838: on Windows a turn's provider starts either through the exec_json CLI path or a direct
    * app_server session, both with the turn's invocationId; the unix-socket pool never runs there.
    * An injected spawnFn owns its own process.
    */
