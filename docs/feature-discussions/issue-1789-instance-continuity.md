@@ -71,8 +71,22 @@ node desktop/redis-directory-diagnostic.js <absolute-user-data-directory> <port>
 ## 验证与回退
 
 - 初次 Windows 复现用基线的 `_startRedis` 观察到 PING 复用。提交的 fixture 直接接入测试 Redis 和不同归属的文件根，复现同一种状态。它用生产 Fastify 路由和 Redis store 观察首页与聊天返回原引用、非 Git cwd 下别名 404 及只更改 uploads 根后的回读。用实际 root-connection handler 验证伪造 proof 拒绝、有效 proof 写入 canonical ID。旧别名和旧上传根的正例均由 fixture 显式预置。独立进程读回映射，重建 Fastify 后使用原 URL 回读两类原件。产品恢复入口与现场验收留待恢复切片。
-- 同一 fixture 对照 Redis 目录匹配、目录不匹配、第二套独立空实例、无根、根内缺文件、原字节读取及解码失败。恢复合同中剩余的同名根、撤权、跨盘/链接逸出、完整重启和首装验收在实际恢复候选上补齐。
+- API fixture 接一套合成 Redis，覆盖目录不匹配、无根、根内缺文件、原字节读取及解码失败。目录匹配和诊断命令边界另由桌面测试覆盖。Windows 隔离脚本用两套合成 Redis 对照实际命令的匹配、不匹配及第二套测试库为空。恢复合同中剩余的同名根、撤权、跨盘/链接逸出、完整重启和首装验收在实际恢复候选上补齐。
 - 本地检查命令为 `node --test desktop/redis-directory-diagnostic.test.js`、`pnpm --filter @cat-cafe/api build` 和 `pnpm biome check desktop/redis-directory-diagnostic.js desktop/redis-directory-diagnostic.test.js packages/api/test/issue1789-instance-continuity-redis.test.js`。支持 Redis runner 的环境用 `pnpm --filter @cat-cafe/api test:redis -- node --import ./test/helpers/setup-cat-registry.js --test test/issue1789-instance-continuity-redis.test.js`。Windows 证据使用独立 loopback 端口和测试 HOME，未使用现场 Redis、SQLite、会话、配置或认证。
 - 当前交付是诊断命令、计划与测试。回退 PR 提交即可，无运行配置或数据回退步骤。真实已安装 Windows 桌面、现场文件接续和恢复策略的产品入口属于后续验收。
+
+## 启动冲突弹窗候选，待确认
+
+目标是在新桌面版接入另一实例的 Redis 之前提示用户。沿用现有固定端口和启动失败弹窗。端口空闲时照常启动，且只在端口已被占用时额外探测。预期目录取本次桌面启动实际要用的目录。安装包无法进行只读探测时，归入无法比较。
+
+| 启动时观察到的情况 | 候选行为 |
+| --- | --- |
+| 端口占用，只确认收到 PING 回应 | 只能确认对方是 Redis。继续只读核对它报告的目录和桌面预期目录。 |
+| 两端目录都可验证，规范化后明确不同 | 判定为数据目录冲突。在 API 接入前停下，提示用户回到原实例继续工作，或确认占用方并正常退出后重试。 |
+| 目录一致，或 ACL、超时等导致无法比较 | 归属仍待核实。目录一致不能授予接入权限，查不清也不能声称是另一实例。此分支的启动行为需要单独确认。 |
+
+正常重启和升级尤其要覆盖同一实例还在退出、旧版 Redis 无标记和目录经 Windows 路径别名指向同一位置的情况。有现成证据表明本实例正在退出时，候选方案沿现有退出流程等待端口释放后复查。验收至少走一次干净首启、正常重启、从仍有历史的旧版升级，以及明确的另一目录占用。重启和升级检查历史仍可见，新增的目录冲突提示只用于已证实的不匹配。
+
+请维护者确认两个点：目录明确不匹配是否足以触发这个弹窗，以及目录一致但未证明归属、目录无法比较时如何处理。后者直接影响仍在使用旧版数据的用户，须结合 S2 选定行为并验证后再接入启动流程。此候选处理启动冲突，恢复旧文件和映射仍沿前述候选路径。
 
 Architecture cell: desktop runtime / workspace / works reads。Map delta: none。诊断采用现有桌面目录约定，fixture 使用现有 API 和持久授权。当前增量没有第二套数据根、索引或迁移器。

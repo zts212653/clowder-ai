@@ -31,6 +31,7 @@ if (require.main === module) {
     !/^\d+$/.test(rawPort ?? '') ||
     port < 1 ||
     port > 65535 ||
+    !redisCli ||
     rest.length
   ) {
     console.error(

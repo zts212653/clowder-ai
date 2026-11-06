@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -27,7 +27,20 @@ test(
   },
   async (t) => {
     assertRedisIsolationOrThrow(redisUrl, 'Issue1789InstanceContinuity');
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'clowder-issue1789-')));
+    const originalCwd = process.cwd();
+    const fixtureDir = await mkdtemp(join(await realpath(tmpdir()), 'clowder-issue1789-'));
+    const apps = [];
+    let redis;
+    t.after(async () => {
+      process.chdir(originalCwd);
+      const closed = await Promise.allSettled([...apps.map((app) => app.close()), redis?.quit()]);
+      await rm(fixtureDir, { recursive: true, force: true, maxRetries: 3 });
+      assert.deepEqual(
+        closed.filter((result) => result.status === 'rejected'),
+        [],
+      );
+    });
+    const root = await realpath(fixtureDir);
     const desktop = join(root, 'desktop');
     const project = join(desktop, 'project');
     const uploads = join(desktop, 'uploads');
@@ -57,8 +70,6 @@ test(
     await writeFile(join(legacy, 'broken.png'), 'not a PNG');
     await writeFile(join(oldUploads, 'old.txt'), doc);
 
-    const originalCwd = process.cwd();
-    t.after(() => process.chdir(originalCwd));
     process.chdir(project);
     process.env.CAT_CAFE_WORKSPACE_ROOT = project;
     process.env.CAT_CAFE_CONFIG_ROOT = project;
@@ -66,8 +77,7 @@ test(
     delete process.env.WORKSPACE_LINKED_ROOTS;
 
     // Reproduce the mixed data plane explicitly, independent of desktop startup policy.
-    const redis = new Redis(redisUrl, { keyPrefix: `issue1789-${process.pid}:` });
-    t.after(() => redis.quit());
+    redis = new Redis(redisUrl, { keyPrefix: `issue1789-${process.pid}:` });
     const [, reportedDir] = await redis.config('GET', 'dir');
     const redisDirectory =
       process.platform === 'win32' ? reportedDir.replace(/^\/cygdrive\/([a-z])\//i, '$1:/') : reportedDir;
@@ -96,7 +106,7 @@ test(
 
     const start = async (uploadDir) => {
       const app = Fastify();
-      t.after(() => app.close());
+      apps.push(app);
       await app.register(threadsRoutes, { threadStore, messageStore });
       await app.register(messagesRoutes, { threadStore, messageStore, registry: new InvocationRegistry() });
       await app.register(workspaceRoutes);
