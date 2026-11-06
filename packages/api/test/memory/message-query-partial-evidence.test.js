@@ -11,6 +11,161 @@ const candidates = ['a', 'b'].map((id) => ({
   contentRevision: contentRevision(`PRIVATE-BODY-${id}: a replacement was discussed`),
 }));
 
+for (const external of [false, true]) {
+  test(`sealed provider result ${external ? 'cannot survive request cancellation' : 'survives local expiry only after normal teardown'}`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_700_000_000_000 });
+    const client = new AbortController();
+    let finish;
+    let settled = false;
+    const traces = [];
+    const qualifier = new MessageQueryQualifier(async (batch, ctx) => {
+      const text = JSON.stringify({ requestId: batch.requestId, rows: [[batch.rows[0].id, 'rejected', null]] });
+      ctx.onResult?.(text);
+      await new Promise((resolve) => {
+        finish = resolve;
+      });
+      ctx.onTrace({ phase: 'native-completed' });
+      return text;
+    });
+    const pending = qualifier
+      .qualify('PRIVATE-QUERY', candidates.slice(0, 1), {
+        userId: 'owner',
+        deadlineAt: Date.now() + 3000,
+        signal: client.signal,
+        onTrace: (trace) => traces.push(trace),
+      })
+      .finally(() => {
+        settled = true;
+      });
+    const checked = external ? assert.rejects(pending, { name: 'AbortError' }) : pending;
+    t.mock.timers.tick(1000);
+    await Promise.resolve();
+    assert.equal(settled, false, 'Host capacity and publication wait for actual runner teardown');
+    if (external) client.abort(new DOMException('request closed', 'AbortError'));
+    finish();
+    const result = await checked;
+    if (!external) {
+      assert.equal(result.meta.rejected, 1);
+      assert.equal(result.meta.unassessed, 0);
+      assert.deepEqual(result.meta.batches, { started: 1, completed: 1, cancelled: 0, failed: 0 });
+      assert.ok(traces.find((x) => x.phase === 'qualification').batches[0].abortAfterMs >= 0);
+    }
+  });
+}
+
+for (const scenario of ['late result', 'changed result', 'hard expiry']) {
+  test(`${scenario} cannot publish a sealed batch across the work deadline`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_700_000_000_000 });
+    let release;
+    const qualifier = new MessageQueryQualifier(async (batch, ctx) => {
+      const text = JSON.stringify({ requestId: batch.requestId, rows: [[batch.rows[0].id, 'rejected', null]] });
+      if (scenario !== 'late result') assert.equal(ctx.onResult(text), true);
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      if (scenario === 'late result') assert.equal(ctx.onResult(text), false);
+      return scenario === 'changed result' ? `${text} ` : text;
+    });
+    const pending = qualifier.qualify('PRIVATE-QUERY', candidates.slice(0, 1), {
+      userId: 'owner',
+      deadlineAt: Date.now() + 3000,
+    });
+    const checked = scenario === 'hard expiry' ? assert.rejects(pending, { name: 'TimeoutError' }) : pending;
+    t.mock.timers.tick(scenario === 'hard expiry' ? 3000 : 1000);
+    release();
+    const result = await checked;
+    if (scenario !== 'hard expiry') {
+      assert.equal(result.meta.unassessed, 1);
+      assert.equal(result.meta.rejected, 0);
+      assert.equal(result.meta.batches.cancelled, 1);
+    }
+  });
+}
+
+test('native completion diagnostics expose only bounded status and exit facts', () => {
+  const fields = {
+    resultStatus: 'success',
+    exitCode: 0,
+    exitSignal: 'none',
+    processClosed: true,
+    deadlineAfterResult: true,
+  };
+  const privateFields = { result: 'PRIVATE-OUTPUT', thinking: 'PRIVATE-THINKING', requestId: 'PRIVATE-ID' };
+  assert.deepEqual(privateMessageSearchTrace({ phase: 'native-terminal', ...fields, ...privateFields }), {
+    phase: 'native-terminal',
+    ...fields,
+  });
+  const nested = privateMessageSearchTrace({ phase: 'qualification', batches: [{ ...fields, ...privateFields }] });
+  assert.deepEqual(nested.batches, [fields]);
+  assert.deepEqual(
+    privateMessageSearchTrace({
+      phase: 'native-closed',
+      exitCode: '0',
+      exitSignal: 'PRIVATE',
+      resultStatus: 'PRIVATE',
+    }),
+    {
+      phase: 'native-closed',
+    },
+  );
+});
+
+test('elapsed work time cannot be bypassed while the timeout callback is still queued', async (t) => {
+  const now = 1_700_000_000_000;
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now });
+  const qualifier = new MessageQueryQualifier(async (batch, ctx) => {
+    const text = JSON.stringify({ requestId: batch.requestId, rows: [[batch.rows[0].id, 'rejected', null]] });
+    t.mock.timers.setTime(now + 1001);
+    assert.equal(ctx.signal.aborted, false, 'setTime advances the wall clock without executing the timer');
+    assert.equal(ctx.onResult(text), false, 'the original work cutoff still rejects the result');
+    return text;
+  });
+  const result = await qualifier.qualify('PRIVATE-QUERY', candidates.slice(0, 1), {
+    userId: 'owner',
+    deadlineAt: now + 3000,
+  });
+  assert.equal(result.meta.unassessed, 1);
+  assert.equal(result.meta.rejected, 0);
+});
+
+test('a timed-out runner keeps its existing Host slot until owned close is proven', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_700_000_000_000 });
+  let close;
+  const closed = new Promise((resolve) => {
+    close = resolve;
+  });
+  const first = new MessageQueryQualifier(async (_batch, ctx) => {
+    ctx.onTeardown?.(closed);
+    await new Promise((resolve) => ctx.signal.addEventListener('abort', resolve, { once: true }));
+    throw ctx.signal.reason;
+  }).qualify('PRIVATE-QUERY', candidates.slice(0, 1), { userId: 'owner', deadlineAt: Date.now() + 3000 });
+  t.mock.timers.tick(1000);
+  assert.equal((await first).meta.unassessed, 1);
+  let finish;
+  const second = new MessageQueryQualifier(async (batch) => {
+    await new Promise((resolve) => {
+      finish = resolve;
+    });
+    return JSON.stringify({ requestId: batch.requestId, rows: [] });
+  }).qualify('PRIVATE-QUERY', candidates.slice(0, 1), { userId: 'owner', deadlineAt: Date.now() + 3000 });
+  try {
+    const third = await new MessageQueryQualifier(async () => assert.fail('started before owned close')).qualify(
+      'PRIVATE-QUERY',
+      candidates.slice(0, 1),
+      { userId: 'owner', deadlineAt: Date.now() + 3000 },
+    );
+    assert.equal(third.nativeCalls, 0);
+  } finally {
+    close();
+    finish();
+    await second;
+  }
+  const afterClose = await new MessageQueryQualifier(async (batch) =>
+    JSON.stringify({ requestId: batch.requestId, rows: [] }),
+  ).qualify('PRIVATE-QUERY', candidates.slice(0, 1), { userId: 'owner', deadlineAt: Date.now() + 3000 });
+  assert.equal(afterClose.nativeCalls, 1);
+});
+
 test('successful partial retains both runner abort/cleanup summaries after teardown, without approving unknown rows', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_700_000_000_000 });
   const traces = [];

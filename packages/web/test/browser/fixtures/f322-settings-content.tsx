@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ConfigData } from '@/components/config-viewer-types';
 import { ExecutionRecordDefaultSettings } from '@/components/settings/ExecutionRecordDefaultSettings';
 import { InstallPreviewModal } from '@/components/settings/InstallPreviewModal';
+import { ThemeSettingsPanel } from '@/components/settings/ThemeSettingsPanel';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 
 const S5_CONFIG = {
@@ -45,6 +46,8 @@ function SettingsS5Fixture() {
 // Domain rendering is outside the shell journey. The real SettingsShell owns selection,
 // query preservation and pin controls; this boundary reveals which owner it selected.
 export function SettingsContent({ section, initialEditCatId }: { section: string; initialEditCatId?: string }) {
+  // Both presentations must use the real switch for the default/refresh journey.
+  if (section === 'theme') return <ThemeSettingsPanel />;
   return (
     <section data-testid="settings-owner" data-section={section} data-cat={initialEditCatId ?? ''}>
       {section}

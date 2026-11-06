@@ -7,6 +7,8 @@
  */
 
 export const SessionChainKeys = {
+  /** Set: unfinished watcher Session IDs; changed atomically with their owner state, TTL=0. */
+  watcherPending: (userId: string) => `session-watcher-pending:${encodeURIComponent(userId)}`,
   /** Hash: session record fields */
   detail: (id: string) => `session:${id}`,
   /** Sorted Set: cat+thread session chain (score = seq) */

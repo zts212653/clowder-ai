@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
@@ -50,7 +51,7 @@ function okJson(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
-describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
+describe('Classic ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -61,6 +62,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   beforeEach(() => {
+    writeShellPresentation('classic');
     observeApiSessionOwner('owner-1');
     vi.mocked(apiFetch).mockReset();
     vi.mocked(apiFetch).mockImplementation(async () => okJson({ proposal: { proposalId: 'p1', status: 'pending' } }));
@@ -71,6 +73,7 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('strips the 📥 title prefix and renders an SVG title icon instead', async () => {

@@ -13,6 +13,7 @@ import {
 } from '../../../../../config/capabilities/invoke-capability-root.js';
 import { readInvocationMcpConfig } from '../../../../../config/capabilities/invoke-mcp-config.js';
 import { resolveManagedMcpEntrypoint } from '../../../../../config/capabilities/managed-mcp-config.js';
+import { resolveWorkspaceRoot } from '../../../../../config/capabilities/mcp-config-adapters.js';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   isManagedCatCafeSplit,
@@ -49,11 +50,7 @@ export async function captureCodexMcpInput(catId?: string, workingDirectory?: st
   if (!mcpDistDir) return { available: false, resolved: false, allowedWorkspaceDirs: '', servers: [] };
   const binaryRoot = resolve(mcpDistDir, '../../..');
   const capabilityRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-  const allowedWorkspaceDirs =
-    process.env.ALLOWED_WORKSPACE_DIRS?.trim() ||
-    (workingDirectory?.trim()
-      ? resolve(workingDirectory.trim())
-      : process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || process.cwd());
+  const allowedWorkspaceDirs = resolveWorkspaceRoot(workingDirectory);
   const servers: Array<McpServerDescriptor & { catCafe: boolean; plugin: boolean }> = [];
   let resolved = false;
   try {

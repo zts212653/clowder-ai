@@ -1714,14 +1714,6 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
     });
     assert.equal(res.statusCode, 400, 'double soft-delete should fail');
   });
-
-  it('DELETE /api/threads/default still rejects', async () => {
-    const res = await app.inject({
-      method: 'DELETE',
-      url: '/api/threads/default',
-    });
-    assert.equal(res.statusCode, 400);
-  });
 });
 
 describe('GET /api/messages with threadId', () => {

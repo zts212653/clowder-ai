@@ -8,6 +8,7 @@ import { useThreadSettingsPosition } from '../chat-background/useThreadSettingsP
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { threadSettingsCopy } from '../shell/thread-settings.shell-copy';
+import { WatcherThreadCard } from '../watcher/WatcherThreadControls';
 import { ThreadCatSettingsContent } from './ThreadCatSettings';
 import { ThreadEffortSettingsContent } from './ThreadEffortSettings';
 import { ThreadFeatureSettingsContent } from './ThreadFeatureSettings';
@@ -160,6 +161,7 @@ export function ThreadSettingsPanel({
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <WatcherThreadCard key={threadId} threadId={threadId} />
           {isV2 && (
             <ThreadBackgroundSettings
               threadId={threadId}

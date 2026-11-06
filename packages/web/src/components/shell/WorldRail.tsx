@@ -7,6 +7,7 @@ import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { ClapperboardIcon } from '../ActivityBar';
+import { AvatarImageWithFallback } from '../AvatarImageWithFallback';
 import { useCollectiveWorldDirectoryRecovery } from '../collective/use-collective-world-directory-recovery';
 import { useConciergeRailToggle } from '../concierge/ConciergeRailToggle';
 import { HubIcon } from '../hub-icons';
@@ -183,22 +184,12 @@ function AvatarButton({ selected, onOpen }: { selected: boolean; onOpen: () => v
         style={{ background: 'var(--color-cocreator-primary)', color: 'var(--cafe-surface)' }}
         aria-hidden="true"
       >
-        {coCreator.avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          // biome-ignore lint/performance/noImgElement: tiny runtime-configured avatar URL, onError falls back to initial
-          <img
-            src={coCreator.avatar}
-            alt=""
-            width={28}
-            height={28}
-            className="h-full w-full object-cover"
-            onError={(event) => {
-              (event.currentTarget as HTMLImageElement).style.display = 'none';
-            }}
-          />
-        ) : (
-          coCreator.name.slice(0, 1).toUpperCase()
-        )}
+        <AvatarImageWithFallback
+          src={coCreator.avatar}
+          alt=""
+          className="h-full w-full object-cover"
+          fallback={coCreator.name.slice(0, 1).toUpperCase()}
+        />
       </span>
     </RailButton>
   );

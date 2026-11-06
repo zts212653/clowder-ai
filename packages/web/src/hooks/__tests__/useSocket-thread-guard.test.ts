@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * P1 regression test for cross-thread event leakage via useSocket.
  *
@@ -972,7 +973,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1', 'opus', 'execute', undefined);
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1-kimi', 'kimi', 'execute', undefined);
     expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });
@@ -1008,7 +1009,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
     await act(async () => Promise.resolve());
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });

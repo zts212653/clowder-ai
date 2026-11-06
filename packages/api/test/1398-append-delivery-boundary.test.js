@@ -397,7 +397,7 @@ describe('delivery owns Append admission, without model-read state', () => {
   });
 
   for (const barrier of ['next_work', 'retry']) {
-    it(`automatic Append respects a same-target ${barrier} barrier while another target progresses`, async () => {
+    it(`automatic Append ${barrier === 'next_work' ? 'passes future work' : 'waits for earlier guidance retry'} while another target progresses`, async () => {
       const harness = createHarness();
       const first = await admit(harness);
       if (barrier === 'next_work') {
@@ -414,16 +414,22 @@ describe('delivery owns Append admission, without model-read state', () => {
       bindRun(harness, dispatch);
       bindRun(harness, otherDispatch, 'codex');
       await harness.processor.requestDrain('thread-1');
-      assert.equal(dispatch.mock.calls.length, 0);
+      assert.equal(dispatch.mock.calls.length, barrier === 'next_work' ? 1 : 0);
       assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', first.entry.id).status, 'queued');
-      assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', later.entry.id).status, 'queued');
+      if (barrier === 'next_work') {
+        assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', later.entry.id), null);
+        assert.deepEqual(activeInputs(harness), [later.message.id], 'only the current guide enters the original run');
+        assert.deepEqual(dispatch.mock.calls[0].arguments[0].messageIds, [later.message.id]);
+      } else {
+        assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', later.entry.id).status, 'queued');
+      }
       assert.equal(otherDispatch.mock.calls.length, 1);
       assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', other.entry.id), null);
       harness.processor.retryDeferrals.forget(first.entry.id);
     });
   }
 
-  it('pending native ACK holds its target while a different target appends', async () => {
+  it('pending native ACK stays in History while a different target appends', async () => {
     const harness = createHarness();
     const entered = deferred();
     const release = deferred();
@@ -449,10 +455,7 @@ describe('delivery owns Append admission, without model-read state', () => {
       ]);
       await waitFor(() => otherDispatch.mock.calls.length === 1);
       assert.equal(otherDispatch.mock.calls.length, 1, 'other target advances before first ACK');
-      assert.deepEqual(
-        harness.queue.getEntrySnapshot('thread-1', 'user-1', first.entry.id).delivery.routingHeldTargetIds,
-        ['opus'],
-      );
+      assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', first.entry.id), null);
       assert.equal(
         harness.messageStore.getById(first.message.id).lifecycle.dispatchRefs[0].appendAcceptance,
         'pending',
@@ -731,10 +734,7 @@ describe('delivery owns Append admission, without model-read state', () => {
       return { accepted: false, reason: 'active_run_closed', acceptance: 'not_accepted' };
     });
     await harness.processor.requestDrain('thread-1');
-    assert.deepEqual(
-      harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id).delivery.routingHeldTargetIds,
-      ['opus'],
-    );
+    assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', admitted.entry.id), null);
     assert.equal(
       harness.messageStore.getById(admitted.message.id).lifecycle.dispatchRefs[0].statusMessageId,
       run.response.id,
@@ -756,7 +756,7 @@ describe('delivery owns Append admission, without model-read state', () => {
     );
   });
 
-  it('an uncertain carrier outcome keeps its exact run binding and a held original Queue owner', async () => {
+  it('an uncertain carrier outcome keeps its exact History binding with no Queue owner', async () => {
     const harness = createHarness();
     const admitted = await admit(harness);
     const run = bindRun(harness, async () => ({ accepted: false, reason: 'provider_rejected', acceptance: 'unknown' }));
@@ -765,8 +765,8 @@ describe('delivery owns Append admission, without model-read state', () => {
     assert.equal(source.lifecycle.dispatchRefs[0].statusMessageId, run.response.id);
     assert.deepEqual(activeInputs(harness), [source.id]);
     const queued = await harness.queue.getDurableEntry('thread-1', admitted.entry.id);
-    assert.deepEqual(queued.delivery.routingHeldTargetIds, ['opus']);
-    assert.deepEqual(queued.payload, admitted.entry.payload);
+    assert.equal(queued, null);
+    assert.equal(source.lifecycle.appendFailures[0].acceptance, 'unknown');
     assert.equal(
       harness.messageStore
         .getByThread('thread-1', 100, 'user-1')
@@ -854,7 +854,11 @@ describe('existing ingress chains use common send admission and wake', () => {
         assert.deepEqual(admission.targets, ['opus'], 'ingress must preserve the admitted target');
         assert.equal(admission.delivery.authorIntentByTarget.opus.requested, policy);
         if (policy === 'continue_current') {
-          await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', admission.id) === null);
+          await waitFor(
+            () =>
+              harness.messageStore.getById(admission.payload.messageId).lifecycle?.dispatchRefs?.[0]
+                ?.appendAcceptance === 'accepted',
+          );
           assert.equal(dispatch.mock.calls.length, 1);
           assert.equal(
             harness.messageStore.getById(admission.payload.messageId).lifecycle.dispatchRefs[0].appendAcceptance,

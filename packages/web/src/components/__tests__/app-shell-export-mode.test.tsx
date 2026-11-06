@@ -17,17 +17,29 @@ vi.mock('@/components/ActivityBar', () => ({
   ActivityBar: () => <nav data-testid="activity-bar" />,
 }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/services/playbackRuntime', () => ({ getPlaybackManager: vi.fn(), destroyPlaybackRuntime: vi.fn() }));
 
 import { AppShell } from '@/components/AppShell';
 import { loadExportThreadTitle, selectMessagesForExport } from '@/components/message-export-selection';
+import {
+  readShellPresentation,
+  useShellPresentation,
+  writeShellPresentation,
+} from '@/components/shell/shell-presentation';
+
+function PresentationProbe() {
+  return <output data-testid="presentation">{useShellPresentation()}</output>;
+}
 
 describe('AppShell export mode', () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     navState.pathname = '/';
     navState.search = '';
+    writeShellPresentation('classic');
     window.history.replaceState(null, '', '/');
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -35,7 +47,7 @@ describe('AppShell export mode', () => {
   });
 
   afterEach(() => {
-    root.unmount();
+    React.act(() => root.unmount());
     container.remove();
     window.history.replaceState(null, '', '/');
   });
@@ -44,7 +56,9 @@ describe('AppShell export mode', () => {
     React.act(() => {
       root.render(
         <AppShell>
-          <main data-testid="content">content</main>
+          <main data-testid="content">
+            <PresentationProbe />
+          </main>
         </AppShell>,
       );
     });
@@ -58,11 +72,31 @@ describe('AppShell export mode', () => {
     window.history.pushState(null, '', '/?export=true');
     renderShell();
     expect(container.querySelector('[data-testid="activity-bar"]')).toBeNull();
+    expect(container.querySelector('[data-testid="presentation"]')?.textContent).toBe('v2');
+    expect(document.documentElement.dataset.shell).toBe('v2');
+    expect(readShellPresentation()).toBe('classic');
 
     navState.search = '';
     window.history.pushState(null, '', '/');
     renderShell();
     expect(container.querySelector('[data-testid="activity-bar"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="presentation"]')?.textContent).toBe('classic');
+    expect(document.documentElement.dataset.shell).toBeUndefined();
+  });
+
+  it.each([
+    'export=true',
+    'export=true&shell=classic',
+    'export=true&shell=v2',
+  ])('renders a direct %s document in v2 without changing the saved interface', (search) => {
+    navState.search = search;
+    window.history.replaceState(null, '', `/?${search}`);
+    renderShell();
+
+    expect(container.querySelector('[data-testid="presentation"]')?.textContent).toBe('v2');
+    expect(document.documentElement.dataset.shell).toBe('v2');
+    expect(container.querySelector('[data-testid="activity-bar"]')).toBeNull();
+    expect(readShellPresentation()).toBe('classic');
   });
 });
 

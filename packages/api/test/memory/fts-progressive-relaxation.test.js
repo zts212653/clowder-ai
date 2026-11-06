@@ -158,17 +158,6 @@ describe('SqliteEvidenceStore — FTS Progressive Relaxation integration', () =>
     assert.equal(results[0].anchor, 'F200');
   });
 
-  it('reports degradation metadata when relaxation is used', async () => {
-    const longQuery = 'F200 memory recall eval consumption reranking metrics Phase pipeline events tracking';
-    const { items, meta } = await store.searchWithMeta(longQuery);
-    // If relaxation kicked in, meta should indicate it
-    // (short queries that match via AND-all should NOT be degraded)
-    if (items.length > 0) {
-      // Success case — relaxation found results
-      assert.ok(true, 'relaxation produced results');
-    }
-  });
-
   it('strong tokens are prioritized — F200 match ranks higher than weak-only match', async () => {
     // Add a doc that only matches weak tokens
     await store.upsert([

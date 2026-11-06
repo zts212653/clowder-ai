@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F080 + clowder-ai#314: Draft persistence across thread switches.
  *

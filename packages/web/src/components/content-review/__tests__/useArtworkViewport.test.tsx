@@ -99,6 +99,20 @@ it('keeps gallery buttons clickable while image panning is active', async () => 
   expect(section.setPointerCapture).not.toHaveBeenCalled();
 });
 
+it('leaves Space activation to a focused gallery button while the pointer is over the image', async () => {
+  await act(async () => root.render(<Artwork gallery />));
+  const section = container.querySelector('section')!;
+  await act(async () => section.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="gallery-control"]')!;
+  button.focus();
+  const key = new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
+  await act(async () => button.dispatchEvent(key));
+  expect(key.defaultPrevented, 'native button activation must win over the image pan shortcut').toBe(false);
+  const canvasKey = new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
+  await act(async () => section.dispatchEvent(canvasKey));
+  expect(canvasKey.defaultPrevented, 'Space on the image itself must still start panning').toBe(true);
+});
+
 it('keeps a fitted landscape picture and its dock near the top of a tall image desk', async () => {
   function Landscape() {
     const ref = useRef<HTMLElement>(null);

@@ -128,6 +128,7 @@ export function useMailboxPersonalPreferences(view: UnifiedAttentionView) {
     undo && read?.identity.ownerUserId === undo.owner && preferences.snapshot?.ownerUserId === undo.owner ? undo : null;
   return {
     actions,
+    ignoredSnapshot: preferences.snapshot,
     ignoredEntries: preferences.snapshot?.entries ?? [],
     batchRefusal: refusal('mentions'),
     restoreBatchRefusal: refusal('all'),

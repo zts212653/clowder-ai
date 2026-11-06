@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { configEventBus, createChangeSetId } from '../../config/config-event-bus.js';
+import { writeFileAtomic } from '../../config/write-file-atomic.js';
 import type { OperationState } from './operations/operation-state-machine.js';
+
+/** Plugin config can hold secrets: owner read/write only. */
+const PLUGIN_CONFIG_MODE = { mode: 0o600 };
 
 const CONFIG_DIR = '.cat-cafe';
 const PLUGIN_CONFIG_SUBDIR = 'plugin-config';
@@ -25,21 +29,6 @@ export function readPluginConfigText(projectRoot: string, pluginId: string): str
   }
 }
 
-function writeFileAtomic(filePath: string, content: string): void {
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
-  try {
-    renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      /* ignore cleanup failure */
-    }
-    throw error;
-  }
-}
-
 /** Only consumed while the inventory writer queue is still held. Preserve all unknown file edits. */
 export function restorePluginConfigText(
   projectRoot: string,
@@ -51,7 +40,7 @@ export function restorePluginConfigText(
     throw new Error('Configuration changed before compensation; refresh before recovery');
   const path = resolvePluginConfigPath(projectRoot, pluginId);
   if (previous === undefined) renameSync(path, `${path}.retained-failed-${randomUUID()}`);
-  else writeFileAtomic(path, previous);
+  else writeFileAtomic(path, previous, PLUGIN_CONFIG_MODE);
   configEventBus.emitChange({
     source: 'secrets',
     scope: 'file',
@@ -137,7 +126,11 @@ export function writePluginOperationState(
 
   const dir = resolvePluginConfigDir(projectRoot);
   mkdirSync(dir, { recursive: true });
-  writeFileAtomic(resolvePluginConfigPath(projectRoot, pluginId), `${JSON.stringify(document, null, 2)}\n`);
+  writeFileAtomic(
+    resolvePluginConfigPath(projectRoot, pluginId),
+    `${JSON.stringify(document, null, 2)}\n`,
+    PLUGIN_CONFIG_MODE,
+  );
 }
 
 export function writePluginConfig(
@@ -164,7 +157,7 @@ export function writePluginConfig(
   }
 
   const configPath = resolvePluginConfigPath(projectRoot, pluginId);
-  writeFileAtomic(configPath, `${JSON.stringify(existing, null, 2)}\n`);
+  writeFileAtomic(configPath, `${JSON.stringify(existing, null, 2)}\n`, PLUGIN_CONFIG_MODE);
 
   if (changedKeys.length > 0) {
     configEventBus.emitChange({

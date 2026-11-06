@@ -1,4 +1,6 @@
+import { watcherUsageSchema } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { SettledTurnQuery, TurnResponseSettlement } from '../ports/TurnExecutionSettlement.js';
 import {
   assertCoveredMessageIds,
   assertCreatableOutputFence,
@@ -9,7 +11,6 @@ import {
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   createdOutputFence,
-  hasUnconfirmedProviderTeardown,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   matchesTurnExecutionSource,
@@ -21,6 +22,7 @@ import {
   type TurnOutputFenceVerdict,
 } from '../ports/TurnExecutionStore.js';
 import { TurnExecutionKeys } from '../redis-keys/turn-execution-keys.js';
+import { RedisTurnExecutionSettlement } from './RedisTurnExecutionSettlement.js';
 import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { hydrateTurnExecution, type RedisTurnExecutionHash, sortTurnExecutions } from './turn-execution-redis-codec.js';
 import {
@@ -33,6 +35,65 @@ import {
 import { isUnrelatedRetiredTurnExecution } from './turn-execution-retired-record.js';
 
 export class RedisTurnExecutionStore implements ITurnExecutionStore {
+  async recordWatcherModelAttempt(
+    invocationId: string,
+    turnId: string,
+    startedAt: number,
+    usage?: import('@cat-cafe/shared').WatcherUsage,
+  ): Promise<boolean> {
+    if (!turnId || !Number.isSafeInteger(startedAt)) return false;
+    if (usage) usage = watcherUsageSchema.parse(usage);
+    return (
+      Number(
+        await this.redis.eval(
+          `
+      if redis.call('HGET', KEYS[1], 'executionKind') ~= 'watcher' then return 0 end
+      local attempts = cjson.decode(redis.call('HGET', KEYS[1], 'watcherModelAttempts') or '{}')
+      local previous = attempts[ARGV[1]]
+      local usage = ARGV[3] ~= '' and cjson.decode(ARGV[3]) or nil
+      if previous and previous.usage then return 1 end
+      attempts[ARGV[1]] = {startedAt=previous and previous.startedAt or tonumber(ARGV[2]), usage=usage}
+      redis.call('HSET', KEYS[1], 'watcherModelAttempts', cjson.encode(attempts))
+      return 1
+    `,
+          1,
+          TurnExecutionKeys.record(invocationId),
+          turnId,
+          String(startedAt),
+          usage ? JSON.stringify(usage) : '',
+        ),
+      ) === 1
+    );
+  }
+  async settledHead(userId: string, threadId?: string): Promise<number> {
+    const head = await this.redis.zrevrange(
+      threadId ? TurnExecutionKeys.settledThread(userId, threadId) : TurnExecutionKeys.settledUser(userId),
+      0,
+      0,
+      'WITHSCORES',
+    );
+    return head.length > 0 ? Number(head[1]) : 0;
+  }
+  async recordWatcherUsage(invocationId: string, usage: import('@cat-cafe/shared').WatcherUsage): Promise<boolean> {
+    usage = watcherUsageSchema.parse(usage);
+    return (
+      Number(
+        await this.redis.eval(
+          `
+    if redis.call('HGET', KEYS[1], 'executionKind') ~= 'watcher' then return 0 end
+    local old = redis.call('HGET', KEYS[1], 'watcherUsage')
+    if old then if old == ARGV[1] then return 1 else return 0 end end
+    redis.call('HSET', KEYS[1], 'watcherUsage', ARGV[1])
+    return 1
+   `,
+          1,
+          TurnExecutionKeys.record(invocationId),
+          JSON.stringify(usage),
+        ),
+      ) === 1
+    );
+  }
+
   constructor(private readonly redis: RedisClient) {}
 
   async createRunning(input: CreateTurnExecutionInput): Promise<CreateTurnExecutionResult> {
@@ -192,6 +253,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
       ) !== 1
     )
       throw new Error('invalid exact provider teardown');
+    await new RedisTurnExecutionSettlement(this.redis, (id) => this.get(id)).publishPending(invocationId);
   }
 
   async transitionTerminal(
@@ -216,6 +278,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
       ),
     );
     if (result === -2) throw new Error('provider_teardown_unconfirmed');
+    await new RedisTurnExecutionSettlement(this.redis, (id) => this.get(id)).publishPending(invocationId);
     const record = await this.get(invocationId);
     if (result === -1 || !record) return { outcome: 'not_found', record: null };
     return { outcome: result === 1 ? 'transitioned' : 'already_terminal', record };
@@ -277,7 +340,26 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
   }
 
   async clearResponsePending(invocationId: string): Promise<void> {
-    await this.redis.srem(TurnExecutionKeys.responsePending, invocationId);
+    await this.redis.eval(
+      `
+      if redis.call('EXISTS', KEYS[1]) == 0 or redis.call('HEXISTS', KEYS[1], 'responseSettlement') == 1 then
+        redis.call('SREM', KEYS[2], ARGV[1])
+      end
+      return 1
+    `,
+      2,
+      TurnExecutionKeys.record(invocationId),
+      TurnExecutionKeys.responsePending,
+      invocationId,
+    );
+  }
+
+  markResponseSettled(invocationId: string, settlement: TurnResponseSettlement) {
+    return new RedisTurnExecutionSettlement(this.redis, (id) => this.get(id)).mark(invocationId, settlement);
+  }
+
+  listSettled(query: SettledTurnQuery) {
+    return new RedisTurnExecutionSettlement(this.redis, (id) => this.get(id)).list(query);
   }
 
   async settleOutputFence(invocationId: string, verdict: TurnOutputFenceVerdict): Promise<TurnExecutionRecord | null> {
@@ -308,7 +390,11 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         await this.redis.srem(TurnExecutionKeys.running, invocationId);
         continue;
       }
-      if (record.startedAt >= cutoffStartedAt || excluded.has(invocationId) || hasUnconfirmedProviderTeardown(record))
+      if (
+        record.startedAt >= cutoffStartedAt ||
+        input.excludedExecutionKinds?.includes(record.executionKind) ||
+        excluded.has(invocationId)
+      )
         continue;
       const result = await this.transitionTerminal(invocationId, {
         status: 'interrupted',

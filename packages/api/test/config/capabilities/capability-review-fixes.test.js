@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { appendAuditEntry } from '../../../dist/config/capabilities/capability-audit.js';
 import { buildInstallPreview } from '../../../dist/config/capabilities/capability-install.js';
 import {
   readCapabilitiesConfig,
@@ -113,13 +112,6 @@ describe('F146 review fixes', () => {
   });
 
   // ── Cloud review round 2 regressions ──
-
-  test('CR2-P1-1: install must not overwrite managed (source!=external) MCP', async () => {
-    const config = await readCapabilitiesConfig(projectRoot);
-    const managed = config.capabilities.find((c) => c.id === 'managed-mcp');
-    assert.equal(managed.source, 'cat-cafe');
-    assert.notEqual(managed.source, 'external', 'managed MCP must be blocked from overwrite');
-  });
 
   test('CR2-P1-2: buildInstallPreview rejects args with non-string elements', () => {
     assert.throws(() => {

@@ -69,6 +69,8 @@ export default defineConfig({
       'src/__tests__/parse-dossier-profiles.test.ts',
       'src/__tests__/dossier-parse-diagnostics.test.ts',
       'src/__tests__/profile-frontmatter-parser.test.ts',
+      'src/__tests__/markdown-frontmatter.test.ts',
+      'src/__tests__/a2a-mention-grammar.test.ts',
       'src/__tests__/scanner-discovery-pure.test.ts',
       'src/__tests__/recall-outcome.test.ts',
       'src/__tests__/capability-tip-privacy.test.ts',
