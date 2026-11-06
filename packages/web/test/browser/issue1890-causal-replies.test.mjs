@@ -343,7 +343,12 @@ test('issue1890 causal reading remains consistent live, complete and after refre
     const recordToggle = page.locator('button[aria-controls="reply-record-R"]');
     if ((await recordToggle.getAttribute('aria-expanded')) === 'false') await recordToggle.click();
     assert.match(await page.locator('#reply-record-R').innerText(), /原来的调用链/);
+    await page.getByRole('button', { name: '查看完整原文', exact: true }).click();
+    assert.match(await page.locator('[data-causal-full-text]').innerText(), /原来的调用链[\s\S]*收到鲸鲸审查/);
+    assert.equal((await page.locator('[data-causal-original="R"]').innerText()).split('原来的调用链').length - 1, 1);
+    await page.getByRole('button', { name: '收起完整原文', exact: true }).click();
     results.push({ stage: 'native-output', processInOriginalRecord: true, finalInContinuation: true });
+    results.push({ stage: 'native-full-original', includesProcessAndFinal: true, prefixCount: 1 });
     const second = { ...settledInput, id: 'S2', timestamp: 3000 };
     native.lifecycle.inputMessageIds.push('S2');
     native.lifecycle.inputEntryIds.push('review2');

@@ -107,6 +107,74 @@ describe('causal reply presentation without moving History', () => {
     expect(projection.continuations.size).toBe(0);
   });
 
+  it('keeps the whole reply when the exact queued native turn did not complete', () => {
+    const source: ChatMessage = {
+      ...input,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '2000:S',
+        dispatchRefs: [
+          {
+            targetId: 'codex',
+            phase: 'settled',
+            statusMessageId: 'R',
+            dispatchedAt: 2000,
+            appendAcceptance: 'written',
+            inputRead: { status: 'read', at: 2100 },
+          },
+        ],
+        appendFailures: [
+          {
+            targetId: 'codex',
+            invocationId: 'turn',
+            responseMessageId: 'R',
+            at: 2200,
+            acceptance: 'incomplete',
+            reason: 'provider_rejected',
+          },
+        ],
+      },
+    };
+    expect(projectCausalReplies([response(), source], proof).originals.size).toBe(0);
+  });
+
+  it('uses an exact read receipt over pending acceptance or a late refusal', () => {
+    [false, true].forEach((lateRefusal) => {
+      const source: ChatMessage = {
+        ...input,
+        lifecycle: {
+          kind: 'input',
+          orderKey: '2000:S',
+          dispatchRefs: [
+            {
+              targetId: 'codex',
+              phase: 'dispatched',
+              statusMessageId: 'R',
+              dispatchedAt: 2000,
+              appendAcceptance: 'pending',
+              inputRead: { status: 'read', at: 2100 },
+            },
+          ],
+          ...(lateRefusal
+            ? {
+                appendFailures: [
+                  {
+                    targetId: 'codex',
+                    invocationId: 'turn',
+                    responseMessageId: 'R',
+                    at: 2200,
+                    acceptance: 'not_accepted' as const,
+                    reason: 'provider_rejected' as const,
+                  },
+                ],
+              }
+            : {}),
+        },
+      };
+      expect(projectCausalReplies([response(), source], proof).originals.size).toBe(1);
+    });
+  });
+
   it('keeps the whole reply while append acceptance is unknown, refused, or rebound to another response', () => {
     const source: ChatMessage = {
       ...input,

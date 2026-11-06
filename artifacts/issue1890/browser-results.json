@@ -41,6 +41,11 @@
       "finalInContinuation": true
     },
     {
+      "stage": "native-full-original",
+      "includesProcessAndFinal": true,
+      "prefixCount": 1
+    },
+    {
       "stage": "equal-cut-navigation",
       "from": "S",
       "focused": "S2"

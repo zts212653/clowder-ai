@@ -52,6 +52,7 @@ export function projectCausalReplies(messages: readonly ChatMessage[], verified:
           ref?.statusMessageId === response.id &&
           outcome !== 'not_accepted' &&
           outcome !== 'unknown' &&
+          outcome !== 'incomplete' &&
           boundary.contentOffset <= content.length &&
           (!previous ||
             (boundary.contentOffset >= previous.contentOffset &&
