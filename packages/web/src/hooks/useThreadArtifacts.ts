@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { apiSessionIdentity } from '../utils/api-session-identity';
 import { threadArtifactsEntry } from './thread-artifacts-store';
@@ -64,7 +64,7 @@ export function useWorksSourceRefresh(
   }, [enabled, threadId, refetch, scopeToThread]);
 }
 
-export function useThreadArtifacts(threadId: string | undefined, view?: 'works') {
+export function useThreadArtifacts(threadId: string | undefined, view?: 'works', active = true) {
   const scopeThreadId = view === 'works' && threadId === 'default' ? undefined : threadId;
   const identity = useSyncExternalStore(
     apiSessionIdentity.subscribe,
@@ -73,7 +73,11 @@ export function useThreadArtifacts(threadId: string | undefined, view?: 'works')
   );
   const key = JSON.stringify([identity.ownerUserId, identity.generation, scopeThreadId, view]);
   const entry = useMemo(() => threadArtifactsEntry(key, scopeThreadId, view), [key, scopeThreadId, view]);
-  const snapshot = useSyncExternalStore(entry.subscribe, entry.getSnapshot, entry.getSnapshot);
-  useWorksSourceRefresh(scopeThreadId, view === 'works', entry.refetch);
-  return { ...snapshot, refetch: entry.refetch };
+  const subscribe = useCallback((listener: () => void) => entry.subscribe(listener, active), [entry, active]);
+  const snapshot = useSyncExternalStore(subscribe, entry.getSnapshot, entry.getSnapshot);
+  const refetch = useCallback(() => {
+    if (active) entry.refetch();
+  }, [active, entry]);
+  useWorksSourceRefresh(scopeThreadId, active && view === 'works', refetch);
+  return { ...snapshot, loading: active && snapshot.loading, refetch };
 }
