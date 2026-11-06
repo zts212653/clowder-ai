@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863');
+const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863-blue');
 await fs.mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({
   headless: true,
@@ -23,6 +23,12 @@ console.log('errors', errors);
 await page.screenshot({ path: path.join(evidence, '01-initial.png'), fullPage: true });
 const textarea = page.locator('textarea:not([aria-hidden="true"])');
 assert.equal(await textarea.count(), 1);
+const linkColor = await page
+  .locator('[data-link-href]')
+  .first()
+  .evaluate((node) => getComputedStyle(node).color);
+const [red, green, blue] = linkColor.match(/[\d.]+/g).map(Number);
+assert.ok(blue > red + 60 && blue > green, `Link text should be blue, received ${linkColor}`);
 await textarea.locator('xpath=../..').screenshot({ path: path.join(evidence, '01-composer.png') });
 console.log(
   'mirror',
@@ -46,6 +52,18 @@ const marks = () =>
     .evaluateAll((nodes) => nodes.map((node) => ({ text: node.textContent, href: node.dataset.linkHref })));
 const url = 'https://github.com/meow-club/cat-cafe-map';
 await textarea.fill(`${url}这是链接 这不是`);
+await textarea.evaluate((node, offset) => node.setSelectionRange(0, offset), url.length);
+await textarea.locator('xpath=../..').screenshot({ path: path.join(evidence, '05-composer-selection.png') });
+const selection = await textarea.evaluate((node) => ({
+  text: node.value.slice(node.selectionStart, node.selectionEnd),
+  color: getComputedStyle(node, '::selection').color,
+  background: getComputedStyle(node, '::selection').backgroundColor,
+  caret: getComputedStyle(node).caretColor,
+}));
+assert.equal(selection.text, url);
+assert.notEqual(selection.color, selection.background);
+assert.notEqual(selection.caret, 'rgba(0, 0, 0, 0)');
+report.cases.push('blue link text / native selected text and visible caret');
 assert.deepEqual(
   (await marks()).map((m) => m.text),
   [`${url}这是链接`],
@@ -117,7 +135,10 @@ await textarea.fill(url);
 await textarea.press('End');
 const cdp = await context.newCDPSession(page);
 await cdp.send('Input.imeSetComposition', { text: '这是说明', selectionStart: 4, selectionEnd: 4 });
+assert.equal(await page.locator('[data-testid="composer-link-mirror"]').getAttribute('data-active'), 'false');
+assert.notEqual(await textarea.evaluate((node) => getComputedStyle(node).color), 'rgba(0, 0, 0, 0)');
 await cdp.send('Input.insertText', { text: '这是说明' });
+assert.equal(await page.locator('[data-testid="composer-link-mirror"]').getAttribute('data-active'), 'true');
 assert.equal(await textarea.inputValue(), `${url}这是说明`);
 assert.deepEqual(
   (await marks()).map((m) => m.text),
@@ -154,6 +175,16 @@ assert.ok((await page.locator('[data-testid="sent-messages"] a[href]').count()) 
 await page.getByRole('button', { name: '明暗切换' }).click();
 await page.waitForTimeout(200);
 await textarea.fill(`${url}这是链接 这不是`);
+report.dark = await page
+  .locator('[data-link-href]')
+  .first()
+  .evaluate((node) => ({
+    theme: document.documentElement.dataset.theme,
+    color: getComputedStyle(node).color,
+  }));
+console.log('dark link', report.dark);
+assert.equal(report.dark.theme, 'dark');
+assert.notEqual(report.dark.color, linkColor);
 await page.screenshot({ path: path.join(evidence, '04-dark.png'), fullPage: true });
 await textarea.locator('xpath=../..').screenshot({ path: path.join(evidence, '04-composer-dark.png') });
 await page.getByRole('button', { name: '切换经典' }).click();

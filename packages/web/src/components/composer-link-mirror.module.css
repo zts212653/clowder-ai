@@ -4,7 +4,18 @@
   overflow: hidden;
   pointer-events: none;
   user-select: none;
+  color: var(--shell-ink);
+  --composer-link-color: #2563eb;
+}
+
+.viewport[data-active="true"] + textarea {
   color: transparent;
+  caret-color: var(--shell-ink);
+}
+
+.viewport[data-active="true"] + textarea::selection {
+  color: HighlightText;
+  background: Highlight;
 }
 
 .content {
@@ -13,18 +24,10 @@
 }
 
 .range {
-  color: transparent;
-  background: color-mix(in srgb, var(--shell-primary-text) 7%, transparent);
-  text-decoration-line: underline;
-  text-decoration-color: color-mix(in srgb, var(--shell-primary-text) 68%, transparent);
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
-  text-decoration-skip-ink: auto;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  color: var(--composer-link-color);
+  background: transparent;
 }
 
-:global([data-theme="dark"]) .range {
-  background: color-mix(in srgb, var(--shell-primary-text) 12%, transparent);
-  text-decoration-color: color-mix(in srgb, var(--shell-primary-text) 58%, transparent);
+:global([data-theme="dark"]) .viewport {
+  --composer-link-color: #93c5fd;
 }

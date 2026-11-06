@@ -4,7 +4,7 @@ import { type RefObject, useLayoutEffect, useMemo, useRef } from 'react';
 import styles from './composer-link-mirror.module.css';
 import { composerWebLinks } from './composer-web-links';
 
-/** Decorative only: the textarea keeps its text, caret, selection and editing history. */
+/** Paints the draft while the textarea keeps its value, caret, selection and editing history. */
 export function ComposerLinkMirror({
   input,
   textareaRef,
@@ -17,6 +17,7 @@ export function ComposerLinkMirror({
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const { ranges, unmapped } = useMemo(() => composerWebLinks(input), [input]);
+  const active = ranges.length > 0 && !composing;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Synchronize after React commits each changed draft, including a change that does not resize the textarea.
   useLayoutEffect(() => {
@@ -86,7 +87,8 @@ export function ComposerLinkMirror({
         aria-hidden="true"
         data-testid="composer-link-mirror"
         data-unmapped={unmapped}
-        style={{ visibility: composing ? 'hidden' : undefined }}
+        data-active={active}
+        style={{ visibility: active ? undefined : 'hidden' }}
       >
         <div ref={contentRef} className={styles.content}>
           {spans}
