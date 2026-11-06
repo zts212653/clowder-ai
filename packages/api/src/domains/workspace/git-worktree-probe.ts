@@ -80,6 +80,10 @@ async function isBareGitRepository(cwd: string): Promise<boolean> {
   throw result.err;
 }
 
+export async function isGitWorkTree(cwd: string): Promise<boolean> {
+  return isInsideGitWorkTree(cwd);
+}
+
 export async function readGitWorktreeList(cwd: string): Promise<string | null> {
   if (!(await isInsideGitWorkTree(cwd)) && !(await isBareGitRepository(cwd))) return null;
 

@@ -130,6 +130,22 @@ describe('GitPanel shell presentations', () => {
     expect(container.textContent).not.toContain('状态（0 处改动）');
   });
 
+  it('shows a non-git empty state instead of claiming a clean tree', async () => {
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('git-status')) {
+        return Response.json({ isGitRepository: false, branch: '', staged: [], unstaged: [], untracked: [] });
+      }
+      if (url.includes('git-log')) return Response.json({ isGitRepository: false, commits: [] });
+      if (url.includes('git-health')) {
+        return Response.json({ isGitRepository: false, staleBranches: [], worktrees: [], runtimeDrift: null });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    await render();
+    expect(container.textContent).toContain('当前工作区不是 Git 仓库');
+    expect(container.textContent).not.toContain('工作区干净');
+  });
+
   it('keeps the runtime object on drift numbers instead of implying the current branch', async () => {
     await render();
     expect(container.textContent).toContain('runtime');

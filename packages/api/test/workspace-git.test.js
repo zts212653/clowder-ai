@@ -3,9 +3,14 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 const {
+  isGitWorkTree,
   parseGitLog,
   parseGitStatus,
   parseGitShow,
@@ -15,6 +20,21 @@ const {
   parseDriftCommits,
   STALE_BRANCH_FORMAT,
 } = await import('../dist/routes/workspace-git.js');
+
+describe('isGitWorkTree', () => {
+  test('distinguishes a plain directory from a git worktree', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'nongit-workspace-'));
+    const repo = mkdtempSync(join(tmpdir(), 'git-workspace-'));
+    try {
+      assert.equal(await isGitWorkTree(plain), false);
+      execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' });
+      assert.equal(await isGitWorkTree(repo), true);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('parseGitLog', () => {
   test('parses NUL-delimited git log output', () => {

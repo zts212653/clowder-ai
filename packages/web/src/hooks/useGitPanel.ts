@@ -11,6 +11,7 @@ export interface GitCommit {
 }
 
 export interface GitStatusResult {
+  isGitRepository?: boolean;
   branch: string;
   staged: Array<{ status: string; path: string }>;
   unstaged: Array<{ status: string; path: string }>;
