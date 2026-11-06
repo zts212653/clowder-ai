@@ -273,7 +273,10 @@ describe('TurnExecutionStartupReconciler', () => {
   test('production startup obtains exact live process owners before child interruption', () => {
     assert.match(indexSource(), /listLiveExecutionOwners: \(\) => cliExecutionOwnerService\.listLive\(\)/);
     const steps = recoverySource();
-    assert.match(steps, /protectedInvocationIds:\s*liveExecutionOwners\.owners\.map/);
+    assert.match(
+      steps,
+      /protectedInvocationIds:\s*\[[\s\S]*\.\.\.liveExecutionOwners\.owners\.map\(\(owner\) => owner\.invocationId\)[\s\S]*\.\.\.windowsJobTeardowns\.liveOwners/,
+    );
     assert.ok(steps.indexOf('await deps.listLiveExecutionOwners()') < steps.indexOf('childReconciler.reconcile('));
   });
 
