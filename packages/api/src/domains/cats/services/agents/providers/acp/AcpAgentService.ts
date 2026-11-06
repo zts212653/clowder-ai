@@ -693,6 +693,8 @@ export class AcpAgentService implements AgentService {
       readonly recentCapacitySignal: AcpCapacitySignal | null;
       clearRecentCapacitySignal(): void;
       close?(): Promise<void>;
+      /** True when the latest prompt received a final RPC response, including a provider error. */
+      hasPromptFinalResponse?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
@@ -1455,6 +1457,9 @@ export class AcpAgentService implements AgentService {
             },
             timestamp: Date.now(),
           };
+          // A provider error response is still the final prompt response: the turn ended, so the
+          // existing recovery path must see an acknowledged prompt rather than an unknown stop.
+          if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
           deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
           return; // Exit — error path handled completion
         }
@@ -1503,6 +1508,9 @@ export class AcpAgentService implements AgentService {
         },
         timestamp: Date.now(),
       };
+      // A provider error response is still the final prompt response, so this turn ended at the
+      // protocol boundary; only a genuine transport/timeout/cancel stays unconfirmed.
+      if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
       if (sessionId) cancelActivePromptSession(sessionId);

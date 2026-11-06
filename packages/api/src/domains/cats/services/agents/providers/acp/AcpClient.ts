@@ -235,6 +235,8 @@ export class AcpClient {
   private exited = false;
   /** Sessions whose local prompt ended before provider completion was acknowledged. */
   private readonly unquiescedSessionIds = new Set<string>();
+  /** Sessions whose latest prompt received its final RPC response, success or provider error. */
+  private readonly promptFinalResponses = new Set<string>();
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   /**
    * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
@@ -703,6 +705,7 @@ export class AcpClient {
     if (this.sessionPromptPendingIds.has(sessionId)) {
       throw new AcpProtocolError(-32600, 'ACP session already has an active prompt');
     }
+    this.promptFinalResponses.delete(sessionId);
     this.failedProviderSessions.delete(sessionId);
     const prompt = toAcpPromptContent(input, this.promptCapabilities);
     // KD-12: Activity-based turn budget — resets on each event.
@@ -1061,6 +1064,11 @@ export class AcpClient {
     return this.exited;
   }
 
+  /** True when the latest prompt received a final RPC response, including a provider error. */
+  hasPromptFinalResponse(sessionId: string): boolean {
+    return this.promptFinalResponses.has(sessionId);
+  }
+
   /**
    * #1203: False when the bootstrap cwd was deleted after spawn (e.g. by an
    * external cleaner emptying the shared /tmp bootstrap root) — including the
@@ -1264,6 +1272,11 @@ export class AcpClient {
             { method, id, durationMs: Date.now() - sentAt, hasError: !!resp.error },
             'ACP sendRequest: response received',
           );
+          if (method === ACP_METHODS.sessionPrompt && typeof params.sessionId === 'string') {
+            // A provider error response is still this prompt's final RPC response: the provider
+            // finished the turn. Local cancel/timeout/early stream close never reaches this branch.
+            this.promptFinalResponses.add(params.sessionId);
+          }
           if (resp.error) {
             reject(new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data));
           } else {
