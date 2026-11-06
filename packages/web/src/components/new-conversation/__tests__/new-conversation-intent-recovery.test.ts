@@ -103,3 +103,19 @@ it('retains a failed image for recovery and accepts a newer save', async () => {
   await saveNewConversationIntent(record(ALICE));
   expect((await loadNewConversationIntent(ALICE))?.files).toEqual([]);
 });
+
+it('uses a newer pending snapshot when it appears during an earlier database read', async () => {
+  await saveNewConversationIntent(record(ALICE));
+  const restoring = loadNewConversationIntent(ALICE);
+  let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
+  const bytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
+  const file = new File(['newer'], 'newer.png', { type: 'image/png' });
+  Object.defineProperty(file, 'arrayBuffer', { value: () => bytes });
+  const saving = saveNewConversationIntent(record(ALICE, [file])).catch((error: unknown) => error);
+  try {
+    expect((await restoring)?.files.map((image) => image.name)).toEqual(['newer.png']);
+  } finally {
+    releaseBytes(new TextEncoder().encode('newer').buffer);
+    await Promise.all([saving, restoring]);
+  }
+});

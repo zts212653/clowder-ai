@@ -103,7 +103,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     [currentOwner],
   );
   const readSaveState = useCallback(() => getNewConversationIntentSaveState(currentOwner), [currentOwner]);
-  const localSaveState = useSyncExternalStore(subscribeToSave, readSaveState, () => 'idle');
+  const localSaveState = useSyncExternalStore(subscribeToSave, readSaveState, readSaveState);
 
   useLayoutEffect(() => setCurrentThread(DRAFT_THREAD_ID), [setCurrentThread]);
 
