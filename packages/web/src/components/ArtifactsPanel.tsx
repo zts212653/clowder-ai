@@ -22,6 +22,7 @@ import { ThreadWorksPanelV2, type WorksPanelProps } from './artifacts/ThreadWork
 import { CompactLabel } from './content-overflow/CompactLabel';
 import { useContentOpen } from './content-review/useContentOpen';
 import { useShellPresentation } from './shell/shell-presentation';
+import { useWorkspaceSurfaceVisibility } from './workbench/WorkspaceSurfaceVisibility';
 
 const resolveUrl = (url?: string): string | undefined => resolveAssetUrl(url, API_URL);
 
@@ -257,8 +258,9 @@ function ClassicArtifactsPanel({
   const [scope, setScope] = useState<ArtifactScope>(initialView?.scope ?? 'thread');
 
   // Data sources: thread-scoped (Phase A) + global (Phase B)
-  const threadData = useThreadArtifacts(threadId);
-  const globalData = useGlobalArtifacts(scope === 'global');
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
+  const threadData = useThreadArtifacts(threadId, undefined, surfaceVisible && scope === 'thread');
+  const globalData = useGlobalArtifacts(scope === 'global', undefined, undefined, { paused: !surfaceVisible });
 
   // Active data source based on scope
   const { artifacts, loading, error } = scope === 'global' ? globalData : threadData;

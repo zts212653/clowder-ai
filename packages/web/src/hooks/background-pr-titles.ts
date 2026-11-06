@@ -45,9 +45,16 @@ export async function refreshMissingPrTitles(
               return null;
             }
           })();
-          attempt = { until: Date.now() + 60_000, result };
-          attempts.set(key, attempt);
+          const started = { until: Date.now() + 60_000, result };
+          attempt = started;
+          attempts.set(key, started);
           if (attempts.size > 256) attempts.delete(attempts.keys().next().value!);
+          // Pausing an owner withdraws an in-flight attempt, so its next read can try again.
+          const forgetCanceled = () => {
+            if (attempts.get(key) === started) attempts.delete(key);
+          };
+          signal.addEventListener('abort', forgetCanceled, { once: true });
+          void result.then(() => signal.removeEventListener('abort', forgetCanceled));
         }
         const title = await attempt.result;
         if (title && !signal.aborted) titles.set(ref, title);
