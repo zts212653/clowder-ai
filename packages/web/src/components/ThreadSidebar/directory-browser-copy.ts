@@ -1,4 +1,7 @@
+import type { ProjectRestriction } from './directory-segments';
+
 export interface DirectoryBrowserCopy {
+  projectRestrictions: Record<ProjectRestriction, string>;
   configuredPathUnavailable: string;
   browseFailed: string;
   connectFailed: string;
@@ -24,6 +27,10 @@ export interface DirectoryBrowserCopy {
 }
 
 export const defaultDirectoryBrowserCopy: DirectoryBrowserCopy = {
+  projectRestrictions: {
+    runtime_read_only: '运行目录仅供只读浏览。绑定项目或创建文件夹时，请选择其他目录，以免影响重启或更新。',
+    configuration_unknown: '仍可浏览此目录。运行目录或工作区配置异常，暂时无法选择项目或创建文件夹。',
+  },
   configuredPathUnavailable: '配置路径不可用，已切换到主目录',
   browseFailed: 'Failed to browse directory',
   connectFailed: 'Unable to connect to server',
@@ -57,6 +64,9 @@ export interface DirectoryBrowserProps {
   activeProjectPath?: string;
   /** Called whenever the browsed directory changes */
   onCurrentPathChange?: (path: string) => void;
+  /** A successfully browsed directory that can become a new project. */
+  onSelectablePathChange?: (path: string) => void;
+  onProjectRestricted?: () => void;
   /** Called when browsing a virtual location that is not a concrete directory */
   onVirtualLocationChange?: () => void;
   /** Called when user cancels */

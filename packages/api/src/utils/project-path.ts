@@ -11,7 +11,7 @@
 import { realpathSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir, platform, tmpdir } from 'node:os';
-import { delimiter, relative, resolve, win32 } from 'node:path';
+import { delimiter, relative, resolve, sep, win32 } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Denylist: known system directories that should never be project roots
@@ -164,11 +164,12 @@ export async function validateProjectPath(rawPath: string): Promise<string | nul
 
 export function isPathUnderRoots(absPath: string, roots: string[], platformName = process.platform): boolean {
   const isWindows = platformName === 'win32';
+  const separator = isWindows ? win32.sep : sep;
   for (const root of roots) {
     const rel = isWindows ? win32.relative(root, absPath) : relative(root, absPath);
     if (rel === '') return true;
     if (isWindows && win32.isAbsolute(rel)) continue;
-    if (!rel.startsWith('..') && !rel.startsWith('/') && !rel.startsWith('\\')) {
+    if (rel !== '..' && !rel.startsWith(`..${separator}`) && !rel.startsWith('/') && !rel.startsWith('\\')) {
       return true;
     }
   }

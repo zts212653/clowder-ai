@@ -9,6 +9,8 @@ export interface BrowseEntry {
   isDirectory: boolean;
 }
 
+export type ProjectRestriction = 'runtime_read_only' | 'configuration_unknown';
+
 export interface BrowseResult {
   current: string;
   name: string;
@@ -17,6 +19,7 @@ export interface BrowseResult {
   entries: BrowseEntry[];
   /** Server-owned capability: true when the API server's filesystem is Windows. */
   isWindows?: boolean;
+  projectRestriction?: ProjectRestriction;
 }
 
 export interface BreadcrumbSegment {

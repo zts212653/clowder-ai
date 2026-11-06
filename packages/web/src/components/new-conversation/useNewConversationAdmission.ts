@@ -283,6 +283,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     },
     [save],
   );
+  const updateProject = useCallback((projectPath: string | undefined) => updateIntent({ projectPath }), [updateIntent]);
 
   const onDraftChange = useCallback(
     (snapshot: ChatInputDraftSnapshot) => {
@@ -310,7 +311,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     optionsLocked: Boolean(intent?.creationStarted || phase === 'creating' || phase === 'sending'),
     updateTitle: (title) => updateIntent({ title }),
     updatePinned: (pinned) => updateIntent({ pinned }),
-    updateProject: (projectPath) => updateIntent({ projectPath }),
+    updateProject,
     updatePreferredCats: (preferredCats) => updateIntent({ preferredCats }),
     onDraftChange,
     send,
