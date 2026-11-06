@@ -32,7 +32,7 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
-import { isGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
@@ -550,7 +550,12 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitWorkTree(root))) {
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
         return { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };
       }
 

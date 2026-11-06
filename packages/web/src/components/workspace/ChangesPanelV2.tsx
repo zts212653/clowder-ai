@@ -150,7 +150,13 @@ export function ChangesPanelV2({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : copy.noChanges}
+            {data.isGitRepository === false ? (
+              copy.notGitRepository
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              copy.noChanges
+            )}
           </div>
         )}
       </div>

@@ -10,12 +10,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
-import { isGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
 
-export { isGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+export { isGitWorkTree, probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 
 // ── Parsers (exported for unit testing) ─────────────────────────────
 
@@ -234,7 +234,12 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitWorkTree(root))) {
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
         return { worktreeId, isGitRepository: false, commits: [] };
       }
       const n = Math.min(Math.max(1, Number(limit) || 50), 200);
@@ -267,7 +272,12 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitWorkTree(root))) {
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
         return {
           worktreeId,
           isGitRepository: false,
@@ -338,7 +348,12 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitWorkTree(root))) {
+      const probe = await probeGitWorkTree(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
         return { isGitRepository: false, staleBranches: [], worktrees: [], runtimeDrift: null };
       }
 

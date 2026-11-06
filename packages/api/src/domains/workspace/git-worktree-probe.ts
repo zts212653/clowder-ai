@@ -80,8 +80,25 @@ async function isBareGitRepository(cwd: string): Promise<boolean> {
   throw result.err;
 }
 
+export type GitWorkTreeProbe = 'git' | 'not-git' | 'unavailable';
+
+/**
+ * Distinguish a confirmed non-Git directory from a failed probe (for example,
+ * a missing `git` executable). Callers that expose repository state must not
+ * turn an environment failure into a normal non-Git empty state.
+ */
+export async function probeGitWorkTree(cwd: string): Promise<GitWorkTreeProbe> {
+  const result = await execGit(cwd, ['rev-parse', '--is-inside-work-tree']);
+  if (result.ok) return result.stdout.trim() === 'true' ? 'git' : 'not-git';
+  if (isGitExecutableUnavailableError(result.err)) return 'unavailable';
+  if (isGitExit128(result.err) && !(await hasGitMarkerInParents(cwd))) return 'not-git';
+  return 'unavailable';
+}
+
 export async function isGitWorkTree(cwd: string): Promise<boolean> {
-  return isInsideGitWorkTree(cwd);
+  const probe = await probeGitWorkTree(cwd);
+  if (probe === 'unavailable') throw new Error('Git repository probe failed');
+  return probe === 'git';
 }
 
 export async function readGitWorktreeList(cwd: string): Promise<string | null> {
