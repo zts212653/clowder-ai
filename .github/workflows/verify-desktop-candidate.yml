@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-nightly-${{ inputs.branch || 'next' }}
+  group: desktop-nightly-${{ github.event_name }}-${{ inputs.branch || 'next' }}-${{ inputs.platform || 'all' }}-${{ inputs.suite || 'smoke' }}
   cancel-in-progress: false
 
 jobs:
