@@ -1,11 +1,5 @@
-/**
- * #1838 API A of windows-job-restart-recovery.test.js. After adopting its kernel job it runs two real
- * invokeSingleCat turns of one thread and role. The first completes and leaves the persistent
- * logical/native session mapping. The second is admitted the way the router does it (parent
- * invocation, then the child's response R and streamed draft once invokeSingleCat names the child);
- * invokeSingleCat itself links it to the job and passes the provider-entry fence, and its provider
- * starts a tree whose PPID chain breaks. It stays inside that provider until the test kills it.
- */
+/** API A runs two real turns: the first persists its session; the second hangs in real spawnCli.
+ * Covered mode owns its provider Job; legacy mode never writes a link. */
 import './setup-cat-registry.js';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRedisClient } from '../../../shared/dist/utils/index.js';
@@ -49,6 +43,7 @@ const turns = restartTurns({
   registry,
   turnExecutionStore: new CallbackAuthTurnExecutionLifecycle(canonical, registry),
   scope: config.scope,
+  windowsProviderHosts: !config.legacy,
 });
 
 // --- turn 1 completes and leaves the logical/native session mapping ---

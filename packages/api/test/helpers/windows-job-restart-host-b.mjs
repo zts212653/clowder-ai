@@ -1,16 +1,7 @@
-/**
- * #1838 API B of windows-job-restart-recovery.test.js: a fresh API that runs the index.ts startup
- * recovery on the durable state API A left, then reports every lifecycle object it can read.
- *
- * All modes run the product's `recoverPriorProcessExecutions`. `baseline` is the pre-#1838 recovery
- * (no job adoption, no job evidence); `fixed` is the current one; `settle-fail` is `fixed` with a
- * response settlement that throws. `baseline` and `next` then run the user's next turn of the same
- * thread and role through the real invokeSingleCat, which must refuse it (baseline) or reach its
- * provider resuming the session API A left (next).
- */
+/** Fresh API B runs the shared index startup recovery and optionally the real next turn.
+ * Physical teardown evidence and actual next-turn admission are separate observations. */
 import './setup-cat-registry.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { createRedisClient } from '../../../shared/dist/utils/index.js';
 import { CallbackAuthTurnExecutionLifecycle } from '../../dist/domains/cats/services/agents/invocation/CallbackAuthTurnExecutionLifecycle.js';
 import { createTaskProgressStore } from '../../dist/domains/cats/services/agents/invocation/createTaskProgressStore.js';
@@ -25,10 +16,7 @@ import {
 import { createDraftStore } from '../../dist/domains/cats/services/stores/factories/DraftStoreFactory.js';
 import { createInvocationRecordStore } from '../../dist/domains/cats/services/stores/factories/InvocationRecordStoreFactory.js';
 import { createMessageStore } from '../../dist/domains/cats/services/stores/factories/MessageStoreFactory.js';
-import {
-  findUnconfirmedProviderBlocker,
-  hasUnconfirmedProviderTeardown,
-} from '../../dist/domains/cats/services/stores/ports/TurnExecutionStore.js';
+import { hasUnconfirmedProviderTeardown } from '../../dist/domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { RedisTurnExecutionStore } from '../../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { createCliExecutionOwnerService } from '../../dist/utils/cli-process-ownership.js';
 import { restartTurns } from './windows-job-restart-turn.mjs';
@@ -38,10 +26,9 @@ const [configPath, mode, outFile] = process.argv.slice(2);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const { execution: e, callbackToken } = JSON.parse(readFileSync(config.hostAFile, 'utf8'));
 // `settle-fail` is the fixed recovery whose response settlement throws, as a Redis error would.
-const fixed = mode !== 'baseline';
 // The API's one data root, as in production: recovery and the real provider entry read the same
 // host-job evidence there.
-if (fixed) process.env.CAT_CAFE_DATA_DIR = config.dataDir;
+process.env.CAT_CAFE_DATA_DIR = config.dataDir;
 const client = createRedisClient({ url: config.redisUrl, keyPrefix: config.prefix });
 
 // The index.ts composition: callback auth wraps the canonical store; recovery settles through it.
@@ -57,7 +44,7 @@ const messageStore = createMessageStore(client);
 const draftStore = createDraftStore(client);
 const log = { info() {}, warn: (message) => process.stderr.write(`${message}\n`) };
 
-// The index.ts startup recovery itself. Before #1838 there was no job evidence to read at all.
+// The same startup recovery composition index.ts uses; both scenarios read their own data root.
 const recovery = await recoverPriorProcessExecutions({
   processStartedAt: PROCESS_START_AT,
   turnExecutionStore: store,
@@ -74,7 +61,7 @@ const recovery = await recoverPriorProcessExecutions({
       },
     );
   },
-  windowsJobDataDir: fixed ? config.dataDir : join(config.dataDir, 'pre-1838-no-job-evidence'),
+  windowsJobDataDir: config.dataDir,
   orphans: { invocationRecordStore: records, taskProgressStore: createTaskProgressStore(client), log, messageStore },
   markStartupRecoveryComplete: () => registry.markStartupRecoveryComplete(),
 });
@@ -82,22 +69,19 @@ const { childRecovery: reconciled, startupRecovery: orphans, windowsJobTeardowns
 
 const child = await store.get(e.invocationId);
 const running = await store.listRunningByUser(e.userId);
-const next = { invocationId: `next-${PROCESS_START_AT}`, threadId: e.threadId, catId: e.catId };
-const blocker = findUnconfirmedProviderBlocker(running, next);
 const response = await messageStore.getByIdempotencyKey(
   e.userId,
   e.threadId,
   lifecycleResponseIdempotencyKey(e.invocationId),
 );
 const parent = await records.get(e.executionId);
-// Read the crashed child's own truth first: a refused next turn still mints its credential and
-// retires the slot's previous one, which is not what this evidence is about.
+// Read the original lifecycle, then verify its callback again after any next-turn admission.
 const auth = await registry.verify(e.invocationId, callbackToken);
 const drafts = (await draftStore.getByThread(e.userId, e.threadId)).length;
 const responsePending = (await store.listResponsePending()).map((turn) => turn.invocationId);
 // The user's next message of the same thread and role, through the product's invokeSingleCat.
 let nextTurn = null;
-if (mode === 'next' || mode === 'baseline') {
+if (mode === 'next' || mode === 'next-while-alive') {
   const turns = restartTurns({
     client,
     registry,
@@ -107,6 +91,7 @@ if (mode === 'next' || mode === 'baseline') {
   const { errors } = await turns.run();
   nextTurn = { errors, providerCalls: turns.calls, session: await turns.session() };
 }
+const authAfterNext = await registry.verify(e.invocationId, callbackToken);
 writeFileSync(
   outFile,
   JSON.stringify({
@@ -121,8 +106,8 @@ writeFileSync(
     cleared: recovery.windowsJobEvidence,
     status: child?.status,
     terminalReason: child?.terminalReason ?? null,
-    blocked: hasUnconfirmedProviderTeardown(child),
-    blockerId: blocker?.invocationId ?? null,
+    teardownUnconfirmed: hasUnconfirmedProviderTeardown(child),
+    teardownAt: child?.providerTeardownAt ?? null,
     nextTurn,
     runningIds: running.map((record) => record.invocationId),
     parent: { status: parent?.status, error: parent?.error ?? null },
@@ -133,6 +118,7 @@ writeFileSync(
     },
     drafts,
     responsePending,
+    authAfterNextOk: authAfterNext.ok,
     authOk: auth.ok,
     authReason: auth.ok ? null : auth.reason,
   }),

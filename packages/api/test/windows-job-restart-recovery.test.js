@@ -1,21 +1,4 @@
-/**
- * #1838 RED/GREEN on real processes: API A really starts a provider whose PPID chain breaks, A is
- * really killed, Redis really restarts, and a separate API B recovers from the durable store.
- *
- * A and B are independent Node processes using the product modules in the order the product runs
- * them: A runs two real invokeSingleCat turns (only the provider is deterministic); the first leaves
- * the persistent logical/native session mapping, the second is admitted with its parent invocation,
- * callback credential, response R and streamed draft, linked to A's job by invokeSingleCat, and is
- * still inside its provider when A is killed. B runs the index.ts startup recovery through the
- * callback-auth lifecycle, response settlement and invocation reconciler. B first runs the pre-#1838
- * recovery on the same durable state to show the original block, then the fixed one, then the
- * user's next turn through invokeSingleCat. Only this test's
- * own PIDs, private Redis (random port, own password and data directory) and temp directories are
- * touched.
- *
- * Needs Windows and `redis-server`/`redis-cli` on PATH (e.g. the desktop's bundled
- * `.cat-cafe/redis/windows`); otherwise it skips with the reason.
- */
+/** #1838: native ownership and legacy unknown are isolated scenarios. */
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -116,7 +99,7 @@ function privateRedis(directory, port, password) {
   };
 }
 
-test('a killed Windows API leaves no stuck execution after a real restart', { skip, timeout: 300_000 }, async (t) => {
+async function runRecovery(t, legacy = false) {
   const root = mkdtempSync(join(tmpdir(), 'issue1838-restart-'));
   const dataDir = join(root, 'data');
   const redisDir = join(root, 'redis');
@@ -129,6 +112,8 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     redisUrl: `redis://:${password}@127.0.0.1:${redisPort}`,
     prefix: `issue1838-restart:${randomUUID()}:`,
     dataDir,
+    legacy,
+    providerPidFile: join(root, 'provider-pid.json'),
     scope: { threadId: 'issue1838-thread', catId: 'codex', userId: 'issue1838-user' },
     streamedBody: 'streamed before the API was killed',
     launcher: join(root, 'launcher.cjs'),
@@ -153,6 +138,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     config.root,
     [
       "const { spawn } = require('node:child_process');",
+      `require('node:fs').writeFileSync(${JSON.stringify(config.providerPidFile)}, JSON.stringify(process.pid));`,
       `spawn(process.execPath, [${JSON.stringify(config.launcher)}], { stdio: 'ignore' });`,
       'setInterval(() => {}, 1000);',
     ].join('\n'),
@@ -160,7 +146,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
   const configPath = join(root, 'config.json');
   const runB = (mode) => {
     const out = join(root, `b-${mode}-${randomUUID()}.json`);
-    // A timeout here also catches an API that cannot exit by itself after adopting its job.
+    // A fresh API must also exit naturally after its recovery and optional next turn.
     execFileSync(process.execPath, [HOST_B, configPath, mode, out], {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 90_000,
@@ -175,7 +161,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
   let tree;
   try {
     await redis.start();
-    // --- API A: adopts its job, links and starts the execution, spawns the broken-chain tree ---
+    // API A starts a real turn and a provider tree whose launcher exits before its writer.
     hostA = spawn(process.execPath, [HOST_A, configPath], { stdio: 'ignore', windowsHide: true });
     tree = await waitFor(
       () => (existsSync(config.hostAFile) ? JSON.parse(readFileSync(config.hostAFile, 'utf8')) : null),
@@ -191,43 +177,69 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
     assert.equal(tree.resumed, tree.session.nativeId);
     // A turn still running keeps every object of its lifecycle open.
     const untouched = (result) => {
-      assert.deepEqual([result.status, result.blocked, result.blockerId], ['running', true, childId]);
+      assert.deepEqual([result.status, result.teardownUnconfirmed], ['running', true]);
       assert.deepEqual(result.runningIds, [childId]);
       assert.deepEqual([result.parent.status, result.response.status, result.drafts], ['running', 'processing', 1]);
       assert.deepEqual([result.authOk, result.sweptParents, result.settledResponses], [true, 0, 0]);
     };
 
     // --- while A is alive, a second API must not release its execution ---
-    const whileAlive = runB('fixed');
-    assert.deepEqual(whileAlive.released, []);
-    untouched(whileAlive);
-    assert.ok(whileAlive.preserved.some((entry) => entry.invocationId === childId));
+    let whileAlive;
+    let denied;
+    if (!legacy) {
+      whileAlive = runB('fixed');
+      assert.deepEqual(whileAlive.released, []);
+      untouched(whileAlive);
+      assert.ok(whileAlive.preserved.some((entry) => entry.invocationId === childId));
+      denied = runB('next-while-alive');
+      untouched(denied);
+      assert.deepEqual(denied.nextTurn.providerCalls, []);
+      assert.equal(denied.nextTurn.errors.length, 1);
+      assert.ok(denied.nextTurn.errors[0].includes(`invocationId=${childId}`));
+      assert.equal(denied.authAfterNextOk, true);
+      assert.deepEqual(denied.nextTurn.session, tree.session);
+    }
 
-    // --- API A is killed on its own; the kernel job must reap the disconnected writer ---
+    // Kill only API A: covered mode must reap its writer; legacy remains physically unknown.
     hostA.kill();
-    await waitFor(() => !alive(tree.writer), 20_000, 'the job to reap the writer');
-    assert.equal(alive(tree.host), false);
+    await waitFor(() => !alive(tree.host), 20_000, 'API A to exit');
+    if (!legacy) await waitFor(() => !alive(tree.writer), 20_000, 'the job to reap the writer');
 
     // --- the desktop restarts Redis too; the ledger must come back from disk ---
     await redis.stop();
     await redis.start();
 
-    // RED: the pre-#1838 recovery has no stop proof, so the execution stays blocked forever.
-    const baseline = runB('baseline');
-    assert.equal(baseline.liveComplete, true);
-    assert.deepEqual(baseline.interrupted, []);
-    untouched(baseline);
-    // The user's next message is refused by invokeSingleCat itself, naming the exact blocking child.
-    assert.deepEqual(baseline.nextTurn.providerCalls, []);
-    assert.equal(baseline.nextTurn.errors.length, 1);
-    assert.match(baseline.nextTurn.errors[0], new RegExp(`invocationId=${childId}`));
+    if (legacy) {
+      const recovered = runB('fixed');
+      assert.deepEqual(recovered.released, []);
+      assert.deepEqual(recovered.interrupted, [childId]);
+      assert.deepEqual([recovered.status, recovered.terminalReason], ['interrupted', 'process_restart']);
+      assert.equal(recovered.teardownUnconfirmed, true);
+      assert.equal(recovered.teardownAt, null);
+      assert.deepEqual(recovered.parent, { status: 'failed', error: 'process_restart' });
+      assert.deepEqual(recovered.response, {
+        status: 'interrupted',
+        reason: 'process_restart',
+        content: config.streamedBody,
+      });
+      assert.deepEqual([recovered.drafts, recovered.responsePending, recovered.authOk], [0, [], false]);
+      assert.equal(alive(tree.writer), true, 'unknown remains unknown; the Host does not certify or kill this writer');
+      const next = runB('next');
+      assert.deepEqual(next.nextTurn.errors, []);
+      assert.deepEqual(next.nextTurn.providerCalls, [{ resume: tree.session.nativeId }]);
+      assert.deepEqual(next.nextTurn.session, tree.session);
+      assert.equal(next.teardownAt, null);
+      t.diagnostic(JSON.stringify({ scenario: 'legacy-no-link', recovered, next }));
+      return;
+    }
 
     // GREEN, with a failing response store: the job proof ends the child, and R stays pending.
     const settleFailed = runB('settle-fail');
     assert.deepEqual(settleFailed.released, [childId]);
     assert.deepEqual(settleFailed.interrupted, [childId]);
     assert.deepEqual([settleFailed.status, settleFailed.terminalReason], ['interrupted', 'process_restart']);
-    assert.deepEqual([settleFailed.blocked, settleFailed.blockerId, settleFailed.runningIds], [false, null, []]);
+    assert.deepEqual([settleFailed.teardownUnconfirmed, settleFailed.runningIds], [false, []]);
+    assert.equal(typeof settleFailed.teardownAt, 'number');
     assert.deepEqual(settleFailed.parent, { status: 'failed', error: 'process_restart' });
     assert.equal(settleFailed.sweptParents, 1);
     assert.deepEqual([settleFailed.settledResponses, settleFailed.settlementFailures], [0, [childId]]);
@@ -257,7 +269,7 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       "A's evidence is cleared once settled",
     );
 
-    t.diagnostic(JSON.stringify({ whileAlive, baseline, settleFailed, recovered }));
+    t.diagnostic(JSON.stringify({ scenario: 'native', whileAlive, denied, settleFailed, recovered }));
     // Recovery again changes nothing, and the next message of the same thread/role reaches its provider.
     const repeated = runB('next');
     assert.deepEqual([repeated.released, repeated.interrupted, repeated.status], [[], [], 'interrupted']);
@@ -265,20 +277,32 @@ test('a killed Windows API leaves no stuck execution after a real restart', { sk
       [repeated.settledResponses, repeated.sweptParents, repeated.response.status],
       [0, 0, 'interrupted'],
     );
-    assert.equal(repeated.blockerId, null);
+    assert.deepEqual(repeated.runningIds, []);
     // It reaches the provider through invokeSingleCat, resuming the same native and logical session.
     assert.deepEqual(repeated.nextTurn.errors, []);
     assert.deepEqual(repeated.nextTurn.providerCalls, [{ resume: tree.session.nativeId }]);
     assert.deepEqual(repeated.nextTurn.session, tree.session);
-    // That turn linked itself to B's job and removed the link once its terminal was durable.
+    // That turn removes its provider-host link once its stop and terminal are durable.
     assert.deepEqual(readdirSync(join(dataDir, 'windows-job-execution-links')), []);
   } finally {
     if (hostA && hostA.exitCode === null) hostA.kill();
-    // The job reaps the writer once its API dies; both may already be gone, so never fail on that.
-    for (const pid of [tree?.writer, tree?.launcher]) {
+    // Stop only our recorded PIDs; the legacy tree has no Job and needs explicit test cleanup.
+    const providerPid = existsSync(config.providerPidFile)
+      ? JSON.parse(readFileSync(config.providerPidFile, 'utf8'))
+      : undefined;
+    for (const pid of [providerPid, tree?.writer, tree?.launcher]) {
       if (pid && alive(pid)) spawn('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', windowsHide: true });
     }
     await redis.stop();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}
+
+test(
+  'a killed Windows API recovers its owned provider and resumes the original session',
+  { skip, timeout: 300_000 },
+  (t) => runRecovery(t),
+);
+test('legacy no-link recovery settles the Host while physical stop stays unknown', { skip, timeout: 300_000 }, (t) =>
+  runRecovery(t, true),
+);

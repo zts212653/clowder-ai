@@ -1,9 +1,5 @@
-/**
- * #1838: the real invokeSingleCat turn both restart hosts run against their durable Redis stores.
- * Only the provider is deterministic (no model is called). Admission, the prior-provider fence, the
- * kernel-job link and the persistent logical/native session mapping (SessionManager over Redis and
- * the Redis session chain store) are the product's. Import `./setup-cat-registry.js` first.
- */
+/** Real invokeSingleCat and durable session/response lifecycle; only the provider is deterministic.
+ * The legacy scenario alone disables Windows host coverage to leave physical stop unknown. */
 
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -20,7 +16,7 @@ import { commitLifecycleResponseFromAppendInput } from '../../dist/domains/cats/
 import { isolateAccountAuthEnvironment } from './account-auth-environment.js';
 import { routingJourneyDeps } from './routing-journey-deps.js';
 
-export function restartTurns({ client, registry, turnExecutionStore, scope }) {
+export function restartTurns({ client, registry, turnExecutionStore, scope, windowsProviderHosts = true }) {
   const { threadId, userId, catId } = scope;
   isolateAccountAuthEnvironment();
   const originals = catRegistry.getAllConfigs();
@@ -36,7 +32,7 @@ export function restartTurns({ client, registry, turnExecutionStore, scope }) {
   // Covered like the real CLI services: its provider starts through spawnCli with the turn's own
   // invocationId, so on Windows the Host links the turn to a provider host before the fence.
   const service = {
-    windowsProviderHosts: true,
+    windowsProviderHosts,
     implementationSnapshot: () => ({ key: 'test:issue1838-restart', generation: 'g1', compatibilityRevision: 'g1' }),
     async *invoke(_prompt, options) {
       calls.push({ resume: options.cliSessionId ?? null });
