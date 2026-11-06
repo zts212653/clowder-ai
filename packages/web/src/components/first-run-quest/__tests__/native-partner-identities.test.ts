@@ -167,4 +167,68 @@ describe('native partner identities reflect tools rather than an unrelated model
     expect(partner.form.nickname).toBeTruthy();
     expect(partner.form.roleDescription).toBe('保留的职责');
   });
+
+  it.each([
+    ['provider', 'custom-acp', ['--provider', 'deepseek']],
+    ['directory', 'C:/deepseek/dsh-tools/custom-acp.exe', []],
+    ['nonstandard entry without verification', 'node', ['/some/install/dsh/lib/bin.js', '--profile', 'acp']],
+    ['unknown', 'unknown-acp', []],
+  ] as const)('uses generic defaults for %s', (_reason, command, args) => {
+    const runtime: RuntimeChoice = {
+      id: 'acp:custom',
+      label: 'Custom ACP',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: { command, startupArgs: [...args] },
+    };
+    expect(nativePartnerIdentity(runtime, templateConfig.roleTemplates, [])).toMatchObject({
+      name: 'Custom ACP 伙伴',
+      nickname: 'Custom ACP',
+      avatar: '/avatars/default.png',
+      roleDescription: '一起分析问题、完成任务',
+      personality: '认真务实，先确认目标，完成后说明结果',
+      teamStrengths: '任务拆解、实现与验证',
+    });
+  });
+
+  it('uses the verified discovery status for an official nonstandard DSH install', () => {
+    const runtime: RuntimeChoice = {
+      id: 'acp:registered-cat',
+      label: 'Registered ACP',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      discoveryStatus: 'configured',
+      acp: { command: 'node', startupArgs: ['/some/install/lib/bin.js', '--profile', 'acp'] },
+    };
+    expect(nativePartnerIdentity(runtime, templateConfig.roleTemplates, [])).toMatchObject({
+      name: '小鲸鱼',
+      nickname: '鲸鲸',
+      avatar: '/avatars/family/dsh.png',
+    });
+  });
+
+  it('keeps a plugin binding ahead of a retained DSH startup', () => {
+    const runtime: RuntimeChoice = {
+      id: 'acp:dsh',
+      label: 'Bound ACP',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: {
+        agentProvider: 'plugin:official.codeagent/codeagent',
+        command: 'dsh',
+        startupArgs: ['--profile', 'acp'],
+      },
+    };
+    const partner = recommendNativePartners([runtime], templateConfig.roleTemplates, [], 'plugin-bound')[0];
+    expect(partner.form).toMatchObject({
+      name: 'Bound ACP 伙伴',
+      nickname: 'Bound ACP',
+      avatar: '/avatars/default.png',
+      acpAgentProvider: runtime.acp?.agentProvider,
+      acpCommand: 'dsh',
+    });
+  });
 });
