@@ -46,10 +46,18 @@ describe('workspace path compatibility helpers', () => {
     try {
       await writeFile(join(root, 'doc.md'), '# doc\n');
       const href = `/${root.replaceAll('\\', '/').replace(/^\//, '')}/doc.md`;
-      const target = await workspacePathResolutionMod.resolveWorkspaceAbsolutePath(href, undefined, [
-        { id: 'drive-wt', root, branch: 'main', head: 'abc123' },
-      ]);
+      const entries = [{ id: 'drive-wt', root, branch: 'main', head: 'abc123' }];
+      const target = await workspacePathResolutionMod.resolveWorkspaceAbsolutePath(href, undefined, entries);
       assert.deepEqual(target, { worktreeId: 'drive-wt', path: 'doc.md', kind: 'file' });
+
+      for (const suffix of [':42', ':42:7']) {
+        const linked = await workspacePathResolutionMod.resolveWorkspacePathLinkHref(
+          `${href}${suffix}`,
+          undefined,
+          entries,
+        );
+        assert.deepEqual(linked, { worktreeId: 'drive-wt', path: 'doc.md', kind: 'file', line: 42 });
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
