@@ -35,7 +35,7 @@ afterEach(async () => {
 
 it('loads an earlier pending image save without blocking another owner', async () => {
   await saveNewConversationIntent(record(ALICE));
-  let releaseBytes = (_bytes: ArrayBuffer) => {};
+  let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
   const bytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
   const read = vi.fn(() => bytes);
   const file = new File(['pending'], 'pending.png', { type: 'image/png' });
@@ -54,7 +54,7 @@ it('loads an earlier pending image save without blocking another owner', async (
 
 it('does not let a pending image save recreate a cleared intent', async () => {
   await saveNewConversationIntent(record(ALICE));
-  let releaseBytes = (_bytes: ArrayBuffer) => {};
+  let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
   const bytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
   const file = new File(['pending'], 'pending.png', { type: 'image/png' });
   Object.defineProperty(file, 'arrayBuffer', { value: () => bytes });

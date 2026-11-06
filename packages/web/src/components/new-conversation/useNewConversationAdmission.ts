@@ -86,38 +86,25 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
   const ownerRef = useRef<string | null>(null);
   const intentRef = useRef<PendingNewConversationIntent | null>(null);
   const draftRef = useRef<ChatInputDraftSnapshot>(EMPTY_DRAFT);
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useLayoutEffect(() => setCurrentThread(DRAFT_THREAD_ID), [setCurrentThread]);
 
-  const enqueue = useCallback((operation: () => Promise<void>): Promise<void> => {
-    const next = saveQueueRef.current.then(operation, operation);
-    saveQueueRef.current = next.catch(() => undefined);
-    return next;
+  const save = useCallback((nextIntent: PendingNewConversationIntent, snapshot = draftRef.current): Promise<void> => {
+    const ownerUserId = ownerRef.current;
+    if (!ownerUserId) return Promise.reject(new Error('owner unavailable'));
+    return saveNewConversationIntent({
+      ownerUserId,
+      intent: nextIntent,
+      files: snapshot.files,
+      contextAttachments: snapshot.contextAttachments,
+      updatedAt: Date.now(),
+    });
   }, []);
-
-  const save = useCallback(
-    (nextIntent: PendingNewConversationIntent, snapshot = draftRef.current): Promise<void> => {
-      const ownerUserId = ownerRef.current;
-      if (!ownerUserId) return Promise.reject(new Error('owner unavailable'));
-      return enqueue(() =>
-        saveNewConversationIntent({
-          ownerUserId,
-          intent: nextIntent,
-          files: snapshot.files,
-          contextAttachments: snapshot.contextAttachments,
-          updatedAt: Date.now(),
-        }),
-      );
-    },
-    [enqueue],
-  );
 
   const applyHydratedAdmission = useCallback(
     async (hydrated: HydratedAdmissionState, signal: AbortSignal) => {
       if (signal.aborted) return;
       ownerRef.current = hydrated.ownerUserId;
-      saveQueueRef.current = Promise.resolve();
       restoreAttachments(hydrated.files, hydrated.contextAttachments);
       draftRef.current = {
         text: getThreadDraft(DRAFT_THREAD_ID),
@@ -202,12 +189,12 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     if (!current || !(await clearAcceptedComposerDraft(current))) {
       throw new Error('accepted composer draft cleanup failed');
     }
-    await enqueue(() => clearNewConversationIntent(ownerUserId));
+    await clearNewConversationIntent(ownerUserId);
     clearDefaultDraft();
     draftRef.current = EMPTY_DRAFT;
     setThreadHasDraft(DRAFT_THREAD_ID, false);
     await invalidateSidebarProjection();
-  }, [enqueue, setThreadHasDraft]);
+  }, [setThreadHasDraft]);
 
   const controller = useMemo(
     () =>
@@ -251,7 +238,6 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     persistIntent,
     createThread,
     onNavigate,
-    enqueue,
     setPhase,
     resetIntent: resetImportIntent,
   });

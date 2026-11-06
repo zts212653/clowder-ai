@@ -33,6 +33,18 @@ interface StoredNewConversationIntent extends Omit<PersistedNewConversationInten
 }
 
 let dbPromise: Promise<IDBPDatabase<NewConversationIntentDB>> | null = null;
+const ownerOperations = new Map<string, Promise<unknown>>();
+
+/** Keep image writes, restoration and clearing ordered across composer remounts. */
+function enqueueOwnerOperation<T>(ownerUserId: string, operation: () => Promise<T>): Promise<T> {
+  const next = (ownerOperations.get(ownerUserId) ?? Promise.resolve()).then(operation, operation);
+  ownerOperations.set(ownerUserId, next);
+  const release = () => {
+    if (ownerOperations.get(ownerUserId) === next) ownerOperations.delete(ownerUserId);
+  };
+  void next.then(release, release);
+  return next;
+}
 
 function database(): Promise<IDBPDatabase<NewConversationIntentDB>> {
   if (!dbPromise) {
@@ -87,61 +99,67 @@ function isStoredArrayBuffer(value: unknown): value is ArrayBuffer {
 }
 
 export async function loadNewConversationIntent(ownerUserId: string): Promise<PersistedNewConversationIntent | null> {
-  const record = await (await database()).get(STORE, ownerUserId);
-  if (!record || record.ownerUserId !== ownerUserId || !isIntent(record.intent)) return null;
-  const parsedContext = ContextAttachmentsSchema.safeParse(record.contextAttachments);
-  return {
-    ownerUserId,
-    intent: {
-      ...record.intent,
-      preferredCats: [...record.intent.preferredCats],
-    },
-    files: Array.isArray(record.files)
-      ? record.files
-          .slice(0, 5)
-          .filter(
-            (file): file is StoredFile =>
-              !!file &&
-              typeof file.name === 'string' &&
-              typeof file.type === 'string' &&
-              typeof file.lastModified === 'number' &&
-              isStoredArrayBuffer(file.bytes),
-          )
-          .map(
-            (file) =>
-              new File([file.bytes], file.name, {
-                type: file.type,
-                lastModified: file.lastModified,
-              }),
-          )
-      : [],
-    contextAttachments: parsedContext.success ? [...parsedContext.data] : [],
-    updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : 0,
-  };
+  return enqueueOwnerOperation(ownerUserId, async () => {
+    const record = await (await database()).get(STORE, ownerUserId);
+    if (!record || record.ownerUserId !== ownerUserId || !isIntent(record.intent)) return null;
+    const parsedContext = ContextAttachmentsSchema.safeParse(record.contextAttachments);
+    return {
+      ownerUserId,
+      intent: {
+        ...record.intent,
+        preferredCats: [...record.intent.preferredCats],
+      },
+      files: Array.isArray(record.files)
+        ? record.files
+            .slice(0, 5)
+            .filter(
+              (file): file is StoredFile =>
+                !!file &&
+                typeof file.name === 'string' &&
+                typeof file.type === 'string' &&
+                typeof file.lastModified === 'number' &&
+                isStoredArrayBuffer(file.bytes),
+            )
+            .map(
+              (file) =>
+                new File([file.bytes], file.name, {
+                  type: file.type,
+                  lastModified: file.lastModified,
+                }),
+            )
+        : [],
+      contextAttachments: parsedContext.success ? [...parsedContext.data] : [],
+      updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : 0,
+    };
+  });
 }
 
 export async function saveNewConversationIntent(value: PersistedNewConversationIntent): Promise<void> {
   if (!value.ownerUserId.trim() || !isIntent(value.intent)) throw new Error('invalid new-conversation intent');
-  const parsedContext = ContextAttachmentsSchema.safeParse(value.contextAttachments);
-  const files = await Promise.all(
-    value.files.slice(0, 5).map(async (file) => ({
-      name: file.name,
-      type: file.type,
-      lastModified: file.lastModified,
-      bytes: await readFileBytes(file),
-    })),
-  );
-  await (await database()).put(STORE, {
-    ownerUserId: value.ownerUserId,
-    intent: { ...value.intent, preferredCats: [...value.intent.preferredCats] },
-    files,
-    contextAttachments: parsedContext.success ? [...parsedContext.data] : [],
-    updatedAt: value.updatedAt,
+  return enqueueOwnerOperation(value.ownerUserId, async () => {
+    const parsedContext = ContextAttachmentsSchema.safeParse(value.contextAttachments);
+    const files = await Promise.all(
+      value.files.slice(0, 5).map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        lastModified: file.lastModified,
+        bytes: await readFileBytes(file),
+      })),
+    );
+    await (await database()).put(STORE, {
+      ownerUserId: value.ownerUserId,
+      intent: { ...value.intent, preferredCats: [...value.intent.preferredCats] },
+      files,
+      contextAttachments: parsedContext.success ? [...parsedContext.data] : [],
+      updatedAt: value.updatedAt,
+    });
   });
 }
 
 export async function clearNewConversationIntent(ownerUserId: string): Promise<void> {
-  await (await database()).delete(STORE, ownerUserId);
+  return enqueueOwnerOperation(ownerUserId, async () => {
+    await (await database()).delete(STORE, ownerUserId);
+  });
 }
 
 export function _resetNewConversationIntentDbForTests(): void {

@@ -44,6 +44,7 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 let container: HTMLDivElement;
 let root: Root;
 let owner: string;
+const owners = new Set<string>();
 
 function Host() {
   const admission = useNewConversationAdmission(navigate);
@@ -73,6 +74,7 @@ async function attachImage(file: File) {
 
 beforeEach(() => {
   owner = `draft-navigation-${crypto.randomUUID()}`;
+  owners.add(owner);
   threadDrafts.clear();
   threadImageDrafts.clear();
   threadReplyDrafts.clear();
@@ -94,7 +96,8 @@ beforeEach(() => {
 afterEach(async () => {
   act(() => root.unmount());
   container.remove();
-  await clearNewConversationIntent(owner);
+  await Promise.all([...owners].map(clearNewConversationIntent));
+  owners.clear();
   _resetNewConversationIntentDbForTests();
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
@@ -114,7 +117,7 @@ it('retains an unsent image after leaving and returning while its local save is 
   });
 
   const file = new File(['image-bytes'], 'pending.png', { type: 'image/png' });
-  let releaseBytes = (_bytes: ArrayBuffer) => {};
+  let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
   const pendingBytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
   const readBytes = vi.fn(() => pendingBytes);
   Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
@@ -153,4 +156,21 @@ it('keeps an explicitly removed image absent after returning to the new conversa
   await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
   expect(container.querySelector('img[alt="removed.png"]')).toBeNull();
   expect(threadImageDrafts.has('default')).toBe(false);
+});
+
+it("does not restore another owner's images from the unscoped browser mirror", async () => {
+  await act(async () => root.render(<Host />));
+  await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
+  await attachImage(new File(['private-image'], 'owner-a.png', { type: 'image/png' }));
+  await waitForAct(async () => expect((await loadNewConversationIntent(owner))?.files).toHaveLength(1));
+  await act(async () => root.render(<div>another conversation</div>));
+
+  owner = `draft-navigation-${crypto.randomUUID()}`;
+  owners.add(owner);
+  installPendingAdmissionServer(owner, { draft: null, revision: 0 }, 'send', () => undefined);
+  await act(async () => root.render(<Host />));
+  await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
+
+  expect(container.querySelector('img[alt="owner-a.png"]')).toBeNull();
+  await waitForAct(async () => expect((await loadNewConversationIntent(owner))?.files).toHaveLength(0));
 });
