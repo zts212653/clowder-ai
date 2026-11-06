@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
@@ -9,8 +9,30 @@ import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js
 const PLUGIN = secretRuntimeScript('secret-dsh-plugin.mjs');
 // Startup admission covers this exact reviewed consumer, never arbitrary YAML or !!js.
 const PLUGIN_HASH = 'c34e9b909d42d44f52d4742fcd7e94679cacd65e26f8743403121521628c8901';
-const template = () =>
-  `- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(pathToFileURL(PLUGIN).href)}\n- id: acp\n  inject: [acpAppStartup, catCafeSecretContent]\n`;
+const MODEL_PREFIX = '# clowder-acp-model: ';
+function template(modelSelection?: string): string {
+  let route: { provider: string; model: string } | undefined;
+  if (modelSelection?.trim()) {
+    try {
+      const selection: unknown = JSON.parse(modelSelection);
+      if (
+        Array.isArray(selection) &&
+        selection.length === 2 &&
+        typeof selection[0] === 'string' &&
+        selection[0].trim() &&
+        typeof selection[1] === 'string' &&
+        selection[1].trim() &&
+        !selection.includes('unknown')
+      )
+        route = { provider: selection[0], model: selection[1] };
+    } catch {
+      // Existing DSH setups can expose bare model IDs; keep their native route.
+    }
+  }
+  const selected = route ? `${MODEL_PREFIX}${JSON.stringify([route.provider, route.model])}\n` : '';
+  const config = route ? `  config: ${JSON.stringify(route)}\n` : '';
+  return `${selected}- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(pathToFileURL(PLUGIN).href)}\n- id: acp\n  inject: [acpAppStartup, catCafeSecretContent]\n${config}`;
+}
 
 function managedPatchName(content: string): string {
   const revision = createHash('sha256').update(content).digest('hex');
@@ -28,12 +50,14 @@ async function waitForConcurrentPatchWrite(path: string): Promise<boolean> {
 export function verifyDshSecretPatch(path: string): boolean {
   try {
     const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size >= 4096) return false;
+    const content = readFileSync(path, 'utf8');
+    const selection = content.startsWith(MODEL_PREFIX)
+      ? content.slice(MODEL_PREFIX.length, content.indexOf('\n'))
+      : undefined;
     return (
-      stat.isFile() &&
-      !stat.isSymbolicLink() &&
-      stat.nlink === 1 &&
-      stat.size < 4096 &&
-      readFileSync(path, 'utf8') === template() &&
+      content === template(selection) &&
+      basename(path) === managedPatchName(content) &&
       createHash('sha256').update(readFileSync(PLUGIN)).digest('hex') === PLUGIN_HASH
     );
   } catch {
@@ -41,12 +65,33 @@ export function verifyDshSecretPatch(path: string): boolean {
   }
 }
 
-/** An explicit final patch leaves the native DSH home/profile and OAuth state intact. */
-export async function prepareDshSecretPatch(command: string, args: string[], projectRoot: string): Promise<string[]> {
-  if (!/^dsh(?:\.(?:cmd|exe|bat))?$/i.test(basename(command))) return args;
+function isDshLaunch(command: string, args: readonly string[], projectRoot: string): boolean {
+  if (/^dsh(?:\.(?:cmd|exe|bat))?$/i.test(basename(command))) return true;
+  if (!/^node(?:\.exe)?$/i.test(basename(command)) || !args[0]) return false;
+  // Discovery may find an installed npm entry rather than a named dsh shim.
+  try {
+    const entry = realpathSync(resolve(projectRoot, args[0]));
+    if (!/(?:^|[/\\])(?:lib|src)[/\\]bin\.(?:js|ts)$/.test(entry)) return false;
+    const manifest: unknown = JSON.parse(readFileSync(join(dirname(dirname(entry)), 'package.json'), 'utf8'));
+    return Boolean(
+      manifest && typeof manifest === 'object' && 'name' in manifest && manifest.name === '@deepseek-ai/dsh',
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Pin DSH's handshake route without changing its native profile or credentials. */
+export async function prepareDshSecretPatch(
+  command: string,
+  args: string[],
+  projectRoot: string,
+  modelSelection?: string,
+): Promise<string[]> {
+  if (!isDshLaunch(command, args, projectRoot)) return args;
   const directory = join(projectRoot, '.cat-cafe', 'native-guards');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const content = template();
+  const content = template(modelSelection);
   // The template contains the canonical Plugin URL. Addressing the managed file by
   // its complete content lets a reviewed path/template upgrade coexist with an old
   // deployment without overwriting a possibly user-modified guard file.
