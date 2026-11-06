@@ -1,0 +1,1408 @@
+{
+  "sourceHead": "bffff6ba3cffd354171172aa6f366ea4a5a1db95",
+  "testScope": "component host with actual macOS input method; no API journey claim",
+  "testInputSource": "com.apple.inputmethod.SCIM.ITABC",
+  "presentation": "classic",
+  "browserVersion": "149.0.7827.55",
+  "results": [
+    {
+      "kind": "tail-confirm",
+      "status": "pass",
+      "composing": {
+        "value": "https://example.com/abCDzhong wen 说明",
+        "selectionStart": 33,
+        "selectionEnd": 33,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/abCD中文 说明",
+        "selectionStart": 26,
+        "selectionEnd": 26,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "中文"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "中文",
+            "composing": true
+          },
+          {
+            "type": "compositionend",
+            "trusted": false,
+            "data": "中文"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "middle-confirm",
+      "status": "pass",
+      "composing": {
+        "value": "https://example.com/abzhong wenCD 说明",
+        "selectionStart": 31,
+        "selectionEnd": 31,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/ab中文CD 说明",
+        "selectionStart": 24,
+        "selectionEnd": 24,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "中文"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "中文",
+            "composing": true
+          },
+          {
+            "type": "compositionend",
+            "trusted": false,
+            "data": "中文"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "tail-cancel",
+      "status": "pass",
+      "composing": {
+        "value": "https://example.com/abCDzhong wen 说明",
+        "selectionStart": 33,
+        "selectionEnd": 33,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/abCD 说明",
+        "selectionStart": 24,
+        "selectionEnd": 24,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": null,
+            "composing": true
+          },
+          {
+            "type": "compositionend",
+            "trusted": false,
+            "data": ""
+          }
+        ]
+      }
+    },
+    {
+      "kind": "middle-cancel",
+      "status": "pass",
+      "composing": {
+        "value": "https://example.com/abzhong wenCD 说明",
+        "selectionStart": 31,
+        "selectionEnd": 31,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          }
+        ]
+      },
+      "after": {
+        "value": "https://example.com/abCD 说明",
+        "selectionStart": 22,
+        "selectionEnd": 22,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": ""
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": null,
+            "composing": true
+          },
+          {
+            "type": "compositionend",
+            "trusted": false,
+            "data": ""
+          }
+        ]
+      }
+    },
+    {
+      "kind": "replace",
+      "status": "pass",
+      "composing": {
+        "value": "zhong wen 说明",
+        "selectionStart": 9,
+        "selectionEnd": 9,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": "https://example.com/abCD"
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          }
+        ]
+      },
+      "after": {
+        "value": "中文 说明",
+        "selectionStart": 2,
+        "selectionEnd": 2,
+        "focused": true,
+        "color": "oklch(0.2 0.005 30)",
+        "ranges": [],
+        "events": [
+          {
+            "type": "compositionstart",
+            "trusted": true,
+            "data": "https://example.com/abCD"
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "z"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "z",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zh"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zh",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zho"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zho",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhon"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhon",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong w"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong w",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong we"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong we",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "zhong wen"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "zhong wen",
+            "composing": true
+          },
+          {
+            "type": "compositionupdate",
+            "trusted": true,
+            "data": "中文"
+          },
+          {
+            "type": "input",
+            "trusted": true,
+            "data": "中文",
+            "composing": true
+          },
+          {
+            "type": "compositionend",
+            "trusted": false,
+            "data": "中文"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "native-undo-redo",
+      "status": "pass",
+      "undoStates": [
+        {
+          "value": "https://example.com/abCD 说明",
+          "selectionStart": 0,
+          "selectionEnd": 9,
+          "focused": true,
+          "color": "oklch(0.2 0.005 30)",
+          "ranges": [],
+          "events": [
+            {
+              "type": "compositionstart",
+              "trusted": true,
+              "data": "https://example.com/abCD"
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "z"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "z",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zh"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zh",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zho"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zho",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhon"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhon",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong w"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong w",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong we"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong we",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong wen"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong wen",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "中文"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "中文",
+              "composing": true
+            },
+            {
+              "type": "compositionend",
+              "trusted": false,
+              "data": "中文"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": null,
+              "composing": false
+            }
+          ]
+        }
+      ],
+      "redoStates": [
+        {
+          "value": "中文 说明",
+          "selectionStart": 2,
+          "selectionEnd": 2,
+          "focused": true,
+          "color": "oklch(0.2 0.005 30)",
+          "ranges": [],
+          "events": [
+            {
+              "type": "compositionstart",
+              "trusted": true,
+              "data": "https://example.com/abCD"
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "z"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "z",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zh"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zh",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zho"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zho",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhon"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhon",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong w"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong w",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong we"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong we",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "zhong wen"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "zhong wen",
+              "composing": true
+            },
+            {
+              "type": "compositionupdate",
+              "trusted": true,
+              "data": "中文"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": "中文",
+              "composing": true
+            },
+            {
+              "type": "compositionend",
+              "trusted": false,
+              "data": "中文"
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": null,
+              "composing": false
+            },
+            {
+              "type": "input",
+              "trusted": true,
+              "data": null,
+              "composing": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "restoration": {
+    "inputSourceRestored": true,
+    "pointerRestored": true,
+    "foregroundRestored": true
+  }
+}
