@@ -144,6 +144,7 @@ function baseAdmission() {
     ready: true,
     loadFailed: false,
     localSaveFailed: false,
+    localSaveState: 'idle' as 'idle' | 'saving' | 'failed' | 'cancelled',
     intent: {
       v: 1 as const,
       createIdempotencyKey: '11111111-1111-4111-8111-111111111111',
@@ -165,6 +166,8 @@ function baseAdmission() {
     onDraftChange: vi.fn(),
     send: vi.fn(async () => true),
     retryLoad: vi.fn(),
+    retrySave: vi.fn(),
+    cancelSave: vi.fn(),
   };
 }
 
@@ -202,6 +205,32 @@ describe('F322 new conversation page', () => {
     expect(landingArtworkForHour(6)).toBe('dusk');
     expect(landingArtworkForHour(21)).toBe('dusk');
     expect(landingArtworkForHour(22)).toBe('night');
+  });
+
+  it.each(['saving', 'failed', 'cancelled'] as const)('offers a clear action for a %s local save', (state) => {
+    const admission = baseAdmission();
+    admission.localSaveState = state;
+    mocks.admission = admission;
+    act(() =>
+      root.render(
+        <NewConversationPage
+          sidebarOpen
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      ),
+    );
+    const notice = container.querySelector('[data-testid="new-conversation-save-state"]');
+    expect(notice?.getAttribute('role')).toBe(state === 'saving' ? 'status' : 'alert');
+    expect(notice?.textContent).toContain(
+      state === 'saving' ? '正在保存草稿' : state === 'failed' ? '本地持久保存失败' : '草稿仍保留',
+    );
+    act(() => notice?.querySelector('button')?.click());
+    expect(state === 'saving' ? admission.cancelSave : admission.retrySave).toHaveBeenCalledOnce();
+    expect(admission.send).not.toHaveBeenCalled();
   });
 
   it.each([

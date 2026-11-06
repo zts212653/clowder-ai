@@ -62,12 +62,14 @@ it('clears without releasing an old read and rejects its late write', async () =
   const saving = saveNewConversationIntent(record(ALICE, [file])).catch((error: unknown) => error);
   let cleared = false;
   const clearing = clearNewConversationIntent(ALICE).then(() => (cleared = true));
+  const restoring = loadNewConversationIntent(ALICE);
   try {
     await saveNewConversationIntent(record(BOB));
     expect(cleared).toBe(true);
+    expect(await restoring).toBeNull();
   } finally {
     releaseBytes(new TextEncoder().encode('pending').buffer);
-    await Promise.all([saving, clearing]);
+    await Promise.all([saving, clearing, restoring]);
   }
   expect(await loadNewConversationIntent(ALICE)).toBeNull();
 });

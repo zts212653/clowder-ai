@@ -46,8 +46,9 @@ let root: Root;
 let owner: string;
 const owners = new Set<string>();
 
-function Host() {
+function Host({ capture }: { capture?: (admission: ReturnType<typeof useNewConversationAdmission>) => void }) {
   const admission = useNewConversationAdmission(navigate);
+  capture?.(admission);
   return admission.ready ? (
     <ChatInput
       threadId="default"
@@ -173,4 +174,66 @@ it("does not restore another owner's images from the unscoped browser mirror", a
 
   expect(container.querySelector('img[alt="owner-a.png"]')).toBeNull();
   await waitForAct(async () => expect((await loadNewConversationIntent(owner))?.files).toHaveLength(0));
+});
+
+it('retains a failed image on return and retries only after an explicit action', async () => {
+  const captured = { current: null as ReturnType<typeof useNewConversationAdmission> | null };
+  const capture = (admission: ReturnType<typeof useNewConversationAdmission>) => (captured.current = admission);
+  await act(async () => root.render(<Host capture={capture} />));
+  await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
+  const file = new File(['image-bytes'], 'failed.png', { type: 'image/png' });
+  const readBytes = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('image read failed'))
+    .mockResolvedValue(new TextEncoder().encode('image-bytes').buffer);
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  await attachImage(file);
+  await waitForAct(() => expect(captured.current?.localSaveState).toBe('failed'));
+
+  await act(async () => root.render(<div>another conversation</div>));
+  await act(async () => root.render(<Host capture={capture} />));
+  await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
+  expect(container.querySelector('img[alt="failed.png"]')).not.toBeNull();
+  expect(captured.current?.localSaveState).toBe('failed');
+  expect(readBytes).toHaveBeenCalledOnce();
+
+  act(() => captured.current?.retrySave());
+  await waitForAct(() => expect(captured.current?.localSaveState).toBe('idle'));
+  expect((await loadNewConversationIntent(owner))?.files).toHaveLength(1);
+  expect(readBytes).toHaveBeenCalledTimes(2);
+});
+
+it('stops preparing the first send when its unfinished local save is cancelled', async () => {
+  const captured = { current: null as ReturnType<typeof useNewConversationAdmission> | null };
+  await act(async () => root.render(<Host capture={(admission) => (captured.current = admission)} />));
+  await waitForAct(() => expect(container.querySelector('textarea')).not.toBeNull());
+  let releaseBytes: (bytes: ArrayBuffer) => void = () => {};
+  const bytes = new Promise<ArrayBuffer>((resolve) => (releaseBytes = resolve));
+  const readBytes = vi.fn(() => bytes);
+  const file = new File(['image-bytes'], 'pending-send.png', { type: 'image/png' });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  await attachImage(file);
+  await waitForAct(() => expect(readBytes).toHaveBeenCalledOnce());
+  const admission = captured.current;
+  if (!admission) throw new Error('Missing admission controller');
+  let sending = Promise.resolve(true);
+  let sendResult: boolean | undefined;
+  try {
+    act(() => {
+      sending = admission.send({ content: 'keep my draft', images: [file] });
+      void sending.then((result) => (sendResult = result));
+    });
+    await waitForAct(() => expect(captured.current?.phase).toBe('creating'));
+    act(() => admission.cancelSave());
+    await waitForAct(() => expect(sendResult).toBe(false));
+    expect(captured.current?.phase).toBe('create_failed');
+    expect(captured.current?.localSaveState).toBe('cancelled');
+    expect(container.querySelector('img[alt="pending-send.png"]')).not.toBeNull();
+    expect(
+      vi.mocked(apiFetch).mock.calls.some(([url, options]) => url === '/api/threads' && options?.method === 'POST'),
+    ).toBe(false);
+  } finally {
+    releaseBytes(new TextEncoder().encode('image-bytes').buffer);
+    await sending;
+  }
 });

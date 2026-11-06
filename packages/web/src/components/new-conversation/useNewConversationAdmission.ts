@@ -1,7 +1,7 @@
 'use client';
 
 import type { ContextAttachment } from '@cat-cafe/shared';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -23,7 +23,14 @@ import {
 } from './first-message-admission';
 import { buildNewConversationCreateBody } from './new-conversation-create-request';
 import { freshIntent, type HydratedAdmissionState, hydrateAdmissionState } from './new-conversation-hydration';
-import { clearNewConversationIntent, saveNewConversationIntent } from './new-conversation-intent-store';
+import {
+  cancelNewConversationIntentSave,
+  clearNewConversationIntent,
+  getNewConversationIntentSaveState,
+  retryNewConversationIntentSave,
+  saveNewConversationIntent,
+  subscribeNewConversationIntentSaveState,
+} from './new-conversation-intent-store';
 import type { SessionImportIntent } from './session-import-admission';
 import {
   clearAcceptedAdmission,
@@ -57,6 +64,7 @@ export interface NewConversationAdmission {
   ready: boolean;
   loadFailed: boolean;
   localSaveFailed: boolean;
+  localSaveState: ReturnType<typeof getNewConversationIntentSaveState>;
   intent: PendingNewConversationIntent | null;
   phase: FirstMessageAdmissionPhase;
   uploadStatus: ReturnType<typeof useSendMessage>['uploadStatus'];
@@ -71,6 +79,8 @@ export interface NewConversationAdmission {
   importSession: (selection: SessionImportIntent) => Promise<void>;
   cancelImport: () => Promise<void>;
   retryLoad: () => void;
+  retrySave: () => void;
+  cancelSave: () => void;
 }
 
 export function useNewConversationAdmission(onNavigate: (threadId: string) => void): NewConversationAdmission {
@@ -86,12 +96,21 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
   const ownerRef = useRef<string | null>(null);
   const intentRef = useRef<PendingNewConversationIntent | null>(null);
   const draftRef = useRef<ChatInputDraftSnapshot>(EMPTY_DRAFT);
+  const currentOwner = ownerRef.current;
+  const subscribeToSave = useCallback(
+    (listener: () => void) =>
+      currentOwner ? subscribeNewConversationIntentSaveState(currentOwner, listener) : () => {},
+    [currentOwner],
+  );
+  const readSaveState = useCallback(() => getNewConversationIntentSaveState(currentOwner), [currentOwner]);
+  const localSaveState = useSyncExternalStore(subscribeToSave, readSaveState, () => 'idle');
 
   useLayoutEffect(() => setCurrentThread(DRAFT_THREAD_ID), [setCurrentThread]);
 
   const save = useCallback((nextIntent: PendingNewConversationIntent, snapshot = draftRef.current): Promise<void> => {
     const ownerUserId = ownerRef.current;
     if (!ownerUserId) return Promise.reject(new Error('owner unavailable'));
+    setLocalSaveFailed(false);
     return saveNewConversationIntent({
       ownerUserId,
       intent: nextIntent,
@@ -262,10 +281,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
       const next = { ...current, ...patch };
       intentRef.current = next;
       setIntent(next);
-      void save(next).then(
-        () => setLocalSaveFailed(false),
-        () => setLocalSaveFailed(true),
-      );
+      void save(next).catch(() => undefined);
     },
     [save],
   );
@@ -276,10 +292,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
       draftRef.current = snapshot;
       const current = intentRef.current;
       if (!current || !ownerRef.current) return;
-      void save(current, snapshot).then(
-        () => setLocalSaveFailed(false),
-        () => setLocalSaveFailed(true),
-      );
+      void save(current, snapshot).catch(() => undefined);
     },
     [isAdmissionPending, save],
   );
@@ -288,7 +301,8 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     ownerUserId: ready ? ownerRef.current : null,
     ready,
     loadFailed,
-    localSaveFailed,
+    localSaveFailed: localSaveFailed || localSaveState === 'failed',
+    localSaveState,
     intent,
     phase,
     uploadStatus,
@@ -303,5 +317,16 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     importSession: importController.importSession,
     cancelImport: importController.cancel,
     retryLoad: () => setLoadAttempt((value) => value + 1),
+    retrySave: () => {
+      const owner = ownerRef.current;
+      if (!owner) return;
+      setLocalSaveFailed(false);
+      if (!intentRef.current?.creationStarted) setPhase('idle');
+      void retryNewConversationIntentSave(owner).catch(() => undefined);
+    },
+    cancelSave: () => {
+      const owner = ownerRef.current;
+      if (owner) cancelNewConversationIntentSave(owner);
+    },
   };
 }

@@ -50,6 +50,10 @@ export const newConversationCopy = defineShellCopy(
       done: '完成',
       optionsLocked: '对话创建已经开始，名称、项目、置顶和首选猫会保持不变。',
       saveFailed: '草稿仍在本页，但本地持久保存失败。请先保持页面打开并重试。',
+      savingDraft: '正在保存草稿，可以继续编辑或取消本次保存。',
+      saveCancelled: '已取消本次保存，草稿仍保留。可重试保存或移除附件。',
+      retrySave: '重试保存',
+      cancelSave: '取消保存',
       identityFailed: '无法确认当前用户，草稿还在本机；重新连接后可继续。',
       draftRecovered: '已找回另一份未发送草稿，并停止了本次发送。请检查合并后的内容，再次发送即确认。',
       draftRecoveryBlocked: '已保存的附件尚未完整找回。本次发送已停止；请重试找回或明确移除后再发送。',
@@ -136,6 +140,10 @@ export const newConversationCopy = defineShellCopy(
       optionsLocked:
         'Conversation creation has started, so its name, project, pin setting, and preferred cats will stay unchanged.',
       saveFailed: 'The draft is still on this page, but durable local saving failed. Keep this page open and retry.',
+      savingDraft: 'Saving your draft. You can keep editing or cancel this save.',
+      saveCancelled: 'This save was cancelled. Your draft is preserved; retry saving or remove attachments.',
+      retrySave: 'Retry saving',
+      cancelSave: 'Cancel save',
       identityFailed: 'Your account could not be confirmed. The draft is still on this device; reconnect to continue.',
       draftRecovered:
         'Another unsent draft was restored, so this send was stopped. Review the merged content and send again to confirm.',

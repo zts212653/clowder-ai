@@ -18,6 +18,7 @@ import { ShellGlyph } from '../shell/ShellIcons';
 import { useShellCopy } from '../shell/shell-copy';
 import { getProjectPaths } from '../ThreadSidebar/thread-utils';
 import { ThreadComposerHost } from '../thread-chat/ThreadComposerHost';
+import { LocalDraftSaveNotice } from './LocalDraftSaveNotice';
 import { NewConversationComposerContext } from './NewConversationComposerContext';
 import { newConversationCopy } from './new-conversation.shell-copy';
 import { queueWorkDiscussion } from './queue-work-discussion';
@@ -115,9 +116,17 @@ function AdmissionNotice({
   phase,
   loadFailed,
   localSaveFailed,
+  localSaveState,
   onRetry,
-}: Pick<ReturnType<typeof useNewConversationAdmission>, 'phase' | 'loadFailed' | 'localSaveFailed'> & {
+  onRetrySave,
+  onCancelSave,
+}: Pick<
+  ReturnType<typeof useNewConversationAdmission>,
+  'phase' | 'loadFailed' | 'localSaveFailed' | 'localSaveState'
+> & {
   onRetry: () => void;
+  onRetrySave: () => void;
+  onCancelSave: () => void;
 }) {
   const copy = useShellCopy(newConversationCopy);
   const message = admissionMessage(phase, localSaveFailed, copy);
@@ -133,6 +142,9 @@ function AdmissionNotice({
         </button>
       </div>
     );
+  }
+  if (localSaveState !== 'idle') {
+    return <LocalDraftSaveNotice state={localSaveState} onRetry={onRetrySave} onCancel={onCancelSave} />;
   }
   return message ? (
     <p
@@ -332,7 +344,10 @@ export function NewConversationPage(props: NewConversationPageProps) {
           phase={admission.phase}
           loadFailed={admission.loadFailed}
           localSaveFailed={admission.localSaveFailed}
+          localSaveState={admission.localSaveState}
           onRetry={admission.retryLoad}
+          onRetrySave={admission.retrySave}
+          onCancelSave={admission.cancelSave}
         />
         {props.onShowCollaboration && <DemoEntryActions onShowCollaboration={props.onShowCollaboration} />}
         {floating.error && <p role="alert">{floating.error}</p>}

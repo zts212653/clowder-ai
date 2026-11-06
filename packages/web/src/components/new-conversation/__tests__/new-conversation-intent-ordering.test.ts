@@ -44,12 +44,17 @@ it('loads an earlier pending image save without blocking another owner', async (
   const restoring = loadNewConversationIntent(ALICE);
 
   // A completed transaction for B also lets an incorrectly eager read of A finish.
-  await saveNewConversationIntent(record(BOB));
-  releaseBytes(new TextEncoder().encode('pending').buffer);
-  await saving;
+  try {
+    await saveNewConversationIntent(record(BOB));
+    releaseBytes(new TextEncoder().encode('pending').buffer);
+    await saving;
 
-  expect((await restoring)?.files.map((image) => image.name)).toEqual(['pending.png']);
-  expect((await loadNewConversationIntent(BOB))?.files).toEqual([]);
+    expect((await restoring)?.files.map((image) => image.name)).toEqual(['pending.png']);
+    expect((await loadNewConversationIntent(BOB))?.files).toEqual([]);
+  } finally {
+    releaseBytes(new TextEncoder().encode('pending').buffer);
+    await Promise.all([saving, restoring]);
+  }
 });
 
 it('does not let a pending image save recreate a cleared intent', async () => {
@@ -59,13 +64,20 @@ it('does not let a pending image save recreate a cleared intent', async () => {
   const file = new File(['pending'], 'pending.png', { type: 'image/png' });
   Object.defineProperty(file, 'arrayBuffer', { value: () => bytes });
   const saving = saveNewConversationIntent(record(ALICE, [file]));
+  let cancellation: unknown;
+  const outcome = saving.catch((error: unknown) => {
+    cancellation = error;
+  });
   const clearing = clearNewConversationIntent(ALICE);
-
-  await saveNewConversationIntent(record(BOB));
-  releaseBytes(new TextEncoder().encode('pending').buffer);
-  await Promise.all([saving, clearing]);
-
-  expect(await loadNewConversationIntent(ALICE)).toBeNull();
+  try {
+    await saveNewConversationIntent(record(BOB));
+    expect(cancellation).toMatchObject({ name: 'AbortError' });
+    await clearing;
+    expect(await loadNewConversationIntent(ALICE)).toBeNull();
+  } finally {
+    releaseBytes(new TextEncoder().encode('pending').buffer);
+    await Promise.all([outcome, clearing]);
+  }
 });
 
 it('continues saving after an earlier image read fails', async () => {
