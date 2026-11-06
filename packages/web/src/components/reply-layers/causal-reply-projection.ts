@@ -1,3 +1,4 @@
+import { getLifecycleAppendOutcome } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
 
 export interface CausalReplySlice {
@@ -19,7 +20,7 @@ export function causalBoundaryKey(
 export function projectCausalReplies(messages: readonly ChatMessage[], verified: ReadonlyMap<string, string>) {
   const originals = new Map<string, { start: number; end: number; inputMessageId: string }>();
   const continuations = new Map<string, CausalReplySlice[]>();
-  const positions = new Map(messages.map((message, index) => [message.id, index]));
+  const sources = new Map(messages.map((message, position) => [message.id, { message, position }]));
   messages.forEach((response, responseIndex) => {
     const lifecycle = response.lifecycle;
     if (
@@ -28,6 +29,7 @@ export function projectCausalReplies(messages: readonly ChatMessage[], verified:
       response.origin !== 'stream' ||
       response.type !== 'assistant' ||
       response.visibility === 'whisper' ||
+      response.extra?.recall ||
       response.contentBlocks?.length ||
       response.extra?.isExplicitPost
     )
@@ -37,16 +39,23 @@ export function projectCausalReplies(messages: readonly ChatMessage[], verified:
     const boundaries = lifecycle.appendBoundaries;
     if (
       !boundaries.every((boundary, index) => {
-        const position = positions.get(boundary.inputMessageId);
+        const source = sources.get(boundary.inputMessageId);
+        const ref = source?.message.lifecycle?.dispatchRefs?.find(
+          (candidate) => candidate.targetId === lifecycle.targetId,
+        );
+        const outcome = getLifecycleAppendOutcome(ref, source?.message.lifecycle);
         const previous = boundaries[index - 1];
         return (
           lifecycle.inputMessageIds.includes(boundary.inputMessageId) &&
-          position !== undefined &&
-          position > responseIndex &&
+          source !== undefined &&
+          source.position > responseIndex &&
+          ref?.statusMessageId === response.id &&
+          outcome !== 'not_accepted' &&
+          outcome !== 'unknown' &&
           boundary.contentOffset <= content.length &&
           (!previous ||
             (boundary.contentOffset >= previous.contentOffset &&
-              position >= (positions.get(previous.inputMessageId) ?? Infinity))) &&
+              source.position >= (sources.get(previous.inputMessageId)?.position ?? Infinity))) &&
           verified.get(causalBoundaryKey(response, boundary)) === content.slice(0, boundary.contentOffset)
         );
       })

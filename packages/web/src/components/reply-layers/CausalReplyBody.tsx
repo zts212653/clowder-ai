@@ -7,11 +7,15 @@ import type { ChatMessage } from '@/stores/chat-types';
 import { dispatchChatLayoutChanged } from '@/utils/chat-layout-change';
 import { CatNameplate } from '../CatNameplate';
 import { MessageActions } from '../MessageActions';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { useMessageNavigation } from '../thread-chat/MessageNavigationContext';
 import { causalContinuationId, focusCausalContinuation, useCausalReplies } from './CausalReplyContext';
 import type { CausalReplySlice } from './causal-reply-projection';
 import { NativeReplyText } from './NativeReplyText';
+import { ReplyOutputBody } from './ReplyOutputBody';
 import { REPLY_BODY_CLASS } from './reply-body';
+import type { ReplyOutputText } from './reply-output';
+import { canRenderReplyLayers } from './reply-presentation';
 
 function sliceRun(response: ChatMessage, start: number, end: number) {
   // Cutting inside Markdown syntax must not swallow or invent source text. The
@@ -42,15 +46,51 @@ function sliceRun(response: ChatMessage, start: number, end: number) {
 }
 
 /** Only the original body is clipped; execution records and canonical actions stay on R. */
-export function CausalReplyOriginal({ response, children }: { response: ChatMessage; children: ReactNode }) {
+function CausalReplyText({
+  response,
+  start,
+  end,
+  layered,
+}: {
+  response: ChatMessage;
+  start: number;
+  end: number;
+  layered: boolean;
+}) {
+  const presentation = useCausalReplies();
+  const native = layered ? presentation?.nativeOutputs.get(response.id) : undefined;
+  if (!native) return <NativeReplyText run={sliceRun(response, start, end)} className={REPLY_BODY_CLASS} />;
+  const clip = (run: ReplyOutputText) => {
+    const from = Math.max(start, run.start),
+      to = Math.min(end, run.end);
+    return from < to ? [sliceRun(response, from, to)] : [];
+  };
+  const record = native.record.flatMap((entry) => (entry.kind === 'text' ? clip(entry) : []));
+  return (
+    <ReplyOutputBody
+      output={{ ...native, answers: native.answers.flatMap(clip), record, processCount: record.length }}
+      className={REPLY_BODY_CLASS}
+    />
+  );
+}
+
+export function CausalReplyOriginal({
+  response,
+  layered,
+  children,
+}: {
+  response: ChatMessage;
+  layered: boolean;
+  children: ReactNode;
+}) {
   const [expanded, setExpanded] = useState(false);
   const original = useCausalReplies()?.originals.get(response.id);
   if (!original) return children;
   const { end, inputMessageId } = original;
   return (
     <div data-causal-original={response.id}>
-      {end > 0 ? (
-        <NativeReplyText run={sliceRun(response, 0, end)} className={REPLY_BODY_CLASS} />
+      {expanded ? null : end > 0 ? (
+        <CausalReplyText response={response} start={0} end={end} layered={layered} />
       ) : (
         <p className="text-sm text-cafe-muted">本轮正文接续在下方</p>
       )}
@@ -102,14 +142,18 @@ function Continuation({
   threadId,
   getCatById,
   forwardingDisabled,
+  compact = false,
 }: {
   slice: CausalReplySlice;
   threadId: string;
   getCatById: (id: string) => CatData | undefined;
   forwardingDisabled: boolean;
+  compact?: boolean;
 }) {
   const { response, inputMessageId, start, end } = slice;
   const navigate = useMessageNavigation();
+  const shellPresentation = useShellPresentation();
+  const layered = canRenderReplyLayers(response, { shellPresentation, compact, currentThreadId: threadId });
   const cat = response.catId ? getCatById(response.catId) : undefined;
   return (
     <div
@@ -117,6 +161,7 @@ function Continuation({
       data-causal-continuation={response.id}
       className="mb-4 scroll-mt-4"
       data-causal-input={inputMessageId}
+      data-causal-next-input={start === end ? slice.nextInputMessageId : undefined}
       tabIndex={-1}
     >
       <MessageActions message={response} threadId={threadId} forwardingDisabled={forwardingDisabled}>
@@ -131,7 +176,7 @@ function Continuation({
         </div>
         <div className="pl-4" style={{ borderLeft: `3px solid ${catColorVar(response.catId, 'primary')}` }}>
           {start < end ? (
-            <NativeReplyText run={sliceRun(response, start, end)} className={REPLY_BODY_CLASS} />
+            <CausalReplyText response={response} start={start} end={end} layered={layered} />
           ) : slice.nextInputMessageId ? (
             <p className="text-sm text-cafe-muted">
               后续正文接续在下一条补充下方。
@@ -166,6 +211,7 @@ export function CausalReplyContinuations({
   threadId: string;
   getCatById: (id: string) => CatData | undefined;
   forwardingDisabled: boolean;
+  compact?: boolean;
 }) {
   const projection = useCausalReplies();
   return (

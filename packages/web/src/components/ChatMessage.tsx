@@ -1086,7 +1086,9 @@ function ChatMessageContent({
 
   const assistantBody =
     message.lifecycle?.kind === 'response' && message.lifecycle.appendBoundaries?.length ? (
-      <CausalReplyOriginal response={message}>{ordinaryAssistantBody}</CausalReplyOriginal>
+      <CausalReplyOriginal response={message} layered={isLayeredReply}>
+        {ordinaryAssistantBody}
+      </CausalReplyOriginal>
     ) : (
       ordinaryAssistantBody
     );

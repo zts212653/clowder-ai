@@ -1420,9 +1420,7 @@ export function computeAppendBoundary(content: string): LifecycleAppendBoundaryI
 }
 
 /** Read the exact live body at adoption; no getter means no cut, never a guessed zero. */
-export function boundaryFromLiveBody(
-  getter: (() => string) | undefined,
-): LifecycleAppendBoundaryInput | undefined {
+export function boundaryFromLiveBody(getter: (() => string) | undefined): LifecycleAppendBoundaryInput | undefined {
   return getter ? computeAppendBoundary(getter()) : undefined;
 }
 

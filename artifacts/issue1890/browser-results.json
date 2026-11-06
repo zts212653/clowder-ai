@@ -2,11 +2,7 @@
   "results": [
     {
       "stage": "streaming",
-      "order": [
-        "R",
-        "S",
-        "continuation"
-      ]
+      "order": ["R", "S", "continuation"]
     },
     {
       "stage": "quote",
@@ -29,6 +25,25 @@
     {
       "stage": "classic",
       "canonicalCount": 1
+    },
+    {
+      "stage": "native-append",
+      "pendingContinuationCount": 0,
+      "writtenContinuationCount": 1
+    },
+    {
+      "stage": "recalled",
+      "continuationCount": 0
+    },
+    {
+      "stage": "native-output",
+      "processInOriginalRecord": true,
+      "finalInContinuation": true
+    },
+    {
+      "stage": "equal-cut-navigation",
+      "from": "S",
+      "focused": "S2"
     }
   ],
   "errors": []

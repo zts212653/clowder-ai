@@ -25,7 +25,18 @@ const response = (content = before + after): ChatMessage => ({
     appendBoundaries: [{ inputMessageId: 'S', contentOffset: before.length, prefixSha256: hash(before) }],
   },
 });
-const input: ChatMessage = { id: 'S', type: 'assistant', catId: 'dsh', timestamp: 2000, content: '请修正审查意见。' };
+const input: ChatMessage = {
+  id: 'S',
+  type: 'assistant',
+  catId: 'dsh',
+  timestamp: 2000,
+  content: '请修正审查意见。',
+  lifecycle: {
+    kind: 'input',
+    orderKey: '2000:S',
+    dispatchRefs: [{ targetId: 'codex', phase: 'dispatched', statusMessageId: 'R', dispatchedAt: 2000 }],
+  },
+};
 const proof = new Map([[`R:turn:S:${before.length}:${hash(before)}`, before]]);
 
 describe('causal reply presentation without moving History', () => {
@@ -62,6 +73,7 @@ describe('causal reply presentation without moving History', () => {
     const verified = new Map([...proof, [`R:turn:S2:${before.length}:${hash(before)}`, before]]);
     const projected = projectCausalReplies([message, input, second], verified);
     expect(projected.continuations.get('S')?.[0].end).toBe(before.length);
+    expect(projected.continuations.get('S')?.[0].nextInputMessageId).toBe('S2');
     expect(projected.continuations.get('S2')?.[0].start).toBe(before.length);
     expect(projected.continuations.get('S2')?.[0].end).toBe(message.content.length);
   });
@@ -85,5 +97,67 @@ describe('causal reply presentation without moving History', () => {
   it('does not export private responses or cut a client snapshot that is behind the boundary', () => {
     expect(projectCausalReplies([{ ...response(), visibility: 'whisper' }, input], proof).originals.size).toBe(0);
     expect(projectCausalReplies([response('原先'), input], proof).originals.size).toBe(0);
+  });
+
+  it('does not resurrect a recalled response through a continuation while its old body is still cached', () => {
+    const recalled = response();
+    recalled.extra = { recall: { version: 1, exposure: 'seen', recalledAt: 3000, exposures: [] } };
+    const projection = projectCausalReplies([recalled, input], proof);
+    expect(projection.originals.size).toBe(0);
+    expect(projection.continuations.size).toBe(0);
+  });
+
+  it('keeps the whole reply while append acceptance is unknown, refused, or rebound to another response', () => {
+    const source: ChatMessage = {
+      ...input,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '2000:S',
+        dispatchRefs: [
+          {
+            targetId: 'codex',
+            phase: 'dispatched',
+            statusMessageId: 'R',
+            dispatchedAt: 2000,
+            appendAcceptance: 'pending',
+          },
+        ],
+      },
+    };
+    if (source.lifecycle?.kind !== 'input') throw new Error('fixture');
+    expect(projectCausalReplies([response(), source], proof).originals.size).toBe(0);
+    source.lifecycle = {
+      ...source.lifecycle,
+      appendFailures: [
+        {
+          targetId: 'codex',
+          invocationId: 'turn',
+          responseMessageId: 'R',
+          at: 2100,
+          acceptance: 'not_accepted',
+          reason: 'provider_rejected',
+        },
+      ],
+    };
+    expect(projectCausalReplies([response(), source], proof).originals.size).toBe(0);
+    source.lifecycle = {
+      ...source.lifecycle,
+      dispatchRefs: [
+        {
+          targetId: 'codex',
+          phase: 'dispatched',
+          statusMessageId: 'R',
+          dispatchedAt: 2000,
+          appendAcceptance: 'written',
+        },
+      ],
+    };
+    expect(projectCausalReplies([response(), source], proof).originals.size).toBe(1);
+    source.lifecycle = {
+      kind: 'input',
+      orderKey: '2000:S',
+      dispatchRefs: [{ targetId: 'codex', phase: 'dispatched', statusMessageId: 'R2', dispatchedAt: 2000 }],
+    };
+    expect(projectCausalReplies([response(), source], proof).originals.size).toBe(0);
   });
 });

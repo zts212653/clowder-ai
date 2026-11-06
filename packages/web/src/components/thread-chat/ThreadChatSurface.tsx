@@ -506,7 +506,9 @@ export function ThreadChatSurface({
           conversationView={conversationViewController}
           enabled={composerPresentation === 'v2'}
         >
-          <CausalReplyProvider messages={selection.selectionMode ? [] : visibleMessages}>{surface}</CausalReplyProvider>
+          <CausalReplyProvider threadId={threadId} messages={selection.selectionMode ? [] : visibleMessages}>
+            {surface}
+          </CausalReplyProvider>
         </CatProfileCardScope>
       </ChatReferenceScope>
     </MessageNavigationProvider>

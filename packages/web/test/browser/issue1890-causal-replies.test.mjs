@@ -55,27 +55,34 @@ test('issue1890 causal reading remains consistent live, complete and after refre
     },
   };
   let history = [response(before, 'processing', false)];
-  const built = await build({
-    root: web,
-    configFile: false,
-    logLevel: 'error',
-    esbuild: { jsx: 'automatic' },
-    resolve: {
-      alias: [
-        { find: 'next/navigation', replacement: path.join(web, 'test/browser/fixtures/f322-shell-navigation.ts') },
-        { find: '@', replacement: path.join(web, 'src') },
-      ],
-    },
-    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_API_URL': JSON.stringify(origin) },
-    build: {
-      write: false,
-      minify: false,
-      rollupOptions: {
-        input: path.join(web, 'test/browser/fixtures/issue1890-causal-replies.tsx'),
-        output: { format: 'es', inlineDynamicImports: true },
+  const previousCwd = process.cwd();
+  process.chdir(web);
+  let built;
+  try {
+    built = await build({
+      root: web,
+      configFile: false,
+      logLevel: 'error',
+      esbuild: { jsx: 'automatic' },
+      resolve: {
+        alias: [
+          { find: 'next/navigation', replacement: path.join(web, 'test/browser/fixtures/f322-shell-navigation.ts') },
+          { find: '@', replacement: path.join(web, 'src') },
+        ],
       },
-    },
-  });
+      define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_API_URL': JSON.stringify(origin) },
+      build: {
+        write: false,
+        minify: false,
+        rollupOptions: {
+          input: path.join(web, 'test/browser/fixtures/issue1890-causal-replies.tsx'),
+          output: { format: 'es', inlineDynamicImports: true },
+        },
+      },
+    });
+  } finally {
+    process.chdir(previousCwd);
+  }
   const script = built.output.find((item) => item.type === 'chunk' && item.isEntry).code;
   const css = built.output
     .filter((item) => item.type === 'asset' && item.fileName.endsWith('.css'))
@@ -123,6 +130,7 @@ test('issue1890 causal reading remains consistent live, complete and after refre
           userId: 'isolated-owner',
         };
         if (url.pathname === '/api/messages') body = { messages: history, hasMore: false };
+        if (url.pathname === '/api/config/process-talk') body = { ownerUserId: 'isolated-owner', mode: 'record' };
         if (url.pathname === '/api/cats')
           body = {
             cats: ['codex', 'dsh'].map((id) => ({
@@ -229,6 +237,7 @@ test('issue1890 causal reading remains consistent live, complete and after refre
       await page.locator('[data-causal-full-text]').innerText(),
       /原来的调用链[\s\S]*收到鲸鲸审查[\s\S]*砚砚\/test/,
     );
+    assert.equal((await page.locator('[data-causal-original="R"]').innerText()).split('原来的调用链').length - 1, 1);
     await page.getByRole('button', { name: '收起完整原文', exact: true }).click();
     await page.reload();
     await page.locator('[data-causal-continuation="R"]').waitFor();
@@ -255,6 +264,98 @@ test('issue1890 causal reading remains consistent live, complete and after refre
     await page.evaluate(() => window.issue1890Shell('classic'));
     assert.match(await page.locator('[data-causal-continuation="R"]').innerText(), /砚砚\/test/);
     results.push({ stage: 'classic', canonicalCount: await page.locator('[data-message-id="R"]').count() });
+    const pendingInput = {
+      ...input,
+      lifecycle: {
+        ...input.lifecycle,
+        dispatchRefs: [{ ...input.lifecycle.dispatchRefs[0], appendAcceptance: 'pending' }],
+      },
+    };
+    history = [response(before + tail), pendingInput];
+    await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
+    await page.waitForFunction(() => document.querySelectorAll('[data-causal-continuation]').length === 0);
+    const writtenInput = {
+      ...pendingInput,
+      lifecycle: {
+        ...pendingInput.lifecycle,
+        dispatchRefs: [{ ...pendingInput.lifecycle.dispatchRefs[0], appendAcceptance: 'written' }],
+      },
+    };
+    history = [history[0], writtenInput];
+    await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
+    await page.locator('[data-causal-continuation="R"]').waitFor();
+    results.push({ stage: 'native-append', pendingContinuationCount: 0, writtenContinuationCount: 1 });
+    history = [
+      {
+        ...history[0],
+        extra: { ...history[0].extra, recall: { version: 1, exposure: 'seen', recalledAt: 5000, exposures: [] } },
+      },
+      history[1],
+    ];
+    await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
+    await page.waitForFunction(() => document.querySelectorAll('[data-causal-continuation]').length === 0);
+    results.push({ stage: 'recalled', continuationCount: 0 });
+    await page.evaluate(() => window.issue1890Shell('v2'));
+    const native = response(`${before}${tail}\n\n[砚砚/test]`, 'completed');
+    const identity = { provider: 'codex', runtimeSessionId: 'native', turnId: 'turn' };
+    native.extra.outputLayout = {
+      v: 1,
+      status: 'available',
+      owner: { threadId: 'issue1890', catId: 'codex', turnInvocationId: 'turn' },
+      contentRevision: {
+        length: native.content.length,
+        sha256: createHash('sha256').update(native.content).digest('hex'),
+      },
+      runs: [
+        {
+          id: 'process',
+          identity: { ...identity, nativeId: 'process' },
+          channel: 'commentary',
+          complete: true,
+          start: 0,
+          end: before.length,
+          gluePrefixLength: 0,
+        },
+        {
+          id: 'final',
+          identity: { ...identity, nativeId: 'final' },
+          channel: 'final',
+          complete: true,
+          start: before.length,
+          end: native.content.length,
+          gluePrefixLength: 0,
+        },
+      ],
+      order: [
+        { kind: 'run', runId: 'process' },
+        { kind: 'run', runId: 'final' },
+      ],
+    };
+    const settledInput = {
+      ...input,
+      lifecycle: { ...input.lifecycle, dispatchRefs: [{ ...input.lifecycle.dispatchRefs[0], phase: 'settled' }] },
+    };
+    history = [native, settledInput];
+    await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
+    await page.locator('[data-causal-original="R"] [data-testid="native-reply-answer"]').waitFor({ state: 'attached' });
+    assert.equal((await page.locator('[data-causal-original="R"]').innerText()).includes('原来的调用链'), false);
+    assert.match(await page.locator('[data-causal-continuation="R"]').innerText(), /收到鲸鲸审查/);
+    const recordToggle = page.locator('button[aria-controls="reply-record-R"]');
+    if ((await recordToggle.getAttribute('aria-expanded')) === 'false') await recordToggle.click();
+    assert.match(await page.locator('#reply-record-R').innerText(), /原来的调用链/);
+    results.push({ stage: 'native-output', processInOriginalRecord: true, finalInContinuation: true });
+    const second = { ...settledInput, id: 'S2', timestamp: 3000 };
+    native.lifecycle.inputMessageIds.push('S2');
+    native.lifecycle.inputEntryIds.push('review2');
+    native.lifecycle.appendBoundaries.push({ ...boundary, inputMessageId: 'S2' });
+    history = [native, settledInput, second];
+    await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
+    await page.locator('[data-causal-input="S2"]').waitFor();
+    await page.locator('[data-message-id="S"]').getByRole('button', { name: '看砚砚的回复' }).click();
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-causal-input')), 'S2');
+    assert.equal((await page.locator('[data-causal-input="S"]').innerText()).includes(tail), false);
+    assert.match(await page.locator('[data-causal-input="S2"]').innerText(), /收到鲸鲸审查/);
+    results.push({ stage: 'equal-cut-navigation', from: 'S', focused: 'S2' });
     assert.deepEqual(errors, []);
     if (process.env.ISSUE1890_EVIDENCE_DIR)
       await writeFile(

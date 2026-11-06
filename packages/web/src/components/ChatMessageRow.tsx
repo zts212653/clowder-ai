@@ -125,6 +125,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           threadId={threadId}
           getCatById={getCatById}
           forwardingDisabled={forwardingDisabled}
+          compact={compact}
         />
       ) : null}
     </MessageViewportBoundary>

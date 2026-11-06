@@ -40,8 +40,9 @@ Architecture cell：现有 bubble-pipeline / lifecycle admission。Map delta：n
 - 接续块挂在 S 行之后，不新增顶层消息 ID，不参与 viewport 排序、分页 cursor、未读或批量选择。批量选择模式恢复 canonical 全文。
 - 接续块使用自己的 MessageActions，绑定原 R，位于 S 动作树之外；不需要扩展 TextSelectionAction.sourceMessageId。NativeReplyText 的绝对 UTF-16 坐标继续映射 R 正文；全条操作仍操作 R。
 - 同一 provider run 跨 S 也按 offset 精确切。切进代码围栏/行内 Markdown 时按字面原文呈现，避免解析吞字；原执行可展开完整格式化原文，不猜段落或把整段搬走。
-- S 的“看回复”在有已验证接续时聚焦接续块，接续可回到原执行。源/目标不在当前可读页、私有响应、证据不完整、body 替换或 socket 尚未追上时保持全文与原导航。
+- S 的“看回复”在有已验证接续时聚焦接续块，接续可回到原执行。源的 exact dispatchRef 必须仍指向 R；接收未确认、明确拒绝、改绑其他响应、撤回、源/目标不在当前可读页、私有响应、证据不完整、body 替换或 socket 尚未追上时保持原呈现与导航。
 - 工具留在原执行记录。接续无新增正文时显示真实等待/无新增事实并提供原执行入口；不声称重排工具，不伪造确认话术。
+- 原生 `outputLayout` 经完整正文校验后，复用既有 `projectReplyOutput` / `ReplyOutputBody` 并裁剪对应范围；保留过程/最终回答与个人 process-talk 选择。完整工具与过程记录仍归 R。连续输入具有相同切点时，回复入口跳过空范围，定位后继正文。
 
 ## 验证与限制
 
@@ -53,14 +54,17 @@ Architecture cell：现有 bubble-pipeline / lifecycle admission。Map delta：n
 - 浏览器：实际 ThreadChatSurface、MessageActions、NativeReplyText 和真实样式，隔离 API/socket 数据；运行中接入→续写→完成→展开全文→刷新，引用落到 R，回复跳到接续，classic/v2 与窄屏。
 - shared/API 编译、Web tsc、Biome、diff check。浏览器 fixture 验证前端，不冒充真实 provider 或部署验收。
 
-当前实际验证回执（2026-11-06，隔离工位）：
+当前实际验证回执（2026-11-06 至 11-07，隔离工位）：
 
 - `node --import tsx --test test/issue1890-append-boundary.test.ts test/f322-message-output-accumulator.test.ts`：46 通过。
 - API 的 callback-context-adoption-exposure、route-parallel-parent-invocation-id、1398-history-append-ownership、1398-append-read-observation 四套编译后测试：33 通过。含真实 Fastify 全文读取采用，以及串行/并行实时 getter 和释放断言。并行新增断言修改前以 `undefined != qwen body` 失败，修改后通过。
-- Web 六套受影响回归：32 通过；包含原输出分层、选择映射、聊天行隔离/导航与 ThreadChatSurface。
-- `pnpm --filter @cat-cafe/api exec tsc`、Web `tsc --noEmit --incremental false` 均通过；全包 build 另由鲸鲸回读记录。
-- 浏览器实际 ThreadChatSurface：实时接入/完成/展开全文/刷新/390px/classic/v2/引用/回复聚焦通过。选区引用绑定 R，源范围 13–31；canonical R 只有一条，pageerror 为 0。证据见 `artifacts/issue1890`，其 API/socket 都是隔离 fixture。
+- Web 八套受影响回归：40 通过；包含原输出分层、选择映射、聊天行隔离/导航、撤回和 ThreadChatSurface，以及实际 deferred owner 同步挂载和同切点导航。另补确认/拒绝/改绑来源的切分限制。
+- 审查修正 RED：恢复旧导航逻辑后，S1/S2 同切点测试实际聚焦 S1、预期 S2；禁用原生投影后，真实浏览器无法找到原生分层正文。恢复修正后分别验证新行为。屏外挂载已有 MOUNT + flushSync，组件反例验证成立；异步 proof 的滚动重排仅保留观察项，沿用既有 reading-anchor owner，不新建滚动控制器。
+- `pnpm --filter @cat-cafe/api exec tsc`、Web `tsc --noEmit --incremental false` 均通过；鲸鲸回执 `0001793965701735-000288-b00c58d1` 确认完整 API build 通过。同步 `next@132dfa8d37c3cc48f84799d6c02d9d9072d723c8` 后再次通过 Web 类型和浏览器验证。
+- 浏览器实际 ThreadChatSurface：实时接入/完成/展开全文/刷新/390px/classic/v2/引用/回复聚焦通过。新增原生 commentary 留在原执行记录、final 出现在接续，以及 S1/S2 同切点跳到 S2 的断言通过。选区引用绑定 R，源范围 13–31；canonical R 只有一条，pageerror 为 0。证据见 `artifacts/issue1890`，其 API/socket 都是隔离 fixture。
 - 额外 `1398-private-append-projection.test.js` 的 5 项被本机环境挡住：`spawn redis-server ENOENT`，夹具还要求 Unix socket。没有连接运行中的 Redis，没有把这 5 项计作通过；新增 whisper 单测通过。
+- 本机完整 `pnpm check` 在既有 F290 产品文案扫描测试遇到 Windows 路径分隔符断言差异，未计作通过；Linux 首轮 CI 已通过该段，只在新增 JSON/MessageStore 格式报错，已按同一 Biome 规则修正。
+- 本机全仓 `biome check .` 因 Windows checkout 的 CRLF（含未改动的 `biome.json` / `tsconfig.json`）产生格式失败；不批量重写基线文件。只格式化本 PR 变更文件，最终以这些文件的检查与 Linux CI 核对。
 
 旧历史没有可靠切点，保留全文，不推算或迁移。工具时间线继续由原执行承载。搜索结果仍定位 canonical R，R 提供完整原文入口。API 中断/取消沿用现有正文保留规则。
 
