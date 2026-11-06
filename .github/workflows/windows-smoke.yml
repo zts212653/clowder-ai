@@ -114,6 +114,8 @@ jobs:
           test/f320-plugin-account.test.ts
       - name: Workspace root cold-store, HTTP and persistence regressions
         run: node packages/api/scripts/test-workspace-roots.mjs
+      - name: Windows workspace path compatibility regression
+        run: node --test --test-timeout=15000 packages/api/test/workspace-path-compat.test.js
       - name: Windows web build and duplicate Trusted Types regression
         run: >-
           node --test
@@ -144,9 +146,11 @@ jobs:
           desktop/runtime-config.test.js
           desktop/instance-upgrade.test.js
           desktop/instance-data-boundary.test.js
+          desktop/redis-directory-diagnostic.test.js
           desktop/runtime-web-server.test.js
           desktop/runtime-web-config.test.js
           desktop/service-startup.test.js
+          desktop/service-listener-ownership.test.js
           desktop/project-mirror-startup-recovery.test.js
           desktop/project-resource-materialization.test.js
           desktop/project-resource-redirection-guard.test.js

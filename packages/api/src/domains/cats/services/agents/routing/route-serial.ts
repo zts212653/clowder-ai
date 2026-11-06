@@ -200,7 +200,11 @@ import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
@@ -833,6 +837,12 @@ export async function* routeSerial(
           ...(catSignal ? { signal: catSignal } : {}),
         });
       try {
+        if (
+          !pinnedService &&
+          terminalExecutionBindingFailure(servicePreparationError) &&
+          options.onExecutionBindingRejected
+        )
+          throw servicePreparationError;
         if (pinnedService) {
           const admitted = await invocationServices.admit(
             pinnedService,
@@ -845,6 +855,14 @@ export async function* routeSerial(
           executionBinding = admitted.executionBinding;
         } else executionBinding = await capture();
       } catch (error) {
+        const terminalReason = terminalExecutionBindingFailure(error);
+        if (
+          catSignal?.aborted ||
+          (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+        ) {
+          index++;
+          continue;
+        }
         yield {
           type: 'error',
           catId,

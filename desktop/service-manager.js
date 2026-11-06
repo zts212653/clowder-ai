@@ -5,7 +5,6 @@ const { spawn, execSync } = require('node:child_process');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const net = require('node:net');
-const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
@@ -15,7 +14,13 @@ const { prepareProjectMirrors } = require('./project-mirrors');
 const { waitForProjectMirrors } = require('./project-mirror-readiness');
 const { createPluginNetworkBridge } = require('./plugin-network-bridge');
 const { createStartupTimeline } = require('./startup-timing');
-const { prepareStartupServices, stopOwnedStartupProcess } = require('./startup-services');
+const {
+  assertStartupProcess,
+  occupiedDesktopPorts,
+  prepareStartupServices,
+  probeStartupResponse,
+  stopOwnedStartupProcess,
+} = require('./startup-services');
 const { resolveExternalNodeEntry } = require('./subprocess-entry');
 const { readClientHomes, resolveDefaultClientHomes } = require('./client-homes');
 const {
@@ -27,6 +32,8 @@ const {
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
 const REDIS_FALLBACK_PORT_CHECK_MS = 5_000;
+const startupIds = new WeakMap();
+const startupPaths = { API: '/health', Web: '/' };
 
 // Ordinary installs must fail closed when Redis is unavailable: running the API
 // on an in-memory store silently makes history and queued work non-durable.
@@ -162,10 +169,19 @@ class ServiceManager {
   async _startAll() {
     log(`=== ServiceManager.startAll() ===`);
     log(`projectRoot: ${this.root}`);
-    if (resolveDesktopRuntime().instanceRoot) {
-      for (const port of [this.frontendPort, this.apiPort, this.redisPort]) {
-        if (await this._isPortOpen(port)) throw new Error(`Isolated desktop port ${port} is already occupied`);
-      }
+    const endpoints = [
+      ['API', this.apiPort],
+      ['Web', this.frontendPort],
+    ];
+    const occupied = await Promise.all(
+      endpoints.map(async ([label, port]) => {
+        const listeners = await Promise.all([this._isPortOpen(port), this._isPortOpen(port, '::1')]);
+        return listeners.some(Boolean) ? `${label} ${port}` : null;
+      }),
+    );
+    if (occupied.some(Boolean)) throw occupiedDesktopPorts(occupied.filter(Boolean).join('、'));
+    if (resolveDesktopRuntime().instanceRoot && (await this._isPortOpen(this.redisPort))) {
+      throw new Error(`Isolated desktop port ${this.redisPort} is already occupied`);
     }
 
     // ---- Pre-flight checks ----
@@ -228,7 +244,30 @@ class ServiceManager {
         }),
     });
     this.startupAbort.signal.throwIfAborted();
+    // Renderer URLs use localhost. A separate IPv6 listener can coexist
+    // with an IPv4 child, including while the other service is still starting.
+    await Promise.all(
+      endpoints.map(async ([label, port]) => {
+        if (!(await this._isPortOpen(port, '::1'))) return;
+        const startupId = startupIds.get(this.procs[label.toLowerCase()]);
+        const outcome = await probeStartupResponse('::1', port, startupPaths[label], startupId);
+        if (outcome !== 'ready') throw occupiedDesktopPorts(`${label} ${port} (::1)`);
+      }),
+    );
+    this.assertStartupProcessesRunning();
     this.onStatus('Ready!');
+  }
+
+  assertStartupProcessesRunning() {
+    this.startupAbort?.signal.throwIfAborted();
+    assertStartupProcess(this.procs.api, 'API', this.apiPort, LOG_FILE);
+    assertStartupProcess(this.procs.web, 'Web', this.frontendPort, LOG_FILE);
+  }
+
+  get webStartupId() {
+    const id = startupIds.get(this.procs.web);
+    if (!id) throw new Error('Web 启动归属标记不可用。');
+    return id;
   }
 
   async _startApiWithFallback(nodeExe, userDataDir, signal) {
@@ -236,6 +275,7 @@ class ServiceManager {
       await this._startApi(nodeExe, userDataDir, signal);
     } catch (err) {
       signal.throwIfAborted();
+      if (err.code === 'DESKTOP_PORT_CONFLICT') throw err;
       log(`API first-attempt failed: ${err.message}`);
       // If API failed and we haven't tried memory mode yet, retry with MEMORY_STORE=1
       // only when the Redis process is actually unavailable. A slow/cold API
@@ -408,9 +448,9 @@ class ServiceManager {
       ['--import', pathToFileURL(resolveExternalNodeEntry('api-startup-probe.mjs')).href, apiEntry],
       { envOverrides, cwd: userProjectDir },
     );
-    log(`API process spawned, waiting for port ${this.apiPort}`);
+    log(`API process spawned, waiting for HTTP on port ${this.apiPort}`);
     this.timeline.mark('api-process-spawned');
-    await this._waitForPort(this.apiPort, 'API', signal);
+    await this._waitForHttpReady(this.apiPort, 'API', signal);
   }
 
   _buildApiEnv(userDataDir) {
@@ -752,12 +792,15 @@ class ServiceManager {
     log(`[${name}] env: MEMORY_STORE=${env.MEMORY_STORE || 'unset'}, REDIS_URL=${env.REDIS_URL || 'unset'}`);
     log(`[${name}] env: EVIDENCE_DB=${env.EVIDENCE_DB || 'unset'}, LOG_DIR=${env.LOG_DIR || 'unset'}`);
 
+    const startupId = name === 'api' || name === 'web' ? crypto.randomUUID() : null;
+    if (startupId) env.CAT_CAFE_DESKTOP_STARTUP_ID = startupId;
     const proc = spawn(cmd, args, {
       cwd: opts.cwd || this.root,
       env,
       stdio: 'pipe',
       windowsHide: true,
     });
+    if (startupId) startupIds.set(proc, startupId);
 
     proc.on('error', (err) => {
       log(`[${name}] spawn error: ${err.message}`);
@@ -773,7 +816,7 @@ class ServiceManager {
     this.procs[name] = proc;
   }
 
-  _isPortOpen(port) {
+  _isPortOpen(port, host = '127.0.0.1') {
     return new Promise((resolve) => {
       const sock = new net.Socket();
       sock.setTimeout(300);
@@ -786,30 +829,7 @@ class ServiceManager {
         sock.destroy();
         resolve(false);
       });
-      sock.connect(port, '127.0.0.1');
-    });
-  }
-
-  _isHttpReady(port) {
-    return new Promise((resolve) => {
-      const request = http.get(
-        {
-          host: '127.0.0.1',
-          port,
-          path: '/',
-          headers: { 'Cache-Control': 'no-cache' },
-        },
-        (response) => {
-          response.resume();
-          resolve(response.statusCode >= 200 && response.statusCode < 400);
-        },
-      );
-      request.setTimeout(1000, () => {
-        request.destroy();
-        resolve(false);
-      });
-      request.once('error', () => resolve(false));
-      request.once('close', () => resolve(false));
+      sock.connect(port, host);
     });
   }
 
@@ -837,51 +857,23 @@ class ServiceManager {
     });
   }
 
-  async _waitForPort(port, label, signal = this.startupAbort?.signal) {
-    const deadline = Date.now() + MAX_WAIT_MS;
-    while (Date.now() < deadline) {
-      signal?.throwIfAborted();
-      const open = await this._isPortOpen(port);
-      signal?.throwIfAborted();
-      if (open) {
-        this.onStatus(`${label} ready on port ${port}`);
-        return;
-      }
-      // Check if the process died while we were waiting
-      const procName = label.toLowerCase().includes('api') ? 'api' : label.toLowerCase().includes('web') ? 'web' : null;
-      if (procName && this.procs[procName]) {
-        const proc = this.procs[procName];
-        if (proc.exitCode !== null && !proc.killed) {
-          log(`[${label}] process exited unexpectedly (code=${proc.exitCode}) during wait`);
-          throw new Error(
-            `${label} process exited with code ${proc.exitCode} before port ${port} was ready. Check ${LOG_FILE} for details.`,
-          );
-        }
-      }
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-    }
-    throw new Error(`${label} did not start within ${MAX_WAIT_MS / 1000}s (port ${port})`);
-  }
-
   async _waitForHttpReady(port, label, signal = this.startupAbort?.signal) {
     const deadline = Date.now() + MAX_WAIT_MS;
+    const proc = this.procs[label.toLowerCase()];
+    const startupId = startupIds.get(proc);
     let attempts = 0;
     while (Date.now() < deadline) {
       signal?.throwIfAborted();
+      assertStartupProcess(proc, label, port, LOG_FILE);
       attempts++;
-      const ready = await this._isHttpReady(port);
+      const outcome = await probeStartupResponse('127.0.0.1', port, startupPaths[label], startupId);
       signal?.throwIfAborted();
-      if (ready) {
-        this.timeline.mark('web-probe-ready', { attempts });
+      assertStartupProcess(proc, label, port, LOG_FILE);
+      if (outcome === 'foreign') throw occupiedDesktopPorts(`${label} ${port}`);
+      if (outcome === 'ready') {
+        this.timeline.mark(`${label.toLowerCase()}-probe-ready`, { attempts, pid: proc.pid });
         this.onStatus(`${label} ready on port ${port}`);
         return;
-      }
-      const proc = this.procs.web;
-      if (proc && proc.exitCode !== null && !proc.killed) {
-        log(`[${label}] process exited unexpectedly (code=${proc.exitCode}) during wait`);
-        throw new Error(
-          `${label} process exited with code ${proc.exitCode} before HTTP on port ${port} was ready. Check ${LOG_FILE} for details.`,
-        );
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
