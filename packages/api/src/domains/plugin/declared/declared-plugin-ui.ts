@@ -4,6 +4,9 @@ import type { PluginIconSpec } from '@cat-cafe/shared';
 import type { UiCommandContribution, UiSlotItemContribution, WebhookContribution } from '@clowder-ai/plugin-contract';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 
+export const composerQuickPhrasesGroup = 'composer.quick-phrases';
+type PluginUiGroup = 'activity-bar.bottom' | typeof composerQuickPhrasesGroup;
+
 export interface PluginUiEntry {
   pluginId: string;
   instanceId: string;
@@ -36,10 +39,7 @@ export class DeclaredPluginUi {
       lifetime: new AbortController(),
       commands: contributions.filter((c): c is UiCommandContribution => c.type === 'ui' && c.kind === 'command'),
       resources: contributions.filter((c): c is WebhookContribution => c.type === 'webhook'),
-      slots: contributions.filter(
-        (c): c is UiSlotItemContribution =>
-          c.type === 'ui' && c.kind === 'slot-item' && c.group === 'activity-bar.bottom',
-      ),
+      slots: contributions.filter((c): c is UiSlotItemContribution => c.type === 'ui' && c.kind === 'slot-item'),
     });
   }
   deactivate(id: string): void {
@@ -49,47 +49,50 @@ export class DeclaredPluginUi {
   deactivateAll(): void {
     for (const id of this.#active.keys()) this.deactivate(id);
   }
-  list(): PluginUiEntry[] {
-    return [...this.#active]
-      .flatMap(([instanceId, active]) =>
-        active.slots.flatMap((slot) => {
-          const command = active.commands.find((c) => c.id === slot.command);
-          const resources = command
-            ? active.resources.filter(
+  list(group: PluginUiGroup = 'activity-bar.bottom'): PluginUiEntry[] {
+    return (
+      [...this.#active]
+        // The composer can submit a user-confirmed draft to this package only.
+        .filter(
+          ([, { admission }]) =>
+            group === 'activity-bar.bottom' || admission.packageRecord.pluginId === 'official.quick-phrases',
+        )
+        .flatMap(([instanceId, active]) => {
+          const { pluginId, manifest } = active.admission.packageRecord;
+          const icon =
+            typeof manifest.icon === 'object'
+              ? { ...manifest.icon, src: `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/icon` }
+              : manifest.icon;
+          return active.slots
+            .filter((slot) => slot.group === group)
+            .flatMap((slot) => {
+              const command = active.commands.find((c) => c.id === slot.command);
+              if (!command) return [];
+              const resources = active.resources.filter(
                 (resource) =>
                   resource.methods.includes('GET') &&
                   !resource.path.includes(':') &&
                   resource.action.method === command.action.method &&
                   isDeepStrictEqual(resource.action.params ?? {}, command.action.params ?? {}),
-              )
-            : [];
-          return command && resources.length === 1
-            ? [
+              );
+              const [resource] = resources;
+              if (!resource || resources.length !== 1) return [];
+              return [
                 {
-                  pluginId: active.admission.packageRecord.pluginId,
+                  pluginId,
                   instanceId,
                   commandId: command.id,
-                  resourcePath: resources[0]!.path,
+                  resourcePath: resource.path,
                   label: slot.label,
                   generation: active.generation,
                   order: slot.order ?? 0,
-                  ...(active.admission.packageRecord.manifest.icon
-                    ? {
-                        icon:
-                          typeof active.admission.packageRecord.manifest.icon === 'string'
-                            ? active.admission.packageRecord.manifest.icon
-                            : {
-                                ...active.admission.packageRecord.manifest.icon,
-                                src: `/api/plugin-manager/plugins/${encodeURIComponent(active.admission.packageRecord.pluginId)}/icon`,
-                              },
-                      }
-                    : {}),
+                  ...(icon ? { icon } : {}),
                 },
-              ]
-            : [];
-        }),
-      )
-      .sort((a, b) => a.order - b.order);
+              ];
+            });
+        })
+        .sort((a, b) => a.order - b.order)
+    );
   }
   activation(
     pluginId: string,
