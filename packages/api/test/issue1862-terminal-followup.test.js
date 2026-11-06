@@ -3,7 +3,19 @@ import { test } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { queueHttpFixture } from './helpers/1398-queue-http-fixture.js';
 import { runDispatch, waitFor } from './helpers/issue1862-dispatch-fixture.js';
-import { runPrestartFailure, settlePrestartSibling } from './helpers/issue1862-prestart-fixture.js';
+import {
+  assertPrestartWithdrawalRace,
+  runPrestartFailure,
+  settlePrestartSibling,
+} from './helpers/issue1862-prestart-fixture.js';
+
+for (const withdrawal of ['group', 'thread', 'replacement']) {
+  for (const phase of ['read', 'commit']) {
+    test(`prestart ${withdrawal} withdrawal arbitrates with failure during ${phase}`, async (t) => {
+      await assertPrestartWithdrawalRace(t, undefined, withdrawal, phase);
+    });
+  }
+}
 
 for (const [reason, processing, sibling] of [
   ['control_plane_unavailable', false, false],

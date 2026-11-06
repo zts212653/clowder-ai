@@ -87,3 +87,61 @@ export async function runPrestartFailure(t, { f, reason, processing, sibling = f
     : await processor.failPrestartProcessingGroup(threadId, 'gemini', 'owner', reason);
   return { ...f, source, entry, threadId, processor, outcome };
 }
+
+export async function assertPrestartWithdrawalRace(t, fixture, withdrawal = 'group', phase = 'read') {
+  const f = await runPrestartFailure(t, {
+    f: fixture,
+    reason: 'prestart_timeout',
+    processing: true,
+    prepareOnly: true,
+  });
+  let raced = false;
+  const withdraw = async () => {
+    raced = true;
+    const expected = phase === 'read' ? 'retired' : 'state_changed';
+    if (withdrawal === 'thread') {
+      assert.equal((await f.processor.retireThreadPrestartProcessingGroups(f.threadId, 'owner')).outcome, expected);
+    } else if (withdrawal === 'replacement') {
+      const controller = await f.processor.acquireExternalExecution(f.threadId, ['gemini'], 'owner', {
+        mode: 'replacement',
+        executionId: 'replacement',
+      });
+      assert.equal(controller !== null, phase === 'read');
+      assert.equal(f.processor.deps.invocationTracker.has(f.threadId, 'gemini'), phase === 'read');
+    } else {
+      assert.equal(await f.processor.retirePrestartProcessingGroup(f.threadId, 'gemini', 'owner'), expected);
+    }
+    if (phase === 'read') assert.equal(await f.queue.getDurableEntry(f.threadId, f.entry.id), null);
+  };
+  f.processor.deps.messageStore = new Proxy(f.messages, {
+    get(target, property) {
+      if (property === 'getById')
+        return async (id) => {
+          const result = await target.getById(id);
+          if (phase === 'read' && id === f.source.id && !raced) await withdraw();
+          return result;
+        };
+      if (property === 'commitLifecyclePreAdmissionFailure')
+        return async (input) => {
+          if (phase === 'commit' && !raced) await withdraw();
+          return target.commitLifecyclePreAdmissionFailure(input);
+        };
+      const value = Reflect.get(target, property);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  assert.equal(
+    await f.processor.failPrestartProcessingGroup(f.threadId, 'gemini', 'owner', 'prestart_timeout'),
+    phase === 'read' ? 'state_changed' : 'retired',
+  );
+  assert.equal(raced, true);
+  assert.equal(
+    (await f.queue.listAllDurable(f.threadId)).filter((row) => row.sourceCategory === 'a2a_failure').length,
+    phase === 'read' ? 0 : 1,
+    'completed withdrawal must not acquire a later caller wake',
+  );
+  assert.equal(
+    (await f.messages.getByThread(f.threadId)).filter((row) => row.lifecycle?.kind === 'delivery_failure').length,
+    phase === 'read' ? 0 : 1,
+  );
+}

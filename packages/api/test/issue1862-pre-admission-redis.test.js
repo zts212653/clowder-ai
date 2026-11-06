@@ -15,7 +15,7 @@ import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/Re
 import { RedisThreadStore } from '../dist/domains/cats/services/stores/redis/RedisThreadStore.js';
 import { queueHttpFixture } from './helpers/1398-queue-http-fixture.js';
 import { runDispatch, waitFor } from './helpers/issue1862-dispatch-fixture.js';
-import { runPrestartFailure } from './helpers/issue1862-prestart-fixture.js';
+import { assertPrestartWithdrawalRace, runPrestartFailure } from './helpers/issue1862-prestart-fixture.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
@@ -85,6 +85,22 @@ if (process.send && process.env.ISSUE1862_CRASH_FIXTURE) {
 } else {
   const isolated = !redisIsolationSkipReason(redisUrl);
   const owned = !isolated && process.platform !== 'win32' ? ownedRedisFixture('issue1862-admission') : null;
+  for (const withdrawal of ['group', 'thread', 'replacement']) {
+    for (const phase of ['read', 'commit']) {
+      test(
+        `Redis prestart ${withdrawal} withdrawal arbitrates with failure during ${phase}`,
+        {
+          skip: !isolated && !owned && 'Windows requires an isolated Redis runner',
+        },
+        async (t) => {
+          const prefix = `issue1862:${randomUUID()}:`;
+          const redis = owned ? owned.client(prefix) : isolatedClient(prefix);
+          t.after(() => redis.disconnect());
+          await assertPrestartWithdrawalRace(t, await redisFixture(t, redis), withdrawal, phase);
+        },
+      );
+    }
+  }
   for (const stage of ['prestart', 'caller']) {
     test(
       `Redis process loss preserves ${stage === 'prestart' ? 'the complete failed cohort' : 'the retired wake diagnosis'}`,
