@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { origin } from './fixtures/f322-chat-real-page-build.mjs';
 import { createThreadDeleteProof } from './fixtures/thread-delete-proof.mjs';
 
 const evidence = process.env.THREAD_MENU_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'sidebar-menu');
@@ -15,6 +16,54 @@ before(
   { timeout: 180_000 },
 );
 after(async () => proof?.close());
+
+[
+  { shell: 'classic', language: 'zh', width: 1228, label: '复制 Thread ID', copied: '已复制' },
+  { shell: 'v2', language: 'zh', width: 360, label: '复制 Thread ID', copied: '已复制' },
+  { shell: 'v2', language: 'en', width: 1228, label: 'Copy Thread ID', copied: 'Copied' },
+].forEach((scenario) => {
+  test(`copies the full thread ID through the real menu (${scenario.shell}, ${scenario.language})`, async (t) => {
+    const context = await proof.browser.newContext({ viewport: { width: scenario.width, height: 700 } });
+    t.after(() => context.close());
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    await context.addInitScript(({ shell, language }) => {
+      localStorage.setItem('cat-cafe:shell-presentation', shell);
+      localStorage.setItem('cat-cafe:shell-language', language);
+    }, scenario);
+    const thread = proof.store.create(proof.owner, '复制 ID 的当前会话');
+    const other = proof.store.create(proof.owner, '复制 ID 的另一会话');
+    const page = await proof.openPage(context, `/thread/${thread.id}`);
+    if (scenario.width === 360) await page.evaluate(() => window.__threadDeleteTheme('dark'));
+    const list = page.getByTestId('sidebar-thread-list');
+    for (const id of [thread.id, other.id]) {
+      const row = list.locator(`[data-thread-id="${id}"]`);
+      await row.getByRole('button', { name: '更多操作', exact: true }).click();
+      const menu = page.getByRole('menu', { name: '对话操作', exact: true });
+      const copy = menu.getByRole('menuitem', { name: scenario.label, exact: true });
+      await copy.focus();
+      await page.keyboard.press('Enter');
+      await copy.getByText(scenario.copied, { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), id);
+      assert.equal(new URL(page.url()).pathname, `/thread/${thread.id}`);
+      await assertVisibleMenu(menu);
+      await page.screenshot({
+        path: path.join(
+          evidence,
+          `copy-id-${scenario.shell}-${scenario.language}-${id === thread.id ? 'active' : 'inactive'}.png`,
+        ),
+      });
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
+      assert.equal(
+        await row
+          .getByRole('button', { name: '更多操作', exact: true })
+          .evaluate((element) => element === document.activeElement),
+        true,
+      );
+    }
+    assert.deepEqual(proof.errors, []);
+  });
+});
 
 [
   { name: 'bottom-v2', shell: 'v2', width: 1228, height: 700, bottom: true },
