@@ -246,6 +246,13 @@ export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  /**
+   * #1838: an ACP provider process belongs to the multiplex pool, not to one turn. It can serve
+   * several leases and outlive a turn, so no per-execution Windows host link owns it. Declaring no
+   * Job coverage keeps recovery honest: an unproven stop stays unknown instead of claiming a
+   * teardown for a shared process. A clean final prompt response remains this turn's own proof.
+   */
+  readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
