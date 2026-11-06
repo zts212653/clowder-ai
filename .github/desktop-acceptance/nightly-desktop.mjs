@@ -64,7 +64,7 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
 
   const evidenceName = `desktop-evidence-${platform}`;
   const evidenceDirectory = path.join(root, `${evidenceName}-attempt-${attempt}`);
-  download(evidenceName, evidenceDirectory);
+  if (!fs.existsSync(evidenceDirectory)) download(evidenceName, evidenceDirectory);
   const expected = installerSha256(evidenceDirectory, platform);
   const packageDirectory = path.join(root, 'package');
   const windows = platform === 'windows-x64';

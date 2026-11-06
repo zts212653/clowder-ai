@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-test('a Windows desktop receipt completes its case and preserves the remote Mac result', (t) => {
+test('a Windows desktop receipt completes its case and preserves the remote Mac result', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-nightly-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const evidence = path.join(root, 'desktop-evidence-windows-x64-attempt-2');
@@ -113,6 +114,12 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   write(path.join(macInbox, 'desktop.receipt.json.pending'), { ...desktop, attempt: 'wrong' });
   assert.equal(run('reconcile', root).status, 1);
   assert.equal(discovered().status, 'incomplete');
+  const expired = run('reconcile', root, '--until', '2000-01-01T00:00:00Z');
+  assert.equal(expired.status, 1);
+  assert.equal(
+    discovered().cases.find(({ id, platform }) => id === 'DESKTOP-ONBOARDING' && platform === 'macos-arm64').code,
+    'desktop-receipt-deadline',
+  );
   fs.copyFileSync(path.join(root, 'onboarding.png'), path.join(winInbox, 'onboarding.png'));
   write(path.join(winInbox, 'desktop.receipt.json'), desktop);
   assert.equal(run('reconcile', root).status, 1);
@@ -125,9 +132,20 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
     receipts: [{ ...desktop.receipts[0], platform: 'macos-arm64', packageSha256: 'd'.repeat(64) }],
   });
   assert.match(run('reconcile', root).stderr, /different installation package/);
-  fs.copyFileSync(macReceipt, path.join(macInbox, 'desktop.receipt.json'));
-  const combined = run('reconcile', root);
-  assert.equal(combined.status, 0, combined.stderr);
+  fs.unlinkSync(path.join(macInbox, 'desktop.receipt.json'));
+  const child = spawn(
+    process.execPath,
+    [script, 'reconcile', root, '--until', new Date(Date.now() + 10_000).toISOString()],
+    { env, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  t.after(() => child.kill());
+  const exited = once(child, 'close');
+  const waiting = await Promise.race([once(child.stdout, 'data').then(([value]) => String(value)), exited]);
+  assert.match(String(waiting), /Waiting for 1 desktop receipt/);
+  assert.equal(discovered().status, 'incomplete');
+  fs.copyFileSync(macReceipt, path.join(macInbox, 'desktop.receipt.json.pending'));
+  fs.renameSync(path.join(macInbox, 'desktop.receipt.json.pending'), path.join(macInbox, 'desktop.receipt.json'));
+  assert.deepEqual(await exited, [0, null]);
   assert.equal(discovered().status, 'passed');
   assert.deepEqual(
     discovered()
@@ -154,6 +172,7 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   assert.equal(failed.evidence, 'desktop-evidence-windows-x64-attempt-2/installer/restore-checks.json');
 
   write(path.join(installer, 'port-conflicts.json'), { status: 'passed' });
+  write(path.join(evidence, 'native-auth-checks.json'), { status: 'failed', code: 'installed-native-auth-assertion' });
   const collectFull = spawnSync(process.execPath, [script, 'collect', evidence], {
     env: { ...env, NIGHTLY_SUITE: 'full' },
     encoding: 'utf8',
@@ -167,6 +186,16 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
       platform: 'windows-x64',
       status: 'passed',
       evidence: 'desktop-evidence-windows-x64-attempt-2/installer/port-conflicts.json',
+    },
+  );
+  assert.deepEqual(
+    receipts.find(({ id }) => id === 'DESKTOP-NATIVE-AUTH-DIAGNOSTIC'),
+    {
+      id: 'DESKTOP-NATIVE-AUTH-DIAGNOSTIC',
+      platform: 'windows-x64',
+      status: 'failed',
+      code: 'installed-native-auth-assertion',
+      evidence: 'desktop-evidence-windows-x64-attempt-2/native-auth-checks.json',
     },
   );
 });

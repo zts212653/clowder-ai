@@ -111,7 +111,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github/desktop-acceptance
+          sparse-checkout: |
+            .github/desktop-acceptance
+            scripts/test-helpers
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -176,7 +178,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github/desktop-acceptance
+          sparse-checkout: |
+            .github/desktop-acceptance
+            scripts/test-helpers
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:

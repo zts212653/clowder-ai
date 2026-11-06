@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { installerSha256 } from './nightly-desktop.mjs';
 import { buildReport, renderReport, selectCases } from './nightly-report.mjs';
 
@@ -43,8 +44,8 @@ if (command === 'collect') {
   const receipts = selected
     .filter((entry) => entry.platform === platform)
     .flatMap(({ id, executor }) => {
-      if (executor === 'windows-port-preflight') {
-        const evidence = 'installer/port-conflicts.json';
+      if (executor === 'windows-port-preflight' || executor === 'installed-auth') {
+        const evidence = executor === 'installed-auth' ? 'native-auth-checks.json' : 'installer/port-conflicts.json';
         const receipt = readJson(path.join(directory, evidence));
         return [
           receipt
@@ -55,7 +56,7 @@ if (command === 'collect') {
                 code: receipt.code,
                 evidence: `${artifact(platform)}/${evidence}`,
               }
-            : { id, platform, status: 'blocked', code: 'windows-port-preflight-unavailable' },
+            : { id, platform, status: 'blocked', code: `${executor}-unavailable` },
         ];
       }
       if (executor.startsWith('windows-')) {
@@ -117,7 +118,7 @@ if (command === 'collect') {
     JSON.stringify({ source, catalogRevision, runId: run.runId, attempt: run.attempt, platform, receipts }, null, 2),
   );
 } else if (command === 'report' || command === 'reconcile') {
-  const receipts = baseReport
+  let receipts = baseReport
     ? baseReport.cases.map(({ id, platform, rawStatus, code, evidence }) => ({
         id,
         platform,
@@ -137,57 +138,93 @@ if (command === 'collect') {
         return bundle.receipts;
       });
   if (command === 'reconcile') {
-    const inboxMode = desktopFiles.length === 0;
-    const receiptFiles = inboxMode
-      ? run.platforms.flatMap((platform) => {
-          const inbox = path.join(directory, 'desktop-receipts', platform);
-          if (!fs.existsSync(inbox)) return [];
-          return fs
-            .readdirSync(inbox, { withFileTypes: true })
-            .filter((entry) => entry.isFile() && entry.name.endsWith('.receipt.json'))
-            .map((entry) => path.join(inbox, entry.name))
-            .sort();
-        })
-      : desktopFiles;
-    const desktopReceipts = receiptFiles.flatMap((file) => {
-      const desktop = readJson(file);
-      assert.ok(desktop, `Missing desktop receipt file: ${file}`);
-      for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
-        assert.equal(desktop[key], run[key], `Desktop receipt ${key} does not match the run`);
-      }
-      return desktop.receipts.map((receipt) => ({ receipt, root: path.dirname(file) }));
-    });
-    const received = new Set();
-    for (const { receipt, root } of desktopReceipts) {
-      if (inboxMode) assert.equal(receipt.platform, path.basename(root), 'Desktop receipt is in the wrong inbox');
-      const entry = selected.find(({ id, platform }) => receipt.id === id && receipt.platform === platform);
-      assert.ok(
-        entry && ['computer-use', 'manual'].includes(entry.executor),
-        'Desktop receipt has no selected interactive case',
+    const until = desktopFiles[0] === '--until';
+    const deadline = until ? Date.parse(desktopFiles[1]) : undefined;
+    if (until) {
+      assert.equal(desktopFiles.length, 2, 'Use --until with one timestamp and no explicit receipt files');
+      assert.match(
+        desktopFiles[1],
+        /T\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/,
+        'Specify a timestamp with its timezone',
       );
-      const key = `${receipt.platform}/${receipt.id}`;
-      assert.ok(!received.has(key), 'Duplicate desktop receipt');
-      received.add(key);
-      if (receipt.evidence || receipt.status !== 'blocked') {
-        assert.match(receipt.evidence, /^[A-Za-z0-9][A-Za-z0-9_.-]+$/);
-        assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
-      }
-      if (receipt.status !== 'blocked') {
-        const native = path.join(inboxMode ? directory : root, artifact(receipt.platform));
-        assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
-        assert.equal(
-          receipt.packageSha256,
-          installerSha256(native, receipt.platform),
-          'Desktop evidence is for a different installation package',
+      assert.ok(Number.isFinite(deadline), 'Invalid desktop receipt deadline');
+    }
+    const inboxMode = until || desktopFiles.length === 0;
+    const interactive = selected.filter(({ executor }) => ['computer-use', 'manual'].includes(executor));
+    const keyOf = ({ platform, id }) => `${platform}/${id}`;
+    const original = new Map(receipts.map((receipt) => [keyOf(receipt), receipt]));
+    assert.equal(original.size, receipts.length, 'Duplicate case in original report');
+    let announced = false;
+    for (;;) {
+      const merged = new Map(original);
+      const receiptFiles = inboxMode
+        ? run.platforms.flatMap((platform) => {
+            const inbox = path.join(directory, 'desktop-receipts', platform);
+            if (!fs.existsSync(inbox)) return [];
+            return fs
+              .readdirSync(inbox, { withFileTypes: true })
+              .filter((entry) => entry.isFile() && entry.name.endsWith('.receipt.json'))
+              .map((entry) => path.join(inbox, entry.name))
+              .sort();
+          })
+        : desktopFiles;
+      const desktopReceipts = receiptFiles.flatMap((file) => {
+        const desktop = readJson(file);
+        assert.ok(desktop, `Missing desktop receipt file: ${file}`);
+        for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
+          assert.equal(desktop[key], run[key], `Desktop receipt ${key} does not match the run`);
+        }
+        return desktop.receipts.map((receipt) => ({ receipt, root: path.dirname(file) }));
+      });
+      const received = new Set();
+      for (const { receipt, root } of desktopReceipts) {
+        if (inboxMode) assert.equal(receipt.platform, path.basename(root), 'Desktop receipt is in the wrong inbox');
+        const key = keyOf(receipt);
+        assert.ok(
+          interactive.some((entry) => keyOf(entry) === key),
+          'Desktop receipt has no selected interactive case',
         );
+        assert.ok(!received.has(key), 'Duplicate desktop receipt');
+        received.add(key);
+        if (receipt.evidence || receipt.status !== 'blocked') {
+          assert.match(receipt.evidence, /^[A-Za-z0-9][A-Za-z0-9_.-]+$/);
+          assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
+        }
+        if (receipt.status !== 'blocked') {
+          const native = path.join(inboxMode ? directory : root, artifact(receipt.platform));
+          assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
+          assert.equal(
+            receipt.packageSha256,
+            installerSha256(native, receipt.platform),
+            'Desktop evidence is for a different installation package',
+          );
+        }
+        const existing = merged.get(key);
+        assert.ok(!existing || existing.status === 'blocked', 'Existing execution result cannot be replaced');
+        const evidence = receipt.evidence
+          ? path.relative(directory, path.join(root, receipt.evidence)).split(path.sep).join('/')
+          : undefined;
+        merged.set(key, { ...receipt, evidence });
       }
-      const index = receipts.findIndex(({ id, platform }) => receipt.id === id && receipt.platform === platform);
-      assert.ok(index === -1 || receipts[index].status === 'blocked', 'Existing execution result cannot be replaced');
-      if (index !== -1) receipts.splice(index, 1);
-      const evidence = receipt.evidence
-        ? path.relative(directory, path.join(root, receipt.evidence)).split(path.sep).join('/')
-        : undefined;
-      receipts.push({ ...receipt, evidence });
+      const missing = interactive.filter((entry) => {
+        const key = keyOf(entry);
+        const status = merged.get(key)?.status;
+        return !received.has(key) && (!status || status === 'blocked');
+      });
+      if (!until || missing.length === 0 || Date.now() >= deadline) {
+        if (until) {
+          for (const { id, platform } of missing) {
+            merged.set(keyOf({ id, platform }), { id, platform, status: 'blocked', code: 'desktop-receipt-deadline' });
+          }
+        }
+        receipts = [...merged.values()];
+        break;
+      }
+      if (!announced) {
+        process.stdout.write(`Waiting for ${missing.length} desktop receipt(s) until ${desktopFiles[1]}\n`);
+        announced = true;
+      }
+      await delay(Math.min(1000, Math.max(0, deadline - Date.now())));
     }
   }
   const report = buildReport(cases, run, receipts, expectedFailures);
