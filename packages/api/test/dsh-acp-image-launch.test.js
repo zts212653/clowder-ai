@@ -173,6 +173,9 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
   const root = await mkdtemp(join(tmpdir(), 'dsh-image-factory-'));
   const pools = new Map();
   const services = [];
+  const compatibility = process.env.CAT_CAFE_TRUSTED_HOST_COMPATIBILITY;
+  // This wiring test owns its temp root; ancestor ACL admission has dedicated coverage.
+  if (process.platform === 'win32') process.env.CAT_CAFE_TRUSTED_HOST_COMPATIBILITY = '1';
   try {
     const command = join(root, process.platform === 'win32' ? 'dsh.cmd' : 'dsh');
     await writeFile(command, '// fixture; no child process is started');
@@ -224,6 +227,8 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
     const defaults = parse(await readFile(nativeLaunch.args.at(-1), 'utf8'));
     assert.equal(defaults.find((row) => row.id === 'acp').config, undefined);
   } finally {
+    if (compatibility === undefined) delete process.env.CAT_CAFE_TRUSTED_HOST_COMPATIBILITY;
+    else process.env.CAT_CAFE_TRUSTED_HOST_COMPATIBILITY = compatibility;
     await Promise.all(services.map((service) => service.disposeHostService()));
     await Promise.all([...pools.values()].map((pool) => pool.closeAll()));
     await rm(root, { recursive: true, force: true });
