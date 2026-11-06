@@ -30,9 +30,11 @@ finish() {
   if [[ "$mounted" == 1 ]]; then
     hdiutil detach "$mount" >> "$evidence/dmg.log" 2>&1 || cleanup=false
   fi
-  if [[ -d "$state/logs" ]]; then
-    ditto "$state/logs" "$evidence/logs" || cleanup=false
-  fi
+  for log in main.log desktop.log startup-state.json; do
+    if [[ -f "$state/data/logs/$log" ]]; then
+      tail -c 2097152 "$state/data/logs/$log" > "$evidence/$log" || cleanup=false
+    fi
+  done
   if [[ "$cleanup" == false ]]; then
     phase='cleanup-unconfirmed'
     exit_code=1
