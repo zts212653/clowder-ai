@@ -5,16 +5,13 @@ import { threadSignalsCopy } from './thread-signals.shell-copy';
 export function CopyThreadIdMenuItem({ threadId }: { threadId: string }) {
   const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const labels = useShellCopy(threadSignalsCopy);
-  const copy = () => {
-    const pending = navigator.clipboard?.writeText(threadId);
-    if (!pending) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(threadId);
+      setStatus('copied');
+    } catch {
       setStatus('failed');
-      return;
     }
-    void pending.then(
-      () => setStatus('copied'),
-      () => setStatus('failed'),
-    );
   };
 
   return (

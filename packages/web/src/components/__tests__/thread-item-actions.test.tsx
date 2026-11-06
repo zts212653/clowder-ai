@@ -235,7 +235,7 @@ describe('ThreadItem actions', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     const onSelect = vi.fn();
-    const id = 'thread_owned_ade41eb0e62d4d1ce66cd33ba70cc70d0e083b68';
+    const id = 'thread_owned_0123456789abcdef0123456789abcdef01234567';
     renderThread({ id, isActive, onSelect });
     act(() => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.click());
     const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
@@ -261,8 +261,31 @@ describe('ThreadItem actions', () => {
     expect(copy?.textContent).toBe('已复制');
   });
 
-  it('reports an unavailable clipboard without claiming success', async () => {
-    vi.stubGlobal('navigator', {});
+  it('reports a synchronous clipboard failure and lets the user retry', async () => {
+    const writeText = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new DOMException('denied', 'NotAllowedError');
+      })
+      .mockResolvedValueOnce(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    renderThread();
+    act(() => buttonByTitle('更多操作')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(copy?.textContent).toBe('复制失败，重试');
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenNthCalledWith(2, 'thread-1');
+    expect(copy?.textContent).toBe('已复制');
+  });
+
+  it.each([
+    {},
+    { clipboard: {} },
+    { clipboard: { writeText: null } },
+  ])('reports an unavailable clipboard without claiming success (%j)', async (browser) => {
+    vi.stubGlobal('navigator', browser);
     renderThread();
     act(() => buttonByTitle('更多操作')?.click());
     const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
