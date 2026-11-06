@@ -5,6 +5,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const ghCli = (args) => execFileSync('gh', args, { encoding: 'utf8', windowsHide: true });
+const repositoryName = /^[\w.-]+\/[\w.-]+$/;
+
+export function findScheduledRun(repository, now = new Date(), gh = ghCli) {
+  assert.match(repository, repositoryName);
+  const shanghai = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', dateStyle: 'short' });
+  const date = shanghai.format(now);
+  const { workflow_runs } = JSON.parse(
+    gh(['api', `repos/${repository}/actions/workflows/desktop-nightly.yml/runs?event=schedule&per_page=10`]),
+  );
+  const run = workflow_runs.find(
+    (entry) => entry.event === 'schedule' && shanghai.format(new Date(entry.created_at)) === date,
+  );
+  assert.ok(run, `No scheduled desktop run for ${date} (Asia/Shanghai)`);
+  return String(run.id);
+}
+
 export function installerSha256(directory, platform) {
   const hash =
     platform === 'windows-x64'
@@ -14,14 +31,8 @@ export function installerSha256(directory, platform) {
   return hash.toLowerCase();
 }
 
-export async function prepareDesktop(
-  repository,
-  runId,
-  platform,
-  directory,
-  gh = (args) => execFileSync('gh', args, { encoding: 'utf8', windowsHide: true }),
-) {
-  assert.match(repository, /^[\w.-]+\/[\w.-]+$/);
+export async function prepareDesktop(repository, runId, platform, directory, gh = ghCli) {
+  assert.match(repository, repositoryName);
   assert.match(runId, /^[1-9]\d*$/);
   assert.ok(['windows-x64', 'macos-arm64', 'macos-x64'].includes(platform), 'Unsupported desktop platform');
   const run = JSON.parse(gh(['api', `repos/${repository}/actions/runs/${runId}`]));
@@ -77,8 +88,9 @@ export async function prepareDesktop(
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [repository, runId, platform, directory] = process.argv.slice(2);
-  assert.ok(directory, 'Usage: node nightly-desktop.mjs <owner/repo> <run-id> <platform> <new-directory>');
+  const [repository, run, platform, directory] = process.argv.slice(2);
+  assert.ok(directory, 'Usage: node nightly-desktop.mjs <owner/repo> <run-id|today> <platform> <new-directory>');
+  const runId = run === 'today' ? findScheduledRun(repository) : run;
   const plan = await prepareDesktop(repository, runId, platform, directory);
   process.stdout.write(JSON.stringify(plan, null, 2) + '\n');
 }
