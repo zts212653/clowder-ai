@@ -1573,9 +1573,10 @@ export class AcpAgentService implements AgentService {
         } catch (err) {
           releaseError = err;
         }
-        // A release that kept the shared process alive is not stop proof. A carrier that is no
-        // longer alive (including a turn-bound close) is the existing close result, not a shortcut.
-        const carrierStopped = releaseStoppedCarrier || lease.client.isAlive === false;
+        // A release that kept the shared process alive is not stop proof. Only a real exit or a
+        // release whose controlled close completed is: a transport error sets isAlive false without
+        // any native exit, so availability and closed/killed never stand in for stop evidence.
+        const carrierStopped = releaseStoppedCarrier || lease.client.hasExited === true;
         if (releaseError) {
           log.warn(
             { ...ctx, sessionId, err: releaseError instanceof Error ? releaseError.message : String(releaseError) },

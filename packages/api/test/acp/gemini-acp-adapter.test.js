@@ -1614,6 +1614,63 @@ describe('GeminiAcpAdapter integration', () => {
     assert.equal(child.killed, true, 'the controlled close actually stopped the carrier');
   });
 
+  for (const event of ['error', 'exit']) {
+    it(`#1838: a child ${event} ${event === 'error' ? 'without a real exit keeps the stop unknown' : 'is a real stop fact'}`, async () => {
+      const { child, clientStdin, agentStdout, ee } = createMockChild();
+      let promptSeen;
+      const promptSent = new Promise((resolve) => {
+        promptSeen = resolve;
+      });
+      clientStdin.on('data', (chunk) => {
+        for (const line of chunk.toString().trim().split('\n')) {
+          const msg = JSON.parse(line);
+          if (msg.method === 'initialize') {
+            setImmediate(() =>
+              agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT })}\n`),
+            );
+          } else if (msg.method === 'session/new') {
+            setImmediate(() =>
+              agentStdout.write(
+                `${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'unanswered-prompt' } })}\n`,
+              ),
+            );
+          } else if (msg.method === 'session/prompt') {
+            promptSeen();
+          }
+        }
+      });
+
+      // A multiplex carrier stays in the pool: a transport error must not read as a native stop.
+      pool = createPoolWithSpawn(() => child, { supportsMultiplexing: true });
+      const adapter = new GeminiAcpAdapter({
+        catId: 'gemini',
+        pool,
+        poolKey: TEST_POOL_KEY,
+        projectRoot: '/tmp',
+        providerName: 'google',
+        modelName: 'gemini-acp',
+      });
+
+      const messages = [];
+      const run = (async () => {
+        for await (const msg of adapter.invoke('hello')) messages.push(msg);
+      })();
+      await promptSent;
+      if (event === 'error') ee.emit('error', new Error('controlled transport error without native exit'));
+      else ee.emit('exit', 0, null);
+      await run;
+
+      const done = messages.find((m) => m.type === 'done');
+      assert.ok(done, `Should yield done, got: ${JSON.stringify(messages.map((m) => m.type))}`);
+      if (event === 'error') {
+        assert.equal(child.killed, false, 'no controlled stop was attempted');
+        assert.equal(done.providerTeardown, 'unconfirmed', 'availability without an exit is not stop proof');
+      } else {
+        assert.equal(done.providerTeardown, undefined, 'the observed exit is a valid stop fact');
+      }
+    });
+  }
+
   it('#1838: a completed ACP prompt is not marked as an unknown stop', async () => {
     const result = createPoolWithAutoRespond();
     pool = result.pool;

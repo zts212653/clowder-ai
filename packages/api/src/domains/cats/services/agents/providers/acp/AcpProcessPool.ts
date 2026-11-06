@@ -63,6 +63,8 @@ export interface AcpAcquireOptions {
 /** Minimal AcpClient interface needed by the pool. */
 export interface AcpPoolClient {
   readonly isAlive: boolean;
+  /** True only after the child emitted a real exit; closed/killed/error alone is not proof. */
+  readonly hasExited?: boolean;
   /**
    * #1203: False when the process's bootstrap cwd was deleted after spawn (e.g.
    * by an external cleaner). The child stays alive but any prompt dies with

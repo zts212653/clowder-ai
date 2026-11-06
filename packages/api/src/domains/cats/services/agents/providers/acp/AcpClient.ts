@@ -1054,6 +1054,14 @@ export class AcpClient {
   }
 
   /**
+   * True only after the child emitted its own exit event. A transport error sets `closed` and makes
+   * `isAlive` false without any native exit, so availability is not stop proof.
+   */
+  get hasExited(): boolean {
+    return this.exited;
+  }
+
+  /**
    * #1203: False when the bootstrap cwd was deleted after spawn (e.g. by an
    * external cleaner emptying the shared /tmp bootstrap root) — including the
    * delete→recreate case where the path exists again but the child still holds

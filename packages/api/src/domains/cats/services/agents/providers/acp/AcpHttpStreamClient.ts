@@ -659,6 +659,13 @@ export class AcpHttpStreamClient {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
   }
   /**
+   * True only after the child emitted its own exit event. A transport error sets `closed` and makes
+   * `isAlive` false without any native exit, so availability is not stop proof.
+   */
+  get hasExited(): boolean {
+    return this.exited;
+  }
+  /**
    * #1203: False when the bootstrap cwd was deleted after spawn — including the
    * delete→recreate case. HTTP-stream carriers also spawn a local child with a
    * local cwd, so they must participate in the same retirement contract as stdio.
