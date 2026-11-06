@@ -219,3 +219,26 @@ it('lets a save issued after clear become the new pending and survive the delete
   }
   expect((await loadNewConversationIntent(ALICE))?.files.map((file) => file.name)).toEqual(['new.png']);
 });
+
+it('re-checks the current pending after the database read returns', async () => {
+  await saveNewConversationIntent(record(ALICE));
+  const gate = gatedFile('newer.png');
+  const restoring = loadNewConversationIntent(ALICE);
+  const saving = saveNewConversationIntent(record(ALICE, [gate.file])).catch((error: unknown) => error);
+  try {
+    expect((await restoring)?.files.map((file) => file.name)).toEqual(['newer.png']);
+  } finally {
+    gate.release();
+    await saving;
+  }
+});
+
+it('adopts a newer explicit empty pending after the database read', async () => {
+  const image = new File(['old'], 'old.png', { type: 'image/png' });
+  await saveNewConversationIntent(record(ALICE, [image]));
+  const restoring = loadNewConversationIntent(ALICE);
+  const saving = saveNewConversationIntent(record(ALICE, [], 2));
+  expect((await restoring)?.files).toEqual([]);
+  await saving;
+  expect((await loadNewConversationIntent(ALICE))?.files).toEqual([]);
+});

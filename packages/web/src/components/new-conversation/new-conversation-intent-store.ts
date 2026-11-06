@@ -286,6 +286,8 @@ export function loadNewConversationIntent(ownerUserId: string): Promise<Persiste
     const current = pendingSaves.get(ownerUserId);
     if (current && !current.clearing) return copyValue(current.value);
     const record = await (await database()).get(STORE, ownerUserId);
+    const currentAfterRead = pendingSaves.get(ownerUserId);
+    if (currentAfterRead && !currentAfterRead.clearing) return copyValue(currentAfterRead.value);
     if (!record || record.ownerUserId !== ownerUserId || !isIntent(record.intent)) return null;
     const parsedContext = ContextAttachmentsSchema.safeParse(record.contextAttachments);
     return {
