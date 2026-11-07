@@ -188,7 +188,7 @@ describe('Thread API', () => {
         payload: { userId: 'alice', title: 'New project', projectPath },
       });
     const res = await create(runtimeRoot);
-    assert.equal(res.statusCode, 400, res.body);
+    assert.equal(res.statusCode, 403, res.body);
     assert.match(res.json().error, /runtime.*read.only/i);
     assert.deepEqual(await readdir(runtimeRoot), []);
     assert.deepEqual(await readdir(workspaceRoot), []);

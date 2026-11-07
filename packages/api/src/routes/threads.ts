@@ -728,7 +728,9 @@ async function resolveCreateThreadProjectPath(
     if (!resolved.ok) {
       return {
         ok: false,
-        statusCode: resolved.restriction === 'configuration_unknown' ? 500 : 400,
+        statusCode: resolved.restriction
+          ? { configuration_unknown: 500, runtime_read_only: 403 }[resolved.restriction]
+          : 400,
         error: resolved.error,
       };
     }
