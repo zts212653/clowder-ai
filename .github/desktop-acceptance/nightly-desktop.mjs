@@ -22,13 +22,34 @@ export function findScheduledRun(repository, now = new Date(), gh = ghCli) {
   return String(run.id);
 }
 
-export function installerSha256(directory, platform) {
-  const hash =
-    platform === 'windows-x64'
-      ? JSON.parse(fs.readFileSync(path.join(directory, 'installer', 'distribution-sha256.json'), 'utf8')).Hash
-      : fs.readFileSync(path.join(directory, 'distribution-sha256.txt'), 'utf8').split(/\s+/, 1)[0];
+export function installerSha256(directory, platform, { allowMissing = false } = {}) {
+  const windows = platform === 'windows-x64';
+  const file = path.join(directory, windows ? 'installer/distribution-sha256.json' : 'distribution-sha256.txt');
+  if (allowMissing && !fs.existsSync(file)) return undefined;
+  const contents = fs.readFileSync(file, 'utf8');
+  const hash = windows ? JSON.parse(contents).Hash : contents.split(/\s+/, 1)[0];
   assert.match(hash, /^[a-fA-F0-9]{64}$/, 'Missing or invalid installer hash');
   return hash.toLowerCase();
+}
+
+export function verifiedInstallerSha256(directory, platform, buildHash) {
+  if (buildHash === undefined) return installerSha256(directory, platform);
+  assert.match(buildHash, /^[a-f0-9]{64}$/, 'Invalid published build hash');
+  const nativeHash = installerSha256(directory, platform, { allowMissing: true });
+  if (nativeHash) assert.equal(buildHash, nativeHash, 'The build and native verifier hashes disagree');
+  return buildHash;
+}
+
+export function assertInstallerIdentity(cases, platform) {
+  const windows = platform === 'windows-x64';
+  const executor = windows ? 'windows-installer' : 'macos-dmg';
+  const code = cases.find((entry) => entry.platform === platform && entry.executor === executor)?.code;
+  assert.notEqual(code, 'candidate-package-hash-conflict', 'The build and native verifier hashes disagree');
+  assert.notEqual(
+    code,
+    windows ? 'windows-installed-identity' : 'macos-installed-identity',
+    'The platform verifier rejected the installed candidate identity',
+  );
 }
 
 export function stageNightlyReport(repository, runId, directory, gh = ghCli) {
@@ -62,23 +83,16 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
   assert.ok(!report.blocker, `The candidate is unavailable: ${report.blocker}`);
   const { attempt } = report;
   assert.ok(report.platforms.includes(platform), 'Platform was not requested by the candidate run');
+  assertInstallerIdentity(report.cases, platform);
   const windows = platform === 'windows-x64';
-  assert.ok(
-    !report.cases.some(
-      (entry) =>
-        entry.platform === platform &&
-        entry.executor === (windows ? 'windows-installer' : 'macos-dmg') &&
-        entry.code === (windows ? 'windows-installed-identity' : 'macos-installed-identity'),
-    ),
-    'The platform verifier rejected the installed candidate identity',
-  );
   const cases = report.cases.filter((entry) => entry.platform === platform && entry.executor === 'computer-use');
   assert.ok(cases.length, 'The selected suite has no Computer Use cases on this platform');
 
   const evidenceName = `desktop-evidence-${platform}`;
   const evidenceDirectory = path.join(root, `${evidenceName}-attempt-${attempt}`);
-  if (!fs.existsSync(evidenceDirectory)) download(evidenceName, evidenceDirectory);
-  const expected = installerSha256(evidenceDirectory, platform);
+  const buildHash = report.packageHashes?.[platform];
+  if (buildHash === undefined && !fs.existsSync(evidenceDirectory)) download(evidenceName, evidenceDirectory);
+  const expected = verifiedInstallerSha256(evidenceDirectory, platform, buildHash);
   const packageDirectory = path.join(root, 'package');
   const label = windows ? 'windows-installer' : `macos-dmg-${platform.slice('macos-'.length)}`;
   download(`${label}-${report.packageVersion}`, packageDirectory);

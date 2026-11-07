@@ -100,3 +100,22 @@ jobs:
           name: macos-dmg-${{ matrix.arch }}-${{ inputs.version }}${{ inputs.source-sha && format('-attempt-{0}', github.run_attempt) || '' }}
           path: dist/ClowderAI-*-${{ matrix.arch }}.dmg
           if-no-files-found: error
+
+      - name: Record the published DMG SHA-256
+        if: inputs.source-sha && !inputs.upload-to-release
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          shopt -s nullglob
+          images=(dist/ClowderAI-*-"$ARCH".dmg)
+          [[ "${#images[@]}" == 1 ]]
+          shasum -a 256 "${images[0]}" | cut -d ' ' -f 1 > "$RUNNER_TEMP/installer-sha256.txt"
+
+      - name: Upload the DMG checksum
+        if: inputs.source-sha && !inputs.upload-to-release
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-hash-macos-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installer-sha256.txt
+          if-no-files-found: error

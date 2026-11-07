@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { installerSha256 } from './nightly-desktop.mjs';
+import { assertInstallerIdentity, installerSha256, verifiedInstallerSha256 } from './nightly-desktop.mjs';
 import { buildReport, renderReport, selectCases } from './nightly-report.mjs';
 
 const catalog = JSON.parse(fs.readFileSync(new URL('./nightly-cases.json', import.meta.url), 'utf8'));
@@ -135,6 +135,7 @@ if (command === 'collect') {
     JSON.stringify({ source, catalogRevision, runId: run.runId, attempt: run.attempt, platform, receipts }, null, 2),
   );
 } else if (command === 'report' || command === 'reconcile') {
+  const packageHashes = { ...run.packageHashes };
   let receipts = run.blocker
     ? []
     : baseReport
@@ -156,6 +157,32 @@ if (command === 'collect') {
           assert.ok(bundle.receipts.every((receipt) => receipt.platform === platform));
           return bundle.receipts;
         });
+  if (command === 'report' && !run.blocker) {
+    for (const platform of run.platforms) {
+      const hashFile = path.join(
+        directory,
+        `desktop-build-hash-${platform}-attempt-${run.attempt}`,
+        'installer-sha256.txt',
+      );
+      if (!fs.existsSync(hashFile)) continue;
+      const hash = fs.readFileSync(hashFile, 'utf8').trim();
+      assert.match(hash, /^[a-f0-9]{64}$/, 'Invalid published build hash');
+      packageHashes[platform] = hash;
+      const native = installerSha256(path.join(directory, artifact(platform)), platform, { allowMissing: true });
+      if (native && native !== hash) {
+        const executor = platform === 'windows-x64' ? 'windows-installer' : 'macos-dmg';
+        const { id } = selected.find((entry) => entry.platform === platform && entry.executor === executor);
+        receipts = receipts.filter((receipt) => receipt.platform !== platform || receipt.id !== id);
+        receipts.push({
+          id,
+          platform,
+          status: 'failed',
+          code: 'candidate-package-hash-conflict',
+          evidence: `${artifact(platform)}/${platform === 'windows-x64' ? 'installer/distribution-sha256.json' : 'distribution-sha256.txt'}`,
+        });
+      }
+    }
+  }
   if (command === 'reconcile' && !run.blocker) {
     const until = desktopFiles[0] === '--until';
     const deadline = until ? Date.parse(desktopFiles[1]) : undefined;
@@ -210,11 +237,12 @@ if (command === 'collect') {
           assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
         }
         if (receipt.status !== 'blocked') {
+          assertInstallerIdentity(baseReport.cases, receipt.platform);
           const native = path.join(directory, artifact(receipt.platform));
           assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
           assert.equal(
             receipt.packageSha256,
-            installerSha256(native, receipt.platform),
+            verifiedInstallerSha256(native, receipt.platform, packageHashes[receipt.platform]),
             'Desktop evidence is for a different installation package',
           );
         }
@@ -246,7 +274,12 @@ if (command === 'collect') {
       await delay(Math.min(1000, Math.max(0, deadline - Date.now())));
     }
   }
-  const report = buildReport(cases, run, receipts, expectedFailures);
+  const report = buildReport(
+    cases,
+    { ...run, packageHashes: Object.keys(packageHashes).length ? packageHashes : undefined },
+    receipts,
+    expectedFailures,
+  );
   const markdown = renderReport(report);
   const reportName = command === 'reconcile' ? 'report-with-desktop' : 'report';
   fs.writeFileSync(path.join(directory, `${reportName}.json`), JSON.stringify(report, null, 2) + '\n');

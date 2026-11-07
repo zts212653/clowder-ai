@@ -208,4 +208,29 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   const installerBlocked = cleanupBlocked.find(({ id }) => id === 'WIN-CLEAN-INSTALL');
   assert.equal(installerBlocked.code, 'windows-port-preflight-cleanup');
   assert.equal(installerBlocked.status, 'blocked');
+
+  const buildOnly = path.join(root, 'build-only');
+  const published = path.join(buildOnly, 'desktop-build-hash-windows-x64-attempt-2');
+  fs.mkdirSync(published, { recursive: true });
+  fs.writeFileSync(path.join(published, 'installer-sha256.txt'), packageSha256);
+  assert.equal(run('report', buildOnly).status, 1);
+  const buildReportPath = path.join(buildOnly, 'report.json');
+  const builderReport = JSON.parse(fs.readFileSync(buildReportPath, 'utf8'));
+  assert.deepEqual(builderReport.packageHashes, { 'windows-x64': packageSha256 });
+  assert.ok(builderReport.cases.every(({ status }) => status === 'blocked'));
+  assert.equal(run('reconcile', buildOnly, receipt).status, 1);
+  const workerReport = JSON.parse(fs.readFileSync(path.join(buildOnly, 'report-with-desktop.json'), 'utf8'));
+  assert.equal(
+    workerReport.cases.find(({ id, platform }) => id === 'DESKTOP-ONBOARDING' && platform === 'windows-x64').status,
+    'passed',
+  );
+
+  const differentNative = path.join(buildOnly, 'desktop-evidence-windows-x64-attempt-2', 'installer');
+  fs.mkdirSync(differentNative, { recursive: true });
+  write(path.join(differentNative, 'distribution-sha256.json'), { Hash: 'd'.repeat(64) });
+  assert.equal(run('report', buildOnly).status, 1);
+  const conflict = JSON.parse(fs.readFileSync(buildReportPath, 'utf8'));
+  assert.equal(conflict.status, 'failed');
+  assert.equal(conflict.cases.find(({ id }) => id === 'WIN-CLEAN-INSTALL').code, 'candidate-package-hash-conflict');
+  assert.match(run('reconcile', buildOnly, receipt).stderr, /build and native verifier hashes disagree/);
 });

@@ -40,7 +40,7 @@ test('desktop preparation stages the same attempt and rejects different installe
     cases: [{ id: 'DESKTOP-ONBOARDING', platform, executor: 'computer-use' }],
   };
   const gh =
-    (bytes, reportHasHash = false, extraCases = []) =>
+    (bytes, reportHasHash = false, extraCases = [], publishedHash) =>
     (args) => {
       if (args[0] === 'api') {
         return JSON.stringify({
@@ -55,7 +55,11 @@ test('desktop preparation stages the same attempt and rejects different installe
       if (artifact === 'desktop-nightly-report-attempt-2') {
         fs.writeFileSync(
           path.join(destination, 'report.json'),
-          JSON.stringify({ ...report, cases: [...report.cases, ...extraCases] }),
+          JSON.stringify({
+            ...report,
+            cases: [...report.cases, ...extraCases],
+            packageHashes: publishedHash ? { [platform]: publishedHash } : undefined,
+          }),
         );
         if (reportHasHash) {
           const installer = path.join(destination, 'desktop-evidence-windows-x64-attempt-2', 'installer');
@@ -64,6 +68,7 @@ test('desktop preparation stages the same attempt and rejects different installe
         }
       } else if (artifact === 'desktop-evidence-windows-x64-attempt-2') {
         assert.equal(reportHasHash, false, 'Do not download over checksums already staged by the report');
+        assert.equal(publishedHash, undefined, 'A build hash must work without native verifier evidence');
         fs.mkdirSync(path.join(destination, 'installer'));
         fs.writeFileSync(
           path.join(destination, 'installer', 'distribution-sha256.json'),
@@ -96,6 +101,25 @@ test('desktop preparation stages the same attempt and rejects different installe
     gh('candidate bytes', true),
   );
   assert.equal(stagedWorker.packageSha256, digest);
+  const builderOnly = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'builder-only'),
+    gh('candidate bytes', false, [], digest),
+  );
+  assert.equal(builderOnly.packageSha256, digest);
+  await assert.rejects(
+    prepareDesktop(
+      repo,
+      '123',
+      platform,
+      path.join(root, 'conflicting-hashes'),
+      gh('candidate bytes', true, [], 'd'.repeat(64)),
+    ),
+    /build and native verifier hashes disagree/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'conflicting-hashes', 'package')), false);
 
   const ready = await prepareDesktop(repo, '123', platform, path.join(root, 'ready'), gh('candidate bytes'));
   assert.equal(ready.packageSha256, digest);

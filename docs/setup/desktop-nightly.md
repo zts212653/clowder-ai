@@ -29,6 +29,8 @@ created: 2026-11-07
 
 Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架构的临时 runner 上挂载真实 DMG，安装进空闲的 Applications 路径并检查两轮启动。报告区分应用启动断言与清理结果。原生脚本的覆盖限于其实际路径，普通用户下载后的系统安全弹窗和桌面首启引导另有用例。
 
+构建端上传安装包后记录同轮 SHA-256。报告把这些哈希带给协调端和 Codex 测试机。原生验证作业缺测时，已发布的包仍可独立校验并准备桌面测试，原生用例保留阻塞。构建与原生验证的哈希不一致时，报告记录 L0 新失败，并拒绝为该包准备或合并桌面执行结果。
+
 查看 Actions 的作业摘要和对应 attempt 的 `desktop-nightly-report` artifact。JSON 保留逐例原始结果和分类，Markdown 置顶 L0 新失败、L0 未完成、已知失败。报告列出的 `desktop-evidence-*` 目录名对应各平台证据 artifact。平台未构建、无法启动 runner 或缺收据的用例会保留在报告里并标为阻塞。
 
 待测分支或包版本解析失败时仍生成报告，保留请求的分支和选集。用例统一标为 `candidate-source-unavailable` 或 `package-version-unavailable`。后一种情况保留已经冻结的提交。协调端可以下载并汇总这份报告，测试机不下载安装包。
