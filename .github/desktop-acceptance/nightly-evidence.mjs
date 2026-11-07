@@ -68,6 +68,17 @@ if (command === 'collect') {
         if (!check) return [{ id, platform, status: 'blocked', code: 'windows-verifier-unavailable' }];
         const phaseFile = path.join(directory, kind, 'phase.txt');
         const phase = fs.existsSync(phaseFile) ? fs.readFileSync(phaseFile, 'utf8').trim() : undefined;
+        if (phase === 'port-preflight-blocked-startup') {
+          return [
+            {
+              id,
+              platform,
+              status: 'blocked',
+              code: 'windows-port-preflight-cleanup',
+              evidence: `${artifact(platform)}/${kind}/cleanup-confirmed.json`,
+            },
+          ];
+        }
         if (check.status === 'passed') {
           return [{ id, platform, status: 'passed', evidence: `${artifact(platform)}/${kind}/result.json` }];
         }
@@ -84,7 +95,10 @@ if (command === 'collect') {
               id,
               platform,
               status: 'failed',
-              code: check.reason ?? `windows-${phase}${failures.length ? `-${failures.join('+')}` : ''}`,
+              code:
+                phase === 'installed-identity'
+                  ? 'windows-installed-identity'
+                  : (check.reason ?? `windows-${phase}${failures.length ? `-${failures.join('+')}` : ''}`),
               evidence: `${artifact(platform)}/${failures.length ? phaseEvidence : 'distribution-results.json'}`,
             },
           ];
@@ -196,7 +210,7 @@ if (command === 'collect') {
           assert.ok(fs.statSync(path.join(root, receipt.evidence)).isFile(), 'Missing desktop evidence file');
         }
         if (receipt.status !== 'blocked') {
-          const native = path.join(inboxMode ? directory : root, artifact(receipt.platform));
+          const native = path.join(directory, artifact(receipt.platform));
           assert.match(receipt.packageSha256, /^[a-f0-9]{64}$/);
           assert.equal(
             receipt.packageSha256,

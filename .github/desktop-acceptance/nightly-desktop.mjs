@@ -62,6 +62,16 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
   assert.ok(!report.blocker, `The candidate is unavailable: ${report.blocker}`);
   const { attempt } = report;
   assert.ok(report.platforms.includes(platform), 'Platform was not requested by the candidate run');
+  const windows = platform === 'windows-x64';
+  assert.ok(
+    !report.cases.some(
+      (entry) =>
+        entry.platform === platform &&
+        entry.executor === (windows ? 'windows-installer' : 'macos-dmg') &&
+        entry.code === (windows ? 'windows-installed-identity' : 'macos-installed-identity'),
+    ),
+    'The platform verifier rejected the installed candidate identity',
+  );
   const cases = report.cases.filter((entry) => entry.platform === platform && entry.executor === 'computer-use');
   assert.ok(cases.length, 'The selected suite has no Computer Use cases on this platform');
 
@@ -70,7 +80,6 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
   if (!fs.existsSync(evidenceDirectory)) download(evidenceName, evidenceDirectory);
   const expected = installerSha256(evidenceDirectory, platform);
   const packageDirectory = path.join(root, 'package');
-  const windows = platform === 'windows-x64';
   const label = windows ? 'windows-installer' : `macos-dmg-${platform.slice('macos-'.length)}`;
   download(`${label}-${report.packageVersion}`, packageDirectory);
   const files = fs.readdirSync(packageDirectory, { withFileTypes: true });

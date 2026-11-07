@@ -15,6 +15,7 @@ state="$root/state"
 install='/Applications/Clowder AI.app'
 mounted=0
 pid=''
+quit_pid=''
 phase='preflight'
 frontend=35471
 api=35472
@@ -23,9 +24,18 @@ debug=35473
 
 finish() {
   local exit_code=$? status=failed cleanup=true
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    kill -TERM "$pid" 2>/dev/null || true
-    cleanup=false
+  if [[ -n "$pid" ]]; then
+    if [[ -z "$quit_pid" ]]; then quit_owned || true; fi
+    local owned
+    for owned in "$quit_pid" "$pid"; do
+      [[ -n "$owned" ]] || continue
+      if kill -0 "$owned" 2>/dev/null; then
+        kill -TERM "$owned" 2>/dev/null || true
+        wait_for_exit "$owned" 5 || cleanup=false
+      fi
+      if ! kill -0 "$owned" 2>/dev/null; then wait "$owned" 2>/dev/null || true; fi
+    done
+    assert_free || cleanup=false
   fi
   if [[ "$mounted" == 1 ]]; then
     hdiutil detach "$mount" >> "$evidence/dmg.log" 2>&1 || cleanup=false
@@ -35,11 +45,13 @@ finish() {
       tail -c 2097152 "$state/data/logs/$log" > "$evidence/$log" || cleanup=false
     fi
   done
-  if [[ "$cleanup" == false ]]; then
-    phase='cleanup-unconfirmed'
-    exit_code=1
-  elif [[ "$exit_code" == 0 ]]; then
-    status=passed
+  if [[ "$exit_code" == 0 ]]; then
+    if [[ "$cleanup" == true ]]; then
+      status=passed
+    else
+      phase='cleanup-unconfirmed'
+      exit_code=1
+    fi
   elif [[ "$phase" == preflight ]]; then
     status=blocked
   fi
@@ -68,6 +80,28 @@ launch() {
     "$executable" "$@"
 }
 
+wait_for_exit() {
+  local target="$1" limit="$2" seconds
+  for (( seconds=0; seconds<limit; seconds++ )); do
+    if ! kill -0 "$target" 2>/dev/null; then return 0; fi
+    sleep 1
+  done
+  ! kill -0 "$target" 2>/dev/null
+}
+
+quit_owned() {
+  if ! kill -0 "$pid" 2>/dev/null; then return 0; fi
+  (launch --quit-owned-installation) >> "$evidence/quit-$phase.log" 2>&1 &
+  quit_pid=$!
+  wait_for_exit "$quit_pid" 30 && wait "$quit_pid" || return 1
+  quit_pid=''
+  wait_for_exit "$pid" 30
+}
+
+shopt -s nullglob
+images=("$distribution"/*.dmg)
+[[ "${#images[@]}" == 1 ]]
+shasum -a 256 "${images[0]}" > "$evidence/distribution-sha256.txt"
 [[ "$CANDIDATE_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
 [[ -w /Applications && ! -e "$install" && ! -L "$install" ]]
 case "$NIGHTLY_PLATFORM:$(uname -m)" in
@@ -75,10 +109,6 @@ case "$NIGHTLY_PLATFORM:$(uname -m)" in
   *) echo 'Runner architecture does not match the candidate.' >&2; exit 2 ;;
 esac
 assert_free
-shopt -s nullglob
-images=("$distribution"/*.dmg)
-[[ "${#images[@]}" == 1 ]]
-shasum -a 256 "${images[0]}" > "$evidence/distribution-sha256.txt"
 mkdir -p "$mount" "$state" "$root/home" "$root/temp"
 
 phase=attach
@@ -112,12 +142,7 @@ for phase in create restore; do
   # Exec in the asynchronous subshell so the PID refers to the launched app.
   pid=$!
   node "$(dirname "$0")/browser.mjs" "$phase" "$evidence" "$frontend" "$api" "$debug" "$version"
-  (launch --quit-owned-installation) >> "$evidence/quit-$phase.log" 2>&1
-  for (( seconds=0; seconds<30; seconds++ )); do
-    if ! kill -0 "$pid" 2>/dev/null; then break; fi
-    sleep 1
-  done
-  if kill -0 "$pid" 2>/dev/null; then
+  if ! quit_owned; then
     echo 'Owned application did not exit normally.' >&2
     exit 1
   fi

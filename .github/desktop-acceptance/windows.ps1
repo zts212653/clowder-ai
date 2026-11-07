@@ -81,11 +81,15 @@ function Wait-Ready([int]$ApiPort) {
   throw 'Installed application did not reach durable API readiness'
 }
 
+function Get-OwnedProcesses {
+  Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) }
+}
+
 function Quit-Owned([string]$Exe, [string]$Install, [string]$State, [int[]]$Ports) {
   Wait-Success (Start-Owned $Exe @('--quit-owned-installation') $Install $State $Ports 'normal-quit') 20
   $deadline = [DateTime]::UtcNow.AddSeconds(30)
   do {
-    $owned = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
+    $owned = @(Get-OwnedProcesses)
     if ($owned.Count -eq 0) { Assert-Free $Ports; return }
     Start-Sleep -Seconds 1
   } while ([DateTime]::UtcNow -lt $deadline)
@@ -156,7 +160,6 @@ foreach ($kind in @($Distribution)) {
   [IO.Directory]::CreateDirectory($output) | Out-Null
   $ports = if ($kind -eq 'installer') { @(35471,35472,36471,35473) } else { @(35481,35482,36481,35483) }
   if ($ObservePrivatePath) { $ports += 35474 }
-  Assert-Free $ports
   $wrapper = Join-Path $root "$kind-distribution"
   if ($env:CANDIDATE_DIRECT_ARTIFACTS -ne '1') {
     Expand-OwnedZip (Join-Path $root "$kind-artifact.zip") $wrapper $true
@@ -164,6 +167,7 @@ foreach ($kind in @($Distribution)) {
   $distributionFiles = @(Get-ChildItem -LiteralPath $wrapper -File)
   if ($distributionFiles.Count -ne 1 -or $distributionFiles[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
   Get-FileHash -LiteralPath $distributionFiles[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  Assert-Free $ports
   'install' | Set-Content (Join-Path $output 'phase.txt')
   $logsComplete = $true
   try {
@@ -176,6 +180,7 @@ foreach ($kind in @($Distribution)) {
       $null = Start-Owned "$env:SystemRoot\System32\cmd.exe" @('/d','/c','start.bat') $install $state $ports 'portable-first-run'
       Wait-Ready $ports[1]
     }
+    'installed-identity' | Set-Content (Join-Path $output 'phase.txt')
     $executables = @(Get-ChildItem -LiteralPath (Join-Path $install 'desktop-dist') -Filter '*.exe' -File | Where-Object { $_.VersionInfo.ProductVersion -eq $version -or $_.VersionInfo.ProductVersion -eq "$version.0" })
     if ($executables.Count -ne 1) { throw 'Expected exactly one executable with the actual candidate ProductVersion' }
     $exe = $executables[0].FullName
@@ -190,7 +195,15 @@ foreach ($kind in @($Distribution)) {
     if ($kind -eq 'installer' -and $env:NIGHTLY_SUITE -eq 'full' -and -not $ObservePrivatePath) {
       & $node (Join-Path $PSScriptRoot 'installed-auth.mjs') $install $evidence $root
       if ($LASTEXITCODE -ne 0) { Write-Warning 'Installed authentication admission verifier did not write a result' }
-      Test-PortConflicts $exe $install $output $ports
+      try {
+        Test-PortConflicts $exe $install $output $ports
+      } catch {
+        @{ status='blocked'; code='windows-port-preflight-interrupted'; error=$_.Exception.Message } |
+          ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'port-conflicts.json')
+        'port-preflight-blocked-startup' | Set-Content (Join-Path $output 'phase.txt')
+        if (@(Get-OwnedProcesses).Count) { throw 'Port preflight left owned processes; clean startup was not attempted' }
+        Assert-Free $ports
+      }
     }
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
     foreach ($phase in @('create','restore')) {
@@ -233,7 +246,7 @@ foreach ($kind in @($Distribution)) {
     }
   } finally {
     # Includes this Setup's temporary child. Every matching executable is inside our unique root.
-    $remaining = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
+    $remaining = @(Get-OwnedProcesses)
     foreach ($owned in $remaining) {
       $current = Get-CimInstance Win32_Process -Filter "ProcessId=$($owned.ProcessId)"
       if ($current -and $current.ExecutablePath -eq $owned.ExecutablePath) { Stop-Process -Id $owned.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -260,7 +273,7 @@ foreach ($kind in @($Distribution)) {
     $records.Clear()
     $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-      $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
+      $left = @(Get-OwnedProcesses)
       if ($left.Count -eq 0) { break }
       Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $cleanupDeadline)

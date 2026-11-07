@@ -27,7 +27,7 @@ created: 2026-11-07
 
 相同触发方式、分支、平台和选集共用一个并发组。手动 Windows 全量可以独立于双平台冒烟运行。桌面测试仍按测试机独占执行。
 
-Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架构的临时 runner 上挂载真实 DMG，安装进空闲的 Applications 路径并检查两轮启动。原生脚本的覆盖限于其实际路径，普通用户下载后的系统安全弹窗和桌面首启引导另有用例。
+Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架构的临时 runner 上挂载真实 DMG，安装进空闲的 Applications 路径并检查两轮启动。报告区分应用启动断言与清理结果。原生脚本的覆盖限于其实际路径，普通用户下载后的系统安全弹窗和桌面首启引导另有用例。
 
 查看 Actions 的作业摘要和对应 attempt 的 `desktop-nightly-report` artifact。JSON 保留逐例原始结果和分类，Markdown 置顶 L0 新失败、L0 未完成、已知失败。报告列出的 `desktop-evidence-*` 目录名对应各平台证据 artifact。平台未构建、无法启动 runner 或缺收据的用例会保留在报告里并标为阻塞。
 
@@ -37,9 +37,9 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 
 在专用桌面测试机或 VM 上执行。Windows 保持活跃、解锁并独占前台，macOS 核对辅助功能和屏幕录制权限。预置被允许的测试应用和测试账户。Windows 管理员安装与 macOS Gatekeeper 需要权限或人工操作时，保留阻塞，不改变系统安全设置。严禁指向日用安装、生产端口或个人 HOME。
 
-1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告与候选包，使用 Actions 的平台哈希校验后写出 `desktop-plan.json`。旧报告的哈希从同轮平台证据下载。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
+1. 运行 `node .github/desktop-acceptance/nightly-desktop.mjs zts212653/clowder-ai <run-id> <platform> <新目录>`。它只下载同一运行和 attempt 的报告与候选包，使用 Actions 的平台哈希校验后写出 `desktop-plan.json`。原生验收发现安装版本或源码戳不符时，桌面端停止准备该安装包。旧报告的哈希从同轮平台证据下载。核对目标机、测试目录、端口和安装权限，由已授权的测试环境安装，先记录程序路径和安装实例身份。
 2. 在 Codex 中打开该次运行的用例目录，按选集执行 `computer-use` 用例。为每条保存具体观察和截图。前置条件不满足时记录 `blocked` 和原因。人工用例可按相同方式补录。
-3. 收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`。逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。合并单机试跑时，在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`，令 `GITHUB_SHA` 为该用例版本。桌面收据、截图和 Actions 平台证据目录一起保存。
+3. 收据顶层复制原报告的 `runId`、`attempt`、`source`、`catalogRevision`。逐例记录 `id`、`platform`、`status`、`code`、证据文件名 `evidence` 和安装包 `packageSha256`。合并单机试跑时，在报告指定的用例版本执行 `node .github/desktop-acceptance/nightly-evidence.mjs reconcile <证据根目录> <桌面收据JSON>`，令 `GITHUB_SHA` 为该用例版本。截图与收据同目录，校验哈希只从原报告所在的证据根读取。旧报告需要把同轮 Actions 平台证据目录下载到该根目录。
 
 ### 多平台汇总
 

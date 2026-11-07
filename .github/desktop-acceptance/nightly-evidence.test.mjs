@@ -95,9 +95,14 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   const macNative = path.join(macRoot, 'desktop-evidence-macos-arm64-attempt-2');
   fs.mkdirSync(macNative, { recursive: true });
   fs.writeFileSync(path.join(macNative, 'distribution-sha256.txt'), `${packageSha256}  candidate.dmg\n`);
+  const authoritativeMacHash = path.join(mac, 'distribution-sha256.txt');
+  fs.writeFileSync(authoritativeMacHash, `${'d'.repeat(64)}  candidate.dmg\n`);
   fs.writeFileSync(path.join(macRoot, 'onboarding.png'), 'mac-fixture');
   const macReceipt = path.join(macRoot, 'desktop.json');
   write(macReceipt, { ...desktop, receipts: [{ ...desktop.receipts[0], platform: 'macos-arm64' }] });
+  const wrongPackage = run('reconcile', root, receipt, macReceipt);
+  assert.match(wrongPackage.stderr, /different installation package/);
+  fs.copyFileSync(path.join(macNative, 'distribution-sha256.txt'), authoritativeMacHash);
   const all = run('reconcile', root, receipt, macReceipt);
   assert.equal(all.status, 0, all.stderr);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8')).status, 'passed');
@@ -108,8 +113,6 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   const macInbox = path.join(inbox, 'macos-arm64');
   fs.mkdirSync(winInbox, { recursive: true });
   fs.mkdirSync(macInbox, { recursive: true });
-  fs.mkdirSync(mac, { recursive: true });
-  fs.copyFileSync(path.join(macNative, 'distribution-sha256.txt'), path.join(mac, 'distribution-sha256.txt'));
   const discovered = () => JSON.parse(fs.readFileSync(path.join(root, 'report-with-desktop.json'), 'utf8'));
   write(path.join(macInbox, 'desktop.receipt.json.pending'), { ...desktop, attempt: 'wrong' });
   assert.equal(run('reconcile', root).status, 1);
@@ -198,4 +201,11 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
       evidence: 'desktop-evidence-windows-x64-attempt-2/native-auth-checks.json',
     },
   );
+  fs.writeFileSync(path.join(installer, 'phase.txt'), 'port-preflight-blocked-startup');
+  write(path.join(installer, 'port-conflicts.json'), { status: 'blocked', code: 'windows-port-preflight-interrupted' });
+  assert.equal(run('collect', evidence).status, 0);
+  const cleanupBlocked = JSON.parse(fs.readFileSync(path.join(evidence, 'receipts.json'), 'utf8')).receipts;
+  const installerBlocked = cleanupBlocked.find(({ id }) => id === 'WIN-CLEAN-INSTALL');
+  assert.equal(installerBlocked.code, 'windows-port-preflight-cleanup');
+  assert.equal(installerBlocked.status, 'blocked');
 });
