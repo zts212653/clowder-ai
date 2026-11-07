@@ -81,6 +81,26 @@
       "issues": [1749]
     },
     {
+      "id": "WIN-UPGRADE-STATE",
+      "level": "L1",
+      "platforms": ["windows-x64"],
+      "title": "Windows 发布版原位升级与会话画像回读",
+      "executor": "windows-upgrade",
+      "setup": "在临时 runner 安装记录的公开发布版，创建会话和画像样本，正常退出",
+      "steps": "将候选 EXE 安装到同一程序路径和状态目录，启动后回读同一会话和画像",
+      "expected": "实例标记保持一致，原会话与画像内容及版本可读取，候选实际版本和源码戳正确，进程与端口清理完成",
+      "evidence": "前后包哈希、版本、源码戳、安装日志、历史样本回读和清理收据",
+      "baseline": {
+        "tag": "v0.14.1",
+        "version": "0.14.1",
+        "source": "592f07ae085f9a7e961e82ca8ade695581170407",
+        "filename": "ClowderAI-Setup-0.14.1.exe",
+        "assetId": 695910932,
+        "sha256": "e9022222cedb4fa70f772278399a2c2972e1ca6a9c0b3365c0e335289460db45"
+      },
+      "issues": [1788, 1789]
+    },
+    {
       "id": "DESKTOP-UPGRADE",
       "level": "L1",
       "platforms": ["windows-x64", "macos-arm64", "macos-x64"],

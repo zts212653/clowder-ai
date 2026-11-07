@@ -250,4 +250,35 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
       evidence: 'desktop-evidence-macos-arm64-attempt-2/mac-port-conflicts.json',
     },
   );
+  const upgradeRoot = path.join(root, 'desktop-evidence-windows-upgrade-attempt-2');
+  fs.mkdirSync(upgradeRoot);
+  write(path.join(upgradeRoot, 'upgrade-result.json'), {
+    runId: '123',
+    attempt: '2',
+    source,
+    catalogRevision,
+    status: 'passed',
+  });
+  const reportFull = spawnSync(process.execPath, [script, 'report', root], {
+    env: { ...env, NIGHTLY_SUITE: 'full' },
+    encoding: 'utf8',
+  });
+  assert.equal(reportFull.status, 1, reportFull.stderr);
+  const upgraded = JSON.parse(fs.readFileSync(path.join(root, 'report.json'), 'utf8')).cases.find(
+    ({ id }) => id === 'WIN-UPGRADE-STATE',
+  );
+  assert.equal(upgraded.status, 'passed');
+  assert.equal(upgraded.evidence, 'desktop-evidence-windows-upgrade-attempt-2/upgrade-result.json');
+  write(path.join(upgradeRoot, 'upgrade-result.json'), {
+    runId: '123',
+    attempt: '1',
+    source,
+    catalogRevision,
+    status: 'passed',
+  });
+  const wrongUpgradeAttempt = spawnSync(process.execPath, [script, 'report', root], {
+    env: { ...env, NIGHTLY_SUITE: 'full' },
+    encoding: 'utf8',
+  });
+  assert.match(wrongUpgradeAttempt.stderr, /Upgrade receipt attempt differs from the run/);
 });
