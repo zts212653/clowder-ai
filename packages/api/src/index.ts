@@ -4783,7 +4783,7 @@ async function main(): Promise<void> {
         approvals: { listSettled: (...args) => approvalProducerRegistry.listSettled(...args) },
         epochs: contextEpochStore,
       },
-      mcpDistDir: join(findMonorepoRoot(), 'packages/mcp-server/dist'),
+      mcpDistDir: join(runtimeEntrypointRoot, 'packages/mcp-server/dist'),
       // Keep native meeting exposure off until this package's Host/MCP/native lifecycle cut is verified together.
       meetingToolsEnabled: false,
       desktopRoot: join(findMonorepoRoot(), 'desktop/companion-live'),
@@ -4827,7 +4827,7 @@ async function main(): Promise<void> {
           service: pageActionOwner,
           messages: messageStore,
           threadService: conciergeThreadServiceShared,
-          mcpDistDir: join(findMonorepoRoot(), 'packages/mcp-server/dist'),
+          mcpDistDir: join(runtimeEntrypointRoot, 'packages/mcp-server/dist'),
           allowedDirectories: [join(resolveActiveProjectRoot(), 'docs')],
           apiUrl: `http://127.0.0.1:${PORT}`,
         });
@@ -5591,7 +5591,7 @@ async function main(): Promise<void> {
         })),
       publicAvatar: (value) =>
         publicParticipantAvatar(value, {
-          avatars: join(findMonorepoRoot(), 'packages/web/public/avatars'),
+          avatars: join(runtimeEntrypointRoot, 'packages/web/public/avatars'),
           uploads: getDefaultUploadDir(process.env.UPLOAD_DIR),
         }),
       isCatAvailable,
