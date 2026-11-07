@@ -65,7 +65,7 @@
       "setup": "在临时 macOS runner 上用真实 DMG 安装候选，使用新测试实例和专用回环端口",
       "steps": "分别占用 API、Web 和两者端口，再启动已安装的应用",
       "expected": "候选启动失败并指出每个被占端口，原监听者保留，Electron 不打开 Web 页面",
-      "evidence": "候选启动状态、原监听 PID、Electron 页面列表和清理记录",
+      "evidence": "候选启动状态、原监听 PID、窗口生命周期日志、受控 Web 请求计数和清理记录",
       "issues": [1749]
     },
     {

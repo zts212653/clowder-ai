@@ -8,10 +8,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { collectChecks } from './checks.mjs';
 
-const [executable, evidence, debug] = process.argv.slice(2);
+const [executable, evidence] = process.argv.slice(2);
 const api = process.env.API_SERVER_PORT;
 const web = process.env.FRONTEND_PORT;
-const ports = [api, web, process.env.REDIS_PORT, debug];
+const ports = [api, web, process.env.REDIS_PORT];
 assert.equal(process.platform, 'darwin');
 assert.ok(ports.every((port) => /^\d{5}$/.test(port)) && new Set(ports).size === ports.length);
 const scenarios = { api: { API: api }, web: { Web: web }, both: { API: api, Web: web } };
@@ -40,18 +40,28 @@ const result = await collectChecks(
     const env = { ...process.env, CAT_CAFE_DESKTOP_INSTANCE_ROOT: state, HOME: path.join(root, 'home'), TMPDIR: root };
     fs.mkdirSync(env.HOME);
     const claims = Object.entries(scenarios[scenario]);
+    const requests = Object.fromEntries(claims.map(([service]) => [service, 0]));
     const servers = [];
     let app;
+    let startup;
+    let owners;
+    let webListener;
     try {
-      for (const [, port] of claims) {
-        const server = net.createServer((socket) => socket.destroy());
+      for (const [service, port] of claims) {
+        const server = net.createServer((socket) => {
+          socket.once('data', () => {
+            requests[service] += 1;
+            socket.end('HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+          });
+          socket.setTimeout(1000, () => socket.destroy());
+        });
         servers.push(server);
         server.listen({ host: '127.0.0.1', port: Number(port), exclusive: true });
         await once(server, 'listening');
       }
       const log = fs.openSync(path.join(evidence, `mac-port-${scenario}.log`), 'w');
       try {
-        app = spawn(executable, [`--remote-debugging-port=${debug}`, '--remote-debugging-address=127.0.0.1'], {
+        app = spawn(executable, [], {
           env,
           stdio: ['ignore', log, log],
         });
@@ -59,37 +69,23 @@ const result = await collectChecks(
         fs.closeSync(log);
       }
       await once(app, 'spawn');
-      const startup = await waitFor(() => {
+      startup = await waitFor(() => {
         const file = path.join(state, 'data/logs/startup-state.json');
         if (!fs.existsSync(file)) return;
         const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (['failed', 'ready'].includes(entry.phase)) return entry;
       }, 45_000);
-      const owners = Object.fromEntries(claims.map(([service, port]) => [service, listener(port)]));
-      const pages =
-        listener(debug) === String(app.pid)
-          ? (await (await fetch(`http://127.0.0.1:${debug}/json/list`, { signal: AbortSignal.timeout(5000) })).json())
-              .filter(({ type }) => type === 'page')
-              .map(({ url }) => url)
-          : [];
-      fs.writeFileSync(
-        path.join(evidence, `mac-port-${scenario}.json`),
-        JSON.stringify({ startup, claims, owners, fixturePid: process.pid, candidatePid: app.pid, pages }, null, 2),
-      );
-      assert.equal(startup?.pid, app.pid, 'No terminal startup state from the candidate');
-      assert.equal(startup.phase, 'failed', 'Candidate did not reject the conflict');
-      assert.ok(claims.every(([service, port]) => startup.message.includes(`${service} ${port}`)));
-      assert.ok(
-        Object.values(owners).every((pid) => pid === String(process.pid)),
-        'Original listener changed',
-      );
-      assert.ok(pages.length && pages.every((url) => !/^https?:\/\//.test(url)), 'Unexpected Electron renderer');
+      owners = Object.fromEntries(claims.map(([service, port]) => [service, listener(port)]));
+      webListener = listener(web);
     } finally {
       if (app?.pid) {
         const exited = () => app.exitCode !== null || app.signalCode !== null;
         if (!exited()) {
-          await quit(executable, ['--quit-owned-installation'], { env, timeout: 15_000 }).catch(() => {});
-          if (!(await waitFor(exited, 15_000))) app.kill('SIGTERM');
+          const acknowledged = await quit(executable, ['--quit-owned-installation'], { env, timeout: 15_000 }).then(
+            () => true,
+            () => false,
+          );
+          if (!acknowledged || !(await waitFor(exited, 15_000))) app.kill('SIGTERM');
         }
         clean = (await waitFor(exited, 5000)) === true;
         if (!clean) app.unref();
@@ -99,6 +95,41 @@ const result = await collectChecks(
       );
       clean &&= !ports.some(listener);
     }
+    const logPath = path.join(state, 'data/logs/main.log');
+    const lifecycle = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+    const splashCreated = lifecycle.includes('[lifecycle] splash-created');
+    const mainWindowStarted =
+      lifecycle.includes('creating main window') || lifecycle.includes('"phase":"services-ready"');
+    fs.writeFileSync(path.join(evidence, `mac-port-${scenario}-main.log`), lifecycle);
+    fs.writeFileSync(
+      path.join(evidence, `mac-port-${scenario}.json`),
+      JSON.stringify(
+        {
+          startup,
+          claims,
+          owners,
+          fixturePid: process.pid,
+          candidatePid: app.pid,
+          requests,
+          webListener,
+          splashCreated,
+          mainWindowStarted,
+          exitCode: app.exitCode,
+          signal: app.signalCode,
+        },
+        null,
+        2,
+      ),
+    );
+    assert.equal(startup?.pid, app.pid, 'No terminal startup state from the candidate');
+    assert.equal(startup.phase, 'failed', 'Candidate did not reject the conflict');
+    assert.ok(claims.every(([service, port]) => startup.message.includes(`${service} ${port}`)));
+    assert.ok(
+      Object.values(owners).every((pid) => pid === String(process.pid)),
+      'Original listener changed',
+    );
+    assert.ok(splashCreated && !mainWindowStarted, 'Unexpected window lifecycle');
+    assert.ok(requests.Web === undefined ? !webListener : requests.Web === 0, 'Unexpected Web activity');
   },
   { canContinue: () => clean },
 );

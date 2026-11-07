@@ -153,6 +153,6 @@ done
 node "$(dirname "$0")/initial-plugins.mjs" --logs "$evidence"
 phase=complete
 if [[ "${NIGHTLY_SUITE:-}" == full ]]; then
-  (launch "$(command -v node)" "$(dirname "$0")/macos-port-conflicts.mjs" "$executable" "$evidence" "$debug") ||
+  (launch "$(command -v node)" "$(dirname "$0")/macos-port-conflicts.mjs" "$executable" "$evidence") ||
     echo 'macOS port preflight verifier did not write a result' >&2
 fi
