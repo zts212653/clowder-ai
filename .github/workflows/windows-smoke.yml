@@ -201,6 +201,7 @@ jobs:
           desktop/dsh-test-connection.test.mjs
           desktop/rebuild-frozen-dependencies.test.mjs
           desktop/installer-integrity.test.mjs
+          desktop/prewarm-win-codesign.test.mjs
       - name: Install Inno Setup
         # P2-5: the native installer tests compile desktop/installer/cat-cafe.iss
         # with the real Inno compiler, which windows-latest does not ship. This
