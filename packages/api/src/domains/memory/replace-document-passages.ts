@@ -5,6 +5,7 @@ import { MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
 export type DocumentPassageSource = {
   item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'sourceHash' | 'updatedAt'>;
   passages: string[];
+  document?: EvidenceItem;
 };
 
 import { passageVectorKey } from './PassageVectorStore.js';

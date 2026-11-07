@@ -380,6 +380,32 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
     };
   });
 
+  app.post<{ Params: { taskId: string } }>('/api/callbacks/hold-ball/:taskId/recheck', async (request, reply) => {
+    const task = findHoldBallTask(request.params.taskId, dynamicTaskStore);
+    if (!task) return reply.code(404).send({ error: 'Hold task not found' });
+    const authorization = await authorizeHoldAccess(deps, request, task, reply);
+    if (!authorization) return;
+    if (authorization.access.lifecycleVisibility !== 'full')
+      return reply.code(403).send({ error: 'Only the command principal or operator may recheck its execution' });
+    try {
+      const job = resolveManagedCommandJob(task);
+      if (!job || !task.deliveryThreadId) return { outcome: 'unknown', taskId: task.id };
+      const service = new ManagedJobService(undefined, 4, deps.ownerUserId);
+      const principal = jobAccess(authorization.access, task.deliveryThreadId);
+      // This existing owner observation can prove cleanup/termination. It never calls start or submit.
+      await service.reconcileJob(principal, job.jobId);
+      return {
+        outcome: 'observed',
+        taskId: task.id,
+        job: service.get(principal, job.jobId),
+        recovery: dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact,
+      };
+    } catch (err) {
+      log.warn({ err, taskId: task.id }, 'Managed hold recheck could not observe original execution');
+      return reply.code(503).send({ outcome: 'unknown', taskId: task.id });
+    }
+  });
+
   app.get<{ Params: { taskId: string }; Querystring: { tailBytes?: string } }>(
     '/api/callbacks/hold-ball/:taskId/status',
     async (request, reply) => {
@@ -413,6 +439,10 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
         cancelable: mayCancelHold(task, authorization.access) && isCancelableHoldBallTask(task),
         catId,
         lifecycle: projectLifecycle(lifecycle, authorization.access),
+        recovery:
+          authorization.access.lifecycleVisibility === 'full'
+            ? dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact
+            : undefined,
         job: projectManagedJob(deps, task, authorization.access, tailBytes),
         owner: projectHoldOwner(authorization.access.owner, authorization.access.lifecycleVisibility),
         access: {

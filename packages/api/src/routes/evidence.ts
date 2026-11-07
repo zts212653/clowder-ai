@@ -33,7 +33,9 @@ import type {
 } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import type { MessageSearchService } from '../domains/memory/MessageSearchService.js';
+import type { PublishedDocumentIndex, PublishedIndexStatus } from '../domains/memory/PublishedDocumentIndex.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
+import { relevanceEvidence } from '../domains/memory/relevance-evidence.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -45,6 +47,7 @@ import {
 import { boundTopkSearchResponse } from './evidence-topk-budget.js';
 import { registerMessageNavigationSourceRoute } from './message-navigation-source-route.js';
 import { executeMessageSearch, messageSearchQuerySchema, toMessageSearchInput } from './message-search-handler.js';
+import { registerPublishedEvidenceSource } from './published-evidence-source.js';
 
 /** Accepted query parameters — Phase D: scope/mode/depth added */
 const searchSchema = z.object({
@@ -85,6 +88,7 @@ import type { EvidenceFreshness, EvidenceReimportTrigger } from './evidence-help
 
 export interface EvidenceSearchResponse {
   results: EvidenceResult[];
+  sourceProjection?: PublishedIndexStatus;
   degraded: boolean;
   degradeReason?: string;
   /** Actual retrieval mode after resolver/store degradation handling. */
@@ -132,6 +136,8 @@ export interface EvidenceSearchResponse {
 }
 
 export interface EvidenceRoutesOptions {
+  publishedDocuments?: PublishedDocumentIndex;
+  publishedOwnerUserId?: string;
   messageSearchService?: MessageSearchService;
   docsRoot?: string;
   /** F256 Phase C: repo root for L0 convention graph adapter (reads compiler file) */
@@ -178,6 +184,7 @@ function readPersistedVectorCount(
 
 export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (app, opts) => {
   registerMessageNavigationSourceRoute(app, opts.messageSearchService);
+  registerPublishedEvidenceSource(app, opts.publishedDocuments, opts.publishedOwnerUserId);
   app.get('/api/evidence/search', async (request, reply) => {
     const parseResult = searchSchema.safeParse(request.query);
     if (!parseResult.success) {
@@ -464,6 +471,9 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           anchor: item.anchor,
           snippet: item.summary ?? '',
           matchRank: rankToMatchRank(index),
+          rank: index + 1,
+          relevance: relevanceEvidence(item, q),
+          ...(item.sourceHash ? { sourceHash: item.sourceHash } : {}),
           ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
           sourceType: mapKindToSourceType(item.kind),
           boostSource: effectiveBoostSource,
@@ -556,6 +566,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
 
       return boundTopkSearchResponse({
         results,
+        ...(opts.publishedDocuments ? { sourceProjection: opts.publishedDocuments.getStatus() } : {}),
         degraded: searchMeta.degraded,
         variantId,
         ...(searchMeta.degradeReason ? { degradeReason: searchMeta.degradeReason } : {}),

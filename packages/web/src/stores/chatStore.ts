@@ -537,6 +537,17 @@ export interface DefinitiveRichBlockOwner {
   turnInvocationId?: string;
 }
 
+/** Same-id revisions replace the preview at its original position. */
+function upsertMessageRichBlock(message: ChatMessage, block: RichBlock): ChatMessage {
+  const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
+  const index = rich.blocks.findIndex((existing) => existing.id === block.id);
+  if (index >= 0 && JSON.stringify(rich.blocks[index]) === JSON.stringify(block)) return message;
+  const blocks = [...rich.blocks];
+  if (index >= 0) blocks[index] = block;
+  else blocks.push(block);
+  return { ...message, extra: { ...message.extra, rich: { ...rich, blocks } } };
+}
+
 /** A messageId-bound callback owns its block; an earlier same-turn stream copy was only a preview. */
 function appendRichBlockToMessages(
   messages: ChatMessage[],
@@ -550,10 +561,9 @@ function appendRichBlockToMessages(
   let changed = false;
   const next = messages.map((message) => {
     if (message.id === messageId) {
-      const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
-      if (rich.blocks.some((existing) => existing.id === block.id)) return message;
-      changed = true;
-      return { ...message, extra: { ...message.extra, rich: { ...rich, blocks: [...rich.blocks, block] } } };
+      const updated = upsertMessageRichBlock(message, block);
+      changed ||= updated !== message;
+      return updated;
     }
     if (!definitiveCallback || message.origin !== 'stream' || message.catId !== owner.catId) return message;
     const stream = message.extra?.stream;
@@ -596,12 +606,29 @@ function updateMessageInList(
   return updated;
 }
 
-/** F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator */
-function fireOwnerMentionNotification(msg: ChatMessage, threadId: string) {
+const MAX_NOTIFIED_MENTIONS = 500;
+const notifiedMentionIds = new Set<string>();
+
+export function __resetOwnerMentionNotificationsForTests(): void {
+  notifiedMentionIds.clear();
+}
+
+/**
+ * F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator.
+ * PR-3a: one message can arrive by its thread room, `messages_delivered` and the owner-room
+ * `thread_message_appended` hint, so a page notifies each message id once.
+ */
+export function fireOwnerMentionNotification(msg: Pick<ChatMessage, 'id' | 'catId'>, threadId: string) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') {
     Notification.requestPermission();
     return;
+  }
+  if (notifiedMentionIds.has(msg.id)) return;
+  notifiedMentionIds.add(msg.id);
+  if (notifiedMentionIds.size > MAX_NOTIFIED_MENTIONS) {
+    const oldest = notifiedMentionIds.values().next().value;
+    if (oldest !== undefined) notifiedMentionIds.delete(oldest);
   }
   const cats = getCachedCats();
   const catData = cats.find((c) => c.id === msg.catId);

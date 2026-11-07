@@ -7,11 +7,11 @@ import { readManagedCommandWakeProjection } from './managed-command-wake-task-pr
 export function resolveManagedCommandJob(task: DynamicTaskDef): DurableManagedGateJob | undefined {
   const command = readManagedCommandWakeProjection(task);
   if (!command) return undefined;
-  if (!command.jobId) return command.durableJob;
-  const job = new ManagedJobService().resolve(command.jobId);
+  const job = command.jobId ? new ManagedJobService().resolve(command.jobId) : command.durableJob;
   return job &&
     job.originTaskId === task.id &&
     job.wakeTarget.threadId === task.deliveryThreadId &&
+    job.wakeTarget.userId === task.params.triggerUserId &&
     task.createdBy === `hold-ball:${job.wakeTarget.catId}`
     ? job
     : undefined;

@@ -1295,6 +1295,8 @@ export interface AgentService {
     /** Resolved runtime account identity, including implicit defaults; present undefined means native/unbound. */
     accountRef?: string;
     mcpSupport?: boolean;
+    /** ACP session-scoped selection, captured from the current canonical launch source. */
+    mcpWhitelist?: readonly string[];
     liveCompanion?: AgentServiceOptions['liveCompanion'];
   }): Promise<
     Pick<

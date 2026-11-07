@@ -577,8 +577,47 @@ test(
         const state = service.get(principal, job.jobId).state;
         assert.equal(state, index % 3 === 1 ? 'lost' : index % 3 === 2 ? 'failed' : 'succeeded');
         assert.equal(readFileSync(marker, 'utf8'), 'once', 'no replay of the side effect');
+        if (isLiveDescendant(descendant)) {
+          const evidence = service.get(principal, job.jobId);
+          const observed = readUnixProcessSnapshotSync({ pids: [descendantPid] })?.get(descendantPid);
+          const marker = `CAT_CAFE_MANAGED_GATE_ATTEMPT_TOKEN=${evidence.attemptToken}`;
+          const exact = readUnixProcessSnapshotSync({
+            pids: [descendantPid],
+            includeEnvironment: true,
+            environmentMarkers: [marker],
+          });
+          const all = readUnixProcessSnapshotSync({ includeEnvironment: true, environmentMarkers: [marker] });
+          const os = spawnSync('/bin/ps', ['eww', '-p', String(descendantPid), '-o', 'command='], {
+            encoding: 'utf8',
+            maxBuffer: 2 ** 20,
+          });
+          t.diagnostic(
+            JSON.stringify({
+              cycle: index,
+              jobId: job.jobId,
+              descendantPid,
+              state: evidence.state,
+              cleanupProven: evidence.cleanupProven,
+              owner: evidence.ownerIdentity,
+              originalChild: descendant,
+              hasAttempt: typeof evidence.attemptToken === 'string',
+              exact: exact?.get(descendantPid)?.commandAndEnvironment?.includes(marker),
+              global: all?.get(descendantPid)?.commandAndEnvironment?.includes(marker),
+              os: os.stdout?.includes(marker),
+              child: observed && {
+                pid: observed.pid,
+                ppid: observed.ppid,
+                pgid: observed.pgid,
+                state: observed.state,
+                startedAt: observed.startedAt,
+              },
+            }),
+          );
+        }
         assert.equal(isLiveDescendant(descendant), false, 'no unaccounted detached descendant');
-        assert.ok(messages.has(`hold-ball-completion:${job.originTaskId}`));
+        const completedCommand = tasks.getById(job.originTaskId).params.holdLifecycle.managedCommand;
+        assert.ok(completedCommand.productionIntentKey);
+        assert.ok(messages.has(completedCommand.productionIntentKey));
         completed++;
       }
       assert.equal(completed, 20);

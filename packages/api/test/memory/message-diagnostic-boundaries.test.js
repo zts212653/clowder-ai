@@ -136,6 +136,33 @@ test('qualification traces carry bounded batch coordinates and output counts, wi
   for (const batchIndex of [-1, 2, 0.5, NaN, Infinity, 'PRIVATE-QUERY']) {
     assert.equal(privateMessageSearchTrace({ phase: 'native-response', batchIndex }).batchIndex, undefined);
   }
+  assert.deepEqual(privateMessageSearchTrace({ phase: 'native-seal', resultSealed: false, text: 'PRIVATE-BODY' }), {
+    phase: 'native-seal',
+    resultSealed: false,
+  });
+  assert.deepEqual(
+    privateMessageSearchTrace({
+      phase: 'native-root-exit',
+      rootExitCode: null,
+      rootExitSignal: 'SIGKILL',
+      ownerId: 'PRIVATE-OWNER',
+    }),
+    {
+      phase: 'native-root-exit',
+      rootExitCode: null,
+      rootExitSignal: 'SIGKILL',
+    },
+  );
+  assert.deepEqual(
+    privateMessageSearchTrace({
+      phase: 'native-root-exit',
+      rootExitCode: 'PRIVATE-BODY',
+      rootExitSignal: 'PRIVATE-SIGNAL',
+    }),
+    {
+      phase: 'native-root-exit',
+    },
+  );
 });
 
 test('overlapping operation time is explicitly a settled sum and late work cannot alter a closed snapshot', async () => {

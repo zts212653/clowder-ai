@@ -35,10 +35,11 @@ export function reconcileManagedJobsOffLoop<T>(input: ManagedJobReconciliationRe
     });
     let result: { ok: true; value: T } | { ok: false; error: { name: string; message: string } } | undefined;
     let failure: Error | undefined;
+    const budgetMs = input.kind === 'all' ? 10_000 : 120_000;
     const timer = setTimeout(() => {
-      failure = new Error('Managed job reconciliation exceeded 120 seconds');
+      failure = new Error(`Managed job reconciliation exceeded ${budgetMs}ms`);
       void worker.terminate();
-    }, 120_000);
+    }, budgetMs);
     worker.once('message', (message: typeof result) => {
       result = message;
       void worker.terminate();

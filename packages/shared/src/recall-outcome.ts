@@ -29,6 +29,8 @@ export interface RecallPreviewItem {
   anchor?: string;
   snippet?: string;
   matchRank?: RecallMatchRank;
+  rank?: number;
+  relevance?: { state: 'exact_anchor' | 'exact_title' | 'phrase' | 'unknown' };
   matchType?: RecallMatchType;
   authority?: string;
   updatedAt?: string;
@@ -105,8 +107,17 @@ export function isRecallMatchType(value: unknown): value is RecallMatchType {
   return typeof value === 'string' && MATCH_TYPE_SET.has(value);
 }
 
-function readPersistedPreviewAxes(item: Record<string, unknown>): Pick<RecallPreviewItem, 'matchRank' | 'matchType'> {
-  const axes: Pick<RecallPreviewItem, 'matchRank' | 'matchType'> = {};
+function readPersistedPreviewAxes(
+  item: Record<string, unknown>,
+): Pick<RecallPreviewItem, 'matchRank' | 'matchType' | 'rank' | 'relevance'> {
+  const axes: Pick<RecallPreviewItem, 'matchRank' | 'matchType' | 'rank' | 'relevance'> = {};
+  if (typeof item.rank === 'number' && Number.isInteger(item.rank) && item.rank > 0) axes.rank = item.rank;
+  const state =
+    item.relevance && typeof item.relevance === 'object'
+      ? (item.relevance as Record<string, unknown>).state
+      : undefined;
+  if (state === 'exact_anchor' || state === 'exact_title' || state === 'phrase' || state === 'unknown')
+    axes.relevance = { state };
   if (isRecallMatchRank(item.matchRank)) axes.matchRank = item.matchRank;
   if (isRecallMatchType(item.matchType)) axes.matchType = item.matchType;
 

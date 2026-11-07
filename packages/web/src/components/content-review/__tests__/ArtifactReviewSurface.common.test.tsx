@@ -2,6 +2,7 @@ import type { ArtifactReviewView } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { mediaView } from '@/components/workbench/content-review/__tests__/WorkspaceContentReviewSurface.fixture';
 import { workspaceReviewDraftKey } from '@/components/workbench/content-review/workspace-review-draft';
@@ -80,6 +81,7 @@ const draftKey = `cat-cafe:review:operator:${view.review.reviewId}:round:1:annot
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   mocks.apiFetch.mockReset();
   mocks.act.mockReset().mockResolvedValue(false);
   mocks.controller.mockReturnValue({
@@ -100,8 +102,10 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
 });
-it('renders the common landing using original media, actor, annotation IDs and durable draft prefix', async () => {
+it('classic: renders the common landing using original media, actor, annotation IDs and durable draft prefix', async () => {
+  writeShellPresentation('classic');
   localStorage.setItem(draftKey, JSON.stringify({ body: '原草稿', anchor: { kind: 'image-point', x: 8, y: 9 } }));
   await act(async () => root.render(<ArtifactReviewSurface reviewId={view.review.reviewId} onBack={vi.fn()} />));
   expect(container.querySelector('[data-testid="workspace-content-review-surface"]')).not.toBeNull();
@@ -173,7 +177,8 @@ it('does not silently substitute the latest round for a missing explicitly resto
   expect(container.querySelector('img')).not.toBeNull();
 });
 
-it('switches a named context from the open work and restores each original draft without submitting it', async () => {
+it('classic: switches a named context from the open work and restores each original draft without submitting it', async () => {
+  writeShellPresentation('classic');
   const other = structuredClone(view);
   other.review.reviewId = `review-${'d'.repeat(64)}`;
   other.review.task = { ...view.review.task, taskId: 'task-two', threadId: 'thread-two' };
@@ -301,7 +306,8 @@ it('a linked Task context resumes the publication draft and its exact unknown op
   expect(mocks.act).not.toHaveBeenCalled();
 });
 
-it('uses Chat for a writable PNG round while keeping its modification records accessible', async () => {
+it('classic: uses Chat for a writable PNG round while keeping its modification records accessible', async () => {
+  writeShellPresentation('classic');
   useChatStore.setState({ currentThreadId: 'thread-one', pendingChatInsert: null });
   await act(async () => root.render(<ArtifactReviewSurface reviewId={view.review.reviewId} onBack={vi.fn()} />));
   const entry = container.querySelector<HTMLButtonElement>('[data-testid="content-modification-entry"]');

@@ -165,6 +165,8 @@ async function exercise(t, failed = false, scenario = {}) {
       if (scenario.rejectSeal) return false;
       try {
         parseQualification(text, batch);
+        if (scenario.cancelAfterSeal)
+          setImmediate(() => controller.abort(new DOMException('Qualification deadline', 'TimeoutError')));
         return true;
       } catch {
         return false;
@@ -192,7 +194,7 @@ async function exercise(t, failed = false, scenario = {}) {
     traces.some((trace) => trace.phase === 'native-completed'),
     false,
   );
-  writeFileSync(release, 'exit');
+  if (!scenario.cancelAfterSeal) writeFileSync(release, 'exit');
   if (failed || scenario.reject) {
     await assert.rejects(pending, failed ? /Qualification native result unavailable/ : undefined);
     assert.equal(
@@ -210,6 +212,16 @@ async function exercise(t, failed = false, scenario = {}) {
     const auditText = sanitizeRawEvent({ message: { content: [{ type: 'text', text: output }] } }).message.content[0]
       .text;
     assert.equal(message.outputChars, auditText.length);
+  }
+  if (scenario.boundaryTrace || scenario.cancelAfterSeal) {
+    assert.equal(traces.find((event) => event.phase === 'native-seal')?.resultSealed, true);
+    const rootExit = traces.find((event) => event.phase === 'native-root-exit');
+    assert.ok(rootExit, 'the actual supervisor reports its provider root separately from its own close');
+    if (scenario.cancelAfterSeal) assert.ok(rootExit.rootExitCode !== 0 || rootExit.rootExitSignal !== 'none');
+    else {
+      assert.equal(rootExit.rootExitCode, 0);
+      assert.equal(rootExit.rootExitSignal, 'none');
+    }
   }
   assert.equal(spawned, 1);
   assert.equal(ownedClosed, true, 'the same close promise resolves for successful and failed terminals');
@@ -229,6 +241,8 @@ test(
 
 // Fire on the real supervisor exit, before its iterator has finished draining.
 for (const [name, scenario] of [
+  ['result admission and provider root exit are separate bounded private facts', { boundaryTrace: true }],
+  ['a sealed result never turns a cutoff-killed provider into a success', { cancelAfterSeal: true, reject: true }],
   ['a completed, normally exited batch survives a late local work deadline', { cancelOnExit: true }],
   ['qualification uses the provider result rather than its sanitized audit copy', { credentialQuote: true }],
   ['a telemetry failure cannot interrupt owned close', { throwOnCloseTrace: true }],

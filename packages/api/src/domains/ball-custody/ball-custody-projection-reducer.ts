@@ -120,6 +120,18 @@ export function reduceBallCustodyEvent(
   const now = event.at;
   const before = existing ?? createInitialProjection(event.subjectKey, now);
 
+  if (
+    event.kind === 'ball.wake_sent' &&
+    typeof event.payload.blockedSinceAt === 'number' &&
+    event.payload.blockedSinceAt !== before.blockedSinceAt
+  ) {
+    return {
+      accepted: false,
+      before,
+      after: { ...before, lastEventAt: Math.max(before.lastEventAt, now), updatedAt: Math.max(before.updatedAt, now) },
+    };
+  }
+
   const result = transition(before.state, event, {
     holder: before.holder,
     heldUntil: before.heldUntil,

@@ -18,7 +18,14 @@ type ValueRef<T> = { current: T };
 export function useRoomMembershipReconciler(
   socketRef: ValueRef<Socket | null>,
   desiredRoomsRef: ValueRef<Set<string>>,
+  /**
+   * Called each time the server acknowledges a join in the current connection: the instant from
+   * which room events reach this page. Whatever happened before it is only in History.
+   */
+  onRoomConfirmed?: (room: string) => void,
 ) {
+  const onRoomConfirmedRef = useRef(onRoomConfirmed);
+  onRoomConfirmedRef.current = onRoomConfirmed;
   const confirmedRoomsRef = useRef<Set<string>>(new Set());
   const roomJoinInflightRef = useRef<Set<string>>(new Set());
   const roomJoinTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -117,6 +124,7 @@ export function useRoomMembershipReconciler(
         if (ack?.ok === true && ack.room === room) {
           roomJoinRetryCountRef.current.delete(room);
           confirmedRoomsRef.current.add(room);
+          onRoomConfirmedRef.current?.(room);
           return;
         }
         // Permanent server rejections cannot heal on a timer. Keep the room

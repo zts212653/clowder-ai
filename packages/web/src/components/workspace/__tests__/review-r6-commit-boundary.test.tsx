@@ -9,6 +9,7 @@ import { clearMeetingSessionSummary, readMeetingSessionSummary } from '../meetin
 import { TranscriptPanel } from '../TranscriptPanel';
 
 const api = vi.fn();
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => api(...args), API_URL: 'http://test' }));
 vi.mock('react-rnd', () => ({ Rnd: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 let events: { onmessage: ((event: { data: string }) => void) | null };

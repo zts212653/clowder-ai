@@ -96,6 +96,8 @@ export interface EvidenceResultData {
   anchor: string;
   snippet: string;
   matchRank: 'high' | 'mid' | 'low';
+  rank?: number;
+  relevance?: { state: string };
   retrievalScore?: number;
   sourceType: EvidenceSourceType;
   authority?: string;

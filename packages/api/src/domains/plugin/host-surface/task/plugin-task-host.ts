@@ -13,6 +13,7 @@ import { isTaskSubjectSnapshotConflictError } from '../../../cats/services/store
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
 import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import { currentPluginCallContext, currentPluginOwnerRequestContext } from '../../carrier/plugin-call-context.js';
+import { currentOwnerOperation, currentOwnerTaskReadScope } from '../../carrier/plugin-owner-operation-context.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 import {
   createPluginTaskWorkData,
@@ -196,6 +197,8 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
       throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host task owner is unavailable');
     const native = currentPluginCallContext(input.pluginInstanceId);
     const owner = input.pluginInstanceId ? currentPluginOwnerRequestContext(input.pluginInstanceId) : undefined;
+    const ownerOperation = input.pluginInstanceId ? currentOwnerOperation(input.pluginInstanceId) : undefined;
+    const scopedOperation = currentOwnerTaskReadScope(input.pluginInstanceId) ? ownerOperation : undefined;
     if ((native && native.userId !== readOwnerUserId) || (owner && owner.userId !== readOwnerUserId))
       throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Task caller does not match installation owner');
     const current = async () => {
@@ -203,6 +206,9 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
       await input.assertCurrent?.();
       await native?.assertCurrent();
       await owner?.assertCurrent();
+      // The carrier fences inventory before/after the action; these checkpoints
+      // only need its synchronous request/activation lifetime check.
+      scopedOperation?.assertWriteCurrent();
       await input.assertCurrent?.();
       requireService();
     };
@@ -251,7 +257,18 @@ export function createPluginTaskHost(input: PluginTaskHostDeps): PluginTaskHost 
       objectKeys(filter, ['threadId', 'kind'], 'task filter');
       const threadId = filter.threadId === undefined ? undefined : boundedString(filter.threadId, 'threadId', 500);
       const kind = filter.kind === undefined ? undefined : taskKind(filter.kind);
+      const selection = currentOwnerTaskReadScope(input.pluginInstanceId);
       return read(async (store) => {
+        // A single Task owner-read must not enumerate every private Work just to
+        // resolve that Task's dates. Keep the same fresh ownership/projection checks.
+        if (selection) {
+          const task = await store.get(selection.taskId);
+          return task &&
+            (threadId === undefined || task.threadId === threadId) &&
+            (kind === undefined || task.kind === kind)
+            ? [task]
+            : [];
+        }
         const tasks =
           threadId !== undefined
             ? await store.listByThread(threadId)

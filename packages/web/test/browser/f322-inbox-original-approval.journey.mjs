@@ -133,9 +133,17 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
             const cleanup = await Promise.allSettled([
               browser?.close(),
               server ? stopChild(server) : undefined,
-              env?.cleanup(),
               f.close(),
             ]);
+            // Next can still write its output while stopping; remove it only after exit.
+            if (!server || server.exitCode !== null || server.signalCode !== null) {
+              cleanup.push(...(await Promise.allSettled([env?.cleanup()])));
+            } else {
+              cleanup.push({
+                status: 'rejected',
+                reason: new Error('Next server has not exited; test output retained'),
+              });
+            }
             const failed = cleanup.filter((r) => r.status === 'rejected');
             if (failed.length)
               throw new AggregateError(
@@ -324,11 +332,10 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
         await page.getByTestId('mailbox-panel').waitFor();
         await page.getByTestId('approval-item-inbox-native-approve').waitFor();
         assert.equal(await page.getByTestId('original-approval-card').count(), 0);
+        await page.getByTestId('mailbox-history').click();
         // Includes decisions made in Chat, without any local Inbox ApprovalSession.
         for (const record of [...sources.records, expired]) {
-          const receipt = page.locator(
-            `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify([record.kind, record.proposalId])}']`,
-          );
+          const receipt = page.locator(`[data-testid="mailbox-history-row"][data-proposal-id="${record.proposalId}"]`);
           await receipt.getByTestId('decision-result-label').waitFor();
           if (record === expired)
             assert.equal(await receipt.getByTestId('decision-result-dot').getAttribute('data-status'), 'expired');
@@ -343,7 +350,8 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
               /\bYou\b| · 你(?: ·|$)/,
             );
           assert.equal(await receipt.getByTestId('decision-result-details').count(), 0);
-          await receipt.locator('button[aria-expanded="false"]').click();
+          await receipt.getByTestId('decision-result-label').locator('..').click();
+          await receipt.getByTestId('handled-technical-details').locator(':scope > summary').click();
           await receipt.getByTestId('approval-receipt-original').waitFor();
           if (record !== expired) {
             const canonical =
@@ -362,7 +370,7 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           if (record.kind === 'F231')
             await verifyProfileTechnicalLabels({
               page,
-              card: receipt,
+              card: receipt.getByTestId('approval-receipt-original'),
               language,
               evidence,
               name: `inbox-${record.proposalId}`,
@@ -398,14 +406,14 @@ export function registerOriginalApprovalJourneys(evidenceRoot) {
           [...sources.records.map((r) => r.proposalId), expired.proposalId, withdrawn.proposalId].sort(),
         );
         const withdrawnReceipt = page.locator(
-          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F128', withdrawn.proposalId])}']`,
+          `[data-testid="mailbox-history-row"][data-proposal-id="${withdrawn.proposalId}"]`,
         );
         await withdrawnReceipt.getByTestId('proposal-result-label').waitFor();
         assert.equal(
           await withdrawnReceipt.getByTestId('proposal-result-dot').getAttribute('data-status'),
           'withdrawn',
         );
-        await withdrawnReceipt.locator('button[aria-expanded="false"]').click();
+        await withdrawnReceipt.getByTestId('proposal-result-label').locator('..').click();
         assert.equal(
           await withdrawnReceipt
             .locator(

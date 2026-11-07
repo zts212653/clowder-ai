@@ -168,6 +168,8 @@ function recallPreviewItemsToResults(items: RecallPreviewItem[] | undefined): Re
       {
         title: item.title,
         ...(item.matchRank ? { matchRank: item.matchRank } : {}),
+        ...(item.rank != null ? { rank: item.rank } : {}),
+        ...(item.relevance ? { relevance: item.relevance } : {}),
         ...(item.matchType ? { matchType: item.matchType } : {}),
         ...(item.authority ? { authority: item.authority } : {}),
         ...(item.updatedAt ? { updatedAt: item.updatedAt } : {}),
@@ -191,16 +193,27 @@ export function parseTextResults(text: string): RecallResultItem[] {
   const lines = text.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
+    const ranked = lines[i].match(
+      /^\[rank:(\d+|high|mid|low) · relevance:(exact_anchor|exact_title|phrase|unknown) · authority:([^\]]+?) · updated:([^\]]+?)\]\s+(.+)$/,
+    );
     const current = lines[i].match(/^\[match:(high|mid|low) · authority:([^\]]+?) · updated:([^\]]+?)\]\s+(.+)$/);
     const coverage = lines[i].match(/^\[matchType:(direct|alias|source-thread|convention)\]\s+(.+)$/);
     const legacyRank = lines[i].match(/^\[(high|mid|low)\]\s+(.+)$/);
     const legacyCoverage = lines[i].match(/^\[(direct|alias|source-thread|convention)\]\s+(.+)$/);
-    if (!current && !coverage && !legacyRank && !legacyCoverage) continue;
+    if (!ranked && !current && !coverage && !legacyRank && !legacyCoverage) continue;
 
     const item: RecallResultItem = {
+      ...(ranked
+        ? {
+            relevance: { state: ranked[2] },
+            authority: ranked[3],
+            updatedAt: ranked[4],
+            ...(/^\d+$/.test(ranked[1]) ? { rank: Number(ranked[1]) } : { matchRank: ranked[1] as RecallMatchRank }),
+          }
+        : {}),
       ...(current || legacyRank ? { matchRank: (current?.[1] ?? legacyRank?.[1]) as RecallMatchRank } : {}),
       ...(coverage || legacyCoverage ? { matchType: (coverage?.[1] ?? legacyCoverage?.[1]) as RecallMatchType } : {}),
-      title: current?.[4] ?? coverage?.[2] ?? legacyRank?.[2] ?? legacyCoverage?.[2] ?? '',
+      title: ranked?.[5] ?? current?.[4] ?? coverage?.[2] ?? legacyRank?.[2] ?? legacyCoverage?.[2] ?? '',
       ...(current ? { authority: current[2], updatedAt: current[3] } : {}),
     };
 

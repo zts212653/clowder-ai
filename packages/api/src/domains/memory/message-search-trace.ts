@@ -75,6 +75,7 @@ const phases = new Set([
   'retrieval',
   'canonical-projection',
   'qualification',
+  'decision-sources',
   'final-revalidation',
   'qualification-unavailable',
   'native-prepared',
@@ -87,9 +88,15 @@ const phases = new Set([
   'native-terminal',
   'native-exit',
   'native-closed',
+  'native-seal',
+  'native-root-exit',
 ]);
 
 function completionFields(input: Record<string, unknown>, output: Record<string, unknown>) {
+  if (typeof input.resultSealed === 'boolean') output.resultSealed = input.resultSealed;
+  if (input.rootExitCode === null || Number.isSafeInteger(input.rootExitCode)) output.rootExitCode = input.rootExitCode;
+  if (typeof input.rootExitSignal === 'string' && /^(none|SIG[A-Z0-9]{1,12})$/.test(input.rootExitSignal))
+    output.rootExitSignal = input.rootExitSignal;
   if (input.exitCode === null || Number.isSafeInteger(input.exitCode)) output.exitCode = input.exitCode;
   if (typeof input.exitSignal === 'string' && /^(none|SIG[A-Z0-9]{1,12})$/.test(input.exitSignal))
     output.exitSignal = input.exitSignal;

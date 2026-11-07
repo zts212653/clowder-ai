@@ -30,10 +30,11 @@ import {
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
 import { runNativeQueryBatch } from './message-query-native.js';
 import { candidateKey } from './message-query-protocol.js';
-import { MessageQueryQualifier } from './message-query-qualifier.js';
+import { MessageQueryQualifier, QUALIFICATION_CLEANUP_RESERVE_MS } from './message-query-qualifier.js';
 import { readMessageSearchAnswerSnapshot } from './message-search-answer-snapshot.js';
-import { boundMessageSearchResponse, messageSearchMeta } from './message-search-budget.js';
+import { messageSearchMeta } from './message-search-budget.js';
 import { type CanonicalSearchCandidate, collectMessageSearchCandidates } from './message-search-candidates.js';
+import { type CanonicalWaveSources, readCanonicalSearchWave } from './message-search-canonical-wave.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 import { observeMessageSearchExecution } from './message-search-execution.js';
@@ -51,8 +52,8 @@ export interface MessageSearchPrincipal {
 
 interface MessageSearchServiceDeps {
   evidenceStore: Pick<IEvidenceStore, 'searchMessagePassages' | 'readMessagePassageState'>;
-  messageStore: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByThreadAfter'>>;
-  threadStore: Pick<IThreadStore, 'get' | 'list'>;
+  messageStore: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByThreadAfter' | 'getByIds'>>;
+  threadStore: Pick<IThreadStore, 'get' | 'list' | 'getMany'>;
   qualifier?: MessageQueryQualifier;
   onTrace?: (trace: Record<string, unknown>) => void;
   decisionIndex?: MessageDecisionIndex;
@@ -111,8 +112,9 @@ export class MessageSearchService {
   private async readableMessage(
     ref: { threadId: string; messageId: string },
     principal: MessageSearchPrincipal,
+    messages?: CanonicalWaveSources['messages'],
   ): Promise<StoredMessage | null> {
-    const message = await this.deps.messageStore.getById(ref.messageId);
+    const message = messages ? messages.get(ref.messageId) : await this.deps.messageStore.getById(ref.messageId);
     if (
       !message ||
       message.id !== ref.messageId ||
@@ -141,13 +143,14 @@ export class MessageSearchService {
     authority: Pick<IThreadStore, 'list'> = this.deps.threadStore,
     evidence?: string,
     diagnostics?: MessageSearchDiagnostics,
+    wave?: CanonicalWaveSources,
   ): Promise<CanonicalSearchCandidate | null> {
-    const source = () => this.readableMessage(candidate, principal);
-    const message = await (diagnostics ? diagnostics.measure('source', source) : source());
+    const source = () => this.readableMessage(candidate, principal, wave?.messages);
+    const message = await (diagnostics && !wave ? diagnostics.measure('source', source) : source());
     if (!message || !Number.isFinite(message.timestamp)) return null;
     // Recheck current thread authority after retrieval/embedding, as grants can change.
-    const readThread = () => this.deps.threadStore.get(candidate.threadId);
-    const thread = await (diagnostics ? diagnostics.measure('thread', readThread) : readThread());
+    const readThread = () => wave?.threads.get(candidate.threadId) ?? this.deps.threadStore.get(candidate.threadId);
+    const thread = await (diagnostics && !wave ? diagnostics.measure('thread', readThread) : readThread());
     if (!thread || thread.deletedAt) return null;
     const readAccess = () =>
       resolveThreadAccess({
@@ -321,6 +324,19 @@ export class MessageSearchService {
           threadIds: new Set(threads.keys()),
           source: principal.source,
           project: (candidate) => this.project(candidate, principal, input.query, authority, undefined, diagnostics),
+          projectWave: async (candidates) => {
+            const wave = await readCanonicalSearchWave(
+              candidates,
+              this.deps.messageStore,
+              this.deps.threadStore,
+              diagnostics,
+            );
+            return Promise.all(
+              candidates.map((candidate) =>
+                this.project(candidate, principal, input.query, authority, undefined, diagnostics, wave),
+              ),
+            );
+          },
           diagnostics,
           check: () => checkSearchExecution(context),
         }),
@@ -338,11 +354,17 @@ export class MessageSearchService {
       const ledgerNeedsRead =
         this.deps.decisionIndex !== undefined ||
         approved.slice(0, limit + 1).some((row) => hasDecisionSourceCoordinate(row.result));
-      const decisionIndex = await attachDecisionSources(
-        approved.slice(0, limit + 1).map((row) => row.result),
-        this.decisionIndex,
-        context,
-      );
+      const decisionIndex = await observe('decision-sources', () => {
+        // Optional ledger facts share the original work cutoff. Once cleanup
+        // has used the reserve, its remainder belongs to mandatory readmission.
+        const optionalDeadlineAt = deadlineAt - QUALIFICATION_CLEANUP_RESERVE_MS;
+        if (Date.now() >= optionalDeadlineAt) return { status: 'unavailable' as const };
+        return attachDecisionSources(
+          approved.slice(0, limit + 1).map((row) => row.result),
+          this.decisionIndex,
+          { ...context, deadlineAt: optionalDeadlineAt },
+        );
+      });
       const results: MessageSearchResult[] = [];
       await observe('final-revalidation', async () => {
         if (qualification.nativeCalls || ledgerNeedsRead) await this.requireSource(input, principal);

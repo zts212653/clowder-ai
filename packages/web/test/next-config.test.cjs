@@ -4,6 +4,7 @@ const Module = require('node:module');
 const path = require('node:path');
 const { describe, it } = require('node:test');
 const { pathToFileURL } = require('node:url');
+const { API_TRAFFIC_SAMPLES, matchRoute, routesFromRuntimeCaching } = require('./helpers/service-worker-routes.cjs');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
@@ -50,6 +51,7 @@ function loadConfigWithPwaCapture() {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === '@ducanh2912/next-pwa') {
       return {
+        ...originalLoad.call(this, request, parent, isMain),
         default: (pwaOptions) => {
           capturedPwaOptions = pwaOptions;
           return (config) => config;
@@ -82,6 +84,32 @@ it('precache includes current CSS without eagerly caching every retained histori
   const result = await options.workboxOptions.manifestTransforms[0](entries);
   assert.deepEqual(result.manifest, [entries[0], entries[2], entries[3]]);
   assert.deepEqual(result.warnings, []);
+});
+
+describe('service worker runtime routes', () => {
+  const routes = () => routesFromRuntimeCaching(loadConfigWithPwaCapture().workboxOptions.runtimeCaching);
+
+  it('leaves API and Socket.IO requests to the browser so aborts and redelivery stay native', () => {
+    // Library defaults would bring back the `apis` and `cross-origin` caching routes.
+    assert.equal(loadConfigWithPwaCapture().extendDefaultRuntimeCaching, false);
+    for (const href of API_TRAFFIC_SAMPLES) {
+      assert.equal(matchRoute(routes(), href), null, `${href} must not be handled by the service worker`);
+    }
+  });
+
+  it('keeps the offline shell and static asset caches', () => {
+    const expected = [
+      ['http://localhost:3003/_next/static/chunks/main-abc123.js', {}, 'next-static-js-assets'],
+      ['http://localhost:3003/icons/icon-192x192.png', {}, 'static-assets'],
+      ['http://localhost:3003/uploads/cat.png', {}, 'static-assets'],
+      ['http://localhost:3003/thread/thread_a', {}, 'pages'],
+      ['http://localhost:3003/thread/thread_a', { RSC: '1' }, 'pages-rsc'],
+      ['https://fonts.gstatic.com/s/inter/v1/a.woff2', {}, 'google-fonts-webfonts'],
+    ];
+    for (const [href, headers, cacheName] of expected) {
+      assert.equal(matchRoute(routes(), href, { headers }), cacheName, href);
+    }
+  });
 });
 
 describe('next.config rewrites', () => {

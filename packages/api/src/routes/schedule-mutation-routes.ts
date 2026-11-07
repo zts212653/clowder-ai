@@ -12,6 +12,7 @@ import {
   resolveAgentKeyDeliveryThreadScope,
 } from './schedule-route-support.js';
 import { registerScheduleTaskCreateRoute, type ScheduleMutationRoutesOptions } from './schedule-task-create-route.js';
+import { registerScheduleTaskParameterRoute } from './schedule-task-parameter-routes.js';
 
 export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOptions> = async (app, opts) => {
   const {
@@ -26,6 +27,7 @@ export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOp
   } = opts;
 
   registerScheduleTaskCreateRoute(app, opts);
+  registerScheduleTaskParameterRoute(app, opts);
 
   app.delete('/api/schedule/tasks/:id', async (request, reply) => {
     if (!ownerUserId) {

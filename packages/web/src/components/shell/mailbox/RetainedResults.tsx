@@ -47,7 +47,7 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
           : isDomainApprovalFeature(feature)
             ? `${domainCopy.kind[feature]}: ${typeof fact === 'string' ? fact.split('\n')[0] : domainCopy.unknown}`
             : feature === 'F139'
-              ? `${scheduleCopy.kind}: ${session.approval.summary.replace(/^(Create|Delete) schedule: /, '')}`
+              ? `${scheduleCopy.kind}: ${session.approval.summary.replace(/^(Create|Delete|Update) schedule: /, '')}`
               : feature === 'F321'
                 ? correctionCopy.kind
                 : heading;

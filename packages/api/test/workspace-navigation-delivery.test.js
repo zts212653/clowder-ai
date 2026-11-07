@@ -6,14 +6,14 @@ import {
 } from '../dist/domains/workspace/workspace-navigation-delivery.js';
 
 describe('workspace navigation delivery contract', () => {
-  it('notifies legacy rooms while collecting truth only from the dedicated ack room', async () => {
+  it('notifies legacy rooms, except ack-room members, while collecting truth only from the ack room', async () => {
     const acknowledgedCalls = [];
     const legacyCalls = [];
 
     await emitWorkspaceNavigate(
       {
-        socketEmit: (event, data, room) => {
-          legacyCalls.push({ event, data, room });
+        socketEmit: (event, data, room, options) => {
+          legacyCalls.push({ event, data, room, options });
         },
         socketEmitWithAck: async (event, data, room) => {
           acknowledgedCalls.push({ event, data, room });
@@ -29,11 +29,13 @@ describe('workspace navigation delivery contract', () => {
         event: 'workspace:navigate',
         data: { eventId: 'event-room' },
         room: 'worktree:legacy-wt',
+        options: { exceptRoom: 'workspace:navigate:ack' },
       },
       {
         event: 'workspace:navigate',
         data: { eventId: 'event-room' },
         room: 'workspace:global',
+        options: { exceptRoom: 'workspace:navigate:ack' },
       },
     ]);
     assert.deepEqual(acknowledgedCalls, [

@@ -22,6 +22,13 @@ test('raw intermediate review is found by exact commit association and notified 
   assert.equal(a.notices[0].threadId, origin.threadId);
   assert.equal(a.notices[0].kind, 'merged-unfinished');
   assert.deepEqual(a, mergedWorktreeNotices('/fixture', [row], deps));
+  const generation = (createdAt) =>
+    mergedWorktreeNotices('/fixture', [{ ...row, lifecycle: { ...row.lifecycle, createdAt } }], deps).notices[0].key;
+  assert.notEqual(
+    generation('2026-11-03T00:00:00Z'),
+    generation('2026-11-04T00:00:00Z'),
+    'reusing the same path, head and source still creates a distinct notice identity',
+  );
   assert.equal(
     mergedWorktreeNotices('/fixture', [row], { ...deps, findSources: () => [sourceRef, sourceRef] }).notices.length,
     1,
