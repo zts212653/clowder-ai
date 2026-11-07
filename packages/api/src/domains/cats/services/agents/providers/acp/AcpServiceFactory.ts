@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { CatConfig } from '@cat-cafe/shared';
+import { type CatConfig, defaultAcpPoolMaxProcesses } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   type RuntimeProviderProfile,
@@ -253,6 +253,7 @@ async function ensureAcpPool(
   construction: unknown,
 ): Promise<{ pool: AcpProcessPool; lease: AcpServicePoolLease }> {
   const { profileId, acpConfig, poolRegistry } = input;
+  const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? defaultAcpPoolMaxProcesses(input.config.clientId);
   const spawnSignature = createAcpPoolSpawnSignature({
     command: preparedSpawn.command,
     args: [...preparedSpawn.args],
@@ -264,7 +265,7 @@ async function ensureAcpPool(
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
-    maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+    maxLiveProcesses,
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
     supportsMultiplexing: acpConfig.supportsMultiplexing,
@@ -285,7 +286,7 @@ async function ensureAcpPool(
 
   const pool = new AcpProcessPool(
     {
-      maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+      maxLiveProcesses,
       idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
       healthCheckIntervalMs: 30_000,
     },
@@ -415,7 +416,12 @@ export async function createAcpServiceForConfig(
     env: spawn.env ?? {},
     projectRoot: bootstrap.projectRoot,
   });
-  bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
+  bootstrap.args = await prepareDshSecretPatch(
+    bootstrap.command,
+    originalArgs,
+    bootstrap.projectRoot,
+    spawn.sessionModel,
+  );
   const nativeKimi =
     config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
       ? inspectKimiNativeLaunch({

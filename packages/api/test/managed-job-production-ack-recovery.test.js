@@ -153,6 +153,7 @@ test('a parked producer commits one notice despite a post-append crash and prese
   await sweep.runOnce();
   assert.equal(messages.getByThread('thread').length, 1);
   assert.ok(readManagedJobRecovery(job).recovery.notification.deliveredAt);
+  assert.equal(messages.getByThread('thread')[0].source.meta.cancelable, 'unchanged');
   assert.equal(readManagedJobRecovery(job).recovery.nextAttemptAt, null);
   assert.equal(service.get(principal, job.jobId).state, 'queued', 'parking never invents execution termination');
   assert.equal(tasks.getManagedCommandRecoveryState(job.originTaskId).fact.reasonCode, 'producer_parked');

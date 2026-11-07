@@ -348,6 +348,23 @@
         "matchedFileCount": 4,
         "matchedFilesHash": "da6493a123d4a298eda738be855df78dabbead0fb79e40ca9ef67d885846c14b"
       }
+    },
+    {
+      "id": "schedule-parameter-alpha-home-journey",
+      "match": "^test/scheduler/schedule-parameter-callback-journey\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact MCP-to-owner-approval journey uses the private Alpha subscription/execution runtime from scripts/lib/alpha-browser-subscription.mjs. The public export deliberately omits that home testing runtime. Keep the unchanged journey running at home; portable schedule parameter, principal, proposal, migration and decision contracts remain selected. This classification addresses an observed missing private dependency, not a product behavior failure.",
+      "owner": "@codex-astra",
+      "introducedBy": "Public export closure audit for the schedule parameter Alpha journey",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-06",
+        "sourceHead": "4c9ae6e4002ba723475d940e1dac2bc93bee7ab5",
+        "publicHead": "3569a9b6422723faf3a586b68232c140f84b44a1",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "ff997e5e38eed9f077e8bde1e004ff418fae9839a9cdb7bcb9020b0a588480a4"
+      }
     }
   ]
 }

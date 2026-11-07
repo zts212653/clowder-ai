@@ -342,7 +342,19 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
     });
 
-    it('DOES trigger reconnect catch-up on every subsequent connect (RECONNECT semantic)', async () => {
+    // PR-3a (contract 3.2/3.4): a reconnect rejoins every room; each thread room requests its
+    // catch-up when the server confirms the rejoin, never before (an earlier read could predate it).
+    const confirmLatestJoin = (room: string) => {
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      const ack = emitMock.mock.calls
+        .filter(([event, joined]) => event === 'join_room' && joined === room)
+        .map(([, , acknowledge]) => acknowledge as (ack: { ok: boolean; room: string }) => void)
+        .at(-1);
+      expect(ack, `a join_room request for ${room}`).toBeTypeOf('function');
+      act(() => ack!({ ok: true, room }));
+    };
+
+    it('on every reconnect requests catch-up once the rejoin is confirmed', async () => {
       mockStoreState.hasActiveInvocation = false;
 
       const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
@@ -359,18 +371,18 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       });
       expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
 
-      // Second connect — RECONNECT; should trigger catch-up regardless of
-      // local active-invocation state. This covers the user's reported
-      // "F5 / 切 thread 才出来" scenario: server broadcast a message during
-      // the disconnect window, client never saw it, no live event triggers
-      // gap detection, so we proactively refetch on reconnect.
+      // Second connect — RECONNECT. It still covers the reported "F5 / 切 thread 才出来"
+      // scenario (a broadcast inside the disconnect window that no later live event
+      // reveals), regardless of local active-invocation state, but only from the rejoin.
       act(() => {
         const listeners = mockSocket.listeners('connect');
         for (const listener of listeners) {
           (listener as () => void)();
         }
       });
-      expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+      confirmLatestJoin('thread:thread-1');
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-1');
     });
 
     it('reconnect catch-up also covers joined background thread rooms', () => {
@@ -414,14 +426,16 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
         }
       });
 
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+      for (const room of ['thread:thread-1', 'thread:thread-bg-1', 'thread:thread-bg-2']) confirmLatestJoin(room);
+
       const calledThreads = mockRequestStreamCatchUp.mock.calls.map((c) => c[0]);
       // 砚砚 R1 P1: bg coverage must be locked — without these assertions the
-      // background loop could be silently deleted and the test would still pass.
+      // background rooms' catch-up could be silently lost and the test would still pass.
       expect(calledThreads).toContain('thread-1');
       expect(calledThreads).toContain('thread-bg-1');
       expect(calledThreads).toContain('thread-bg-2');
-      // Active thread dedup: appears exactly once even when `thread:thread-1`
-      // is also enumerated from joinedRoomsRef (the `bumped` Set in src skips it)
+      // Each confirmed room requests exactly one catch-up, the active thread included.
       const activeCount = calledThreads.filter((t) => t === 'thread-1').length;
       expect(activeCount).toBe(1);
       // Total: 3 distinct threads = 3 calls

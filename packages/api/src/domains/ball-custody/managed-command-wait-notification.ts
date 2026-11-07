@@ -39,7 +39,7 @@ export async function deliverManagedCommandWaitNotification(
           connector: 'hold-ball',
           label: '等待需检查',
           icon: '🏓',
-          meta: { taskId: task.id, phase: 'status', recoveryDisposition: true },
+          meta: { taskId: task.id, phase: 'status', recoveryDisposition: true, cancelable: 'unchanged' },
         },
       });
     delivered = true;

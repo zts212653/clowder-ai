@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { type CollectionEmbedDeps, CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
-import { resolveCollectionStorePath, saveExternalCollection } from './external-collections.js';
+import { getExternalCollection, resolveCollectionStorePath, saveExternalCollection } from './external-collections.js';
 import type { IEmbeddingService, IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -25,13 +25,29 @@ export async function ensureProjectCollection(
   catalog: LibraryCatalog,
   stores: Map<string, IEvidenceStore>,
   dataDir: string,
+  ownerUserId: string,
   getEmbeddingService?: () => IEmbeddingService | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
+  const owner = ownerUserId?.trim();
+  if (!owner) throw new Error('project_collection_owner_required');
   const startMs = Date.now();
   const collectionId = deriveProjectCollectionId(projectPath);
 
   let manifest = catalog.get(collectionId);
   let store = stores.get(collectionId) as SqliteEvidenceStore | undefined;
+
+  // Startup may project a legacy owner for reads without persisting that binding.
+  // A project rebuild must honor the saved owner as well as the current catalog.
+  const persistedManifest = getExternalCollection(dataDir, collectionId);
+  for (const existing of [persistedManifest, manifest]) {
+    if (!existing) continue;
+    if (!existing.ownerUserId) throw new Error('project_collection_owner_unbound');
+    if (existing.ownerUserId !== owner) throw new Error('project_collection_owner_mismatch');
+  }
+
+  // An unavailable project may have been omitted from the startup catalog.
+  // Its saved policy and identity still describe an existing collection.
+  manifest ??= persistedManifest;
 
   if (!manifest) {
     const now = new Date().toISOString();
@@ -41,6 +57,7 @@ export async function ensureProjectCollection(
       name: collectionId.replace('project:', ''),
       displayName: basename(projectPath),
       root: projectPath,
+      ownerUserId: owner,
       sensitivity: 'private',
       scannerLevel: 'auto',
       indexPolicy: { autoRebuild: false },
@@ -65,6 +82,7 @@ export async function ensureProjectCollection(
     await store.initialize();
     stores.set(collectionId, store);
   }
+  if (!catalog.get(collectionId)) catalog.register(manifest);
   store.setSourceRoot(manifest.root, manifest.id);
 
   let embedDeps: CollectionEmbedDeps | undefined;

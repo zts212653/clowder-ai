@@ -104,6 +104,7 @@ test('five real delivery failures park the original wait, notify once, and survi
     }
     assert.equal(admissions, 5, 'retired automatic work cannot be revived by rebuilding its index');
     assert.equal(messages.getByThread('thread').length, 1, 'the incident has one durable status notice');
+    assert.equal(messages.getByThread('thread')[0].source.meta.cancelable, 'unchanged');
     assert.deepEqual(store.listManagedCommandCandidates(now, 100), []);
     const original = store.getById(waiting.id);
     store.updateParamsIfCurrent(waiting.id, original.params, {

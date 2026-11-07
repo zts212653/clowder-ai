@@ -1317,7 +1317,7 @@ export function useChatHistory(threadId: string) {
   // Fetch history page from API
   // When replace=true, clears existing messages before setting (used for force-refresh).
   const performFetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean }) => {
+    async (cursor?: string, options?: { replace?: boolean; afterCurrentGet?: boolean }) => {
       if (loadingRef.current) return;
       const controller = abortRef.current;
       if (!controller) return;
@@ -1332,9 +1332,13 @@ export function useChatHistory(threadId: string) {
         const params = new URLSearchParams({ limit: String(limit) });
         if (cursor) params.set('before', cursor);
         params.set('threadId', fetchForThread);
-        const res = await apiFetch(`/api/messages?${params}`, {
-          signal: controller.signal,
-        });
+        // A catch-up must be a read issued now: joining a same-URL GET already in flight would
+        // reuse a snapshot taken before the room join it is meant to cover (PR-3a, contract 3.2).
+        const res = await apiFetch(
+          `/api/messages?${params}`,
+          { signal: controller.signal },
+          options?.afterCurrentGet ? { afterCurrentGet: true } : undefined,
+        );
         if (!res.ok) return;
         // Stale check: discard if the request was superseded while the response body was in flight.
         if (isStaleThreadRequest(controller, fetchForThread)) return;
@@ -1519,7 +1523,7 @@ export function useChatHistory(threadId: string) {
   );
 
   const fetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number }) => {
+    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number; afterCurrentGet?: boolean }) => {
       const freshnessKey = typeof options?.freshnessToken === 'number' ? `:fresh:${options.freshnessToken}` : '';
       const requestKey = `messages:${cursor ?? 'latest'}:${options?.replace ? 'replace' : 'prepend'}${freshnessKey}`;
       while (true) {
@@ -1528,6 +1532,9 @@ export function useChatHistory(threadId: string) {
           consumerId: historyConsumerId,
           requestKey,
           task: () => performFetchHistory(cursor, options),
+          // A read issued after the current one also waits for every surface's running read of
+          // this thread, instead of being turned away by this surface's `loadingRef` (contract 3.2).
+          startWhenIdle: options?.afterCurrentGet === true,
         });
         if (result.status === 'completed') return result.value;
 
@@ -2019,12 +2026,13 @@ export function useChatHistory(threadId: string) {
     // on stale catchUpVersion (already-handled trigger) → unnecessary full-history
     // reload + state churn on routine navigation.
     if (catchUpVersion <= consumedCatchUpVersion) return;
-    // Cloud R3 P1 fix (2026-05-02): retry on skipped/failed fetch with exponential
-    // backoff. Without retry, fetchHistory's `loadingRef.current` early-out (when
-    // another fetch is in flight) returns undefined; my `result !== true` guard
-    // correctly skips ack, but no retry was scheduled — pending hangs forever
-    // if no future event triggers another version bump (e.g. dropped tail packet
-    // on quiet thread). 3 retries with 1s/2s/4s backoff cap.
+    // Cloud R3 P1 fix (2026-05-02): retry on a failed fetch with exponential
+    // backoff; without it the pending gap hangs if no future event bumps the
+    // version (e.g. dropped tail packet on quiet thread). 3 retries, 1s/2s/4s.
+    // A read already in flight is not a failure: `afterCurrentGet` makes the
+    // admission start this read only once every surface's running read of the
+    // thread has settled (PR-3a, Astra P1-4: a 9s bootstrap used to spend all
+    // three retries on "busy" and drop the post-join read).
     //
     // Cloud R4 P1 fix (2026-05-02): retry exhaustion does NOT mark consumed.
     // Marking consumed on exhaustion permanently gates the effect on quiet
@@ -2045,7 +2053,11 @@ export function useChatHistory(threadId: string) {
       // advance lastSeq to capturedTarget and keep newer pending for next ack.
       const targetAtStart = useChatStore.getState().pendingCatchUpTargetSeqByThread[threadId];
       try {
-        const result = await fetchHistory(undefined, { replace: true, freshnessToken: catchUpVersion });
+        const result = await fetchHistory(undefined, {
+          replace: true,
+          freshnessToken: catchUpVersion,
+          afterCurrentGet: true,
+        });
         if (cancelled) return;
         if (result === true) {
           // Success: ack catchup target + mark consumed (gates remount re-fire)
@@ -2055,7 +2067,7 @@ export function useChatHistory(threadId: string) {
           }
           return;
         }
-        // Skipped (loadingRef early-out / !res.ok / stale thread / abort) — retry
+        // Failed or discarded (!res.ok / stale thread / abort) — retry
         if (retries < MAX_RETRIES) {
           retries++;
           const backoff = 1000 * 2 ** (retries - 1); // 1s, 2s, 4s

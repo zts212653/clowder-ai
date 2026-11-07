@@ -247,6 +247,13 @@ export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  /**
+   * #1838: an ACP provider process belongs to the multiplex pool, not to one turn. It can serve
+   * several leases and outlive a turn, so no per-execution Windows host link owns it. Declaring no
+   * Job coverage keeps recovery honest: an unproven stop stays unknown instead of claiming a
+   * teardown for a shared process. A clean final prompt response remains this turn's own proof.
+   */
+  readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
@@ -688,11 +695,17 @@ export class AcpAgentService implements AgentService {
       readonly recentCapacitySignal: AcpCapacitySignal | null;
       clearRecentCapacitySignal(): void;
       close?(): Promise<void>;
+      /** True when the latest prompt received a final RPC response, including a provider error. */
+      hasPromptFinalResponse?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    // #1838: an abnormal terminal is held until lease.release reports whether this release actually
+    // stopped the carrier. Emitting it earlier would mark an unknown stop even when the pool then
+    // completes a controlled close, suppressing the cancel terminal the route must broadcast.
+    let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
     let agyActive = true;
@@ -715,6 +728,12 @@ export class AcpAgentService implements AgentService {
     const markPromptAcknowledged = () => {
       if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
     };
+    // #1838: only the final prompt RPC response proves this turn's provider work ended. An abort,
+    // timeout or stream failure can leave the upstream prompt running (session/cancel is a
+    // notification; lease release and iterator return are not stop receipts), so the Host must
+    // keep the physical stop unknown. A prompt that never left the Host owns no writer.
+    const promptStopUnconfirmed = () =>
+      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -1440,7 +1459,10 @@ export class AcpAgentService implements AgentService {
             },
             timestamp: Date.now(),
           };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          // A provider error response is still the final prompt response: the turn ended, so the
+          // existing recovery path must see an acknowledged prompt rather than an unknown stop.
+          if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+          deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
           return; // Exit — error path handled completion
         }
       }
@@ -1488,7 +1510,10 @@ export class AcpAgentService implements AgentService {
         },
         timestamp: Date.now(),
       };
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      // A provider error response is still the final prompt response, so this turn ended at the
+      // protocol boundary; only a genuine transport/timeout/cancel stays unconfirmed.
+      if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+      deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
@@ -1551,7 +1576,44 @@ export class AcpAgentService implements AgentService {
         if (onAbort && options?.signal) {
           options.signal.removeEventListener('abort', onAbort);
         }
-        await lease.release();
+        let releaseError: unknown;
+        let releaseStoppedCarrier = false;
+        try {
+          releaseStoppedCarrier = await lease.release();
+        } catch (err) {
+          releaseError = err;
+        }
+        // A release that kept the shared process alive is not stop proof. Only a real exit or a
+        // release whose controlled close completed is: a transport error sets isAlive false without
+        // any native exit, so availability and closed/killed never stand in for stop evidence.
+        const carrierStopped = releaseStoppedCarrier || lease.client.hasExited === true;
+        if (releaseError) {
+          log.warn(
+            { ...ctx, sessionId, err: releaseError instanceof Error ? releaseError.message : String(releaseError) },
+            'ACP lease release did not confirm the carrier stop; keeping the turn stop unknown',
+          );
+          if (deferredTerminal) {
+            // Mark the stop unknown before the failure propagates. invoke-single-cat stops on this
+            // flag; the bridge instead receives the rejected return and emits session_contract_failed.
+            yield {
+              type: 'status',
+              catId: this.catId,
+              providerTeardown: 'unconfirmed' as const,
+              content: '停止尚未确认，执行绑定仍被占用',
+              timestamp: Date.now(),
+            };
+          }
+          throw releaseError;
+        }
+        if (deferredTerminal) {
+          yield {
+            type: 'done',
+            catId: this.catId,
+            metadata: deferredTerminal.metadata,
+            ...(deferredTerminal.unconfirmed && !carrierStopped ? { providerTeardown: 'unconfirmed' as const } : {}),
+            timestamp: Date.now(),
+          };
+        }
       }
     }
   }

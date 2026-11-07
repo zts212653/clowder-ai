@@ -107,7 +107,13 @@ function ChangesPanelClassic({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : 'No uncommitted changes'}
+            {data.isGitRepository === false ? (
+              'Not a Git repository'
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              'No uncommitted changes'
+            )}
           </div>
         )}
       </div>

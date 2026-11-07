@@ -10,6 +10,7 @@ const EFFECTS = new Set([
   'repository_rewrite',
   'remote_mutation',
   'service_mutation',
+  'auth_mutation',
   'unknown',
 ]);
 
@@ -25,6 +26,7 @@ const TARGETS = new Set([
 /** Pure provider-neutral policy. Filesystem capability remains outside this guard. */
 export function decideNativeEffect(candidate) {
   if (!isCandidate(candidate)) return deny(candidate, 'invalid_candidate');
+  if (candidate.effect === 'auth_mutation') return deny(candidate, 'native_auth_mutation');
   if (candidate.effect === 'unknown')
     return allow(
       candidate,

@@ -55,7 +55,7 @@ import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
@@ -148,6 +148,7 @@ import {
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
 import { emitLifecycleMessageUpdated } from './domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import type { NativeControlReceiptPort } from './domains/cats/services/agents/invocation/NativeControlReceipt.js';
+import { recoverPriorProcessExecutions } from './domains/cats/services/agents/invocation/prior-process-execution-recovery.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
@@ -167,11 +168,12 @@ import {
   createSidebarPresenceSource,
   type SidebarTerminalExecution,
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
-import {
-  listenBeforeTurnExecutionRecovery,
-  TurnExecutionStartupReconciler,
-} from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
+import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+import {
+  findWindowsLiveOwner,
+  stopWithWindowsJobProof,
+} from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -311,6 +313,7 @@ import { TasteMemoryLifecycleStore } from './domains/memory/taste/TasteMemoryLif
 import { TasteMemoryProjectionWriter } from './domains/memory/taste/TasteMemoryProjectionWriter.js';
 import { importTasteTakeawayCandidates } from './domains/memory/taste/TasteTakeawayCandidateImporter.js';
 import { tasteDocumentAnchor } from './domains/memory/taste/taste-memory-identity.js';
+import { createOwnerRoomNotifier, type OwnerRoomThreads } from './domains/messaging/owner-room/owner-room-notifier.js';
 import { publicParticipantAvatar } from './domains/plugin/host-surface/public-participant-avatar.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
@@ -649,6 +652,8 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  // #1838: the API itself stays outside every kernel job, so the background services and managed
+  // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
@@ -732,22 +737,28 @@ async function main(): Promise<void> {
     backend: 'initializing' | 'redis' | 'memory';
     durability: 'initializing' | 'durable' | 'degraded_memory';
   } = { backend: 'initializing', durability: 'initializing' };
-  const healthHandler = async () => ({
-    status: 'ok' as const,
-    timestamp: Date.now(),
-    deploymentRevision: runtimeDeploymentRevision,
-    ...(runtimeDeploymentContext
-      ? {
-          deploymentSubjectRef: runtimeDeploymentSubjectRef(
-            runtimeDeploymentContext.installationId,
-            runtimeDeploymentContext.deploymentId,
-          ),
-          deploymentBootId: runtimeDeploymentContext.bootId,
-          deploymentBootSequence: runtimeDeploymentContext.bootSequence,
-        }
-      : {}),
-    callbackAuth: callbackAuthCapability,
-  });
+  const desktopStartupId = process.env.CAT_CAFE_DESKTOP_STARTUP_ID;
+  const healthHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (desktopStartupId && request.headers['x-clowder-desktop-probe'] === '1') {
+      reply.header('x-clowder-desktop-startup-id', desktopStartupId);
+    }
+    return {
+      status: 'ok' as const,
+      timestamp: Date.now(),
+      deploymentRevision: runtimeDeploymentRevision,
+      ...(runtimeDeploymentContext
+        ? {
+            deploymentSubjectRef: runtimeDeploymentSubjectRef(
+              runtimeDeploymentContext.installationId,
+              runtimeDeploymentContext.deploymentId,
+            ),
+            deploymentBootId: runtimeDeploymentContext.bootId,
+            deploymentBootSequence: runtimeDeploymentContext.bootSequence,
+          }
+        : {}),
+      callbackAuth: callbackAuthCapability,
+    };
+  };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
@@ -1049,12 +1060,30 @@ async function main(): Promise<void> {
     | ReturnType<typeof import('./domains/growing/CustodyOpportunityRuntime.js').startCustodyOpportunityObservation>
     | undefined;
 
+  // PR-3a: the owner-room events this PR adds go to the thread's owner, not to the identity a
+  // message was stored under (a scheduler notice is stored as `scheduler` in a person's thread).
+  // Both stores it reads are created below, so they are bound late.
+  let ownerRoomThreads: OwnerRoomThreads | null = null;
+  const ownerRoom = createOwnerRoomNotifier({
+    socket: () => socketManager,
+    threads: () => ownerRoomThreads,
+    onError: (error, message, stage) => {
+      app.log.error(
+        { error, messageId: message.id, threadId: message.threadId, stage },
+        stage === 'owner'
+          ? '[owner-room] thread owner unreadable; using the stored identity'
+          : '[owner-room] delivery failed; the page sees it on its next read',
+      );
+    },
+  });
   const rawMessageStore = createMessageStore(redis, {
     readDiagnostics: messageReadDiagnostics,
     onAppend: (msg) => {
       appendListener?.(msg);
       if (userMentionEvent(msg) || hasRecentWorkPublication(msg))
         socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', { ownerUserId: msg.userId });
+      // PR-3a: a standalone message may otherwise reach its owner only through the thread room.
+      void ownerRoom.messageAppended(msg);
       custodyOpportunityObservation?.notifySourceChanged(msg);
     },
   });
@@ -1077,6 +1106,19 @@ async function main(): Promise<void> {
         { error, messageId: stored.id, threadId: stored.threadId },
         '[messaging] publish failed; subscribers will not see this message',
       );
+    },
+    // PR-3a: every lifecycle terminal commit reaches its owner's room from this one seam, marked with
+    // whether it was applied now; the snapshots exits still emit themselves stay unmarked.
+    lifecycleObserver: {
+      committed: (message, commit) => {
+        void ownerRoom.lifecycleCommitted(message, commit);
+      },
+      failed: (error, message) => {
+        app.log.error(
+          { error, messageId: message.id, threadId: message.threadId },
+          '[lifecycle] owner-room terminal snapshot failed; the page sees it on its next History read',
+        );
+      },
     },
   });
   const runtimeInteractionRuntime = await createRuntimeInteractionRuntime({
@@ -1151,6 +1193,7 @@ async function main(): Promise<void> {
     : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore, cursorCanonicalizer);
   const threadStore = createThreadStore(redis);
+  ownerRoomThreads = threadStore;
   const proposalStore = createProposalStore(redis);
   const handoffProposalStore = createSessionHandoffProposalStore(redis);
   // F246 Phase B: dispatch proposal store for assign_work effect-class approvals
@@ -1669,7 +1712,7 @@ async function main(): Promise<void> {
     }
   };
   const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
-    rebuildIndex: async (projectPath: string) => {
+    rebuildIndex: async (projectPath: string, ownerUserId: string) => {
       if (isSameRepo(projectPath, repoRoot)) {
         const startMs = Date.now();
         const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
@@ -1682,6 +1725,7 @@ async function main(): Promise<void> {
         memoryServices.catalog!,
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
+        ownerUserId,
         () => memoryServices.embeddingLifecycle.getService(),
       );
     },
@@ -3495,6 +3539,15 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
+    ...(process.platform === 'win32'
+      ? {
+          stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
+            stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+          findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
+            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+        }
+      : {}),
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -7236,8 +7289,8 @@ async function main(): Promise<void> {
     agentKeyRegistry,
     threadStore,
     skillConsumptionReceipts,
-    socketEmit: (event, data, room) => {
-      socketManager?.broadcastToRoom(room, event, data);
+    socketEmit: (event, data, room, options) => {
+      socketManager?.broadcastToRoom(room, event, data, options);
     },
     socketEmitWithAck: async (event, data, room) =>
       socketManager ? socketManager.broadcastToRoomWithAck(room, event, data) : [],
@@ -7914,45 +7967,42 @@ async function main(): Promise<void> {
       },
       recover: async () => {
         if (!redis) return;
-        const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
-        const liveExecutionOwners = await cliExecutionOwnerService.listLive();
-        const childReconciler = new TurnExecutionStartupReconciler({
-          store: turnExecutionStore,
+        const {
+          authRecovery,
+          liveOwnersComplete,
+          childRecovery,
+          startupRecovery,
+          windowsJobTeardowns,
+          windowsJobEvidence,
+        } = await recoverPriorProcessExecutions({
+          processStartedAt: PROCESS_START_AT,
+          turnExecutionStore,
+          listLiveExecutionOwners: () => cliExecutionOwnerService.listLive(),
           settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
+          windowsJobDataDir: process.env.CAT_CAFE_DATA_DIR,
+          orphans: {
+            invocationRecordStore,
+            taskProgressStore,
+            log: app.log,
+            messageStore,
+            socketManager: socketManager ?? undefined,
+            invocationQueue,
+            ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+          },
+          markStartupRecoveryComplete: () => registry.markStartupRecoveryComplete(),
         });
-        const childRecovery = liveExecutionOwners.complete
-          ? await childReconciler.reconcile({
-              processStartedAt: PROCESS_START_AT,
-              protectedInvocationIds: liveExecutionOwners.owners.map((owner) => owner.invocationId),
-            })
-          : {
-              interruptedCount: 0,
-              invocationIds: [],
-              // Ended turns have no owner left to wait for; running ones keep their unknown owners.
-              ...(await childReconciler.settleEndedTurnResponses({ processStartedAt: PROCESS_START_AT })),
-              reconciledAt: Date.now(),
-              skippedReason: 'cli_execution_owner_snapshot_incomplete',
-            };
-        if (!liveExecutionOwners.complete) {
+        if (windowsJobTeardowns.preserved.length > 0) {
+          app.log.warn(
+            { windowsJobStopEvidence: windowsJobTeardowns.preserved },
+            '[api] Preserved Windows provider executions whose stop could not be verified',
+          );
+        }
+        if (!liveOwnersComplete) {
           app.log.warn(
             { callbackAuthLifecycle: { kind: 'live_execution_owner_snapshot_incomplete' } },
             '[api] Preserved prior running TurnExecutions because external process liveness was unknown',
           );
         }
-        const { StartupReconciler } = await import('./domains/cats/services/agents/invocation/StartupReconciler.js');
-        const reconciler = new StartupReconciler({
-          invocationRecordStore,
-          turnExecutionStore,
-          taskProgressStore,
-          log: app.log,
-          processStartAt: PROCESS_START_AT,
-          messageStore,
-          socketManager: socketManager ?? undefined,
-          invocationQueue,
-          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
-        });
-        const startupRecovery = await reconciler.reconcileOrphans();
-        registry.markStartupRecoveryComplete();
         // History-only Append outcomes must recover even when no Queue row remains.
         for (const threadId of await messageStore.listUnresolvedAppendThreadIds()) {
           void queueProcessor.reconcileAppendDeliveries(threadId);
@@ -7968,7 +8018,12 @@ async function main(): Promise<void> {
           }
         }
         app.log.info(
-          { authRecovery, childRecovery, startupRecovery },
+          {
+            authRecovery,
+            childRecovery,
+            startupRecovery,
+            windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
+          },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
         );
       },

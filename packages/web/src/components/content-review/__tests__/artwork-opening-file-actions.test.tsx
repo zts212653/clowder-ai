@@ -13,6 +13,7 @@ import { ArtworkLightboxProvider, type FloatingArtwork, useArtworkLightboxScope 
 import { ArtworkOpeningPreview } from '../ArtworkOpeningPreview';
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn(), copy: vi.fn() }));
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3102',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),

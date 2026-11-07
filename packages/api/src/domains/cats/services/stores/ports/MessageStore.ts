@@ -1145,6 +1145,12 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
+  /** Exact failed cohort; omit id only after every failed target left the ledger. */
+  claim?: {
+    id?: string;
+    ledger: QueueLedgerStore;
+    makeWake?: (failureId: string) => QueueLedgerEntry;
+  };
 }
 
 export type CommitLifecyclePreAdmissionFailureResult =
@@ -1157,8 +1163,11 @@ export type CommitLifecyclePreAdmissionFailureResult =
     }
   | { kind: 'not_found' };
 
-export function preAdmissionFailureIdempotencyKey(entryId: string): string {
-  return `message-lifecycle:pre-admission-failure:${entryId}`;
+export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string | readonly string[]): string {
+  const key = `message-lifecycle:pre-admission-failure:${entryId}`;
+  if (targetId === undefined) return key;
+  const target = typeof targetId === 'string' ? targetId : targetId.length === 1 ? targetId[0] : [...targetId].sort();
+  return `${key}:${JSON.stringify(target)}`;
 }
 
 export function matchesLifecyclePreAdmissionFailure(
@@ -1178,7 +1187,7 @@ export function matchesLifecyclePreAdmissionFailure(
     lifecycle.status === 'failed' &&
     lifecycle.sourceEntryId === input.expectedEntryId &&
     lifecycle.inputMessageId === sourceMessage.id &&
-    isDeepStrictEqual(lifecycle.requestedTargets, input.requestedTargets) &&
+    isDeepStrictEqual([...lifecycle.requestedTargets].sort(), [...input.requestedTargets].sort()) &&
     lifecycle.reason === input.reason &&
     lifecycle.createdAt === input.failedAt
   );
@@ -3905,7 +3914,10 @@ export class MessageStore {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets : undefined,
+    );
     const existingFailure = this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -4018,6 +4030,26 @@ export class MessageStore {
           );
     if (!settledLifecycle) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+    }
+    if (input.claim) {
+      const { ledger, id, makeWake } = input.claim;
+      if (!(ledger instanceof InMemoryQueueLedgerStore)) {
+        throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
+      }
+      const row = ledger.getNow(source.threadId, input.expectedEntryId);
+      const ownedTarget = id
+        ? row?.status === 'claimed' &&
+          row.claimId === id &&
+          row.payload.messageId === source.id &&
+          input.requestedTargets.every((target) => row.claimedTargetIds?.includes(target))
+        : !row ||
+          (row.payload.messageId === source.id &&
+            input.requestedTargets.every((target) => !row.targets.includes(target)));
+      if (input.requestedTargets.length === 0 || !ownedTarget)
+        return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+      if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
+        throw new Error('pre-admission failure wake admission conflict');
+      }
     }
     // Validate the entire settlement before append can publish effects. Notify
     // consumers only after the source and its failure are both committed.

@@ -444,8 +444,10 @@ export class SocketManager {
     this.io.to(room).emit('agent_message', { ...message, threadId: tid, seq, seqEpoch });
   }
 
-  broadcastToRoom(room: string | string[], event: string, data: unknown): void {
-    this.io.to(room).emit(event, data);
+  /** `exceptRoom` skips sockets that are also in that room. */
+  broadcastToRoom(room: string | string[], event: string, data: unknown, options?: { exceptRoom?: string }): void {
+    const target = this.io.to(room);
+    (options?.exceptRoom ? target.except(options.exceptRoom) : target).emit(event, data);
   }
 
   broadcastToRoomWithAck(room: string | string[], event: string, data: unknown, timeoutMs = 1500): Promise<unknown[]> {

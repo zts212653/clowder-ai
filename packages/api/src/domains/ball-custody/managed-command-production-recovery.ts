@@ -32,7 +32,13 @@ async function notifyJobOwner(deps: ManagedCommandWakeRecoveryDeps, job: Durable
           connector: 'hold-ball',
           label: '命令需检查',
           icon: '🏓',
-          meta: { taskId: job.originTaskId, jobId: job.jobId, phase: 'status', recoveryDisposition: true },
+          meta: {
+            taskId: job.originTaskId,
+            jobId: job.jobId,
+            phase: 'status',
+            recoveryDisposition: true,
+            cancelable: 'unchanged',
+          },
         },
       });
     delivered = true;

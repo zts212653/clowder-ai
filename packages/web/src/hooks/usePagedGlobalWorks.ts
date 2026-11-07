@@ -49,25 +49,28 @@ export const GLOBAL_WORKS_SOURCE_REFRESH_COOLDOWN_MS = 30_000;
 const tabHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 /** Drain bounded requests serially, publishing useful batches while the original catalogue is still being read. */
-export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) {
+export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null, paused = false) {
+  const active = enabled && !paused;
   const [snapshot, setSnapshot] = useState<Snapshot>(empty);
   const current = useRef<Snapshot>(empty());
-  const confirmed = useRef<Snapshot | null>(null);
+  const retainedSnapshot = useRef<Snapshot | null>(null);
   const cursor = useRef<string | undefined>();
   const request = useRef<AbortController | null>(null);
   const cursorExpired = useRef(false);
   const owner = useRef(ownerKey);
+  const admitted = useRef(false);
   const walking = useRef(false);
   const settledAt = useRef(Number.NEGATIVE_INFINITY);
   const refreshPending = useRef(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const armRefresh = useRef(() => {});
   const read = useCallback(async (restart: boolean) => {
+    if (!admitted.current) return;
     request.current?.abort();
     const ac = new AbortController();
     request.current = ac;
     walking.current = true;
-    const retained = restart ? confirmed.current : null;
+    const retained = restart ? retainedSnapshot.current : null;
     if (restart) {
       current.current = empty();
       cursor.current = undefined;
@@ -75,12 +78,12 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) 
     }
     const publish = (patch: Partial<Snapshot>) => {
       current.current = { ...current.current, ...patch };
-      if (current.current.error) confirmed.current = null;
-      else if (current.current.complete) confirmed.current = current.current;
+      if (current.current.error) retainedSnapshot.current = null;
+      else if (current.current.complete) retainedSnapshot.current = current.current;
       // Rebuild independently; a partial replacement is not a new exact total.
       setSnapshot(
         retained && current.current.loadingMore && !current.current.error
-          ? { ...retained, loadingMore: true }
+          ? { ...retained, loadingMore: true, error: false }
           : current.current,
       );
     };
@@ -114,6 +117,7 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) 
       }
     } finally {
       if (request.current === ac) {
+        request.current = null;
         walking.current = false;
         settledAt.current = Date.now();
         if (!ac.signal.aborted) armRefresh.current();
@@ -123,7 +127,7 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) 
   // A pending source refresh starts only when no walk is running, the tab is visible and the
   // cooldown since the last settled walk has elapsed; otherwise settle/visibility re-arms it.
   armRefresh.current = () => {
-    if (!refreshPending.current || walking.current || refreshTimer.current || tabHidden()) return;
+    if (!admitted.current || !refreshPending.current || walking.current || refreshTimer.current || tabHidden()) return;
     const wait = Math.max(0, settledAt.current + GLOBAL_WORKS_SOURCE_REFRESH_COOLDOWN_MS - Date.now());
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null;
@@ -131,11 +135,6 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) 
       refreshPending.current = false;
       void read(true);
     }, wait);
-  };
-  const cancelRefresh = () => {
-    refreshPending.current = false;
-    if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = null;
   };
   const restart = useCallback(() => {
     void read(true);
@@ -145,37 +144,49 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null) 
   }, [read]);
   /** Source-change entry point: never aborts a running walk, and coalesces bursts into one later walk. */
   const scheduleRefresh = useCallback(() => {
+    if (!admitted.current) return;
     refreshPending.current = true;
     armRefresh.current();
   }, []);
   useEffect(() => {
-    if (owner.current !== ownerKey) {
-      confirmed.current = null;
+    if (owner.current !== ownerKey || !enabled) {
       owner.current = ownerKey;
-    }
-    cancelRefresh();
-    if (enabled) restart();
-    else {
       current.current = empty();
-      confirmed.current = null;
+      retainedSnapshot.current = null;
       cursor.current = undefined;
       setSnapshot(current.current);
     }
+    admitted.current = active;
+    if (active) {
+      // A paused initial walk may have displayed results without reaching the last page.
+      if (!retainedSnapshot.current && current.current.artifacts.length) retainedSnapshot.current = current.current;
+      restart();
+    }
     return () => {
-      cancelRefresh();
+      admitted.current = false;
+      refreshPending.current = false;
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      refreshTimer.current = null;
       request.current?.abort();
+      request.current = null;
+      walking.current = false;
     };
-    // cancelRefresh only touches refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, restart, ownerKey]);
+  }, [active, enabled, ownerKey, restart]);
   useEffect(() => {
-    if (!enabled) return;
+    if (!active) return;
     const onVisibility = () => {
       if (!tabHidden()) armRefresh.current();
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [enabled]);
-  const visible = owner.current === ownerKey ? snapshot : empty();
-  return { ...visible, loading: enabled && visible.loading, refetch, restart, scheduleRefresh };
+  }, [active]);
+  const visible = enabled && owner.current === ownerKey ? snapshot : empty();
+  return {
+    ...visible,
+    loading: active && visible.loading,
+    loadingMore: active && visible.loadingMore,
+    refetch,
+    restart,
+    scheduleRefresh,
+  };
 }

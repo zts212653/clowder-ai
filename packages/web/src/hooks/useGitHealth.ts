@@ -31,6 +31,7 @@ export interface RuntimeDrift {
 }
 
 export interface GitHealthResult {
+  isGitRepository?: boolean;
   staleBranches: StaleBranch[];
   worktrees: WorktreeHealth[];
   runtimeDrift: RuntimeDrift | null;

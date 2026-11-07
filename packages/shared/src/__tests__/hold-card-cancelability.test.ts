@@ -60,6 +60,17 @@ describe('readHoldCardCancelability', () => {
     expect(readHoldCardCancelability([])).toBe('unstated');
     expect(readHoldCardCancelability({ cancelable: 'false' })).toBe('unstated');
   });
+
+  it('reads an explicit non-mutating notice without declaring the hold terminal', () => {
+    expect(readHoldCardCancelability({ cancelable: 'unchanged' })).toBe('informational');
+  });
+
+  it('reads persisted disposition notices without rewriting their old metadata', () => {
+    expect(readHoldCardCancelability({ recoveryDisposition: true })).toBe('informational');
+    expect(readHoldCardCancelability({ recoveryDisposition: true, cancelable: false })).toBe('terminal');
+    expect(readHoldCardCancelability({ recoveryDisposition: true, cancelable: true })).toBe('cancelable');
+    expect(readHoldCardCancelability({ recoveryDisposition: 'true', phase: 'status' })).toBe('unstated');
+  });
 });
 
 describe('decideHoldCancelEntry', () => {
@@ -107,5 +118,28 @@ describe('decideHoldCancelEntry', () => {
     const cards = [card('m1', 100, legacy), card('m2', 200, legacy)];
     expect(decideHoldCancelEntry('m2', cards)).toBe('owner');
     expect(decideHoldCancelEntry('m1', cards)).toBe('not_owner');
+  });
+
+  it('keeps the original cancel entry when recovery pauses, regardless of notice ordering', () => {
+    const waiting = card('m1', 100, PRODUCER_META.waiting);
+    const notice = card('m2', 200, { cancelable: 'unchanged' });
+    for (const timeline of [
+      [waiting, notice],
+      [notice, waiting],
+    ]) {
+      expect(decideHoldCancelEntry('m1', timeline)).toBe('owner');
+      expect(decideHoldCancelEntry('m2', timeline)).toBe('not_owner');
+    }
+    expect(decideHoldCancelEntry('m2', [notice])).toBe('not_owner');
+  });
+
+  it('does not restore a terminal hold when a recovery notice arrives later', () => {
+    const timeline = [
+      card('m1', 100, PRODUCER_META.waiting),
+      card('m2', 200, PRODUCER_META.runnerLost),
+      card('m3', 300, { cancelable: 'unchanged' }),
+    ];
+    expect(decideHoldCancelEntry('m1', timeline)).toBe('revoked');
+    expect(decideHoldCancelEntry('m3', timeline)).toBe('not_owner');
   });
 });

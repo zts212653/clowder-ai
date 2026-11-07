@@ -606,12 +606,29 @@ function updateMessageInList(
   return updated;
 }
 
-/** F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator */
-function fireOwnerMentionNotification(msg: ChatMessage, threadId: string) {
+const MAX_NOTIFIED_MENTIONS = 500;
+const notifiedMentionIds = new Set<string>();
+
+export function __resetOwnerMentionNotificationsForTests(): void {
+  notifiedMentionIds.clear();
+}
+
+/**
+ * F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator.
+ * PR-3a: one message can arrive by its thread room, `messages_delivered` and the owner-room
+ * `thread_message_appended` hint, so a page notifies each message id once.
+ */
+export function fireOwnerMentionNotification(msg: Pick<ChatMessage, 'id' | 'catId'>, threadId: string) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') {
     Notification.requestPermission();
     return;
+  }
+  if (notifiedMentionIds.has(msg.id)) return;
+  notifiedMentionIds.add(msg.id);
+  if (notifiedMentionIds.size > MAX_NOTIFIED_MENTIONS) {
+    const oldest = notifiedMentionIds.values().next().value;
+    if (oldest !== undefined) notifiedMentionIds.delete(oldest);
   }
   const cats = getCachedCats();
   const catData = cats.find((c) => c.id === msg.catId);

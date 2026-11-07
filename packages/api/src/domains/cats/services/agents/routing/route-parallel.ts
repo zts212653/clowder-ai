@@ -104,11 +104,16 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { type RouteResponseProducers, responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
@@ -194,9 +199,23 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   try {
-    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+    yield* routeParallelPrepared(
+      deps,
+      targetCats,
+      message,
+      userId,
+      threadId,
+      options,
+      invocationServices,
+      routeResponseProducers,
+    );
   } finally {
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
   }
 }
@@ -209,6 +228,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -257,6 +277,9 @@ async function* routeParallelPrepared(
           signal: catSignal,
         });
       const current = pinnedServices.get(catId);
+      const preparationError = servicePreparationErrors.get(catId);
+      if (!current && terminalExecutionBindingFailure(preparationError) && options.onExecutionBindingRejected)
+        throw preparationError;
       if (!current) return capture();
       const admitted = await invocationServices.admit(
         current,
@@ -274,17 +297,23 @@ async function* routeParallelPrepared(
     const catId = targetCats[index];
     if (!catId) continue;
     if (result.status === 'fulfilled') executionBindings.set(catId, result.value);
-    else
+    else {
+      const error = result.reason;
+      const terminalReason = terminalExecutionBindingFailure(error);
+      if (
+        executionControls.get(catId)?.signal.aborted ||
+        (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+      )
+        continue;
       yield {
         type: 'error',
         catId,
         errorCode:
-          result.reason instanceof ExecutionAdmissionConflict
-            ? 'execution_binding_conflict'
-            : 'execution_binding_unavailable',
-        error: result.reason instanceof Error ? result.reason.message : 'Execution binding is unavailable',
+          error instanceof ExecutionAdmissionConflict ? 'execution_binding_conflict' : 'execution_binding_unavailable',
+        error: error instanceof Error ? error.message : 'Execution binding is unavailable',
         timestamp: Date.now(),
       };
+    }
   }
   targetCats = targetCats.filter((catId) => executionBindings.has(catId));
   if (targetCats.length === 0) {
@@ -1184,7 +1213,12 @@ async function* routeParallelPrepared(
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -2679,6 +2713,8 @@ async function* routeParallelPrepared(
           },
         ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
       }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvId) routeResponseProducers.leave(ownInvId);
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the

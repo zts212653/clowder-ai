@@ -2,22 +2,11 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFakeHubSocket, type FakeHubSocket, withHubSocket } from '@/test-utils/fake-hub-socket';
 import { useWorkspaceFileChange } from '../useWorkspaceFileChange';
 
-const socket = vi.hoisted(() => ({
-  handlers: new Map<string, (...args: unknown[]) => void>(),
-  emit: vi.fn(),
-  disconnect: vi.fn(),
-}));
-vi.mock('socket.io-client', () => ({
-  io: () => ({
-    on: (name: string, handler: (...args: unknown[]) => void) => socket.handlers.set(name, handler),
-    emit: socket.emit,
-    disconnect: socket.disconnect,
-  }),
-}));
-
 let root: Root;
+let fake: FakeHubSocket;
 const onReload = vi.fn();
 function WatchHost({ sha }: { sha: string | null }) {
   useWorkspaceFileChange({ worktreeId: 'wt-1', path: 'README.md', currentSha: sha, onReload });
@@ -25,18 +14,19 @@ function WatchHost({ sha }: { sha: string | null }) {
 }
 async function render(sha: string | null) {
   await act(async () => root.render(createElement(WatchHost, { sha })));
-  await vi.waitFor(() => expect(socket.handlers.has('workspace:file-changed')).toBe(true));
+  expect(fake.listenerCount('workspace:file-changed')).toBe(1);
 }
-/** Connects the mocked socket and returns the watchId the hook subscribed with. */
+/** Connects the page connection and returns the watchId the hook subscribed with. */
 function connect(): string {
-  act(() => socket.handlers.get('connect')!());
-  const watch = socket.emit.mock.calls.find(([name]) => name === 'workspace:watch-file');
-  return (watch?.[1] as { watchId: string }).watchId;
+  act(() => {
+    fake.connect();
+  });
+  return (fake.emitted('workspace:watch-file')[0]?.[0] as { watchId: string }).watchId;
 }
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  root = createRoot(document.createElement('div'));
-  socket.handlers.clear();
+  fake = createFakeHubSocket();
+  root = withHubSocket(createRoot(document.createElement('div')), fake.hub);
   vi.clearAllMocks();
 });
 afterEach(() => {
@@ -53,7 +43,7 @@ describe('production workspace file watcher resource boundaries', () => {
   ])('ignores %s received through the socket subscription', async (_label, event) => {
     await render('sha-current');
     const watchId = connect();
-    act(() => socket.handlers.get('workspace:file-changed')!({ watchId, ...event }));
+    act(() => fake.deliver('workspace:file-changed', { watchId, ...event }));
     expect(onReload).not.toHaveBeenCalled();
   });
 
@@ -61,7 +51,7 @@ describe('production workspace file watcher resource boundaries', () => {
     await render('sha-current');
     const watchId = connect();
     act(() =>
-      socket.handlers.get('workspace:file-changed')!({
+      fake.deliver('workspace:file-changed', {
         watchId: 'another-watch',
         worktreeId: 'wt-1',
         path: 'README.md',
@@ -71,21 +61,21 @@ describe('production workspace file watcher resource boundaries', () => {
     expect(onReload).not.toHaveBeenCalled();
 
     act(() => root.unmount());
-    expect(socket.emit).toHaveBeenLastCalledWith('workspace:unwatch-file', { watchId });
+    expect(fake.emitted('workspace:unwatch-file')).toEqual([[{ watchId }]]);
     root = createRoot(document.createElement('div'));
   });
 
   it('reloads an event received before the initial content hash is available', async () => {
     await render(null);
     const watchId = connect();
-    expect(socket.emit).toHaveBeenCalledWith('workspace:watch-file', {
+    expect(fake.emitted('workspace:watch-file')[0]?.[0]).toEqual({
       watchId,
       worktreeId: 'wt-1',
       path: 'README.md',
       sha256: null,
     });
     act(() =>
-      socket.handlers.get('workspace:file-changed')!({
+      fake.deliver('workspace:file-changed', {
         watchId,
         worktreeId: 'wt-1',
         path: 'README.md',
