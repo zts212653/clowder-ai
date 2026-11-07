@@ -141,6 +141,14 @@ jobs:
           test/f318-claude-sdk.test.ts
           test/f318-claude-sdk-custody.test.ts
           test/f318-claude-sdk-launch.test.ts
+          test/native-auth-carrier.test.js
+      - name: Claude CLI final auth hook contract (fake spawn only)
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test
+          --test-name-pattern="F203 AC-C5: -p carrier passes"
+          test/claude-agent-service.test.js
       - name: Desktop isolation and installer profile contracts
         run: >-
           node --test
