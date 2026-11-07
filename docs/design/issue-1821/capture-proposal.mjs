@@ -86,5 +86,5 @@ try {
 } finally {
   await browser.close();
 }
-await writeFile(path.join(output, 'measurements.json'), JSON.stringify({ sourceSha256, measurements }, null, 2));
+await writeFile(path.join(output, 'measurements.json'), `${JSON.stringify({ sourceSha256, measurements }, null, 2)}\n`);
 console.log(JSON.stringify({ screenshots: measurements.length, overflowing: 0, sourceSha256, output }));
