@@ -1,6 +1,48 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { createCallbackContextFixture } from './helpers/callback-context-fixture.js';
+
+for (const kind of ['conversation_input', 'message_wake']) {
+  test(`issue1890 full context captures the live prefix for ${kind}, not the empty stored response`, async (t) => {
+    const f = await createCallbackContextFixture(t);
+    // The in-memory fixture starts with example prose; production precreates R empty.
+    f.response.content = '';
+    let content = '  Initial analysis\n\n';
+    const prefix = content.trimStart();
+    const release = f.tracker.bindLifecycleOutputCursor(
+      f.threadId,
+      'opus',
+      {
+        invocationId: f.auth.invocationId,
+        responseMessageId: f.response.id,
+      },
+      () => content,
+    );
+    t.after(() => release?.());
+    assert.equal(f.messages.getById(f.response.id).content, '');
+    const source =
+      kind === 'message_wake' ? await publishWake(f, 'codex', 'reviewer request') : await f.enqueue('reviewer request');
+    const read = await f.read();
+    assert.equal(read.statusCode, 200, read.body);
+    const expected = [
+      {
+        inputMessageId: source.message.id,
+        contentOffset: prefix.length,
+        prefixSha256: createHash('sha256').update(prefix).digest('hex'),
+      },
+    ];
+    assert.deepEqual(f.messages.getById(f.response.id).lifecycle.appendBoundaries, expected);
+    content += 'review acknowledged';
+    assert.equal((await f.read()).statusCode, 200);
+    assert.deepEqual(f.messages.getById(f.response.id).lifecycle.appendBoundaries, expected);
+    assert.equal(
+      f.messages.getById(source.message.id).lifecycle.dispatchRefs.find((ref) => ref.targetId === 'opus')
+        .statusMessageId,
+      f.response.id,
+    );
+  });
+}
 
 test('a watcher reads published originals without adopting work input or advancing its member seen cursor', async (t) => {
   const f = await createCallbackContextFixture(t, { executionKind: 'watcher' });

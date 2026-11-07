@@ -1,0 +1,55 @@
+{
+  "results": [
+    {
+      "stage": "streaming",
+      "order": ["R", "S", "continuation"]
+    },
+    {
+      "stage": "quote",
+      "messageId": "R",
+      "start": 13,
+      "end": 31
+    },
+    {
+      "stage": "reload",
+      "viewportWidth": 1100,
+      "width": 720,
+      "scroll": 720
+    },
+    {
+      "stage": "reload",
+      "viewportWidth": 390,
+      "width": 334,
+      "scroll": 334
+    },
+    {
+      "stage": "classic",
+      "canonicalCount": 1
+    },
+    {
+      "stage": "native-append",
+      "pendingContinuationCount": 0,
+      "writtenContinuationCount": 1
+    },
+    {
+      "stage": "recalled",
+      "continuationCount": 0
+    },
+    {
+      "stage": "native-output",
+      "processInOriginalRecord": true,
+      "finalInContinuation": true
+    },
+    {
+      "stage": "native-full-original",
+      "includesProcessAndFinal": true,
+      "prefixCount": 1
+    },
+    {
+      "stage": "equal-cut-navigation",
+      "from": "S",
+      "focused": "S2"
+    }
+  ],
+  "errors": []
+}

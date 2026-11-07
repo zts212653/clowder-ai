@@ -13,6 +13,7 @@ import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type {
   CatId,
   LifecycleActiveRun,
+  LifecycleAppendBoundaryInput,
   LifecycleAppendFailure,
   MessageContent,
   MessageFrom,
@@ -74,6 +75,7 @@ import type {
 import { classifyInvocationRecoveryStatus } from '../../stores/ports/invocation-state-machine.js';
 import {
   type AdvanceLifecycleInputDispatchResult,
+  boundaryFromLiveBody,
   hydrateReplyPreview,
   type IMessageStore,
   isTimelinePublished,
@@ -276,6 +278,17 @@ interface TrackerLike {
   ): (() => void) | null;
   getAgentClientActiveRunDispatcher?(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined;
   getActiveSlots?(threadId: string): Array<{ catId: string; startedAt: number; activeRun?: LifecycleActiveRun }>;
+  bindLifecycleOutputCursor?(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    getter: () => string,
+  ): (() => void) | null;
+  getLifecycleOutputCursor?(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+  ): (() => string) | undefined;
   appendLifecycleActiveRunInputs?(
     threadId: string,
     catId: string,
@@ -1217,13 +1230,17 @@ export class QueueProcessor {
         threadId: input.threadId,
         entryId: input.entryId,
         inputMessageIds,
-        runs: input.expectedRuns.map((run, index) => ({
-          ...run,
-          dispatchedAt: seenAt,
-          awaitingAcceptance: true,
-          ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
-          ...(dispatchers[index]?.capabilities.inputReadReceipt ? { inputReadSupported: true } : {}),
-        })),
+        runs: input.expectedRuns.map((run, index) => {
+          const appendBoundary = this.appendBoundaryForRun(input.threadId, run);
+          return {
+            ...run,
+            dispatchedAt: seenAt,
+            awaitingAcceptance: true,
+            ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
+            ...(dispatchers[index]?.capabilities.inputReadReceipt ? { inputReadSupported: true } : {}),
+            ...(appendBoundary ? { appendBoundary } : {}),
+          };
+        }),
       });
       if (admission.kind !== 'applied' && admission.kind !== 'replayed') {
         throw new Error(
@@ -1569,6 +1586,11 @@ export class QueueProcessor {
     }
 
     try {
+      const appendBoundary = this.appendBoundaryForRun(input.threadId, {
+        targetId: input.catId,
+        invocationId: activeRun.invocationId,
+        responseMessageId: activeRun.responseMessageId,
+      });
       const result = await queue.commitProjectedWakeCoverage(messageStore, {
         threadId: input.threadId,
         userId: input.userId,
@@ -1577,6 +1599,7 @@ export class QueueProcessor {
         responseMessageId: activeRun.responseMessageId,
         entries: input.entries,
         at: input.seenAt ?? Date.now(),
+        ...(appendBoundary ? { appendBoundary } : {}),
       });
       if (result.kind !== 'applied' && result.kind !== 'replayed')
         return { outcome: 'rejected', reason: 'lifecycle_conflict' };
@@ -1722,6 +1745,17 @@ export class QueueProcessor {
     return { outcome: 'adopted', adoptedEntryIds };
   }
 
+  private appendBoundaryForRun(
+    threadId: string,
+    run: { targetId: string; invocationId: string; responseMessageId: string },
+  ): LifecycleAppendBoundaryInput | undefined {
+    const getter = this.deps.invocationTracker.getLifecycleOutputCursor?.(threadId, run.targetId, {
+      invocationId: run.invocationId,
+      responseMessageId: run.responseMessageId,
+    });
+    return boundaryFromLiveBody(getter);
+  }
+
   private async adoptExposedQueuedEntry(input: {
     threadId: string;
     userId: string;
@@ -1772,11 +1806,12 @@ export class QueueProcessor {
         return { outcome: 'rejected', reason: 'persistence_unavailable', entryId: claimed.id };
       }
 
+      const appendBoundary = this.appendBoundaryForRun(input.threadId, input.run);
       const admission = await messageStore.commitLifecycleAppendAdmission({
         threadId: input.threadId,
         entryId: claimed.id,
         inputMessageIds: messageIds,
-        runs: [{ ...input.run, dispatchedAt: seenAt }],
+        runs: [{ ...input.run, dispatchedAt: seenAt, ...(appendBoundary ? { appendBoundary } : {}) }],
       });
       if (admission.kind !== 'applied' && admission.kind !== 'replayed') {
         invocationTracker.detachLifecycleActiveRunInputs?.(
@@ -5890,6 +5925,18 @@ export class QueueProcessor {
             lifecycleQueueTargetsRetired = targetCats.every((target) => lifecycleRetiredTargets.has(target));
             void this.requestDrain(threadId);
             return true;
+          },
+          onLifecycleOutputCursorReady: (input) => {
+            const tracker = this.deps.invocationTracker;
+            if (!tracker.bindLifecycleOutputCursor) return undefined;
+            return (
+              tracker.bindLifecycleOutputCursor(
+                input.threadId,
+                input.catId,
+                { invocationId: input.invocationId, responseMessageId: input.responseMessageId },
+                input.getContent,
+              ) ?? undefined
+            );
           },
           onLifecycleInvocationStarted: async (
             input: Parameters<NonNullable<RouteOptions['onLifecycleInvocationStarted']>>[0],

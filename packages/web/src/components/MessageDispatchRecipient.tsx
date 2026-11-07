@@ -10,6 +10,7 @@ import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt } from './cloud-dispatch-receipt';
 import { HistoryAppendActions } from './HistoryAppendActions';
 import type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
+import { focusCausalContinuation, useCausalReplies } from './reply-layers/CausalReplyContext';
 import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudReply } from './useCloudReply';
 
@@ -46,6 +47,7 @@ export function MessageDispatchRecipient({
   recipientCount,
   threadId,
 }: RecipientProps) {
+  const causalReplies = useCausalReplies();
   const navigateToMessage = useMessageNavigation();
   const shell = useShellPresentation();
   const cloud = shell === 'v2' ? cloudDispatchReceipt(message, projection.targetId, timelineMessages) : undefined;
@@ -156,11 +158,16 @@ export function MessageDispatchRecipient({
           className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
           onClick={() => {
             if (!replyMessageId) return;
+            if (
+              causalReplies?.continuations.get(message.id)?.some((slice) => slice.response.id === replyMessageId) &&
+              focusCausalContinuation(message.id, replyMessageId)
+            )
+              return;
             if (logical.state !== 'unverified') navigateToMessage(replyMessageId, { loadIfNeeded: true });
             else navigateToMessage(replyMessageId);
           }}
         >
-          · 看回复 ↓
+          · 看回复
         </button>
       ) : null}
     </li>
