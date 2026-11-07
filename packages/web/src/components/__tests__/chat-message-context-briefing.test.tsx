@@ -121,7 +121,7 @@ describe('ChatMessage ContextBriefing projection', () => {
     expect(container.textContent).not.toContain('恢复 typed 卡');
   });
 
-  it('shows the recorded receiver and coverage while keeping raw commands and status codes out of the default view', () => {
+  it('shows the actual handoff and warning, with all details reachable through one disclosure', () => {
     act(() =>
       root.render(
         React.createElement(BriefingCard, {
@@ -135,6 +135,18 @@ describe('ChatMessage ContextBriefing projection', () => {
               receiverCatId: 'kimi',
               receiverDisplayName: '墨墨',
               coverageSummary: '近期消息 5 条 · 历史略过 42 条',
+              contextDisplay: {
+                threadId: 'long-thread',
+                handoff: {
+                  from: '砚砚',
+                  time: '15:20 UTC',
+                  excerpt: '请核对侧栏菜单。保留的完整摘录。',
+                  warning: true,
+                },
+                sources: [{ type: 'feature-doc', label: 'F148 spec', ref: 'docs/features/F148.md' }],
+                coverage: '看到 5 条 · 省略 42 条',
+                detailsMarkdown: '已提供的记忆摘要、锚点和活跃任务',
+              },
             },
             fields: [
               { label: '传球', value: '砚砚 → 你 (15:20 UTC)' },
@@ -147,18 +159,20 @@ describe('ChatMessage ContextBriefing projection', () => {
         }),
       ),
     );
-    expect(container.textContent).toContain('接收猫：墨墨');
-    expect(container.textContent).toContain('近期消息 5 条 · 历史略过 42 条');
+    expect(container.textContent).toContain('给 墨墨');
+    expect(container.textContent).toContain('请核对侧栏菜单。');
+    expect(container.textContent).toContain('之前有“别动”指令');
+    expect(container.textContent).not.toContain('42');
+    expect(container.textContent).not.toContain('本次提供给猫的背景');
     expect(container.textContent).not.toMatch(/threadId|cat_cafe_|T0|→ 你/);
     act(() => container.querySelector('button')?.click());
     expect(container.textContent).toContain('砚砚 → 墨墨');
     expect(container.textContent).toContain('F148 spec');
-    const diagnostics = container.querySelector('details');
-    expect(diagnostics?.open).toBe(false);
-    expect(diagnostics?.textContent).toContain('cat_cafe_search_evidence');
-    act(() => container.querySelector('summary')?.click());
-    expect(diagnostics?.open).toBe(true);
-    expect(diagnostics?.textContent).toContain('T0 7');
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.textContent).toContain('保留的完整摘录');
+    expect(container.textContent).toContain('cat_cafe_search_evidence');
+    expect(container.textContent).toContain('T0 7');
+    expect(container.textContent).toContain('已提供的记忆摘要、锚点和活跃任务');
   });
 
   it.each([
@@ -174,7 +188,7 @@ describe('ChatMessage ContextBriefing projection', () => {
         }),
       ),
     );
-    expect(container.textContent).toContain(`接收猫：${receiver}`);
+    expect(container.textContent).toContain(receiver === '未记录' ? '接收猫：未记录' : `给 ${receiver}`);
     expect(container.textContent).not.toContain('999');
     expect(container.textContent).not.toContain('某猫');
     act(() => container.querySelector('button')?.click());
@@ -201,5 +215,69 @@ describe('ChatMessage ContextBriefing projection', () => {
     expect(container.textContent).not.toContain('接收猫');
     act(() => container.querySelector('button')?.click());
     expect(container.textContent).toContain('完整值班记录');
+  });
+
+  it.each([
+    '',
+    'cat_cafe_search_evidence({ threadId: "thread_owned_example" })',
+  ])('uses a recorded source when the handoff has no readable summary (%s)', (excerpt) => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          block: {
+            kind: 'card',
+            v: 1,
+            id: 'source-fallback',
+            title: '原始记录',
+            meta: {
+              kind: 'context_briefing',
+              receiverCatId: 'kimi',
+              contextDisplay: {
+                threadId: 'thread_owned_example',
+                handoff: { from: '砚砚', time: '08:02', excerpt, warning: false },
+                sources: [{ type: 'feature-doc', label: '已筛选的菜单依据', ref: 'docs/menu.md' }],
+                coverage: '',
+                detailsMarkdown: '',
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain('依据：已筛选的菜单依据');
+    expect(container.textContent).not.toMatch(/cat_cafe_|thread_owned_/);
+    act(() => container.querySelector('button')?.click());
+    if (excerpt) expect(container.textContent).toContain(excerpt);
+    expect(container.textContent).toContain('覆盖未记录');
+  });
+
+  it('keeps unknown historical fields and raw body in a single expanded view, without inferring identity', () => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          contextBriefing: true,
+          block: {
+            kind: 'card',
+            v: 1,
+            id: 'old-full',
+            title: '旧标题中的独有记录',
+            fields: [
+              { label: '传球', value: '某猫 → 你 ⚠️' },
+              { label: '额外字段', value: '独有字段值' },
+            ],
+            bodyMarkdown: '旧卡原有的活跃任务与记忆摘要',
+          },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain('接收猫：未记录');
+    expect(container.textContent).toContain('之前有“别动”指令');
+    expect(container.textContent).not.toContain('某猫');
+    act(() => container.querySelector('button')?.click());
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.textContent).toContain('某猫 → 你');
+    expect(container.textContent).toContain('独有字段值');
+    expect(container.textContent).toContain('旧标题中的独有记录');
+    expect(container.textContent).toContain('旧卡原有的活跃任务与记忆摘要');
   });
 });

@@ -24,6 +24,65 @@ function makeCoverage(overrides = {}) {
 }
 
 describe('F148 briefing card — navigation-first collapsed view', () => {
+  it('records a complete display projection without changing the raw context record', () => {
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo', {
+      receiverCatId: 'kimi',
+      receiverDisplayName: '墨墨',
+      baton: {
+        fromMessageId: 'handoff-1',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: '砚砚',
+        timestamp: 1793980800000,
+        mentionExcerpt: '请核对侧栏菜单。保留完整摘录。',
+        staleHoldWarning: true,
+      },
+      anchorSummaries: ['已提供的锚点摘要'],
+      threadMemorySummary: '已提供的线程记忆',
+      activeTasks: [{ title: '保留活跃任务', status: 'doing', ownerCatId: 'codex' }],
+      rankedSources: [
+        { type: 'pr', label: '不可作为依据的候选', ref: '#999', provenance: 'recency' },
+        {
+          type: 'feature-doc',
+          label: '菜单说明',
+          ref: 'docs/menu.md',
+          provenance: 'canonical',
+          directiveEligible: true,
+        },
+      ],
+    }).extra.rich.blocks[0];
+    const display = card.meta.contextDisplay;
+    assert.equal(display.threadId, 'thread-demo');
+    assert.equal(display.handoff.from, '砚砚');
+    assert.equal(display.handoff.excerpt, '请核对侧栏菜单。保留完整摘录。');
+    assert.equal(display.handoff.warning, true);
+    assert.ok(card.fields[0].value.includes(display.handoff.time));
+    assert.deepEqual(display.sources, [{ type: 'feature-doc', label: '菜单说明', ref: 'docs/menu.md' }]);
+    assert.match(display.coverage, /看到 5 条.*省略 42 条.*记忆 3 sessions/);
+    assert.match(display.detailsMarkdown, /已提供的锚点摘要/);
+    assert.match(display.detailsMarkdown, /已提供的线程记忆/);
+    assert.match(display.detailsMarkdown, /保留活跃任务/);
+    assert.match(display.detailsMarkdown, /候选未展开正文/);
+    assert.doesNotMatch(display.detailsMarkdown, /请核对侧栏菜单|菜单说明|不可作为依据的候选/);
+    assert.match(card.bodyMarkdown, /请核对侧栏菜单.*保留完整摘录/);
+    assert.match(card.bodyMarkdown, /菜单说明/);
+    assert.match(card.bodyMarkdown, /之前有"别动"指令/);
+  });
+
+  it('does not invent an excerpt when the recorded handoff only contained a mention', () => {
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo', {
+      baton: {
+        fromMessageId: 'm',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: '砚砚',
+        timestamp: 1793980800000,
+        mentionExcerpt: '',
+        staleHoldWarning: false,
+      },
+    }).extra.rich.blocks[0];
+    assert.equal(card.meta.contextDisplay.handoff.excerpt, '');
+    assert.deepEqual(card.meta.contextDisplay.sources, []);
+  });
+
   it('records the routed receiver and a human coverage summary without changing raw navigation', () => {
     const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
       receiverCatId: 'kimi',

@@ -20,11 +20,16 @@ before(
 after(async () => browser?.close());
 
 [
-  { name: 'desktop-narrow-chat', width: 1280, theme: 'light', legacy: false },
-  { name: 'desktop-legacy', width: 1280, theme: 'light', legacy: true },
-  { name: 'mobile-320', width: 320, theme: 'light', legacy: false },
-  { name: 'mobile-375-dark', width: 375, theme: 'dark', legacy: true },
-].forEach(({ name, width, theme, legacy }) => {
+  ...[1280, 320, 375].flatMap((width) =>
+    ['light', 'dark'].map((theme) => ({ name: `modern-${width}-${theme}`, width, theme, sample: 'modern' })),
+  ),
+  { name: 'desktop-legacy', width: 1280, theme: 'light', sample: 'legacy' },
+  { name: 'mobile-legacy', width: 375, theme: 'dark', sample: 'legacy' },
+  { name: 'mobile-missing', width: 375, theme: 'light', sample: 'missing' },
+  { name: 'mobile-missing-dark', width: 320, theme: 'dark', sample: 'missing' },
+  { name: 'desktop-warning', width: 1280, theme: 'light', sample: 'warning' },
+  { name: 'mobile-warning', width: 320, theme: 'dark', sample: 'warning' },
+].forEach(({ name, width, theme, sample }) => {
   test(`${name}: long briefing content remains inside the real chat card`, { timeout: 30_000 }, async (t) => {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     t.after(() => context.close());
@@ -41,17 +46,20 @@ after(async () => browser?.close());
         body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/proof.css"><div id="root"></div><script type="module" src="/proof.js"></script>',
       });
     });
-    await page.goto(`${origin}/?theme=${theme}&legacy=${legacy ? '1' : '0'}`);
+    await page.goto(`${origin}/?theme=${theme}&case=${sample}`);
     const row = page.locator('[data-message-id="context-briefing-proof"]');
     await row.waitFor();
     assert.match(await row.innerText(), /上下文交接/);
-    assert.match(await row.innerText(), legacy ? /接收猫：未记录/ : /接收猫：墨墨/);
+    assert.match(await row.innerText(), sample === 'legacy' || sample === 'missing' ? /接收猫：未记录/ : /给 墨墨/);
     assert.doesNotMatch(await row.innerText(), /threadId|cat_cafe_|T0|→ 你/);
-    if (!legacy) assert.match(await row.innerText(), /近期消息 5 条 · 历史略过 42 条/);
+    assert.doesNotMatch(await row.innerText(), /42|本次提供给猫的背景/);
+    if (sample === 'modern' || sample === 'warning') assert.match(await row.innerText(), /请核对侧栏菜单/);
+    if (sample === 'warning') assert.match(await row.innerText(), /之前有“别动”指令/);
     await page.screenshot({ path: path.join(evidence, `${name}-collapsed.png`), fullPage: true });
+    await row.screenshot({ path: path.join(evidence, `${name}-card-collapsed.png`) });
     const inspect = () =>
       row.evaluate((element) => {
-        const card = element.querySelector('button')?.parentElement;
+        const card = element.querySelector('[data-context-receipt]');
         const bounds = card.getBoundingClientRect();
         const overflowing = [...card.querySelectorAll('*')]
           .filter((child) => {
@@ -76,17 +84,23 @@ after(async () => browser?.close());
     assert.deepEqual(collapsed.overflowing, [], 'default card must not clip or overlap its content');
     assert.ok(collapsed.pageScroll <= collapsed.pageWidth + 1);
     await row.getByRole('button').first().click();
-    const diagnostics = row.locator('summary').filter({ hasText: '诊断详情' });
-    assert.equal(await diagnostics.count(), 1);
-    assert.doesNotMatch(await row.innerText(), /cat_cafe_search_evidence/);
-    await diagnostics.click();
+    assert.equal(await row.locator('details').count(), 0, 'one disclosure opens every detail');
+    assert.match(await row.innerText(), /诊断/);
+    assert.match(await row.innerText(), /已提供的线程记忆摘要/);
+    assert.match(await row.innerText(), /已提供的锚点摘要/);
+    assert.match(await row.innerText(), /保留原有活跃任务/);
+    assert.match(await row.innerText(), /保留独有字段值/);
+    assert.match(await row.innerText(), /候选仅为指针/);
+    assert.match(await row.innerText(), /T0 7/);
     await page.screenshot({ path: path.join(evidence, `${name}-expanded.png`), fullPage: true });
+    await row.screenshot({ path: path.join(evidence, `${name}-card-expanded.png`) });
     const expanded = await inspect();
     writeFileSync(path.join(evidence, `${name}-expanded.json`), JSON.stringify(expanded, null, 2));
     assert.deepEqual(expanded.overflowing, [], 'expanded commands, IDs and paths must wrap without clipping');
     assert.ok(expanded.pageScroll <= expanded.pageWidth + 1);
     assert.match(await row.innerText(), /cat_cafe_search_evidence/);
-    await row.getByRole('button').first().click();
+    await row.getByRole('button').first().press('Enter');
+    assert.equal(await row.getByRole('button').first().getAttribute('aria-expanded'), 'false');
     assert.doesNotMatch(await row.innerText(), /cat_cafe_|threadId|T0/);
     assert.deepEqual(errors, []);
   });

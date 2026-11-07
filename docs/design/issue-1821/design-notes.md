@@ -1,7 +1,7 @@
 # Issue #1821 · 上下文交接卡设计说明
 
-> **状态：合成内容，待 zts 审核。** 本稿是默认态 / 展开态的设计提案，不是设计验收，也不是实现。
-> 只新增 `docs/design/issue-1821/design-proposal.html` 与 `docs/design/issue-1821/design-notes.md`；未改 `packages/**`，未 commit / push。同目录的 `README.md`、`data-contract.md`、`capture-proposal.mjs` 是砚砚已放好的审稿/截图脚手架，本稿按它们的边界写。实现、截图与 PR 由缅因猫集成。
+> **状态：zts 已确认此设计方向，产品实现与验证进行中。** 见[确认及实施边界](https://github.com/zts212653/clowder-ai/pull/1823#issuecomment-6690153941)。合成设计材料已随 `d6bf57c5a` 提交，不代表正式代码批准或允许合入。
+> 鲸鲸完成视觉与交互初稿，砚砚已集成数据边界、审阅索引与截图脚本，并负责后续产品实现。原样张保留出稿时“待审”字样，当前状态以本说明和 PR 后续记录为准。
 
 样张里的对话、接收猫、5/42 计数、`T0/T1/T2` 数字均为合成内容；真实字段映射见第 5 节。旧版被驳回的样张在 `docs/review-evidence/issue-1821/`。
 
@@ -110,19 +110,21 @@
 | 旧卡 | 仅 `title/fields/body`，无 `receiver*`、无 `coverage*` | 历史持久化卡没有这些 meta | 按第 4 节降级，不迁移数据 |
 | 缺字段 | `fields.传球 = 直接 @`、`fields.真相源` 以“未定位”开头 | 当前 `BriefingCard` 已把这两类值改写为“未记录交接来源 / 尚未关联到明确依据” | 沿用现有改写；不要用 title 猜来源 |
 
-### 5.1 建议的最小 formatter 增量
+### 5.1 实施采用的 formatter 展示增量
 
-为了让默认态不解析 Markdown、不猜，建议在 `buildBriefingMessage` 的 `meta` 里增量输出（都是内部 metadata，向后兼容）：
+为避免解析历史 Markdown，`buildBriefingMessage` 在既有接收者字段之外增加 `meta.contextDisplay`。完整对象在前端持久化边界校验一次；原始标题、字段、正文继续保留：
 
 ```ts
-handoffExcerpt?: string;      // 完整的已记录 baton.mentionExcerpt；前端仅在默认态取首句
-handoffFromDisplay?: string;  // baton.fromSpeakerDisplay
-handoffAt?: number;           // baton.timestamp
-truthSourceLabel?: string;    // selectDirectiveSources(rankedSources)[0]?.label
-truthSourceRef?: string;      // 同一筛选结果的 ref
+contextDisplay: {
+  threadId,                  // 当前实际会话 ID，仅展开显示
+  handoff?,                  // 实际 baton 的 from/time/excerpt/warning；不补造摘录
+  sources,                   // selectDirectiveSources 的完整筛选结果：type/label/ref
+  coverage,                  // 覆盖摘要，不含重复的上下文诊断码
+  detailsMarkdown,           // 其余已记录正文，仅移去有结构化对应的交接与来源块
+}
 ```
 
-这是持久化展示 metadata 的兼容增量，不需要改 shared card schema，也不改变 prompt 或投喂内容；旧卡没有这些字段，前端按第 4 节降级。字段方案在具体实现时核实，不能把样例里存在的值当成历史库中已有的值。
+这是持久化展示 metadata 的兼容增量，不改 shared card schema、prompt 或投喂内容。旧卡无完整投影时保留原标题、所有字段和正文，不以字符串解析推断身份。新卡仅消除在构建处可证明重复的交接与来源块，其余正文、任务、记忆、锚点与候选指针说明仍可查阅。
 
 ### 5.2 已知的真实缺口
 
@@ -191,17 +193,17 @@ const excerpt = m.content.split('\n')[0].replace(/@[\p{L}\p{N}_-]+/gu, '').trim(
 - 截图覆盖：600 浅/深、375 旧卡、320 缺字段、320 长 ID/命令、干净卡面。
 - 未验证：真实 runtime 数据、真实字体回退、实现后的组件行为；本稿不是安装版验收。
 
-## 9. 待确认 / 风险
+## 9. 实施取舍
 
-1. **默认态移除计数**：这与旧 plan 第 27 行“默认显示近期消息/历史略过数量”冲突，但符合 zts 本轮“避免泛说明、计数和诊断并排”的要求。建议以 zts 本轮为准；如果维护侧坚持默认保留计数，建议只保留一行极小字号、放在回执之后，且不再和摘要同一视觉层级——但这会重新引入竞争，我不推荐。
-2. **`mentionExcerpt` 的提取缺口**：@ 单独一行会导致空摘要（5.2）。需要 build 侧小改，或接受默认态退化为“依据某文件”。这是本稿最关键的可实现性风险。
-3. **新增 `meta.handoff*` 字段**：建议加，但不改 shared schema；如果维护侧不希望扩 metadata，前端只能解析 `fields/bodyMarkdown`，脆弱且会把原始格式带进默认态。请缅因猫核一下取舍。
-4. **真相源 label/ref 拆分**：`fields.真相源` 是 `label — ref` 字符串；如果 label 本身含 ` — `，前端拆分会有歧义。建议同时给 `truthSourceLabel/Ref`，否则整串原样显示。
-5. **320px 展开高度**：原始记录约 0.87k 卡高。若 zts 认为太长，可把原始记录做成“复制原始记录”而不是第二层展开；但“第二层展开”正是旧稿被驳回的点，所以本稿先保持单层。
-6. **色彩浓度**：5% info 淡底 + 3px 左边线是“类别回执”，不是状态横幅；如果维护侧希望更中性，可去掉淡底只留左边线，不影响信息层级。
+1. 默认态移除计数，采用已确认的接收者、实际摘录与交接时间；旧 plan 的四行默认态不再沿用。
+2. 不改共享 `extractBatonContext`。既有摘录为空时采用真实筛选依据或如实留缺；完整命令不推到默认态。
+3. 展示数据在构建期写入 `meta.contextDisplay`，避免从 Markdown 反查新卡的身份与来源。历史卡缺字段不补 0。
+4. 来源数组直接复用 `selectDirectiveSources` 的结果，保留全部合格依据；旧字段原样显示，不拆 `label — ref` 猜来源。
+5. 一次展开提供全部内容。新卡只移去有结构化对应的重复块；历史卡的完整标题、正文和任意额外字段保留。
+6. 保留已确认的细蓝边与淡底，接到现行产品主题 token；删去自明的“完整 ID 按原样保留”页脚，保留 cold / T 级解释。真实组件的尺寸与旧稿样例高度可能不同，必须看实际样张。
 
 ## 10. 交付边界
 
-- 本稿只新增两份设计文件；不碰 `packages/**`，不 commit / push，不改 runtime。
-- 由缅因猫集成、核实可实现性、出浏览器标注样张并送 zts；zts 确认前不把本稿称为“已接受设计”。
-- 旧版实现仍保留在 PR #1823 / 分支上；本稿不替代代码 review，也不替代安装版验收。
+- 原创作交稿只包含两份设计文件；整合材料已提交，当前按 zts 确认稿调整真实组件。
+- 实现由缅因猫负责；删去自明页脚说明，保留诊断必要解释与默认态行动警告。
+- 最终仍须真实组件样张、适用检查、非作者代码审查和正式合入条件；设计确认不替代这些步骤，也不代表安装版更新。

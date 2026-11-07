@@ -1,0 +1,266 @@
+[
+    {
+        "sample":  "desktop-legacy-collapsed.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "desktop-legacy-expanded.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "desktop-warning-collapsed.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "desktop-warning-expanded.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-legacy-collapsed.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-legacy-expanded.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-missing-collapsed.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-missing-dark-collapsed.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-missing-dark-expanded.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-missing-expanded.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-warning-collapsed.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "mobile-warning-expanded.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-1280-dark-collapsed.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-1280-dark-expanded.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-1280-light-collapsed.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-1280-light-expanded.json",
+        "result":  {
+                       "cardWidth":  612,
+                       "pageWidth":  1280,
+                       "pageScroll":  1280,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-320-dark-collapsed.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-320-dark-expanded.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-320-light-collapsed.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-320-light-expanded.json",
+        "result":  {
+                       "cardWidth":  251.59375,
+                       "pageWidth":  320,
+                       "pageScroll":  320,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-375-dark-collapsed.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-375-dark-expanded.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-375-light-collapsed.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    },
+    {
+        "sample":  "modern-375-light-expanded.json",
+        "result":  {
+                       "cardWidth":  298.34375,
+                       "pageWidth":  375,
+                       "pageScroll":  375,
+                       "overflowing":  [
+
+                                       ]
+                   }
+    }
+]

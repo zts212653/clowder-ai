@@ -1,6 +1,6 @@
 # Context receipt proposal: data and review boundaries
 
-This file supports the design proposal for Issue #1821 / PR #1823. It is not a change to the product renderer or an accepted design. All screenshot content must be synthetic.
+This file records the data boundaries for Issue #1821 / PR #1823. The concrete design direction was accepted in [the maintainer response](https://github.com/zts212653/clowder-ai/pull/1823#issuecomment-6690153941); implementation and product verification are in progress. All screenshot content must be synthetic.
 
 ## Default summary
 
@@ -32,4 +32,4 @@ Keep original commands, complete IDs, source references and raw diagnostic value
 - A card with no recorded receiver and no recorded handoff/source, without guessed facts or misleading zeroes.
 - Annotated screenshots in the message-flow context, with proposal status visible outside the component.
 
-The next gate is zts review of the concrete screenshots and proposal. Production UI implementation resumes only after the design is aligned. The existing PR remains Draft until the design and subsequent implementation gates are satisfied.
+The visual direction is aligned. The next gates are production-component evidence, substantive independent code review, current checks and formal approval. The existing PR remains Draft while implementation is being verified.
