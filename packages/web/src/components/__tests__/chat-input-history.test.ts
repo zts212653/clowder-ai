@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F080: Input history completion — ghost text + Tab accept + Ctrl+R search.
  */
@@ -20,7 +21,8 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
-vi.mock('@/hooks/useCoCreatorConfig', () => ({
+vi.mock('@/hooks/useCoCreatorConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useCoCreatorConfig')>()),
   useCoCreatorConfig: () => ({
     name: 'ME',
     aliases: [],
