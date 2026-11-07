@@ -11,9 +11,12 @@ const { cases, expectedFailures } = catalog;
 const catalogDigest = createHash('sha256').update(JSON.stringify(catalog)).digest('hex');
 const [command, directory, ...desktopFiles] = process.argv.slice(2);
 const { CANDIDATE_SOURCE_SHA: source, NIGHTLY_SUITE: suite, GITHUB_SHA: catalogRevision } = process.env;
+const blocker = process.env.NIGHTLY_RUN_BLOCKER || undefined;
 const fromActions = {
-  source,
-  packageVersion: process.env.CANDIDATE_VERSION,
+  source: blocker && !source ? null : source,
+  packageVersion: process.env.CANDIDATE_VERSION || undefined,
+  branch: process.env.NIGHTLY_BRANCH,
+  blocker,
   catalogRevision,
   catalogDigest,
   date: process.env.NIGHTLY_DATE,
@@ -118,26 +121,28 @@ if (command === 'collect') {
     JSON.stringify({ source, catalogRevision, runId: run.runId, attempt: run.attempt, platform, receipts }, null, 2),
   );
 } else if (command === 'report' || command === 'reconcile') {
-  let receipts = baseReport
-    ? baseReport.cases.map(({ id, platform, rawStatus, code, evidence }) => ({
-        id,
-        platform,
-        status: rawStatus,
-        code,
-        evidence,
-      }))
-    : run.platforms.flatMap((platform) => {
-        const bundle = readJson(path.join(directory, artifact(platform), 'receipts.json'));
-        if (!bundle) return [];
-        assert.equal(bundle.runId, run.runId);
-        assert.equal(bundle.attempt, run.attempt);
-        assert.equal(bundle.source, run.source);
-        assert.equal(bundle.catalogRevision, run.catalogRevision);
-        assert.equal(bundle.platform, platform);
-        assert.ok(bundle.receipts.every((receipt) => receipt.platform === platform));
-        return bundle.receipts;
-      });
-  if (command === 'reconcile') {
+  let receipts = run.blocker
+    ? []
+    : baseReport
+      ? baseReport.cases.map(({ id, platform, rawStatus, code, evidence }) => ({
+          id,
+          platform,
+          status: rawStatus,
+          code,
+          evidence,
+        }))
+      : run.platforms.flatMap((platform) => {
+          const bundle = readJson(path.join(directory, artifact(platform), 'receipts.json'));
+          if (!bundle) return [];
+          assert.equal(bundle.runId, run.runId);
+          assert.equal(bundle.attempt, run.attempt);
+          assert.equal(bundle.source, run.source);
+          assert.equal(bundle.catalogRevision, run.catalogRevision);
+          assert.equal(bundle.platform, platform);
+          assert.ok(bundle.receipts.every((receipt) => receipt.platform === platform));
+          return bundle.receipts;
+        });
+  if (command === 'reconcile' && !run.blocker) {
     const until = desktopFiles[0] === '--until';
     const deadline = until ? Date.parse(desktopFiles[1]) : undefined;
     if (until) {

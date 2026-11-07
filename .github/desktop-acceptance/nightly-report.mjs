@@ -32,7 +32,8 @@ export function selectCases(catalog, suite, selectedPlatforms) {
 }
 
 export function buildReport(catalog, run, receipts, exceptions = []) {
-  assert.match(run.source, /^[a-f0-9]{40}$/);
+  if (run.source !== null || !run.blocker) assert.match(run.source, /^[a-f0-9]{40}$/);
+  if (run.blocker) assert.equal(receipts.length, 0, 'Cannot attach execution receipts before a candidate is available');
   assert.match(run.catalogRevision, /^[a-f0-9]{40}$/);
   assert.match(run.date, day);
   const selected = selectCases(catalog, run.suite, run.platforms);
@@ -49,7 +50,7 @@ export function buildReport(catalog, run, receipts, exceptions = []) {
   }
 
   const cases = selected.map((entry) => {
-    const receipt = byCase.get(caseKey(entry)) ?? { status: 'blocked', code: 'missing-receipt' };
+    const receipt = byCase.get(caseKey(entry)) ?? { status: 'blocked', code: run.blocker ?? 'missing-receipt' };
     const known =
       receipt.status === 'failed' &&
       exceptions.find(
@@ -100,8 +101,9 @@ export function renderReport(report) {
 
   return [
     `# 桌面安装包验证 · ${report.date} · ${report.suite}`,
-    `结果 **${report.status}** · 待测提交 \`${report.source}\` · 用例版本 \`${report.catalogRevision}\``,
+    `结果 **${report.status}** · 待测提交 \`${report.source ?? '未解析'}\` · 用例版本 \`${report.catalogRevision}\``,
     report.runUrl ? `[运行与各平台证据](${report.runUrl})` : '',
+    ...(report.blocker ? ['## 运行阻塞', `\`${report.blocker}\`。检查同轮 Actions 的待测提交和包版本解析。`] : []),
     '## L0 新失败',
     table(report.cases.filter((entry) => entry.level === 'L0' && entry.status === 'failed')),
     '## L0 未完成',
