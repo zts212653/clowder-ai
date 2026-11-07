@@ -117,12 +117,14 @@ function AdmissionNotice({
   loadFailed,
   localSaveFailed,
   localSaveState,
+  canCancelSave,
+  preparingSend,
   onRetry,
   onRetrySave,
   onCancelSave,
 }: Pick<
   ReturnType<typeof useNewConversationAdmission>,
-  'phase' | 'loadFailed' | 'localSaveFailed' | 'localSaveState'
+  'phase' | 'loadFailed' | 'localSaveFailed' | 'localSaveState' | 'canCancelSave' | 'preparingSend'
 > & {
   onRetry: () => void;
   onRetrySave: () => void;
@@ -143,8 +145,16 @@ function AdmissionNotice({
       </div>
     );
   }
-  if (localSaveState !== 'idle') {
-    return <LocalDraftSaveNotice state={localSaveState} onRetry={onRetrySave} onCancel={onCancelSave} />;
+  if (localSaveState !== 'idle' || preparingSend) {
+    return (
+      <LocalDraftSaveNotice
+        state={localSaveState === 'idle' ? 'saving' : localSaveState}
+        canCancel={canCancelSave}
+        preparingSend={preparingSend}
+        onRetry={onRetrySave}
+        onCancel={onCancelSave}
+      />
+    );
   }
   return message ? (
     <p
@@ -345,6 +355,8 @@ export function NewConversationPage(props: NewConversationPageProps) {
           loadFailed={admission.loadFailed}
           localSaveFailed={admission.localSaveFailed}
           localSaveState={admission.localSaveState}
+          canCancelSave={admission.canCancelSave}
+          preparingSend={admission.preparingSend}
           onRetry={admission.retryLoad}
           onRetrySave={admission.retrySave}
           onCancelSave={admission.cancelSave}

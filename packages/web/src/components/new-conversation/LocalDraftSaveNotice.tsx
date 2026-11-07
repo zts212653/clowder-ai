@@ -4,10 +4,14 @@ import type { NewConversationAdmission } from './useNewConversationAdmission';
 
 export function LocalDraftSaveNotice({
   state,
+  canCancel,
+  preparingSend,
   onRetry,
   onCancel,
 }: {
   state: Exclude<NewConversationAdmission['localSaveState'], 'idle'>;
+  canCancel: boolean;
+  preparingSend: boolean;
   onRetry: () => void;
   onCancel: () => void;
 }) {
@@ -28,11 +32,12 @@ export function LocalDraftSaveNotice({
       <span>{message}</span>
       <button
         type="button"
-        className="shell-focusable rounded-lg px-2 py-1 font-medium"
+        className="shell-focusable rounded-lg px-2 py-1 font-medium disabled:cursor-default disabled:opacity-50"
+        disabled={saving && !canCancel}
         onClick={saving ? onCancel : onRetry}
         data-testid={saving ? 'new-conversation-cancel-save' : 'new-conversation-retry-save'}
       >
-        {saving ? copy.cancelSave : copy.retrySave}
+        {saving ? (preparingSend ? copy.cancelSendPreparation : copy.cancelSave) : copy.retrySave}
       </button>
     </div>
   );

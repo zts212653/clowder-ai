@@ -90,8 +90,14 @@ function Host() {
           return observedSend;
         }}
       />
-      {latest.localSaveState !== 'idle' && (
-        <LocalDraftSaveNotice state={latest.localSaveState} onCancel={latest.cancelSave} onRetry={latest.retrySave} />
+      {(latest.localSaveState !== 'idle' || latest.preparingSend) && (
+        <LocalDraftSaveNotice
+          state={latest.localSaveState === 'idle' ? 'saving' : latest.localSaveState}
+          canCancel={latest.canCancelSave}
+          preparingSend={latest.preparingSend}
+          onCancel={latest.cancelSave}
+          onRetry={latest.retrySave}
+        />
       )}
     </>
   ) : null;
@@ -185,6 +191,9 @@ it.each([
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
     await waitForAct(() => expect(readBytes).toHaveBeenCalledOnce());
     if (phase === 'writing') await waitForAct(() => expect(boundary.writes).toBe(1));
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]')?.disabled).toBe(
+      phase === 'writing',
+    );
     act(() => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
@@ -195,10 +204,13 @@ it.each([
     const cancel = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
     if (!cancel) throw new Error('Missing cancel action');
     expect(cancel.disabled).toBe(false);
+    expect(cancel.textContent).toBe('取消发送');
     if (cancelRequested) act(() => cancel.click());
     if (assertBeforeRelease) {
       // Neither gate is released: cancellation must settle the request now.
       await waitForAct(() => expect(result).toBe(false));
+      expect(latest.localSaveFailed).toBe(false);
+      expect(latest.phase).toBe('idle');
       expect(boundary.handleSend).not.toHaveBeenCalled();
       expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url === '/api/threads')).toBe(false);
       expect((await loadNewConversationIntent(owner))?.files.map((image) => image.name)).toEqual([`${phase}.png`]);

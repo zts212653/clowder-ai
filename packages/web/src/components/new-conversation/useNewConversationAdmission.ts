@@ -24,6 +24,7 @@ import {
 import { buildNewConversationCreateBody } from './new-conversation-create-request';
 import { freshIntent, type HydratedAdmissionState, hydrateAdmissionState } from './new-conversation-hydration';
 import {
+  canCancelNewConversationIntentSave,
   cancelNewConversationIntentSave,
   clearNewConversationIntent,
   getNewConversationIntentSaveState,
@@ -65,6 +66,8 @@ export interface NewConversationAdmission {
   loadFailed: boolean;
   localSaveFailed: boolean;
   localSaveState: ReturnType<typeof getNewConversationIntentSaveState>;
+  canCancelSave: boolean;
+  preparingSend: boolean;
   intent: PendingNewConversationIntent | null;
   phase: FirstMessageAdmissionPhase;
   uploadStatus: ReturnType<typeof useSendMessage>['uploadStatus'];
@@ -104,6 +107,8 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
   );
   const readSaveState = useCallback(() => getNewConversationIntentSaveState(currentOwner), [currentOwner]);
   const localSaveState = useSyncExternalStore(subscribeToSave, readSaveState, readSaveState);
+  const readCanCancelSave = useCallback(() => canCancelNewConversationIntentSave(currentOwner), [currentOwner]);
+  const canCancelLocalSave = useSyncExternalStore(subscribeToSave, readCanCancelSave, readCanCancelSave);
 
   useLayoutEffect(() => setCurrentThread(DRAFT_THREAD_ID), [setCurrentThread]);
 
@@ -261,7 +266,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     resetIntent: resetImportIntent,
   });
 
-  const { isAdmissionPending, send } = useNewConversationAdmissionSend({
+  const { isAdmissionPending, send, preparing, cancelPreparation } = useNewConversationAdmissionSend({
     intentRef,
     draftRef,
     saveSnapshot: save,
@@ -269,6 +274,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     submit: controller.send,
     setPhasePreparing: () => setPhase('creating'),
     setPrepareFailed: () => setPhase('create_failed'),
+    setPreparationCancelled: () => setPhase('idle'),
     setDraftRecovered: () => setPhase('draft_recovered'),
     setDraftRecoveryBlocked: () => setPhase('draft_recovery_blocked'),
     setLocalSaveFailed,
@@ -303,6 +309,8 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
     loadFailed,
     localSaveFailed: localSaveFailed || localSaveState === 'failed',
     localSaveState,
+    canCancelSave: preparing || canCancelLocalSave,
+    preparingSend: preparing,
     intent,
     phase,
     uploadStatus,
@@ -325,6 +333,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
       void retryNewConversationIntentSave(owner).catch(() => undefined);
     },
     cancelSave: () => {
+      cancelPreparation();
       const owner = ownerRef.current;
       if (owner) cancelNewConversationIntentSave(owner);
     },

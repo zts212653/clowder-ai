@@ -24,6 +24,15 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
     root: web,
     logLevel: 'silent',
     esbuild: { jsx: 'automatic' },
+    plugins: [
+      {
+        name: 'isolated-new-conversation-storage-boundary',
+        resolveId(source, importer) {
+          if (source === 'idb' && importer?.replaceAll('\\', '/').endsWith('/new-conversation-intent-store.ts'))
+            return boundary;
+        },
+      },
+    ],
     resolve: {
       alias: [
         { find: 'next/image', replacement: boundary },
@@ -270,6 +279,77 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
       otherOwnerCanSaveDuringStuckRead: true,
     };
     report.result = { imageRetained: true, caption: 'keep the caption' };
+
+    report.sendCancellation = [];
+    for (const phase of ['reading', 'queued', 'writing']) {
+      sessionOwner = `draft-cancel-${phase}`;
+      draft = null;
+      revision = 0;
+      await page.evaluate(() => sessionStorage.clear());
+      await page.reload();
+      await page.locator('textarea').waitFor();
+      await page.locator('textarea').fill(`retain cancelled ${phase}`);
+      await page.waitForFunction(() => !document.querySelector('[data-testid="new-conversation-save-state"]'));
+      await page.evaluate((stage) => {
+        if (stage === 'reading') {
+          const original = File.prototype.arrayBuffer;
+          File.prototype.arrayBuffer = function () {
+            if (this.name !== 'cancel-send.png') return original.call(this);
+            return new Promise((resolve) => {
+              window.draftReadRelease = () => original.call(this).then(resolve);
+            });
+          };
+        } else {
+          let release;
+          const promise = new Promise((resolve) => {
+            release = resolve;
+          });
+          window.draftWriteGate = { promise, release, started: 0 };
+        }
+      }, phase);
+      if (phase === 'queued') {
+        await page.evaluate((owner) => window.draftStorageProbe.startOlderSave(owner), sessionOwner);
+        await page.waitForFunction(() => window.draftWriteGate.started === 1);
+      }
+      await page
+        .locator('input[type="file"]')
+        .setInputFiles({ name: 'cancel-send.png', mimeType: 'image/png', buffer: fixtureImage });
+      await page.locator('img[alt="cancel-send.png"]').waitFor();
+      if (phase === 'writing') {
+        await page.waitForFunction(() => window.draftWriteGate.started === 1);
+        assert.equal(await page.getByTestId('new-conversation-cancel-save').isDisabled(), true);
+      }
+      if (phase === 'reading') await page.waitForFunction(() => Boolean(window.draftReadRelease));
+      await page.locator('textarea').press('Enter');
+      const cancel = page.getByTestId('new-conversation-cancel-save');
+      await page.waitForFunction(() =>
+        /取消发送|Cancel sending/.test(
+          document.querySelector('[data-testid="new-conversation-cancel-save"]')?.textContent,
+        ),
+      );
+      assert.equal(await cancel.isEnabled(), true);
+      await cancel.click();
+      // Do not release either boundary until the actual composer is unlocked.
+      await page.waitForFunction(
+        () => !document.querySelector('textarea').disabled && !document.querySelector('textarea').readOnly,
+      );
+      assert.equal(await page.locator('img[alt="cancel-send.png"]').count(), 1);
+      assert.equal(await page.locator('textarea').inputValue(), `retain cancelled ${phase}`);
+      assert.equal(await page.evaluate(() => window.draftSendCalls), 0);
+      await page.screenshot({ path: path.join(artifacts, `cancel-send-${phase}.png`), fullPage: true });
+      await page.evaluate(async (owner) => {
+        window.draftReadRelease?.();
+        window.draftWriteGate?.release();
+        await window.draftStorageProbe.olderSave;
+        await window.draftStorageProbe.clear(owner);
+      }, sessionOwner);
+      assert.equal(await page.evaluate(() => window.draftSendCalls), 0, 'Late storage completion must not send');
+      assert.equal(
+        report.requests.some((request) => request.method === 'POST' && request.path === '/api/threads'),
+        false,
+      );
+      report.sendCancellation.push({ phase, settledBeforeRelease: true, noLateSend: true });
+    }
 
     assert.equal(report.errors.length, 0, report.errors.join('\n'));
   } finally {

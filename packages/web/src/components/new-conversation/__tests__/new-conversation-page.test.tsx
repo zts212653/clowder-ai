@@ -145,6 +145,8 @@ function baseAdmission() {
     loadFailed: false,
     localSaveFailed: false,
     localSaveState: 'idle' as 'idle' | 'saving' | 'failed' | 'cancelled',
+    canCancelSave: true,
+    preparingSend: false,
     intent: {
       v: 1 as const,
       createIdempotencyKey: '11111111-1111-4111-8111-111111111111',
@@ -511,6 +513,34 @@ describe('F322 new conversation page', () => {
     expect(container.textContent).toContain('附件尚未完整找回');
     expect(container.textContent).toContain('明确移除后再发送');
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it.each([
+    {
+      preparingSend: false,
+      canCancelSave: false,
+      localSaveState: 'saving' as const,
+      label: '取消保存',
+      disabled: true,
+    },
+    { preparingSend: true, canCancelSave: true, localSaveState: 'idle' as const, label: '取消发送', disabled: false },
+  ])('exposes the real cancellation capability during preparation=$preparingSend', (state) => {
+    mocks.admission = { ...baseAdmission(), ...state };
+    act(() =>
+      root.render(
+        <NewConversationPage
+          sidebarOpen
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
+    expect(button?.textContent).toBe(state.label);
+    expect(button?.disabled).toBe(state.disabled);
   });
 
   it('translates the landing header actions with the rest of the English page', () => {

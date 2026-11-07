@@ -226,7 +226,7 @@ it('stops preparing the first send when its unfinished local save is cancelled',
     await waitForAct(() => expect(captured.current?.phase).toBe('creating'));
     act(() => admission.cancelSave());
     await waitForAct(() => expect(sendResult).toBe(false));
-    expect(captured.current?.phase).toBe('create_failed');
+    expect(captured.current?.phase).toBe('idle');
     expect(captured.current?.localSaveState).toBe('cancelled');
     expect(container.querySelector('img[alt="pending-send.png"]')).not.toBeNull();
     expect(

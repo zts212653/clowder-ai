@@ -1,7 +1,40 @@
+import { openDB as openRealDB } from 'idb';
+
+declare global {
+  interface Window {
+    draftWriteGate?: { promise: Promise<void>; release: () => void; started: number };
+    draftReadRelease?: () => void;
+    draftSendCalls: number;
+  }
+}
+
+// Only the new-conversation storage import uses this boundary. All database
+// operations still use Chromium IndexedDB after the explicit test gate opens.
+export async function openDB(...args: Parameters<typeof openRealDB>) {
+  const database = await openRealDB(...args);
+  return new Proxy(database, {
+    get(target, property) {
+      if (property === 'put') {
+        return async (...values: Parameters<typeof database.put>) => {
+          const gate = window.draftWriteGate;
+          if (gate) {
+            gate.started += 1;
+            await gate.promise;
+          }
+          return database.put(...values);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 export function useSendMessage() {
   return {
     handleSend: async () => {
-      throw new Error('This navigation probe never sends messages');
+      window.draftSendCalls += 1;
+      return true;
     },
     uploadStatus: 'idle',
     uploadError: null,

@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NewConversationPage } from '@/components/new-conversation/NewConversationPage';
+import {
+  clearNewConversationIntent,
+  loadNewConversationIntent,
+  saveNewConversationIntent,
+} from '@/components/new-conversation/new-conversation-intent-store';
 import { ConfirmProvider } from '@/components/useConfirm';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
@@ -14,6 +19,23 @@ import '@/app/console-controls.css';
 import '@/app/shell-v2.css';
 
 const ignore = () => {};
+const draftStorageProbe = {
+  olderSave: Promise.resolve(),
+  async startOlderSave(owner: string) {
+    const value = await loadNewConversationIntent(owner);
+    if (!value) throw new Error('Missing initial intent');
+    this.olderSave = saveNewConversationIntent(value);
+    void this.olderSave.catch(() => undefined);
+  },
+  clear: clearNewConversationIntent,
+};
+declare global {
+  interface Window {
+    draftStorageProbe: typeof draftStorageProbe;
+  }
+}
+window.draftStorageProbe = draftStorageProbe;
+window.draftSendCalls = 0;
 function Probe() {
   const [landing, setLanding] = useState(true);
   return (
