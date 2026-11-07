@@ -27,6 +27,7 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
     plugins: [
       {
         name: 'isolated-new-conversation-storage-boundary',
+        enforce: 'pre',
         resolveId(source, importer) {
           if (source === 'idb' && importer?.replaceAll('\\', '/').endsWith('/new-conversation-intent-store.ts'))
             return boundary;
@@ -123,6 +124,7 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
         return json(response.body, response.status);
       }
       if (url.pathname === '/api/routing/preview') return json({ targetCats: [], reason: { kind: 'recent_replier' } });
+      if (url.pathname === '/api/diagnostics/connection') return json({ ok: true });
       if (method !== 'GET' && method !== 'OPTIONS') {
         report.errors.push(`Unexpected mutation ${method} ${url.pathname}`);
         return json({ error: 'Unexpected mutation' }, 500);
