@@ -89,6 +89,7 @@ import {
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
+import { acknowledgeThreadHistoryWatermark } from './thread-history-watermark';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -1474,6 +1475,7 @@ export function useChatHistory(threadId: string) {
           // 响应覆盖而不是合并。
           hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          if (!cursor) acknowledgeThreadHistoryWatermark(fetchForThread, data.historyWatermark);
           return true;
         }
         // An older page joins the loaded records by id; a record already loaded is newer.
@@ -1495,6 +1497,7 @@ export function useChatHistory(threadId: string) {
         if (snapshotState.currentThreadId === fetchForThread) {
           void saveMessagesSnapshot(fetchForThread, snapshotState.messages, data.hasMore ?? false).catch(() => {});
         }
+        if (!cursor) acknowledgeThreadHistoryWatermark(fetchForThread, data.historyWatermark);
         return true;
       } catch (err) {
         // AbortError is expected during thread switch — ignore silently

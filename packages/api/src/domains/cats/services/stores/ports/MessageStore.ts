@@ -80,6 +80,7 @@ import { notifyMessageTimelineChange } from '../notify-message-timeline-change.j
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
   isTimelinePublished as isTimelinePublishedFn,
@@ -2380,7 +2381,7 @@ export interface IMessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       /** Bind human read-state evidence to viewer-scoped managed-hold publication. */
       readonly viewerUserId?: string;
     },
@@ -3530,7 +3531,7 @@ export class MessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): { cursor: string; messageId: string } | null {
@@ -3542,7 +3543,11 @@ export class MessageStore {
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
       const eligible =
-        options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublishedFn(msg);
+        options?.evidence === 'browser_timeline'
+          ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
+          : options?.evidence === 'durable_owner_read'
+            ? isDurableOwnerReadEvidence(msg)
+            : isTimelinePublishedFn(msg);
       if (!eligible) continue;
       if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
       // #1200 codex P1: skip tombstones — same contract as Redis impl.
