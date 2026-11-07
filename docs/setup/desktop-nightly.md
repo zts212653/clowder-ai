@@ -21,6 +21,8 @@ created: 2026-11-07
 
 第二次复盘从 `12514727` 扫到 `3569a9b6`，纳入 [#1811](https://github.com/zts212653/clowder-ai/issues/1811) 的认证边界修复。真实客户端续聊无法发现普通诊断的认证副作用，新增全量 L2 `DESKTOP-NATIVE-AUTH-DIAGNOSTIC`，从已安装 API 解析 Kimi、OpenCode 和 DSH 的生产准入入口。用现有夹具提交惰性载荷，检查拒绝变更和允许查询。真实 OAuth、取消和超时清理仍是母单中的独立授权验收。见 [合入证据](https://github.com/zts212653/clowder-ai/pull/1822)。
 
+第三次复盘从 `3569a9b6` 扫到 `cf49dacc`，纳入 [#1907](https://github.com/zts212653/clowder-ai/pull/1907) 的可见 Works 分页变更。安装首启和持久化回读无法发现目录自动读尽、首页入口另起 reader 或部分结果失去继续入口的问题。新增全量 L1 `DESKTOP-WORKS-PAGINATION`，在实际安装版核对首批请求、已读作品展开、主动续页、零命中、隐藏恢复和首页两入口。该场景需要专用测试目录和桌面证据，缺少前置条件时保留阻塞。源码层的浏览器与实际路由证据见 [维护者合入的验证记录](../evidence/issue1864-visible-pagination/README.md)。
+
 ## 触发和证据
 
 [Desktop Nightly](../../.github/workflows/desktop-nightly.yml) 进默认分支后，每天北京时间 00:00 选 `next` 跑双平台冒烟。手动入口可选源分支、平台和测试范围。触发端提交和被测源码提交分别保存。构建与下载按同一 run ID 和 attempt 配对。需要重跑时使用新的手动运行或重跑整个 workflow，避免混用部分重跑前的产物。
