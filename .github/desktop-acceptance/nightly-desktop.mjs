@@ -85,8 +85,10 @@ export async function prepareDesktop(repository, runId, platform, directory, gh 
   assert.ok(report.platforms.includes(platform), 'Platform was not requested by the candidate run');
   assertInstallerIdentity(report.cases, platform);
   const windows = platform === 'windows-x64';
-  const cases = report.cases.filter((entry) => entry.platform === platform && entry.executor === 'computer-use');
-  assert.ok(cases.length, 'The selected suite has no Computer Use cases on this platform');
+  const cases = report.cases.filter(
+    (entry) => entry.platform === platform && ['computer-use', 'manual'].includes(entry.executor),
+  );
+  assert.ok(cases.length, 'The selected suite has no interactive cases on this platform');
 
   const evidenceName = `desktop-evidence-${platform}`;
   const evidenceDirectory = path.join(root, `${evidenceName}-attempt-${attempt}`);

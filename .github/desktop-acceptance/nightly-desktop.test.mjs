@@ -129,6 +129,21 @@ test('desktop preparation stages the same attempt and rejects different installe
     ready.cases.map(({ id }) => id),
     ['DESKTOP-ONBOARDING'],
   );
+  const full = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'full'),
+    gh('candidate bytes', true, [
+      { id: 'DESKTOP-WORKS-PAGINATION', platform, executor: 'manual' },
+      { id: 'WIN-CLEAN-INSTALL', platform, executor: 'windows-installer' },
+      { id: 'DESKTOP-UPGRADE', platform: 'macos-arm64', executor: 'manual' },
+    ]),
+  );
+  assert.deepEqual(
+    full.cases.map(({ id }) => id),
+    ['DESKTOP-ONBOARDING', 'DESKTOP-WORKS-PAGINATION'],
+  );
   await assert.rejects(
     prepareDesktop(repo, '123', platform, path.join(root, 'wrong'), gh('other bytes')),
     /Candidate package hash mismatch/,
