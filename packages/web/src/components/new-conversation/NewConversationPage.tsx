@@ -176,6 +176,7 @@ export function NewConversationPage(props: NewConversationPageProps) {
   const copy = useShellCopy(newConversationCopy);
   const { cats } = useCatData();
   const [discussionNotice, setDiscussionNotice] = useState<string | null>(null);
+  const [projectSelectionBlocked, setProjectSelectionBlocked] = useState(false);
   const floating = useArtifactLightbox('default');
   const floatingScope = useArtworkLightboxScope();
   const admission = useNewConversationAdmission(props.onNavigate);
@@ -222,6 +223,11 @@ export function NewConversationPage(props: NewConversationPageProps) {
     }
   };
   const busy = admission.phase === 'creating' || admission.phase === 'sending';
+  const updateProject = admission.updateProject;
+  const handleProjectRestricted = useCallback(() => {
+    setProjectSelectionBlocked(true);
+    updateProject(undefined);
+  }, [updateProject]);
   const titleBreak = copy.heroTitle.indexOf('，');
 
   return (
@@ -274,6 +280,7 @@ export function NewConversationPage(props: NewConversationPageProps) {
               presentation="v2"
               threadId="default"
               disabled={busy}
+              sendBlocked={projectSelectionBlocked}
               uploadStatus={admission.uploadStatus}
               uploadError={admission.uploadError}
               placeholder={copy.composerPlaceholder}
@@ -305,7 +312,12 @@ export function NewConversationPage(props: NewConversationPageProps) {
                   existingProjects={existingProjects}
                   locked={admission.optionsLocked}
                   pinned={admission.intent.pinned ?? false}
-                  onProjectChange={admission.updateProject}
+                  onProjectChange={(projectPath) => {
+                    setProjectSelectionBlocked(false);
+                    updateProject(projectPath);
+                  }}
+                  onProjectRestricted={handleProjectRestricted}
+                  projectSelectionBlocked={projectSelectionBlocked}
                   onPinnedChange={admission.updatePinned}
                 />
               }
@@ -320,6 +332,11 @@ export function NewConversationPage(props: NewConversationPageProps) {
                 })
               }
             />
+            {projectSelectionBlocked && (
+              <p role="status" className="mt-2 text-sm text-cafe-secondary">
+                {copy.projectSelectionRequired}
+              </p>
+            )}
           </ThreadComposerHost>
         ) : (
           <div
