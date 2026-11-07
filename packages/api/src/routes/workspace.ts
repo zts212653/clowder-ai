@@ -551,11 +551,28 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
 
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      let root: string;
+      try {
+        root = await getWorktreeRoot(worktreeId);
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code)
+            : '';
+        if (code === 'ENOENT' || code === '128') {
+          reply.status(503);
+          return { error: 'Git is unavailable', code: 'git_unavailable' };
+        }
+        throw error;
+      }
       const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };

@@ -222,6 +222,27 @@ async function detectRuntimeDrift(repoRoot: string): Promise<RuntimeDrift | null
 
 // ── Routes ──────────────────────────────────────────────────────────
 
+function isGitCommandFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = String((error as { code?: unknown }).code);
+  return code === 'ENOENT' || code === '128';
+}
+
+async function resolveGitRoot(
+  worktreeId: string,
+  reply: { status: (code: number) => unknown },
+): Promise<string | null> {
+  try {
+    return await getWorktreeRoot(worktreeId);
+  } catch (error) {
+    if (isGitCommandFailure(error)) {
+      reply.status(503);
+      return null;
+    }
+    throw error;
+  }
+}
+
 export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/workspace/git-log
   app.get<{
@@ -233,7 +254,8 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
       const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
@@ -271,11 +293,16 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
       const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return {
@@ -347,11 +374,16 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'worktreeId required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
+      const root = await resolveGitRoot(worktreeId, reply);
+      if (!root) return { error: 'Git is unavailable', code: 'git_unavailable' };
       const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return { isGitRepository: false, staleBranches: [], worktrees: [], runtimeDrift: null };

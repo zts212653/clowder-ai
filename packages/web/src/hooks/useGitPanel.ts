@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { apiFetch } from '../utils/api-client';
+import { readGitErrorCode } from '../utils/git-response-error';
 
 export interface GitCommit {
   hash: string;
@@ -65,7 +66,7 @@ export function useGitPanel() {
       setError(null);
       try {
         const res = await apiFetch(`/api/workspace/git-log?worktreeId=${encodeURIComponent(target)}&limit=${limit}`);
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) throw new Error(await readGitErrorCode(res));
         const data = await res.json();
         if (ownsRead(request, logEpoch, target)) setCommitsSnap({ worktreeId: target, value: data.commits });
       } catch (e) {
@@ -110,7 +111,7 @@ export function useGitPanel() {
       setDetailSnap(null);
       try {
         const res = await apiFetch(`/api/workspace/git-show?worktreeId=${encodeURIComponent(target)}&hash=${hash}`);
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) throw new Error(await readGitErrorCode(res));
         const json = await res.json();
         if (ownsRead(request, detailEpoch, target)) setDetailSnap({ worktreeId: target, value: json });
       } catch (e) {
