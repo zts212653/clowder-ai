@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
+import { registerComposerDraftFlusher } from '@/components/composer-draft-flush-registry';
 import { LocalDraftSaveNotice } from '@/components/new-conversation/LocalDraftSaveNotice';
 import {
   _resetNewConversationIntentDbForTests,
@@ -77,19 +78,21 @@ const navigate = vi.fn();
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
 
-function Host() {
+function Host({ withComposer = true }: { withComposer?: boolean }) {
   latest = useNewConversationAdmission(navigate);
   return latest.ready ? (
     <>
-      <ChatInput
-        threadId="default"
-        presentation="v2"
-        onDraftChange={latest.onDraftChange}
-        onSend={(content, images) => {
-          observedSend = latest.send({ content, images });
-          return observedSend;
-        }}
-      />
+      {withComposer && (
+        <ChatInput
+          threadId="default"
+          presentation="v2"
+          onDraftChange={latest.onDraftChange}
+          onSend={(content, images) => {
+            observedSend = latest.send({ content, images });
+            return observedSend;
+          }}
+        />
+      )}
       {(latest.localSaveState !== 'idle' || latest.preparingSend) && (
         <LocalDraftSaveNotice
           state={latest.localSaveState === 'idle' ? 'saving' : latest.localSaveState}
@@ -235,4 +238,54 @@ it.each([
   expect(boundary.handleSend).toHaveBeenCalledTimes(cancelRequested ? 0 : 1);
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url === '/api/threads')).toBe(!cancelRequested);
   expect(navigate).toHaveBeenCalledTimes(cancelRequested ? 0 : 1);
+});
+
+it('does not mark a cancelled persistIntent as a local save failure', async () => {
+  act(() => root.render(<Host withComposer={false} />));
+  const unregister = registerComposerDraftFlusher('default', async () => ({
+    persisted: true,
+    revision: 1,
+    snapshot: { text: 'cancel before creation', contextAttachments: [] },
+  }));
+  const file = new File(['image'], 'persist-cancel.png', { type: 'image/png' });
+  const bytes = new TextEncoder().encode('image').buffer;
+  const gate = Promise.withResolvers<ArrayBuffer>();
+  const readBytes = vi
+    .fn()
+    .mockResolvedValueOnce(bytes)
+    .mockResolvedValueOnce(bytes)
+    .mockImplementation(() => gate.promise);
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  act(() => {
+    latest.onDraftChange({ text: 'cancel before creation', files: [file], contextAttachments: [] });
+  });
+  await waitForAct(() => {
+    expect(readBytes).toHaveBeenCalledOnce();
+    expect(latest.localSaveState).toBe('idle');
+  });
+  let sending = Promise.resolve(true);
+  let result: boolean | undefined;
+  try {
+    act(() => {
+      sending = latest.send({ content: 'cancel before creation', images: [file] });
+    });
+    void sending.then((value) => (result = value));
+    // Autosave and the preflight save finished. The third read is the real
+    // persistIntent wrapper storing the composer admission ticket.
+    await waitForAct(() => expect(readBytes).toHaveBeenCalledTimes(3));
+    const cancel = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
+    if (!cancel) throw new Error('Missing cancellation action');
+    act(() => cancel.click());
+    await waitForAct(() => expect(result).toBe(false));
+    await waitForAct(() => expect(latest.localSaveFailed).toBe(false));
+    expect(latest.phase).toBe('idle');
+  } finally {
+    unregister();
+    await act(async () => {
+      gate.resolve(bytes);
+      await sending;
+    });
+  }
+  expect(boundary.handleSend).not.toHaveBeenCalled();
+  expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url === '/api/threads')).toBe(false);
 });
