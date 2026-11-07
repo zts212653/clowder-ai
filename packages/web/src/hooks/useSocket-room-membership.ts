@@ -11,6 +11,17 @@ const ROOM_JOIN_MAX_RETRIES = 5;
 
 type ValueRef<T> = { current: T };
 
+/** What a confirmed join tells the page beyond "room events reach you from now on". */
+export interface RoomConfirmation {
+  /** PR-3a2: the join the server sent this room's stream replay under (absent from older servers). */
+  joinId?: string;
+  /**
+   * PR-3a2: the first confirmation since the page started wanting this room — a return to the
+   * thread or the page's first join. A reconnect while the room stays wanted is not.
+   */
+  firstInNeededPeriod: boolean;
+}
+
 /**
  * Converges desired Socket.IO room membership on server-confirmed membership.
  * Desired rooms outlive a connection; confirmation, in-flight work, and timers do not.
@@ -22,7 +33,7 @@ export function useRoomMembershipReconciler(
    * Called each time the server acknowledges a join in the current connection: the instant from
    * which room events reach this page. Whatever happened before it is only in History.
    */
-  onRoomConfirmed?: (room: string) => void,
+  onRoomConfirmed?: (room: string, confirmation: RoomConfirmation) => void,
 ) {
   const onRoomConfirmedRef = useRef(onRoomConfirmed);
   onRoomConfirmedRef.current = onRoomConfirmed;
@@ -32,6 +43,16 @@ export function useRoomMembershipReconciler(
   const roomJoinRetryCountRef = useRef<Map<string, number>>(new Map());
   const roomJoinAttemptedRef = useRef<Set<string>>(new Set());
   const roomMembershipEpochRef = useRef(0);
+  /** Rooms confirmed at least once since the page last gave them up; reconnects keep this. */
+  const confirmedInNeededPeriodRef = useRef<Set<string>>(new Set());
+  /**
+   * The latest join request of each room. Leaving the room retires the request in flight, so its
+   * acknowledgement or timeout can neither confirm a later period nor touch the next request's state.
+   */
+  const roomJoinRequestRef = useRef<Map<string, number>>(new Map());
+  const retireRoomJoinRequest = useCallback((room: string) => {
+    roomJoinRequestRef.current.set(room, (roomJoinRequestRef.current.get(room) ?? 0) + 1);
+  }, []);
   const requestRoomJoinRef = useRef<(room: string) => void>(() => {});
 
   const clearRoomJoinTimer = useCallback((room: string) => {
@@ -56,14 +77,16 @@ export function useRoomMembershipReconciler(
 
   const forgetRoom = useCallback(
     (room: string) => {
+      retireRoomJoinRequest(room);
       desiredRoomsRef.current.delete(room);
       clearRoomJoinTimer(room);
       roomJoinInflightRef.current.delete(room);
       roomJoinRetryCountRef.current.delete(room);
       roomJoinAttemptedRef.current.delete(room);
       confirmedRoomsRef.current.delete(room);
+      confirmedInNeededPeriodRef.current.delete(room);
     },
-    [clearRoomJoinTimer, desiredRoomsRef],
+    [clearRoomJoinTimer, desiredRoomsRef, retireRoomJoinRequest],
   );
 
   const scheduleRoomJoinRetry = useCallback(
@@ -97,6 +120,9 @@ export function useRoomMembershipReconciler(
       }
 
       const epoch = roomMembershipEpochRef.current;
+      retireRoomJoinRequest(room);
+      const request = roomJoinRequestRef.current.get(room);
+      const isCurrentRequest = () => roomJoinRequestRef.current.get(room) === request;
       roomJoinAttemptedRef.current.add(room);
       roomJoinInflightRef.current.add(room);
       let settled = false;
@@ -108,7 +134,7 @@ export function useRoomMembershipReconciler(
       };
 
       const acknowledgementTimer = setTimeout(() => {
-        if (settled) return;
+        if (settled || !isCurrentRequest()) return;
         settled = true;
         roomJoinTimerRef.current.delete(room);
         retryUnlessStale();
@@ -116,7 +142,7 @@ export function useRoomMembershipReconciler(
       roomJoinTimerRef.current.set(room, acknowledgementTimer);
 
       socket.emit('join_room', room, (ack: RoomJoinAck) => {
-        if (settled) return;
+        if (settled || !isCurrentRequest()) return;
         settled = true;
         clearRoomJoinTimer(room);
         roomJoinInflightRef.current.delete(room);
@@ -124,7 +150,12 @@ export function useRoomMembershipReconciler(
         if (ack?.ok === true && ack.room === room) {
           roomJoinRetryCountRef.current.delete(room);
           confirmedRoomsRef.current.add(room);
-          onRoomConfirmedRef.current?.(room);
+          const firstInNeededPeriod = !confirmedInNeededPeriodRef.current.has(room);
+          confirmedInNeededPeriodRef.current.add(room);
+          onRoomConfirmedRef.current?.(room, {
+            ...(typeof ack.joinId === 'string' ? { joinId: ack.joinId } : {}),
+            firstInNeededPeriod,
+          });
           return;
         }
         // Permanent server rejections cannot heal on a timer. Keep the room
@@ -134,7 +165,7 @@ export function useRoomMembershipReconciler(
         scheduleRoomJoinRetry(room);
       });
     },
-    [clearRoomJoinTimer, desiredRoomsRef, scheduleRoomJoinRetry, socketRef],
+    [clearRoomJoinTimer, desiredRoomsRef, retireRoomJoinRequest, scheduleRoomJoinRetry, socketRef],
   );
   requestRoomJoinRef.current = requestRoomJoin;
 

@@ -441,6 +441,11 @@ services:
           description: 本地轻量高质量语音合成（MLX，推荐）
           requirements: { ramGb: 2, diskGb: 0.5 }
           performance: 实时 5x+
+        - name: mlx-community/Breeze-TTS-2-mlx
+          size: ~7.6GB
+          description: 中文参考声线克隆与语气控制；权重及自托管输出限研究和非商业使用
+          requirements: { ramGb: 16, diskGb: 10 }
+          performance: 实际声线与语气效果请先试听
       customModelHint:
         requirement: 'mlx-community 命名空间下的 TTS MLX 量化模型（本地、离线、Apple Silicon GPU 加速）'
         example: 'mlx-community/Kokoro-82M、mlx-community/StyleTTS2'
@@ -456,6 +461,9 @@ services:
             mlx-community/Kokoro-82M-bf16:
               description: Lightweight, high-quality local speech synthesis (MLX, recommended)
               performance: 5x+ real-time speed
+            mlx-community/Breeze-TTS-2-mlx:
+              description: Chinese voice cloning and delivery control; weights and self-hosted outputs for research and non-commercial use
+              performance: Audition voice identity and expression before selecting
           customModelHint:
             requirement: MLX-quantized TTS models in the mlx-community namespace (local,
               offline, Apple Silicon GPU acceleration)

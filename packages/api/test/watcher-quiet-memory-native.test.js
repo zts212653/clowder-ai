@@ -15,7 +15,7 @@ import { nativeWatcherAvailable, watcherNativeFixture } from './helpers/watcher-
 import { watcherWorld } from './helpers/watcher-world.js';
 
 test(
-  'a quiet native watcher writes and reads the original matter lane and submits profile/taste approval proposals',
+  'a quiet native watcher uses code mode to write/read matters and submit profile/taste approval proposals',
   { timeout: 45000, skip: !nativeWatcherAvailable },
   async () => {
     const w = await watcherWorld();
@@ -26,6 +26,7 @@ test(
       ? (await import(process.env.F335_WATCHER_REVIEW_RED_MODULE)).runWatcherInvocation
       : undefined;
     const f = await watcherNativeFixture(w, {
+      model: 'gpt-6.1-sol',
       ...(old ? { invoke: old } : {}),
       async configure({ app, root }) {
         evidence = new SqliteEvidenceStore(join(root, 'original-memory.sqlite'));
@@ -73,6 +74,7 @@ test(
       });
       const [source] = await w.work('RAW_INCREMENT_12', { currentUserMessageId: original.id });
       f.state.quiet = true;
+      f.state.codeMode = true;
       f.state.toolPlan = [
         {
           name: 'cat_cafe_write_memory_matter',
@@ -130,7 +132,7 @@ test(
       assert.equal(f.enqueues.length, 0);
       const toolResults = f.requests
         .at(-1)
-        .body.input.filter((item) => item.type === 'function_call_output')
+        .body.input.filter((item) => item.type === 'custom_tool_call_output')
         .map((item) => String(item.output).slice(0, 600));
       assert.equal(
         (await profile.listPending('watcher-owner')).length,

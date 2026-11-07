@@ -52,12 +52,14 @@ function openChangesSurface(surface: WorkspaceSurfaceDescriptor, threadId: strin
 }
 export function ChatReference({
   reference,
+  sourceText,
   format = 'text',
   layout: requestedLayout = 'inline',
   children,
   threadId,
 }: {
   reference: string;
+  sourceText?: string;
   format?: string;
   layout?: string;
   children: ReactNode;
@@ -162,6 +164,7 @@ export function ChatReference({
           type="button"
           aria-label={`${filename} · ${t.missing}`}
           data-chat-reference-kind="missing"
+          data-quote-source-text={sourceText}
           className={`shell-focusable ${styles.reference} ${styles.chip} ${styles.missing}`}
         >
           <ChatMissingFileIcon />
@@ -174,6 +177,7 @@ export function ChatReference({
     return (
       <ChatFileReferenceView
         target={target}
+        sourceText={sourceText}
         layout={layout}
         anchor={ref}
         onOpen={() => open(target)}
@@ -183,7 +187,15 @@ export function ChatReference({
     );
   if (target?.kind === 'github' || github) {
     const object: ChatGitHubReference = target?.kind === 'github' ? target : { kind: 'github', ...github! };
-    return <ChatGitHubReferenceView target={object} layout={layout} anchor={ref} onOpen={() => open(object)} />;
+    return (
+      <ChatGitHubReferenceView
+        target={object}
+        sourceText={sourceText}
+        layout={layout}
+        anchor={ref}
+        onOpen={() => open(object)}
+      />
+    );
   }
   if (target?.kind === 'commit')
     return (
@@ -201,9 +213,15 @@ export function ChatReference({
                 <path d="M1 8h4.4M10.6 8H15" />
               </svg>
             </span>
-            <span className={styles.mono}>{reference}</span>
+            <span data-quote-source-text={sourceText} className={styles.mono}>
+              {reference}
+            </span>
           </button>
-          {error ? <span role="alert">{error}</span> : null}
+          {error ? (
+            <span role="alert" data-quote-exclude>
+              {error}
+            </span>
+          ) : null}
         </span>
       </AppTooltip>
     );
@@ -213,6 +231,7 @@ export function ChatReference({
         <a
           aria-label={`${external.hostname} · ${external.href}`}
           data-chat-reference-kind="website"
+          data-quote-source-text={sourceText}
           href={external.href}
           target="_blank"
           rel="noopener noreferrer"

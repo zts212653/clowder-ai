@@ -5,7 +5,6 @@ type SearchPhase =
   | 'source-admission'
   | 'retrieval'
   | 'canonical-projection'
-  | 'qualification'
   | 'decision-sources'
   | 'final-revalidation';
 

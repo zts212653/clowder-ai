@@ -24,6 +24,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { findLatestMessageByTimeline } from '@/stores/message-timeline';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { beginThreadRecovery } from '@/stores/thread-recovery';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, refreshApiSession } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
@@ -42,6 +43,7 @@ export { reconcileThreadWithServer } from './queue-reconciliation';
 import { useSuggestionStore } from '../components/suggestions/suggestion-store';
 import { lifecycleCommitOf, observeLifecycleSnapshot } from './agent-messages/lifecycle-terminal';
 import { isThreadMessageAppendedHint, observeThreadMessageAppended } from './agent-messages/thread-message-appended';
+import { isRunningResponse } from './response-stream-replay';
 import { refreshActiveExecutionProjection } from './useActiveExecutionProjection';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
@@ -50,8 +52,8 @@ import { useHubSocketOutlet } from './useSocket-hub';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
 import { type AgentMessageCoalescer, createAgentMessageCoalescer } from './useSocket-message-coalescer';
-import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
-import { useRoomMembershipReconciler } from './useSocket-room-membership';
+import { type RoomConfirmation, useRoomMembershipReconciler } from './useSocket-room-membership';
+import { createStreamReplayRelay, dispatchAgentQueueItem } from './useSocket-stream-replay';
 import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
 function refreshActiveExecutionForThread(threadId: string): void {
@@ -290,16 +292,6 @@ function checkForStaleActiveInvocations(): void {
 const THREAD_ROOM_PREFIX = 'thread:';
 
 /**
- * PR-3a contract 3.2: whatever a thread room broadcast before this page's join was confirmed is only
- * in History, so every confirmed join is followed by one History read issued after it, cached
- * thread or not. The catch-up read joins no GET already in flight (`afterCurrentGet`).
- */
-function requestCatchUpForConfirmedThreadRoom(room: string): void {
-  if (!room.startsWith(THREAD_ROOM_PREFIX)) return;
-  useChatStore.getState().requestStreamCatchUp(room.slice(THREAD_ROOM_PREFIX.length));
-}
-
-/**
  * PR-3a contract 3.3: after leaving, the room's sequence restarts from this page's point of view.
  * A stale watermark would turn the first event after a rejoin into a gap and request a second
  * catch-up beside the one the confirmed join already requests.
@@ -349,13 +341,33 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   // never goes stale. One coalescer per socket mount — reset only when the component unmounts.
   const agentMessageCoalescerRef = useRef<AgentMessageCoalescer | null>(null);
   if (agentMessageCoalescerRef.current === null) {
-    agentMessageCoalescerRef.current = createAgentMessageCoalescer((msg) =>
-      callbacksRef.current.onMessage(msg as AgentMessage),
+    agentMessageCoalescerRef.current = createAgentMessageCoalescer((item) =>
+      dispatchAgentQueueItem<AgentMessage>(item, (msg) => callbacksRef.current.onMessage(msg)),
     );
   }
 
-  const persistJoinedRooms = useCallback(() => {
-    saveJoinedRoomsToSession(userIdRef.current, joinedRoomsRef.current);
+  // PR-3a2: a thread room's stream replay joins the agent-message queue together with the join
+  // confirmation it was sent under. PR-3a contract 3.2 still holds: whatever the room broadcast before
+  // the confirmation is only in History, so every confirmed join is followed by one History read
+  // issued after it, cached thread or not (`afterCurrentGet`: it joins no GET already in flight).
+  const streamReplayRelayRef = useRef<ReturnType<typeof createStreamReplayRelay> | null>(null);
+  if (streamReplayRelayRef.current === null) {
+    streamReplayRelayRef.current = createStreamReplayRelay({
+      runningResponses: (roomThreadId) =>
+        new Set(
+          useChatStore
+            .getState()
+            .getThreadState(roomThreadId)
+            .messages.filter(isRunningResponse)
+            .map((message) => message.id),
+        ),
+      enqueue: (item) => agentMessageCoalescerRef.current?.push(item),
+      beginRecovery: (roomThreadId) => beginThreadRecovery(roomThreadId),
+      requestCatchUp: (roomThreadId) => useChatStore.getState().requestStreamCatchUp(roomThreadId),
+    });
+  }
+  const confirmRoom = useCallback((room: string, confirmation: RoomConfirmation) => {
+    streamReplayRelayRef.current?.confirmed(room, confirmation);
   }, []);
 
   const {
@@ -365,7 +377,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     reconcileUnconfirmedRoomMembership,
     requestRoomJoin,
     resetConfirmedRoomMembership,
-  } = useRoomMembershipReconciler(socketRef, joinedRoomsRef, requestCatchUpForConfirmedThreadRoom);
+  } = useRoomMembershipReconciler(socketRef, joinedRoomsRef, confirmRoom);
   // Features outside the chat runtime share this connection through the hub instead of opening their own.
   const {
     hub,
@@ -379,11 +391,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
   useEffect(() => {
     userIdRef.current = getUserId();
-    joinedRoomsRef.current = loadJoinedRoomsFromSession(userIdRef.current);
+    // PR-3b: a page subscribes to its foreground threads only. Background threads learn what
+    // happened from the owner room (PR-3a), and a thread that returns to the foreground is read back
+    // once its join is confirmed, so no earlier page's rooms are restored.
+    joinedRoomsRef.current = new Set();
     if (threadIdRef.current) {
       joinedRoomsRef.current.add(`thread:${threadIdRef.current}`);
     }
-    persistJoinedRooms();
     bootstrapDebugFromStorage();
     ensureWindowDebugApi();
 
@@ -436,7 +450,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       setSocketConnected(true);
       const tid = threadIdRef.current;
       if (tid) joinedRoomsRef.current.add(`thread:${tid}`);
-      persistJoinedRooms();
       console.log('[ws] Connected', {
         socketId: socket.id,
         transport: getTransportName(),
@@ -480,6 +493,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       } else {
         hasConnectedOnceRef.current = true;
       }
+    });
+
+    socket.on('response_stream_replay', (payload: unknown) => {
+      streamReplayRelayRef.current?.received(payload);
     });
 
     socket.on('agent_message', (msg: AgentMessage) => {
@@ -1192,6 +1209,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
 
     socket.on('disconnect', (...args: unknown[]) => {
+      streamReplayRelayRef.current?.reset();
       setSocketConnected(false);
       resetConfirmedRoomMembership();
       resetHubRooms();
@@ -1298,7 +1316,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   }, [
     attachHub,
     detachHub,
-    persistJoinedRooms,
     reconcileDesiredRoomMembership,
     reconcileHubRooms,
     reconcileNeverAttemptedHubRooms,
@@ -1313,13 +1330,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   const joinRoom = useCallback(
     (roomThreadId: string) => {
       const room = `thread:${roomThreadId}`;
-      if (!joinedRoomsRef.current.has(room)) {
-        joinedRoomsRef.current.add(room);
-        persistJoinedRooms();
-      }
+      joinedRoomsRef.current.add(room);
       requestRoomJoin(room);
     },
-    [persistJoinedRooms, requestRoomJoin],
+    [requestRoomJoin],
   );
 
   /** Leave a single room */
@@ -1330,48 +1344,43 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       if (!joinedRoomsRef.current.has(room)) return;
       forgetRoom(room);
       forgetThreadRoomSequence(room);
+      streamReplayRelayRef.current?.left(room.slice(THREAD_ROOM_PREFIX.length));
       if (socket?.connected) socket.emit('leave_room', room);
-      persistJoinedRooms();
     },
-    [forgetRoom, persistJoinedRooms],
+    [forgetRoom],
   );
 
-  /** Sync joined rooms to foreground threads plus background work that is still live. */
+  /**
+   * Joined thread rooms are exactly the foreground threads. A thread leaves its room the moment it
+   * leaves the foreground, even with work still running: its endings reach the owner room, and its
+   * stream resumes from a History read once it is back and its join is confirmed (PR-3b).
+   */
   const syncRooms = useCallback(
     (threadIds: string[]) => {
       const socket = socketRef.current;
       const targetRooms = new Set(threadIds.map((id) => `thread:${id}`));
 
-      // Leave rooms no longer needed
       for (const room of joinedRoomsRef.current) {
-        const roomThreadId = room.slice('thread:'.length);
-        const store = useChatStore.getState();
-        const threadState = store.getThreadState(roomThreadId);
-        const hasKnownState = roomThreadId === store.currentThreadId || Object.hasOwn(store.threadStates, roomThreadId);
-        const mustRetainForBackgroundWork =
-          !hasKnownState || threadState.hasActiveInvocation || threadState.queue.length > 0;
-        if (!targetRooms.has(room) && !mustRetainForBackgroundWork) {
-          forgetRoom(room);
-          forgetThreadRoomSequence(room);
-          if (socket?.connected) socket.emit('leave_room', room);
-        }
+        if (targetRooms.has(room)) continue;
+        forgetRoom(room);
+        forgetThreadRoomSequence(room);
+        streamReplayRelayRef.current?.left(room.slice('thread:'.length));
+        if (socket?.connected) socket.emit('leave_room', room);
       }
 
-      // Join new rooms
       for (const room of targetRooms) {
         joinedRoomsRef.current.add(room);
         requestRoomJoin(room);
       }
-      persistJoinedRooms();
     },
-    [forgetRoom, persistJoinedRooms, requestRoomJoin],
+    [forgetRoom, requestRoomJoin],
   );
 
   const foregroundRoomsKey = (foregroundThreadIds ?? (threadId ? [threadId] : [])).join('\u0000');
   const previousForegroundRoomsKeyRef = useRef<string | null>(null);
 
-  // Initial mount restores a bounded legacy set for background catch-up. Once
-  // foreground ownership changes, synchronize and prune inactive rooms.
+  // The first render joins the foreground threads; every later change of the foreground set
+  // synchronizes rooms to it.
   useEffect(() => {
     const requestedThreadIds = foregroundThreadIdsRef.current ?? (threadId ? [threadId] : []);
     if (previousForegroundRoomsKeyRef.current === null) {
@@ -1380,8 +1389,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     } else if (previousForegroundRoomsKeyRef.current !== foregroundRoomsKey) {
       previousForegroundRoomsKeyRef.current = foregroundRoomsKey;
       syncRooms(requestedThreadIds);
-    }
-    if (threadId) {
     }
   }, [foregroundRoomsKey, threadId, joinRoom, syncRooms]);
 

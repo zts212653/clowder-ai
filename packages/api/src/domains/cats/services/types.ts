@@ -479,6 +479,12 @@ export interface AgentMessage {
    * until server catches back up to client's high-water lastSeq.
    */
   seqEpoch?: string;
+  /**
+   * PR-3a2: set by `SocketManager.broadcastAgentMessage` when the event is also in its response's
+   * stream record — its position in that stream (0 = the response's first broadcast since admission).
+   * A page holding positions 0..n-1 holds the prefix; absent means no record vouches for the event.
+   */
+  streamIndex?: number;
   /** When this message was created */
   timestamp: number;
 }

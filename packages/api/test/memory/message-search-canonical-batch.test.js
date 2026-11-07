@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { RedisMessageStore } from '../../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { RedisThreadStore } from '../../dist/domains/cats/services/stores/redis/RedisThreadStore.js';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 
 const principal = { userId: 'owner', viewer: { type: 'cat', catId: 'codex61-sol' } };
 
@@ -94,7 +93,12 @@ function fixture(t, count = 2000) {
   const service = new MessageSearchService({
     messageStore,
     threadStore,
-    decisionIndex: { lookup: async () => ({ status: 'unavailable', facts: new Map() }) },
+    decisionIndex: {
+      lookup: async () => {
+        mutate();
+        return { status: 'ready', facts: new Map() };
+      },
+    },
     evidenceStore: {
       searchMessagePassages: async () => {
         now += count === 2000 ? 9400 : 0;
@@ -105,14 +109,12 @@ function fixture(t, count = 2000) {
       },
       readMessagePassageState: () => ({ current: true }),
     },
-    qualifier: new MessageQueryQualifier(async (batch) => {
-      calls.push(batch);
-      mutate();
-      return JSON.stringify({
-        requestId: batch.requestId,
-        rows: batch.rows.map((row) => [row.id, 'supported', row.body]),
-      });
-    }),
+    qualifier: {
+      qualify() {
+        calls.push('forbidden');
+        throw new Error('Generative qualification is retired');
+      },
+    },
   });
   return {
     service,
@@ -136,18 +138,12 @@ function fixture(t, count = 2000) {
   };
 }
 
-test('complete canonical projection leaves qualification and final readmission inside the original 15s', async (t) => {
+test('bounded canonical projection leaves final readmission inside the original 15s without qualification', async (t) => {
   const f = fixture(t);
   const response = await f.search();
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 0);
   assert.equal(response.results.length, 4);
-  assert.equal(response.meta.qualification.examined, 2000);
-  const fullBodies = new Set(f.candidates.map((row) => row.content));
-  for (const batch of f.calls)
-    for (const row of batch.rows) {
-      assert.ok(fullBodies.has(row.body));
-      assert.ok(row.body.endsWith('正文'.repeat(50)));
-    }
+  assert.equal(response.meta.qualification, undefined);
   const metrics = f.metrics();
   assert.ok(
     metrics.elapsedMs < 13000,
@@ -155,7 +151,7 @@ test('complete canonical projection leaves qualification and final readmission i
   );
   const projection = metrics.traces.find((trace) => trace.phase === 'canonical-projection');
   assert.equal(projection.canonical.waves.maxWidth, 5, 'the original literal page/witness wave cap is unchanged');
-  assert.equal(projection.canonical.acceptedRows, 2000);
+  assert.equal(projection.canonical.acceptedRows, 5);
   assert.ok(
     f.requests.every((ops) => ops.length <= 16),
     'batching never increases the eight-source wave limit',
@@ -169,17 +165,17 @@ test('complete canonical projection leaves qualification and final readmission i
   );
 });
 
-test('wave snapshots never survive inference into final owner, withdrawal and revision admission', async (t) => {
+test('wave snapshots never survive optional ledger I/O into final owner, withdrawal and revision admission', async (t) => {
   const f = fixture(t, 6);
   f.mutate(() => {
     f.hashes.get('thread:t-0').createdBy = 'another-owner';
     f.hashes.get('msg:m-1').deletedAt = '1';
-    f.hashes.get('msg:m-2').content = 'changed after inference';
+    f.hashes.get('msg:m-2').content = 'changed after ledger I/O';
   });
   const response = await f.search();
   assert.ok(response.results.length > 0);
   assert.ok(response.results.every((row) => !['m-0', 'm-1', 'm-2'].includes(row.messageId)));
-  assert.equal(response.meta.qualification.status, 'partial');
+  assert.equal(response.meta.qualification, undefined);
 });
 
 test('complete batch objects exactly match individual hydrate semantics', async (t) => {

@@ -28,6 +28,7 @@ import { ProjectKnowledgeCueResolver } from './resolvers/ProjectKnowledgeCueReso
 import { TasteCueResolver } from './resolvers/TasteCueResolver.js';
 import { CatOwnedSeedMemoryCueSource } from './sources/CatOwnedSeedMemoryCueSource.js';
 import { ContextProjectCueSource } from './sources/ContextProjectCueSource.js';
+import type { PublishedProjectCueSource } from './sources/canonical-project-document.js';
 import { DecisionMemoryCueSource } from './sources/DecisionMemoryCueSource.js';
 import { EventMemoryCueSource } from './sources/EventMemoryCueSource.js';
 import { CanonicalOperationalPrecedentCueSource } from './sources/OperationalPrecedentCueSource.js';
@@ -66,6 +67,7 @@ export function createMemoryCueRuntime(input: {
   ownerUserId: string;
   profileRepository: import('../../cats/services/profile/ProfileRepository.js').FileProfileRepository;
   projectDocsRoot: string;
+  publishedProjectSource?: PublishedProjectCueSource;
   autoDreamStore: Pick<AutoDreamStore, 'getOwnedSeed'>;
 }): MemoryCueRuntime {
   const personSource = input.personRecall
@@ -75,7 +77,10 @@ export function createMemoryCueRuntime(input: {
   const tasteSource = new CanonicalTasteMemoryCueSource(input.tasteRepository, input.ownerUserId, input.tasteLifecycle);
   const primerSource = new PrimerMemoryCueSource(input.profileRepository);
   const contextProjectSource = input.contextProjectDiscovery
-    ? new ContextProjectCueSource(input.contextProjectDiscovery)
+    ? new ContextProjectCueSource({
+        ...input.contextProjectDiscovery,
+        ...(input.publishedProjectSource ? { publishedSource: input.publishedProjectSource } : {}),
+      })
     : undefined;
   const profileSource = new ProfileMemoryCueSource({
     ownerUserId: input.ownerUserId,
@@ -90,11 +95,13 @@ export function createMemoryCueRuntime(input: {
   });
   const decisionSource = new DecisionMemoryCueSource({
     projectDocsRoot: input.projectDocsRoot,
+    ...(input.publishedProjectSource ? { publishedSource: input.publishedProjectSource } : {}),
     evidenceStore: input.evidenceStore,
     episodeStore: input.episodeStore,
   });
   const projectKnowledgeSource = new ProjectKnowledgeMemoryCueSource({
     projectDocsRoot: input.projectDocsRoot,
+    ...(input.publishedProjectSource ? { publishedSource: input.publishedProjectSource } : {}),
     evidenceStore: input.evidenceStore,
     episodeStore: input.episodeStore,
   });

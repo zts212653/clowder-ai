@@ -173,9 +173,22 @@ export async function loadSidebarSnapshot(): Promise<SidebarSnapshotRow[] | null
  * pollutes the persisted record).
  */
 function stripPersistMarkers(m: ChatMessage): ChatMessage {
-  if (m.cachedFrom === undefined) return m;
+  if (
+    m.cachedFrom === undefined &&
+    m.recoveryGeneration === undefined &&
+    m.streamPrefix === undefined &&
+    m.streamNextIndex === undefined &&
+    m.localBodyWriteSeq === undefined &&
+    m.localMetadataWriteSeq === undefined
+  )
+    return m;
   const copy = { ...m };
   delete copy.cachedFrom;
+  delete copy.recoveryGeneration;
+  delete copy.streamPrefix;
+  delete copy.streamNextIndex;
+  delete copy.localBodyWriteSeq;
+  delete copy.localMetadataWriteSeq;
   return copy;
 }
 

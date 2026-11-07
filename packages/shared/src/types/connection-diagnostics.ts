@@ -66,6 +66,7 @@ export const connectionDiagnosticEventSchema = z.discriminatedUnion('kind', [
       ...base,
       kind: z.literal('settings_return'),
       bridgeId: id,
+      operationId: id.optional(),
       phase: z.enum(['created', 'capture', 'return', 'cancel', 'notice', 'consumed', 'presented', 'disposed']),
       cause: z
         .enum([
@@ -89,6 +90,50 @@ export const connectionDiagnosticEventSchema = z.discriminatedUnion('kind', [
       admitted: z.boolean(),
     })
     .strict(),
+  z
+    .object({
+      ...base,
+      kind: z.literal('reading_restore'),
+      bridgeId: id,
+      operationId: id,
+      readerId: id,
+      phase: z.enum(['start', 'cancel', 'complete']),
+      readerMounted: z.boolean(),
+      refreshPending: z.boolean(),
+      restorePending: z.boolean(),
+      settlementPending: z.boolean(),
+      cancelSource: z
+        .enum([
+          'bootstrap_cleanup',
+          'native_input',
+          'jump_latest',
+          'restore_schedule',
+          'restore_thread_change',
+          'restore_request',
+          'restore_signal_abort',
+          'correction_thread_change',
+          'message_navigation',
+          'navigation_thread_change',
+          'inactive_jump',
+          'navigation_request',
+          'navigation_signal_abort',
+          'refresh_request',
+          'refresh_signal_abort',
+          'history_no_progress',
+          'history_failed',
+          'reading_capture',
+          'viewport_anchor',
+          'reading_disclosure',
+          'rail_input',
+          'rail_owner_change',
+        ])
+        .optional(),
+      inputKind: z.enum(['wheel', 'pointer', 'touch', 'key', 'click']).optional(),
+      inputTrusted: z.boolean().optional(),
+      status: z.enum(['settled', 'interrupted', 'unavailable', 'threw']).optional(),
+      exact: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export const connectionDiagnosticBatchSchema = z
   .object({
@@ -98,6 +143,7 @@ export const connectionDiagnosticBatchSchema = z
   .strict();
 export type ConnectionDiagnosticEvent = z.infer<typeof connectionDiagnosticEventSchema>;
 export type ConnectionDiagnosticRoute = z.infer<typeof route>;
+export type ReadingRestoreDiagnostic = Extract<ConnectionDiagnosticEvent, { kind: 'reading_restore' }>;
 export type SettingsReturnDiagnostic = Extract<ConnectionDiagnosticEvent, { kind: 'settings_return' }>;
 
 /** Classify before recording; raw identifiers and query strings never enter the diagnostic. */

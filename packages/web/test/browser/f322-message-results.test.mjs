@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { registerSelectedAnswerCases } from './f322-selected-answer.cases.mjs';
 import { registerMessageReadingVisibilityCases } from './message-reading-visibility.cases.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -80,12 +81,17 @@ function searchAnswer(url, coldReturn = false) {
         ? []
         : [{ start: record.content.indexOf('琴键'), end: record.content.indexOf('琴键') + 2 }],
       match: 'lexical',
+      matchEvidence: { kind: 'literal', terms: ['琴键'] },
       contentRevision: 'controlled',
       publiclyQuotable: true,
     })),
     meta: {
+      resultKind: 'sources',
       scope: url.searchParams.has('threadId') ? 'thread' : 'global',
       sort: url.searchParams.get('messageSort'),
+      ...(url.searchParams.get('messageSort') === 'time'
+        ? { timeWindow: { limit: 32, admitted: 2, complete: false } }
+        : {}),
       effectiveMode: 'lexical',
       requestedMode: 'hybrid',
       degraded: true,
@@ -221,6 +227,10 @@ for (const width of [1440, 390]) {
   test(`search trip leaves the Workspace return clickable and resumes in Chat at ${width}px`, async () => {
     const { page, errors } = await open({ width, height: 900 }, false, false, false, false, true);
     try {
+      await page.getByText('找到 2 处可打开的原文，请结合内容和上下文判断。', { exact: true }).waitFor();
+      await page.getByText(/本次核完 2 条来源，未读满 32 条相关窗口/).waitFor();
+      const resultText = await page.getByRole('region', { name: '消息检索结果', exact: true }).innerText();
+      assert(!resultText.includes('尚未评估') && !resultText.includes('资格核对'));
       await page
         .locator('[data-message-search-result]')
         .first()
@@ -525,6 +535,9 @@ test('global provenance, sorting and narrow dark layout keep real text and contr
     await page.waitForFunction(() => document.querySelector('[aria-pressed="true"]') !== null);
     assert.equal(queries.at(-1).messageSort, 'relevance');
     assert.equal(queries.at(-1).threadId, undefined);
+    await page.getByText('找到 2 处可打开的原文，请结合内容和上下文判断。', { exact: true }).waitFor();
+    await page.getByText(/按相关度列出本次可得的部分来源/).waitFor();
+    assert.equal(await page.getByText(/未读满 32 条相关窗口/).count(), 0);
     await page.getByText('索引覆盖范围尚未确认。', { exact: false }).waitFor({ state: 'visible' });
     assert.equal(
       await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth),
@@ -574,4 +587,11 @@ test('middle reading origin restores its signed message offset through the real 
   } finally {
     await page.close();
   }
+});
+
+registerSelectedAnswerCases({
+  assets: () => ({ browser, script, css, productionCss }),
+  web: webRoot,
+  root: repoRoot,
+  origin,
 });
