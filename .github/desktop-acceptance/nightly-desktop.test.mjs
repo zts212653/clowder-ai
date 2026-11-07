@@ -107,4 +107,18 @@ test('desktop preparation stages the same attempt and rejects different installe
     /Candidate package hash mismatch/,
   );
   assert.equal(fs.existsSync(path.join(root, 'wrong', 'desktop-plan.json')), false);
+
+  const blocked = { ...report, source: null, packageVersion: undefined, blocker: 'candidate-source-unavailable' };
+  const blockedGh = (args) => {
+    if (args[0] === 'api') return gh('unused')(args);
+    assert.equal(args.at(-3), 'desktop-nightly-report-attempt-2');
+    fs.writeFileSync(path.join(args.at(-1), 'report.json'), JSON.stringify(blocked));
+    return '';
+  };
+  assert.equal(stageNightlyReport(repo, '123', path.join(root, 'blocked-report'), blockedGh).report.source, null);
+  await assert.rejects(
+    prepareDesktop(repo, '123', platform, path.join(root, 'blocked-worker'), blockedGh),
+    /candidate-source-unavailable/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'blocked-worker', 'package')), false);
 });

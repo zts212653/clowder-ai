@@ -36,29 +36,16 @@ jobs:
     outputs:
       source: ${{ steps.target.outputs.source }}
       version: ${{ steps.target.outputs.version }}
-      date: ${{ steps.target.outputs.date }}
-      platforms: ${{ steps.target.outputs.platforms }}
-      mac: ${{ steps.target.outputs.mac }}
-      arch: ${{ steps.target.outputs.arch }}
+      date: ${{ steps.selection.outputs.date }}
+      platforms: ${{ steps.selection.outputs.platforms }}
+      mac: ${{ steps.selection.outputs.mac }}
+      arch: ${{ steps.selection.outputs.arch }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - id: target
-        name: Freeze the source and requested coverage
+      - id: selection
+        name: Record the requested coverage
         env:
-          BRANCH: ${{ inputs.branch || 'next' }}
           PLATFORM: ${{ inputs.platform || 'all' }}
-          VERSION_OVERRIDE: ${{ inputs.version }}
         run: |
-          git check-ref-format "refs/heads/$BRANCH"
-          git fetch --no-tags origin "refs/heads/$BRANCH"
-          source="$(git rev-parse --verify FETCH_HEAD)"
-          version="$VERSION_OVERRIDE"
-          if [[ -z "$version" ]]; then
-            version="$(git show "$source:desktop/package.json" | jq -er .version)"
-          fi
-          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           case "$PLATFORM" in
             all) platforms='["windows-x64","macos-arm64","macos-x64"]'; mac='["arm64","x64"]'; arch=all ;;
             windows-x64) platforms='["windows-x64"]'; mac='[]'; arch=all ;;
@@ -67,16 +54,33 @@ jobs:
             *) exit 2 ;;
           esac
           {
-            echo "source=$source"
-            echo "version=$version"
             echo "date=$(TZ=Asia/Shanghai date +%F)"
             echo "platforms=$platforms"
             echo "mac=$mac"
             echo "arch=$arch"
           } >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: target
+        name: Freeze the source and package version
+        env:
+          BRANCH: ${{ inputs.branch || 'next' }}
+          VERSION_OVERRIDE: ${{ inputs.version }}
+        run: |
+          git check-ref-format "refs/heads/$BRANCH"
+          git fetch --no-tags origin "refs/heads/$BRANCH"
+          source="$(git rev-parse --verify FETCH_HEAD)"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          version="$VERSION_OVERRIDE"
+          if [[ -z "$version" ]]; then
+            version="$(git show "$source:desktop/package.json" | jq -er .version)"
+          fi
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Report a source or configuration blocker
         if: failure()
-        run: echo '桌面回归未能冻结待测提交或包版本。检查同一作业中的 Freeze the source and requested coverage。' >> "$GITHUB_STEP_SUMMARY"
+        run: echo '桌面回归未能冻结待测提交或包版本。检查同一作业中的 Freeze the source and package version。' >> "$GITHUB_STEP_SUMMARY"
 
   build-windows:
     needs: resolve
@@ -204,7 +208,7 @@ jobs:
 
   report:
     needs: [resolve, verify-windows, verify-mac]
-    if: always() && needs.resolve.result == 'success' && !cancelled()
+    if: always() && needs.resolve.outputs.platforms != '' && !cancelled()
     runs-on: ubuntu-latest
     env:
       CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
@@ -212,6 +216,8 @@ jobs:
       NIGHTLY_SUITE: ${{ inputs.suite || 'smoke' }}
       NIGHTLY_PLATFORMS: ${{ needs.resolve.outputs.platforms }}
       NIGHTLY_DATE: ${{ needs.resolve.outputs.date }}
+      NIGHTLY_BRANCH: ${{ inputs.branch || 'next' }}
+      NIGHTLY_RUN_BLOCKER: ${{ needs.resolve.result != 'success' && (needs.resolve.outputs.source != '' && 'package-version-unavailable' || 'candidate-source-unavailable') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -221,6 +227,7 @@ jobs:
         with:
           node-version: 24
       - uses: actions/download-artifact@v4
+        if: needs.resolve.result == 'success'
         with:
           pattern: desktop-evidence-*-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/desktop-report

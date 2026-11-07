@@ -31,6 +31,8 @@ Windows 测试运行真实 EXE，全量也测试便携 ZIP。macOS 在相应架�
 
 查看 Actions 的作业摘要和对应 attempt 的 `desktop-nightly-report` artifact。JSON 保留逐例原始结果和分类，Markdown 置顶 L0 新失败、L0 未完成、已知失败。报告列出的 `desktop-evidence-*` 目录名对应各平台证据 artifact。平台未构建、无法启动 runner 或缺收据的用例会保留在报告里并标为阻塞。
 
+待测分支或包版本解析失败时仍生成报告，保留请求的分支和选集。用例统一标为 `candidate-source-unavailable` 或 `package-version-unavailable`。后一种情况保留已经冻结的提交。协调端可以下载并汇总这份报告，测试机不下载安装包。
+
 ## Codex 桌面收据试跑
 
 在专用桌面测试机或 VM 上执行。Windows 保持活跃、解锁并独占前台，macOS 核对辅助功能和屏幕录制权限。预置被允许的测试应用和测试账户。Windows 管理员安装与 macOS Gatekeeper 需要权限或人工操作时，保留阻塞，不改变系统安全设置。严禁指向日用安装、生产端口或个人 HOME。

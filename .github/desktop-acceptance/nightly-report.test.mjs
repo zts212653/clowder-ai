@@ -65,3 +65,19 @@ test('contradictory receipts cannot turn a failure into a pass', () => {
   );
   assert.throws(() => buildReport(catalog, run, [{ ...install, evidence: '' }]), /Missing evidence/);
 });
+
+test('an unresolved candidate produces a blocked report for every selected L0 case', () => {
+  const unresolved = { ...run, source: null, blocker: 'candidate-source-unavailable' };
+  const report = buildReport(catalog, unresolved, []);
+  assert.equal(report.status, 'incomplete');
+  assert.equal(report.source, null);
+  assert.deepEqual(
+    report.cases.map(({ id, status, code }) => [id, status, code]),
+    [
+      ['WIN-INSTALL', 'blocked', 'candidate-source-unavailable'],
+      ['DESKTOP-FIRST-OPEN', 'blocked', 'candidate-source-unavailable'],
+    ],
+  );
+  assert.match(renderReport(report), /待测提交 `未解析`[\s\S]*运行阻塞[\s\S]*candidate-source-unavailable/);
+  assert.throws(() => buildReport(catalog, unresolved, [install]), /Cannot attach execution receipts/);
+});
