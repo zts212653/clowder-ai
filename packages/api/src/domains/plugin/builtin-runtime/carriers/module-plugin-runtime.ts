@@ -117,10 +117,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 
 export interface ModulePluginRuntimeOptions {
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
-  readonly onTaskDataChanged?: (
-    task: import('@cat-cafe/shared').TaskItem,
-    reason?: EntrustedWorkChangeReason,
-  ) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;

@@ -202,10 +202,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly threadStore?: IThreadStore;
   readonly threadBindingStore?: IConnectorThreadBindingStore;
   readonly threadOwnerUserId?: string;
-  readonly onTaskDataChanged?: (
-    task: import('@cat-cafe/shared').TaskItem,
-    reason?: EntrustedWorkChangeReason,
-  ) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly threadProjections?: import('./host-surface/plugin-thread-projections.js').PluginThreadProjectionDeps;
   readonly threadDeepLinkUrl?: (threadId: string) => string;
   readonly desktopExecutor?: DesktopWindowExecutor;
