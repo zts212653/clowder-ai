@@ -7257,9 +7257,9 @@ async function main(): Promise<void> {
   }
 
   await app.register(workspaceRoutes, {
-    socketEmitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
     callbackRegistry: registry,
     agentKeyRegistry,
+    socketEmitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
     threadStore,
     skillConsumptionReceipts,
     socketEmit: (event, data, room) => {
