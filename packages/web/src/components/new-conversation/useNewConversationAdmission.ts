@@ -183,7 +183,7 @@ export function useNewConversationAdmission(onNavigate: (threadId: string) => vo
         await save(nextIntent);
         setLocalSaveFailed(false);
       } catch (error) {
-        setLocalSaveFailed(true);
+        if (!(error instanceof Error && error.name === 'AbortError')) setLocalSaveFailed(true);
         throw error;
       }
     },

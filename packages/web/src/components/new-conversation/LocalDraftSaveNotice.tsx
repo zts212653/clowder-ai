@@ -17,7 +17,11 @@ export function LocalDraftSaveNotice({
 }) {
   const copy = useShellCopy(newConversationCopy);
   const saving = state === 'saving';
-  const message = { saving: copy.savingDraft, failed: copy.saveFailed, cancelled: copy.saveCancelled }[state];
+  const message = {
+    saving: preparingSend ? copy.preparingSend : canCancel ? copy.savingDraft : copy.finishingDraftSave,
+    failed: copy.saveFailed,
+    cancelled: copy.saveCancelled,
+  }[state];
   return (
     <div
       className={`mt-3 flex flex-wrap items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm ${

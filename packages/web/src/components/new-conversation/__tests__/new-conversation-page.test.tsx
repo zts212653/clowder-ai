@@ -541,6 +541,8 @@ describe('F322 new conversation page', () => {
     const button = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
     expect(button?.textContent).toBe(state.label);
     expect(button?.disabled).toBe(state.disabled);
+    expect(container.textContent).toContain(state.preparingSend ? '正在准备发送' : '正在完成本次保存');
+    expect(container.textContent).not.toContain('或取消本次保存');
   });
 
   it('translates the landing header actions with the rest of the English page', () => {

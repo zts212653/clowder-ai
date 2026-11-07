@@ -72,7 +72,9 @@ function gatePut(): { release: () => void } {
 
 function releaseGates(): void {
   boundary.beforePut = null;
-  for (const resolve of activeGates.splice(0)) resolve();
+  activeGates.splice(0).forEach((resolve) => {
+    resolve();
+  });
 }
 
 afterEach(async () => {

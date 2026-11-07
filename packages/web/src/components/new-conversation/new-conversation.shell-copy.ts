@@ -55,6 +55,8 @@ export const newConversationCopy = defineShellCopy(
       retrySave: '重试保存',
       cancelSave: '取消保存',
       cancelSendPreparation: '取消发送',
+      preparingSend: '正在准备发送，你可以取消本次发送。',
+      finishingDraftSave: '正在完成本次保存，你可以继续编辑。',
       identityFailed: '无法确认当前用户，草稿还在本机；重新连接后可继续。',
       draftRecovered: '已找回另一份未发送草稿，并停止了本次发送。请检查合并后的内容，再次发送即确认。',
       draftRecoveryBlocked: '已保存的附件尚未完整找回。本次发送已停止；请重试找回或明确移除后再发送。',
@@ -146,6 +148,8 @@ export const newConversationCopy = defineShellCopy(
       retrySave: 'Retry saving',
       cancelSave: 'Cancel save',
       cancelSendPreparation: 'Cancel sending',
+      preparingSend: 'Preparing to send. You can cancel this send.',
+      finishingDraftSave: 'Finishing this save. You can keep editing.',
       identityFailed: 'Your account could not be confirmed. The draft is still on this device; reconnect to continue.',
       draftRecovered:
         'Another unsent draft was restored, so this send was stopped. Review the merged content and send again to confirm.',

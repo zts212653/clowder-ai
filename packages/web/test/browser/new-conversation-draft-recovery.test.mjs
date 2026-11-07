@@ -87,14 +87,16 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
       ['/entry.js', { contentType: 'text/javascript', body: script }],
       ['/style.css', { contentType: 'text/css', body: css }],
     ]);
-    const readResponses = new Map([
-      ['/api/session', () => ({ userId: sessionOwner, csrfToken: 'fixture' })],
-      ['/api/projects/cwd', () => ({ path: '/isolated-draft-probe' })],
+    const knownResponses = new Map([
+      ['GET /api/session', () => ({ userId: sessionOwner, csrfToken: 'fixture' })],
+      ['GET /api/projects/cwd', () => ({ path: '/isolated-draft-probe' })],
       [
-        '/api/config',
+        'GET /api/config',
         () => ({ config: { coCreator: { name: 'Fixture', aliases: [], mentionPatterns: ['@co-creator'] } } }),
       ],
-      ['/api/cats', () => ({ cats: [] })],
+      ['GET /api/cats', () => ({ cats: [] })],
+      ['POST /api/routing/preview', () => ({ targetCats: [], reason: { kind: 'recent_replier' } })],
+      ['POST /api/diagnostics/connection', () => ({ ok: true })],
     ]);
     function composerDraftResponse(request) {
       const method = request.method();
@@ -123,14 +125,12 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
         const response = composerDraftResponse(request);
         return json(response.body, response.status);
       }
-      if (url.pathname === '/api/routing/preview') return json({ targetCats: [], reason: { kind: 'recent_replier' } });
-      if (url.pathname === '/api/diagnostics/connection') return json({ ok: true });
+      const knownResponse = knownResponses.get(`${method} ${url.pathname}`);
+      if (knownResponse) return json(knownResponse());
       if (method !== 'GET' && method !== 'OPTIONS') {
         report.errors.push(`Unexpected mutation ${method} ${url.pathname}`);
         return json({ error: 'Unexpected mutation' }, 500);
       }
-      const readResponse = readResponses.get(url.pathname);
-      if (readResponse) return json(readResponse());
       if (url.pathname.startsWith('/api/')) return json({});
       if (/^\/shell\/cafe-landing-(dusk|night)\.png$/.test(url.pathname))
         return route.fulfill({ path: path.join(web, 'public', url.pathname) });
@@ -320,6 +320,7 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
       if (phase === 'writing') {
         await page.waitForFunction(() => window.draftWriteGate.started === 1);
         assert.equal(await page.getByTestId('new-conversation-cancel-save').isDisabled(), true);
+        assert.match(await notice.textContent(), /正在完成本次保存|Finishing this save/);
       }
       if (phase === 'reading') await page.waitForFunction(() => Boolean(window.draftReadRelease));
       await page.locator('textarea').press('Enter');
@@ -330,6 +331,10 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
         ),
       );
       assert.equal(await cancel.isEnabled(), true);
+      assert.match(await notice.textContent(), /正在准备发送|Preparing to send/);
+      assert.doesNotMatch(await notice.textContent(), /或取消本次保存/);
+      if (phase === 'writing')
+        await page.screenshot({ path: path.join(artifacts, 'cancel-send-writing-before.png'), fullPage: true });
       await cancel.click();
       // Do not release either boundary until the actual composer is unlocked.
       await page.waitForFunction(
