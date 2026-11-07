@@ -47,6 +47,9 @@ if (command === 'collect') {
   const receipts = selected
     .filter((entry) => entry.platform === platform)
     .flatMap(({ id, executor }) => {
+      if (executor === 'windows-upgrade') {
+        return [{ id, platform, status: 'blocked', code: 'windows-upgrade-unavailable' }];
+      }
       const evidence = {
         'installed-auth': 'native-auth-checks.json',
         'windows-port-preflight': 'installer/port-conflicts.json',
@@ -162,6 +165,24 @@ if (command === 'collect') {
           return bundle.receipts;
         });
   if (command === 'report' && !run.blocker) {
+    const upgradeCase = selected.find(({ executor }) => executor === 'windows-upgrade');
+    if (upgradeCase) {
+      const evidence = `desktop-evidence-windows-upgrade-attempt-${run.attempt}/upgrade-result.json`;
+      const upgrade = readJson(path.join(directory, evidence));
+      if (upgrade) {
+        for (const key of ['runId', 'attempt', 'source', 'catalogRevision']) {
+          assert.equal(upgrade[key], run[key], `Upgrade receipt ${key} differs from the run`);
+        }
+        receipts = receipts.filter(({ id, platform }) => id !== upgradeCase.id || platform !== upgradeCase.platform);
+        receipts.push({
+          id: upgradeCase.id,
+          platform: upgradeCase.platform,
+          status: upgrade.status,
+          code: upgrade.code,
+          evidence,
+        });
+      }
+    }
     for (const platform of run.platforms) {
       const hashFile = path.join(
         directory,

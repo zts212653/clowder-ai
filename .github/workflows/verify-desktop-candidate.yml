@@ -1,4 +1,4 @@
-name: Windows released-to-next upgrade feasibility
+name: Integrated Windows release upgrade proof
 on:
   workflow_dispatch:
 permissions:
@@ -7,10 +7,10 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     env:
-      CANDIDATE_DIRECT_ARTIFACTS: '1'
-      NIGHTLY_SUITE: smoke
+      CANDIDATE_SOURCE_SHA: 3569a9b6422723faf3a586b68232c140f84b44a1
+      CANDIDATE_VERSION: '1.14.0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,80 +19,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Freeze and download the released upgrade baseline
+      - name: Allocate a fresh upgrade root
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $release=gh api repos/zts212653/clowder-ai/releases/tags/v0.14.1|ConvertFrom-Json
-          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-          $asset=@($release.assets|Where-Object name -eq 'ClowderAI-Setup-0.14.1.exe')
-          if($asset.Count -ne 1 -or $asset[0].id -ne 695910932 -or $asset[0].digest -ne 'sha256:e9022222cedb4fa70f772278399a2c2972e1ca6a9c0b3365c0e335289460db45'){throw 'Released baseline identity changed'}
-          $root=Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
-          New-Item -ItemType Directory -Path $root|Out-Null
-          "CANDIDATE_ROOT=$root" >> $env:GITHUB_ENV
-          gh release download v0.14.1 -R zts212653/clowder-ai -p ClowderAI-Setup-0.14.1.exe -D "$root/installer-distribution"
-          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-          if((Get-FileHash -LiteralPath "$root/installer-distribution/ClowderAI-Setup-0.14.1.exe").Hash -ne 'E9022222CEDB4FA70F772278399A2C2972E1CA6A9C0B3365C0E335289460DB45'){throw 'Released installer bytes changed'}
+          $candidate=Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $candidate|Out-Null
+          "CANDIDATE_ROOT=$candidate" >> $env:GITHUB_ENV
       - uses: actions/download-artifact@v4
         with:
           name: windows-installer-1.14.0-attempt-1
           run-id: 42322304957
           github-token: ${{ github.token }}
           path: ${{ env.CANDIDATE_ROOT }}/upgrade-candidate-distribution
-      - name: Create real baseline state and run the in-place candidate upgrade
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-build-hash-windows-x64-attempt-1
+          run-id: 42322304957
+          github-token: ${{ github.token }}
+          path: ${{ env.CANDIDATE_ROOT }}/candidate-hash
+      - name: Run the unchanged upgrade verifier
         shell: pwsh
-        run: |
-          $root=$env:CANDIDATE_ROOT
-          $candidate=@(Get-ChildItem -LiteralPath "$root/upgrade-candidate-distribution" -File)
-          if($candidate.Count -ne 1 -or (Get-FileHash -LiteralPath $candidate[0].FullName).Hash -ne '986D6506A7943077D55F7223AC6FA4BB588619266F4D4473D4D5F192EC63E522'){throw 'Next installer bytes changed'}
-          $script='.github/desktop-acceptance/windows.ps1'
-          $original=Get-Content -Raw -LiteralPath $script
-          $marker="foreach (" + '$phase' + " in @('create','restore')) {"
-          if(-not $original.Contains($marker)){throw 'Expected existing phase seam missing'}
-          $original.Replace($marker,("foreach ("+'$phase'+" in @('create')) {"))|Set-Content -LiteralPath $script
-          $env:CANDIDATE_VERSION='0.14.1'
-          $env:CANDIDATE_SOURCE_SHA='592f07ae085f9a7e961e82ca8ade695581170407'
-          node .github/desktop-acceptance/distributions.mjs installer
-          $baselineExit=$LASTEXITCODE
-          $baseline="$root/evidence/installer"
-          $checks=Get-Content -Raw -LiteralPath "$baseline/create-checks.json"|ConvertFrom-Json
-          if(@($checks.checks|Where-Object { $_.name -in @('state-write','persisted-readback') -and $_.status -eq 'passed' }).Count -ne 2){throw 'Released baseline did not produce a usable persistence sample'}
-          $cleanup=Get-Content -Raw -LiteralPath "$baseline/cleanup-confirmed.json"|ConvertFrom-Json
-          if(-not $cleanup.ownedProcessesAbsent -or -not $cleanup.portsFree){throw 'Baseline did not settle'}
-          $expected=Get-Content -Raw -LiteralPath "$baseline/expected-state.json"|ConvertFrom-Json
-          $markerPath="$root/installer-install/desktop-instance.json"
-          $identityBefore=(Get-FileHash -LiteralPath $markerPath).Hash
-          $archive=[IO.Path]::GetFullPath("$root/evidence/upgrade-baseline")
-          $baseline=[IO.Path]::GetFullPath($baseline)
-          $owned=[IO.Path]::GetFullPath("$root/evidence").TrimEnd('\')+'\'
-          if(-not $archive.StartsWith($owned,[StringComparison]::OrdinalIgnoreCase) -or -not $baseline.StartsWith($owned,[StringComparison]::OrdinalIgnoreCase)){throw 'Evidence move leaves the owned root'}
-          Move-Item -LiteralPath $baseline -Destination $archive
-          $from=[IO.Path]::GetFullPath("$root/installer-distribution")
-          $saved=[IO.Path]::GetFullPath("$root/upgrade-baseline-distribution")
-          $incoming=[IO.Path]::GetFullPath("$root/upgrade-candidate-distribution")
-          $owned=[IO.Path]::GetFullPath($root).TrimEnd('\')+'\'
-          if(@($from,$saved,$incoming|Where-Object {-not $_.StartsWith($owned,[StringComparison]::OrdinalIgnoreCase)}).Count){throw 'Package move leaves the owned root'}
-          Move-Item -LiteralPath $from -Destination $saved
-          Move-Item -LiteralPath $incoming -Destination $from
-          New-Item -ItemType Directory -Path $baseline|Out-Null
-          Copy-Item -LiteralPath "$archive/expected-state.json" -Destination "$baseline/expected-state.json"
-          $original.Replace($marker,("foreach ("+'$phase'+" in @('restore')) {"))|Set-Content -LiteralPath $script
-          $env:CANDIDATE_VERSION='1.14.0'
-          $env:CANDIDATE_SOURCE_SHA='3569a9b6422723faf3a586b68232c140f84b44a1'
-          node .github/desktop-acceptance/distributions.mjs installer
-          $candidateExit=$LASTEXITCODE
-          $identityAfter=(Get-FileHash -LiteralPath $markerPath).Hash
-          if($candidateExit -ne 0 -or $identityBefore -ne $identityAfter){throw 'Upgrade restore or instance identity failed'}
-          @{
-            status='passed'; baselineVersion='0.14.1';baselineSource='592f07ae085f9a7e961e82ca8ade695581170407'
-            candidateVersion='1.14.0';candidateSource=$env:CANDIDATE_SOURCE_SHA
-            baselineVerifierExit=$baselineExit;candidateVerifierExit=$candidateExit
-            sameInstallPath=$true;sameStatePath=$true;instanceMarkerPreserved=$true;preservedThreadId=$expected.thread.id
-          }|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$root/evidence/upgrade-feasibility.json"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/desktop-acceptance/windows-upgrade.ps1
       - uses: actions/upload-artifact@v4
         if: always() && env.CANDIDATE_ROOT != ''
         with:
-          name: windows-upgrade-feasibility-attempt-${{ github.run_attempt }}
+          name: desktop-evidence-windows-upgrade-attempt-${{ github.run_attempt }}
           path: ${{ env.CANDIDATE_ROOT }}/evidence
           retention-days: 14

@@ -163,6 +163,48 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  verify-windows-upgrade:
+    needs: [resolve, build-windows]
+    if: always() && needs.resolve.result == 'success' && inputs.suite == 'full' && contains(fromJSON(needs.resolve.outputs.platforms), 'windows-x64') && !cancelled()
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/desktop-acceptance
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Allocate a fresh upgrade root
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $candidate | Out-Null
+          "CANDIDATE_ROOT=$candidate" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-${{ needs.resolve.outputs.version }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_ROOT }}/upgrade-candidate-distribution
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-build-hash-windows-x64-attempt-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_ROOT }}/candidate-hash
+      - name: Upgrade from the recorded release and read historical state
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/desktop-acceptance/windows-upgrade.ps1
+      - uses: actions/upload-artifact@v4
+        if: always() && env.CANDIDATE_ROOT != ''
+        with:
+          name: desktop-evidence-windows-upgrade-attempt-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_ROOT }}/evidence
+          retention-days: 30
+
   verify-mac:
     needs: [resolve, build-mac]
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.mac != '[]' && !cancelled()
@@ -207,7 +249,7 @@ jobs:
           retention-days: 30
 
   report:
-    needs: [resolve, verify-windows, verify-mac]
+    needs: [resolve, verify-windows, verify-windows-upgrade, verify-mac]
     if: always() && needs.resolve.outputs.platforms != '' && !cancelled()
     runs-on: ubuntu-latest
     env:

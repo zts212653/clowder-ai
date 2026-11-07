@@ -5,6 +5,8 @@ param(
   [Parameter(Mandatory = $true)]
   [ValidatePattern('^[a-f0-9-]{36}$')]
   [string]$AttemptId,
+  [ValidateSet('create', 'restore')]
+  [string[]]$Phases = @('create','restore'),
   [switch]$ObservePrivatePath
 )
 $ErrorActionPreference = 'Stop'
@@ -206,7 +208,7 @@ foreach ($kind in @($Distribution)) {
       }
     }
     $launchArgs = @("--remote-debugging-port=$($ports[3])", '--remote-debugging-address=127.0.0.1')
-    foreach ($phase in @('create','restore')) {
+    foreach ($phase in $Phases) {
       $phase | Set-Content (Join-Path $output 'phase.txt')
       Assert-Free $ports
       $observeRestore = $ObservePrivatePath -and $phase -eq 'restore'
@@ -287,5 +289,5 @@ foreach ($kind in @($Distribution)) {
   'initial-plugins' | Set-Content (Join-Path $output 'phase.txt')
   & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
   if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
-  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
+  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=($Phases -contains 'create' -and $Phases -contains 'restore'); phases=$Phases; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
 }
