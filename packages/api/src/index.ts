@@ -1118,6 +1118,8 @@ async function main(): Promise<void> {
     // whether it was applied now; the snapshots exits still emit themselves stay unmarked.
     lifecycleObserver: {
       committed: (message, commit) => {
+        // PR-3a2: a committed response is no longer replayed to pages joining its thread.
+        socketManager?.closeResponseStream(message.id);
         void ownerRoom.lifecycleCommitted(message, commit);
       },
       failed: (error, message) => {
@@ -1578,6 +1580,9 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     threadStore,
     messageStore,
+    selectedSourceReadFence: redis
+      ? (await import('./domains/memory/message-selected-read-fence.js')).redisSelectedSourceReadFence(redis)
+      : undefined,
   });
   const messageSearchAnswerService = new MessageSearchAnswerPublicationService(
     new MessageSearchAnswerPublicationStore(memoryServices.store.getDb(), (work) =>
@@ -2831,6 +2836,7 @@ async function main(): Promise<void> {
     ownerUserId: privateUserId,
     profileRepository,
     projectDocsRoot: docsRoot,
+    ...(memoryServices.publishedDocuments ? { publishedProjectSource: memoryServices.publishedDocuments.source } : {}),
     autoDreamStore: autoDream.services.store,
   });
   memoryCueDeps.sourceReader = memoryCueRuntime.sourceReader;

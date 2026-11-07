@@ -44,18 +44,36 @@ export async function buildConciergeMessageSearchContext(
     anchor: { type: 'thread', threadId: result.threadId, messageId: result.messageId, title: result.threadTitle },
   }));
   const lines = ['', '**消息检索候选（复制对应完整标记；只表示本次可核来源）：**'];
+  if (response.meta.resultKind === 'sources') lines.push('以下是供你阅读判断的原文，不是系统已判断支持答案的材料。');
   for (let index = 0; index < handles.length; index++) {
     const handle = handles[index];
     const result = results[index];
     lines.push(
       `- ${handle.label}: ${result.speaker === 'connector' ? (result.speakerLabel ?? 'connector') : result.speaker} · ${new Date(result.timestamp).toISOString()} · 《${handle.anchor.title}》 — [跳过去 ${binding(handle.label, handle.anchor)}] — ${result.snippet.text.slice(0, 160)}`,
     );
+    if (result.matchEvidence) {
+      const { kind, terms } = result.matchEvidence;
+      lines.push(
+        terms.length
+          ? `  命中词：${terms.slice(0, 8).join('、')}${terms.length > 8 ? '（其余见结构化结果）' : ''}。`
+          : kind === 'semantic'
+            ? '  语义召回，未发现问句字面词，不补造高亮。'
+            : '  词法召回，原文字形与问句可能不同。',
+      );
+    }
   }
   lines.push(`范围：${response.meta.scope === 'thread' ? '当前对话' : '全局可读对话'}；排序：按时间。`);
   const qualification = response.meta.qualification;
   if (qualification?.status === 'partial')
     lines.push(`${qualification.unassessed + qualification.indeterminate} 条候选尚未核对出结论，不能将其当作不相关。`);
   if (response.meta.degraded) lines.push('本次检索已降级到词法；语义命中可能不完整。');
+  const window = response.meta.timeWindow;
+  if (window)
+    lines.push(
+      window.complete
+        ? `按相关度取得前 ${window.limit} 条来源后按时间排，窗口外仍可能有更早原文。`
+        : `本次只核完 ${window.admitted} 条来源，未读满 ${window.limit} 条窗口；时间序仅覆盖这些来源。`,
+    );
   lines.push('这是有限索引候选，不代表完整历史或第一次；最近消息可能尚未入索引，延迟暂无法确认。', '');
   const hidden = response.results.some((result) => !result.publiclyQuotable);
   return {

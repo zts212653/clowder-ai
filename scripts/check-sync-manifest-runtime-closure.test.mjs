@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
@@ -580,7 +590,9 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     const missing = [];
 
     for (const importer of new Set(files)) {
-      if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(importer) || !isCoveredByPublicExport(importer, coverage)) continue;
+      if (!isCoveredByPublicExport(importer, coverage)) continue;
+      const codeExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/.test(importer);
+      if (!codeExtension && extname(importer)) continue;
       // The public API resolver deliberately excludes home-only provider/OS
       // fixtures. Browser journeys are another home-gate resource contract,
       // not public API inputs. Never make their private dependencies public
@@ -593,9 +605,11 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       )
         continue;
       const importerPath = resolve(ROOT, importer);
-      if (!existsSync(importerPath)) continue;
+      if (!existsSync(importerPath) || !statSync(importerPath).isFile()) continue;
 
       const source = readFileSync(importerPath, 'utf8');
+      // Executable Node carriers such as guarded-bin/gh have no extension.
+      if (!codeExtension && !/^#![^\r\n]*\bnode(?:\s|$)/.test(source)) continue;
       for (const specifier of collectRelativeImports(source, importer)) {
         const dependency = resolveLocalImport(importer, specifier);
         const dependencyPath = toRepoPath(dependency);
@@ -842,25 +856,50 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
   });
 
   it('exports the embedding policy probe executed by the public API regression test', () => {
-    const policyTest = readFileSync(resolve(ROOT, 'packages/api/test/embed-runtime-policy.test.js'), 'utf8');
-    assert.match(
-      policyTest,
-      /scripts\/services\/test_embed_runtime_policy\.py/,
-      'test must bind the real policy probe path',
-    );
-    assert.ok(
-      managedScripts.has('scripts/services/test_embed_runtime_policy.py'),
-      'sync-manifest must export the Python policy probe used by embed-runtime-policy.test.js',
-    );
+    const bridge = 'packages/api/test/embed-runtime-policy.test.js';
+    const policyTest = readFileSync(resolve(ROOT, bridge), 'utf8');
+    assert.match(policyTest, /['"]discover['"]/, 'public bridge must discover the Python policy suite');
+    assert.match(policyTest, /['"]test_embed_\*\.py['"]/, 'public bridge must retain the embedding test scope');
+    const probes = readdirSync(resolve(ROOT, 'scripts/services')).filter((name) => /^test_embed_.*\.py$/.test(name));
+    assert.ok(probes.length > 0, 'the public discovery scope must contain actual probes');
+    for (const path of [
+      'scripts/services/embed-api.py',
+      'scripts/services/embed_runtime_policy.py',
+      'scripts/services/embed_process_footprint.py',
+      ...probes.map((name) => `scripts/services/${name}`),
+    ]) {
+      assert.ok(managedScripts.has(path), `${path} must accompany the public embedding service and discovery suite`);
+      assert.ok(!excluded.has(path), `${path} must not be excluded from the filtered tree`);
+    }
     assert.match(
       readFileSync(resolve(ROOT, 'scripts/services/test_embed_runtime_policy.py'), 'utf8'),
       /from embed_runtime_policy import/,
       'policy probe must bind its sibling runtime module',
     );
-    assert.ok(
-      managedScripts.has('scripts/services/embed_runtime_policy.py'),
-      'sync-manifest must export the runtime module imported by the Python policy probe',
+    assert.match(
+      readFileSync(resolve(ROOT, 'scripts/services/embed_runtime_policy.py'), 'utf8'),
+      /from embed_process_footprint import read_process_footprint_bytes/,
+      'runtime policy must bind the exported native reader',
     );
+    const filtered = mkdtempSync(join(tmpdir(), 'public-embedding-policy-'));
+    const coverage = loadPublicExportCoverage(ROOT);
+    try {
+      for (const path of [bridge, ...managedScripts].filter(
+        (path) => path === bridge || (path.startsWith('scripts/services/') && path.endsWith('.py')),
+      )) {
+        if (!isCoveredByPublicExport(path, coverage)) continue;
+        mkdirSync(dirname(resolve(filtered, path)), { recursive: true });
+        copyFileSync(resolve(ROOT, path), resolve(filtered, path));
+      }
+      execFileSync(process.execPath, ['--test', resolve(filtered, bridge)], {
+        cwd: filtered,
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+        stdio: 'pipe',
+        timeout: 20_000,
+      });
+    } finally {
+      rmSync(filtered, { recursive: true, force: true });
+    }
   });
 
   it('does not make the public review guard depend on the home-only inbound playbook', () => {

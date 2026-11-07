@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import time
 import unittest
+from unittest.mock import patch
 
 from embed_runtime_policy import (
     AdmissionError,
@@ -12,6 +15,7 @@ from embed_runtime_policy import (
     MemoryBudgetExceeded,
     MemoryMetricUnavailable,
     MlxMemoryEnvelope,
+    read_process_footprint_bytes,
 )
 
 
@@ -248,6 +252,16 @@ class FakeMlx:
 
 
 class MlxMemoryEnvelopeTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "macOS process ledger")
+    def test_self_footprint_survives_unavailable_sampling_command(self) -> None:
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired("/usr/bin/footprint", 2),
+        ):
+            footprint = read_process_footprint_bytes()
+        self.assertIsInstance(footprint, int)
+        self.assertGreater(footprint, 0)
+
     def test_applies_allocator_limits_and_uses_os_footprint_delta_as_hard_gate(
         self,
     ) -> None:

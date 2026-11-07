@@ -461,6 +461,8 @@ interface SocketManagerLike {
   broadcastAgentMessage(msg: unknown, threadId: string): void;
   broadcastToRoom(room: string, event: string, data: unknown): void;
   emitToUser(userId: string, event: string, data: unknown): void;
+  /** PR-3a2: record what an admitted response broadcasts, for pages that join mid-reply. */
+  openResponseStream?(response: StoredMessage): void;
 }
 
 interface LoggerLike {
@@ -5991,6 +5993,8 @@ export class QueueProcessor {
               }
               lifecycleResponseMessageIds.add(observed.message.id);
               lifecycleResponseMessageIdByCat.set(input.catId, observed.message.id);
+              // Before the route produces anything: every event it broadcasts into R is recorded.
+              socketManager.openResponseStream?.(observed.message);
               terminalInvocationIdByCatId[input.catId] = input.invocationId;
               lifecycleReceiverPersisted = true;
               interruptLifecycleResponse = async (reason: string): Promise<void> => {

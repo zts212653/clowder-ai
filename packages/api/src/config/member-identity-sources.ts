@@ -7,6 +7,14 @@ export function captureMemberIdentitySources(config: CatCafeConfig, authored: Ca
   return config;
 }
 
+function hasAuthoredIdentityValue(field: string, value: unknown): boolean {
+  // Empty routing inputs mean dossier fallback, even when a saved caution is null.
+  // Other identity fields retain their existing explicit-clear semantics.
+  return field === 'caution' || field === 'teamStrengths'
+    ? typeof value === 'string' && value.trim().length > 0
+    : value !== undefined;
+}
+
 export function projectMemberIdentitySources(config: CatCafeConfig, breed: CatBreed, variant: CatVariant) {
   const authored = authoredCatalogs.has(config) ? authoredCatalogs.get(config) : config;
   const ownBreed = authored?.breeds.find((entry) => entry.id === breed.id);
@@ -29,18 +37,14 @@ export function projectMemberIdentitySources(config: CatCafeConfig, breed: CatBr
         field === 'name' && variant.name === undefined && variant.displayName !== undefined
           ? 'displayName'
           : (field as keyof CatVariant);
-      const source =
-        variant[key] !== undefined
-          ? ownVariant?.[key] !== undefined
-            ? 'variant'
-            : 'template'
-          : field === 'personality'
-            ? defaultVariant?.personality !== undefined
-              ? 'default_variant'
-              : 'template'
-            : ownBreed?.[field as keyof CatBreed] !== undefined
-              ? 'breed'
-              : 'template';
+      let source = 'template';
+      if (variant[key] !== undefined) {
+        if (hasAuthoredIdentityValue(field, ownVariant?.[key])) source = 'variant';
+      } else if (field === 'personality') {
+        if (defaultVariant?.personality !== undefined) source = 'default_variant';
+      } else if (hasAuthoredIdentityValue(field, ownBreed?.[field as keyof CatBreed])) {
+        source = 'breed';
+      }
       return [field, source];
     }),
   );

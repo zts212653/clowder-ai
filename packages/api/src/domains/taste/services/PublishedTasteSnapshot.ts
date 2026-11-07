@@ -75,7 +75,7 @@ export async function publishedTasteSnapshot(root: string): Promise<PublishedTas
   return {
     revision: pinnedSha,
     async entries() {
-      const tree = await git(root, ['ls-tree', '-r', '-z', pinnedSha, '--', 'docs/taste/vignettes']);
+      const tree = await git(root, ['ls-tree', '--full-tree', '-r', '-z', pinnedSha, '--', 'docs/taste/vignettes']);
       const entries = new Map<string, string>();
       for (const row of tree.split('\0')) {
         const match =
@@ -86,12 +86,14 @@ export async function publishedTasteSnapshot(root: string): Promise<PublishedTas
     },
     async read(sourcePath) {
       if (!/^docs\/taste\/vignettes\/[\p{L}\p{N}][\p{L}\p{N}._-]*\.md$/u.test(sourcePath)) return null;
-      const entry = await git(root, ['ls-tree', pinnedSha, '--', sourcePath]);
+      const entry = await git(root, ['ls-tree', '--full-tree', pinnedSha, '--', sourcePath]);
       if (!/^100(?:644|755) blob /u.test(entry)) return null;
       return git(root, ['cat-file', 'blob', `${pinnedSha}:${sourcePath}`]);
     },
     async list() {
-      return (await git(root, ['ls-tree', '-r', '-z', '--name-only', pinnedSha, '--', 'docs/taste/vignettes']))
+      return (
+        await git(root, ['ls-tree', '--full-tree', '-r', '-z', '--name-only', pinnedSha, '--', 'docs/taste/vignettes'])
+      )
         .split('\0')
         .filter(Boolean);
     },

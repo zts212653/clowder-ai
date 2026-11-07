@@ -80,6 +80,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.reference [data-chat-file-name] {
+  user-select: text;
+}
 .line {
   color: var(--shell-muted);
 }
@@ -96,6 +99,7 @@
   color: var(--shell-muted);
 }
 .officeIcon {
+  user-select: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -108,6 +112,9 @@
   line-height: 1;
   letter-spacing: -0.2px;
   flex: none;
+}
+.officeIcon::before {
+  content: attr(data-file-symbol);
 }
 .pdfIcon {
   font-size: 5.5px;

@@ -55,6 +55,7 @@ export function unboundTurn(author: 'user' | 'cat' = 'user', live = false): Chat
     : {
         id: 'needs-binding',
         type: 'connector',
+        from: { kind: 'system', service: 'system-info-warning' },
         content,
         timestamp: 120,
         replyTo: source.id,

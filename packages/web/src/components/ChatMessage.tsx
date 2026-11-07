@@ -44,7 +44,7 @@ import {
   isLinkedCloudBindingRecoveryNotice,
   projectCloudBindingRecovery,
 } from './cloud-binding-recovery';
-import { cloudCarrierDispatch, cloudReceiptOf } from './cloud-dispatch-receipt';
+import { cloudCarrierDispatch, cloudReceiptOf, hasNativeCloudDeliveryReceipt } from './cloud-dispatch-receipt';
 import { CompanionMessageAvatar, CompanionMessageIdentity } from './concierge/CompanionMessageIdentity';
 import { ContentModificationReceiptCard } from './content-review/ContentModificationReceiptCard';
 import { ContentModificationSourceMessage } from './content-review/ContentModificationSourceMessage';
@@ -63,6 +63,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { MessageDispatchAvatars } from './MessageDispatchAvatars';
 import { MetadataBadge } from './MetadataBadge';
+import { ProviderCitationContext } from './markdown-provider-citations';
 import { buildMessageDisclosureKey, buildRichHtmlDisclosureKey } from './message-disclosure-state';
 import { isConnectorSystemNotice } from './message-render-visibility';
 import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
@@ -478,7 +479,7 @@ function ChatMessageContent({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
-  if (cloudCarrier && cloudReply.state !== 'unverified')
+  if (cloudCarrier && (cloudReply.state !== 'unverified' || hasNativeCloudDeliveryReceipt(cloudCarrier)))
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
   if (isSummary && message.summary) {
     return (
@@ -1290,10 +1291,21 @@ function ChatMessageContent({
 }
 
 export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
+  const shell = useShellPresentation();
   const queue = useChatStore((state) => {
     const threadId = props.threadId ?? state.currentThreadId;
     return threadId === state.currentThreadId ? state.queue : state.threadStates[threadId]?.queue;
   });
   if (isHiddenChatRow(props.message)) return null;
-  return <ChatMessageContent {...props} queue={queue} />;
+  const providerCitations =
+    shell === 'v2' &&
+    props.message.type === 'assistant' &&
+    props.message.from?.kind === 'agent' &&
+    props.message.from.catId === props.message.catId &&
+    (props.message.catId === 'gpt-pro' || props.message.catId === 'gpt-dot');
+  return (
+    <ProviderCitationContext.Provider value={providerCitations}>
+      <ChatMessageContent {...props} queue={queue} />
+    </ProviderCitationContext.Provider>
+  );
 });

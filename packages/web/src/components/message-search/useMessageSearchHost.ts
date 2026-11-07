@@ -293,7 +293,7 @@ export function useMessageSearchHost({
       setFindState({
         query: response.query,
         scope: response.meta.scope,
-        sort: response.meta.sort,
+        sort: response.meta.sort === 'selected' ? 'time' : response.meta.sort,
         scrollTop: 0,
         status: 'ready',
         response,

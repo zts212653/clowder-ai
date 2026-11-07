@@ -7,7 +7,6 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import pino from 'pino';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { executeMessageSearch } from '../../dist/routes/message-search-handler.js';
 
@@ -46,9 +45,11 @@ test('HTTP late canonical failure retains successful real worker origin and boun
   t.after(() => app.close());
   const original = new DOMException('controlled deadline', 'TimeoutError');
   const service = new MessageSearchService({
-    qualifier: new MessageQueryQualifier(async () => {
-      assert.fail('fixture must not invoke a model');
-    }),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     evidenceStore: store,
     threadStore: { list: () => [{ id: 'neutral', createdBy: 'private-owner' }] },
     messageStore: {
@@ -94,9 +95,11 @@ test('HTTP late canonical failure retains successful real worker origin and boun
 test('throwing diagnostic trace sinks cannot replace successful search or original failure', async () => {
   const reason = new DOMException('original', 'TimeoutError');
   const service = new MessageSearchService({
-    qualifier: new MessageQueryQualifier(async () => {
-      assert.fail('fixture must not invoke a model');
-    }),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     threadStore: { list: () => [] },
     messageStore: {},
     evidenceStore: {

@@ -516,7 +516,8 @@ pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
 
 Reviewer 每轮 verdict 前仍按 receive-review 收尾。作者在合入后调用下列只读入口：它枚举 Git 的全部登记，
 包含未声明旧树、嵌套 `.review-worktrees`、非标准路径和命名 Alpha，不用 capacity.active 或目录前缀代替完整清单。
-PR 状态及完整提交列表来自 canonical gh；中间 review HEAD 按提交列表关联，兼容 squash。关联查询失败就报告 unknown。
+PR 状态及完整提交列表来自 canonical gh；明确本地 PR 来源的中间 review HEAD 按完整提交列表核实，兼容 squash。
+只有相同提交、或点名该 PR 但来源验证失败的路径保留在 `unknownWorktrees`，不生成本 PR 的清理责任。
 
 ```bash
 pnpm worktree:inventory --pr pr:{OWNER}/{REPO}#{PR_NUMBER}
@@ -525,6 +526,7 @@ pnpm worktree:inventory --pr pr:{OWNER}/{REPO}#{PR_NUMBER}
 逐项消费 `worktrees` 的实际 released 或有效 retained 回执。`owner-finish-required` 不等于可代删：
 携路径回原责任线程，核用途和原件后由 owner 收尾，不停止别人的预览、不造老工位的出生登记。
 旧树没有来源时沿原聊天/创建记录查证，不因 owner 退役就无限搁置。查不到归属的列 unknown，不宣称零残留。
+同时核对 `unknownWorktrees`；`associationComplete=false` 表示归属尚有未知，不能只看 `unresolved=0` 宣称零残留。
 
 已合入中间稿与 main 内容不同、普通 finish 拒绝时，由已核原 owner 使用明确的 PR 证据：
 

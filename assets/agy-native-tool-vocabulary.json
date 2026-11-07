@@ -1,5 +1,5 @@
 {
-  "qualifiedVersions": ["1.3.4", "1.3.5"],
+  "qualifiedVersions": ["1.3.4", "1.3.5", "1.5.2"],
   "components": [
     "ask_permission",
     "ask_question",
@@ -26,9 +26,25 @@
     "wait",
     "write_to_file"
   ],
-  "readOnlyComponents": ["view_file", "list_dir", "grep_search", "find_by_name", "read_url_content", "search_web"],
+  "readOnlyComponents": [
+    "view_file",
+    "list_dir",
+    "grep_search",
+    "find_by_name",
+    "read_url_content",
+    "search_web",
+    "read_file"
+  ],
   "mcpResourceTools": ["call_mcp_tool", "list_resources", "read_resource"],
-  "fileWriters": ["write_to_file", "replace_file_content", "multi_replace_file_content", "notebook_edit", "sed_file"],
+  "fileWriters": [
+    "write_to_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "notebook_edit",
+    "sed_file",
+    "write_file",
+    "edit_file"
+  ],
   "commands": ["run_command", "send_command_input", "run_workflow"],
   "unsupportedEffects": ["notebook_execution"],
   "delegatedTools": [
@@ -82,6 +98,12 @@
     "send_message",
     "view_file",
     "wait",
-    "wait_5_seconds"
-  ]
+    "wait_5_seconds",
+    "read_file"
+  ],
+  "fileToolAliases": {
+    "view_file": "read_file",
+    "write_to_file": "write_file",
+    "replace_file_content": "edit_file"
+  }
 }

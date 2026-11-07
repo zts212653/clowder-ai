@@ -29,7 +29,7 @@ test('only a direct authenticated read of actual message/block coordinates can r
     for (const row of f.source) f.messages.getById(row.id).recall = { version: 1, exposure: 'none', recalledAt: 5 };
     const revoked = await app.inject({ url, headers: { 'x-cat-cafe-user': 'owner' } });
     assert.deepEqual(revoked.json(), { status: 'unavailable' });
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     await app.close();

@@ -198,6 +198,7 @@ export function acknowledgeDurableGateSelfRecovery(
   ownerIdentity: UnixProcessIdentity,
   pauseEpoch: number,
   now = Date.now(),
+  continuation: 'replay' | 'same_preparation' = 'replay',
 ): boolean {
   recoveryConfig(job);
   const database = openDurableGateRecoveryStore(job);
@@ -229,7 +230,12 @@ export function acknowledgeDurableGateSelfRecovery(
         AND state = 'reconciling_owner' AND terminal_intent IS NULL`)
         .run(now, now, job.jobId, pauseEpoch);
       if (updated.changes !== 1) return false;
-      appendDurableGateRecoveryEvent(database, row, 'live_owner_reconciled', now);
+      appendDurableGateRecoveryEvent(
+        database,
+        row,
+        continuation === 'same_preparation' ? 'live_preparation_continued' : 'live_owner_reconciled',
+        now,
+      );
       return true;
     });
   } finally {
