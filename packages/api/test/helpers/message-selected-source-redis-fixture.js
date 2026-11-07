@@ -11,17 +11,21 @@ import { MessageSearchService } from '../../dist/domains/memory/MessageSearchSer
 import { MESSAGE_SEARCH_ANSWER_SCHEMA } from '../../dist/domains/memory/message-search-answer-schema.js';
 import { buildSearchableMessageContent } from '../../dist/domains/memory/message-search-content.js';
 import { redisSelectedSourceReadFence } from '../../dist/domains/memory/message-selected-read-fence.js';
+import { ownedRedisFixture } from './owned-redis-fixture.js';
 
-// Explicit canonical test:redis entry, never ordinary API discovery or a protected port.
-assert.equal(process.env.CAT_CAFE_REDIS_TEST_ISOLATED, '1');
-const endpoint = new URL(process.env.REDIS_URL);
-assert.equal(endpoint.hostname, '127.0.0.1');
-assert.ok(![6397, 6398, 6399, 6401].includes(Number(endpoint.port)));
+// Public discovery owns a portless child; test:redis supplies its isolated TCP child.
+const isolated = process.env.CAT_CAFE_REDIS_TEST_ISOLATED === '1';
+const owned = isolated ? null : ownedRedisFixture('selected-source-fence');
+const endpoint = isolated ? new URL(process.env.REDIS_URL) : null;
+if (endpoint) {
+  assert.equal(endpoint.hostname, '127.0.0.1');
+  assert.ok(![6397, 6398, 6399, 6401].includes(Number(endpoint.port)));
+}
 export const producer = { kind: 'agent_key', id: 'selected-read-fence', catId: 'codex61-sol' };
 export const human = { userId: 'owner', viewer: { type: 'user' }, publicReply: true };
 
 export async function selectedSourceRedisFixture() {
-  const redis = createRedisClient({ url: endpoint.href });
+  const redis = owned ? owned.client() : createRedisClient({ url: endpoint.href });
   const messages = new RedisMessageStore(redis, { ttlSeconds: 0 });
   const threads = new RedisThreadStore(redis, { ttlSeconds: 0 });
   const target = await threads.create('owner', 'card destination');

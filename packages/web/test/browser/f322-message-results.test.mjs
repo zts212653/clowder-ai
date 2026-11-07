@@ -312,7 +312,7 @@ test('system-notice results keep a neutral identity in the production renderer',
   try {
     await page.getByRole('textbox', { name: '搜索消息' }).fill('system-notice');
     await page.getByRole('button', { name: '搜索', exact: true }).click();
-    await page.getByRole('button', { name: '跳过去：系统通知 · 第1处', exact: true }).waitFor();
+    await page.getByRole('button', { name: '去原处：系统通知 · 第1处', exact: true }).waitFor();
     const hits = page.locator('[data-message-search-result]');
     assert.equal(await hits.count(), 2);
     assert.equal(await hits.locator('[data-testid="message-result-human-nameplate"]').count(), 0);
@@ -330,7 +330,7 @@ test('connector source and sender remain neutral in the production result render
     await page.getByRole('textbox', { name: '搜索消息' }).fill('external-connector');
     await page.getByRole('button', { name: '搜索', exact: true }).click();
     await page
-      .getByRole('button', { name: '跳过去：Alpha Connector · Acceptance source · 第1处', exact: true })
+      .getByRole('button', { name: '去原处：Alpha Connector · Acceptance source · 第1处', exact: true })
       .waitFor();
     const hits = page.locator('[data-message-search-result]');
     assert.equal(await hits.locator('[data-testid="message-result-human-nameplate"]').count(), 0);
