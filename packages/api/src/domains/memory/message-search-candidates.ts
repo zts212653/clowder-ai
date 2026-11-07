@@ -1,12 +1,17 @@
 import type { MessageSearchInput, MessageSearchResult } from '@cat-cafe/shared';
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
-import { literalQueryEvidence, type QueryCandidate } from './message-query-protocol.js';
 import type { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 
-export interface CanonicalSearchCandidate extends QueryCandidate {
+export interface CanonicalSearchCandidate {
+  threadId: string;
+  messageId: string;
+  contentRevision: string;
   result: MessageSearchResult;
   candidate: MessagePassageCandidate;
 }
+
+/** ROOT's first measured window; this is coverage, never a relevance qualification. */
+export const MESSAGE_SEARCH_TIME_WINDOW = 32;
 
 /** Candidate collection never consumes indexed body text as a permission or qualification grant. */
 export async function collectMessageSearchCandidates(input: {
@@ -16,6 +21,9 @@ export async function collectMessageSearchCandidates(input: {
   source?: { threadId: string; messageId: string };
   project: (candidate: MessagePassageCandidate) => Promise<CanonicalSearchCandidate | null>;
   projectWave?: (candidates: MessagePassageCandidate[]) => Promise<Array<CanonicalSearchCandidate | null>>;
+  beforeWave?: (
+    read: () => Promise<Array<CanonicalSearchCandidate | null>>,
+  ) => Promise<Array<CanonicalSearchCandidate | null> | undefined>;
   check: () => void;
   diagnostics?: MessageSearchDiagnostics;
 }): Promise<CanonicalSearchCandidate[]> {
@@ -26,13 +34,15 @@ export async function collectMessageSearchCandidates(input: {
   const to = input.search.dateTo
     ? Date.parse(input.search.dateTo.length === 10 ? `${input.search.dateTo}T23:59:59.999Z` : input.search.dateTo)
     : Infinity;
-  let literalWitnesses = 0;
   const limit = input.search.limit ?? 20;
+  const admissionLimit = input.search.sort === 'relevance' ? limit + 1 : MESSAGE_SEARCH_TIME_WINDOW;
   for (let offset = 0; offset < input.candidates.length; ) {
     input.check();
     // Overlap only independent canonical reads, retaining retrieval order below.
-    // Never read beyond the remaining literal page/witness budget on the fast path.
-    const width = input.search.sort === 'relevance' ? Math.min(8, limit + 1 - literalWitnesses) : 8;
+    // Ordinary recall counts every admitted source, including semantic-only rows.
+    const remaining = admissionLimit - rows.length;
+    if (remaining <= 0) break;
+    const width = Math.min(8, remaining);
     const wave = input.candidates.slice(offset, offset + width);
     const selected = wave.filter(
       (candidate) =>
@@ -43,7 +53,9 @@ export async function collectMessageSearchCandidates(input: {
       input.projectWave
         ? input.projectWave(selected)
         : Promise.all(selected.map((candidate) => input.project(candidate)));
-    const projected = await (input.diagnostics ? input.diagnostics.wave(wave.length, readWave) : readWave());
+    const read = () => (input.diagnostics ? input.diagnostics.wave(wave.length, readWave) : readWave());
+    const projected = await (input.beforeWave ? input.beforeWave(read) : read());
+    if (!projected) break;
     offset += width;
     for (const row of projected) {
       input.check();
@@ -54,9 +66,6 @@ export async function collectMessageSearchCandidates(input: {
       if (!(row.result.timestamp >= from && row.result.timestamp <= to)) continue;
       rows.push(row);
       input.diagnostics?.accepted();
-      if (literalQueryEvidence(input.search.query, row.content)) literalWitnesses++;
-      // Pending semantic rows preceding these literal witnesses are still judged.
-      if (input.search.sort === 'relevance' && literalWitnesses > limit) return rows;
     }
   }
   if (input.search.sort !== 'relevance')

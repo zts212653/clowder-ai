@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { fixture, git, idle, NOW } from './lib/worktree-finish-fixture.mjs';
 import { worktreeInventory } from './lib/worktree-inventory.mjs';
 import { mergedNoticeKey, mergedWorktreeNotices } from './lib/worktree-merged-notices.mjs';
+import { bindWorktreePr } from './worktree-bind-pr.mjs';
 import { createWorktree } from './worktree-new.mjs';
 import { retireMergedWorktree } from './worktree-retire-merged.mjs';
 
@@ -56,6 +57,74 @@ function setup(f) {
     },
   };
 }
+test('unbound live task and Alpha checkouts do not produce merged cleanup notices', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    for (const role of ['author', 'alpha']) {
+      const e = a.make(`live-${role}`, role);
+      git(
+        e.path,
+        'config',
+        '--worktree',
+        'catcafe.lifecycle.origin',
+        JSON.stringify({
+          threadId: 'thread_original',
+          userId: 'owner',
+          sourceRef: 'task:work:current',
+          role,
+        }),
+      );
+    }
+    const head = git(f.repo, 'rev-parse', 'HEAD').trim();
+    const result = mergedWorktreeNotices(f.repo, worktreeInventory(f.repo), {
+      now: 0,
+      findSources: () => [sourceRef],
+      readPr: () => ({ sourceRef, state: 'MERGED', mergedAt: head, commits: [head] }),
+    });
+    assert.deepEqual(result.notices, [], 'GitHub commit-to-PR discovery is not worktree ownership');
+    assert.equal(result.unknown.length, 2);
+    assert(result.unknown.every((row) => row.reason.includes('provenance')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('a queued notice cannot retire a checkout whose source changed at the same HEAD', () => {
+  const f = fixture();
+  const a = setup(f);
+  try {
+    const e = a.make('same-head-new-source');
+    assert.throws(
+      () =>
+        a.retire(e, {
+          readPr: () => {
+            git(
+              e.path,
+              'config',
+              '--worktree',
+              'catcafe.lifecycle.origin',
+              JSON.stringify({
+                threadId: 'thread_original',
+                userId: 'owner',
+                sourceRef: 'task:work:next',
+                role: 'author',
+              }),
+            );
+            return { sourceRef, state: 'MERGED', mergedAt: e.head, commits: [e.head] };
+          },
+        }),
+      /PR association/,
+    );
+    assert(existsSync(e.path));
+    assert(!existsSync(join(f.root, '.worktree-release-archives')));
+  } finally {
+    a.restoreEnv();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('automatic retirement keeps dirty, busy and unknown-process worktrees', () => {
   const f = fixture();
   const a = setup(f);
@@ -139,14 +208,19 @@ test('a collected key cannot retire a replacement generation at the same path an
     rmSync(f.root, { recursive: true, force: true });
   }
 });
-test('a current inventory notice key retires its matching idle merged checkout', () => {
+test('a bound invocation-origin author is discovered and retired with its current notice key', () => {
   const f = fixture();
   const a = setup(f);
   try {
     const e = a.make('matching-generation');
+    const origin = { threadId: 'thread_original', userId: 'owner', sourceRef: 'invocation:author', role: 'author' };
+    git(e.path, 'config', '--worktree', 'catcafe.lifecycle.origin', JSON.stringify(origin));
+    const readPr = () => ({ sourceRef, state: 'MERGED', mergedAt: e.head, commits: [e.head] });
+    const binding = bindWorktreePr({ repo: f.repo, path: e.path, owner: 'codex61-sol', sourceRef, readPr });
+    assert.deepEqual(binding.origin, origin);
     const notices = mergedWorktreeNotices(f.repo, worktreeInventory(f.repo), {
       now: 0,
-      readPr: () => ({ sourceRef, state: 'MERGED', mergedAt: e.head, commits: [e.head] }),
+      readPr,
     }).notices;
     assert.equal(notices.length, 1);
     const receipt = a.retire(e, { noticeKey: notices[0].key });

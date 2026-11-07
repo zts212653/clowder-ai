@@ -14,13 +14,20 @@ import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const events = [];
+  const closedResponseStreams = [];
   return {
     broadcastAgentMessage() {},
     broadcastToRoom(room, event, data) {
       events.push({ room, event, data });
     },
+    closeResponseStream(messageId) {
+      closedResponseStreams.push(messageId);
+    },
     getEvents() {
       return events;
+    },
+    getClosedResponseStreams() {
+      return closedResponseStreams;
     },
   };
 }
@@ -210,6 +217,8 @@ describe('DELETE /api/messages/:id (soft delete)', () => {
     // Verify WebSocket broadcast
     const events = socketManager.getEvents();
     assert.ok(events.some((e) => e.event === 'message_deleted' && e.data.messageId === msgs[2].id));
+    // PR-3a2: a deleted message is never replayed to a page joining the thread afterwards.
+    assert.deepEqual(socketManager.getClosedResponseStreams(), [msgs[2].id]);
 
     await app.close();
   });
@@ -392,6 +401,7 @@ describe('DELETE /api/messages/:id mode=hard', () => {
     // Verify WebSocket broadcast
     const events = socketManager.getEvents();
     assert.ok(events.some((e) => e.event === 'message_hard_deleted'));
+    assert.deepEqual(socketManager.getClosedResponseStreams(), [msgs[2].id]);
 
     await app.close();
   });

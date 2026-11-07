@@ -32,8 +32,15 @@ export async function createNextDevTestEnvironment(label, overrides = {}) {
     throw error;
   }
 
+  // The test server proxies /api and /socket.io to the port these name (next.config.mjs). Inherited
+  // from a cat's shell they name the running runtime, so a fixture with stubbed APIs joined real thread
+  // rooms there (PR-3a2: that join opens a recovery round the fixture's empty History then decides).
+  // A test that needs a backend passes its own port in `overrides`.
+  const inherited = { ...process.env };
+  delete inherited.API_SERVER_PORT;
+  delete inherited.FRONTEND_PORT;
   const env = {
-    ...process.env,
+    ...inherited,
     NEXT_TELEMETRY_DISABLED: '1',
     NODE_ENV: 'development',
     ...overrides,

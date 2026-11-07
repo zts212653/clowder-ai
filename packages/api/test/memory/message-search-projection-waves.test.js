@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { collectMessageSearchCandidates } from '../../dist/domains/memory/message-search-candidates.js';
 
 test('relevance projection fits the same I/O budget without removing any canonical admission', async (t) => {
@@ -69,29 +68,31 @@ test('relevance projection fits the same I/O budget without removing any canonic
         meta: { effectiveMode: 'hybrid', degraded: false, candidateLimit: 2000, semanticCandidatesLimited: true },
       }),
     },
-    qualifier: new MessageQueryQualifier(async (batch) => {
-      calls.push(batch);
-      return JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((r) => [r.id, 'indeterminate', null]) });
-    }),
+    qualifier: {
+      qualify() {
+        calls.push('forbidden');
+        throw new Error('Qualification is retired');
+      },
+    },
   });
-  // 5000ms in this deterministic store permits 50 round trips. Serial projection takes128.
+  // The same 5000ms permits 50 round trips; relevance admits limit+1 before final revalidation.
   const result = await service.search(
     { query: 'package login', sort: 'relevance', mode: 'hybrid', limit: 12 },
     { userId: 'owner', viewer: { type: 'cat', catId: 'codex61-sol' } },
     { deadlineAt: now + 5000 },
   );
-  assert.equal(result.meta.qualification.examined, 64);
-  assert.equal(result.meta.qualification.indeterminate, 13);
-  assert.equal(result.meta.qualification.unassessed, 51);
-  assert.equal(result.meta.qualification.status, 'partial');
+  assert.equal(result.meta.qualification, undefined);
   assert.equal(result.meta.sourceCoverage, 'unknown');
-  assert.deepEqual(result.results, []);
-  assert.equal(calls.length, 2);
-  assert.equal(reads.messages, 64);
-  assert.equal(reads.threads, 64);
-  assert.equal(reads.currentPassages, 64);
+  assert.deepEqual(
+    result.results.map((row) => row.messageId),
+    Array.from({ length: 12 }, (_, i) => `m-${i}`),
+  );
+  assert.equal(calls.length, 0);
+  assert.equal(reads.messages, 26, 'limit+1 admitted sources are re-read before returning');
+  assert.equal(reads.threads, 26);
+  assert.equal(reads.currentPassages, 26);
   assert.ok(reads.maximumInFlight > 1 && reads.maximumInFlight <= 8);
-  assert.ok(waves <= 16, JSON.stringify({ waves, reads }));
+  assert.ok(waves <= 50, JSON.stringify({ waves, reads }));
   t.diagnostic(
     JSON.stringify({
       kind: 'deterministic I/O wave witness, not production latency',
@@ -154,15 +155,13 @@ test('overlapped reads retain the serial admitted prefix, canonical dates and ex
 
 function admittedIds(candidates, sort, limit, canonicalTime) {
   const unique = new Set();
-  let literal = 0;
   const expected = [];
   for (const c of candidates) {
     if (c.threadId !== 'visible' || c.messageId === 'm-7' || unique.has(c.messageId)) continue;
     unique.add(c.messageId);
     if (canonicalTime(c) < Date.UTC(2026, 9, 9)) continue;
     expected.push(c.messageId);
-    if (c.content.startsWith('piano')) literal++;
-    if (sort === 'relevance' && literal > limit) break;
+    if (expected.length === (sort === 'relevance' ? limit + 1 : 32)) break;
   }
   if (sort === 'time') expected.sort((a, b) => Number(a.slice(2)) - Number(b.slice(2)));
   return expected;

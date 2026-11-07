@@ -8,6 +8,7 @@ import { registerEndGrowthJourney } from './chat-end-growth.journey.mjs';
 import { registerNavigationOwnerJourneys } from './chat-navigation-owner.journey.mjs';
 import { registerReadingLandingJourneys } from './chat-reading-landing.journey.mjs';
 import { registerReadingWheelJourneys } from './chat-reading-wheel.journey.mjs';
+import { registerStreamRecoveryJourneys } from './chat-stream-recovery.journey.mjs';
 import { registerStreamingWheelJourney } from './chat-streaming-wheel.journey.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -54,6 +55,7 @@ registerReadingWheelJourneys({
   launchNativeScrollbarBrowser: () => chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] }),
 });
 registerEndGrowthJourney({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
+registerStreamRecoveryJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {
   if (pathname === '/api/messages') {
@@ -68,12 +70,21 @@ function fixtureApiBody(pathname, state) {
   return { userId: 'fixture-owner', tasks: [], threads: [], cats: [] };
 }
 
-async function openConversation({ holdJoinAcks = false } = {}) {
+async function openConversation({ holdJoinAcks = false, savedRooms = null } = {}) {
   const page = await browser.newPage();
   const errors = [],
     writes = [],
     sockets = [],
-    heldJoinAcks = [];
+    heldJoinAcks = [],
+    joinedRooms = [];
+  if (savedRooms) {
+    // What an older build left in this tab's sessionStorage before the page loads.
+    await page.addInitScript((rooms) => {
+      for (const key of ['cat-cafe:ws:joined-rooms:v1:default-user']) {
+        window.sessionStorage.setItem(key, JSON.stringify(rooms));
+      }
+    }, savedRooms);
+  }
   const state = {
     historyReads: 0,
     documentLoads: 0,
@@ -94,6 +105,7 @@ async function openConversation({ holdJoinAcks = false } = {}) {
       const bracket = text.indexOf('[');
       const acknowledgement = text.slice(2, bracket);
       const [event, room] = JSON.parse(text.slice(bracket));
+      if (event === 'join_room') joinedRooms.push(room);
       if (event === 'join_room' && acknowledgement) {
         const acknowledge = () => socket.send(`43${acknowledgement}${JSON.stringify([{ ok: true, room }])}`);
         if (holdJoinAcks) heldJoinAcks.push(acknowledge);
@@ -125,7 +137,7 @@ async function openConversation({ holdJoinAcks = false } = {}) {
   const releaseJoinAcks = () => {
     for (const acknowledge of heldJoinAcks.splice(0)) acknowledge();
   };
-  return { page, state, sockets, errors, writes, releaseJoinAcks, heldJoinAcks };
+  return { page, state, sockets, errors, writes, releaseJoinAcks, heldJoinAcks, joinedRooms };
 }
 
 function saveMissedReply(state) {
@@ -221,6 +233,22 @@ test('a message saved between the first History read and the room join appears o
     assert(state.historyReads > readsBeforeJoin, 'the confirmed join was followed by a History read');
     assert.deepEqual(errors, []);
     assert.deepEqual(writes, []);
+  } finally {
+    await page.close();
+  }
+});
+
+// PR-3b (contract 3.1): a page subscribes to its foreground thread only; rooms an earlier page saved
+// are not restored, so a background thread's stream no longer reaches this page piece by piece.
+test('a loaded page joins only its foreground thread room, not rooms an earlier page saved', async () => {
+  const { page, errors, joinedRooms } = await openConversation({
+    savedRooms: ['thread:old-background-a', 'thread:old-background-b', `thread:${threadId}`],
+  });
+  try {
+    await page.clock.runFor(1000);
+    const threadRooms = joinedRooms.filter((room) => room.startsWith('thread:'));
+    assert.deepEqual([...new Set(threadRooms)], [`thread:${threadId}`]);
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }

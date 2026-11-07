@@ -385,16 +385,11 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-1');
     });
 
-    it('reconnect catch-up also covers joined background thread rooms', () => {
+    // PR-3b: only foreground threads have rooms, so a reconnect catches up only those; an earlier
+    // page's background rooms (saved by an older build in sessionStorage) are neither rejoined nor read.
+    it('reconnect catch-up covers the foreground room and no background thread', () => {
       mockStoreState.hasActiveInvocation = false;
       mockStoreState.threadStates = {};
-      // Cloud R1 P1: joined rooms come from joinedRoomsRef (loaded from
-      // sessionStorage at hook mount), NOT threadStates. Pre-seed
-      // sessionStorage so bg rooms are present in joinedRoomsRef before
-      // the first connect handler runs. This mirrors the production
-      // scenario: user previously joined bg threads → rooms persisted to
-      // session → reload restores joined-rooms set → reconnect should
-      // catch-up all of them, not just the currently-mounted active thread.
       window.sessionStorage.setItem(
         'cat-cafe:ws:joined-rooms:v1:test-user',
         JSON.stringify(['thread:thread-1', 'thread:thread-bg-1', 'thread:thread-bg-2']),
@@ -404,42 +399,21 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
       act(() => {
         root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
       });
-
-      // Initial connect — should NOT trigger catch-up
       act(() => {
-        const listeners = mockSocket.listeners('connect');
-        for (const listener of listeners) {
-          (listener as () => void)();
-        }
+        for (const listener of mockSocket.listeners('connect')) (listener as () => void)();
       });
       mockRequestStreamCatchUp.mockClear();
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
 
-      // Reconnect — active thread always covered; bg threads (thread-bg-1,
-      // thread-bg-2) MUST also get a catch-up call because they may have
-      // missed broadcasts during the disconnect window. Active thread should
-      // appear exactly once even though `thread:thread-1` is also in
-      // joinedRoomsRef (dedup via the `bumped` Set).
       act(() => {
-        const listeners = mockSocket.listeners('connect');
-        for (const listener of listeners) {
-          (listener as () => void)();
-        }
+        for (const listener of mockSocket.listeners('connect')) (listener as () => void)();
       });
+      const rejoined = emitMock.mock.calls.filter(([event]) => event === 'join_room').map(([, room]) => room);
+      expect(new Set(rejoined)).toEqual(new Set(['thread:thread-1']));
 
-      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
-      for (const room of ['thread:thread-1', 'thread:thread-bg-1', 'thread:thread-bg-2']) confirmLatestJoin(room);
-
-      const calledThreads = mockRequestStreamCatchUp.mock.calls.map((c) => c[0]);
-      // 砚砚 R1 P1: bg coverage must be locked — without these assertions the
-      // background rooms' catch-up could be silently lost and the test would still pass.
-      expect(calledThreads).toContain('thread-1');
-      expect(calledThreads).toContain('thread-bg-1');
-      expect(calledThreads).toContain('thread-bg-2');
-      // Each confirmed room requests exactly one catch-up, the active thread included.
-      const activeCount = calledThreads.filter((t) => t === 'thread-1').length;
-      expect(activeCount).toBe(1);
-      // Total: 3 distinct threads = 3 calls
-      expect(calledThreads).toHaveLength(3);
+      confirmLatestJoin('thread:thread-1');
+      expect(mockRequestStreamCatchUp.mock.calls.map((c) => c[0])).toEqual(['thread-1']);
     });
   });
 });

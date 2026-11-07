@@ -365,6 +365,23 @@
         "matchedFileCount": 1,
         "matchedFilesHash": "ff997e5e38eed9f077e8bde1e004ff418fae9839a9cdb7bcb9020b0a588480a4"
       }
+    },
+    {
+      "id": "alpha-managed-preparation-home-sleep",
+      "match": "^test/alpha-managed-preparation-sleep\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact preparation-sleep integration uses the private Alpha subscription and execution APIs. The public runtime deliberately omits those home-only harness modules. Keep the unchanged home integration suite; public command-clock and process-supervision contracts remain selected and exported.",
+      "owner": "@codex-astra",
+      "introducedBy": "Current-main export closure audit for the home Alpha preparation lifecycle",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-07",
+        "sourceHead": "5af4b6a87043400a5a4921e7d886b7a20c6e4f4e",
+        "publicHead": "3569a9b6422723faf3a586b68232c140f84b44a1",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "e4dfe4fe9b658304a322453f3faf8e4a6c61c054ebcf3abdc0daa351cd4bbb49"
+      }
     }
   ]
 }

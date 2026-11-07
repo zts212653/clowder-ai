@@ -231,6 +231,12 @@ export async function prepareCodexNativeLaunch(
       ]),
       '--config',
       'features.code_mode_host=true',
+      // V2 native delegation can be model-enabled independently of legacy multi_agent.
+      // Keep the code-mode host dispatcher, but expose no native child-agent tools.
+      '--config',
+      'agents.enabled=false',
+      '--config',
+      'features.multi_agent_v2={enabled=false,disable_native_tools=true}',
       '--config',
       'features.skip_host_skill_discovery=true',
     ];

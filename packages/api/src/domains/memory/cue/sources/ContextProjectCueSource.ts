@@ -7,15 +7,21 @@ import type { CollectionManifest } from '../../collection-types.js';
 import type { IEvidenceStore, IKnowledgeResolver } from '../../interfaces.js';
 import type { LibraryCatalog } from '../../LibraryCatalog.js';
 import { lessonSections } from '../../lesson-sections.js';
+import type { PublishedDocumentSnapshot } from '../../PublishedDocumentSource.js';
 import type { ContextSourceOmission } from '../context-source-omission.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
-import { canonicalProjectDocumentWindow, readCanonicalProjectDocument } from './canonical-project-document.js';
+import {
+  canonicalProjectDocumentWindow,
+  type PublishedProjectCueSource,
+  readCanonicalProjectDocument,
+} from './canonical-project-document.js';
 
 interface BoundProject {
   manifest: CollectionManifest;
   store: IEvidenceStore;
   digest: string;
   authorized: string[];
+  homeBound: boolean;
 }
 interface Coordinate {
   collectionId: string;
@@ -54,6 +60,7 @@ export class ContextProjectCueSource {
       /** Explicit first-party bootstrap binding, not guessed from a query/path. */
       homeProjectPath: string;
       homeDocsRoot: string;
+      publishedSource?: PublishedProjectCueSource;
     },
   ) {}
 
@@ -85,7 +92,7 @@ export class ContextProjectCueSource {
         manifest.updatedAt,
       ]),
     );
-    return { manifest, store, digest, authorized: privateSource ? [id] : [] };
+    return { manifest, store, digest, authorized: privateSource ? [id] : [], homeBound };
   }
 
   async discover(input: { scope: RecallScopeV1; query: string; signal?: AbortSignal }): Promise<{
@@ -113,9 +120,10 @@ export class ContextProjectCueSource {
     }
     const sources: MemoryCueSourceProjection[] = [];
     const omissions = new Set<ContextSourceOmission>();
+    const published = bound.homeBound ? await this.deps.publishedSource?.snapshot() : undefined;
     for (const hit of found.results.slice(0, 5)) {
       input.signal?.throwIfAborted();
-      const projection = await this.project(bound, hit.anchor);
+      const projection = await this.project(bound, hit.anchor, published);
       if ('omission' in projection) {
         omissions.add(projection.omission);
         continue;
@@ -135,6 +143,7 @@ export class ContextProjectCueSource {
   private async project(
     bound: BoundProject,
     anchor: string,
+    published?: PublishedDocumentSnapshot,
   ): Promise<
     | {
         source: MemoryCueSourceProjection;
@@ -152,7 +161,7 @@ export class ContextProjectCueSource {
     if (!indexed || indexed.sourceHash !== item.sourceHash || !indexed.vectorSourceHash)
       return { omission: 'index_revision_unverified' };
     if (indexed.vectorSourceHash !== indexed.sourceHash) return { omission: 'index_stale' };
-    const document = await readCanonicalProjectDocument(bound.manifest.root, item.sourcePath);
+    const document = await readCanonicalProjectDocument(bound.manifest.root, item.sourcePath, published);
     if (!document) return { omission: 'source_unavailable' };
     const splitLesson =
       item.kind === 'lesson' && item.sourcePath === 'lessons-learned.md' && /^LL-\d+$/.test(item.anchor);
@@ -193,7 +202,8 @@ export class ContextProjectCueSource {
     if (!bound || !coordinate || coordinate.collectionId !== bound.manifest.id || coordinate.binding !== bound.digest) {
       return { status: 'not_available' as const, invalidationReason: 'scope_revoked' as const };
     }
-    const current = await this.project(bound, coordinate.anchor);
+    const published = bound.homeBound ? await this.deps.publishedSource?.snapshot() : undefined;
+    const current = await this.project(bound, coordinate.anchor, published);
     if ('omission' in current)
       return {
         status: 'not_available' as const,

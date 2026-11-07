@@ -1636,7 +1636,7 @@ export type {
   UpdateSliceInput,
 } from './slice.js';
 // Socket.IO room membership convergence contract shared by API and Web.
-export type { RoomJoinAck } from './socket-room.js';
+export type { ResponseStreamReplay, RoomJoinAck } from './socket-room.js';
 // SOP definition generated truth source (#748)
 export {
   DEVELOPMENT_SOP_DEFINITION,

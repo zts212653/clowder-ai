@@ -377,12 +377,20 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const embedding = snapshot ? this.searchEmbedding() : undefined;
     const value = await runMemoryRead<T>({ ...job, embedding: snapshot }, { ...options, embedding });
     const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
-    if (mode === 'lexical' || !embedding || embedding.isCurrent()) return value;
+    throwIfSearchCancelled(options);
+    // A worker that already fell back discarded vector candidates and ranking.
+    // Its lexical result does not borrow the retired geometry.
+    if (
+      mode === 'lexical' ||
+      executionOf(value).meta.effectiveMode === 'lexical' ||
+      !embedding ||
+      embedding.isCurrent()
+    )
+      return value;
 
     // A retired worker result may contain old geometry with newly hydrated
     // source bodies. Discard it and use the existing lexical consumer once,
     // preserving the original absolute deadline, grants, filters and signal.
-    throwIfSearchCancelled(options);
     const lexicalJob: typeof job =
       job.kind === 'message-search'
         ? { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined }

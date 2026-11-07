@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Read-only lifecycle receipts across every Git-registered linked path. */
 import { fileURLToPath } from 'node:url';
-import { associatedWorktrees, worktreeInventory } from './lib/worktree-inventory.mjs';
+import { prWorktreeInventory, worktreeInventory } from './lib/worktree-inventory.mjs';
 import {
   completedMergedNoticeRelease,
   mergedWorktreeNotices,
@@ -35,12 +35,12 @@ export function inventoryCommand(argv, readPr = readPrTruth) {
   if (options.pr && options.notices) throw new Error('choose PR receipt or notices');
   if (options.pr) {
     const truth = readPr(options.pr);
-    const associated = associatedWorktrees({
+    const associated = prWorktreeInventory({
       repo,
       sourceRef: options.pr,
       commits: [...truth.commits, truth.mergedAt].filter(Boolean),
     });
-    const worktrees = associated.map((row) => ({
+    const worktrees = associated.worktrees.map((row) => ({
       ...row,
       disposition:
         row.retentionStatus === 'retained-until' && row.lifecycle.retention.sourceRef === options.pr
@@ -52,6 +52,8 @@ export function inventoryCommand(argv, readPr = readPrTruth) {
       repo,
       pr: truth,
       worktrees,
+      unknownWorktrees: associated.unknownWorktrees,
+      associationComplete: associated.unknownWorktrees.length === 0,
       unresolved: worktrees.filter((row) => row.disposition !== 'retained').length,
     };
   }

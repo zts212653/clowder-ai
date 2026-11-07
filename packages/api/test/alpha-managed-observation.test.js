@@ -68,3 +68,40 @@ test('Alpha recovery requires positive interruption provenance and a complete ob
     'unknown',
   );
 });
+
+test('a sleep-aware preparation may continue in place but never supplies replay evidence', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'alpha-preparation-observation-'));
+  t.after(() => rmSync(root, { force: true, recursive: true }));
+  const job = { jobId: 'private-job', recordPath: join(root, 'job.json') };
+  const token = 'private-attempt';
+  const read = (events, start = {}) => {
+    const entries = [
+      { type: 'command-start', stage: 'build', observerProtocol: 'confirmed-sleep-v1', ...start },
+      { type: 'command-spawn', pid: 42, startedAt: 'birth' },
+      ...events,
+    ];
+    writeFileSync(
+      alphaRecoveryJournalPath(job, token),
+      entries
+        .map((event) =>
+          JSON.stringify({
+            version: 1,
+            jobId: job.jobId,
+            attemptToken: token,
+            unitKey: 'prepare',
+            observedAt: 100,
+            ...event,
+          }),
+        )
+        .join('\n') + '\n',
+    );
+    return readAlphaRecoveryObservation(job, token);
+  };
+  assert.deepEqual(read([]), { kind: 'live_preparation', pid: 42, startedAt: 'birth' });
+  assert.equal(read([], { observerProtocol: 'unsupported' }).kind, 'unknown');
+  assert.equal(read([], { stage: 'browser' }).kind, 'unknown');
+  assert.equal(read([{ type: 'command-exit', exitCode: 7 }]).kind, 'failed');
+  assert.equal(read([{ type: 'command-exit', exitCode: null, timedOut: true }]).kind, 'unknown');
+  assert.equal(read([{ type: 'command-exit', exitCode: null, cancelled: true }]).kind, 'unknown');
+  assert.equal(read([{ type: 'test-failure' }]).kind, 'failed');
+});

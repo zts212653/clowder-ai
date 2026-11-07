@@ -145,10 +145,12 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   let toolInput;
   let overwrite;
   if (FILE_WRITERS.has(name)) {
-    const target = args.TargetFile ?? args.NotebookPath;
+    // 1.5 file tools execute Path; a legacy field must never substitute a
+    // different target for policy checks, even in a malformed mixed payload.
+    const target = name === 'write_file' || name === 'edit_file' ? args.Path : (args.TargetFile ?? args.NotebookPath);
     if (typeof target !== 'string' || !target) return deny('missing file target');
     if (isControl(target, cwd, options.profileHome)) return deny('AGY executable control-plane write');
-    toolName = name === 'write_to_file' ? 'Write' : 'Edit';
+    toolName = name === 'write_to_file' || name === 'write_file' ? 'Write' : 'Edit';
     toolInput = { file_path: target };
   } else if (COMMANDS.has(name)) {
     const quote = (value) => `'${value.replaceAll("'", `'"'"'`)}'`;

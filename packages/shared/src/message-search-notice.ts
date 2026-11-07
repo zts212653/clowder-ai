@@ -61,6 +61,18 @@ function execution(q: Record<string, unknown>, counts: MessageSearchNotice['coun
 export function messageSearchNotice(input: { results: readonly unknown[]; meta?: unknown }): MessageSearchNotice {
   const meta = record(input.meta),
     q = record(meta.qualification);
+  if (meta.resultKind === 'sources') return sourceNotice(input.results.length, meta);
+  if (meta.resultKind === 'selected-answer') {
+    return {
+      summary: `本卡显示猫选出的 ${input.results.length} 处来源；系统核验原句与结构归属，选用理由由选材猫判断。`,
+      coverage:
+        '本卡没有重新搜索，也不证明已查全历史。' +
+        (record(meta.response).truncated || meta.hasMore || meta.partial
+          ? '部分选材受当前可读性或返回预算限制，未在本卡显示。'
+          : ''),
+      nextStep: '打开原文，结合标题、条件、引文与当条批注核对选用理由。',
+    };
+  }
   const counts = qualificationCounts(q);
   const batchExecution = execution(q, counts);
   const notice: MessageSearchNotice = {
@@ -77,4 +89,23 @@ export function messageSearchNotice(input: { results: readonly unknown[]; meta?:
   else if (meta.hasMore || meta.partial || meta.semanticCandidatesLimited)
     notice.coverage += '仅列出本次可得的部分命中。';
   return notice;
+}
+
+function sourceNotice(shown: number, meta: Record<string, unknown>): MessageSearchNotice {
+  const window = record(meta.timeWindow);
+  let coverage = '索引覆盖范围尚未确认。最近消息可能尚未入索引，延迟暂无法确认。';
+  if (meta.sort === 'time' && isCount(window.limit) && isCount(window.admitted)) {
+    coverage += window.complete
+      ? `按相关度取得前 ${window.limit} 条可读来源，再按时间排列；窗口外可能有更早的原文。`
+      : `本次核完 ${window.admitted} 条来源，未读满 ${window.limit} 条相关窗口，仅按已核部分的时间排列。`;
+  } else coverage += '按相关度列出本次可得的部分来源。';
+  if (record(meta.response).truncated) coverage += '返回受预算限制，当前没有后续分页入口。';
+  else if (meta.hasMore && meta.sort === 'time') coverage += '仅列出本次可得的部分来源。';
+  return {
+    summary: shown
+      ? `找到 ${shown} 处可打开的原文，请结合内容和上下文判断。`
+      : '本次没有可显示的原文，不能据此判断历史没有相关消息。',
+    coverage,
+    nextStep: shown ? '打开原文核对内容、原说话者和上下文。' : '可结合已有线索调整查询或查找范围。',
+  };
 }
