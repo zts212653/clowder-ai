@@ -3,31 +3,30 @@
  * Converts hex colors from API to rgba for glow/shadow effects.
  */
 
+/** `#rgb`, `#rrggbb` or `#rrggbbaa` → [r, g, b] (alpha ignored); anything else → null. */
+export function parseHexColor(hex: string): [number, number, number] | null {
+  const cleaned = hex.replace('#', '');
+  if (![3, 6, 8].includes(cleaned.length) || !/^[0-9a-f]+$/i.test(cleaned)) return null;
+  const pairs =
+    cleaned.length === 3
+      ? Array.from(cleaned, (digit) => digit + digit)
+      : [cleaned.slice(0, 2), cleaned.slice(2, 4), cleaned.slice(4, 6)];
+  return pairs.map((pair) => Number.parseInt(pair, 16)) as [number, number, number];
+}
+
+/** A value that is not a hex colour still yields an invalid CSS colour, which the browser ignores. */
+const UNREADABLE: [number, number, number] = [Number.NaN, Number.NaN, Number.NaN];
+
 /** Blend a hex color toward white by ratio (0→white, 1→accent). Symmetric to tintedDark. */
 export function tintedLight(hex: string, ratio: number, base = '#FFFFFF'): string {
-  const parse = (h: string) => [
-    Number.parseInt(h.slice(1, 3), 16),
-    Number.parseInt(h.slice(3, 5), 16),
-    Number.parseInt(h.slice(5, 7), 16),
-  ];
-  const [r1, g1, b1] = parse(hex);
-  const [r2, g2, b2] = parse(base);
+  const [r1, g1, b1] = parseHexColor(hex) ?? UNREADABLE;
+  const [r2, g2, b2] = parseHexColor(base) ?? UNREADABLE;
   return `rgb(${Math.round(r2 + (r1 - r2) * ratio)}, ${Math.round(g2 + (g1 - g2) * ratio)}, ${Math.round(b2 + (b1 - b2) * ratio)})`;
 }
 
 /** Convert hex color (3/6/8 digit) to rgba string */
 export function hexToRgba(hex: string, alpha: number): string {
-  const cleaned = hex.replace('#', '');
-  let r: number, g: number, b: number;
-  if (cleaned.length === 3) {
-    r = parseInt(cleaned[0] + cleaned[0], 16);
-    g = parseInt(cleaned[1] + cleaned[1], 16);
-    b = parseInt(cleaned[2] + cleaned[2], 16);
-  } else {
-    r = parseInt(cleaned.slice(0, 2), 16);
-    g = parseInt(cleaned.slice(2, 4), 16);
-    b = parseInt(cleaned.slice(4, 6), 16);
-  }
+  const [r, g, b] = parseHexColor(hex) ?? UNREADABLE;
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
@@ -157,20 +156,9 @@ function oklabToOklch(L: number, a: number, b: number): OklchColor {
  *   hexToOklch('#5B8C5A')  // codex 绿 → { l: ~0.563, c: ~0.099, h: ~145 }
  */
 export function hexToOklch(hex: string): OklchColor {
-  const cleaned = hex.replace('#', '');
-  if (![3, 6, 8].includes(cleaned.length) || !/^[0-9a-f]+$/i.test(cleaned)) {
-    throw new Error(`Invalid hex color: "${hex}"`);
-  }
-  let r: number, g: number, b: number;
-  if (cleaned.length === 3) {
-    r = Number.parseInt(cleaned[0] + cleaned[0], 16);
-    g = Number.parseInt(cleaned[1] + cleaned[1], 16);
-    b = Number.parseInt(cleaned[2] + cleaned[2], 16);
-  } else {
-    r = Number.parseInt(cleaned.slice(0, 2), 16);
-    g = Number.parseInt(cleaned.slice(2, 4), 16);
-    b = Number.parseInt(cleaned.slice(4, 6), 16);
-  }
+  const rgb = parseHexColor(hex);
+  if (!rgb) throw new Error(`Invalid hex color: "${hex}"`);
+  const [r, g, b] = rgb;
   const rLin = srgbByteToLinear(r);
   const gLin = srgbByteToLinear(g);
   const bLin = srgbByteToLinear(b);

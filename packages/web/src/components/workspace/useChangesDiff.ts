@@ -16,6 +16,7 @@ export interface ChangedFile {
 }
 
 export interface ChangesDiffData {
+  isGitRepository?: boolean;
   changedFiles: ChangedFile[];
   diff: string;
   target?: PullRequestChangesTarget;
@@ -104,10 +105,12 @@ async function readChangesResponse(
 export function useChangesDiff(
   worktreeId: string | null,
   pullRequestTarget?: PullRequestChangesTarget,
-  chatSource = false,
   commitTarget?: CommitChangesTarget,
 ) {
   const prKey = pullRequestTarget ? encodePullRequestChangesTarget(pullRequestTarget) : null;
+  // #1809: read permission follows the target's own session coordinate. The entry that opened the
+  // PR (chat link, artifact list, workspace home) only decides where "back" returns to.
+  const prUsesChatEndpoint = Boolean(pullRequestTarget?.threadId);
   const commitKey = commitTarget ? JSON.stringify(commitTarget) : null;
   const targetKey = commitKey ? `commit:${commitKey}` : prKey ? `pr:${prKey}` : `local:${worktreeId ?? ''}`;
   const currentKey = useRef(targetKey);
@@ -131,7 +134,7 @@ export function useChangesDiff(
         commitKey
           ? `/api/workspace/chat-commit-changes?${new URLSearchParams(JSON.parse(commitKey))}`
           : prKey
-            ? `/api/workspace/${chatSource ? 'chat-pull-request-changes' : 'pull-request-changes'}?target=${encodeURIComponent(prKey)}`
+            ? `/api/workspace/${prUsesChatEndpoint ? 'chat-pull-request-changes' : 'pull-request-changes'}?target=${encodeURIComponent(prKey)}`
             : `/api/workspace/diff?worktreeId=${encodeURIComponent(worktreeId)}`,
       );
       if (!isCurrent()) return;
@@ -155,7 +158,7 @@ export function useChangesDiff(
     } catch {
       if (isCurrent()) setStatus({ key: targetKey, loading: false, error: 'network' });
     }
-  }, [worktreeId, prKey, targetKey, chatSource, commitKey]);
+  }, [worktreeId, prKey, targetKey, prUsesChatEndpoint, commitKey]);
 
   useEffect(() => {
     void refresh();

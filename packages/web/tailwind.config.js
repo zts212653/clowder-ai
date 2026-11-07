@@ -346,7 +346,7 @@ module.exports = {
     },
   },
   plugins: [
-    require('./src/components/chat-background/surface-plugin.cjs'),
+    require('./scripts/chat-background/surface-plugin.cjs'),
     /* Expose fontSizePx as --console-font-{name} CSS vars for JS/non-Tailwind consumers */
     ({ addBase }) => {
       const vars = {};

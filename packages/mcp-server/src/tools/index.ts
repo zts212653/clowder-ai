@@ -219,6 +219,12 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
+  handleListMemoryMatters,
+  handleReadMemoryMatter,
+  handleWriteMemoryMatter,
+  matterMemoryTools,
+} from './matter-memory-tools.js';
+export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
   recordMemoryCueOutcomeInputSchema,
@@ -359,4 +365,15 @@ export {
   recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
+export {
+  bringToDeskInputShape,
+  handleBringToDesk,
+  handleOfferSuggestion,
+  handlePostActionReceipt,
+  handleSuggestionFacts,
+  offerSuggestionInputSchema,
+  postActionReceiptInputSchema,
+  suggestionFactsInputSchema,
+  suggestionTools,
+} from './suggestion-tools.js';
 export { workTools } from './work-tools.js';

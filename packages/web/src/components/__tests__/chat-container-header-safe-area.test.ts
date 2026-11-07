@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainerHeader } from '@/components/ChatContainerHeader';
+import { ShellPresentationContext } from '../shell/shell-presentation';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) =>
@@ -31,15 +33,19 @@ describe('ChatContainerHeader safe-area', () => {
 
   it('applies top safe-area class so iOS standalone status bar does not overlap header', async () => {
     container.innerHTML = renderToStaticMarkup(
-      React.createElement(ChatContainerHeader, {
-        sidebarOpen: false,
-        onToggleSidebar: vi.fn(),
-        threadId: 'default',
-        viewMode: 'single',
-        onToggleViewMode: vi.fn(),
-        statusPanelOpen: true,
-        onToggleStatusPanel: vi.fn(),
-      }),
+      React.createElement(
+        ShellPresentationContext.Provider,
+        { value: 'classic' },
+        React.createElement(ChatContainerHeader, {
+          sidebarOpen: false,
+          onToggleSidebar: vi.fn(),
+          threadId: 'default',
+          viewMode: 'single',
+          onToggleViewMode: vi.fn(),
+          statusPanelOpen: true,
+          onToggleStatusPanel: vi.fn(),
+        }),
+      ),
     );
 
     const header = container.querySelector('header');

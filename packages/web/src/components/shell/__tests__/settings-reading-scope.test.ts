@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SCOPE_KEY = 'cat-cafe:settings-reading-scope:v1';

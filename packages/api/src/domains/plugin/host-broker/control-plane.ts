@@ -77,8 +77,11 @@ function handshakeError(reason: HandshakeRejectReason, message: string): HostBro
   return new HostBrokerError('HANDSHAKE_REJECTED', message, reason);
 }
 
-function sessionForConnection(transaction: HostBrokerTransaction, connectionId: string): BrokerSessionRecord {
-  const session = transaction.sessions.getByConnectionId(connectionId);
+async function sessionForConnection(
+  transaction: HostBrokerTransaction,
+  connectionId: string,
+): Promise<BrokerSessionRecord> {
+  const session = await transaction.sessions.getByConnectionId(connectionId);
   if (!session) throw new HostBrokerError('SESSION_NOT_FOUND', `unknown Broker connection ${connectionId}`);
   return session;
 }
@@ -163,17 +166,17 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     const connectionId = this.options.createConnectionId?.() ?? `conn_${randomUUID()}`;
     const brokerSessionId = this.options.createSessionId?.() ?? `bs_${randomUUID()}`;
     const runtimeLeaseId = this.options.createRuntimeLeaseId?.() ?? `lease_${randomUUID()}`;
-    await this.options.store.transaction((transaction) => {
-      if (transaction.sessions.getByConnectionId(connectionId)) {
+    await this.options.store.transaction(async (transaction) => {
+      if (await transaction.sessions.getByConnectionId(connectionId)) {
         throw new HostBrokerError('BROKER_INVARIANT', `connection id collision: ${connectionId}`);
       }
-      const currentSession = transaction.sessions
-        .list()
-        .find((session) => session.pluginInstanceId === pluginInstanceId && session.phase !== 'closed');
+      const currentSession = (
+        await transaction.sessions.list(pluginInstanceId, ['transport_connected', 'host_bound', 'active', 'draining'])
+      ).find((session) => session.pluginInstanceId === pluginInstanceId && session.phase !== 'closed');
       if (currentSession) {
         throw new HostBrokerError('INSTANCE_NOT_READY', `${pluginInstanceId} already has an open Broker session`);
       }
-      transaction.sessions.put({
+      await transaction.sessions.put({
         connectionId,
         brokerSessionId,
         runtimeLeaseId,
@@ -236,12 +239,12 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     if (!validateSessionBinding(binding)) {
       await this.rejectHandshake(connectionId, 'AUTHORITY_VIOLATION', 'Host produced an invalid session binding');
     }
-    await this.options.store.transaction((transaction) => {
-      const current = sessionForConnection(transaction, connectionId);
+    await this.options.store.transaction(async (transaction) => {
+      const current = await sessionForConnection(transaction, connectionId);
       if (current.phase !== 'transport_connected') {
         throw handshakeError('BINDING_REPLAY', 'concurrent hello changed the session state');
       }
-      transaction.sessions.put({
+      await transaction.sessions.put({
         ...current,
         phase: 'host_bound',
         candidate: structuredClone(candidate),
@@ -270,19 +273,19 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
 
     const now = this.now();
     const expiresAt = now + this.activeLeaseTtlMs;
-    await this.options.store.transaction((transaction) => {
-      const current = sessionForConnection(transaction, connectionId);
+    await this.options.store.transaction(async (transaction) => {
+      const current = await sessionForConnection(transaction, connectionId);
       if (current.phase !== 'host_bound' || current.bindingNonce !== params.bindingNonce) {
         throw handshakeError('BINDING_REPLAY', 'concurrent ready changed the session state');
       }
-      transaction.sessions.put({
+      await transaction.sessions.put({
         ...current,
         phase: 'active',
         bindingNonce: undefined,
         activeLeaseExpiresAt: expiresAt,
         updatedAt: now,
       });
-      transaction.runtimeLeases.put({
+      await transaction.runtimeLeases.put({
         runtimeLeaseId: current.runtimeLeaseId,
         brokerSessionId: current.brokerSessionId,
         pluginInstanceId: current.pluginInstanceId,
@@ -360,8 +363,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private async authorizeConnection(pluginInstanceId: string): Promise<BrokerCallContext> {
-    const sessions = (await this.options.store.snapshot()).sessions.filter(
-      (candidate) => candidate.pluginInstanceId === pluginInstanceId && candidate.phase === 'active',
+    const sessions = (await this.options.store.read.sessions.list(pluginInstanceId, 'active')).filter(
+      (candidate) => candidate.phase === 'active',
     );
     if (sessions.length === 0) {
       throw new HostBrokerError('INSTANCE_NOT_READY', `${pluginInstanceId} has no active Broker session`);
@@ -376,9 +379,9 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     const context = await this.currentCallContext(connectionId);
     const now = this.now();
     const expiresAt = now + this.activeLeaseTtlMs;
-    const decision = await this.options.store.transaction<RuntimeLeaseRenewalDecision>((transaction) => {
-      const session = sessionForConnection(transaction, connectionId);
-      const lease = transaction.runtimeLeases.get(session.runtimeLeaseId);
+    const decision = await this.options.store.transaction<RuntimeLeaseRenewalDecision>(async (transaction) => {
+      const session = await sessionForConnection(transaction, connectionId);
+      const lease = await transaction.runtimeLeases.get(session.runtimeLeaseId);
       const leaseExpiredWhileActive =
         session.phase === 'active' &&
         ((session.activeLeaseExpiresAt !== undefined && session.activeLeaseExpiresAt <= now) ||
@@ -411,12 +414,12 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
           proposedCloseReason,
         };
       }
-      transaction.sessions.put({
+      await transaction.sessions.put({
         ...session,
         activeLeaseExpiresAt: expiresAt,
         updatedAt: now,
       });
-      transaction.runtimeLeases.put({
+      await transaction.runtimeLeases.put({
         ...lease,
         expiresAt,
         updatedAt: now,
@@ -467,11 +470,11 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   async close(connectionId: string, reason = 'closed'): Promise<void> {
     let session: BrokerSessionRecord | undefined;
     const now = this.now();
-    await this.options.store.transaction((transaction) => {
-      const current = transaction.sessions.getByConnectionId(connectionId);
+    await this.options.store.transaction(async (transaction) => {
+      const current = await transaction.sessions.getByConnectionId(connectionId);
       if (!current || current.phase === 'closed') return;
       session = current;
-      transaction.sessions.put({
+      await transaction.sessions.put({
         ...current,
         phase: 'closed',
         bindingNonce: undefined,
@@ -480,11 +483,11 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
         closedAt: now,
         updatedAt: now,
       });
-      const lease = transaction.runtimeLeases.get(current.runtimeLeaseId);
-      if (lease) transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
-      const features = transaction.staticFeatures.get();
+      const lease = await transaction.runtimeLeases.get(current.runtimeLeaseId);
+      if (lease) await transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
+      const features = await transaction.staticFeatures.getActive(current.pluginInstanceId);
       if (features.leases.some((r) => r.brokerSessionId === current.brokerSessionId && r.state !== 'revoked')) {
-        transaction.staticFeatures.put(
+        await transaction.staticFeatures.update(
           revokeStaticFeatures(features, (r) => r.brokerSessionId === current.brokerSessionId, now),
         );
       }
@@ -496,12 +499,17 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     const affected = new Map<string, string>();
     let changed = 0;
     const now = this.now();
-    await this.options.store.transaction((transaction) => {
-      for (const session of transaction.sessions.list()) {
+    await this.options.store.transaction(async (transaction) => {
+      for (const session of await transaction.sessions.list(undefined, [
+        'transport_connected',
+        'host_bound',
+        'active',
+        'draining',
+      ])) {
         if (session.phase === 'closed') continue;
         changed += 1;
         affected.set(session.pluginInstanceId, session.packageDigest);
-        transaction.sessions.put({
+        await transaction.sessions.put({
           ...session,
           phase: 'closed',
           bindingNonce: undefined,
@@ -511,13 +519,14 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
           updatedAt: now,
         });
       }
-      for (const lease of transaction.runtimeLeases.list()) {
+      for (const lease of await transaction.runtimeLeases.list(['pending', 'live', 'expired', 'revoked'])) {
         if (lease.state === 'closed') continue;
-        transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
+        await transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
       }
-      const features = transaction.staticFeatures.get();
-      if (features.leases.some((r) => r.state !== 'revoked')) {
-        transaction.staticFeatures.put(revokeStaticFeatures(features, () => true, now));
+      for (const instanceId of affected.keys()) {
+        const features = await transaction.staticFeatures.getActive(instanceId);
+        if (features.leases.length)
+          await transaction.staticFeatures.update(revokeStaticFeatures(features, () => true, now));
       }
     });
     for (const [pluginInstanceId, packageDigest] of affected) {
@@ -532,22 +541,15 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private async readSession(connectionId: string): Promise<BrokerSessionRecord> {
-    const session = (await this.options.store.snapshot()).sessions.find(
-      (candidate) => candidate.connectionId === connectionId,
-    );
+    const session = await this.options.store.read.sessions.getByConnectionId(connectionId);
     if (!session) throw new HostBrokerError('SESSION_NOT_FOUND', `unknown Broker connection ${connectionId}`);
     return session;
   }
 
   private async currentCallContext(connectionId: string): Promise<BrokerCallContext> {
-    const brokerSnapshot = await this.options.store.snapshot();
-    const session = brokerSnapshot.sessions.find((candidate) => candidate.connectionId === connectionId);
+    const { session, lease: currentLease } = await this.options.store.readConnection(connectionId);
     if (!session) throw new HostBrokerError('SESSION_NOT_FOUND', `unknown Broker connection ${connectionId}`);
-    const assessment = assessRuntimeLease(
-      session,
-      brokerSnapshot.runtimeLeases.find((candidate) => candidate.runtimeLeaseId === session.runtimeLeaseId),
-      this.now(),
-    );
+    const assessment = assessRuntimeLease(session, currentLease, this.now());
     if (!assessment.live) {
       return this.throwPersistedInactiveSession(
         connectionId,
@@ -603,8 +605,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       throw new HostBrokerError('INVALID_CALL_RESULT', `${record.method} handler returned an invalid result`);
     }
     const settled = structuredClone(result);
-    await this.options.store.transaction((transaction) => {
-      const current = transaction.calls.get(record.ledgerKey);
+    await this.options.store.transaction(async (transaction) => {
+      const current = await transaction.calls.get(record.ledgerKey);
       if (!current || current.inputDigest !== record.inputDigest) {
         throw new HostBrokerError('BROKER_INVARIANT', `${record.method} call ledger changed before settlement`);
       }
@@ -612,7 +614,7 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       if (current.phase !== 'dispatched') {
         throw new HostBrokerError('BROKER_INVARIANT', `${record.method} cannot settle from ${current.phase}`);
       }
-      transaction.calls.put({
+      await transaction.calls.put({
         ...current,
         phase: 'settled_success',
         revision: current.revision + 1,
@@ -624,8 +626,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private async acquireDispatchClaim(record: BrokerCallRecord): Promise<CallLedgerDecision> {
-    return this.options.store.transaction((transaction) => {
-      const current = transaction.calls.get(record.ledgerKey);
+    return this.options.store.transaction(async (transaction) => {
+      const current = await transaction.calls.get(record.ledgerKey);
       if (!current || current.inputDigest !== record.inputDigest) {
         throw new HostBrokerError('BROKER_INVARIANT', `${record.method} call ledger changed after claim`);
       }
@@ -648,24 +650,24 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
         revision: current.revision + 1,
         updatedAt: this.now(),
       };
-      transaction.calls.put(dispatched);
+      await transaction.calls.put(dispatched);
       return { kind: 'dispatch', record: dispatched };
     });
   }
 
   private async beginCall(record: BrokerCallRecord, handler: BrokerMethodHandler): Promise<CallLedgerDecision> {
-    return this.options.store.transaction((transaction) => {
-      const existing = transaction.calls.get(record.ledgerKey);
+    return this.options.store.transaction(async (transaction) => {
+      const existing = await transaction.calls.get(record.ledgerKey);
       if (existing) {
         this.assertSameCallIdentity(existing, record);
         const retried = this.retrySettledErrorAfterAuthorityChange(existing, record, handler);
         if (retried) {
-          transaction.calls.put(retried);
+          await transaction.calls.put(retried);
           return { kind: 'claim', record: retried };
         }
         return this.decisionForExistingCall(existing, record);
       }
-      transaction.calls.put(record);
+      await transaction.calls.put(record);
       return { kind: 'claim', record };
     });
   }
@@ -717,8 +719,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private async settleCallError(record: BrokerCallRecord, error: BrokerCallError): Promise<void> {
-    await this.options.store.transaction((transaction) => {
-      const current = transaction.calls.get(record.ledgerKey);
+    await this.options.store.transaction(async (transaction) => {
+      const current = await transaction.calls.get(record.ledgerKey);
       if (!current || current.inputDigest !== record.inputDigest) {
         throw new HostBrokerError('BROKER_INVARIANT', `${record.method} call ledger changed before error settlement`);
       }
@@ -726,7 +728,7 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       if (current.phase !== 'dispatched') {
         throw new HostBrokerError('BROKER_INVARIANT', `${record.method} cannot settle error from ${current.phase}`);
       }
-      transaction.calls.put({
+      await transaction.calls.put({
         ...current,
         phase: 'settled_error',
         revision: current.revision + 1,
@@ -737,13 +739,8 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private async currentAuthority(pluginInstanceId: string, requireReady: boolean): Promise<CurrentAuthority> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const current = instance
-      ? snapshot.instances.find(
-          (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
-        )
-      : undefined;
+    const authority = await this.options.inventory.readAuthority(pluginInstanceId);
+    const { instance, current, packageRecord } = authority ?? {};
     if (
       !instance ||
       current?.pluginInstanceId !== pluginInstanceId ||
@@ -752,10 +749,7 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     ) {
       throw new HostBrokerError('INSTANCE_NOT_READY', `${pluginInstanceId} is not a current enabled instance`);
     }
-    const packageRecord = snapshot.packages.find(
-      (candidate) => candidate.packageDigest === instance.packageDigest && candidate.packageState === 'installed',
-    );
-    if (!packageRecord) {
+    if (!packageRecord || packageRecord.packageState !== 'installed' || packageRecord.pluginId !== instance.pluginId) {
       throw new HostBrokerError('BROKER_INVARIANT', `${pluginInstanceId} has incomplete inventory authority`);
     }
     if (packageRecord.manifest === null)
@@ -789,15 +783,15 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     runtimeState: 'healthy' | 'stopped',
   ): Promise<void> {
     const now = this.now();
-    await this.options.inventory.transaction((transaction: PluginInventoryTransaction) => {
-      const instance = transaction.instances.get(pluginInstanceId);
+    await this.options.inventory.transaction(async (transaction: PluginInventoryTransaction) => {
+      const instance = await transaction.instances.get(pluginInstanceId);
       if (!instance || instance.lifecycleState !== 'installed' || instance.packageDigest !== packageDigest) {
         throw new HostBrokerError(
           'INSTANCE_NOT_READY',
           `${pluginInstanceId} authority changed before runtime projection`,
         );
       }
-      transaction.instances.put({ ...instance, runtimeState, updatedAt: now });
+      await transaction.instances.put({ ...instance, runtimeState, updatedAt: now });
     });
   }
 }

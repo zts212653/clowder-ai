@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { LocalMediaFileUnavailable } from '../domains/video-studio/content-owner/published-media-file-exports.js';
 import { isDirectLoopbackRequest, isTrustedLocalApiRequest } from '../utils/loopback-request.js';
 
 const exec = promisify(execFile);
@@ -85,6 +86,8 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         defaultApplicationBundleId: application.bundleId,
       };
     } catch (error) {
+      if (error instanceof LocalMediaFileUnavailable)
+        return { local: false, canOpen: false, canReveal: false, reason: error.message };
       return deps.onError(reply, error);
     }
   });
@@ -116,6 +119,8 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         }
         return { ok: true };
       } catch (error) {
+        if (error instanceof LocalMediaFileUnavailable)
+          return reply.code(403).send({ error: 'local_file_unavailable', reason: error.message });
         return deps.onError(reply, error);
       }
     });

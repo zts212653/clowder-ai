@@ -136,16 +136,22 @@ skills:
     category: "引导与协作"
     description: >
       单人或多猫的创意探索、独立思考、讨论收敛。
-      Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
+      Use when: 有目标但不知道怎么做、已有方向反复不满意、头脑风暴 / brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
       Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
       Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
     triggers:
       - "不知道怎么做"
       - "怎么改都不满意"
       - "brainstorm"
+      - "头脑风暴"
       - "讨论"
       - "多猫独立思考"
+      - "专家辩论"
+      - "多猫分析"
+      - "三猫讨论"
       - "收敛"
+      - "高度深度广度"
+      - "Altitude Range Depth"
       - "讨论结束"
       - "总结一下"
     not_for:
@@ -175,42 +181,14 @@ skills:
     category: "引导与协作"
     description: >
       围绕具体材料陪人读懂、听懂、讨论与共同探索。
-      Use when: 一起读论文/访谈/文章/书中章节、重读旧材料、准备共读的阅读稿或口播稿、听完后继续挑战与发散。
+      Use when: 一起读论文/访谈/文章/书中章节、以审稿人视角精读单篇或系列论文、重读旧材料、准备共读的阅读稿或口播稿、听完后继续挑战与发散。
       Not for: 单次事实问答、只要摘要或翻译、产品操作引导、对外文章、替用户启动训练或能力进化项目。
       Output: 按需交付带来源的阅读稿/口播稿与共同讨论；需要保存时在约定位置更新材料，并同步读者正在消费的版本。
-    triggers: ["陪我学习", "一起读", "一起重读", "学习口播稿", "听完一起讨论"]
+    triggers: ["陪我学习", "一起读", "一起重读", "学习口播稿", "听完一起讨论", "审稿人视角读论文", "审稿人系列"]
     not_for: ["单次事实问答", "只要摘要或翻译", "产品操作引导", "对外文章", "启动训练或能力进化项目"]
     output: "带来源的阅读稿/口播稿、共同探索与按需同步的学习记录"
-    next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging"]
+    next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging", "video-forge"]
     sop_step: null
-
-  # ── 专家辩论团 ──
-  expert-panel:
-    category: "引导与协作"
-    description: >
-      多猫专家辩论团：独立分析→挑战→收敛→风险预演→语音汇报→文档交付。
-      Use when: 用户明确要求 expert panel、专家辩论、多猫分析或三猫讨论。
-      Not for: 普通“帮我分析一下”、单猫能搞定的问题、代码实现、bug fix、日常聊天。
-      Output: 洞察卡片(rich block) + 语音总结 + 会议纪要 + 正式报告(DOCX/PDF)。
-    triggers:
-      - "专家辩论"
-      - "expert panel"
-      - "技术参谋"
-      - "竞品分析"
-      - "行业分析"
-      - "趋势判断"
-      - "多猫分析"
-      - "三猫讨论"
-      - "showcase"
-    not_for:
-      - "单猫能搞定的问题"
-      - "代码实现"
-      - "bug fix"
-      - "日常聊天"
-    output: "Insight card + voice summary + meeting notes + formal report (DOCX/PDF)"
-    next: ["feat-lifecycle", "deep-research", "collaborative-thinking"]
-    sop_step: null
-    merged_from: null
 
   # ── 计划编写 ──
   writing-plans:
@@ -350,6 +328,28 @@ skills:
       - "一次性新任务"
     output: "重复未确认不强制 block；重复已确认后按 operator 决策需要产出 interactive 或行动后 card"
     next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
+    sop_step: null
+
+  paw-feel-daily:
+    category: "治理"
+    description: >
+      每天看前一天全家报的爪感差：哪里还在让猫做不成、做得费劲，错在哪一层，推动能让它不再发生的改变，并核实困难是否真的减少。
+      Use when: 爪感差每日分拣的定时唤醒、You 要看最近猫猫用着哪里不顺。
+      Not for: 当场撞到的单条摩擦（原 turn 自己处理）、F278 旧值班的逐条签字与 blocker（已停，不重启）、
+      修复本身（修复线程用 debugging / code-as-harness）。
+      Output: 每日分拣日报一条 + 0–3 个修复去向（向负责线程投证据，或提修复 / 架构复查线程卡给 You 批）。
+    triggers:
+      - "爪感差分拣"
+      - "爪感差日报"
+      - "每日爪感差"
+      - "爪感差分类"
+      - "paw-feel daily"
+    not_for:
+      - "当场单条摩擦"
+      - "F278 逐条签字"
+      - "根因修复本身"
+    output: "每日分拣日报 + 0–3 个修复去向"
+    next: ["code-as-harness", "cross-thread-sync"]
     sop_step: null
 
   # ── 质量门禁 ──
@@ -632,7 +632,6 @@ skills:
       - "不值得继续"
       - "保守路径"
       - "实际价值变了"
-      - "收口"
       - "vision rescue"
     not_for:
       - "未出现绝境信号的常规 debugging"
@@ -1030,7 +1029,7 @@ skills:
     category: "创作与媒体"
     description: >
       家里用 Remotion 做视频要知道的事：工程在哪、本机配音和回听怎么调、You 定过的片子规矩、真踩过的坑、怎么在 Console 里交片。
-      Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
+      Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片（含论文讲解）、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
       或给片子配音、对时间轴、交片。
       Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
       目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
@@ -1044,12 +1043,14 @@ skills:
       - "教程视频"
       - "动态排版"
       - "录屏剪辑"
+      - "论文讲解视频"
+      - "审稿人系列视频"
     not_for:
       - "只查 Remotion API 用法"
       - "讲角色自己故事的动画短片"
       - "PPT"
     output: "Remotion project + retained video work + fixed-version card and original-feedback response"
-    next: ["rich-messaging", "anime-forge"]
+    next: ["rich-messaging", "anime-forge", "learning-companion"]
     sop_step: null
     merged_from: null
   anime-forge:

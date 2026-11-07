@@ -1,4 +1,5 @@
 import { reportAcpHostPolicy, resolveAcpHostPolicy } from './config/acp-host-policy.js';
+import { resolveInitialBuildRevision } from './config/runtime-deployment-revision.js';
 import { AgentServiceUnavailableError } from './domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
 import { hasRecentWorkPublication } from './domains/cats/services/agents/routing/recent-global-work-reader.js';
 import { createRefreshingAcpSessionProvider } from './domains/cats/services/agents/session-contract/acp-session-provider.js';
@@ -27,6 +28,7 @@ import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './domains/plugin/host-inven
 import { createCollectiveWorkCalendarReader } from './domains/plugin/host-surface/collective-work-calendar.js';
 import { createPluginConversationDelivery } from './domains/plugin/host-surface/plugin-conversation-delivery.js';
 import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-parser.js';
+import { assertRecoveryCurrent } from './infrastructure/recovery/recovery-deadline.js';
 /**
  * Clowder AI API Server
  * 后端 API 入口
@@ -53,7 +55,7 @@ import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
-import Fastify, { type FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
@@ -146,6 +148,7 @@ import {
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
 import { emitLifecycleMessageUpdated } from './domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import type { NativeControlReceiptPort } from './domains/cats/services/agents/invocation/NativeControlReceipt.js';
+import { recoverPriorProcessExecutions } from './domains/cats/services/agents/invocation/prior-process-execution-recovery.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
@@ -165,11 +168,12 @@ import {
   createSidebarPresenceSource,
   type SidebarTerminalExecution,
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
-import {
-  listenBeforeTurnExecutionRecovery,
-  TurnExecutionStartupReconciler,
-} from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
+import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
 import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+import {
+  findWindowsLiveOwner,
+  stopWithWindowsJobProof,
+} from './domains/cats/services/agents/invocation/WindowsJobStopRecovery.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -262,7 +266,10 @@ import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-clea
 import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { AgentService, ClaudeCompactionHooksFactory } from './domains/cats/services/types.js';
 import { EntrustedWorkHumanTerminalService } from './domains/growing/EntrustedWorkHumanTerminalService.js';
-import { EntrustedWorkLifecycleService } from './domains/growing/EntrustedWorkLifecycleService.js';
+import {
+  type EntrustedWorkChangeReason,
+  EntrustedWorkLifecycleService,
+} from './domains/growing/EntrustedWorkLifecycleService.js';
 import {
   EntrustedWorkOwnerReadService,
   type PreparedArtifactReader,
@@ -309,6 +316,7 @@ import { TasteMemoryLifecycleStore } from './domains/memory/taste/TasteMemoryLif
 import { TasteMemoryProjectionWriter } from './domains/memory/taste/TasteMemoryProjectionWriter.js';
 import { importTasteTakeawayCandidates } from './domains/memory/taste/TasteTakeawayCandidateImporter.js';
 import { tasteDocumentAnchor } from './domains/memory/taste/taste-memory-identity.js';
+import { createOwnerRoomNotifier, type OwnerRoomThreads } from './domains/messaging/owner-room/owner-room-notifier.js';
 import { publicParticipantAvatar } from './domains/plugin/host-surface/public-participant-avatar.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
@@ -320,6 +328,10 @@ import {
   type RuntimeDeploymentProcessContext,
 } from './domains/runtime-deployment/RuntimeDeploymentBootstrap.js';
 import { runtimeDeploymentSubjectRef } from './domains/runtime-deployment/RuntimeDeploymentObservationProvider.js';
+import {
+  API_CORS_EXPOSED_HEADERS,
+  registerDeploymentRevisionHeader,
+} from './domains/runtime-deployment/RuntimeDeploymentRevisionHeader.js';
 import { readRuntimeServiceReadiness } from './domains/runtime-deployment/RuntimeDeploymentServiceReadiness.js';
 import { MessageQueueRuntimeConversationReturnGateway } from './domains/runtime-interaction/MessageQueueRuntimeConversationReturnGateway.js';
 import { createRuntimeInteractionRuntime } from './domains/runtime-interaction/runtime-interaction-composition.js';
@@ -329,6 +341,7 @@ import { createVignetteWriter } from './domains/taste/services/writeVignette.js'
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import { createApiServer } from './infrastructure/api-server.js';
 import { createDuckCapabilityPublicAdapter } from './infrastructure/capability-evolution/adapters/microduck-exploration/duck-capability-public-adapter.js';
 import {
   createMicroduckApprovalResolver,
@@ -642,6 +655,8 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  // #1838: the API itself stays outside every kernel job, so the background services and managed
+  // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
@@ -656,13 +671,20 @@ async function main(): Promise<void> {
   const { registerConnectionDiagnostics } = await import('./routes/connection-diagnostics.js');
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
-  const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  const app = createApiServer({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   let approvalDecisionReceipts: ApprovalDecisionReceiptService;
   installApprovalDecisionReceiptHooks(app, () => approvalDecisionReceipts);
-  let runtimeDeploymentRevision: string | null = null;
+  const declaredRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  const declaredDeploymentId = process.env.CAT_CAFE_DEPLOYMENT_ID;
+  const runtimeEntrypointRoot = findMonorepoRoot(dirname(fileURLToPath(import.meta.url)));
+  let runtimeDeploymentRevision = resolveInitialBuildRevision({
+    entrypointRoot: runtimeEntrypointRoot,
+    declaredRuntimeRoot,
+    declaredDeploymentId,
+  });
   let runtimeDeploymentContext: RuntimeDeploymentProcessContext | undefined;
   const deploymentWaitLifecycleHolder: {
     current?: import('./domains/runtime-deployment/DeploymentWaitLifecycleService.js').DeploymentWaitLifecycleService;
@@ -672,9 +694,6 @@ async function main(): Promise<void> {
     | import('./domains/runtime-deployment/DeploymentWaitRecoverySweep.js').DeploymentWaitRecoverySweep
     | undefined;
   app.addHook('onClose', () => deploymentWaitRecoveryLoop?.stopPeriodic());
-  const declaredRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
-  const declaredDeploymentId = process.env.CAT_CAFE_DEPLOYMENT_ID;
-  const runtimeEntrypointRoot = findMonorepoRoot(dirname(fileURLToPath(import.meta.url)));
   if (!privateUserId) throw new Error('[api] CAT_CAFE_USER_ID must not be blank');
 
   if (isDebugMode) {
@@ -685,10 +704,11 @@ async function main(): Promise<void> {
   await app.register(cors, {
     origin: resolveFrontendCorsOrigins(process.env, app.log),
     credentials: true,
-    exposedHeaders: ['x-clowder-save-id'],
-    // Diagnostic correlation adds a fixed header to GETs; reuse their preflight during polling.
+    exposedHeaders: [...API_CORS_EXPOSED_HEADERS],
+    // Diagnostic correlation adds fixed headers to GETs; reuse their preflight during polling.
     maxAge: 600,
   });
+  registerDeploymentRevisionHeader(app, () => runtimeDeploymentRevision);
 
   // F156 D-2: Anti-clickjacking headers (X-Frame-Options + CSP frame-ancestors)
   await app.register(securityHeadersPlugin);
@@ -720,22 +740,28 @@ async function main(): Promise<void> {
     backend: 'initializing' | 'redis' | 'memory';
     durability: 'initializing' | 'durable' | 'degraded_memory';
   } = { backend: 'initializing', durability: 'initializing' };
-  const healthHandler = async () => ({
-    status: 'ok' as const,
-    timestamp: Date.now(),
-    deploymentRevision: runtimeDeploymentRevision,
-    ...(runtimeDeploymentContext
-      ? {
-          deploymentSubjectRef: runtimeDeploymentSubjectRef(
-            runtimeDeploymentContext.installationId,
-            runtimeDeploymentContext.deploymentId,
-          ),
-          deploymentBootId: runtimeDeploymentContext.bootId,
-          deploymentBootSequence: runtimeDeploymentContext.bootSequence,
-        }
-      : {}),
-    callbackAuth: callbackAuthCapability,
-  });
+  const desktopStartupId = process.env.CAT_CAFE_DESKTOP_STARTUP_ID;
+  const healthHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (desktopStartupId && request.headers['x-clowder-desktop-probe'] === '1') {
+      reply.header('x-clowder-desktop-startup-id', desktopStartupId);
+    }
+    return {
+      status: 'ok' as const,
+      timestamp: Date.now(),
+      deploymentRevision: runtimeDeploymentRevision,
+      ...(runtimeDeploymentContext
+        ? {
+            deploymentSubjectRef: runtimeDeploymentSubjectRef(
+              runtimeDeploymentContext.installationId,
+              runtimeDeploymentContext.deploymentId,
+            ),
+            deploymentBootId: runtimeDeploymentContext.bootId,
+            deploymentBootSequence: runtimeDeploymentContext.bootSequence,
+          }
+        : {}),
+      callbackAuth: callbackAuthCapability,
+    };
+  };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
@@ -782,6 +808,11 @@ async function main(): Promise<void> {
   // Create invocation tracker for cancellation support
   const invocationTracker = new InvocationTracker();
   let router!: AgentRouter;
+  let watcherSupervisor: import('./domains/concierge/watcher/WatcherSupervisor.js').WatcherSupervisor | undefined;
+  let watcherReceipts:
+    | ReturnType<typeof import('./domains/concierge/watcher/watcher-receipts.js').createWatcherReceipts>
+    | undefined;
+  const { applyDirectWatcherControl } = await import('./domains/concierge/watcher/watcher-controls.js');
 
   // Initialize WebSocket manager BEFORE routes (injected via opts, no circular import).
   // IMPORTANT: Socket.io must attach to the SAME server Fastify listens on.
@@ -1032,12 +1063,34 @@ async function main(): Promise<void> {
     | ReturnType<typeof import('./domains/growing/CustodyOpportunityRuntime.js').startCustodyOpportunityObservation>
     | undefined;
 
+  // PR-3a: the owner-room events this PR adds go to the thread's owner, not to the identity a
+  // message was stored under (a scheduler notice is stored as `scheduler` in a person's thread).
+  // Both stores it reads are created below, so they are bound late.
+  let ownerRoomThreads: OwnerRoomThreads | null = null;
+  const ownerRoom = createOwnerRoomNotifier({
+    socket: () => socketManager,
+    threads: () => ownerRoomThreads,
+    onError: (error, message, stage) => {
+      app.log.error(
+        { error, messageId: message.id, threadId: message.threadId, stage },
+        stage === 'owner'
+          ? '[owner-room] thread owner unreadable; using the stored identity'
+          : '[owner-room] delivery failed; the page sees it on its next read',
+      );
+    },
+  });
   const rawMessageStore = createMessageStore(redis, {
     readDiagnostics: messageReadDiagnostics,
     onAppend: (msg) => {
       appendListener?.(msg);
-      if (userMentionEvent(msg) || hasRecentWorkPublication(msg))
-        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', { ownerUserId: msg.userId });
+      const worksChanged = hasRecentWorkPublication(msg);
+      if (userMentionEvent(msg) || worksChanged)
+        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: msg.userId,
+          ...(worksChanged ? { reason: 'works_changed' } : {}),
+        });
+      // PR-3a: a standalone message may otherwise reach its owner only through the thread room.
+      void ownerRoom.messageAppended(msg);
       custodyOpportunityObservation?.notifySourceChanged(msg);
     },
   });
@@ -1047,16 +1100,32 @@ async function main(): Promise<void> {
   });
   // W2-5b: bound once the media ledger and TTS exist (below); until then media blocks publish as before.
   let outboundMediaPublication: OutboundMediaPublication | undefined;
+  // Late-bound observers of complete, visible messages (bound below once their owners exist).
+  let messagePublishedListener: ((message: StoredMessage) => void) | null = null;
   const messageStore = createPublishingMessageStore(rawMessageStore, {
     events: messagingStores.events,
     publications: messagingStores.publications,
     outboundMedia: () => outboundMediaPublication,
     onPublished: subscriptionDrainScheduler.schedule,
+    onMessagePublished: (message) => messagePublishedListener?.(message),
     onPublishFailure: (error, stored) => {
       app.log.error(
         { error, messageId: stored.id, threadId: stored.threadId },
         '[messaging] publish failed; subscribers will not see this message',
       );
+    },
+    // PR-3a: every lifecycle terminal commit reaches its owner's room from this one seam, marked with
+    // whether it was applied now; the snapshots exits still emit themselves stay unmarked.
+    lifecycleObserver: {
+      committed: (message, commit) => {
+        void ownerRoom.lifecycleCommitted(message, commit);
+      },
+      failed: (error, message) => {
+        app.log.error(
+          { error, messageId: message.id, threadId: message.threadId },
+          '[lifecycle] owner-room terminal snapshot failed; the page sees it on its next History read',
+        );
+      },
     },
   });
   const runtimeInteractionRuntime = await createRuntimeInteractionRuntime({
@@ -1075,19 +1144,51 @@ async function main(): Promise<void> {
 
   const queueLedgerStore = redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore();
   const invocationQueue = new InvocationQueue(queueLedgerStore, {
+    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     projectRoot: resolveActiveProjectRoot(),
     invocationTracker,
     resolveCarrierCapability: (catId) => router?.freshnessCarrierCapability(catId),
     resolveTargets: (requested, threadId, content, exact) =>
       router.resolveSendTargets(requested, threadId, content, exact),
-    resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
-    onAdmitted: ({ threadId, message, entries }) => {
+    onAdmitted: async ({ threadId, message, entries }) => {
       if (message && entries.some((entry) => entry.sourceCategory !== 'a2a_failure'))
         queueProcessor.registerCallerDispatchInitialTargets(
           message,
           entries.flatMap((entry) => entry.targets),
         );
       void queueProcessor.requestDrain(threadId).catch((err) => app.log.error({ err, threadId }, 'send drain failed'));
+      if (message?.from?.kind === 'user') {
+        try {
+          const changed = await applyDirectWatcherControl(
+            threadStore,
+            { role: 'user', content: message.content, threadId, messageId: message.id },
+            message.timestamp,
+            async () => turnExecutionStore.settledHead(message.userId, threadId),
+          );
+          if (changed) {
+            watcherSupervisor?.controlChanged(threadId);
+            void conciergeConfigStoreShared
+              .readWatcherConfig?.(message.userId)
+              .then((config) =>
+                watcherReceipts?.control({
+                  userId: message.userId,
+                  threadId,
+                  catId: config.memberCatId,
+                  messageId: message.id,
+                  ...changed,
+                }),
+              )
+              .catch((error) =>
+                app.log.warn({ err: error, sourceMessageId: message.id }, 'Watcher receipt could not be saved'),
+              );
+          }
+        } catch (error) {
+          app.log.warn(
+            { error, threadId, sourceMessageId: message.id },
+            'Watcher control was not saved; original work continues',
+          );
+        }
+      }
     },
   });
   await invocationQueue.hydrateFromLedger(messageStore);
@@ -1099,6 +1200,7 @@ async function main(): Promise<void> {
     : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore, cursorCanonicalizer);
   const threadStore = createThreadStore(redis);
+  ownerRoomThreads = threadStore;
   const proposalStore = createProposalStore(redis);
   const handoffProposalStore = createSessionHandoffProposalStore(redis);
   // F246 Phase B: dispatch proposal store for assign_work effect-class approvals
@@ -1152,6 +1254,10 @@ async function main(): Promise<void> {
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
+  const { createActionRecoveryNotification } = await import(
+    './domains/ball-custody/action-successor-recovery-notification.js'
+  );
+  const notifyActionRecovery = createActionRecoveryNotification({ messages: messageStore, threads: threadStore });
   let taskActionSuccessorLifecycle:
     | import('./domains/ball-custody/TaskActionSuccessorLifecycle.js').TaskActionSuccessorLifecycle
     | undefined;
@@ -1228,6 +1334,7 @@ async function main(): Promise<void> {
     actionSuccessorCompletionService = completionService;
     taskActionSuccessorLifecycle = new taskActionLifecycleMod.TaskActionSuccessorLifecycle({
       leaseStore: actionSuccessorLeaseStore,
+      notifyRecovery: notifyActionRecovery,
       completionService: actionSuccessorCompletionService,
     });
     taskActionSuccessorOrphanRecovery = new orphanRecoveryMod.TaskActionSuccessorOrphanRecovery({
@@ -1390,7 +1497,8 @@ async function main(): Promise<void> {
 
   // F102: Memory services — SQLite-only
   const { resolve } = await import('node:path');
-  const { repoRoot, docsRoot, markersDir } = resolveMemoryRepoPaths(process.cwd());
+  const { existsSync } = await import('node:fs');
+  const { repoRoot, knowledgeRoot, docsRoot, markersDir } = resolveMemoryRepoPaths(process.cwd());
 
   const { initRepoIdentity, isSameRepo } = await import('./utils/is-same-repo.js');
   initRepoIdentity(repoRoot);
@@ -1426,6 +1534,7 @@ async function main(): Promise<void> {
     type: 'sqlite',
     readDiagnostics,
     sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+    publishedProjectRoot: !process.env.DOCS_ROOT && existsSync(join(knowledgeRoot, '.git')) ? knowledgeRoot : undefined,
     docsRoot,
     markersDir,
     dataDir: process.env.CAT_CAFE_DATA_DIR,
@@ -1528,13 +1637,15 @@ async function main(): Promise<void> {
     invalidateDerived: async ({ sourcePath }) => {
       const anchor = tasteDocumentAnchor(sourcePath);
       await memoryServices.evidenceStore.deleteByAnchor(anchor);
+      memoryServices.publishedDocuments?.markPending();
       memoryServices.embeddingLifecycle.getVectorStore()?.delete(anchor);
     },
   });
-  const tasteProposalWriter = createTasteProposalWriter(
-    createVignetteWriter(tasteRepository),
-    tasteMemoryLifecycleService,
-  );
+  const tasteProposalWriter = createTasteProposalWriter(async (proposal) => {
+    const result = await createVignetteWriter(tasteRepository)(proposal);
+    if (proposal.privacy === 'public') memoryServices.publishedDocuments?.markPending();
+    return result;
+  }, tasteMemoryLifecycleService);
   const takeawayImport = await importTasteTakeawayCandidates({
     repository: tasteRepository,
     lifecycleStore: tasteMemoryLifecycleStore,
@@ -1553,6 +1664,14 @@ async function main(): Promise<void> {
     './domains/memory/cue/MemoryCueDrillHandleService.js'
   );
   const memoryCueEpisodeStore = new MemoryCueEpisodeStore(memoryServices.store.getDb());
+  const { MatterMemoryService } = await import('./domains/memory/matters/MatterMemoryService.js');
+  const matterMemoryService = new MatterMemoryService({
+    db: memoryServices.store.getDb(),
+    messageStore,
+    threadStore,
+    runWrite: (operation) => memoryServices.store.runExclusive(operation),
+    onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
+  });
   const memoryCueHandles = new MemoryCueDrillHandleService(createProcessMemoryCueDrillSecret(), memoryCueEpisodeStore);
   const memoryCueDeps: CallbackMemoryCueDeps = {
     episodeStore: memoryCueEpisodeStore,
@@ -1600,7 +1719,7 @@ async function main(): Promise<void> {
     }
   };
   const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
-    rebuildIndex: async (projectPath: string) => {
+    rebuildIndex: async (projectPath: string, ownerUserId: string) => {
       if (isSameRepo(projectPath, repoRoot)) {
         const startMs = Date.now();
         const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
@@ -1613,6 +1732,7 @@ async function main(): Promise<void> {
         memoryServices.catalog!,
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
+        ownerUserId,
         () => memoryServices.embeddingLifecycle.getService(),
       );
     },
@@ -1696,6 +1816,22 @@ async function main(): Promise<void> {
     }
   }
 
+  if (memoryServices.publishedDocuments) {
+    const { IndexBuilder } = await import('./domains/memory/IndexBuilder.js');
+    const builder = memoryServices.indexBuilder;
+    if (builder instanceof IndexBuilder) {
+      memoryServices.publishedDocuments.start(async () => {
+        await builder.refreshPublishedDocuments(true);
+        // Reuse the coalesced accelerator and its current-source fence after lexical
+        // publication. Provider work and retries do not hold the source mutation queue.
+        void memoryServices.embeddingLifecycle.catchUpAfterReady().catch((error) => {
+          app.log.warn({ err: error }, '[memory] published document vector catch-up pending');
+        });
+      });
+      app.addHook('onClose', async () => memoryServices.publishedDocuments!.stop());
+    }
+  }
+
   // Phase E-2: Dirty-thread debounce — flush modified thread summaries every 30s
   const DIRTY_THREAD_FLUSH_INTERVAL_MS = 30_000;
   if (memoryServices.indexBuilder) {
@@ -1751,9 +1887,11 @@ async function main(): Promise<void> {
   const priorTimelineListener = messageStore.onTimelineChanged;
   messageStore.onTimelineChanged = (message) => {
     priorTimelineListener?.(message);
-    if (userMentionEvent(message) || message.mentionsUser || hasRecentWorkPublication(message))
+    const worksChanged = hasRecentWorkPublication(message);
+    if (userMentionEvent(message) || message.mentionsUser || worksChanged)
       socketManager?.emitToUser(message.userId, 'entrusted_work_projection_invalidated', {
         ownerUserId: message.userId,
+        ...(worksChanged ? { reason: 'works_changed' } : {}),
       });
   };
 
@@ -1809,8 +1947,12 @@ async function main(): Promise<void> {
   const schedulerLifecycleToast = createLifecycleToastFn({ socketManager });
   const schedulerFetchContent = createFetchContentFn();
 
+  const { createSchedulerLogger, createRecoveryLoopObserver } = await import(
+    './infrastructure/scheduler/logging/adapter.js'
+  );
+  const observeRecoveryLoop = createRecoveryLoopObserver(app.log);
   const taskRunnerV2 = new TaskRunnerV2({
-    logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
+    logger: createSchedulerLogger(app.log),
     ledger: runLedger,
     actorResolver,
     globalControlStore,
@@ -2654,6 +2796,7 @@ async function main(): Promise<void> {
     logger: app.log,
   });
   const memoryCueRuntime = createMemoryCueRuntime({
+    matterMemoryService,
     ...(memoryServices.catalog && memoryServices.collectionStores && memoryServices.knowledgeResolver
       ? {
           contextProjectDiscovery: {
@@ -2796,6 +2939,8 @@ async function main(): Promise<void> {
     agentRegistry,
     registry,
     messageStore,
+    refreshServices: () =>
+      agentRegistry.refreshForAdmission(() => syncAgentRegistry(catRegistry.getAllConfigs(), false)),
     threadExecutionSituationSource,
     taskProgressStore,
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
@@ -2848,6 +2993,7 @@ async function main(): Promise<void> {
     ),
     contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
+    matterMemoryService,
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     threadOverviewOpportunitySource: memoryCueRuntime.threadOverviewOpportunitySource,
@@ -3104,7 +3250,9 @@ async function main(): Promise<void> {
   };
   if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
+    await actionSuccessorLeaseStore.initializeRecovery();
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
+      notifyRecovery: notifyActionRecovery,
       tasks: taskStore,
       leaseStore: actionSuccessorLeaseStore,
       deliverReturnCarrier: async (carrier) => {
@@ -3114,6 +3262,7 @@ async function main(): Promise<void> {
           carrier.userId,
           invocationKey,
         );
+        assertRecoveryCurrent();
         if (existing) {
           const recoveryStatus = classifyInvocationRecoveryStatus(existing.status);
           if (recoveryStatus === 'completed') {
@@ -3153,6 +3302,7 @@ async function main(): Promise<void> {
         return recoveryStatus === 'terminal' ? { outcome: 'unavailable' as const } : { outcome: 'enqueued' as const };
       },
       dispatch: {
+        notifyRecovery: notifyActionRecovery,
         tasks: taskStore,
         leaseStore: actionSuccessorLeaseStore,
         truthResolver: actionSubjectTruthResolver,
@@ -3168,30 +3318,29 @@ async function main(): Promise<void> {
       recoverDispatches: () => actionSuccessorRecovery!.runDispatchesOnce(),
       reconcileDoneTasks: () => taskActionSuccessorLifecycle?.reconcileDoneTasks(taskStore),
     });
-    const runActionSuccessorRecovery = (): void => {
-      void runRecoveryCycle()
-        .then((stats) => {
-          if (!stats) return;
-          const [returnStats, dispatchStats, taskStats] = stats;
-          if (returnStats.scanned > 0) {
-            app.log.info({ ...returnStats }, 'F167 S.1-c ActionSuccessor return recovery sweep');
-          }
-          if (dispatchStats.scanned > 0) {
-            app.log.info({ ...dispatchStats }, 'F246 approved ActionSuccessor carrier recovery sweep');
-          }
-          if (taskStats && taskStats.attempted > 0) {
-            app.log.info({ ...taskStats }, 'F167 task ActionSuccessor completion recovery sweep');
-          }
-        })
-        .catch((err: unknown) => {
-          app.log.warn({ err }, 'F167 S.1-c ActionSuccessor return recovery sweep failed');
-        });
-    };
-    runActionSuccessorRecovery();
-    const actionSuccessorRecoveryTimer = setInterval(runActionSuccessorRecovery, 30_000);
-    actionSuccessorRecoveryTimer.unref();
-    app.addHook('onClose', async () => {
-      clearInterval(actionSuccessorRecoveryTimer);
+    taskRunnerV2.registerRecoveryLoop({
+      id: 'action-successor',
+      intervalMs: 30_000,
+      observe: observeRecoveryLoop,
+      runOnce: async (): Promise<Record<string, number>> => {
+        const stats = await runRecoveryCycle();
+        if (!stats) return { skipped: 1 };
+        const [returns, dispatches, tasks] = stats;
+        return {
+          returnsScanned: returns.scanned,
+          returnsDelivered: returns.delivered,
+          returnsPending: returns.pending,
+          returnsOverdue: returns.overdue,
+          dispatchesScanned: dispatches.scanned,
+          dispatchesDelivered: dispatches.delivered,
+          dispatchesPending: dispatches.pending,
+          dispatchesFailed: dispatches.failed,
+          tasksScanned: tasks?.scanned ?? 0,
+          tasksAttempted: tasks?.attempted ?? 0,
+          tasksCommitted: tasks?.committed ?? 0,
+          tasksErrored: tasks?.errored ?? 0,
+        };
+      },
     });
   }
   // F117 KD-21: a turn ended by restart or zombie reclaim never reached its route's commit, so its
@@ -3253,12 +3402,7 @@ async function main(): Promise<void> {
     getProviderLifecycle: getCodexAppServerLifecycle,
     listStaleProcessingLeases: (now) => queueProcessor.listStaleProcessingLeases(now),
     reapStalePrestartReservations: (now) => queueProcessor.reapStalePrestartReservations(now),
-    ...('scanAll' in invocationRecordStore
-      ? {
-          listRunningRecords: async () =>
-            (await invocationRecordStore.scanAll()).filter((record) => record.status === 'running'),
-        }
-      : {}),
+    listRunningRecords: () => invocationRecordStore.listRunningForRecovery(),
     reconcileZombie: (zombie) =>
       reconcileZombies([zombie], {
         invocationRecordStore,
@@ -3377,6 +3521,7 @@ async function main(): Promise<void> {
   // 候选进来、定性落空、presence=null，被终态回落误报成 done/error（R3 P1-1 / P1-2）。
   const activeExecutionService = createActiveExecutionService({
     invocationTracker,
+    cliExecutionOwnerService,
     recordStore: invocationRecordStore,
     responseStatus: responseStatusFromMessages(messageStore), // F117 KD-23: a terminal R is not processing
     turnExecutionStore,
@@ -3403,6 +3548,15 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
+    ...(process.platform === 'win32'
+      ? {
+          stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
+            stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+          findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
+            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+        }
+      : {}),
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -3523,14 +3677,17 @@ async function main(): Promise<void> {
     ...recallOwnerMessageSources,
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
+  const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
+  await app.register(memoryMatterRoutes, { service: matterMemoryService });
   await app.register(memoryCueInvocationReadRoutes, {
+    matterMemoryService,
     evidenceDb: memoryServices.store.getDb(),
     threadStore,
     invocationRecordStore,
     turnExecutionStore,
   });
   const { memoryCueSourceSummaryRoutes } = await import('./routes/memory-cue-source-summary.js');
-  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb() });
+  await app.register(memoryCueSourceSummaryRoutes, { evidenceDb: memoryServices.store.getDb(), matterMemoryService });
   const { tasteObservatoryRoutes } = await import('./routes/taste-observatory.js');
   await app.register(tasteObservatoryRoutes, {
     evidenceDb: memoryServices.store.getDb(),
@@ -4448,6 +4605,98 @@ async function main(): Promise<void> {
     }),
     isLiveConfigChangePending: (userId) => liveCompanionSessions.isChangingPreferences(userId),
   });
+  await app.register((await import('./routes/watcher.js')).watcherRoutes, {
+    configStore: conciergeConfigStoreShared,
+    threadStore,
+    labelStore,
+    turnExecutionStore,
+    capability: (catId) => router.boundedWatcherSessionCapability(catId),
+    runtimeReady: () => watcherSupervisor?.isReady() ?? false,
+    controlChanged: (threadId) => watcherSupervisor?.controlChanged(threadId),
+  });
+  const { effectiveWatcherState, readWatcherPreferences } = await import(
+    './domains/concierge/watcher/watcher-controls.js'
+  );
+  const { readWatcherOutputFence } = await import('./domains/concierge/watcher/watcher-output-fence.js');
+  const watcherOutputFence = (userId: string, threadId: string, catId: string) =>
+    readWatcherOutputFence(
+      { configs: conciergeConfigStoreShared, threads: threadStore, labels: labelStore },
+      userId,
+      threadId,
+      catId,
+    );
+  const watcherMaySpeak = async (userId: string, threadId: string, catId: string) => {
+    const [preferences, thread] = await Promise.all([
+      readWatcherPreferences(conciergeConfigStoreShared, labelStore, userId),
+      threadStore.get(threadId),
+    ]);
+    return (
+      preferences.config.memberCatId === catId &&
+      !!thread &&
+      !thread.deletedAt &&
+      effectiveWatcherState(preferences.config, thread, preferences.quietLabels).maySpeak
+    );
+  };
+  await app.register((await import('./routes/watcher-callbacks.js')).watcherCallbackRoutes, {
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    queue: invocationQueue,
+    maySpeak: watcherMaySpeak,
+    outputFence: watcherOutputFence,
+    afterNudge: async (input) =>
+      watcherReceipts?.nudge({
+        ...input,
+        targetName:
+          catRegistry.tryGet(input.targetCatId)?.config.nickname ??
+          catRegistry.tryGet(input.targetCatId)?.config.displayName ??
+          input.targetCatId,
+      }),
+    publish: (message) => {
+      if (message.from?.kind === 'agent')
+        socketManager?.broadcastAgentMessage(
+          {
+            type: 'text',
+            catId: message.from.catId as CatId,
+            content: message.content,
+            origin: 'callback',
+            messageId: message.id,
+            invocationId: message.id,
+            extra: { ...message.extra, isExplicitPost: true },
+            timestamp: message.timestamp,
+          },
+          message.threadId,
+        );
+    },
+  });
+  // Always on: the settings switch (default: only threads the owner picks) decides what is watched.
+  const { WatcherSupervisor } = await import('./domains/concierge/watcher/WatcherSupervisor.js');
+  watcherSupervisor = new WatcherSupervisor({
+    maySpeak: watcherMaySpeak,
+    userId: privateUserId,
+    configs: conciergeConfigStoreShared,
+    labels: labelStore,
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    threads: threadStore,
+    transcript: transcriptWriter,
+    apiUrl: `http://127.0.0.1:${PORT}`,
+    service: (catId) => router.getStrategyDeps().services[catId],
+    capability: (catId) => router.boundedWatcherSessionCapability(catId),
+    report: (error, threadId) =>
+      app.log.warn({ err: error, threadId }, 'Watcher invocation failed; ordinary work remains independent'),
+  });
+  app.addHook('onReady', async () => {
+    void watcherSupervisor!
+      .start()
+      .catch((error) => app.log.warn({ err: error }, 'Watcher startup failed; ordinary work remains independent'));
+  });
+  app.addHook('onClose', async () => {
+    await watcherSupervisor?.stop();
+  });
   const { companionDecisionRoutes } = await import('./routes/companion-decision-routes.js');
   const { readIgnoredItemPreferences } = await import('./config/user-preferences-ignored-items.js');
   const ignoredItemPreferenceProjectRoot = resolveActiveProjectRoot();
@@ -4838,6 +5087,7 @@ async function main(): Promise<void> {
         }
       : {}),
     memoryCueDeps,
+    matterMemoryService,
     skillConsumptionDeps: {
       receipts: skillConsumptionReceipts,
       ...(requestReviewUseReceipts ? { requestReviewReceipts: requestReviewUseReceipts } : {}),
@@ -5123,11 +5373,24 @@ async function main(): Promise<void> {
       await deliveryThreadMeta(threadId),
     );
   const { DesktopWindowComponent } = await import('./domains/plugin/desktop-window-runtime/desktop-component.js');
+  const { companionContractHas } = await import('./domains/plugin/desktop-window-runtime/published-companion-v2.js');
   const { ElectronDesktopWindowExecutor } = await import(
     './domains/plugin/desktop-window-runtime/electron-executor.js'
   );
   const { CompanionHostBridge } = await import('./domains/concierge/live/CompanionHostBridge.js');
   const { CompanionAppAssistOwner } = await import('./domains/concierge/live/host/companion-app-assist-owner.js');
+  const { CompanionDeskOwner } = await import('./domains/concierge/live/host/companion-desk-owner.js');
+  const { createDeskAvatarReader } = await import('./domains/concierge/live/host/companion-desk-avatar.js');
+  const deskAvatarReader = createDeskAvatarReader(
+    createHostMediaPathResolver(
+      hostMediaPathRootsFromEnv(process.env, getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR)),
+    ),
+  );
+  // F335 交付三：set once the suggestions integration exists (below). Desktops open only after the Host listens (resume
+  // waits for `hostListening`, a fresh start comes over HTTP), so a desk-capable window always gets its desk owner.
+  const suggestionDeskHolder: {
+    current?: import('./domains/suggestions/desk-delivery.js').SuggestionDesk;
+  } = {};
   const { CompanionWorkOverview } = await import('./domains/concierge/live/work/companion-work-overview.js');
   const { resolveCompanionWorkPublication } = await import(
     './domains/concierge/live/host/home/companion-work-publication.js'
@@ -5296,8 +5559,21 @@ async function main(): Promise<void> {
             },
           }
         : undefined;
+      const suggestionDesk = suggestionDeskHolder.current;
       return new CompanionHostBridge({
-        ...(companionContract === '0.1.0-beta.29'
+        ...(suggestionDesk
+          ? {
+              desk: new CompanionDeskOwner({
+                desk: suggestionDesk,
+                ownerUserId: privateUserId,
+                assertCurrent: assertWorkCurrent,
+                messages: messageStore,
+                readAvatar: deskAvatarReader,
+                openCard: (destination) => decisions.openDecision(destination),
+              }),
+            }
+          : {}),
+        ...(companionContractHas(companionContract, 'appAssist')
           ? {
               appAssist: new CompanionAppAssistOwner({
                 store: redis ? conciergeConfigStoreShared : undefined,
@@ -5343,10 +5619,13 @@ async function main(): Promise<void> {
     threadStore,
     threadBindingStore: connectorBindingStore,
     threadOwnerUserId: privateUserId,
-    onTaskDataChanged: (task) => {
+    onTaskDataChanged: (task, reason) => {
       socketManager?.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
       if (task.userId)
-        socketManager?.emitToUser(task.userId, 'entrusted_work_projection_invalidated', { ownerUserId: task.userId });
+        socketManager?.emitToUser(task.userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: task.userId,
+          ...(reason ? { reason } : {}),
+        });
     },
     members: {
       listCats: () =>
@@ -5641,10 +5920,7 @@ async function main(): Promise<void> {
       }
     },
     authority: async () => {
-      const inventory = await pluginRuntime.inventoryStore.snapshot();
-      const instance = inventory.instances.find(
-        (candidate) => candidate.pluginId === 'official.chatgpt-dot' && candidate.lifecycleState === 'installed',
-      );
+      const instance = await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot');
       return instance ? { ownerUserId: privateUserId, pluginInstanceId: instance.pluginInstanceId } : null;
     },
   });
@@ -5673,12 +5949,8 @@ async function main(): Promise<void> {
     );
   };
   const dotEnabled = async () =>
-    (await pluginRuntime.inventoryStore.snapshot()).instances.some(
-      (instance) =>
-        instance.pluginId === 'official.chatgpt-dot' &&
-        instance.lifecycleState === 'installed' &&
-        instance.activationState === 'enabled',
-    );
+    (await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot'))?.activationState ===
+    'enabled';
   const { DotAskService } = await import('./domains/cats/services/cloud-bridge/dot/DotAskService.js');
   dotAskService = new DotAskService({
     connection: dotConnectionService,
@@ -6036,8 +6308,12 @@ async function main(): Promise<void> {
     }),
   );
   const livingWorks = new LivingWorkService({
-    changed: (ownerUserId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    changed: (ownerUserId, threadId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        threadId,
+        reason: 'works_changed',
+      }),
     responses: workResponses,
     owner: collaborativeContent.owner,
     versions: artifactReview.store.works,
@@ -6157,12 +6433,66 @@ async function main(): Promise<void> {
     },
   });
   memberCanonService = new MemberCanonService(assetCanonService, privateUserId);
+  const { WorkCoverService } = await import('./domains/collaborative-content/works/cover/cover-service.js');
+  const { locateUploadedFile } = await import('./domains/collaborative-content/works/cover/cover-upload-locator.js');
+  const { readPublishedMessageItem } = await import('./domains/video-studio/content-owner/published-message-media.js');
+  const { listWorktrees: listCoverRoots } = await import('./domains/workspace/workspace-security.js');
+  // A person's card has no thread of its own; the owner checks the work's original thread instead.
+  type CoverPrincipal = import('./domains/collaborative-content/works/types.js').WorkPrincipal;
+  const coverPrincipal = (
+    reference: { contentRef: string; ownerRevision: number },
+    principal: CoverPrincipal,
+  ): CoverPrincipal =>
+    principal.actor.kind === 'human' && !principal.threadId
+      ? {
+          ...principal,
+          threadId:
+            artifactReview.store.works.get(principal.userId, reference.contentRef, reference.ownerRevision)?.threadId ??
+            '',
+        }
+      : principal;
+  const coverLocator = (locator: { rootId: string; path: string }, principal: CoverPrincipal) =>
+    workspaceContentReviews.source.resolveFileLocator({
+      principal: { userId: principal.userId },
+      locator: { worktreeId: locator.rootId, path: locator.path },
+    });
+  const workCovers = new WorkCoverService({
+    store: artifactReview.store.works.covers,
+    authorize: (reference, principal, permission) =>
+      livingWorks.authorizeVersion(reference, coverPrincipal(reference, principal), permission),
+    mediaType: async (reference, principal) =>
+      (await livingWorks.read(reference, coverPrincipal(reference, principal))).description.mediaType,
+    readContext: (reference, principal, metadataRevision) => workContexts.read(reference, principal, metadataRevision),
+    authorizeThread: (threadId, principal) =>
+      artifactReview.media.access.authorizeThread(threadId, workMediaPrincipal(principal)),
+    readMessageItem: (source, principal) =>
+      readPublishedMessageItem(messageStore, source, workMediaPrincipal(principal)),
+    locateUpload: (fileName, principal) =>
+      locateUploadedFile(fileName, {
+        uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
+        roots: () => listCoverRoots(process.env.CAT_CAFE_WORKSPACE_ROOT),
+        resolve: (locator) =>
+          workspaceContentReviews.source.resolveFileLocator({ principal: { userId: principal.userId }, locator }),
+      }),
+    inspect: async (locator, principal) => {
+      const current = await coverLocator(locator, principal);
+      return canonAssetIndex.inspect({ kind: 'workspace', rootId: current.worktreeId, path: current.path });
+    },
+    open: (version) => canonAssetIndex.open(version),
+    threadOf: (reference, principal) => coverPrincipal(reference, principal).threadId,
+    changed: (ownerUserId) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+  });
+  livingWorks.attachCovers(workCovers);
   await registerLivingWorkRoutes(app, {
     service: livingWorks,
     registry,
     contexts: workContexts,
     assets: assetCanonService,
+    covers: workCovers,
   });
+  const { registerWorkCoverRoutes } = await import('./routes/work-cover-routes.js');
+  await registerWorkCoverRoutes(app, { covers: workCovers });
   registerWorkVideoAssetRoutes(app, { contexts: workContexts, assets: canonAssetIndex });
   const { registerAssetCanonRoutes } = await import('./routes/asset-canon-routes.js');
   registerAssetCanonRoutes(app, assetCanonService, canonAssetIndex);
@@ -6178,6 +6508,87 @@ async function main(): Promise<void> {
     reviews: artifactReview.ledgers,
     namespace: 'publication',
     changed: (ownerUserId, reviewId) => socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+  });
+  // F335 交付二：回话下面那一排（一键提议 + 原地回执）。动作表 `suggestionActions` 也给线 1 登记暂停 / 关闭的撤销。
+  const { createSuggestionIntegration } = await import('./domains/suggestions/composition.js');
+  const { createScheduledTaskSuggestionAction } = await import(
+    './domains/suggestions/actions/scheduled-task-action.js'
+  );
+  const { createVideoCommentsSuggestionAction } = await import(
+    './domains/suggestions/actions/video-comments-action.js'
+  );
+  const { registerSuggestionRoutes } = await import('./routes/suggestion-routes.js');
+  const suggestions = createSuggestionIntegration({
+    redis,
+    messageStore,
+    invocationTracker,
+    socketManager,
+    watcherOutputFence: (actor) => watcherOutputFence(actor.userId, actor.threadId, actor.catId),
+    threadTitle: async (threadId) => (await threadStore.get(threadId))?.title ?? undefined,
+    richBlocks: (await import('./domains/cats/services/agents/invocation/RichBlockBuffer.js')).getRichBlockBuffer(),
+  });
+  watcherReceipts = (await import('./domains/concierge/watcher/watcher-receipts.js')).createWatcherReceipts({
+    threads: threadStore,
+    executions: turnExecutionStore,
+    messages: messageStore,
+    ...suggestions,
+    changed: (threadId) => watcherSupervisor?.controlChanged(threadId),
+  });
+  suggestionDeskHolder.current = suggestions.desk;
+  // F335 交付三：a brought work reaches the desk once its reply (with the work card) is complete. A cat's reply
+  // becomes complete through its terminal commit, not an append, so the desk listens where messages publish.
+  const { deskMessage } = await import('./domains/suggestions/composition.js');
+  const priorPublished = messagePublishedListener as ((message: StoredMessage) => void) | null;
+  messagePublishedListener = (message) => {
+    priorPublished?.(message);
+    suggestions.desk.observeMessage(deskMessage(message));
+  };
+  const priorDeskTimeline = messageStore.onTimelineChanged;
+  messageStore.onTimelineChanged = (message) => {
+    priorDeskTimeline?.(message);
+    suggestions.desk.observeMessage(deskMessage(message));
+  };
+  suggestions.registry.register(
+    createVideoCommentsSuggestionAction({
+      reviews: artifactReview.ledgers,
+      publications: artifactReview.publicationReads.media,
+      changed: (ownerUserId, reviewId) =>
+        socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+    }),
+  );
+  suggestions.registry.register(
+    createScheduledTaskSuggestionAction({
+      ownerUserId: privateUserId,
+      templateRegistry,
+      packTemplateStore,
+      dynamicTaskStore,
+      commit: { taskRunner: taskRunnerV2, scheduleMutationProposalStore, notifyLifecycle: schedulerLifecycleToast },
+    }),
+  );
+  await app.register(async (scope) => {
+    registerSuggestionRoutes(scope, {
+      service: suggestions.service,
+      desk: suggestions.desk,
+      callbackRegistry: registry,
+      agentKeyRegistry,
+      resolveByline: async (actor) => {
+        const execution = actor.invocationId ? await turnExecutionStore.get(actor.invocationId) : null;
+        return execution?.executionKind === 'watcher' &&
+          execution.userId === actor.userId &&
+          execution.threadId === actor.threadId &&
+          execution.catId === actor.catId
+          ? 'watcher'
+          : 'cat';
+      },
+      authorizeActor: async (actor, operation) => {
+        const record = actor.invocationId ? await registry.peekRecord(actor.invocationId) : null;
+        if (record?.toolExecutionPolicy?.mode !== 'watcher') return true;
+        return (
+          actor.byline === 'watcher' &&
+          (operation === 'facts' || (await watcherMaySpeak(actor.userId, actor.threadId, actor.catId)))
+        );
+      },
+    });
   });
   const { createContentModificationIntegration } = await import(
     './domains/collaborative-content/modification/composition.js'
@@ -6198,8 +6609,11 @@ async function main(): Promise<void> {
       socketManager?.emitToUser(ownerUserId, 'content_modification_source_saved', { threadId, messageId }),
     receiptChanged: (ownerUserId, threadId, messageId) =>
       socketManager?.emitToUser(ownerUserId, 'content_modification_source_saved', { threadId, messageId }),
-    changed: (ownerUserId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    changed: (ownerUserId, reason) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        ...(reason ? { reason } : {}),
+      }),
     onError: (error) => app.log.warn({ err: error }, '[content-modification] request remains pending'),
   });
   acceptedWorkspaceArtifactsHolder.current = modifications.workspaceArtifacts;
@@ -6357,8 +6771,11 @@ async function main(): Promise<void> {
     tracker: invocationTracker,
     ...(taskApprovedDelegateProvider ? { taskApprovedDelegateProvider } : {}),
   });
-  const invalidateEntrustedWorkProjection = (ownerUserId: string) =>
-    socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId });
+  const invalidateEntrustedWorkProjection = (ownerUserId: string, reason?: EntrustedWorkChangeReason) =>
+    socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+      ownerUserId,
+      ...(reason ? { reason } : {}),
+    });
   const entrustedWorkHumanTerminal = new EntrustedWorkHumanTerminalService({
     tasks: taskStore,
     lifecycle: new EntrustedWorkLifecycleService(taskStore, {
@@ -6447,6 +6864,7 @@ async function main(): Promise<void> {
     tasteProposalStore,
     socketManager,
     writeVignette: tasteProposalWriter,
+    getIndexProjection: () => memoryServices.publishedDocuments?.getStatus(),
     approvalCoordinator: tasteApprovalCoordinator,
   });
   // F221 Phase B: callback route for cat_cafe_propose_taste tool (cat-auth)
@@ -6891,10 +7309,11 @@ async function main(): Promise<void> {
   await app.register(workspaceRoutes, {
     callbackRegistry: registry,
     agentKeyRegistry,
+    socketEmitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
     threadStore,
     skillConsumptionReceipts,
-    socketEmit: (event, data, room) => {
-      socketManager?.broadcastToRoom(room, event, data);
+    socketEmit: (event, data, room, options) => {
+      socketManager?.broadcastToRoom(room, event, data, options);
     },
     socketEmitWithAck: async (event, data, room) =>
       socketManager ? socketManager.broadcastToRoomWithAck(room, event, data) : [],
@@ -7168,6 +7587,8 @@ async function main(): Promise<void> {
 
   // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search + F188 rebuild
   await app.register(evidenceRoutes, {
+    publishedDocuments: memoryServices.publishedDocuments,
+    publishedOwnerUserId: privateUserId,
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
     getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
@@ -7412,6 +7833,7 @@ async function main(): Promise<void> {
     ),
     speech: outboundSpeech,
     onPublished: subscriptionDrainScheduler.schedule,
+    onMessagePublished: (message) => messagePublishedListener?.(message),
     onPublishFailure: (error, messageId) => {
       app.log.error({ error, messageId }, '[messaging] outbound media publication failed; recovered at next start');
     },
@@ -7505,23 +7927,14 @@ async function main(): Promise<void> {
     }
   });
 
-  // F167 S.1-c: the sweep timer is created after listen (it needs invokeTrigger), but
-  // Fastify rejects addHook once listening — so register the cleanup hook here and
-  // late-bind the timer handle.
-  let managedCommandWakeRecoveryTimer: ReturnType<typeof setInterval> | null = null;
-  app.addHook('onClose', async () => {
-    if (managedCommandWakeRecoveryTimer) {
-      clearInterval(managedCommandWakeRecoveryTimer);
-      managedCommandWakeRecoveryTimer = null;
-    }
-  });
-
   // F192 Phase I: the observer is created after listen alongside the scheduler
   // delivery boundary, so register cleanup now and late-bind its handle below.
   let designGateThresholdObserver: { close(): void } | null = null;
   app.addHook('onClose', async () => designGateThresholdObserver?.close());
   let processCpuCapture: { close(): Promise<void> } | undefined;
   app.addHook('onClose', async () => processCpuCapture?.close());
+  let detachManagedWaitEvents: (() => void) | undefined;
+  app.addHook('onClose', async () => detachManagedWaitEvents?.());
 
   // New managed HTTP launches must never race their persistent stdio migration.
   const migratedCodexServers = await migrateStartupCodexMcpConfig(process.cwd());
@@ -7577,45 +7990,46 @@ async function main(): Promise<void> {
       },
       recover: async () => {
         if (!redis) return;
-        const authRecovery = await turnExecutionStore.reconcileStartup({ processStartedAt: PROCESS_START_AT });
-        const liveExecutionOwners = await cliExecutionOwnerService.listLive();
-        const childReconciler = new TurnExecutionStartupReconciler({
-          store: turnExecutionStore,
+        const {
+          authRecovery,
+          liveOwnersComplete,
+          childRecovery,
+          startupRecovery,
+          windowsJobTeardowns,
+          windowsJobEvidence,
+        } = await recoverPriorProcessExecutions({
+          processStartedAt: PROCESS_START_AT,
+          turnExecutionStore,
+          listLiveExecutionOwners: () => cliExecutionOwnerService.listLive(),
           settleEndedTurnResponse: (turn) => settleTurnResponse(turn, responseOutcomeForEndedTurn(turn)),
+          windowsJobDataDir: process.env.CAT_CAFE_DATA_DIR,
+          orphans: {
+            invocationRecordStore,
+            taskProgressStore,
+            log: app.log,
+            messageStore,
+            socketManager: socketManager ?? undefined,
+            invocationQueue,
+            ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+          },
+          markStartupRecoveryComplete: () => registry.markStartupRecoveryComplete(),
         });
-        const childRecovery = liveExecutionOwners.complete
-          ? await childReconciler.reconcile({
-              processStartedAt: PROCESS_START_AT,
-              protectedInvocationIds: liveExecutionOwners.owners.map((owner) => owner.invocationId),
-            })
-          : {
-              interruptedCount: 0,
-              invocationIds: [],
-              // Ended turns have no owner left to wait for; running ones keep their unknown owners.
-              ...(await childReconciler.settleEndedTurnResponses({ processStartedAt: PROCESS_START_AT })),
-              reconciledAt: Date.now(),
-              skippedReason: 'cli_execution_owner_snapshot_incomplete',
-            };
-        if (!liveExecutionOwners.complete) {
+        if (windowsJobTeardowns.preserved.length > 0) {
+          app.log.warn(
+            { windowsJobStopEvidence: windowsJobTeardowns.preserved },
+            '[api] Preserved Windows provider executions whose stop could not be verified',
+          );
+        }
+        if (!liveOwnersComplete) {
           app.log.warn(
             { callbackAuthLifecycle: { kind: 'live_execution_owner_snapshot_incomplete' } },
             '[api] Preserved prior running TurnExecutions because external process liveness was unknown',
           );
         }
-        const { StartupReconciler } = await import('./domains/cats/services/agents/invocation/StartupReconciler.js');
-        const reconciler = new StartupReconciler({
-          invocationRecordStore,
-          turnExecutionStore,
-          taskProgressStore,
-          log: app.log,
-          processStartAt: PROCESS_START_AT,
-          messageStore,
-          socketManager: socketManager ?? undefined,
-          invocationQueue,
-          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
-        });
-        const startupRecovery = await reconciler.reconcileOrphans();
-        registry.markStartupRecoveryComplete();
+        // History-only Append outcomes must recover even when no Queue row remains.
+        for (const threadId of await messageStore.listUnresolvedAppendThreadIds()) {
+          void queueProcessor.reconcileAppendDeliveries(threadId);
+        }
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
             await queueProcessor.requestDrain(scope.threadId);
@@ -7627,7 +8041,12 @@ async function main(): Promise<void> {
           }
         }
         app.log.info(
-          { authRecovery, childRecovery, startupRecovery },
+          {
+            authRecovery,
+            childRecovery,
+            startupRecovery,
+            windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
+          },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
         );
       },
@@ -7700,17 +8119,9 @@ async function main(): Promise<void> {
     10,
   );
   try {
-    const startupRuntimeReaper = await runtimeSessionSealReaper.runOnce();
-    if (
-      startupRuntimeReaper.sealed > 0 ||
-      startupRuntimeReaper.pending > 0 ||
-      startupRuntimeReaper.skippedMaxRetries > 0 ||
-      startupRuntimeReaper.failed > 0
-    ) {
-      app.log.info({ result: startupRuntimeReaper }, '[api] F211 runtime session seal reaper startup sweep completed');
-    }
+    await runtimeSessionSealReaper.runOnce();
   } catch (err) {
-    app.log.warn(`[api] F211 runtime session seal reaper startup sweep failed (best-effort): ${String(err)}`);
+    app.log.warn({ err }, '[api] F211 runtime session seal reaper startup sweep failed (best-effort)');
   }
   runtimeSessionSealReaperTimer = startSerializedRuntimeSessionSealReaperInterval({
     runtimeSessionSealReaper,
@@ -7718,13 +8129,8 @@ async function main(): Promise<void> {
       Number.isSafeInteger(RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS) && RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS > 0
         ? RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS
         : 30_000,
-    onResult: (result) => {
-      if (result.sealed > 0 || result.failed > 0) {
-        app.log.info({ result }, '[api] F211 runtime session seal reaper sweep completed');
-      }
-    },
-    onError: () => {
-      // best-effort periodic reaper
+    onError: (err) => {
+      app.log.warn({ err }, '[api] F211 runtime session seal recovery failed');
     },
   });
   runtimeSessionSealReaperTimer.unref();
@@ -7734,21 +8140,15 @@ async function main(): Promise<void> {
   // reaper would never visit (e.g., threads with no subsequent invocations).
   const GLOBAL_REAPER_INTERVAL_MS = 5 * 60_000;
   try {
-    const startupReaped = await sessionSealer.reconcileAllStuck();
-    if (startupReaped > 0) {
-      app.log.info(`[api] F118 global reaper: reconciled ${startupReaped} stuck sealing session(s) at startup`);
-    }
+    await sessionSealer.reconcileAllStuck();
   } catch (err) {
-    app.log.warn(`[api] F118 global reaper startup sweep failed (best-effort): ${String(err)}`);
+    app.log.warn({ err }, '[api] F118 global reaper startup sweep failed (best-effort)');
   }
   const globalReaperTimer = setInterval(async () => {
     try {
-      const reaped = await sessionSealer.reconcileAllStuck();
-      if (reaped > 0) {
-        app.log.info(`[api] F118 global reaper: reconciled ${reaped} stuck sealing session(s)`);
-      }
-    } catch {
-      // best-effort periodic reaper
+      await sessionSealer.reconcileAllStuck();
+    } catch (err) {
+      app.log.warn({ err }, '[api] F118 global session recovery failed');
     }
   }, GLOBAL_REAPER_INTERVAL_MS);
   globalReaperTimer.unref();
@@ -7898,6 +8298,10 @@ async function main(): Promise<void> {
       actionSuccessorLeaseStore,
       admitWake: admitManagedWake,
       isCommandRunnerActive: isManagedWakeRunnerActive,
+      canNotifyOwner: async ({ threadId, userId, catId }) => {
+        const thread = await threadStore.get(threadId);
+        return !!thread && !thread.deletedAt && thread.createdBy === userId && !!catRegistry.tryGet(catId);
+      },
       ...createManagedCommandWakeCarrierAdapter({
         messageStore,
         invocationRecordStore,
@@ -7905,32 +8309,23 @@ async function main(): Promise<void> {
       }),
     });
     managedCommandWakeRecovery = recovery;
+    const { attachManagedCommandWaitLifecycleEvents } = await import(
+      './domains/ball-custody/managed-command-wait-lifecycle-events.js'
+    );
+    detachManagedWaitEvents = attachManagedCommandWaitLifecycleEvents(
+      messageStore,
+      (message) => recovery.onMessageLifecycleChanged(message),
+      { warn: (context, message) => app.log.warn(context, message) },
+    );
     (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).managedCommandWakeRecovery = recovery;
     taskRunnerV2.setManagedCommandWakeRecovery((taskId) => recovery.recordFallbackDue(taskId));
 
-    let managedCommandRecoveryTickInFlight = false;
-    const runManagedCommandWakeRecovery = (): void => {
-      if (managedCommandRecoveryTickInFlight) return;
-      managedCommandRecoveryTickInFlight = true;
-      const sweepStarted = performance.now();
-      void recovery
-        .runOnce()
-        .then((stats) => {
-          const elapsedMs = performance.now() - sweepStarted;
-          if (stats.scanned > 0 || elapsedMs >= 200) {
-            app.log.info({ ...stats, elapsedMs }, 'F167 S.1-c managed-command wake recovery sweep');
-          }
-        })
-        .catch((err: unknown) => {
-          app.log.warn({ err }, 'F167 S.1-c managed-command wake recovery sweep failed');
-        })
-        .finally(() => {
-          managedCommandRecoveryTickInFlight = false;
-        });
-    };
-    runManagedCommandWakeRecovery();
-    managedCommandWakeRecoveryTimer = setInterval(runManagedCommandWakeRecovery, 30_000);
-    managedCommandWakeRecoveryTimer.unref();
+    taskRunnerV2.registerRecoveryLoop({
+      id: 'managed-command-wake',
+      intervalMs: 30_000,
+      observe: observeRecoveryLoop,
+      runOnce: async () => ({ ...(await recovery.runOnce()) }),
+    });
   }
 
   // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
@@ -8409,7 +8804,7 @@ async function main(): Promise<void> {
   // F233 PR4: realtime blocked-task probe. Side effects live here, not in projector/rebuild.
   if (ballCustodyIngest && ballCustodyProjectionStore) {
     const [
-      { BallCustodyProbeScheduler },
+      { BallCustodyProbeScheduler, createBallProbeRecoveryNotification },
       { DefaultBallCustodyProbeEvaluator },
       { SchedulerBallCustodyWakeSender },
       { createBallCustodyProbeTaskSpec },
@@ -8424,6 +8819,7 @@ async function main(): Promise<void> {
       projectionStore: ballCustodyProjectionStore,
       taskStore,
       ballCustody: ballCustodyIngest,
+      notifyRecovery: createBallProbeRecoveryNotification({ messages: messageStore, threads: threadStore }),
       probeEvaluator: new DefaultBallCustodyProbeEvaluator({ redis }),
       wakeSender: new SchedulerBallCustodyWakeSender({
         deliver: schedulerDeliver,

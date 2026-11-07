@@ -66,15 +66,18 @@ async function recoveryHarness(t, provenance) {
     signalSchemas: {},
     ...(provenance ? { provenance } : {}),
   });
-  await initial.inventoryStore.transaction((transaction) => {
-    transaction.instances.put({
-      ...transaction.instances.get(installed.pluginInstanceId),
+  await initial.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    assert.ok(instance);
+    await transaction.instances.put({
+      ...instance,
       configReadiness: 'ready',
       activationState: 'enabled',
       runtimeState: 'healthy',
     });
   });
   const before = await initial.inventoryStore.snapshot();
+  await initial.shutdown();
   return { options, before, failures, connectionChecks: () => connectionChecks };
 }
 

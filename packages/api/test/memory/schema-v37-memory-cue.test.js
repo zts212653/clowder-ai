@@ -63,7 +63,7 @@ describe('V37 memory cue event ledger migration', () => {
         .prepare('PRAGMA table_info(memory_cue_events)')
         .all()
         .map((column) => column.name),
-      columns,
+      [...columns, 'read_origin', 'read_details_json'],
     );
     for (const forbidden of [
       'content',
@@ -84,7 +84,7 @@ describe('V37 memory cue event ledger migration', () => {
         .all()
         .map((row) => row.name)
         .sort(),
-      ['memory_cue_events_no_delete', 'memory_cue_events_no_update'],
+      ['memory_cue_events_no_delete', 'memory_cue_events_no_update', 'memory_cue_matter_entries_shape'],
     );
   });
 

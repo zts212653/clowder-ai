@@ -1,4 +1,5 @@
 import { createMemberAdmission } from './admission.js';
+import { readHistoricalMemberAdmission } from './admission-recovery.js';
 import { createHostMemberCallback } from './callback.js';
 import { createHostMemberExecutions } from './execution.js';
 import { executionIsTerminal } from './journal.js';
@@ -291,10 +292,13 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
             const original =
               input.generation === row.generation ? row : await store.journal.grant(row, input.generation);
             if (!original) throw new Error('member_original_grant_unavailable');
-            try {
-              result = await readMemberTerminalReceipt(deps.canonicalExecution, original, result);
-            } catch (error) {
-              if (!evidencePending(error)) throw error;
+            result = await readHistoricalMemberAdmission(deps.canonicalExecution, original, row.generation, result);
+            if (result.admissionState !== 'not_dispatched') {
+              try {
+                result = await readMemberTerminalReceipt(deps.canonicalExecution, original, result);
+              } catch (error) {
+                if (!evidencePending(error)) throw error;
+              }
             }
           }
           await scope.assertCurrent();

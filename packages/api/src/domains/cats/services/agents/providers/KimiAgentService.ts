@@ -18,6 +18,7 @@ import { formatCliNotFoundError } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { resolveKimiCliRuntime, resolveKimiRuntimePaths } from '../../../../../utils/kimi-cli-runtime.js';
+import { readKimiModelMetadata } from '../../../../../utils/kimi-model-metadata.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -76,16 +77,27 @@ const log = createModuleLogger('kimi-agent');
  * CLI's operational effort channel; bypasses support_efforts but cannot
  * re-enable thinking the user turned off).
  *
- * Returns null for boolean-thinking Kimi models (no support_efforts metadata,
- * e.g. kimi-for-coding): the harness must not invent tiers the model does not
- * have, so the CLI keeps its own thinking config and no env is injected.
+ * Declared model tiers take precedence over legacy name-based compatibility.
+ * Null means no tier control; undefined leaves the native configuration alone.
  */
 export function resolveKimiEffortLevel(
   catId: string,
   effectiveModel: string | null | undefined,
   override: CliEffortPreset | null | undefined,
   preferences?: AgentServiceOptions['executionPreferences'],
-): string | null {
+  declaredEfforts?: readonly string[] | null,
+): string | null | undefined {
+  if (declaredEfforts !== undefined) {
+    if (!declaredEfforts?.length) return null;
+    // Frozen platform defaults are not a member choice. With declared tiers,
+    // leave their resolution to the CLI instead of validating a synthesized high.
+    const memberEffort = preferences ? preferences.effort : catRegistry.tryGet(catId)?.config.cli?.effort?.trim();
+    const inherited = preferences?.effortSource === 'platform_default' ? undefined : memberEffort;
+    const selected = override && declaredEfforts.includes(override) ? override : inherited;
+    if (!selected) return undefined;
+    if (!declaredEfforts.includes(selected)) throw new Error(`kimi_effort_unsupported:${selected}`);
+    return selected;
+  }
   if (!getCliEffortOptionsForProvider('kimi', effectiveModel)) return null;
   const inherited = preferences?.effort ?? getCatEffort(catId, undefined, 'kimi', effectiveModel);
   return resolveCliEffortOverride('kimi', effectiveModel, inherited, override).effective;
@@ -105,6 +117,11 @@ interface KimiAgentServiceOptions {
 export class KimiAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
+
+  /** #1838: the turn's only provider spawn is spawnCli with its invocationId; an injected spawnFn owns its own. */
+  get windowsProviderHosts(): boolean {
+    return this.spawnFn === undefined;
+  }
   private readonly model: string;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
@@ -201,11 +218,14 @@ export class KimiAgentService implements AgentService {
     const observedModel =
       followsNativeConfig && !effectiveModel ? readKimiConfiguredModel(toolEnv, runtimePaths) : undefined;
     const identityModel = effectiveModel || observedModel || '';
+    const nativeMetadata = scoped ? undefined : readKimiModelMetadata(runtimePaths.configPath);
+    const nativeModel = nativeMetadata?.models.find((model) => model.alias === identityModel);
     const effortLevel = resolveKimiEffortLevel(
       this.catId as string,
       identityModel,
       options?.reasoningEffortOverride,
       options?.executionPreferences,
+      nativeMetadata?.thinkingEnabled === false ? null : nativeModel ? (nativeModel.efforts ?? null) : undefined,
     );
     const metadata: MessageMetadata = { provider: 'kimi', model: identityModel };
     const imagePaths = await extractTrustedImagePaths(
@@ -475,7 +495,7 @@ export class KimiAgentService implements AgentService {
           ...(scoped
             ? { KIMI_MODEL_NAME: options?.accountEnv?.KIMI_MODEL_NAME || apiKeyEnv?.KIMI_MODEL_NAME || identityModel }
             : {}),
-          KIMI_MODEL_THINKING_EFFORT: effortLevel,
+          ...(effortLevel !== undefined ? { KIMI_MODEL_THINKING_EFFORT: effortLevel } : {}),
           // Native mode requires the kimi-code v2 engine for --agent-file.
           [KIMI_V2_ENGINE_ENV_KEY]: '1',
         },

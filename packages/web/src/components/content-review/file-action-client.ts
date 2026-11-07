@@ -5,6 +5,7 @@ export type ContentFileInfo = {
   local: boolean;
   canOpen?: boolean;
   canReveal?: boolean;
+  reason?: string;
   path?: string;
   displayPath?: string;
   filename?: string;

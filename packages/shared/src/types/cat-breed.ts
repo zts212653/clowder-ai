@@ -74,6 +74,8 @@ export interface CatVariant {
   /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
   readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
+  /** Member-only environment declarations. Account adapters retain final credential authority. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
   /** null explicitly clears a template profile in a runtime catalog overlay. */
@@ -279,7 +281,7 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Optional familiar form of address, prefilled as co-creator for new installations. */
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
   readonly nickname?: string;
   /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
   readonly nicknameSource?: 'user';

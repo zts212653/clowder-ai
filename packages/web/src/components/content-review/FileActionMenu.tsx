@@ -1,5 +1,5 @@
 import { fileContentKind } from '@cat-cafe/shared';
-import { type ReactNode, type RefObject, useLayoutEffect } from 'react';
+import { type CSSProperties, type ReactNode, type RefObject, useLayoutEffect } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import styles from './artwork-actions.module.css';
@@ -94,7 +94,13 @@ export function FileActionMenu({
       role="menu"
       popover="manual"
       aria-label={t.more}
-      style={{ position: 'fixed', left: position.x, top: position.y }}
+      style={
+        {
+          position: 'fixed',
+          '--file-menu-x': `${position.x}px`,
+          '--file-menu-y': `${position.y}px`,
+        } as CSSProperties
+      }
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -230,7 +236,8 @@ export function FileActionMenu({
         ) : null}
       </div>
       <section className={styles.info} aria-label={t.fileInfo}>
-        <strong>{filename}</strong>
+        <strong>{info?.filename ?? filename}</strong>
+        {info?.reason && <p role="status">{info.reason}</p>}
         {info?.local && info.canOpen === false && info.canReveal === false ? <p>{t.localActionsUnavailable}</p> : null}
         {copyName && (
           <button type="button" onClick={copyName}>

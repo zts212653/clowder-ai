@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
 import { contextSourcePayloadV1Schema } from './memory-cue-context.js';
 
-export const RECALL_OPPORTUNITY_CATALOG_VERSION = 7 as const;
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 8 as const;
 
 /** A selector within an already authenticated, revision-pinned canonical document. */
 export const memoryCueDocumentWindowRequestSchema = z
@@ -38,6 +38,7 @@ export const RECALL_RESOLVER_FAMILIES = [
   'project_knowledge',
   'cat_owned_seed',
   'thread_overview',
+  'matter',
 ] as const;
 
 export const MEMORY_CUE_INVALIDATORS = [
@@ -355,7 +356,16 @@ export const cueEnvelopeV1Schema = z
       .strict(),
     drill: z
       .object({
-        family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event', 'owned_seed', 'thread_overview']),
+        family: z.enum([
+          'person_memory',
+          'evidence',
+          'taste',
+          'profile',
+          'event',
+          'owned_seed',
+          'thread_overview',
+          'matter',
+        ]),
         handle: boundedIdentifier(2_000),
       })
       .strict(),
@@ -408,6 +418,7 @@ const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
   project_knowledge: 'evidence' as const,
   cat_owned_seed: 'owned_seed' as const,
   thread_overview: 'thread_overview' as const,
+  matter: 'matter' as const,
 });
 
 export function memoryCueDrillFamilyForResolver(

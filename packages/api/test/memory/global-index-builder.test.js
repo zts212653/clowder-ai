@@ -420,4 +420,144 @@ describe('GlobalIndexBuilder', () => {
     assert.equal((await globalStore.search('SYNTHETIC')).length, 0);
     globalStore.close();
   });
+
+  it('F314-18: legal YAML spellings of a personal marker stay out of the global store', async () => {
+    const memoryDir = join(tmpDir, 'projects', '-Users-test-yaml-variants', 'memory');
+    mkdirSync(memoryDir, { recursive: true });
+    // Neutral basenames: only the header can make these private.
+    const personal = {
+      'probe-crlf.md': '---\r\nname: CRLF\r\nscope: personal\r\n---\r\nSYNTHETIC_CRLF_PAYLOAD',
+      'probe-double-quoted.md': '---\nname: Double quoted\nscope: "personal"\n---\nSYNTHETIC_DQ_PAYLOAD',
+      'probe-type-user.md': '---\nname: Quoted user type\ntype: "user"\n---\nSYNTHETIC_TYPE_PAYLOAD',
+      'probe-single-quoted.md': "---\nname: Single quoted\nsensitivity: 'Private'\n---\nSYNTHETIC_SQ_PAYLOAD",
+      'probe-bom.md': '﻿---\nname: BOM\nscope: personal\n---\nSYNTHETIC_BOM_PAYLOAD',
+      'probe-list.md': '---\nname: List\nscope: [personal]\n---\nSYNTHETIC_LIST_PAYLOAD',
+      // Not valid YAML (unquoted ": " in a plain scalar); the marker must still count.
+      'probe-broken.md':
+        '---\nname: Broken\nmemo: Note: colon inside\nscope: "personal"\n---\nSYNTHETIC_BROKEN_PAYLOAD',
+      // Review of #6457: the same broken field next to other legal spellings of the marker.
+      'probe-broken-comment.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\nscope: personal # keep private\n---\nSYNTHETIC_RVCOMMENT_PAYLOAD',
+      'probe-broken-flow-list.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\nscope: [personal]\n---\nSYNTHETIC_RVFLOW_PAYLOAD',
+      'probe-broken-block-list.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\nscope:\n  - personal\n---\nSYNTHETIC_RVBLOCK_PAYLOAD',
+      'probe-broken-quoted-key.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\n"scope": "personal"\n---\nSYNTHETIC_RVQKEY_PAYLOAD',
+      // Re-review: whole-document context (an alias to an earlier anchor, an explicit `? key` entry).
+      'probe-broken-anchor.md':
+        '---\nname: Synthetic review\nclassification: &privacy personal\nmemo: Note: colon inside\nscope: *privacy\n---\nSYNTHETIC_RVANCHOR_PAYLOAD',
+      'probe-broken-explicit-key.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\n? scope\n: personal\n---\nSYNTHETIC_RVEXPLICIT_PAYLOAD',
+      // A privacy field whose value cannot be read stays personal rather than leaking.
+      'probe-broken-unresolved.md':
+        '---\nname: Synthetic review\nmemo: Note: colon inside\nscope: *missing\n---\nSYNTHETIC_RVUNRESOLVED_PAYLOAD',
+      'probe-broken-marker-itself.md':
+        '---\nname: Synthetic review\nscope: personal: oops\n---\nSYNTHETIC_RVUNREADABLE_PAYLOAD',
+      // Valid YAML, but a privacy value that is neither text nor a flat list of text.
+      'probe-nested-list.md': '---\nname: Synthetic review\nscope: [[personal]]\n---\nSYNTHETIC_RVNESTED_PAYLOAD',
+    };
+    for (const [file, content] of Object.entries(personal)) writeFileSync(join(memoryDir, file), content);
+    writeFileSync(
+      join(memoryDir, 'probe-shared.md'),
+      '---\r\nname: "Shared CRLF Method"\r\ntype: reference\r\n---\r\nSYNTHETIC_SHARED_PAYLOAD',
+    );
+    // A broken header is not private by itself: without a marker it stays shared.
+    writeFileSync(
+      join(memoryDir, 'probe-shared-broken.md'),
+      '---\nname: Shared broken memo\nmemo: Note: colon inside\ntype: reference\n---\nSYNTHETIC_SHAREDBROKEN_PAYLOAD',
+    );
+    writeFileSync(
+      join(memoryDir, 'probe-shared-broken-scope.md'),
+      '---\nname: Shared broken scope\nmemo: Note: colon inside\nscope: team\n---\nSYNTHETIC_SHAREDSCOPE_PAYLOAD',
+    );
+    writeFileSync(
+      join(memoryDir, 'probe-shared-scope-list.md'),
+      '---\nname: Shared scope list\nscope: [team, shared]\n---\nSYNTHETIC_SHAREDLIST_PAYLOAD',
+    );
+
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    const personalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+    await personalStore.initialize();
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+      personalStore,
+    });
+
+    const result = await builder.rebuild();
+    assert.equal(result.privacyAudit.personalSources, Object.keys(personal).length);
+    for (const payload of [
+      'CRLF',
+      'DQ',
+      'TYPE',
+      'SQ',
+      'BOM',
+      'LIST',
+      'BROKEN',
+      'RVCOMMENT',
+      'RVFLOW',
+      'RVBLOCK',
+      'RVQKEY',
+      'RVANCHOR',
+      'RVEXPLICIT',
+      'RVUNRESOLVED',
+      'RVUNREADABLE',
+      'RVNESTED',
+    ]) {
+      const marker = `SYNTHETIC_${payload}_PAYLOAD`;
+      assert.equal((await globalStore.search(marker)).length, 0, `${marker} leaked into the global store`);
+      assert.equal((await personalStore.search(marker)).length, 1, `${marker} missing from the personal store`);
+    }
+    const shared = await globalStore.search('SYNTHETIC_SHARED_PAYLOAD');
+    assert.equal(shared.length, 1);
+    assert.equal(shared[0].title, 'Shared CRLF Method');
+    const sharedBroken = await globalStore.search('SYNTHETIC_SHAREDBROKEN_PAYLOAD');
+    assert.equal(sharedBroken.length, 1);
+    assert.equal(sharedBroken[0].title, 'Shared broken memo');
+    assert.equal((await personalStore.search('SYNTHETIC_SHAREDBROKEN_PAYLOAD')).length, 0);
+    assert.equal((await globalStore.search('SYNTHETIC_SHAREDSCOPE_PAYLOAD')).length, 1);
+    assert.equal((await personalStore.search('SYNTHETIC_SHAREDSCOPE_PAYLOAD')).length, 0);
+    assert.equal((await globalStore.search('SYNTHETIC_SHAREDLIST_PAYLOAD')).length, 1);
+    assert.equal((await personalStore.search('SYNTHETIC_SHAREDLIST_PAYLOAD')).length, 0);
+
+    globalStore.close();
+    personalStore.close();
+  });
+  it('F314-18: a privacy list that refers to itself neither aborts the rebuild nor keeps the old global row', async () => {
+    const memoryDir = join(tmpDir, 'projects', '-Users-test-cyclic-scope', 'memory');
+    mkdirSync(memoryDir, { recursive: true });
+    const file = join(memoryDir, 'neutral-probe.md');
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    const personalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+    await personalStore.initialize();
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+      personalStore,
+    });
+
+    // Review of #6457: the alias makes the list's first item the list itself.
+    for (const header of [
+      'scope: &s [*s, personal]',
+      'scope: &s [personal, *s]',
+      'memo: Note: colon inside\nscope: &s [*s, personal]',
+    ]) {
+      writeFileSync(file, '---\nname: Synthetic review\ntype: reference\n---\nSYNTHETIC_CYCLE_PAYLOAD');
+      await builder.rebuild();
+      assert.equal((await globalStore.search('SYNTHETIC_CYCLE_PAYLOAD')).length, 1, 'starts as a shared row');
+
+      writeFileSync(file, `---\nname: Synthetic review\n${header}\n---\nSYNTHETIC_CYCLE_PAYLOAD`);
+      await builder.rebuild();
+      assert.equal((await globalStore.search('SYNTHETIC_CYCLE_PAYLOAD')).length, 0, `${header}: old global row kept`);
+      assert.equal((await personalStore.search('SYNTHETIC_CYCLE_PAYLOAD')).length, 1, `${header}: not personal`);
+    }
+
+    globalStore.close();
+    personalStore.close();
+  });
 });

@@ -1,5 +1,6 @@
 import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { invocationFetch } from './invocation-auth.js';
+import { scheduleParameterTools } from './schedule-parameter-tools.js';
 
 /**
  * F139 Phase 3A: Schedule MCP Tools (AC-G2)
@@ -291,6 +292,7 @@ export async function handleRemoveScheduledTask(input: {
 // ─── Tool definitions ───────────────────────────────────────
 
 export const scheduleTools = [
+  ...scheduleParameterTools,
   defineTool({
     name: 'cat_cafe_list_schedule_templates',
     description:

@@ -1,3 +1,4 @@
+import { collectiveIdSchema } from '@cat-cafe/shared';
 import type { ClientPhase, CollectiveMe } from './client-types.js';
 
 export { trustedGitHubAppRegistrationUrl } from './github-app-manifest.js';
@@ -11,6 +12,7 @@ export interface HumanAuthCompletionMessage {
   readonly type: 'collective:human-auth-completion';
   readonly serviceUrl: string;
   readonly sessionToken: string;
+  readonly collectiveId?: string;
 }
 
 const HUMAN_AUTH_ERROR_CODES = [
@@ -91,12 +93,14 @@ export function trustedHumanAuthResult(
     const errorCode = parseHumanAuthErrorCode(data.errorCode);
     return errorCode ? { type: data.type, serviceUrl: serviceOrigin, errorCode } : undefined;
   }
-  if (Object.keys(data).some((key) => !['type', 'serviceUrl', 'sessionToken'].includes(key))) return undefined;
+  if (Object.keys(data).some((key) => !['type', 'serviceUrl', 'sessionToken', 'collectiveId'].includes(key)))
+    return undefined;
   if (
     data.type !== 'collective:human-auth-completion' ||
     typeof data.sessionToken !== 'string' ||
     data.sessionToken.length < 16 ||
-    data.sessionToken.length > 512
+    data.sessionToken.length > 512 ||
+    (data.collectiveId !== undefined && !collectiveIdSchema.safeParse(data.collectiveId).success)
   ) {
     return undefined;
   }

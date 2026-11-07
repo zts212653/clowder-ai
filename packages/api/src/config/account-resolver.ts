@@ -197,6 +197,7 @@ export function resolveByAccountRef(projectRoot: string, accountRef: string): Ru
         kind: 'api_key',
         syntheticNative: true,
         client: builtinClient,
+        ...(builtinClient === 'openai' ? { accountOwnerRoot: resolve(projectRoot) } : {}),
         ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
         ...(baseUrl ? { baseUrl } : {}),
         apiKey,

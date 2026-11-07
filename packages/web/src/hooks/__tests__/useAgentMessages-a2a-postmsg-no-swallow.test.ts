@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F194 live A2A post_message no-swallow — ACTIVE-path incident regression net
  * (2026-06-10 incident; see bubble-speech-real-store-no-swallow.test.ts for

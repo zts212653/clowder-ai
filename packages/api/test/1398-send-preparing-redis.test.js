@@ -192,11 +192,11 @@ for (const useSteer of [false, true]) {
       const guidanceRef = async () =>
         (await reloaded.getById(guidance.message.id)).lifecycle.dispatchRefs.find((ref) => ref.targetId === 'opus');
       const pendingEntry = await reloadedLedger.get('thread', guidance.entry.id);
-      assert.deepEqual(pendingEntry.payload, guidance.entry.payload, 'original input survives until acceptance');
-      assert.deepEqual(pendingEntry.targets, ['opus']);
-      assert.equal(pendingEntry.delivery.appendPendingByTarget.opus.dispatchStarted, true);
+      assert.equal(pendingEntry, null, 'History owns the input before the provider ACK');
+      assert.equal((await reloaded.getById(guidance.message.id)).content, guidance.message.content);
       const pendingRef = await guidanceRef();
       assert.equal(pendingRef.appendAcceptance, 'pending', 'dispatch start is not durable acceptance');
+      assert.equal(pendingRef.appendDelivery.dispatchStarted, true);
       assert.deepEqual(dispatch.mock.calls[0].arguments[0].messageIds, [guidance.message.id]);
       await processor.requestDrain('thread');
       assert.equal(dispatch.mock.calls.length, 1, 'repeated drain before ACK must not append again');

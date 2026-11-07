@@ -3,6 +3,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../../shell/shell-presentation';
 import { RichBlocks } from '../RichBlocks';
 import { RuntimeInteractionQuestionForm } from '../RuntimeInteractionQuestionForm';
 import {
@@ -27,6 +29,7 @@ describe('RuntimeInteractionQuestionForm', () => {
   beforeAll(() => ((globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true));
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    observeApiSessionOwner('user-1');
     vi.mocked(apiFetch).mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -35,6 +38,7 @@ describe('RuntimeInteractionQuestionForm', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('keeps labels attached to their own inputs when the original and hosted form are both mounted', async () => {
@@ -177,7 +181,11 @@ describe('RuntimeInteractionQuestionForm', () => {
     );
   });
 
-  it('rejects the question through the canonical card without manufacturing an answer', async () => {
+  it.each([
+    'classic',
+    'v2',
+  ] as const)('rejects through the canonical card without manufacturing an answer (%s)', async (presentation) => {
+    writeShellPresentation(presentation);
     const request: RuntimeInteractionRequest = {
       version: 1,
       interactionId: 'interaction-ui',
@@ -221,7 +229,10 @@ describe('RuntimeInteractionQuestionForm', () => {
       '/api/runtime-interactions/interaction-ui/reject',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ cardRef }) }),
     );
-    expect(container.textContent).toContain('你已拒绝这次请求');
+    expect(container.textContent).toContain(
+      presentation === 'classic' ? '你已拒绝这次请求' : '已拒绝 · Outcome choice',
+    );
+    expect(container.querySelector('form')).toBeNull();
     expect(container.textContent).not.toContain('提交回答');
   });
 

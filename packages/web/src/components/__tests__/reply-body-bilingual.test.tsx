@@ -107,7 +107,8 @@ describe('v2 reply copy uses the live shell language without replacing content',
     const paragraph = container.querySelector('[data-testid="fold"] p');
     expect(fold.textContent).toBe('展开（还有 15 行）');
     expect(container.textContent).toContain('引用缅因猫 Astra 的回复');
-    expect(container.textContent).toContain('批注批注原文 Keep this comment');
+    expect(container.textContent).toContain('批注原文 Keep this comment');
+    expect(container.querySelector('.cafe-quote-comment strong')?.textContent?.trim()).toBe('批注');
     expect(container.textContent).toContain('提示');
     act(() => fold.click());
     expect(fold.textContent).toBe('收起');
@@ -116,7 +117,8 @@ describe('v2 reply copy uses the live shell language without replacing content',
     expect(container.querySelector('[data-testid="fold"] button')).toBe(fold);
     expect(fold.textContent).toBe('Show less');
     expect(container.textContent).toContain("Quote缅因猫 Astra's reply");
-    expect(container.textContent).toContain('Comment批注原文 Keep this comment');
+    expect(container.textContent).toContain('批注原文 Keep this comment');
+    expect(container.querySelector('.cafe-quote-comment strong')?.textContent?.trim()).toBe('Comment');
     expect(container.textContent).toContain('原始引用 Keep this text');
     expect(container.textContent).toContain('Tip');
     act(() => fold.click());
@@ -129,7 +131,8 @@ describe('v2 reply copy uses the live shell language without replacing content',
     renderSurface();
     expect(container.textContent).toContain('Show more (+15 lines)');
     expect(container.textContent).toContain('QUOTECLI Output');
-    expect(container.textContent).toContain('Comment批注原文 Keep this comment');
+    expect(container.textContent).toContain('批注原文 Keep this comment');
+    expect(container.querySelector('.cafe-quote-comment strong')?.textContent?.trim()).toBe('Comment');
     expect(container.textContent).toContain('Tip');
     expect(container.textContent).not.toContain('缅因猫 Astra 的回复');
   });

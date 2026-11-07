@@ -35,12 +35,14 @@ export function WorkPreview({
   pending,
   title,
   compact = false,
+  previewCover,
 }: {
   artifact: ThreadArtifactDTO;
   description?: WorkCardDescription | null;
   pending?: boolean;
   title?: string;
   compact?: boolean;
+  previewCover?: string;
 }) {
   const t = useShellCopy(worksPanelCopy);
   const { kind: contentKind } = projectFileContent(artifact);
@@ -57,7 +59,9 @@ export function WorkPreview({
       </span>
     );
   if (contentKind === 'video')
-    return <WorkVideoPreview artifact={artifact} description={description} pending={pending} />;
+    return (
+      <WorkVideoPreview artifact={artifact} description={description} pending={pending} previewCover={previewCover} />
+    );
   if (contentKind === 'audio') return <WorkAudioPreview artifact={artifact} />;
   return <TypedCover artifact={artifact} />;
 }

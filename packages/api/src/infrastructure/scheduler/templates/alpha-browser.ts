@@ -72,8 +72,22 @@ async function loadRuntime(repoRoot: string): Promise<AlphaRuntime> {
   return { runAlphaBrowserRevision: worker.runAlphaBrowserProcess, ...failures } as AlphaRuntime;
 }
 async function inspectMain(repoRoot: string, signal: AbortSignal): Promise<MainProjection> {
-  await git(repoRoot, ['fetch', 'origin', 'main', '--quiet'], signal);
-  const targetSha = await git(repoRoot, ['rev-parse', '--verify', 'origin/main^{commit}'], signal);
+  const advertised = await git(repoRoot, ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], signal);
+  const [targetSha, remoteRef, extra] = advertised.split(/\s+/u);
+  if (!targetSha || !EXACT_OID.test(targetSha) || remoteRef !== 'refs/heads/main' || extra !== undefined) {
+    throw new Error('Alpha discovery requires one exact remote main commit');
+  }
+  // Worktrees share remote-tracking refs. Pin the advertised commit and fetch
+  // only its objects so concurrent callers cannot overwrite each other's refs
+  // or FETCH_HEAD. A failed remote read/transfer never falls back to stale main.
+  await git(
+    repoRoot,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--refmap=', 'origin', targetSha],
+    signal,
+  );
+  if ((await git(repoRoot, ['rev-parse', '--verify', `${targetSha}^{commit}`], signal)) !== targetSha) {
+    throw new Error('Alpha remote main commit identity mismatch');
+  }
   const common = await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal);
   return {
     targetSha,
@@ -206,6 +220,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
       executionCarrier: {
         type: 'string',
         required: false,
+        enum: ['fork', 'managed'],
         description: '执行载体：fork（默认）或 managed；在飞 revision 保持原载体',
       },
     },

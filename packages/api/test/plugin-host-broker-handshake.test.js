@@ -181,9 +181,11 @@ describe('K-2B Host Broker handshake', () => {
     const delegate = new MemoryHostBrokerStore();
     let beforeSnapshotReturn;
     const store = {
+      read: delegate.read,
+      snapshot: () => delegate.snapshot(),
       transaction: (work) => delegate.transaction(work),
-      snapshot: async () => {
-        const snapshot = await delegate.snapshot();
+      readConnection: async (id) => {
+        const snapshot = await delegate.readConnection(id);
         const hook = beforeSnapshotReturn;
         beforeSnapshotReturn = undefined;
         if (hook) await hook();
@@ -215,6 +217,8 @@ describe('K-2B Host Broker handshake', () => {
       const delegate = new MemoryHostBrokerStore();
       let beforeTransaction;
       const store = {
+        read: delegate.read,
+        readConnection: (id) => delegate.readConnection(id),
         snapshot: () => delegate.snapshot(),
         transaction: async (work) => {
           const hook = beforeTransaction;
@@ -247,6 +251,8 @@ describe('K-2B Host Broker handshake', () => {
     const delegate = new MemoryHostBrokerStore();
     let rejectNextTransaction = false;
     const store = {
+      read: delegate.read,
+      readConnection: (id) => delegate.readConnection(id),
       snapshot: () => delegate.snapshot(),
       transaction: (work) => {
         if (rejectNextTransaction) {

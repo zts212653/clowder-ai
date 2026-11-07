@@ -11,15 +11,17 @@ export function MemoryEntry({
   profileSource,
   initialQuery,
   findSessionId,
+  matterId,
 }: {
   tab: MemoryPageTab;
   from: string | null;
   profileSource?: ProfileSourceTarget;
   initialQuery?: string;
   findSessionId?: string | null;
+  matterId?: string;
 }) {
   const presentation = useShellPresentation();
-  return presentation === 'v2' || profileSource ? (
+  return presentation === 'v2' || profileSource || matterId ? (
     <MemoryPagePreview
       tab={tab}
       shell={presentation}
@@ -28,6 +30,7 @@ export function MemoryEntry({
       profileSource={profileSource}
       initialQuery={initialQuery}
       findSessionId={findSessionId}
+      matterId={matterId}
     />
   ) : (
     <MemoryHub activeTab="feed" initialReferrerThread={from} />

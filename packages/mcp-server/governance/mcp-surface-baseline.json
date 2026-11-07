@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -983,10 +983,10 @@
         "create"
       ],
       "activeState": "canonical",
-      "description": "Ask the canonical Task owner to admit or resume explicitly entrusted work. Use when: a current user Message explicitly entrusts work, an offer was accepted, or a registered source grants admission. Not for: casual mentions, a new Task for a follow-up to known work, or replacing its owner. For a known Task, read_entrusted_work and update_entrusted_work continue that Task. GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=[\"message:<messageId>\"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. Authorized-source admission fails closed unless its producer grant is registered and current.",
-      "descriptionDigest": "sha256:c764c7b42ccd5b539cb8ea2060189712f3ad25f91499f0f6f80351a59d51f312",
-      "descriptionCharacters": 936,
-      "descriptionTokensCl100kBase": 184,
+      "description": "Ask the canonical Task owner to admit or resume explicitly entrusted work. Use when: a current user Message explicitly entrusts work, an offer was accepted, or a registered source grants admission. Not for: casual mentions, a new Task for a follow-up to known work, or replacing its owner. For a known Task, read_entrusted_work and update_entrusted_work continue that Task. GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=[\"message:<messageId>\"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. Authorized-source admission fails closed unless its producer grant is registered and current. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.",
+      "descriptionDigest": "sha256:06f16c26b8c2f8f74198534432ff489ccb8fc85f14a9f026dc5c58632b432e82",
+      "descriptionCharacters": 1142,
+      "descriptionTokensCl100kBase": 238,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1163,6 +1163,7 @@
             "description": "Explicit, accepted-offer, or registered-source admission basis with stable source and idempotency coordinates"
           },
           "artifactRefs": {
+            "description": "Initial Artifact refs; max 64 entries, each 1–1000 UTF-16 code units after trimming. Omit if none are known; never discard existing refs just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -1227,13 +1228,13 @@
             "type": "object"
           },
           "title": {
-            "description": "Title for the canonical entrusted-work Task",
+            "description": "Title for the canonical entrusted-work Task; 1–200 UTF-16 code units after trimming",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Why this work was entrusted and why the Task owns it",
+            "description": "Why this work was entrusted and why the Task owns it; max 1000 UTF-16 code units (JavaScript string.length)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -1244,7 +1245,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:2419dcdb3810693a2f466e7093a1586ccaee7c868b691584610cbde065f57f8f",
+      "inputSchemaDigest": "sha256:ca4b55fb5bb1df8bea179e33e853153c0dd1f872b430eacabc883b46962c9e22",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -1259,7 +1260,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1595,7 +1596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2344,7 +2345,77 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
+    },
+    {
+      "name": "cat_cafe_bring_to_desk",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Have the desktop cat bring a work you already made to the person (「桌面猫带来」): who brought it, one sentence, the work, 忽略 / 打开. Use when: you finished something for them nobody asked for yet, saved it with cat_cafe_work and attached its card to your reply with publish-reference. Not for: anything unsaved, decisions or approvals, progress reports, or things that need them right now. Output: ready (the reply with the card is saved) or waiting_for_card (it reaches the desk once this reply is saved). At the desk it shows at once; while they are away it waits and comes in one list when they return; unanswered, it stays in this conversation. It never enters Needs Me. GOTCHA: one row per message, so do not also offer a suggestion on that reply. Read cat_cafe_suggestion_facts kind=brought-work for how they treated earlier ones.",
+      "descriptionDigest": "sha256:45a80235d6f8b1da5e985cd21c8b64e811b1f04d4ed31fe012f1269ab3aef547",
+      "descriptionCharacters": 828,
+      "descriptionTokensCl100kBase": 200,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "messageId": {
+            "description": "The message carrying the work card, in this conversation. Omit for your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sentence": {
+            "description": "The one line on the desk bubble, said to the person: 「鲸鲸那三格，照他的头像画就行。」",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "work": {
+            "additionalProperties": false,
+            "description": "The fixed work version whose card you attached with cat_cafe_work publish-reference.",
+            "properties": {
+              "contentRef": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "ownerRevision": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "contentRef",
+              "ownerRevision"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "sentence",
+          "work"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:be525cf8f316950aba693c737d37de8bea23d790404cc82d4fb9d1b521dfbc97",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleBringToDesk",
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_capabilities_snapshot",
@@ -3025,7 +3096,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3243,7 +3314,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_correct_person_claim",
@@ -3371,7 +3442,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3501,7 +3572,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3510,11 +3581,11 @@
       "actions": [
         "create"
       ],
-      "activeState": "migration-candidate",
-      "description": "Create a new 🧶 毛线球 (yarn ball) task in the current thread. Use when: user says \"建个毛线球\", \"记一下任务\", \"track this\", or you identify persistent work items across sessions — e.g. \"fix login timeout\", \"update API docs\", \"review F160 spec\". NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:\"checklist\"). Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. TIP: Include a \"why\" to give context to whoever picks up the task. F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, provide dispatchGate with status \"dispatched\" (you already cross_posted to the owning thread) or \"not_dispatched\" (with reason). If you omit dispatchGate and external F-IDs are detected, the task is created but a warning is returned reminding you to dispatch.",
-      "descriptionDigest": "sha256:c224ac98c314369ea0d708aacbd4a9ebba742a006a187203294dc0a78b63270b",
-      "descriptionCharacters": 1077,
-      "descriptionTokensCl100kBase": 275,
+      "activeState": "canonical",
+      "description": "Create a new 🧶 毛线球 (yarn ball) task in the current thread. Use when: user says \"建个毛线球\", \"记一下任务\", \"track this\", or you identify persistent work items across sessions — e.g. \"fix login timeout\", \"update API docs\", \"review F160 spec\". NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:\"checklist\"). Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. TIP: Include a \"why\" to give context to whoever picks up the task. LIMITS: title 1–200 and why max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes). F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, provide dispatchGate with status \"dispatched\" (you already cross_posted to the owning thread) or \"not_dispatched\" (with reason). If you omit dispatchGate and external F-IDs are detected, the task is created but a warning is returned reminding you to dispatch.",
+      "descriptionDigest": "sha256:77155c3773dcca2e5178f4ef33c52768f9602d317584b1a1721a4becb5bca997",
+      "descriptionCharacters": 1181,
+      "descriptionTokensCl100kBase": 304,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3565,13 +3636,13 @@
             "type": "string"
           },
           "title": {
-            "description": "Task title — what needs to be done",
+            "description": "Task title — what needs to be done; 1–200 UTF-16 code units",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Why this task matters (context for whoever picks it up)",
+            "description": "Why this task matters; max 1000 UTF-16 code units (JavaScript string.length, not tokens or bytes)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -3581,7 +3652,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:001098b30cdc0b6ce5a177afcd99d6f25d55713fcaacde8fe413a32b249f39ff",
+      "inputSchemaDigest": "sha256:ea1566bcfd832a024b8ece85d405ccd3299e71c83ab6b3ddf02aa1a80dc9ed9d",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -3595,7 +3666,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3931,7 +4002,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4111,7 +4182,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4238,10 +4309,10 @@
         "resume"
       ],
       "activeState": "canonical",
-      "description": "Durably accept or continue development through the original Task owner. Use when: an accepted Feature kickoff becomes authorized work, or the human says “继续 Phase C / continue this phase” in its original thread, including work without a deadline. Not for: casual Feature mentions, unaccepted ideas, media/research without Feature scope (use admit_entrusted_work), or moving another thread’s Task. Output: a typed admitted/resumed/adopted/bound receipt after an atomic Task mutation. GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results.",
-      "descriptionDigest": "sha256:f2ad47c8474461ea97e3b5eaa0a341337cf3c985eb198f1d8dcea177ae9301b1",
-      "descriptionCharacters": 707,
-      "descriptionTokensCl100kBase": 143,
+      "description": "Durably accept or continue development through the original Task owner. Use when: an accepted Feature kickoff becomes authorized work, or the human says “继续 Phase C / continue this phase” in its original thread, including work without a deadline. Not for: casual Feature mentions, unaccepted ideas, media/research without Feature scope (use admit_entrusted_work), or moving another thread’s Task. Output: a typed admitted/resumed/adopted/bound receipt after an atomic Task mutation. GOTCHA: call resolve_development_work first and reuse its Task identity. scope_unavailable_here permits no duplicate admission. A receipt alone does not deliver the work—continue the accepted action and publish real results. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 without trimming. Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.",
+      "descriptionDigest": "sha256:c3bc2cf5a2ab0936da0d699c105bce65e27f38a94891c10910acd97ddfc39ae4",
+      "descriptionCharacters": 961,
+      "descriptionTokensCl100kBase": 206,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4427,7 +4498,7 @@
             "description": "Exact current human source and action idempotency key. New messages authorize actions, not new work identities."
           },
           "artifactRefs": {
-            "description": "Existing Artifact-owner refs at admission/adoption; later publications use update_entrusted_work.",
+            "description": "Existing Artifact-owner refs at admission/adoption; max 64 entries, each 1–1000 UTF-16 code units (JavaScript string.length). Preserve existing refs; never drop them just to fit. Later publications use update_entrusted_work.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -4562,13 +4633,13 @@
             "type": "object"
           },
           "title": {
-            "description": "Human-readable title for newly admitted work; existing identity/title remain unchanged.",
+            "description": "Human-readable title for newly admitted work; 1–200 UTF-16 code units after trimming. Existing identity/title remain unchanged.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
-            "description": "Reason for accepting this scoped development outcome.",
+            "description": "Reason for accepting this scoped development outcome; max 1000 UTF-16 code units (JavaScript string.length).",
             "maxLength": 1000,
             "type": "string"
           }
@@ -4581,7 +4652,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:864d1ba5840c5b5dce77982dc46879b922dc4dc57ba7ec87a1fb4cb694bd9b0a",
+      "inputSchemaDigest": "sha256:573635bff9b385deef776a6bdcac7d8227c7607ace4a6290fcb9e91381530966",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -4595,7 +4666,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/development-work-tools.js#handleDevelopmentWork",
-      "protectedImplementationDigest": "sha256:e19200aac99d2a59d0272b422d9b6a075a288d642466b82070504fed1425123d"
+      "protectedImplementationDigest": "sha256:51e4f7910be1ab412994af29955c68da881a2e8e10164fb72aabfc5e6e53155c"
     },
     {
       "name": "cat_cafe_dismiss_request_review_consumption",
@@ -4782,7 +4853,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4851,7 +4922,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4948,7 +5019,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5138,7 +5209,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5278,7 +5349,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5328,7 +5399,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5378,7 +5449,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5438,7 +5509,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5474,7 +5545,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5525,7 +5596,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5664,7 +5735,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5730,7 +5801,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5779,7 +5850,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5826,7 +5897,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5877,7 +5948,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6003,7 +6074,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6060,7 +6131,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6166,7 +6237,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6200,7 +6271,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6249,7 +6320,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6363,7 +6434,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6511,7 +6582,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_home_action",
@@ -7593,7 +7664,58 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
+    },
+    {
+      "name": "cat_cafe_list_memory_matters",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "list"
+      ],
+      "activeState": "canonical",
+      "description": "Find shared memory pages about a matter (事情/跨线原话). Use when opening/resuming work, finding prior discussion or continuing an opening directory. NOT for proving a real read; use read_memory_matter. Output: currently readable titles, IDs, revisions, entry counts, source/summary status and nextCursor; no read receipt. Pages with active unchanged sources from this authenticated invocation thread come first, then updatedAt and stable ID. hasThreadSource means source location, not applicability or authorization. Reuse a cursor with the same reader, thread and query. The optional query matches titles/descriptions; empty does not prove no relevant history exists.",
+      "descriptionDigest": "sha256:3adfa7d1a625ca1953fcc6f3a7b7b6eb82fda0b8860fcd59969fc85907d34c48",
+      "descriptionCharacters": 663,
+      "descriptionTokensCl100kBase": 134,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque nextCursor returned by the same catalogue or page.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum entries per page; default 12, maximum 30.",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "Literal title/description clue, e.g. 守望猫; omit to browse.",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:df1b6ca1450e7f0cc48fbde498723e5445ac9cb8d76a2a40f0fc4ae331169d4a",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleListMemoryMatters",
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7805,7 +7927,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleListScheduleTemplates",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_list_session_chain",
@@ -7943,7 +8065,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7953,10 +8075,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Discover visible threads and recent work without reading conversation bodies. Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.",
-      "descriptionDigest": "sha256:15a1e6425c9cf38f20476b5799e1090a385cf70f2fba8587f349eb3de21ff4c3",
-      "descriptionCharacters": 1290,
-      "descriptionTokensCl100kBase": 251,
+      "description": "Discover visible threads and recent work without reading conversation bodies. Use when: finding an earlier work line such as “那个3D建模” or “昨天做的视频”, even without a Matter page; choose short topic clues from the current title/question and set includeWork=true. Without a topic, browse titles, up to 3 unfinished Tasks and actual running members. NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). Output: bounded metadata candidates and original-read pointers; topic mode also searches authorized completed Tasks and attached references, reports checked/uninspected scope, and offers weak recent pointers plus existing Work/evidence tools after a miss. nextCursor continues the same topic. A bound original roadmap includes file version/as-of and its read pointer. GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. Task and roadmap reads also respect the invocation callback allowlist. Partial scans or an empty page cannot prove absence. Metadata matches are not original reads, relevance judgments, search-qualified message answers or grants. Follow original pointers, read current sources and assess applicability before answering. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.",
+      "descriptionDigest": "sha256:eb95a3d1555fea5888cb9f9c4235cbbada8a20c814206176e9078e2d796a2fe9",
+      "descriptionCharacters": 1699,
+      "descriptionTokensCl100kBase": 314,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -7972,7 +8094,7 @@
             "type": "string"
           },
           "cursor": {
-            "description": "Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.",
+            "description": "Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword/topic filters. Live pages are not a frozen snapshot.",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
@@ -7993,11 +8115,17 @@
             "maximum": 200,
             "minimum": 1,
             "type": "integer"
+          },
+          "topic": {
+            "description": "Work mode only: choose up to 6 short topic clues from the current title/question, separated by spaces. Matches title, owner-scoped Tasks including done, attached artifact refs and active roadmap bindings within a bounded scan. Use topic or keyword, not both. Candidates require original reads; zero matches do not establish absence.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:4e94bdb15064059f33d38696e8c10c01ddfc724282d2d3c884477bbce953baf2",
+      "inputSchemaDigest": "sha256:735f0ea121ccde171fbf26aeb524b32805cf3dd0d5c07c53bf142b243a6261a2",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -8015,7 +8143,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8623,7 +8751,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -8740,7 +8868,84 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
+    },
+    {
+      "name": "cat_cafe_offer_suggestion",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Put one prepared, reversible action under a message as a button the person taps once (「一键提议」). Use when: there is one small thing nobody asked for that the person may want, it only touches their own things, and you can prepare it completely now — e.g. their screenshots of a film turned into timed video comments, a recurring request turned into a scheduled task. Not for: decisions, spending, starting new conversations, changing how a cat works, or touching someone else’s things (use a proposal card); repeating what the reply already offers. Output: the row; tapping runs the action, shows an undoable receipt in place, × dismisses. It never enters Needs Me. GOTCHA: one row per message. Before offering a kind again, read cat_cafe_suggestion_facts and weigh how the person treated it; there is no fixed limit.",
+      "descriptionDigest": "sha256:2ddc56634302791537aa86a34806781f0826993a02d4d87bd378cc2f577a635a",
+      "descriptionCharacters": 814,
+      "descriptionTokensCl100kBase": 179,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "description": "The prepared action. It runs only when the person taps.",
+            "properties": {
+              "kind": {
+                "description": "video-comments | scheduled-task",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": {},
+                "description": "video-comments: {contentRef, ownerRevision, title, comments:[{atSeconds, endSeconds?, text}] (1–12)} on a Works video. scheduled-task: {templateId, trigger, params?, label?, category?, description?} — the same fields as register_scheduled_task, as objects; it delivers to this conversation.",
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "params"
+            ],
+            "type": "object"
+          },
+          "expiresInMinutes": {
+            "description": "Default 24h. Unanswered by then, the row leaves and counts as 不理.",
+            "maximum": 10080,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "label": {
+            "description": "The button text: verb + object, e.g. 「添加 7 条视频批注」「创建定时任务 · 每周一 9:00」.",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "messageId": {
+            "description": "The message the row hangs under, in this conversation. Omit to hang it under your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "action"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:c5bc94e27671f09b7ba7495bdbafc238d1dae273ddf2a3e96c23540c1824bbd7",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleOfferSuggestion",
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_open_evolution_round",
@@ -8967,6 +9172,76 @@
       },
       "implementationRef": "module:./tools/page-action-tools.js#handlePageActionStatus",
       "protectedImplementationDigest": "sha256:0fc084064a0da229b87f1ed217909a9e16b3ad90f3e6c7f5d67c8f90d8825c3a"
+    },
+    {
+      "name": "cat_cafe_post_action_receipt",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "create"
+      ],
+      "activeState": "canonical",
+      "description": "Leave one receipt line under a message for something you already did (「已向小星星补了一条先例」), optionally undoable. Use when: you acted without being asked in this turn and the person should see it where it happened. Not for: progress reports, asking for anything, or actions you have not done. Output: the row, right under that message. GOTCHA: one row per message; undo only for a scheduled task you registered in this conversation.",
+      "descriptionDigest": "sha256:393b3882473e5b7aab935f5733e478e4895791e961cf71c0dd8d6cb2826b541e",
+      "descriptionCharacters": 425,
+      "descriptionTokensCl100kBase": 100,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "description": "Give the row an undo. Omit for a receipt that cannot be undone.",
+            "properties": {
+              "appliedRef": {
+                "additionalProperties": {},
+                "description": "scheduled-task: {taskId} of a task you registered here.",
+                "type": "object"
+              },
+              "kind": {
+                "description": "scheduled-task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "appliedRef"
+            ],
+            "type": "object"
+          },
+          "messageId": {
+            "description": "The message the row hangs under, in this conversation. Omit to hang it under your own reply in this turn.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "description": "What was done, as a receipt: 「已向小星星补了一条先例」.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:214b98069401e10a557c45b6b14fd2fae7b11ad60dc79cf3869f1a20eb6ca035",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handlePostActionReceipt",
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
     },
     {
       "name": "cat_cafe_post_message",
@@ -10574,7 +10849,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11252,7 +11527,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handlePreviewScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_propose_entity",
@@ -11396,7 +11671,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -11572,7 +11847,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12482,7 +12757,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -12562,7 +12837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -12639,7 +12914,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -12827,7 +13102,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -12953,7 +13228,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -14491,10 +14766,10 @@
         "read"
       ],
       "activeState": "canonical",
-      "description": "Read a bounded line range from a file within allowed directories. Use after search_evidence returns a sourcePath. Returns numbered text within a 24k character budget; follow the returned startLine/charOffset for a long-line continuation. Read-only; rejects paths outside allowed directories.",
-      "descriptionDigest": "sha256:653bfd33d9745e10fbeaf5c876abfcd5a92b4ed726b70ab810a9c2b04a30c261",
-      "descriptionCharacters": 291,
-      "descriptionTokensCl100kBase": 56,
+      "description": "Read a bounded line range from a file within allowed directories. Use when: reading a known file or a search result drillDown path. NOT for: finding unknown documents (use search_evidence). Output: numbered text within a 24k character budget; follow startLine/charOffset for continuation. Published references verify the indexed content hash against the current lawful source; changed or forgotten content requires a fresh search. Read-only; the same allowed-directory checks apply to published and ordinary files.",
+      "descriptionDigest": "sha256:9b9abdaacf35eb76879bd02371f2897668b99e39f6e8184e8b46ce2a99ae9064",
+      "descriptionCharacters": 514,
+      "descriptionTokensCl100kBase": 97,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -14541,7 +14816,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/file-tools.js#handleReadFileSlice",
-      "protectedImplementationDigest": "sha256:f4a76c24375c7c2bda74b56bb7e7e033e4a55d3ae315e3ac435f77a1323b6b50"
+      "protectedImplementationDigest": "sha256:836bd8e3b1995afa3df5d3d5f93e631424440c02bf8e07bc29cf407223ce443e"
     },
     {
       "name": "cat_cafe_read_invocation_detail",
@@ -14607,6 +14882,65 @@
       "protectedImplementationDigest": "sha256:19513169bbfebc419d454a71be2e7f03a751eaf31be037cefa561199578c9730"
     },
     {
+      "name": "cat_cafe_read_memory_matter",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "read"
+      ],
+      "activeState": "canonical",
+      "description": "Read one shared matter page: description is the cat-written contextual interpretation; entries provide exact raw quotes and sources. Use when a matter is relevant to this turn, including after resume or correction; reread its current version. NOT for granting execution authority or proving adoption. Output: interpretation, raw quotes, separate authors/quoted speakers, source coordinates, page/source revisions and pagination. Changed active sources mark the interpretation unverified (summaryStatus=sources_changed); do not treat it as a current conclusion or silently substitute new speech. A successful nonempty read records a durable explicit-read receipt for this invocation/cat. Directory, context hints, empty and failed reads do not count. Verify applicability from the full page; current user instructions take precedence within their scope.",
+      "descriptionDigest": "sha256:8ff7d3c9ed43a7e76bebc1d767617490990e44ddd2c48572c4637be0e408747d",
+      "descriptionCharacters": 852,
+      "descriptionTokensCl100kBase": 151,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque nextCursor returned by the same catalogue or page.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "history": {
+            "description": "Include superseded/retired entries, still subject to current source permissions.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum entries per page; default 12, maximum 30.",
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "matterId": {
+            "description": "Stable matterId from the directory or an earlier page.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "matterId"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:d660847d0ffb6a8d5d9742e6a5f91ad91d10a226ad0a5cacb8ac96d5e676ba2f",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleReadMemoryMatter",
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
+    },
+    {
       "name": "cat_cafe_read_profile",
       "serverFamily": "collab",
       "resourceFamily": "identity-proposal",
@@ -14668,7 +15002,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15075,7 +15409,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -15599,7 +15933,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -15673,7 +16007,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16131,7 +16465,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16243,7 +16577,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -16444,7 +16778,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleRegisterScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_remove_scheduled_task",
@@ -16498,7 +16832,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/schedule-tools.js#handleRemoveScheduledTask",
-      "protectedImplementationDigest": "sha256:15bc3dbb80a6af734f6ba3f991ed54b9c42b62c718f4a3521f36bde11981d510"
+      "protectedImplementationDigest": "sha256:3a9d380906230d941d659baa318967c34e776c2e284d66a993f1a60838921c9e"
     },
     {
       "name": "cat_cafe_request_user_input",
@@ -16849,7 +17183,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/development-work-tools.js#handleResolveDevelopmentWork",
-      "protectedImplementationDigest": "sha256:e19200aac99d2a59d0272b422d9b6a075a288d642466b82070504fed1425123d"
+      "protectedImplementationDigest": "sha256:51e4f7910be1ab412994af29955c68da881a2e8e10164fb72aabfc5e6e53155c"
     },
     {
       "name": "cat_cafe_respond_artifact_review",
@@ -17243,7 +17577,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_retry_custody_admission",
@@ -17253,10 +17587,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox.",
-      "descriptionDigest": "sha256:d793031aadd6292fd5795bafff891134aabd286ba7428f7cf45e8e52eb1aad80",
-      "descriptionCharacters": 559,
-      "descriptionTokensCl100kBase": 113,
+      "description": "Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox. LIMITS (UTF-16 code units, JavaScript string.length): title 1–200 after trimming, why max 1000; artifactRefs max 64 entries, each 1–1000 after trimming. Preserve existing refs; never drop them just to fit.",
+      "descriptionDigest": "sha256:62206c67a214a042ae218de9092067285b1405584c8786c1dc49ca0cfca2b930",
+      "descriptionCharacters": 765,
+      "descriptionTokensCl100kBase": 167,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -17267,6 +17601,7 @@
             "type": "string"
           },
           "artifactRefs": {
+            "description": "Initial Artifact refs for this admission retry; max 64 entries, each 1–1000 UTF-16 code units after trimming. Preserve existing refs; never discard them just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -17352,11 +17687,13 @@
             "type": "object"
           },
           "title": {
+            "description": "Task title; 1–200 UTF-16 code units after trimming",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "why": {
+            "description": "Why this work was entrusted; max 1000 UTF-16 code units (JavaScript string.length)",
             "maxLength": 1000,
             "type": "string"
           }
@@ -17371,7 +17708,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:86f38c47ead08386ae0d76f3a65e0cad96fbc19bc002e6f38fe268fc5884b672",
+      "inputSchemaDigest": "sha256:1dfbc1aa02519ef6d34f15582cb0d81ca025187fd2f56e401dfb33e28ce305e1",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -17386,7 +17723,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -17568,10 +17905,10 @@
           ]
         }
       ],
-      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: matchRank = rank-based match position, retrievalScore = store score when available, authority = document reliability, updated = source freshness. These are independent axes. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
-      "descriptionDigest": "sha256:e97473ecdaa450af03b9b5e7a43a4afced85b8be6ce18c2794167502da9902b2",
-      "descriptionCharacters": 5418,
-      "descriptionTokensCl100kBase": 1182,
+      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
+      "descriptionDigest": "sha256:ef0aa56f06ef51dbec2c369df95264812f8342a3e0697b7f47d285ffb6991a19",
+      "descriptionCharacters": 5840,
+      "descriptionTokensCl100kBase": 1255,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -17716,7 +18053,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/evidence-tools.js#handleSearchEvidence",
-      "protectedImplementationDigest": "sha256:b379bce1fc7e067cce94feefd9633cbc197af726f1077abab8e8e9efb085bc64"
+      "protectedImplementationDigest": "sha256:80c2abe591238fe0dcbdf5b05dc74c057b8a0ed214893050b02aa77411403f1f"
     },
     {
       "name": "cat_cafe_set_read_mode",
@@ -17763,7 +18100,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18008,7 +18345,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18710,7 +19047,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18788,7 +19125,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -19857,6 +20194,49 @@
       "protectedImplementationDigest": "sha256:01d5f2bf141c6850aebbf8a19e6caa24bc3ccf7e33b059bb26b7005652333e59"
     },
     {
+      "name": "cat_cafe_suggestion_facts",
+      "serverFamily": "collab",
+      "resourceFamily": "artifact-surface",
+      "actions": [
+        "read"
+      ],
+      "activeState": "canonical",
+      "description": "Read how the person has treated each kind of one-tap suggestion: offered, used, changed afterwards, undone, dismissed, ignored, still open, and the latest few. Use when: deciding whether to offer a kind again, or deciding to stop offering one (stopOffering). Output: facts per kind; counts are facts, never a rule. GOTCHA: a stopped kind cannot be offered by you until the person restores it.",
+      "descriptionDigest": "sha256:57652582881c94aee2b98551cc0dd4dfa33186123fe7c139d1d704ac386dfb78",
+      "descriptionCharacters": 392,
+      "descriptionTokensCl100kBase": 88,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "One kind; omit for every kind.",
+            "type": "string"
+          },
+          "stopOffering": {
+            "description": "A kind you decide not to offer again. The person can restore it in 设置 › 你 › 已隐藏的建议.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:02dc620a4031e61781bf295b223c9f76ccab247a5a4bfe09c1b1397bae3d0174",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/suggestion-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/suggestion-tools.js#handleSuggestionFacts",
+      "protectedImplementationDigest": "sha256:3f3dbaac32a4f98a3db96c53232d5984097b556063fd13f5af1791a83c445ead"
+    },
+    {
       "name": "cat_cafe_take_over_content_modification",
       "serverFamily": "collab",
       "resourceFamily": "collaborative-content",
@@ -20483,7 +20863,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20493,16 +20873,16 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Update the current open entrusted-work Task using its exact revision. Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.",
-      "descriptionDigest": "sha256:212c22825a82e7cc3b3792b0663f66c52465ca5b6f5cd285e73a473be9779b30",
-      "descriptionCharacters": 685,
-      "descriptionTokensCl100kBase": 129,
+      "description": "Update the current open entrusted-work Task using its exact revision. Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. Artifact refs replace the complete canonical set (max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming): read_entrusted_work first and preserve existing refs when adding; never drop refs just to fit. Values are deduplicated/sorted; omitting artifactRefs preserves refs, [] clears them. progress.summary, nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming (JavaScript string.length); progress.sourceRef allows 1–1000 after trimming. Supplied progress replaces the whole object. Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress or one time fact. No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.",
+      "descriptionDigest": "sha256:239e9dfcc92479bcc5cfe504735b871908bec501349cf6afed236083b38400a4",
+      "descriptionCharacters": 1273,
+      "descriptionTokensCl100kBase": 254,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
           "artifactRefs": {
-            "description": "Optional complete replacement of canonical Artifact refs; values are deduplicated and sorted",
+            "description": "Complete replacement of canonical Artifact refs, not an append; max 64 entries before deduplication, each 1–1000 UTF-16 code units after trimming. Read read_entrusted_work first and retain all existing refs when adding. Omit to preserve the set; [] clears it. Values are deduplicated/sorted. Never drop existing refs just to fit the limit.",
             "items": {
               "maxLength": 1000,
               "minLength": 1,
@@ -20522,19 +20902,25 @@
                 "additionalProperties": false,
                 "properties": {
                   "blockerReason": {
+                    "description": "Current blocker; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
                   },
                   "nextStep": {
+                    "description": "Next step; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
                   },
                   "sourceRef": {
-                    "$ref": "#/properties/time/properties/businessDeadline/anyOf/0/properties/sourceRef"
+                    "description": "Source for this progress note; 1–1000 UTF-16 code units after trimming",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
                   },
                   "summary": {
+                    "description": "Current progress summary; 1–600 UTF-16 code units after trimming (JavaScript string.length)",
                     "maxLength": 600,
                     "minLength": 1,
                     "type": "string"
@@ -20550,7 +20936,7 @@
                 "type": "null"
               }
             ],
-            "description": "Replace the short current summary, nextStep and optional blockerReason with one sourceRef; null clears it. Original Task why stays unchanged. Resuming clears blockerReason."
+            "description": "Replace the whole progress object: summary, optional nextStep and blockerReason each allow 1–600 UTF-16 code units after trimming, with one sourceRef (1–1000 after trimming). Omit to preserve progress, except that blockerReason is always cleared when the resulting status is not blocked. null clears progress. Original Task why stays unchanged."
           },
           "status": {
             "description": "Optional Task progress: todo, doing, or blocked; completion requires close_entrusted_work",
@@ -20647,7 +21033,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:45ca65ef6bd86f4e5831b528ff177b8fd98988c0eb81f9fcf1e3001560bd65b8",
+      "inputSchemaDigest": "sha256:866d1b7ddc6bf9a5dd0bda72037a310d23ab10bcfa939ab4a5ed0311d6366bfb",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -20662,7 +21048,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21009,7 +21395,67 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
+    },
+    {
+      "name": "cat_cafe_update_scheduled_task_params",
+      "serverFamily": "collab",
+      "resourceFamily": "schedule",
+      "actions": [
+        "update"
+      ],
+      "activeState": "canonical",
+      "description": "Propose changes to template parameters of an existing recurring scheduled task. Use when changing a reminder or subscription while preserving its task ID, trigger, delivery thread and cursor. NOT for creating, deleting, pausing, changing the trigger/destination, or modifying managed owner tasks. Output: an anchored Approval Hub proposal with before/after values; no task changes until the operator approves. GOTCHA: paramsPatch is a JSON object string, omitted values are preserved, and a changed task definition requires a fresh proposal. Active runs keep their original settings. Persistent agent-key callers need agentKeyCatId and an owned sourceThreadId.",
+      "descriptionDigest": "sha256:90787bd2686bde64a3d58db1eda594a4bbdadb45257b8b33a038cfd99eb71110",
+      "descriptionCharacters": 660,
+      "descriptionTokensCl100kBase": 123,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "agentKeyCatId": {
+            "description": "Persistent-agent identity selector; ignored when invocation credentials are present.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "paramsPatch": {
+            "description": "Non-empty JSON object of template parameters to merge, e.g. {\"executionCarrier\":\"managed\"}. Omitted parameters keep their current values.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceThreadId": {
+            "description": "Owned thread for the approval card. Required for persistent agent-key callers; invocation callers use their authenticated thread.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "taskId": {
+            "description": "Existing recurring dynamic task ID; the subscription identity is preserved.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "paramsPatch"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:21d1fc7345e28f5837b956204e434535cd48b0638c93bdb76aff48cdc808fe38",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "agent-key",
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/schedule-parameter-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/schedule-parameter-tools.js#handleUpdateScheduledTaskParams",
+      "protectedImplementationDigest": "sha256:a05e72856df4ce9c184609c1f717643584051c559462bbb2957cea6a276db95d"
     },
     {
       "name": "cat_cafe_update_task",
@@ -21019,10 +21465,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: Include a \"why\" note when marking as blocked — it helps others understand the situation. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
-      "descriptionDigest": "sha256:c02a93b70853368eb53c8cc5555ae690f9f5bcac5eba60cf264c5abc47c5b4ef",
-      "descriptionCharacters": 1064,
-      "descriptionTokensCl100kBase": 207,
+      "description": "Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. TIP: why replaces the prior note, max 1000 UTF-16 code units (JavaScript string.length); omitted or empty keeps it. Include a note when blocked. F193-E1: Pass dispatchGate to resolve a \"missing\" dispatch gate (e.g. after cross_posting to the owning thread).",
+      "descriptionDigest": "sha256:8cb78b9742c8e6b48adff55dbdc7010fded4ce7b50cbe8c6f1decf2b383967ed",
+      "descriptionCharacters": 1115,
+      "descriptionTokensCl100kBase": 221,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -21077,7 +21523,7 @@
             "type": "string"
           },
           "why": {
-            "description": "Optional note explaining the status change",
+            "description": "Optional replacement for the existing why, not an append; max 1000 UTF-16 code units (JavaScript string.length). Omit or pass an empty string to keep the existing note.",
             "maxLength": 1000,
             "type": "string"
           }
@@ -21087,7 +21533,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:48d51f2fb0667dc6abb65f3ac44fc899a5b402956891973afc9a6d55a09851b9",
+      "inputSchemaDigest": "sha256:77989aea695d67e0a6e609da2d2faedfe0c1650bd4c37d60e82a938d0442bbeb",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -21102,7 +21548,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21252,7 +21698,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -21885,6 +22331,53 @@
       "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
+      "name": "cat_cafe_watcher_nudge",
+      "serverFamily": "collab",
+      "resourceFamily": "thread-message",
+      "actions": [
+        "nudge"
+      ],
+      "activeState": "canonical",
+      "description": "守望猫向刚结束工作的猫递一句有出处的提醒。Use when: 发现一个具体遗漏、先例或有帮助的下一步，值得让工作猫带进下一轮。NOT for: 派任务、找任意成员、改动原请求、代人决策或在免打扰时说话。Output: 同一对话中的一条虚线提醒与普通投递回执；忙碌的猫下一轮收到，已停下的猫由普通 @ 唤醒。",
+      "descriptionDigest": "sha256:247b05130d90527c6757b9c865ba2aa93583671ef5ad0b08a1386186b35bba66",
+      "descriptionCharacters": 153,
+      "descriptionTokensCl100kBase": 173,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sentence": {
+            "description": "一句具体提醒，不含额外 @ 路由或任务分派。",
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "description": "本线原话的 Message ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sentence",
+          "sourceMessageId"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:fc79866cb9246a77cd63f65f41fda0c240074c9a4be304359637dae6053b78da",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/watcher-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/watcher-tools.js#handleWatcherNudge",
+      "protectedImplementationDigest": "sha256:e5d4a4600893511602e546246242c08753ea8c7dcc4a67c4b57fd43da2930f14"
+    },
+    {
       "name": "cat_cafe_withdraw_deferred_person_memory",
       "serverFamily": "collab",
       "resourceFamily": "memory-write",
@@ -21925,7 +22418,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -21969,7 +22462,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:28064390eb6bd4645ef7286ac895fa4182532ec3d007314d7d8fed2c0e8a500a"
+      "protectedImplementationDigest": "sha256:293e24c964fa7ad4694e83eaef7f815a5ce13035f2481722f78902d464dfff1e"
     },
     {
       "name": "cat_cafe_work",
@@ -22915,6 +23408,199 @@
                         "minLength": 1,
                         "type": "string"
                       },
+                      "cover": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "inherit",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "frame",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "const": "image",
+                                "type": "string"
+                              },
+                              "pick": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "assetId": {
+                                        "maxLength": 256,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "const": "work-asset",
+                                        "type": "string"
+                                      },
+                                      "metadataRevision": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                                      },
+                                      "ownerRevision": {
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "ownerRevision",
+                                      "metadataRevision",
+                                      "assetId"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "expectedUrl": {
+                                        "maxLength": 2048,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "item": {
+                                        "anyOf": [
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "blockId": {
+                                                "maxLength": 256,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              },
+                                              "itemIndex": {
+                                                "maximum": 10000,
+                                                "minimum": 0,
+                                                "type": "integer"
+                                              },
+                                              "kind": {
+                                                "const": "media-gallery",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "blockId",
+                                              "itemIndex"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "blockId": {
+                                                "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/1/properties/item/anyOf/0/properties/blockId"
+                                              },
+                                              "kind": {
+                                                "const": "rich-file",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "blockId"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "index": {
+                                                "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/1/properties/item/anyOf/0/properties/itemIndex"
+                                              },
+                                              "kind": {
+                                                "const": "content-block",
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "index"
+                                            ],
+                                            "type": "object"
+                                          }
+                                        ]
+                                      },
+                                      "kind": {
+                                        "const": "thread-image",
+                                        "type": "string"
+                                      },
+                                      "messageId": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                                      },
+                                      "messageRevision": {
+                                        "maxLength": 64,
+                                        "pattern": "^\\d+$",
+                                        "type": "string"
+                                      },
+                                      "threadId": {
+                                        "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "threadId",
+                                      "messageId",
+                                      "messageRevision",
+                                      "item",
+                                      "expectedUrl"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "kind": {
+                                        "const": "upload",
+                                        "type": "string"
+                                      },
+                                      "uploadUrl": {
+                                        "pattern": "^\\/uploads\\/work-cover-[0-9]+-[a-f0-9]{8}\\.(png|jpg|webp)$",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "uploadUrl"
+                                    ],
+                                    "type": "object"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "pick"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
                       "expectedOwnerRevision": {
                         "exclusiveMinimum": 0,
                         "maximum": 9007199254740991,
@@ -23539,6 +24225,105 @@
                 "additionalProperties": false,
                 "properties": {
                   "action": {
+                    "const": "set-cover",
+                    "type": "string"
+                  },
+                  "choice": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "const": "image",
+                            "type": "string"
+                          },
+                          "pick": {
+                            "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick"
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "pick"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "const": "frame",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "coverRevision": {
+                            "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                          },
+                          "mode": {
+                            "const": "restore",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "coverRevision"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "expectedCoverRevision": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "operationId": {
+                    "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/assetId"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference",
+                  "operationId",
+                  "expectedCoverRevision",
+                  "choice"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "const": "read-cover",
+                    "type": "string"
+                  },
+                  "coverRevision": {
+                    "$ref": "#/properties/command/anyOf/1/anyOf/1/properties/cover/anyOf/2/properties/pick/anyOf/0/properties/ownerRevision"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
                     "const": "resolve-review-submission",
                     "type": "string"
                   },
@@ -23699,7 +24484,7 @@
                 "type": "object"
               }
             ],
-            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work from a Workspace MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
+            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work from a Workspace MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. set-cover adopts, changes (mode image with an exact pick: a work-asset from a fixed version’s context, or a thread-image message item of your own conversation), clears (mode frame) or restores an earlier coverRevision for one fixed video version with expectedCoverRevision CAS; it never changes video bytes or ownerRevision, and context imports never erase it. read-cover returns state none/frame/image/unavailable; unavailable keeps the choice and shows a real frame. submit.cover may say inherit (default: the previous version’s cover frozen at submit), frame, or image. Tell the person in your reply which version’s cover you set. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
           },
           "contentTaskId": {
             "description": "Original F309 publication-modification Task ID when reading or submitting entrusted content. Context only: the live Task owner, exact content grant and original Human source are rechecked. Never create a Task merely to import your own work.",
@@ -23725,7 +24510,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:81508a2efac9f4b9f30c31996420da4c8c8448201249063c26d683979b58127f",
+      "inputSchemaDigest": "sha256:598d6f1fdb0fb06d8c99e0dc274ec679500bb7c3f8d8303606d71b90976efc2a",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -23739,7 +24524,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/work-tools.js#handleWorkCommand",
-      "protectedImplementationDigest": "sha256:f4ceb8f0fca105987f32d480a5b3c86dabe53677cbf70449258085801b650404"
+      "protectedImplementationDigest": "sha256:eec63609b4dbb7866ff8ebd8c238c6d0e5e87c02e0849fa6728c4cd0b51b5530"
     },
     {
       "name": "cat_cafe_workspace_navigate",
@@ -23818,6 +24603,303 @@
       },
       "implementationRef": "module:./tools/hub-action-tools.js#handleWorkspaceNavigate",
       "protectedImplementationDigest": "sha256:9b47c56bc3660825ed764bfc5a77b125c1ac37bf2050665bd0b2c630959b8a4a"
+    },
+    {
+      "name": "cat_cafe_write_memory_matter",
+      "serverFamily": "memory",
+      "resourceFamily": "memory-matter",
+      "actions": [
+        "write"
+      ],
+      "activeState": "canonical",
+      "description": "Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions across threads should remain findable together, or a sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. description is cat-written contextual interpretation: background, the core issue, subsequent action, and applicable/inapplicable scope; it is optional for simple facts, not a mandatory four-part template. When useful, include one brief, source-grounded way this matter might be asked about in the interpretation; it is only a retrieval clue, not a new fact, applicability rule or instruction. sources retain exact original speech coordinates, never reconstructed speech or hidden reasoning. Reuse requestId only for the exact change; updates need expectedRevision from a fresh read. Selections use raw UTF-16 start/end (end exclusive), body/quote_comment/quote_text; quote attachments need contentBlockIndex and attachmentId. Recheck the interpretation after source correction; current user instructions take precedence within their scope. Owner forgetting is in the memory UI.",
+      "descriptionDigest": "sha256:29ec22a890e48e6a972e8c365f68e1aa8ff551537e51f1faaeb72f250c20d152",
+      "descriptionCharacters": 1266,
+      "descriptionTokensCl100kBase": 237,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "default": "",
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  "operation": {
+                    "const": "create",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sources": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attachmentId": {
+                          "$ref": "#/properties/change/anyOf/0/properties/requestId",
+                          "description": "Exact quote attachment ID; required for quote segments."
+                        },
+                        "contentBlockIndex": {
+                          "description": "Zero-based contentBlocks index; required for quote segments or multiple text blocks.",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "end": {
+                          "description": "Exclusive raw UTF-16 offset, greater than start.",
+                          "exclusiveMinimum": 0,
+                          "type": "integer"
+                        },
+                        "messageId": {
+                          "description": "Exact source message ID in that thread.",
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "quote": {
+                          "description": "Exact selected original text, preserving whitespace; maximum 8000 UTF-16 units.",
+                          "maxLength": 8000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "segment": {
+                          "description": "Raw message body, the quoting author comment, or quoted text; never normalized search text.",
+                          "enum": [
+                            "body",
+                            "quote_comment",
+                            "quote_text"
+                          ],
+                          "type": "string"
+                        },
+                        "start": {
+                          "description": "Inclusive raw UTF-16 offset within the selected segment.",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "threadId": {
+                          "description": "Exact source thread ID.",
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "threadId",
+                        "messageId",
+                        "segment",
+                        "start",
+                        "end",
+                        "quote"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "title": {
+                    "maxLength": 160,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "operation",
+                  "title",
+                  "sources"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "append",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "sources": {
+                    "items": {
+                      "$ref": "#/properties/change/anyOf/0/properties/sources/items"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "sources"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "edit",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "title": {
+                    "maxLength": 160,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "title",
+                  "description"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entryId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "correct",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "source": {
+                    "$ref": "#/properties/change/anyOf/0/properties/sources/items"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "entryId",
+                  "source"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entryId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "retire_entry",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation",
+                  "entryId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedRevision": {
+                    "$ref": "#/properties/change/anyOf/1/properties/expectedRevision"
+                  },
+                  "matterId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  },
+                  "operation": {
+                    "const": "retire",
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "$ref": "#/properties/change/anyOf/0/properties/requestId"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "matterId",
+                  "expectedRevision",
+                  "operation"
+                ],
+                "type": "object"
+              }
+            ],
+            "description": "One exact change. description is optional cat-written context and applicability; sources preserve exact original threadId/messageId, segment, raw start/end and selected quote."
+          }
+        },
+        "required": [
+          "change"
+        ],
+        "type": "object"
+      },
+      "inputSchemaDigest": "sha256:d1b832604ddfec70557fc265a05ab14bdbd31ce7d90eb933a56b514d6920c4f8",
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "runtimeProfiles": [
+        "full"
+      ],
+      "schemaDelivery": {
+        "evidenceRef": "file:packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "policy": "host-default"
+      },
+      "implementationRef": "module:./tools/matter-memory-tools.js#handleWriteMemoryMatter",
+      "protectedImplementationDigest": "sha256:84a711f304f34f6b023e56f91db4460072d6f9397e3edb7ab85d3657e0a05ad4"
     },
     {
       "name": "limb_bind_embodiment",

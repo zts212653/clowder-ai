@@ -46,16 +46,13 @@ import { allowsImplicitCapabilityWrites } from '../config/capabilities/startup-c
 import { GovernanceRegistry } from '../config/governance/governance-registry.js';
 import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import {
-  findMonorepoRoot,
-  listSubdirs,
-  scanProjectSkillSources,
-} from '../domains/capabilities/capability-board-parts.js';
+import { listSubdirs, scanProjectSkillSources } from '../domains/capabilities/capability-board-parts.js';
 import { readCapabilitySnapshot } from '../domains/capabilities/capability-read-service.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
 import { resolveKimiRuntimePaths } from '../utils/kimi-cli-runtime.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolvePersistentProjectPath, validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { pathsEqual } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';

@@ -13,6 +13,7 @@ import { createInitialWorkbenchState } from '../workbench-model';
 Object.assign(globalThis as Record<string, unknown>, { React });
 const api = vi.hoisted(() => ({ requests: [] as string[], readable: true }));
 const canonicalWorktreeId = `f063_root_v1_${'1'.repeat(64)}`;
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => true }));
 // The review strip is unrelated to opening a diff. Changes, DiffViewer, FileOwner,
 // the renderer and the Workbench callbacks below are the real production tree.

@@ -75,6 +75,7 @@ export function createMemberAdmission(deps: {
         semanticCursor: input.semanticCursor,
         content: input.content,
         phase: 'admitting',
+        dispatchStarted: false,
       };
       return { ...row, executions: { ...row.executions, [input.executionId]: run } };
     });
@@ -112,6 +113,17 @@ export function createMemberAdmission(deps: {
     )
       throw new Error('member_original_admission_canceled_or_changed');
     if (!message || message.routedCatIds.length === 0) {
+      // Commit the possibility of an append before calling the transport. A
+      // renewed grant cannot archive an unclaimed reserve and then let this
+      // old generation cross into send after its asynchronous lookup returns.
+      await mutate(input, async (current) => {
+        const run = current.executions[input.executionId];
+        if (!run || run.inputDigest !== digest(input)) throw new Error('member_execution_id_conflict');
+        return {
+          ...current,
+          executions: { ...current.executions, [input.executionId]: { ...run, dispatchStarted: true } },
+        };
+      });
       await deps.messaging.send(
         { ...lookup, identity: row.identity, content: input.content, wake: { catId: row.catId, exact: true } },
         executionScope,

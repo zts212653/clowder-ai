@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { RECALL_OPPORTUNITY_CATALOG_VERSION } from '@cat-cafe/shared';
 import { formatMemoryCues } from '../../dist/domains/memory/cue/format-memory-cues.js';
 import { MemoryCuePlaneService } from '../../dist/domains/memory/cue/MemoryCuePlaneService.js';
 import {
@@ -314,7 +315,7 @@ const productionSizedDrillHandle =
 
 describe('F287 RecallOpportunity catalog', () => {
   it('is closed, versioned and binds scope to server truth', () => {
-    assert.equal(RECALL_OPPORTUNITY_CATALOG_V5.version, 7);
+    assert.equal(RECALL_OPPORTUNITY_CATALOG_V5.version, RECALL_OPPORTUNITY_CATALOG_VERSION);
     assert.deepEqual(
       RECALL_OPPORTUNITY_CATALOG_V5.entries.map(({ kind, producer }) => ({ kind, producer })),
       [
@@ -368,6 +369,7 @@ describe('F287 MemoryCueResolverRegistry', () => {
     assert.equal(RECALL_RESOLVER_ADMISSION_V5.decision, 'catalog');
     assert.equal(RECALL_RESOLVER_ADMISSION_V5.project_knowledge, 'catalog');
     assert.equal(RECALL_RESOLVER_ADMISSION_V5.cat_owned_seed, 'catalog');
+    assert.equal(RECALL_RESOLVER_ADMISSION_V5.matter, 'explicit_read');
     assert.equal(
       (
         await registry.get('profile').resolve(profileOpportunity, {
@@ -619,7 +621,7 @@ describe('F287 MemoryCuePlaneService', () => {
         opportunityKind: 'recall',
         producerOwner: candidate.producer,
         consumerScope: { kind: 'invocation', ...scope },
-        entryVersion: `recall-catalog:7:${candidate.kind}:${candidate.producer}`,
+        entryVersion: `recall-catalog:${RECALL_OPPORTUNITY_CATALOG_VERSION}:${candidate.kind}:${candidate.producer}`,
         subjectKey: `memory-cue:${expectedFamily}:${expectedFamily === 'project_knowledge' ? 'project:cat-cafe:' : ''}${result.cues[0].source.anchor}${expectedFamily === 'profile' || expectedFamily === 'project_knowledge' ? ':consumer:codex-sol' : ''}`,
         asOf: { kind: 'version', value: result.cues[0].source.revision },
         sourceRefs: [result.cues[0].source.anchor],
@@ -674,7 +676,7 @@ describe('F287 MemoryCuePlaneService', () => {
         sourceRevision: 'revision-1',
         axis: 'consumption',
         consumptionOutcome: 'presented',
-        catalogVersion: 7,
+        catalogVersion: RECALL_OPPORTUNITY_CATALOG_VERSION,
         resolverVersion: 1,
         occurredAt: subjectOpportunity.occurredAt,
       },

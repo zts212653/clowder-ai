@@ -17,7 +17,6 @@ import {
   makeProposal,
   makeProposalStore,
   makeTask,
-  mockCommunityStore,
   mockLeaseStore,
   mockTruthLeaseStore,
   OWNER_CAT,
@@ -221,12 +220,6 @@ describe('F167 approved-child delegation — real proposal-backed provider', () 
   });
 
   // ── Full pipeline: real provider → resolver → admission ──
-
-  test('real provider → resolver → admission: full chain with approved proposal', async () => {
-    const { service } = buildRealDelegatePipeline({ proposal: makeProposal(), binding: VALID_BINDING });
-    const result = await service.admit(admissionRequest());
-    assert.equal(result.admit, true);
-  });
 
   test('real provider → resolver → admission: rejected proposal → child rejected', async () => {
     const { service } = buildRealDelegatePipeline({

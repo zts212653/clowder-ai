@@ -5,6 +5,9 @@ import { MessageViewportBoundary } from '@/components/MessageViewportBoundary';
 import { ThreadChatRuntimeProvider, useThreadChatRuntime } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useChatHistory } from '@/hooks/useChatHistory';
+import { useTeleport } from '@/hooks/useTeleport';
+import { useWorkspaceFileChange } from '@/hooks/useWorkspaceFileChange';
+import { WorkspaceNavigateHost } from '@/hooks/useWorkspaceNavigate';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -25,6 +28,16 @@ useChatStore.setState({
     },
   ],
 });
+
+/**
+ * Features that used to open their own Socket.IO connection. They share the page connection
+ * now, so the socket counts asserted by the recovery proof cover them too.
+ */
+function SharedConnectionConsumers() {
+  useTeleport();
+  useWorkspaceFileChange({ worktreeId: 'fixture-wt', path: 'README.md', currentSha: null, onReload: () => {} });
+  return <WorkspaceNavigateHost threadId={threadId} isChatRoute isWorkspaceVisible />;
+}
 
 function Conversation() {
   const { socketConnected } = useThreadChatRuntime([threadId]);
@@ -184,6 +197,7 @@ createRoot(root).render(
     <ScrollProof />
   ) : (
     <ThreadChatRuntimeProvider routeThreadId={threadId}>
+      <SharedConnectionConsumers />
       <Conversation />
     </ThreadChatRuntimeProvider>
   ),

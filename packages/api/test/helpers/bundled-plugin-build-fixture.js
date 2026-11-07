@@ -6,6 +6,23 @@ import { dirname, join, resolve } from 'node:path';
 
 const api = resolve(import.meta.dirname, '../..');
 
+export async function copyBundledBuildDependencies(root, fromSource = false) {
+  const mode = fromSource ? 'src' : 'dist';
+  const extension = fromSource ? 'ts' : 'js';
+  for (const name of ['bundled-plugin-definitions', 'package-capability-admission']) {
+    await cp(
+      join(api, mode, 'domains/plugin', `${name}.${extension}`),
+      join(root, mode, 'domains/plugin', `${name}.${extension}`),
+    );
+  }
+  // The admission parser is the real Host parser, not a build-only schema stub.
+  await symlink(
+    join(api, mode, 'domains/cats'),
+    join(root, mode, 'domains/cats'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+}
+
 export async function bundledBuildFixture(t, description, fromSource = false) {
   const root = await mkdtemp(join(tmpdir(), 'bundled-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -28,20 +45,7 @@ export async function bundledBuildFixture(t, description, fromSource = false) {
     producerPath,
     producer.replace(/description: '[^']*'/, `description: ${JSON.stringify(description)}`),
   );
-  const mode = fromSource ? 'src' : 'dist';
-  const extension = fromSource ? 'ts' : 'js';
-  for (const name of ['bundled-plugin-definitions', 'package-capability-admission']) {
-    await cp(
-      join(api, mode, 'domains/plugin', `${name}.${extension}`),
-      join(root, mode, 'domains/plugin', `${name}.${extension}`),
-    );
-  }
-  // The admission parser is the real Host parser, not a build-only schema stub.
-  await symlink(
-    join(api, mode, 'domains/cats'),
-    join(root, mode, 'domains/cats'),
-    process.platform === 'win32' ? 'junction' : 'dir',
-  );
+  await copyBundledBuildDependencies(root, fromSource);
   // Leave only canonical SVG inputs. A checkout must not need old JSON/tar/index outputs.
   const assets = join(root, 'src/domains/plugin/bundled-packages/chatgpt-dot/0.1.2/assets');
   await mkdir(dirname(assets), { recursive: true });

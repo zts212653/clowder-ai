@@ -22,6 +22,7 @@ import {
   readInvocationMcpConfig,
   readInvocationMcpFile,
 } from '../../../../../config/capabilities/invoke-mcp-config.js';
+import { resolveManagedMcpEntrypoint } from '../../../../../config/capabilities/managed-mcp-config.js';
 import {
   toOpenCodeMcpEntry,
   toOpenCodeRemoteMcpEntry,
@@ -87,12 +88,16 @@ export function buildOpenCodeMcpSync(
       }>) {
         if (!s.enabled) continue;
         if (s.transport === 'streamableHttp') {
-          if (s.url) mcp[s.name] = toOpenCodeRemoteMcpEntry({ url: s.url, headers: s.headers });
+          if (s.url)
+            mcp[s.name] = toOpenCodeRemoteMcpEntry({
+              url: s.url,
+              headers: s.headers ? resolveEnvReferences(s.headers) : undefined,
+            });
           continue;
         }
         if (isManagedCatCafeSplit(s)) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
-          const epPath = join(distDir, ep);
+          const epPath = resolveManagedMcpEntrypoint(ep);
           if (existsSync(epPath)) {
             mcp[s.name] = toOpenCodeMcpEntry({
               command: resolveCatCafeNodeCommand(),
@@ -122,7 +127,7 @@ export function buildOpenCodeMcpSync(
     for (const [name, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
       mcp[name] = toOpenCodeMcpEntry({
         command: resolveCatCafeNodeCommand(),
-        args: [join(distDir, entrypoint)],
+        args: [resolveManagedMcpEntrypoint(entrypoint)],
         env: allowedWorkspaceDirs ? { ALLOWED_WORKSPACE_DIRS: allowedWorkspaceDirs } : undefined,
       });
     }

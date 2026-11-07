@@ -197,9 +197,15 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
@@ -482,6 +488,9 @@ export async function* routeSerial(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   const preparationStartedAt = performance.now();
   let memberPreparationStartedAt = preparationStartedAt;
   let preparationCheckpointAt = preparationStartedAt;
@@ -832,17 +841,32 @@ export async function* routeSerial(
           ...(catSignal ? { signal: catSignal } : {}),
         });
       try {
+        if (
+          !pinnedService &&
+          terminalExecutionBindingFailure(servicePreparationError) &&
+          options.onExecutionBindingRejected
+        )
+          throw servicePreparationError;
         if (pinnedService) {
           const admitted = await invocationServices.admit(
             pinnedService,
             () => getService(deps.services, catId, deps.unavailableServices),
             capture,
             catSignal,
+            deps.refreshServices,
           );
           pinnedService = admitted.service;
           executionBinding = admitted.executionBinding;
         } else executionBinding = await capture();
       } catch (error) {
+        const terminalReason = terminalExecutionBindingFailure(error);
+        if (
+          catSignal?.aborted ||
+          (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+        ) {
+          index++;
+          continue;
+        }
         yield {
           type: 'error',
           catId,
@@ -2049,7 +2073,12 @@ export async function* routeSerial(
             }
           : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -2477,7 +2506,7 @@ export async function* routeSerial(
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
 
       // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;
@@ -3913,6 +3942,27 @@ export async function* routeSerial(
         await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
       }
 
+      if (ownInvocationId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvocationId,
+            ...((turnStoredMessageId ?? lifecycleResponseMessageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleResponseMessageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleResponseMessageId && doneMsg
+              ? {
+                  noResponseReason: collectedToolEvents.length ? ('tool_only' as const) : ('empty_turn' as const),
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) =>
+          log.warn({ err, invocationId: ownInvocationId }, 'Child response settlement retained for recovery'),
+        );
+      }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvocationId) routeResponseProducers.leave(ownInvocationId);
       if (doneMsg) {
         if (cancellationDiagnostics) {
           const stored = turnStoredMessageId ? await deps.messageStore.getById(turnStoredMessageId) : undefined;
@@ -3951,6 +4001,8 @@ export async function* routeSerial(
     routeFailed = true;
     throw error;
   } finally {
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
     // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all

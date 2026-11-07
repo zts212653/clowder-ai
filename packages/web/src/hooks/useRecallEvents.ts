@@ -1,8 +1,9 @@
-import type { RecallResolverFamily } from '@cat-cafe/shared';
+import type { MatterReadSummary, RecallResolverFamily } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MATTER_MEMORY_CHANGED } from './matter-memory-events';
 import { deduplicateRecallEvents, recallReplyInvocationId } from './recall-feed-model';
 import { lookupRecallReply, type RecallReplyCursor, recallReplyMessage } from './recall-reply-lookup';
 import { filterRecallEvents } from './recall-tool-events';
@@ -22,6 +23,8 @@ function cueViewKey(input: { invocationId?: string; cueId?: string; sourceRevisi
   return JSON.stringify([input.invocationId, input.cueId, input.sourceRevision, input.anchor]);
 }
 interface CueEntry {
+  source?: 'push' | 'pull';
+  matterRead?: MatterReadSummary;
   cueId: string;
   consumerCatId: string;
   sourceAnchor: string;
@@ -36,6 +39,15 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
   const messages = options.messages ?? currentMessages;
   const threadId = options.threadId ?? currentThreadId;
   const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const refresh = () => setGeneration((value) => value + 1);
+    window.addEventListener(MATTER_MEMORY_CHANGED, refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener(MATTER_MEMORY_CHANGED, refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
   const [cueViewGeneration, setCueViewGeneration] = useState(0);
   const requestedCueViews = useRef({ threadId, keys: new Set<string>() });
   const cueCache = useRef(new Map<string, { token: string; events: RecallEvent[]; failed: boolean }>());
@@ -213,7 +225,8 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
                 query: '',
                 resolverFamily: cue.resolverFamily,
                 timestamp: cue.presentedAt,
-                source: 'push' as const,
+                source: cue.source ?? ('push' as const),
+                ...(cue.matterRead ? { matterRead: cue.matterRead } : {}),
                 cueStatus: cue.status,
                 results: [{ title: '', anchor: cue.sourceAnchor, sourceType: cue.resolverFamily }],
               }));
@@ -240,6 +253,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     if (history.threadId !== threadId || history.status !== 'ready' || deliveries.threadId !== threadId) return;
     const available = new Set((history.sourceViews ?? []).filter((view) => view.cueId).map(cueViewKey));
     const missing = deliveries.events.filter((event) => {
+      if (event.resolverFamily === 'matter') return false;
       const key = cueViewKey({ ...event, anchor: event.results?.[0]?.anchor });
       return !available.has(key) && !requestedCueViews.current.keys.has(key);
     });
@@ -259,6 +273,18 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     ].map((event) => ({
       ...event,
       results: event.results?.map((item): RecallResultItem => {
+        if (event.resolverFamily === 'matter') {
+          const read = event.matterRead;
+          return read?.status === 'current'
+            ? { ...item, title: read.title, href: `/memory?matter=${encodeURIComponent(read.matterId)}` }
+            : {
+                ...item,
+                title: '',
+                titleStatus: 'unavailable',
+                href: null,
+                ...(read?.status === 'changed' ? { sourceUnavailableReason: 'source_corrected' } : {}),
+              };
+        }
         const key = cueViewKey({ ...event, anchor: item.anchor });
         const view = event.cueId ? cueViews.get(key) : item.anchor ? views.get(item.anchor) : undefined;
         if (view)

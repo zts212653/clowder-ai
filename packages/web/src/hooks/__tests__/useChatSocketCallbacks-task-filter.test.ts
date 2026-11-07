@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression test: TaskPanel must only receive work tasks for the active thread.
  * Bug: #320 intake caused pr_tracking tasks to leak into 毛线球 (TaskPanel).

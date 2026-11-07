@@ -28,20 +28,60 @@ function callbackToolFromUrl(url: string): string {
   return match ? match[1] : 'unknown';
 }
 
-function allowToolExecution(
+async function allowToolExecution(
   request: FastifyRequest,
   reply: FastifyReply,
   record: InvocationRecord,
   options: CallbackAuthHookOptions,
-): boolean {
+  registry: CallbackAuthRegistry,
+): Promise<boolean> {
   const denial = toolExecutionPolicyDenial(
     record.toolExecutionPolicy,
-    record.toolExecutionPolicy?.mode === 'callback_allowlist' || record.toolExecutionPolicy?.mode === 'plugin_native'
-      ? `${request.method} ${request.url}`
-      : callbackToolFromUrl(request.routeOptions.url ?? ''),
+    record.toolExecutionPolicy?.mode === 'watcher'
+      ? `${request.method} ${request.routeOptions.url ?? ''}`
+      : record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
+          record.toolExecutionPolicy?.mode === 'plugin_native'
+        ? `${request.method} ${request.url}`
+        : callbackToolFromUrl(request.routeOptions.url ?? ''),
     record.toolExecutionPolicy?.mode === 'plugin_native' ? options.pluginNativeActionTarget?.(request) : undefined,
   );
-  if (!denial) return true;
+  if (!denial) {
+    if (
+      record.toolExecutionPolicy?.mode === 'watcher' &&
+      request.routeOptions.url !== '/api/callbacks/watcher-tool-admission'
+    ) {
+      const callId = firstHeaderValue(request.headers['x-watcher-tool-call-id']);
+      if (
+        request.watcherToolTicket?.invocationId === record.invocationId &&
+        request.watcherToolTicket.callId === callId
+      )
+        return true;
+      const claim = callId
+        ? await registry.claimWatcherToolCallback?.(
+            record.invocationId,
+            callId,
+            `${request.method} ${request.routeOptions.url ?? ''}`,
+            createHash('sha256')
+              .update(JSON.stringify([request.method, request.url, request.body ?? null]))
+              .digest('hex'),
+          )
+        : undefined;
+      if (!claim || claim.kind === 'denied') {
+        reply.status(403).send({ error: 'watcher_tool_admission_required' });
+        return false;
+      }
+      if (claim.kind === 'completed') {
+        reply.code(claim.response.statusCode).type('application/json').send(claim.response.body);
+        return false;
+      }
+      if (claim.kind === 'in_progress') {
+        reply.code(409).send({ error: 'watcher_tool_result_pending', retryable: true });
+        return false;
+      }
+      request.watcherToolTicket = { invocationId: record.invocationId, callId: callId! };
+    }
+    return true;
+  }
   reply.status(403).send({
     error: 'tool_policy_violation',
     reason: denial.reason,
@@ -52,12 +92,25 @@ function allowToolExecution(
 
 declare module 'fastify' {
   interface FastifyRequest {
+    watcherToolTicket?: { invocationId: string; callId: string };
     callbackAuth?: InvocationRecord;
     callbackPrincipal?: CallbackPrincipal;
   }
 }
 
 export interface CallbackAuthRegistry {
+  claimWatcherToolCallback?(
+    invocationId: string,
+    callId: string,
+    route: string,
+    requestHash: string,
+  ): Promise<WatcherTicketClaim>;
+  completeWatcherToolCallback?(
+    invocationId: string,
+    callId: string,
+    response: NonNullable<WatcherToolTicket['response']>,
+  ): Promise<void>;
+  isWatcherToolCallAdmitted?(invocationId: string, callId: string): Promise<boolean>;
   verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
   isStartupRecoveryComplete?(): boolean;
   /** Pure record read for associating typed tombstones with notifier metadata. */
@@ -108,6 +161,15 @@ export function registerCallbackAuthHook(
   registry: CallbackAuthRegistry,
   options: CallbackAuthHookOptions = {},
 ): void {
+  app.addHook('onSend', async (request, reply, payload) => {
+    const ticket = request.watcherToolTicket;
+    if (ticket && typeof payload === 'string')
+      await registry.completeWatcherToolCallback?.(ticket.invocationId, ticket.callId, {
+        statusCode: reply.statusCode,
+        body: payload,
+      });
+    return payload;
+  });
   if (!app.hasRequestDecorator('callbackAuth')) {
     app.decorateRequest('callbackAuth', undefined);
   }
@@ -120,10 +182,11 @@ export function registerCallbackAuthHook(
     if (request.callbackAuth) {
       if (
         options.enforceToolExecutionPolicy !== false ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'watcher' ||
         request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist' ||
         request.callbackAuth.toolExecutionPolicy?.mode === 'plugin_native'
       )
-        allowToolExecution(request, reply, request.callbackAuth, options);
+        await allowToolExecution(request, reply, request.callbackAuth, options, registry);
       return;
     }
 
@@ -239,9 +302,10 @@ export function registerCallbackAuthHook(
     }
     if (
       (options.enforceToolExecutionPolicy !== false ||
+        result.record.toolExecutionPolicy?.mode === 'watcher' ||
         result.record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
         result.record.toolExecutionPolicy?.mode === 'plugin_native') &&
-      !allowToolExecution(request, reply, result.record, options)
+      !(await allowToolExecution(request, reply, result.record, options, registry))
     )
       return;
     request.callbackAuth = result.record;
@@ -339,3 +403,9 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
   if (Array.isArray(value)) return value[0] || undefined;
   return undefined;
 }
+
+import { createHash } from 'node:crypto';
+import type {
+  WatcherTicketClaim,
+  WatcherToolTicket,
+} from '../domains/cats/services/agents/invocation/WatcherToolTicket.js';

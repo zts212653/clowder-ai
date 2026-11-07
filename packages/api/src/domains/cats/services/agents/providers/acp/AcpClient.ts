@@ -201,6 +201,9 @@ interface PendingAcpRequest {
   refreshTimeout: () => void;
 }
 
+/** Only these keys may cross into host-side native-home resolution; never the whole child env. */
+const NATIVE_HOME_ENV_KEYS = ['HOME', 'USERPROFILE', 'KIMI_CODE_HOME'] as const;
+
 export class AcpClient {
   private providerDiagnosticTail = '';
   private readonly failedProviderSessions = new Set<string>();
@@ -216,6 +219,12 @@ export class AcpClient {
   }
   private readonly liveSessions = new ActiveSessionCache();
   private child: ChildProcess | null = null;
+  /**
+   * Exact environment the child received, captured at spawn. Host-side provider
+   * evidence readers must resolve the same native home the CLI used — never the
+   * ambient process env, which may belong to a different account.
+   */
+  private childEnv: Readonly<Record<string, string | undefined>> = {};
   private rl: ReadlineInterface | null = null;
   private readonly pending = new Map<string, PendingAcpRequest>();
   private readonly notificationListeners: Array<(n: AcpNotification) => void> = [];
@@ -226,6 +235,8 @@ export class AcpClient {
   private exited = false;
   /** Sessions whose local prompt ended before provider completion was acknowledged. */
   private readonly unquiescedSessionIds = new Set<string>();
+  /** Sessions whose latest prompt received its final RPC response, success or provider error. */
+  private readonly promptFinalResponses = new Set<string>();
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   /**
    * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
@@ -259,6 +270,20 @@ export class AcpClient {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
   }
 
+  /**
+   * Spawn coordinates for bounded host-side provider diagnostics (e.g. reading
+   * the Kimi CLI's own turn ledger). Read-only and account-exact: env carries
+   * only the native-home selectors the child actually received, never ambient
+   * process state or unrelated credentials.
+   */
+  get spawnContext(): { cwd: string; env: Readonly<Record<string, string | undefined>> } {
+    const env: Record<string, string | undefined> = {};
+    for (const key of NATIVE_HOME_ENV_KEYS) {
+      if (this.childEnv[key]) env[key] = this.childEnv[key];
+    }
+    return { cwd: this.config.cwd, env };
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
@@ -285,6 +310,7 @@ export class AcpClient {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
     }
+    this.childEnv = childEnv;
     // #712: Re-create bootstrap CWD if it was cleaned up by OS temp-dir rotation
     // or by the ACP agent process on exit. Node.js spawn() returns ENOENT when the
     // cwd doesn't exist, even though the command binary itself exists — the error
@@ -509,7 +535,7 @@ export class AcpClient {
         error instanceof AcpProtocolError &&
         error.code === PI_SESSION_BINDING_ERROR
       )
-        throw new AcpSessionBindingError(error.message);
+        throw new AcpSessionBindingError(error.message, { cause: error });
       throw error;
     });
     log.info(
@@ -679,6 +705,7 @@ export class AcpClient {
     if (this.sessionPromptPendingIds.has(sessionId)) {
       throw new AcpProtocolError(-32600, 'ACP session already has an active prompt');
     }
+    this.promptFinalResponses.delete(sessionId);
     this.failedProviderSessions.delete(sessionId);
     const prompt = toAcpPromptContent(input, this.promptCapabilities);
     // KD-12: Activity-based turn budget — resets on each event.
@@ -1030,6 +1057,19 @@ export class AcpClient {
   }
 
   /**
+   * True only after the child emitted its own exit event. A transport error sets `closed` and makes
+   * `isAlive` false without any native exit, so availability is not stop proof.
+   */
+  get hasExited(): boolean {
+    return this.exited;
+  }
+
+  /** True when the latest prompt received a final RPC response, including a provider error. */
+  hasPromptFinalResponse(sessionId: string): boolean {
+    return this.promptFinalResponses.has(sessionId);
+  }
+
+  /**
    * #1203: False when the bootstrap cwd was deleted after spawn (e.g. by an
    * external cleaner emptying the shared /tmp bootstrap root) — including the
    * delete→recreate case where the path exists again but the child still holds
@@ -1232,6 +1272,11 @@ export class AcpClient {
             { method, id, durationMs: Date.now() - sentAt, hasError: !!resp.error },
             'ACP sendRequest: response received',
           );
+          if (method === ACP_METHODS.sessionPrompt && typeof params.sessionId === 'string') {
+            // A provider error response is still this prompt's final RPC response: the provider
+            // finished the turn. Local cancel/timeout/early stream close never reaches this branch.
+            this.promptFinalResponses.add(params.sessionId);
+          }
           if (resp.error) {
             reject(new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data));
           } else {

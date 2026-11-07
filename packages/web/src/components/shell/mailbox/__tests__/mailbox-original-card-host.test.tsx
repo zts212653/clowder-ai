@@ -255,3 +255,43 @@ it.each([
   expect(posts[0][0]).toBe(`/api/${kind === 'F225' ? 'session-handoff' : 'profile-updates'}/original-p/approve`);
   expect(posts[0][1]?.body && JSON.parse(String(posts[0][1].body))).toBeDefined();
 });
+
+it.each([
+  'chat',
+  'mailbox',
+] as const)('the compact F231 reject button writes once and settles in %s', async (placement) => {
+  writeShellPresentation('v2');
+  const item = source('F231');
+  const block = item.originalApprovalCard?.block;
+  if (!block) throw new Error('original profile fixture');
+  let rejected = false;
+  vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+    if (path === '/api/session') return json({ userId: 'owner-1' });
+    if (path === '/api/profile-updates/original-p/reject' && options?.method === 'POST') {
+      rejected = true;
+      return json({ proposalId: 'original-p', status: 'rejected' });
+    }
+    if (path === '/api/profile-updates/original-p' && !options?.method)
+      return json({ proposalId: 'original-p', status: rejected ? 'rejected' : 'pending' });
+    throw new Error(`Unexpected profile request: ${path}`);
+  });
+  if (placement === 'mailbox') await render(item);
+  else await act(async () => root.render(<CardBlock block={block} messageId="original-message" />));
+  const reject = [...container.querySelectorAll('button')].find((button) => button.textContent === '驳回');
+  expect(reject).toBeDefined();
+  expect(reject?.disabled).toBe(false);
+  await act(async () => reject?.click());
+  const posts = vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST');
+  expect(posts).toHaveLength(1);
+  expect(posts[0]?.[0]).toBe('/api/profile-updates/original-p/reject');
+  expect(JSON.parse(String(posts[0]?.[1]?.body))).toEqual({});
+  expect(container.textContent).toContain('已拒绝');
+  expect(container.querySelector('[data-testid="decision-result-dot"]')?.getAttribute('data-status')).toBe('rejected');
+  expect(primary('F231')).toBeUndefined();
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent === '驳回')).toBe(false);
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.some(([path, options]) => path === '/api/profile-updates/original-p' && !options?.method),
+  ).toBe(true);
+});

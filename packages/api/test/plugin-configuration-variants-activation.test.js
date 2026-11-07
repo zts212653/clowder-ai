@@ -37,7 +37,10 @@ import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-ro
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
 
 const roots = [];
+const runtimes = new Set();
 afterEach(async () => {
+  for (const runtime of runtimes) await runtime.shutdown('test_cleanup');
+  runtimes.clear();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -58,7 +61,7 @@ function fakeTaskRunner() {
 
 function createRuntime(projectRoot, mcpConfigIO, binaryProjectRoot = projectRoot) {
   const limbRegistry = new LimbRegistry();
-  return {
+  const fixture = {
     limbRegistry,
     runtime: createDormantPluginRuntimeComposition({
       projectRoot,
@@ -77,6 +80,14 @@ function createRuntime(projectRoot, mcpConfigIO, binaryProjectRoot = projectRoot
       },
     }),
   };
+  const runtime = fixture.runtime;
+  const shutdown = runtime.shutdown.bind(runtime);
+  runtime.shutdown = async (reason) => {
+    await shutdown(reason);
+    runtimes.delete(runtime);
+  };
+  runtimes.add(runtime);
+  return fixture;
 }
 
 /** The feishu-shaped target declaration (brief §47-64): Token required iff webhook. */

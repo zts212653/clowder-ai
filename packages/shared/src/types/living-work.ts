@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { artifactReviewResponseRecordSchema } from './artifact-review.js';
 import { assetCanonCommandSchema } from './asset-canon-commands.js';
+import { readWorkCoverSchema, setWorkCoverSchema, workSubmitCoverSchema } from './work-cover.js';
 import { workReferenceSchema } from './work-reference.js';
 import { workVideoContextSchema } from './work-video.js';
 
@@ -93,6 +94,8 @@ export const submitWorkSchema = z
     contentRef: ref,
     expectedOwnerRevision: z.number().int().positive().safe(),
     reviewResponse: workReviewResponseSchema.optional(),
+    /** Video only. Omitted means inherit the previous version's cover as frozen at this submit. */
+    cover: workSubmitCoverSchema.optional(),
   })
   .strict();
 export type SubmitWork = z.infer<typeof submitWorkSchema>;
@@ -126,6 +129,8 @@ export const workCommandSchema = z.union([
   commitWorkSchema,
   setWorkContextSchema,
   importWorkContextSchema,
+  setWorkCoverSchema,
+  readWorkCoverSchema,
   z
     .object({
       action: z.literal('resolve-review-submission'),

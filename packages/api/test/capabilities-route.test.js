@@ -1,4 +1,5 @@
 // @ts-check
+import { useCapabilityWriterFixture } from './helpers/capability-writer-fixture.js';
 /**
  * Capabilities Route Tests — F041 统一能力看板 API
  *
@@ -721,7 +722,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
-  it('returns CapabilityBoardResponse with items and catFamilies', async () => {
+  it('returns CapabilityBoardResponse with items and catFamilies', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -946,7 +948,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('includes Kimi mount state for cat-cafe skills in the board payload', async () => {
+  it('includes Kimi mount state for cat-cafe skills in the board payload', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1036,7 +1039,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('uses project mount rules for capability skill health', async () => {
+  it('uses project mount rules for capability skill health', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1522,7 +1526,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('does not treat cat-cafe-skills/refs as a skill', async () => {
+  it('does not treat cat-cafe-skills/refs as a skill', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1550,7 +1555,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
-  it('ignores broken project skill symlinks for deleted skills', async () => {
+  it('ignores broken project skill symlinks for deleted skills', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1585,7 +1591,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('accepts ?projectPath query param for multi-project support', async () => {
+  it('accepts ?projectPath query param for multi-project support', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1756,7 +1763,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('discovers antigravity MCP from homedir instead of a stale project-local file', async () => {
+  it('discovers antigravity MCP from homedir instead of a stale project-local file', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1810,7 +1818,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('realigns stale managed cat-cafe MCP paths to the stable main repo root on GET', async () => {
+  it('realigns stale managed cat-cafe MCP paths to the stable main repo root on GET', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
     const { resolveMainRepoPath } = await import('../dist/utils/skill-mount.js');
@@ -1863,7 +1872,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('does not use project-local manifests to prune installed plugin skills', async () => {
+  it('does not use project-local manifests to prune installed plugin skills', async (t) => {
+    useCapabilityWriterFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 

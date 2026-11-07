@@ -31,7 +31,7 @@ const spawnQualificationCli: SpawnFn = (command, args, options) => {
     });
   }
   const plan = buildUnixSupervisedSpawnPlan(command, args, { env: options.env, killGraceMs: 50 });
-  return spawn(plan.command, plan.args, { cwd: options.cwd, env: plan.env, stdio: options.stdio });
+  return spawn(plan.command, plan.args, { cwd: options.cwd, env: plan.env, stdio: [...options.stdio, 'ipc'] });
 };
 
 export const qualificationSpawnDeps = {
@@ -47,7 +47,11 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
   const trace = (event: Record<string, unknown>) => {
     const now = performance.now();
     if (event.phase === 'native-usage') usageAt = now;
-    context.onTrace?.({ ...event, runnerElapsedMs: Math.max(0, now - entered) });
+    try {
+      context.onTrace?.({ ...event, runnerElapsedMs: Math.max(0, now - entered) });
+    } catch {
+      // Exit/close listeners still own teardown when a telemetry sink fails.
+    }
   };
   context.signal?.throwIfAborted();
   const config = catRegistry.tryGet('haiku55')?.config;
@@ -67,11 +71,18 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
   );
   const controller = new AbortController();
   const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
-  const observer = nativeQualificationObserver(config.defaultModel, controller, trace);
+  let resultText: string | undefined;
+  let text = '';
+  const observer = nativeQualificationObserver(config.defaultModel, controller, trace, (output) => {
+    const resultSealed = !signal.aborted && output === text && context.onResult?.(output) === true;
+    if (resultSealed) resultText = output;
+    trace({ phase: 'native-seal', resultSealed });
+  });
   let successful = false;
   let failed = false;
   let launched = false;
-  let text = '';
+  let closed: { code: unknown; signal: unknown } | undefined;
+  let closePromise: Promise<void> | undefined;
   const service = new ClaudeAgentService({
     catId: config.id,
     model: config.defaultModel,
@@ -112,7 +123,36 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
         bodyChars: batch.rows.reduce((sum, row) => sum + row.body.length, 0),
         safeMode: true,
       });
-      yield* spawnCli(prepared, qualificationSpawnDeps);
+      const events = spawnCli(prepared, {
+        ...qualificationSpawnDeps,
+        spawnFn: (command, args, options) => {
+          const child = qualificationSpawnDeps.spawnFn(command, args, options);
+          child.on('message', (value) => {
+            const event = nativeRootExit(value);
+            if (event) trace(event);
+          });
+          closePromise = new Promise<void>((resolve) => {
+            child.once('exit', (code, exitSignal) => {
+              if (process.platform === 'win32')
+                trace({ phase: 'native-root-exit', rootExitCode: code, rootExitSignal: exitSignal ?? 'none' });
+              trace({ phase: 'native-exit', exitCode: code, exitSignal: exitSignal ?? 'none' });
+            });
+            child.once('close', (code, exitSignal) => {
+              closed = { code, signal: exitSignal };
+              trace({ phase: 'native-closed', exitCode: code, exitSignal: exitSignal ?? 'none' });
+              resolve();
+            });
+          });
+          context.onTeardown?.(closePromise);
+          return child;
+        },
+      });
+      // Business text belongs to the owned wire. The archive's sanitized view
+      // still supplies diagnostics and never persists qualification payloads.
+      for await (const event of events) {
+        observer.captureResult(event);
+        yield event;
+      }
     },
   })) {
     if (message.type === 'text')
@@ -127,11 +167,47 @@ export const runNativeQueryBatch: QueryBatchRunner = async (batch, context) => {
       failed ||= Boolean(message.errorCode);
     }
   }
-  signal.throwIfAborted();
-  if (!observer.verified() || !successful || failed) throw new Error('Qualification native result unavailable');
+  // spawnCli may finish its exit drain before Node's close event. Remain inside
+  // the original hard deadline; an unknown or killed exit is never success.
+  if (closePromise && !closed) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        closePromise,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new DOMException('Qualification cleanup deadline', 'TimeoutError')),
+            Math.max(0, context.deadlineAt - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+  const deadlineAfterResult =
+    resultText === text &&
+    context.deadlineSignal?.aborted === true &&
+    signal.reason === context.deadlineSignal.reason &&
+    !context.requestSignal?.aborted &&
+    !controller.signal.aborted;
+  if (!deadlineAfterResult) signal.throwIfAborted();
+  if (
+    !observer.verified() ||
+    !observer.succeeded() ||
+    observer.resultText() !== text ||
+    (context.onResult !== undefined && resultText !== text) ||
+    !successful ||
+    failed ||
+    closed?.code !== 0 ||
+    closed?.signal !== null
+  )
+    throw new Error('Qualification native result unavailable');
+  if (Date.now() >= context.deadlineAt) throw new DOMException('Qualification cleanup deadline', 'TimeoutError');
   trace({
     phase: 'native-completed',
     outputChars: text.length,
+    ...(deadlineAfterResult ? { deadlineAfterResult: true } : {}),
     ...(usageAt === undefined ? {} : { afterUsageMs: Math.max(0, performance.now() - usageAt) }),
   });
   return text;
@@ -141,9 +217,13 @@ function nativeQualificationObserver(
   model: string,
   controller: AbortController,
   trace?: (value: Record<string, unknown>) => void,
+  onResult?: (text: string) => void,
 ) {
   let surface = false,
     response = false;
+  let resultCount = 0;
+  let resultText: string | undefined;
+  let succeeded = false;
   const object = (value: unknown): Record<string, unknown> =>
     value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const observe = (value: unknown) => {
@@ -167,6 +247,8 @@ function nativeQualificationObserver(
         costUsd: item.total_cost_usd,
         durationMs: item.duration_ms,
       });
+      trace?.({ phase: 'native-terminal', resultStatus: succeeded ? 'success' : 'error' });
+      if (succeeded && surface && response && resultText !== undefined) onResult?.(resultText);
       return;
     }
     if (item.type === 'assistant') {
@@ -192,6 +274,25 @@ function nativeQualificationObserver(
   };
   return {
     archive: { append: async (_id: string, event: unknown) => observe(event) },
+    captureResult(value: unknown) {
+      const item = object(value);
+      if (item.type !== 'result') return;
+      resultCount++;
+      succeeded = resultCount === 1 && item.subtype === 'success' && item.is_error === false;
+      resultText = typeof item.result === 'string' ? item.result : undefined;
+    },
     verified: () => surface && response,
+    succeeded: () => succeeded && resultCount === 1,
+    resultText: () => resultText,
   };
+}
+
+/** Only the owned Node supervisor has IPC; provider stdio is never a lifecycle receipt. */
+function nativeRootExit(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return;
+  const event = value as Record<string, unknown>;
+  if (event.type !== 'cli-supervisor-root-exit') return;
+  if (event.code !== null && !Number.isSafeInteger(event.code)) return;
+  if (event.signal !== null && (typeof event.signal !== 'string' || !/^SIG[A-Z0-9]{1,12}$/.test(event.signal))) return;
+  return { phase: 'native-root-exit', rootExitCode: event.code, rootExitSignal: event.signal ?? 'none' };
 }

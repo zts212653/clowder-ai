@@ -191,6 +191,7 @@ export async function scene(width = 1440, dark = false, classic = false, protect
         return route.fulfill({ status: response.statusCode, contentType: 'application/json', body: response.body });
       }
       if (p === '/api/auth/session') return json(route, { userId: 'fixture-owner' });
+      if (p === '/api/cats/native-runtimes') return json(route, { runtimes: [] });
       if (p === '/api/cats' && request.method() === 'GET') return json(route, { cats: state.cats });
       if (p === '/api/config' && request.method() === 'GET')
         return state.rejectConfig

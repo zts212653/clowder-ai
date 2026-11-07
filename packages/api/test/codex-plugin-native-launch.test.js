@@ -291,6 +291,7 @@ test(
     }
     assert.equal(args.includes('--add-dir'), false);
     const values = configValues(args);
+    assert.doesNotMatch(values.get('developer_instructions') ?? '', /Codex MCP tool routing/);
     const configured = codexConfigObjectFromArgs(args).mcp_servers;
     assert.deepEqual(Object.keys(configured), [f.launch.server.name]);
     assert.equal(configured[f.launch.server.name].command, process.execPath);

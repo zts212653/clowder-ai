@@ -427,7 +427,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         temperature: float = 0.3,
     ) -> tuple[bytes, str]:
         if ref_audio and not Path(ref_audio).exists():
-            log.warning("Reference audio not found: %s — falling back to voice ID mode", ref_audio)
+            log.warning("Reference audio not found: %s — using Base generation without a reference", ref_audio)
             ref_audio = None
             ref_text = None
             instruct = None
@@ -436,7 +436,6 @@ class Qwen3CloneAdapter(TtsAdapter):
             self._inference_executor.submit(
                 self._synthesize_sync,
                 text,
-                voice,
                 lang_code,
                 speed,
                 audio_format,
@@ -461,7 +460,6 @@ class Qwen3CloneAdapter(TtsAdapter):
     def _synthesize_sync(
         self,
         text: str,
-        voice: str,
         lang_code: str,
         speed: float,
         audio_format: str,
@@ -491,8 +489,8 @@ class Qwen3CloneAdapter(TtsAdapter):
                         kwargs["ref_text"] = ref_text
                     if instruct:
                         kwargs["instruct"] = instruct
-                else:
-                    kwargs["voice"] = voice
+                # Base models have no preset speakers. Without a reference,
+                # omit voice and use the model's reference-free generation.
                 tts_generate(**kwargs)
 
             audio_files = list(output_dir.glob(f"*.{audio_format}"))
@@ -556,8 +554,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         self._inference_executor.submit(
             self._synthesize_sync,
             "你好",
-            "zm_yunjian",
-            "z",
+            "zh",
             1.0,
             "wav",
             None,

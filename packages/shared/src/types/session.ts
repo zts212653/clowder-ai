@@ -71,6 +71,9 @@ export interface HostExecutionBoundary {
 
 export interface SessionRecord {
   readonly id: string;
+  /** A resumable observer role is separate from this member's ordinary home chain. */
+  readonly sessionPurpose?: 'watcher';
+  watcherState?: import('./watcher.js').WatcherSessionState;
   /** A one-shot scoped execution is traceable history, never a home resume candidate. */
   readonly scopedInvocation?:
     | {

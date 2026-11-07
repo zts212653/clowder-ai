@@ -34,6 +34,7 @@ import {
 } from './CodexAppServerLifecycle.js';
 import { CodexAppServerNotificationQueue } from './CodexAppServerNotificationQueue.js';
 import { type CodexAppServerThreadVerdict, resolveCodexAppServerThread } from './CodexAppServerThreadResolver.js';
+import { WatcherTokenUsage } from './CodexAppServerWatcherUsage.js';
 import { type CodexLiveRunPort, CodexLiveStartupCancelledError, isLiveDraftEvent } from './CodexLiveRunPort.js';
 import { CodexLiveTurnInput, type LiveProviderInput } from './CodexLiveTurnInput.js';
 import { assertCodexRequiredToolsAvailable } from './CodexRequiredToolsPreflight.js';
@@ -55,6 +56,7 @@ import {
   CodexAppServerRpcError,
   CodexAppServerTurnStartTimeoutError,
 } from './codex-app-server-rpc-error.js';
+import { mergeCodexConfig } from './codex-config-overrides.js';
 import { inspectCodexInput, readCodexTurnMetadata } from './codex-history-reader.js';
 
 export type {
@@ -91,6 +93,7 @@ export interface CodexAppServerContextCompactionEvent {
 }
 
 export interface CodexAppServerRunInput {
+  boundedWatcher?: import('./BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   requireExactResume?: boolean;
   /** F317: explicit Host-owned continuous call. Ordinary invocations remain single-turn. */
   live?: CodexLiveRunPort;
@@ -242,11 +245,12 @@ export class CodexAppServerClient {
   async *run(input: CodexAppServerRunInput): AsyncGenerator<unknown> {
     if (this.deps.wire.hostAcquisitionMode) input.live?.observeHostAcquisition?.(this.deps.wire.hostAcquisitionMode);
     const runtimeInteraction = createCodexRuntimeInteractionRunState(input.runtimeInteraction, input.approvalsReviewer);
-    this.pumpPromise = this.pump(runtimeInteraction);
+    this.pumpPromise = this.pump(runtimeInteraction, input.boundedWatcher);
     // Pending requests / notifications propagate the same failure; attach immediately
     // so carrier shutdown grace cannot expose it as unhandled under Node strict mode.
     void this.pumpPromise.catch(() => {});
     let latestUsage: JsonObject | null = null;
+    let watcherUsage = input.boundedWatcher ? new WatcherTokenUsage() : undefined;
     let activeThreadId: string | null = null;
     let activeTurnId: string | null = null;
     let activeRunDispatchOpen = false;
@@ -341,7 +345,11 @@ export class CodexAppServerClient {
       await preflightRequest('initialize', {
         clientInfo: { name: 'cat-cafe', title: `${deploymentDefaults.brand.displayName}`, version: '1' },
         capabilities:
-          recoveryInstruction || input.prepareCompactionRequest || input.collaborationMode || input.live
+          recoveryInstruction ||
+          input.prepareCompactionRequest ||
+          input.collaborationMode ||
+          input.live ||
+          input.boundedWatcher
             ? { experimentalApi: true }
             : {},
       });
@@ -353,13 +361,27 @@ export class CodexAppServerClient {
       input.startupCheckSignal?.throwIfAborted();
       await input.validateConfiguration?.(preflightRequest, input.config ?? {});
       await validateCodexAccountConfiguration(this.deps.wire, preflightRequest, input.config ?? {});
+      if (input.boundedWatcher) {
+        const loaded = asCodexAppServerRecord(
+          await preflightRequest('config/read', { ...(input.cwd ? { cwd: input.cwd } : {}), includeLayers: false }),
+        );
+        const account = asCodexAppServerRecord(await preflightRequest('account/read', { refreshToken: false }));
+        const nativeConfig = asCodexAppServerRecord(loaded?.config);
+        if (!nativeConfig) throw new Error('watcher_native_provider_configuration_unavailable');
+        const patch = await input.boundedWatcher.configureProvider({
+          config: nativeConfig,
+          account: asCodexAppServerRecord(account?.account),
+          transportEnv: codexTransportEnvironment(this.deps.wire),
+        });
+        input.config = mergeCodexConfig(input.config ?? {}, patch) as JsonObject;
+      }
       input.signal?.throwIfAborted();
       input.startupCheckSignal?.throwIfAborted();
       input.startupCheckSignal?.removeEventListener('abort', startupAbortHandler);
       accountCheckComplete = true;
       yield { type: 'app_server.account_check', stage: 'ready' };
 
-      if (input.live) {
+      if (input.live || input.boundedWatcher) {
         // config/read without cwd sees global servers, while a resumed thread
         // also loads project servers at its persisted cwd. Fence the exact scope.
         let liveCwd = input.cwd;
@@ -455,6 +477,14 @@ export class CodexAppServerClient {
         requiredTools: input.requiredTools ?? [],
         request: (method, params) => this.request(method, params),
       });
+      if (
+        input.boundedWatcher &&
+        !(await input.boundedWatcher.beforeTurn({
+          threadId,
+          client: { request: (method, params) => this.request(method, params) },
+        }))
+      )
+        return;
       assertLiveStartupActive();
 
       // F296 B4a preflight fence. The provider verdict exists; buffered
@@ -545,6 +575,8 @@ export class CodexAppServerClient {
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;
+      if (input.boundedWatcher) watcherUsage = new WatcherTokenUsage();
+      await input.boundedWatcher?.accepted({ threadId, turnId: activeTurnId });
       if (initialClientId) {
         inputReadCallbacks.set(initialClientId, {
           turnId: activeTurnId,
@@ -767,7 +799,9 @@ export class CodexAppServerClient {
           await deliverAtBoundary('tool_complete');
 
         if (isCodexAppServerTokenUsageNotification(record)) {
-          latestUsage = mapCodexAppServerTokenUsage(asCodexAppServerRecord(record?.params)?.tokenUsage) ?? latestUsage;
+          const tokenUsage = asCodexAppServerRecord(record?.params)?.tokenUsage;
+          latestUsage = mapCodexAppServerTokenUsage(tokenUsage) ?? latestUsage;
+          if (params?.turnId === activeTurnId) watcherUsage?.observe(tokenUsage);
         }
 
         // F296 B4b (kimi review A4): a compaction can also arrive *during* the
@@ -811,6 +845,17 @@ export class CodexAppServerClient {
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped && !(input.live && isLiveDraftEvent(mapped))) yield mapped;
         if (activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+          if (input.boundedWatcher) {
+            const completed = asCodexAppServerRecord(params?.turn);
+            if (completed?.status !== 'completed')
+              throw new Error(`watcher_native_turn_not_completed:${codexAppServerErrorMessage(completed?.error)}`);
+            await input.boundedWatcher.completed({
+              threadId,
+              turnId: activeTurnId,
+              client: { request: (method, value) => this.request(method, value) },
+              usage: watcherUsage?.value(),
+            });
+          }
           if (input.live) {
             const completed = asCodexAppServerRecord(params?.turn);
             if (completed?.status === 'failed') {
@@ -986,7 +1031,10 @@ export class CodexAppServerClient {
     candidates[0]?.resolve({ turn });
   }
 
-  private async pump(runtimeInteraction: CodexRuntimeInteractionRunState | null): Promise<void> {
+  private async pump(
+    runtimeInteraction: CodexRuntimeInteractionRunState | null,
+    watcher?: import('./BoundedWatcherRunPort.js').BoundedWatcherRunPort,
+  ): Promise<void> {
     try {
       for await (const value of this.deps.wire.read()) {
         const message = asCodexAppServerRecord(value);
@@ -1033,6 +1081,26 @@ export class CodexAppServerClient {
           continue;
         }
         if (typeof message.id === 'number' && typeof message.method === 'string') {
+          if (watcher && message.method === 'item/tool/call') {
+            const id = message.id;
+            void watcher
+              .callTool(asCodexAppServerRecord(message.params) ?? {})
+              .then(
+                (result) => this.write({ id, result }),
+                (error) =>
+                  this.write({
+                    id,
+                    result: {
+                      success: false,
+                      contentItems: [
+                        { type: 'inputText', text: error instanceof Error ? error.message : 'Watcher tool failed' },
+                      ],
+                    },
+                  }),
+              )
+              .catch((error) => this.failTransport(error));
+            continue;
+          }
           if (runtimeInteraction) {
             runtimeInteraction.dispatch(
               message,
@@ -1099,4 +1167,7 @@ export class CodexAppServerClient {
   }
 }
 
-import { validateCodexAccountConfiguration } from './codex-app-server-account-configuration.js';
+import {
+  codexTransportEnvironment,
+  validateCodexAccountConfiguration,
+} from './codex-app-server-account-configuration.js';

@@ -46,6 +46,7 @@ function qualificationBatches(input: unknown) {
     if (typeof batch.stage === 'string' && batchStages.has(batch.stage)) result.stage = batch.stage;
     if (typeof batch.outcome === 'string' && ['completed', 'failed', 'aborted'].includes(batch.outcome))
       result.outcome = batch.outcome;
+    completionFields(batch, result);
     return [result];
   });
 }
@@ -74,6 +75,7 @@ const phases = new Set([
   'retrieval',
   'canonical-projection',
   'qualification',
+  'decision-sources',
   'final-revalidation',
   'qualification-unavailable',
   'native-prepared',
@@ -83,7 +85,25 @@ const phases = new Set([
   'native-usage',
   'native-output',
   'native-completed',
+  'native-terminal',
+  'native-exit',
+  'native-closed',
+  'native-seal',
+  'native-root-exit',
 ]);
+
+function completionFields(input: Record<string, unknown>, output: Record<string, unknown>) {
+  if (typeof input.resultSealed === 'boolean') output.resultSealed = input.resultSealed;
+  if (input.rootExitCode === null || Number.isSafeInteger(input.rootExitCode)) output.rootExitCode = input.rootExitCode;
+  if (typeof input.rootExitSignal === 'string' && /^(none|SIG[A-Z0-9]{1,12})$/.test(input.rootExitSignal))
+    output.rootExitSignal = input.rootExitSignal;
+  if (input.exitCode === null || Number.isSafeInteger(input.exitCode)) output.exitCode = input.exitCode;
+  if (typeof input.exitSignal === 'string' && /^(none|SIG[A-Z0-9]{1,12})$/.test(input.exitSignal))
+    output.exitSignal = input.exitSignal;
+  if (input.resultStatus === 'success' || input.resultStatus === 'error') output.resultStatus = input.resultStatus;
+  if (input.processClosed === true) output.processClosed = true;
+  if (input.deadlineAfterResult === true) output.deadlineAfterResult = true;
+}
 function counts(input: unknown, nested = true): Record<string, unknown> | undefined {
   if (!input || typeof input !== 'object') return;
   const result: Record<string, unknown> = {};
@@ -103,6 +123,7 @@ export function privateMessageSearchTrace(trace: Record<string, unknown>): Recor
   try {
     if (typeof trace.phase !== 'string' || !phases.has(trace.phase)) return;
     const result: Record<string, unknown> = { phase: trace.phase };
+    completionFields(trace, result);
     if (trace.batchIndex === 0 || trace.batchIndex === 1) result.batchIndex = trace.batchIndex;
     if (trace.permissionMode === 'dontAsk') result.permissionMode = 'dontAsk';
     if (trace.effort === 'low') result.effort = 'low';

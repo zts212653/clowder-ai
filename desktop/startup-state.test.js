@@ -181,6 +181,29 @@ test('the startup prompt offers one-launch memory storage only for a recoverable
   }
 });
 
+for (const response of [1, 2]) {
+  test(`a port conflict lets the user ${response === 1 ? 'relaunch after freeing the port' : 'quit and keep the listener'}`, async () => {
+    const events = [];
+    const outcome = await showStartupFailure({
+      app: { relaunch: () => events.push('relaunch'), exit: (code) => events.push(`exit:${code}`) },
+      dialog: {
+        showMessageBox: async ({ buttons, defaultId, cancelId, detail }) => {
+          assert.deepEqual(buttons, ['打开日志目录', '已关闭占用方，重启桌面版', '退出桌面版，保留原服务']);
+          assert.equal(defaultId, 2);
+          assert.equal(cancelId, 2);
+          assert.match(detail, /先确认占用方并正常退出/);
+          return { response };
+        },
+      },
+      message: 'Web port ownership could not be confirmed',
+      logDir: 'private/logs',
+      error: { code: 'DESKTOP_PORT_CONFLICT' },
+    });
+    assert.equal(outcome, response === 1 ? 'relaunch' : 'quit');
+    assert.deepEqual(events, response === 1 ? ['relaunch', 'exit:0'] : []);
+  });
+}
+
 test('an unrecoverable startup failure keeps the plain dialog and never consents to memory', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'startup-memory-denied-'));
   let supplied;

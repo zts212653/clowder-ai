@@ -28,13 +28,14 @@ export class SessionManager {
    * Store session ID for user + cat + thread combination.
    * Uses Redis SessionStore when available, falls back to in-memory Map.
    */
-  async store(userId: string, catId: CatId, threadId: string, sessionId: string): Promise<void> {
+  async store(userId: string, catId: CatId, threadId: string, sessionId: string, purpose?: 'watcher'): Promise<void> {
     if (this.sessionStore) {
-      await this.sessionStore.setSessionId(userId, catId, threadId, sessionId);
+      if (purpose) await this.sessionStore.setSessionId(userId, catId, threadId, sessionId, 0, purpose);
+      else await this.sessionStore.setSessionId(userId, catId, threadId, sessionId);
       return;
     }
 
-    const key = `${userId}:${catId}:${threadId}`;
+    const key = this.key(userId, catId, threadId, purpose);
 
     // Delete first so it moves to the end (most recent) on re-insert
     if (this.sessions.has(key)) {
@@ -56,24 +57,31 @@ export class SessionManager {
    * Get stored session ID for user + cat + thread combination.
    * Uses Redis SessionStore when available, falls back to in-memory Map.
    */
-  async get(userId: string, catId: CatId, threadId: string): Promise<string | undefined> {
+  async get(userId: string, catId: CatId, threadId: string, purpose?: 'watcher'): Promise<string | undefined> {
     if (this.sessionStore) {
-      const result = await this.sessionStore.getSessionId(userId, catId, threadId);
+      const result = purpose
+        ? await this.sessionStore.getSessionId(userId, catId, threadId, purpose)
+        : await this.sessionStore.getSessionId(userId, catId, threadId);
       return result ?? undefined;
     }
 
-    return this.sessions.get(`${userId}:${catId}:${threadId}`);
+    return this.sessions.get(this.key(userId, catId, threadId, purpose));
   }
 
   /**
    * Delete stored session for user + cat + thread combination.
    * Used by self-healing flows when persisted CLI session becomes invalid.
    */
-  async delete(userId: string, catId: CatId, threadId: string): Promise<void> {
+  async delete(userId: string, catId: CatId, threadId: string, purpose?: 'watcher'): Promise<void> {
     if (this.sessionStore) {
-      await this.sessionStore.deleteSession(userId, catId, threadId);
+      if (purpose) await this.sessionStore.deleteSession(userId, catId, threadId, purpose);
+      else await this.sessionStore.deleteSession(userId, catId, threadId);
       return;
     }
-    this.sessions.delete(`${userId}:${catId}:${threadId}`);
+    this.sessions.delete(this.key(userId, catId, threadId, purpose));
+  }
+
+  private key(userId: string, catId: CatId, threadId: string, purpose?: 'watcher'): string {
+    return `${userId}:${catId}:${threadId}${purpose ? ':role:watcher' : ''}`;
   }
 }

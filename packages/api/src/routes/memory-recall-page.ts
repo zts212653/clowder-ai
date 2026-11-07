@@ -66,7 +66,7 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
       query: '',
       resolverFamily: cue.resolverFamily,
       timestamp: cue.presentedAt,
-      source: 'push' as const,
+      source: cue.source ?? ('push' as const),
       ...(cue.pushSurface ? { pushSurface: cue.pushSurface } : {}),
       cueStatus: cue.status,
       results: [

@@ -53,6 +53,9 @@ export interface RuntimeSessionLifecycle {
   drainResult?: RuntimeSessionDrainResult;
   pendingSince?: number;
   retryCount?: number;
+  recoveryDisposition?: 'needs_attention';
+  recoveryReasonCode?: string;
+  recoveryDisposedAt?: number;
   lastRetryAt?: number;
   lastFailureReason?: string;
   retryFragment?: RuntimeSessionRetryFragment;
@@ -174,6 +177,9 @@ function normalizeLifecycle(input: Record<string, unknown>): RuntimeSessionLifec
     ...optionalOneOfField(input.drainResult, RUNTIME_SESSION_DRAIN_RESULTS, 'lifecycle.drainResult'),
     ...optionalNumberField(input.pendingSince, 'lifecycle.pendingSince'),
     ...optionalNumberField(input.retryCount, 'lifecycle.retryCount'),
+    ...optionalOneOfField(input.recoveryDisposition, ['needs_attention'] as const, 'lifecycle.recoveryDisposition'),
+    ...optionalStringField(input.recoveryReasonCode, 'lifecycle.recoveryReasonCode'),
+    ...optionalNumberField(input.recoveryDisposedAt, 'lifecycle.recoveryDisposedAt'),
     ...optionalNumberField(input.lastRetryAt, 'lifecycle.lastRetryAt'),
     ...optionalStringField(input.lastFailureReason, 'lifecycle.lastFailureReason'),
     ...optionalRetryFragment(input.retryFragment),

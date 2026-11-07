@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   AgyProfileConfig,
@@ -29,6 +29,7 @@ import {
 import { readLocalAccountSelection } from './local-account-selection.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
+import { writeFileAtomic } from './write-file-atomic.js';
 
 const runtimeCatMutationTails = new Map<string, Promise<void>>();
 
@@ -103,6 +104,7 @@ export interface RuntimeCatInput {
   defaultModel: string;
   executionApproval?: 'auto' | 'ask_user';
   mcpSupport: boolean;
+  env?: Record<string, string>;
   /** F247 KD-17: cloud-only cats (Remote MCP) omit cli to skip local dispatch.
    * When cli is absent, mention routing queues the mention without spawning a CLI. */
   cli?: CliConfig;
@@ -144,6 +146,7 @@ export interface RuntimeCatUpdate {
   defaultModel?: string;
   executionApproval?: 'auto' | 'ask_user';
   mcpSupport?: boolean;
+  env?: Record<string, string> | null;
   /** F247 KD-17: cli null to remove (cloud-only mode), CliConfig to update, undefined to skip. */
   cli?: CliConfig | null;
   commandArgs?: string[];
@@ -285,20 +288,10 @@ function writeAndValidateCatalog(projectRoot: string, catalog: unknown): CatCafe
   const candidate = catalog as CatCafeConfig;
   assertUniqueMentionAliases(candidate);
   const catalogPath = resolveCatCatalogPath(projectRoot);
-  const tempPath = `${catalogPath}.tmp-${process.pid}-${Date.now()}`;
   mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(tempPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf-8');
-  try {
-    loadCatConfig(tempPath);
-    renameSync(tempPath, catalogPath);
-  } catch (err) {
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      // best-effort cleanup
-    }
-    throw err;
-  }
+  writeFileAtomic(catalogPath, `${JSON.stringify(candidate, null, 2)}\n`, {
+    verify: (tempPath) => loadCatConfig(tempPath),
+  });
   return validatePersistedCatalog(projectRoot);
 }
 
@@ -349,6 +342,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         defaultModel: input.defaultModel,
         ...(input.executionApproval ? { executionApproval: input.executionApproval } : {}),
         mcpSupport: input.mcpSupport,
+        ...(input.env ? { env: { ...input.env } } : {}),
         // F247 KD-17: omit cli for cloud-only cats (Remote MCP, no local dispatch).
         ...(input.cli ? { cli: input.cli } : {}),
         ...(input.accountRef != null && input.accountRef.trim().length > 0
@@ -673,6 +667,10 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
   if (patch.executionApproval !== undefined) variant.executionApproval = patch.executionApproval;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
+  if (patch.env !== undefined) {
+    if (patch.env === null) delete variant.env;
+    else variant.env = { ...patch.env };
+  }
   // F247 KD-17: patch.cli === null means remove (cloud-only mode); object means update.
   if (patch.cli !== undefined) {
     if (patch.cli === null) {

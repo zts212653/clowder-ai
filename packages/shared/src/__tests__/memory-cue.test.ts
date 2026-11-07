@@ -167,7 +167,7 @@ describe('F287 memory cue shared contract', () => {
   });
 
   it('admits only the twelve versioned producer/kind pairs including the two context source entries', () => {
-    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(7);
+    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(8);
     expect(RECALL_OPPORTUNITY_V1_PAIRS).toEqual([
       { kind: 'subject_seen', producer: 'entity_nudge' },
       { kind: 'delivery_decision', producer: 'github_ci' },
@@ -260,7 +260,7 @@ describe('F287 memory cue shared contract', () => {
       v: 1,
       cueId: 'cue-1',
       opportunityId: fixtures.subject_seen.opportunityId,
-      catalogVersion: 7,
+      catalogVersion: 8,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       whyNow: 'A named subject is present in the current decision frame.',

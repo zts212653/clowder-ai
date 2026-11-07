@@ -1,3 +1,4 @@
+import type { ActionRecoveryPort } from './action-successor-recovery-state.js';
 import type {
   ActionCompletionVerdict,
   ActionSuccessorDispatchFailureReason,
@@ -110,11 +111,12 @@ export type ActionSuccessorCommitOutcomeResult =
     };
 
 export interface ActionSuccessorLeaseStore {
+  readonly recovery?: ActionRecoveryPort;
   get(leaseId: string): Promise<ActionSuccessorLease | null>;
   getByIdentity(input: ActionSuccessorIdentityInput): Promise<ActionSuccessorLease | null>;
-  listActiveTaskLeases(limit?: number): Promise<ActionSuccessorLease[]>;
-  listPendingReturns(limit?: number): Promise<ActionSuccessorLease[]>;
-  listPendingDispatches(limit?: number): Promise<ActionSuccessorLease[]>;
+  listActiveTaskLeases(limit?: number, now?: number): Promise<ActionSuccessorLease[]>;
+  listPendingReturns(limit?: number, now?: number): Promise<ActionSuccessorLease[]>;
+  listPendingDispatches(limit?: number, now?: number): Promise<ActionSuccessorLease[]>;
   claim(input: ClaimActionSuccessorInput): Promise<ActionSuccessorClaimStoreResult>;
   commitOutcome(
     leaseId: string,

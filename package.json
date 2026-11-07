@@ -64,7 +64,7 @@
     "build:app-assist": "node desktop/scripts/build-app-assist.cjs",
     "lint": "pnpm -r run lint",
     "check:sources": "pnpm check:vendor-stylesheets && pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:capability-tips && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-registry && pnpm check:env-example && pnpm check:worktree-reaper && pnpm check:node-runtime-guard && pnpm check:prompt-time-apis && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:f212-reconciliation-eval && pnpm check:site-css && pnpm check:brand-guard",
-    "check:installed": "pnpm check:vendor-stylesheets:installed && pnpm check:sidebar-projection-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:design-md && pnpm check:skills:manifest && pnpm check:env-ports && pnpm check:start-profile-isolation && pnpm check:guides && pnpm check:no-codex-provider-exit-suppression && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity",
+    "check:installed": "pnpm check:recovery-loops && pnpm check:vendor-stylesheets:installed && pnpm check:sidebar-projection-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:design-md && pnpm check:skills:manifest && pnpm check:env-ports && pnpm check:start-profile-isolation && pnpm check:guides && pnpm check:no-codex-provider-exit-suppression && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity",
     "check:artifacts": "pnpm check:paw-feel-disposition-capacity && pnpm check:mcp-surface-governance && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips-enablement && pnpm check:pre-merge-gate && pnpm check:dossier-prompts",
     "check": "pnpm check:sources && pnpm check:installed && pnpm check:artifacts",
     "check:f290-product-copy": "node --test scripts/check-f290-product-copy.test.mjs && node scripts/check-f290-product-copy.mjs",
@@ -85,7 +85,7 @@
     "check:video-new": "node --test test/scripts/video-new-project.test.mjs",
     "check:scripts-ascii-only": "node scripts/check-scripts-ascii-only.mjs",
     "check:whisper-dispatch": "node --test scripts/services/whisper-dispatch.test.mjs && python3 -m unittest scripts/services/test_whisper_cuda.py scripts/services/test_whisper_worker.py",
-    "check:tts-runtime": "python3 -m unittest scripts/services/test_tts_runtime.py",
+    "check:tts-runtime": "python3 -m unittest scripts/services/test_tts_runtime.py scripts/services/test_tts_base_compat.py",
     "check:guides": "node scripts/gen-guide-catalog.mjs",
     "check:biome-version": "node scripts/check-biome-version.mjs",
     "check:fix": "pnpm biome check --write .",
@@ -152,6 +152,7 @@
     "fseventsd:observe": "python3 -I -S -B scripts/macos/fseventsd_recovery.py --observe",
     "check:fseventsd-recovery": "python3 -I -S -B scripts/macos/test_fseventsd_recovery.py && python3 -I -S -B scripts/macos/test_fseventsd_recovery_native.py && node --test scripts/lib/gate-resource-receipts-noop.test.mjs",
     "check:dossier-prompts": "node --test scripts/dossier-prompt-fixture.test.mjs",
+    "check:recovery-loops": "node --test scripts/recovery-loop-contract.test.mjs && node scripts/check-recovery-loops.mjs",
     "check:brand-guard:home": "node --test scripts/deployment-brand.test.mjs scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
   },
   "devDependencies": {

@@ -1,4 +1,6 @@
 import { CONTEXT_SOURCE_OPPORTUNITY_SCHEMA } from './cue/ContextSourceOpportunityStore.js';
+import { admitMatterCueFamily } from './matters/matter-cue-schema.js';
+import { MATTER_MEMORY_SCHEMA } from './matters/matter-schema.js';
 import { addMessageSearchAnswerRecoveryColumn, MESSAGE_SEARCH_ANSWER_SCHEMA } from './message-search-answer-schema.js';
 import { PROFILE_READ_SCHEMA } from './profile/profile-read-schema.js';
 // F102: SQLite schema — evidence_docs + evidence_fts + edges + markers + schema_version
@@ -6,7 +8,10 @@ import { PROFILE_READ_SCHEMA } from './profile/profile-read-schema.js';
 
 import type Database from 'better-sqlite3';
 import { addDevelopmentReturnColumn } from '../../infrastructure/scheduler/development-return/development-return-schema.js';
+import { installManagedCommandRecoverySchema } from '../../infrastructure/scheduler/managed-command/recovery-schema.js';
 import { MANAGED_COMMAND_CANDIDATE_INDEX } from '../../infrastructure/scheduler/managed-command-candidate-schema.js';
+import { migrateScheduleParameterUpdates } from '../../infrastructure/scheduler/mutations/schedule-parameter-update-schema.js';
+import { SCHEDULE_LIST_INDEX } from '../../infrastructure/scheduler/schedule-list-schema.js';
 import { admitThreadOverviewCueFamily } from './curation/thread-cue-schema-migration.js';
 import { migrateEntityMentionProjections } from './entity-mention-projection-schema.js';
 import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
@@ -81,7 +86,7 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 74;
+export const CURRENT_SCHEMA_VERSION = 78;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1821,6 +1826,33 @@ export function applyMigrations(db: Database.Database): void {
     db.transaction(() => {
       db.exec(PROFILE_READ_SCHEMA);
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(74, new Date().toISOString());
+    })();
+  }
+  // Historical hold carriers stay immutable and readable; index only listable tasks.
+  if (currentVersion < 75) {
+    db.transaction(() => {
+      db.exec(SCHEDULE_LIST_INDEX);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(75, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 76) {
+    db.transaction(() => {
+      db.exec(MATTER_MEMORY_SCHEMA);
+      admitMatterCueFamily(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(76, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 77) {
+    db.transaction(() => {
+      installManagedCommandRecoverySchema(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(77, new Date().toISOString());
+    })();
+  }
+
+  if (currentVersion < 78) {
+    db.transaction(() => {
+      migrateScheduleParameterUpdates(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(78, new Date().toISOString());
     })();
   }
 }

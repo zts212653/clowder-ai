@@ -68,11 +68,12 @@ function fixtureApiBody(pathname, state) {
   return { userId: 'fixture-owner', tasks: [], threads: [], cats: [] };
 }
 
-async function openConversation() {
+async function openConversation({ holdJoinAcks = false } = {}) {
   const page = await browser.newPage();
   const errors = [],
     writes = [],
-    sockets = [];
+    sockets = [],
+    heldJoinAcks = [];
   const state = {
     historyReads: 0,
     documentLoads: 0,
@@ -94,7 +95,9 @@ async function openConversation() {
       const acknowledgement = text.slice(2, bracket);
       const [event, room] = JSON.parse(text.slice(bracket));
       if (event === 'join_room' && acknowledgement) {
-        socket.send(`43${acknowledgement}${JSON.stringify([{ ok: true, room }])}`);
+        const acknowledge = () => socket.send(`43${acknowledgement}${JSON.stringify([{ ok: true, room }])}`);
+        if (holdJoinAcks) heldJoinAcks.push(acknowledge);
+        else acknowledge();
       }
     });
   });
@@ -119,7 +122,10 @@ async function openConversation() {
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   await page.locator('[data-message-id="before"]').waitFor();
   await page.locator('main[data-connected="true"]').waitFor();
-  return { page, state, sockets, errors, writes };
+  const releaseJoinAcks = () => {
+    for (const acknowledge of heldJoinAcks.splice(0)) acknowledge();
+  };
+  return { page, state, sockets, errors, writes, releaseJoinAcks, heldJoinAcks };
 }
 
 function saveMissedReply(state) {
@@ -168,7 +174,8 @@ test('dormant automatic retry recovers the saved reply while execution polling c
     await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
     assert.equal(await page.locator('[data-executions]').innerText(), 'codex-sol');
     assert.equal(await page.locator('main').getAttribute('data-connected'), 'true');
-    assert.equal(sockets.length, 2);
+    // Teleport, workspace navigation and file watching are mounted too; they share the page connection.
+    assert.equal(sockets.length, 2, 'one connection per page, plus its one reconnect');
     assert(state.historyReads > previousReads);
     assert.equal(state.documentLoads, 1, 'no F5 or route remount');
     assert.deepEqual(errors, ['injected disconnect observer failure']);
@@ -186,9 +193,32 @@ test('returning to a connected quiet page fetches the missed reply without a soc
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.clock.runFor(1000);
     await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
-    assert.equal(sockets.length, 1);
+    assert.equal(sockets.length, 1, 'one Socket.IO connection per page, shared-connection consumers included');
     assert(state.historyReads > previousReads);
     assert.equal(state.documentLoads, 1);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(writes, []);
+  } finally {
+    await page.close();
+  }
+});
+
+// PR-3a (contract 3.2, Astra R1 P1-A): the first History read can return a snapshot taken before a
+// message lands; if the room join is confirmed only after that, nothing in the room will ever say so.
+test('a message saved between the first History read and the room join appears once the join is confirmed', async () => {
+  const { page, state, errors, writes, releaseJoinAcks, heldJoinAcks } = await openConversation({
+    holdJoinAcks: true,
+  });
+  try {
+    assert(heldJoinAcks.length > 0, 'the thread room join is still waiting for its acknowledgement');
+    saveMissedReply(state);
+    const readsBeforeJoin = state.historyReads;
+
+    releaseJoinAcks();
+    await page.clock.runFor(1000);
+    await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
+
+    assert(state.historyReads > readsBeforeJoin, 'the confirmed join was followed by a History read');
     assert.deepEqual(errors, []);
     assert.deepEqual(writes, []);
   } finally {

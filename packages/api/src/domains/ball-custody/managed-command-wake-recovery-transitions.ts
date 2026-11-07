@@ -25,6 +25,8 @@ export function persistManagedCommandFallbackDue(
   const parsed = parseManagedCommandWakeTask(store.getById(taskId));
   if (!parsed) return 'missing';
   if (parsed.command.state !== 'command_running') return 'active';
+  // Persistent jobs produce completion only at their owner's terminal CAS, even after the fallback deadline.
+  if (parsed.command.jobId || parsed.command.durableJob) return 'pending';
   const wakeContent = parsed.task.params.message;
   if (typeof wakeContent !== 'string' || wakeContent.length === 0) return 'pending';
   return store.updateParamsIfCurrent(parsed.task.id, parsed.task.params, {

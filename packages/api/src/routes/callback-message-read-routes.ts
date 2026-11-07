@@ -29,7 +29,7 @@ import { truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { projectCallbackMessageBody } from './callback-message-body.js';
 import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
-import { guardLiveCarrierRead } from './live-carrier-read-guard.js';
+import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
@@ -89,7 +89,10 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       const expectedParentInvocationId =
         principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
       const queuedDrillEntry =
-        isFullDrill && principal.kind === 'invocation' && message.threadId === principal.threadId
+        !isWatcherRead(request) &&
+        isFullDrill &&
+        principal.kind === 'invocation' &&
+        message.threadId === principal.threadId
           ? opts.invocationQueue
               ?.getQueuedBodyMessagesForCat(
                 principal.threadId,
@@ -254,7 +257,12 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
 
       const contextMessages = Array.isArray(result.context) ? result.context : [];
 
-      if (isFullDrill && principal.kind === 'invocation' && message.threadId === principal.threadId) {
+      if (
+        !isWatcherRead(request) &&
+        isFullDrill &&
+        principal.kind === 'invocation' &&
+        message.threadId === principal.threadId
+      ) {
         try {
           await coverPublishedMessageReads(opts, {
             threadId: principal.threadId,

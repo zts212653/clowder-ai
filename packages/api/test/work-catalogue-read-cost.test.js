@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { ArtifactReviewStore } from '../dist/domains/collaborative-content/artifact-review/store.js';
@@ -66,7 +66,10 @@ test('complete independent Works reads canonical manifests at most twice, with f
   const originalRead = fs.readFile;
   fs.readFile = async (path, ...args) => {
     const value = await originalRead(path, ...args);
-    if (String(path).startsWith(join(root, 'projects', 'content-owner-v1')) && String(path).endsWith('/state.json')) {
+    if (
+      String(path).startsWith(join(root, 'projects', 'content-owner-v1')) &&
+      basename(String(path)) === 'state.json'
+    ) {
       stateReads++;
       manifestBytes += Buffer.byteLength(value);
     }
@@ -92,6 +95,7 @@ test('complete independent Works reads canonical manifests at most twice, with f
   t.diagnostic(
     JSON.stringify({ rawCount, selectedCount, stateReads, manifestBytes, elapsedMs: performance.now() - started }),
   );
-  // Two full fresh discovery passes plus at most three point reads per selected version.
+  assert.ok(stateReads > 0, 'the manifest counter must observe physical reads on every supported platform');
+  // Includes the first legacy migration, fresh thread discovery/validation and selected exact-version reads.
   assert.ok(stateReads <= 2 * rawCount + 3 * selectedCount, `canonical manifest read budget exceeded: ${stateReads}`);
 });

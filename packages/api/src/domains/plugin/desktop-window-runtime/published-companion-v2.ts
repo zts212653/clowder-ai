@@ -18,17 +18,58 @@ export const PUBLISHED_COMPANION_LETTER = {
   packageDigest: 'sha512-nAQbBlflHyfY08lzldO/nxEqbLvteXYT3e+rMxw/Lfq/2o8t01WH82aPLHrkyhxgvDe0IS7cfo0DCo30qow/wQ==',
 } as const;
 
+/**
+ * Admitted public companion contract lines, oldest first. Every later line carries what the earlier modern lines do,
+ * so Host checks ask for a capability (below) and a new line is one row here plus its archive row and validators.
+ * The desktop kernel keeps the same table in `desktop/plugin-window/companion-contracts.cjs`; a test holds them equal.
+ */
+export const COMPANION_CONTRACT_LINES = [
+  '0.1.0-beta.21',
+  '0.1.0-beta.23',
+  '0.1.0-beta.24',
+  '0.1.0-beta.25',
+  '0.1.0-beta.27',
+  '0.1.0-beta.28',
+  '0.1.0-beta.29',
+  '0.3.3-candidate.0',
+] as const;
+export type CompanionContract = (typeof COMPANION_CONTRACT_LINES)[number];
+
+/** The first contract line that carries each Host-visible capability. */
+export const COMPANION_CAPABILITY_SINCE = {
+  /** Published native state passthrough and call-scoped voice. */
+  modern: '0.1.0-beta.23',
+  /** `decisions.read` returns the unified decision page. */
+  unifiedDecisions: '0.1.0-beta.24',
+  /** The renderer accepts ball sizes below the published modern minimum. */
+  smallBall: '0.1.0-beta.25',
+  /** `state.meeting` and the presentation manifest reader. */
+  presentation: '0.1.0-beta.27',
+  /** Durable letters. */
+  letter: '0.1.0-beta.28',
+  /** `state.appAssist`, `app-assist.settle` and the `appAssistEnabled` setting. */
+  appAssist: '0.1.0-beta.29',
+  /** F335 交付三：`state.desk`, `desk.settle`, desk thumbnails and avatars. */
+  desk: '0.3.3-candidate.0',
+} as const satisfies Record<string, CompanionContract>;
+export type CompanionCapability = keyof typeof COMPANION_CAPABILITY_SINCE;
+
+export function isCompanionContract(value: unknown): value is CompanionContract {
+  return typeof value === 'string' && (COMPANION_CONTRACT_LINES as readonly string[]).includes(value);
+}
+
+export function companionContractHas(contract: string | undefined, capability: CompanionCapability): boolean {
+  if (!isCompanionContract(contract)) return false;
+  return (
+    COMPANION_CONTRACT_LINES.indexOf(contract) >=
+    COMPANION_CONTRACT_LINES.indexOf(COMPANION_CAPABILITY_SINCE[capability])
+  );
+}
+
 export interface CompanionArchiveContract {
   readonly version: string;
   readonly packageDigest: string;
-  readonly contract:
-    | '0.1.0-beta.21'
-    | '0.1.0-beta.23'
-    | '0.1.0-beta.24'
-    | '0.1.0-beta.25'
-    | '0.1.0-beta.27'
-    | '0.1.0-beta.28'
-    | '0.1.0-beta.29';
+  readonly contract: CompanionContract;
 }
 
 /** Host-owned archive catalog, never negotiated by bridgeVersion or renderer input. */
@@ -96,17 +137,16 @@ export const COMPANION_ARCHIVE_CONTRACTS: readonly CompanionArchiveContract[] = 
     packageDigest: 'sha512-zM9CLwI09/dqa4HM8ubSO+FejF2n307pF2DCiHd+QJ6O4YTuhW6s7FJX0qHxUISRvr872e/urZ/33f+Kk41PBg==',
     contract: '0.1.0-beta.29',
   },
+  // F335 交付三：clowder-ai-plugins #188 (f21df559), npm `next`; the same SRI as catalog/candidate.json.
+  {
+    version: '0.1.0-alpha.37',
+    packageDigest: 'sha512-xfxNnyl0Zg8qxCXInQdN5UJBn+uaKZF0exdDItNBCAputlke1Btfvk8GqdTCiYo0/2g/tmqAYegzOJhyZrRq/g==',
+    contract: '0.3.3-candidate.0',
+  },
 ];
 
-export function isModernCompanionContract(contract: CompanionArchiveContract['contract'] | undefined): boolean {
-  return (
-    contract === '0.1.0-beta.23' ||
-    contract === '0.1.0-beta.24' ||
-    contract === '0.1.0-beta.25' ||
-    contract === '0.1.0-beta.27' ||
-    contract === '0.1.0-beta.28' ||
-    contract === '0.1.0-beta.29'
-  );
+export function isModernCompanionContract(contract: CompanionContract | undefined): boolean {
+  return companionContractHas(contract, 'modern');
 }
 
 export function resolveCompanionArchiveContract(
@@ -121,4 +161,9 @@ export function hasPublishedCompanionV2(
   pkg: Pick<PluginPackageRecord, 'pluginId' | 'version' | 'packageDigest'>,
 ): boolean {
   return resolveCompanionArchiveContract(pkg) === '0.1.0-beta.21';
+}
+
+/** F335 交付三：the archive's state carries `desk` and its renderer settles it. */
+export function companionSupportsDesk(contract: CompanionContract | undefined): boolean {
+  return companionContractHas(contract, 'desk');
 }

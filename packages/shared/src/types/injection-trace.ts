@@ -19,7 +19,7 @@ export interface ObservedSegment {
   status: 'observed' | 'absent';
   contentHash: string | null;
   charCount: number;
-  /** Approximate token count (tiktoken cl100k_base). */
+  /** o200k_base ordinary-text token count — the counter context budgets use (`utils/token-counter`). */
   tokenEstimate: number;
 }
 

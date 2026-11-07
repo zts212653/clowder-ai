@@ -4,11 +4,14 @@ import path from 'node:path';
 import { after, before, describe, test as nativeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { registerFileMenuViewportJourneys } from './f309-file-menu-viewport.mjs';
+import { assertMenuClosed, assertPopupVisible, menuPanel, menuTrigger } from './f322-workspace-menu-observations.mjs';
 import { buildWorkspaceMenuPage, menuOrigin, routeWorkspaceMenuAssets } from './fixtures/f322-workspace-menu-build.mjs';
 
 const evidence = process.env.F322_MENU_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f322-workspace-menu';
 const menuCases = ['zh', 'en'].flatMap((language) => ['tabs', 'workspace', 'file'].map((menu) => ({ language, menu })));
 export function registerWorkspaceMenuTests(getSharedBrowser) {
+  registerFileMenuViewportJourneys();
   return describe('Workspace menu: visible placement and original actions', () => {
     let browser, built;
     const test = (name, action) => nativeTest(`Workspace menu: ${name}`, action);
@@ -43,49 +46,13 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
           // The production chrome is inside the same overflow-clipped width boundary as Workspace.
           // Its host is deliberately low and narrow: a fixed right-aligned child cannot fit.
           await page.goto(`${menuOrigin}/?pane=320&left=180&top=470`, { waitUntil: 'domcontentloaded' });
-          const trigger =
-            menu === 'tabs'
-              ? page.getByTestId('v2-more-tabs')
-              : menu === 'workspace'
-                ? page.getByTestId('v2-workspace-chrome').locator('summary').last()
-                : page.getByTestId('v2-file-chrome').locator('summary');
+          const trigger = menuTrigger(page, menu);
           await trigger.click();
-          await page.locator('[data-v2-workspace-menu]:visible').waitFor({ timeout: 1000 });
-          const measurement = await trigger.evaluate((node) => {
-            const details = node.closest('details');
-            const controls = node.getAttribute('aria-controls');
-            const panel = controls ? document.getElementById(controls) : details.querySelector(':scope > div');
-            const host = document.querySelector('[data-testid="workspace-menu-host"]');
-            const rect = panel.getBoundingClientRect(),
-              bounds = host.getBoundingClientRect();
-            const points = [
-              [rect.left + 4, rect.top + 4],
-              [rect.right - 4, Math.min(rect.bottom - 4, innerHeight - 4)],
-            ];
-            return {
-              panel: rect.toJSON(),
-              host: bounds.toJSON(),
-              viewport: { width: innerWidth, height: innerHeight },
-              pointsVisible: points.map(([x, y]) => panel.contains(document.elementFromPoint(x, y))),
-            };
-          });
+          const measurement = await assertPopupVisible(trigger);
           await writeFile(path.join(evidence, `${name}.json`), JSON.stringify(measurement, null, 2));
           await page.screenshot({ path: path.join(evidence, `${name}.png`) });
-          assert.ok(
-            measurement.panel.left >= measurement.host.left && measurement.panel.right <= measurement.host.right,
-            'the entire menu must fit its Workspace width',
-          );
-          assert.ok(
-            measurement.panel.top >= 0 && measurement.panel.bottom <= measurement.viewport.height,
-            'the menu must flip or scroll into the visible viewport',
-          );
-          assert.deepEqual(
-            measurement.pointsVisible,
-            [true, true],
-            'panel pixels must escape ancestor clipping and remain hit-testable',
-          );
           await page.keyboard.press('Escape');
-          assert.equal(await trigger.evaluate((node) => node.closest('details').open), false);
+          await assertMenuClosed(trigger);
           assert.equal(await trigger.evaluate((node) => document.activeElement === node), true);
           assert.deepEqual(errors, []);
           assert.deepEqual(unexpected, []);
@@ -123,37 +90,6 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
         await context.close();
       }
     }
-    function menuTrigger(page, menu) {
-      return menu === 'tabs'
-        ? page.getByTestId('v2-more-tabs')
-        : menu === 'workspace'
-          ? page.getByTestId('v2-workspace-chrome').locator('summary').last()
-          : page.getByTestId('v2-file-chrome').locator('summary');
-    }
-    async function assertPopupVisible(trigger) {
-      await trigger.page().locator('[data-v2-workspace-menu]:visible').waitFor({ timeout: 1000 });
-      const result = await trigger.evaluate((node) => {
-        const popup = document.getElementById(node.getAttribute('aria-controls'));
-        const r = popup.getBoundingClientRect();
-        const host = document.querySelector('[data-testid="workspace-menu-host"]').getBoundingClientRect();
-        return {
-          rect: r.toJSON(),
-          host: host.toJSON(),
-          viewport: { width: innerWidth, height: innerHeight },
-          hits: [
-            [r.left + 4, r.top + 4],
-            [r.right - 4, r.bottom - 4],
-          ].map(([x, y]) => popup.contains(document.elementFromPoint(x, y))),
-        };
-      });
-      assert.ok(
-        result.rect.left >= Math.max(0, result.host.left) &&
-          result.rect.right <= Math.min(result.viewport.width, result.host.right),
-      );
-      assert.ok(result.rect.top >= 0 && result.rect.bottom <= result.viewport.height);
-      assert.deepEqual(result.hits, [true, true]);
-      return result;
-    }
     for (const language of ['zh', 'en']) {
       for (const menu of ['tabs', 'workspace', 'file']) {
         test(`${language} ${menu} stays visible at both edges and through live resize`, async () => {
@@ -165,12 +101,7 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
             await page.waitForTimeout(50);
             const before = await assertPopupVisible(trigger);
             await page.screenshot({ path: path.join(evidence, `${name}-open.png`) });
-            assert.equal(
-              await trigger.evaluate((node) =>
-                document.getElementById(node.getAttribute('aria-controls')).contains(document.activeElement),
-              ),
-              true,
-            );
+            assert.equal(await menuPanel(trigger).evaluate((node) => node.contains(document.activeElement)), true);
             await page.getByTestId('workspace-menu-host').evaluate((node) => {
               node.style.width = '320px';
               node.style.left = '0px';
@@ -182,7 +113,7 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
             await page.screenshot({ path: path.join(evidence, `${name}-resized.png`) });
             await writeFile(path.join(evidence, `${name}.json`), JSON.stringify({ before, after }, null, 2));
             await page.mouse.click(310, 650);
-            assert.equal(await trigger.evaluate((node) => node.closest('details').open), false);
+            await assertMenuClosed(trigger);
           });
         });
       }
@@ -254,7 +185,7 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
           assert.equal(await page.getByTestId('action-result').getAttribute('data-surface-count'), '0');
         });
       });
-      test(`${language} scrolling Workspace repositions the open file menu`, async () => {
+      test(`${language} scrolling Workspace keeps the open file actions reachable`, async () => {
         await menuScenario(language, `${language}-scroll-file`, 'pane=400&left=0&top=300&scroll=1', async (page) => {
           const trigger = menuTrigger(page, 'file');
           await trigger.click();
@@ -264,15 +195,21 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
           await page.waitForFunction(() => document.querySelector('[data-testid="menu-scroll-host"]').scrollTop > 0);
           await page.waitForTimeout(50);
           const after = await assertPopupVisible(trigger);
-          assert.ok(after.rect.top < before.rect.top, 'popup follows the scrolling trigger');
+          assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+          await menuPanel(trigger).getByText('docs/menu.md', { exact: true }).first().waitFor();
           await writeFile(
             path.join(evidence, `${language}-scroll-file.json`),
             JSON.stringify({ before, after }, null, 2),
           );
-          const edit = page.getByTitle('编辑文件', { exact: true });
+          await menuPanel(trigger).locator('.file-toolbar-menu-listen button').click();
+          assert.equal(await page.getByTestId('action-result').getAttribute('data-action'), 'listen');
+          await assertMenuClosed(trigger);
+          const edit = page.getByTitle(language === 'zh' ? '编辑文件' : 'Edit file', { exact: true });
           await edit.click();
           assert.equal(await page.getByTestId('action-result').getAttribute('data-action'), 'edit');
+          await trigger.click();
           await page.keyboard.press('Escape');
+          await assertMenuClosed(trigger);
           assert.equal(await trigger.evaluate((node) => document.activeElement === node), true);
         });
       });
@@ -297,21 +234,20 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
         await menuScenario(language, `${language}-responsive-file`, 'pane=320&left=0&top=12', async (page) => {
           const trigger = menuTrigger(page, 'file');
           await trigger.click();
-          await page.locator('[data-v2-workspace-menu]:visible').waitFor({ timeout: 1000 });
+          await menuPanel(trigger).waitFor();
           const visible = () =>
-            trigger.evaluate((node) => {
-              const popup = document.getElementById(node.getAttribute('aria-controls'));
-              return ['.v2-file-menu-view', '.v2-file-menu-listen'].map(
+            menuPanel(trigger).evaluate((popup) => {
+              return ['.file-toolbar-menu-view', '.file-toolbar-menu-listen'].map(
                 (selector) => popup.querySelector(selector).getBoundingClientRect().height > 0,
               );
             });
           assert.deepEqual(await visible(), [true, true], 'narrow Workspace actions remain in More');
           const readable = await page
-            .getByTitle('切换渲染与源码')
+            .getByTitle(language === 'zh' ? '切换渲染与源码' : 'Switch rendered view and source')
             .last()
             .evaluate((node) => {
               const button = getComputedStyle(node),
-                popup = getComputedStyle(node.closest('[data-v2-workspace-menu]'));
+                popup = getComputedStyle(node.closest('[role=menu]'));
               const background =
                 button.backgroundColor === 'rgba(0, 0, 0, 0)' ? popup.backgroundColor : button.backgroundColor;
               return { foreground: button.color, background };
@@ -322,6 +258,22 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
           });
           await page.waitForTimeout(50);
           assert.deepEqual(await visible(), [false, false], 'wide Workspace keeps these actions in the toolbar');
+          for (let step = 0; step < 12; step++) {
+            await page.keyboard.press('ArrowDown');
+            const focus = await menuPanel(trigger).evaluate((node) => {
+              const active = document.activeElement;
+              const rect = active.getBoundingClientRect();
+              return { owned: node.contains(active), width: rect.width, height: rect.height };
+            });
+            assert.ok(focus.owned && focus.width > 0 && focus.height > 0, 'arrows never focus hidden overflow actions');
+          }
+          await page.keyboard.press('Escape');
+          await assertMenuClosed(trigger);
+          assert.equal(await trigger.evaluate((node) => document.activeElement === node), true);
+          await page.locator('.file-toolbar-view button').click();
+          assert.equal(await page.getByTestId('action-result').getAttribute('data-action'), 'render');
+          await page.locator('.file-toolbar-listen button').click();
+          assert.equal(await page.getByTestId('action-result').getAttribute('data-action'), 'listen');
         });
       });
     }
@@ -330,6 +282,19 @@ export function registerWorkspaceMenuTests(getSharedBrowser) {
         await menuScenario(language, `${language}-${menu}-hidden`, 'pane=320&left=0&top=12', async (page) => {
           const trigger = menuTrigger(page, menu);
           await trigger.click();
+          if (menu === 'file') {
+            const row = await page.getByTestId('content-file-toolbar').elementHandle();
+            await page.getByTestId('fixture-surface-hide').evaluate((button) => button.click());
+            await menuPanel(trigger).waitFor({ state: 'detached' });
+            await page.getByTestId('fixture-surface-show').evaluate((button) => button.click());
+            await trigger.waitFor();
+            await assertMenuClosed(trigger);
+            assert.equal(
+              await row.evaluate((node) => node === document.querySelector('[data-testid="content-file-toolbar"]')),
+              true,
+            );
+            return;
+          }
           await page.getByTestId('workspace-menu-host').evaluate((node) => {
             node.style.display = 'none';
           });

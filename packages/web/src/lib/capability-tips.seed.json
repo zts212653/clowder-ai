@@ -1,5 +1,33 @@
 [
   {
+    "id": "feature-f332-matter-recall",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "查看和更正参考消息"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/reply-layers/MatterRecallLine.tsx",
+      "anchor": "MatterRecallLine"
+    },
+    "bodySource": {
+      "path": "docs/guides/matter-recall.md",
+      "anchor": "修改已经讨论过的事"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "回复开头出现「参考了…」时，点开先看猫的归纳和支撑原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
+    "action": {
+      "type": "open_source",
+      "label": "查看参考消息的用法",
+      "sourceRef": {
+        "path": "docs/guides/matter-recall.md",
+        "anchor": "查看和更正参考消息"
+      }
+    },
+    "owner": "codex-astra"
+  },
+  {
     "id": "feature-f309-html-work-versions",
     "kind": "feature",
     "sourceRef": {
@@ -265,7 +293,7 @@
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "聊天里的文件标签可以直接点开：文档在右边继续读，图片点开看大图，PR 和提交号点开看改动。想复制完整路径或在 Finder 中显示，悬停或右键点文件标签；不用再手动复制到右边输入。",
+    "body": "聊天里的文件标签可以直接点开：文档在右边继续读，图片点开看大图，提交号点开看改动。PR 标题打开 GitHub 原页，旁边的「查看变更」在右边看改动。想复制完整路径或在 Finder 中显示，悬停或右键点文件标签。",
     "action": {
       "type": "open_source",
       "label": "查看路径标签的用法",
@@ -776,7 +804,7 @@
     "kind": "capability",
     "sourceRef": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "expert-panel"
+      "anchor": "`collaborative-thinking` — 探索与多视角判断"
     },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
@@ -784,7 +812,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "`expert-panel`"
+      "anchor": "「专家辩论」「多猫分析」「三猫讨论」"
     },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo", "developer"],
@@ -1471,15 +1499,15 @@
     "kind": "feature",
     "sourceRef": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+      "anchor": "User Journey"
     },
     "structureSource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Cat-proxy create and permanent-delete mutations"
+      "anchor": "Creating and deleting schedules"
     },
     "bodySource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Pause/resume remains direct"
+      "anchor": "Pause and resume remain direct actions after identity verification"
     },
     "contexts": ["thinking", "waiting_external", "feature_dev"],
     "audience": ["cvo", "developer", "maintainer"],
@@ -1489,10 +1517,38 @@
       "label": "查看 F139 审批边界",
       "sourceRef": {
         "path": "docs/features/F139-unified-schedule-abstraction.md",
-        "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+        "anchor": "User Journey"
       }
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f139-schedule-parameter-update",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "bodySource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "contexts": ["thinking", "waiting_external", "feature_dev"],
+    "audience": ["cvo", "developer", "maintainer"],
+    "body": "想改已有周期任务的提醒内容或订阅参数？让猫提交参数修改，核对改前、改后的值再批准；原任务身份和进度会保留，正在执行的那一轮继续用原设置。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 F139 审批边界",
+      "sourceRef": {
+        "path": "docs/features/F139-unified-schedule-abstraction.md",
+        "anchor": "User Journey"
+      }
+    },
+    "owner": "codex-astra"
   },
   {
     "id": "feature-f246-approval-hub",
@@ -3259,7 +3315,7 @@
     },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
-    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开原件。",
+    "body": "在 Workspace 选中内容后点“请猫修改”，在同一聊天里说明想法；新版可对照后采用或拒绝，标记不会改原件。视频按 F 全屏播放；本机的“⋯”可在 Finder 中显示或用默认播放器打开当前版本。",
     "action": {
       "type": "open_source",
       "label": "查看 Workspace 协作说明",

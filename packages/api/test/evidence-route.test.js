@@ -152,7 +152,7 @@ describe('GET /api/evidence/search', () => {
                 kind: 'feature',
                 status: 'active',
                 title: 'Memory Search Strategy',
-                keywords: ['related'],
+                keywords: ['F256'],
                 updatedAt: '2026-08-04T00:00:00Z',
               },
             ],

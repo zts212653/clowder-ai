@@ -3,7 +3,7 @@
 import { ChatBackgroundPicker } from '../chat-background/ChatBackgroundPicker';
 import type { CoCreatorConfig } from '../config-viewer-types';
 import { useShellCopy } from '../shell/shell-copy';
-import { ThreadDeletePreferences } from './ThreadDeletePreferences';
+import { HiddenSuggestionsCard } from '../suggestions/HiddenSuggestionsCard';
 import { YouProfileCard } from './YouProfileCard';
 import { youSettingsCopy } from './you-settings-copy';
 
@@ -21,7 +21,6 @@ export function YouSettingsPage({
     <div className="you-settings-page" data-testid="you-settings-page">
       <h1>{copy.you}</h1>
       <YouProfileCard coCreator={coCreator} loadError={loadError} reload={reload} />
-      <ThreadDeletePreferences />
       <section className="you-settings-card" aria-label={copy.background}>
         <div className="you-settings-card-heading">
           <h2>{copy.background}</h2>
@@ -29,6 +28,7 @@ export function YouSettingsPage({
         </div>
         <ChatBackgroundPicker />
       </section>
+      <HiddenSuggestionsCard />
     </div>
   );
 }

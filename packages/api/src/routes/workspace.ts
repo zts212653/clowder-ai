@@ -32,6 +32,7 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
+import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
@@ -171,6 +172,8 @@ interface WorkspaceRouteOpts extends WorkspaceNavigationEmitter {
   agentKeyRegistry?: AgentKeyAuthRegistry;
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
   skillConsumptionReceipts?: SkillConsumptionReceiptService;
+  /** Optional per-user invalidation for consumers whose cached workspace catalogue lost access. */
+  socketEmitToUser?: (userId: string, event: string, data: unknown) => void;
 }
 
 function resolveWorkspaceInteractiveUserId(request: FastifyRequest): string | null {
@@ -549,6 +552,14 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
+      const probe = await probeGitRepository(root);
+      if (probe === 'unavailable') {
+        reply.status(503);
+        return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'not-git') {
+        return { worktreeId, isGitRepository: false, changedFiles: [], diff: '' };
+      }
 
       // Get list of changed files (staged + unstaged)
       const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
@@ -662,8 +673,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.delete<{
     Querystring: { id?: string; expectedEpoch?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
-    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
-      return reply.code(401).send({ error: 'identity_required' });
+    const userId = workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId);
+    if (!userId) return reply.code(401).send({ error: 'identity_required' });
     const { id, expectedEpoch } = request.query;
     const epoch = expectedEpoch !== undefined && /^\d+$/.test(expectedEpoch) ? Number(expectedEpoch) : NaN;
     if (!id || !Number.isSafeInteger(epoch) || epoch < 0) {
@@ -672,6 +683,12 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
     try {
       const removed = await removeLinkedRoot(id, epoch);
+      if (removed) {
+        opts.socketEmitToUser?.(userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: userId,
+          reason: 'access_revoked',
+        });
+      }
       return { ok: true, removed };
     } catch (error) {
       if (error instanceof WorkspaceSecurityError) return reply.code(409).send({ error: 'connection_changed' });

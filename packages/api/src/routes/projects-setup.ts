@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { redirectRuntimeProjectPath, validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 
 const VALID_MODES = ['clone', 'init', 'skip'] as const;
 type SetupMode = (typeof VALID_MODES)[number];
@@ -139,7 +139,7 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
     throw new Error(`Unable to resolve persistent ${deploymentDefaults.brand.name} root for project setup`);
 
   app.post('/api/projects/setup', async (request, reply) => {
-    const userId = resolveHeaderUserId(request);
+    const userId = resolveDirectLocalAuthorizationUserId(request, { requireOwnerSession: true });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
@@ -219,9 +219,10 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
     }
 
     // F152 Phase B: indexing is Clowder AI-owned state and remains non-blocking.
-    if (opts?.memoryBootstrapService) {
+    if (opts?.memoryBootstrapService && userId) {
       opts.memoryBootstrapService
         .bootstrap(validated, {
+          ownerUserId: userId,
           onProgress: (p: unknown) => {
             if (userId && opts.socketManager) {
               opts.socketManager.emitToUser(userId, 'index:progress', {

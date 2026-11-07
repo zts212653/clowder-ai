@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import Fastify from 'fastify';
 import { createModuleHostInvocation } from '../dist/domains/plugin/builtin-runtime/carriers/module-host-invocation.js';
-
 import {
   InstalledPluginOperations,
   pluginOperationRoutes,
 } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const apps = [];
 
@@ -154,14 +154,14 @@ async function harness({
   );
   const invocation = createModuleHostInvocation({ runtime: { actions: () => actions } });
   const operations = new InstalledPluginOperations({
-    inventory: {
+    inventory: snapshotInventoryFixture({
       snapshot: async () => {
         const value = snapshot({ enabled, installed });
         if (confirmation && value.packages[0])
           value.packages[0].manifest.configuration[2].actions[0].confirm = 'Confirm generation';
         return value;
       },
-    },
+    }),
     configuration,
     invocation,
     timeoutMs,
@@ -402,7 +402,7 @@ test('loaded settings run before enable without restoring previous action output
   const calls = [];
   const completed = [];
   const operations = new InstalledPluginOperations({
-    inventory: { snapshot: async () => structuredClone(current) },
+    inventory: snapshotInventoryFixture({ snapshot: async () => structuredClone(current) }),
     invocation: {
       invoke: async () => {
         started++;

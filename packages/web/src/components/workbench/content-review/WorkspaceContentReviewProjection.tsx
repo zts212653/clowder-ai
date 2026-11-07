@@ -1,5 +1,6 @@
 import type { WorkspaceContentReviewAction } from '@cat-cafe/shared';
 import { useRef, useState } from 'react';
+import { WorkCoverMenuItems } from '@/components/artifacts/WorkCoverMenuItems';
 import { artworkActionsCopy } from '@/components/content-review/artwork-actions.shell-copy';
 import { GalleryPlaceEditor } from '@/components/content-review/GalleryPlaceEditor';
 import { ImageWorkProgress } from '@/components/content-review/ImageWorkProgress';
@@ -367,13 +368,34 @@ export function WorkspaceContentReviewProjection({
           imageChatPrimary={imageChatPrimary}
           wholeWorkAction={
             !comparing && !openingComparison ? (
-              <WholeWorkChatButton
-                chat={mediaChat}
-                menuItem={isV2}
-                label={
-                  isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined
-                }
-              />
+              <>
+                <WholeWorkChatButton
+                  chat={mediaChat}
+                  menuItem={isV2}
+                  label={
+                    isV2 ? (source.media.kind === 'video' ? artworkCopy.wholeVideo : artworkCopy.wholeImage) : undefined
+                  }
+                />
+                {source.kind === 'publication' &&
+                source.media.kind === 'video' &&
+                source.publication.contentRef.startsWith('work:') ? (
+                  <WorkCoverMenuItems
+                    artifact={{
+                      type: 'video',
+                      name: path.split('/').at(-1) || path,
+                      url: `/api/content-publications/${encodeURIComponent(source.publication.contentRef)}/media/${source.publication.ownerRevision}`,
+                      catId: null,
+                      createdAt: 0,
+                      sourceMessageId: null,
+                      work: { ...source.publication, currentOwnerRevision: source.publication.ownerRevision },
+                    }}
+                    title={path.split('/').at(-1) || path}
+                    focusReturn={() =>
+                      document.querySelector<HTMLElement>('[aria-haspopup="menu"][aria-expanded="true"]')
+                    }
+                  />
+                ) : null}
+              </>
             ) : undefined
           }
           onOpenDiscussion={() => {

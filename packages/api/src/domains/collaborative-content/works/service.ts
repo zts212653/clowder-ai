@@ -26,6 +26,8 @@ import {
 } from '../../video-studio/content-owner/types.js';
 import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
 import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
+import type { WorkCoverService } from './cover/cover-service.js';
+import { assertSubmitCoverSource, freezeSubmitCover, projectSubmitCover } from './cover/cover-submission.js';
 import { isHtmlWorkSource, openHtmlWorkSource, readHtmlWorkBody } from './html-source.js';
 import { resolveFileWork } from './resolve-file-work.js';
 import type { WorkReviewResponseService } from './review-response.js';
@@ -69,21 +71,27 @@ export class WorkProjectionPendingError extends Error {
 
 /** A shared submission coordinator: saved owner effect and recoverable F309 annotations, never a second head. */
 export class LivingWorkService {
+  private covers?: WorkCoverService;
   constructor(
     private readonly deps: {
       owner: ProjectContentOwnerService;
       versions: WorkVersionStore;
       source: WorkSourcePort;
       responses?: WorkReviewResponseService;
-      changed?(ownerUserId: string): void;
+      changed?(ownerUserId: string, threadId: string): void;
       authorize(input: WorkAuthorizationInput): Promise<void>;
     },
   ) {}
 
+  /** The cover owner authorizes through this service, so it is attached after construction. */
+  attachCovers(covers: WorkCoverService) {
+    this.covers = covers;
+  }
+
   async commit(raw: unknown, principal: WorkPrincipal) {
     const result = await this.commitVersion(raw, principal);
     try {
-      this.deps.changed?.(principal.userId);
+      this.deps.changed?.(principal.userId, principal.threadId);
     } catch {
       /* Projection invalidation never changes the canonical save result. */
     }
@@ -119,12 +127,13 @@ export class LivingWorkService {
       assertWorkReplay(command, principal, previous, requestDigest);
       if (command.action === 'submit' && response) {
         try {
+          projectSubmitCover(this.covers, principal, previous, command.operationId);
           return await this.deps.responses!.project(command, principal, workScope, previous, requestDigest);
         } catch (cause) {
           throw new WorkProjectionPendingError(previous, { cause });
         }
       }
-      return this.project(command, workScope, previous, requestDigest);
+      return this.project(command, workScope, previous, requestDigest, principal);
     }
     if (command.action === 'submit' && current?.currentOwnerRevision !== command.expectedOwnerRevision)
       throw new ContentOwnerConflictError(
@@ -140,6 +149,10 @@ export class LivingWorkService {
         throw new MediaOwnerError('invalid_media');
       if (command.action === 'submit' && current?.blobDigest === opened.blobDigest)
         throw new MediaOwnerError('publication_changed');
+      const frozenCover =
+        command.action === 'submit' && current
+          ? await freezeSubmitCover(this.covers, command, principal, requestDigest, current.mediaType)
+          : null;
       const pending =
         command.action === 'submit' && response
           ? await this.deps.responses!.reserve(command, principal, workScope, opened, requestDigest)
@@ -148,6 +161,7 @@ export class LivingWorkService {
         await opened.revalidate();
         await this.deps.authorize({ principal, permission: 'write', scope: workScope });
         if (pending) await this.deps.responses!.assertEffect(pending, principal);
+        await assertSubmitCoverSource(this.covers, frozenCover, principal);
       };
       const mutation = {
         ...opened,
@@ -164,12 +178,13 @@ export class LivingWorkService {
           : await this.deps.owner.settleStream({ ...mutation, expectedOwnerRevision: command.expectedOwnerRevision });
       if (command.action === 'submit' && response) {
         try {
+          projectSubmitCover(this.covers, principal, receipt, command.operationId);
           return await this.deps.responses!.project(command, principal, workScope, receipt, requestDigest);
         } catch (cause) {
           throw new WorkProjectionPendingError(receipt, { cause });
         }
       }
-      return this.project(command, workScope, receipt, requestDigest);
+      return this.project(command, workScope, receipt, requestDigest, principal);
     } finally {
       opened.stream.destroy();
     }
@@ -278,10 +293,12 @@ export class LivingWorkService {
     scope: WorkPublicationScopeV1,
     receipt: ContentSettlementReceiptV1,
     requestDigest: `sha256:${string}`,
+    principal: WorkPrincipal,
   ) {
     const reference = { contentRef: receipt.contentRef, ownerRevision: receipt.ownerRevision };
     try {
       const version = this.deps.versions.recordVersion(workVersionRecord(command, scope, receipt, requestDigest));
+      projectSubmitCover(this.covers, principal, reference, command.operationId);
       return { status: 'saved' as const, reference, receipt, version };
     } catch (cause) {
       throw new WorkProjectionPendingError(receipt, { cause });

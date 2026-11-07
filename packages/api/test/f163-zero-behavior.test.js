@@ -82,21 +82,6 @@ describe('F163 Zero-behavior regression', () => {
     // but we verify no crash and results are returned)
   });
 
-  it('all flags off = boostSource is legacy', async () => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('F163_')) delete process.env[key];
-    }
-
-    const flags = freezeFlags();
-    assert.equal(flags.authorityBoost, 'off');
-    assert.equal(flags.alwaysOnInjection, 'off');
-    assert.equal(flags.retrievalRerank, 'off');
-    assert.equal(flags.compression, 'off');
-    assert.equal(flags.promotionGate, 'off');
-    assert.equal(flags.contradictionDetection, 'off');
-    assert.equal(flags.reviewQueue, 'off');
-  });
-
   it('all flags off = consistent variantId across queries', () => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];

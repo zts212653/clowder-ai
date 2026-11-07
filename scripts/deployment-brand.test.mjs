@@ -117,7 +117,13 @@ function repositoryFixture(t, files) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts/lib'), { recursive: true });
   mkdirSync(join(root, 'assets'));
-  for (const file of [...files, 'scripts/brand-dictionary-helper.mjs']) cpSync(file, join(root, file));
+  for (const file of [
+    ...files,
+    'scripts/brand-dictionary-helper.mjs',
+    'scripts/lib/publication-branches.mjs',
+    'scripts/publication-branches.json',
+  ])
+    cpSync(file, join(root, file));
   const raw = readFileSync('assets/brand-dictionary.yaml', 'utf8').replace(
     /(- id: deployment\.repository[\s\S]*?)(?=\n {2}- id:|$)/,
     (block) =>

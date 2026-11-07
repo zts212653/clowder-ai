@@ -11,7 +11,14 @@
  */
 
 import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
-import { CLI_EFFORT_VALUES, CODEX_SPEED_VALUES, generateThreadId } from '@cat-cafe/shared';
+import {
+  CLI_EFFORT_VALUES,
+  CODEX_SPEED_VALUES,
+  generateThreadId,
+  parseWatcherThreadControl,
+  type WatcherThreadControl,
+  type WatcherThreadControlPatch,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from '../ports/OwnedThreadSeed.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
@@ -58,6 +65,7 @@ import {
   moveThreadProject,
   threadProjectIndexKey,
 } from './thread-project-index.js';
+import { updateRedisWatcherThreadControl } from './watcher-thread-control.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
@@ -440,6 +448,41 @@ export class RedisThreadStore implements IThreadStore {
     const members = await awaitStoreRead(this.redis.smembers(ThreadKeys.participants(threadId)), options);
     thread.participants = members as CatId[];
     return thread;
+  }
+
+  async getMany(
+    ids: readonly string[],
+    options?: StoreReadOptions & { recoverMissing?: false },
+  ): Promise<Map<string, Thread | null>> {
+    const result = new Map<string, Thread | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      throwIfStoreReadAborted(options);
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) {
+        pipeline.hgetall(ThreadKeys.detail(id));
+        pipeline.smembers(ThreadKeys.participants(id));
+      }
+      const replies = await awaitStoreRead(pipeline.exec(), options);
+      throwIfStoreReadAborted(options);
+      // Validate the entire wave before missing/default recovery may write.
+      const snapshots = batch.map((id, i) => ({
+        id,
+        data: readAuthoritativeHash(replies?.[i * 2], 'canonical thread batch'),
+        members: readAuthoritativeMembers(replies?.[i * 2 + 1], 'canonical thread participants'),
+      }));
+      for (const { id, data, members } of snapshots) {
+        throwIfStoreReadAborted(options);
+        if (!data?.id) result.set(id, options?.recoverMissing === false ? null : await this.get(id, options));
+        else {
+          const thread = this.hydrateThread(data);
+          thread.participants = members as CatId[];
+          result.set(id, thread);
+        }
+      }
+    }
+    return result;
   }
 
   async list(userId: string, options?: StoreReadOptions): Promise<Thread[]> {
@@ -1530,6 +1573,7 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.labels && thread.labels.length > 0) {
       result.labels = JSON.stringify(thread.labels);
     }
+    if (thread.watcher) result.watcher = JSON.stringify(parseWatcherThreadControl(thread.watcher));
     if (thread.threadMetadata) {
       result.threadMetadata = JSON.stringify(thread.threadMetadata);
     }
@@ -1770,6 +1814,7 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    if (data.watcher !== undefined) result.watcher = parseWatcherThreadControl(JSON.parse(data.watcher));
     // #872: Thread metadata anchor
     if (data.threadMetadata) {
       const meta = parseThreadMetadataJson(data.threadMetadata);
@@ -1785,6 +1830,15 @@ export class RedisThreadStore implements IThreadStore {
   async updateLabels(threadId: string, labelIds: string[]): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.redis.hset(key, { labels: JSON.stringify(labelIds) });
+  }
+
+  async updateWatcherControl(
+    threadId: string,
+    expectedRevision: number,
+    patch: WatcherThreadControlPatch,
+    metadata?: import('@cat-cafe/shared').WatcherControlWriteMetadata,
+  ): Promise<WatcherThreadControl | null> {
+    return updateRedisWatcherThreadControl(this.redis, threadId, expectedRevision, patch, metadata);
   }
 
   async getThreadMetadata(threadId: string): Promise<ThreadMetadataV1 | null> {

@@ -11,6 +11,7 @@ import { publishedMediaContentRef, samePublicationScope } from './publication.js
 import { type PublishedAnchorEvidenceVerifier, verifyPublishedAnchorEvidence } from './published-anchor-evidence.js';
 import { type MediaReviewPrincipal, PublishedMediaAccess, withContentTask } from './published-media-access.js';
 import { listRetainedPublishedMedia } from './published-media-catalogue.js';
+import { PublishedMediaFileExports } from './published-media-file-exports.js';
 import { importPreparedPublication, preparePublishedSource } from './published-media-preparation.js';
 import { probeImmutableMedia, probeImmutableVideoFile } from './published-media-probe.js';
 import type { PublishedMediaSource } from './published-media-source.js';
@@ -38,6 +39,7 @@ export class PublishedMediaService {
   readonly access: PublishedMediaAccess;
   private readonly metadata = new Map<string, ReviewedMediaAsset['media']>();
   private anchorEvidenceVerifier?: PublishedAnchorEvidenceVerifier;
+  private readonly localExports: PublishedMediaFileExports;
 
   /** F309 owns retained paragraph metadata; the media owner only fences its exact-version admission. */
   setAnchorEvidenceVerifier(verifier: PublishedAnchorEvidenceVerifier) {
@@ -56,9 +58,11 @@ export class PublishedMediaService {
       owner: ProjectContentOwnerService;
       access: PublishedMediaAccess;
       sources: PublishedMediaSource;
+      workTitle?: (reference: { contentRef: string; ownerRevision: number }, ownerUserId: string) => string | undefined;
     },
   ) {
     this.access = deps.access;
+    this.localExports = new PublishedMediaFileExports(deps.owner.localExportDirectory);
   }
 
   async prepare(input: PublicationInput | SourcePublicationInput): Promise<ReviewedMediaAsset> {
@@ -236,9 +240,21 @@ export class PublishedMediaService {
         throw new MediaOwnerError('access_denied');
       }
       await this.assertVisible(asset, scope, principal);
-      const originalPath = localFile
-        ? await this.deps.sources.localOriginalFile(content.sourcePublication, content.blobDigest)
-        : null;
+      let path = content.path;
+      if (localFile) {
+        const original = await this.deps.sources.localOriginalFile(
+          content.sourcePublication,
+          content.blobDigest,
+          principal,
+          content.mediaType,
+        );
+        if (original) path = original;
+        else {
+          const origin = await this.deps.sources.originDetails(scope, principal);
+          const title = this.deps.workTitle?.(asset, principal.userId) ?? origin.title;
+          path = await this.localExports.materialize(content, title);
+        }
+      }
       const publication =
         localFile && 'kind' in scope && scope.kind === 'message'
           ? await this.deps.sources.messageIdentity(scope.source, principal)
@@ -246,7 +262,7 @@ export class PublishedMediaService {
       if (localFile) await this.assertVisible(asset, scope, principal);
       return {
         ...content,
-        path: originalPath ?? content.path,
+        path,
         fileAuthor:
           publication?.publisherCatId ??
           (content.committedBy?.kind === 'cat' ? content.committedBy.actorId : undefined),

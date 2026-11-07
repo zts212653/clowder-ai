@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { parseIndexStatus } from '../IndexStatus';
 import { MemoryBrakes } from './MemoryBrakes';
 import { MemoryLibrary } from './MemoryLibrary';
+import { MemoryMatterDetail } from './MemoryMatterDetail';
 import { MemoryNavigation } from './MemoryNavigation';
 import { MemoryProfile } from './MemoryProfile';
 import { MemoryRecall } from './MemoryRecall';
@@ -31,6 +32,7 @@ export function MemoryPagePreview({
   profileSource,
   initialQuery,
   findSessionId,
+  matterId,
 }: {
   tab: MemoryPageTab;
   shell?: string;
@@ -39,6 +41,7 @@ export function MemoryPagePreview({
   profileSource?: ProfileSourceTarget;
   initialQuery?: string;
   findSessionId?: string | null;
+  matterId?: string;
 }) {
   const search = useMemorySearch(initialQuery);
   const rawIndex = useMemoryRead<Parameters<typeof parseIndexStatus>[0]>('/api/evidence/status');
@@ -72,6 +75,8 @@ export function MemoryPagePreview({
       <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8">
         {search.query !== null ? (
           <MemorySearch key={`${search.query}:${search.type}:${search.depth}`} search={search} />
+        ) : matterId ? (
+          <MemoryMatterDetail key={matterId} matterId={matterId} from={from} />
         ) : profileSource?.status === 'invalid' ? (
           <output className="block text-sm text-cafe-muted">来源链接不完整，请从记忆页重新打开。</output>
         ) : profileSource ? (

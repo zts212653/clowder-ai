@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // F210-H1 hotfix: agy_trajectory_progress system_info must NOT render as a system bubble.
 // Bug: backend emits a progress side-channel per trajectory step, but the frontend did not
 // recognize the type → it fell through to addMessage/addBackgroundSystemMessage and rendered the

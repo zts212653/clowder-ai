@@ -35,6 +35,8 @@ function launch(t) {
       '--strict-mcp-config',
       '--system-prompt-file',
       l0,
+      '--system-prompt-snapshot',
+      'off',
       '--append-system-prompt-file',
       appended,
       '--settings',
@@ -106,6 +108,13 @@ for (const [label, change] of [
   ['allowed tools override', (args) => args.push('--allowedTools', 'Bash')],
   ['resume', (args) => args.push('--resume', 'old-session')],
   ['prompt override', (args) => args.push('--system-prompt', 'replacement')],
+  [
+    'recorded system prompt',
+    (args) => {
+      args[args.indexOf('--system-prompt-snapshot') + 1] = 'on';
+    },
+  ],
+  ['missing snapshot opt-out', (args) => args.splice(args.indexOf('--system-prompt-snapshot'), 2)],
 ]) {
   test(`qualification rejects ${label} before native launch`, (t) => {
     const original = launch(t);

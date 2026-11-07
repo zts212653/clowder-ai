@@ -1,12 +1,16 @@
-import { pathToFileURL } from 'node:url';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
 import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
+import { type ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
+import { manageExecutionActivation } from '../../execution-worker/managed-activation.js';
+import { loadExecutionDefinition } from '../../execution-worker/module-loader.js';
+import { executionMcpFactory } from '../../execution-worker/shared-mcp.js';
 import { verifyPackageEntrypoint } from '../../external-runtime/package-entrypoint-authority.js';
 import {
   ExternalPluginRuntimeError,
@@ -52,7 +56,7 @@ import {
   assertModuleSettingsDeclaration,
   createModuleSettingsHost,
   invokeModuleSettings,
-  type ModulePluginSettingsDefinition,
+  type ModulePluginSettingsFactory,
   type ModulePluginSettingsHost,
   type PluginSettingsInvocation,
 } from './module-plugin-settings.js';
@@ -104,17 +108,16 @@ export interface PluginModuleActivationShape {
   stop(context: { reason: string }): void | Promise<void>;
 }
 
-export interface PluginModuleDefinitionShape {
+export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory {
   preStart?(host: ModulePluginHostShape): void | Promise<void>;
   preUninstall?(host: ModulePluginSettingsHost): void | Promise<void>;
   uninstall?(host: ModulePluginSettingsHost): void | Promise<void>;
-  settings?(host: ModulePluginSettingsHost): ModulePluginSettingsDefinition | Promise<ModulePluginSettingsDefinition>;
   start(host: ModulePluginHostShape): PluginModuleActivationShape | Promise<PluginModuleActivationShape>;
 }
 
 export interface ModulePluginRuntimeOptions {
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;
@@ -163,6 +166,8 @@ interface LoadedModule {
   readonly activation: PluginModuleActivationShape;
   readonly publicActions: Readonly<Record<string, unknown>>;
   readonly subscriptions: PluginMessagingSubscriptionSession;
+  readonly execution: ModuleExecutionLease;
+  readonly mcpScopes: Set<() => Promise<void>>;
 }
 
 /** Storage and child environments use strings; builtin config retains YAML field types. */
@@ -184,17 +189,20 @@ function moduleConfigValue(field: ResolvedConfigurationField): unknown {
 }
 
 /**
- * Runs a package's own code as a module inside the Host process.
+ * Owns Host capabilities and delegates package code to an execution worker.
  *
- * Host-shipped runtimes and package modules share one in-process carrier, authority fence,
+ * Host-shipped runtimes and package modules share one carrier and authority fence;
  * lifecycle and failure isolation. Static resources activate above that carrier boundary.
  */
 export class ModulePluginRuntime implements BundledPluginRuntime {
+  readonly #execution = new ModuleExecutionWorker();
   readonly #loaded = new Map<string, LoadedModule>();
   readonly #neutralActivations = new Map<string, symbol>();
   readonly #operationActivations = new Map<string, AbortController>();
   /** Teardown steps that failed; the next stop retries exactly these (F202 W2-3 h2 ⑥). */
   readonly #unfinished = new Map<string, readonly ModuleTeardownStep[]>();
+  readonly #refreshes = new Map<string, { dirty: boolean; promise: Promise<void> }>();
+  readonly #stops = new Map<string, Promise<void>>();
 
   constructor(private readonly options: ModulePluginRuntimeOptions) {}
 
@@ -205,13 +213,20 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     if (!loaded || declaration?.type !== 'mcp' || !declaration.sharedFactory) return undefined;
     const { entrypoint } = await verifyPackageEntrypoint(loaded.packageRecord, loaded.located, contributionId);
     await loaded.located.verifyIntegrity();
-    const namespace: Record<string, unknown> = await import(pathToFileURL(entrypoint).href);
+    await loaded.execution.call('factoryProbe', entrypoint, declaration.sharedFactory.export);
     if (this.#loaded.get(pluginInstanceId) !== loaded || !this.#neutralActivations.has(pluginInstanceId))
       throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'MCP factory activation changed');
-    const factory = namespace[declaration.sharedFactory.export];
-    if (typeof factory !== 'function')
-      throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'MCP factory export is unavailable');
-    return factory as SharedMcpFactory;
+    return executionMcpFactory({
+      worker: this.#execution,
+      instanceId: pluginInstanceId,
+      entrypoint,
+      exportName: declaration.sharedFactory.export,
+      scopes: loaded.mcpScopes,
+      assertCurrent: () => {
+        if (this.#loaded.get(pluginInstanceId) !== loaded || !this.#neutralActivations.has(pluginInstanceId))
+          throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'MCP factory activation changed');
+      },
+    });
   }
 
   /**
@@ -252,7 +267,17 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     // These are Host-owned authority values, never the caller's or the module's mutable objects.
     // Capture before package resolution yields, and retain them through every admission phase.
     const packageRecord = snapshotModuleAuthority(admittedPackage);
-    const located = await this.#resolvePackage(pluginInstanceId, packageRecord);
+    const originalLocated = await this.#resolvePackage(pluginInstanceId, packageRecord);
+    let execution: ModuleExecutionLease | undefined;
+    let ownsExecution = () => false;
+    const mcpScopes = new Set<() => Promise<void>>();
+    const located: VerifiedPluginPackage = {
+      ...originalLocated,
+      release: async () => {
+        if (!ownsExecution()) await execution?.close();
+        await originalLocated.release();
+      },
+    };
     const activationToken = Symbol(pluginInstanceId);
     this.#neutralActivations.set(pluginInstanceId, activationToken);
     const operationActivation = new AbortController();
@@ -266,20 +291,22 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     let subscriptions: PluginMessagingSubscriptionSession | undefined;
     try {
       const { entrypoint } = await verifyPackageEntrypoint(packageRecord, located);
-      // This carrier's integrity instant: the bytes are re-snapshotted immediately before
-      // they become live code in THIS process. There is no projection window to straddle
-      // here the way the child-process carrier has, so the check belongs next to `import()`.
+      // Keep executable admission adjacent to sending the verified private path to the worker.
       await located.verifyIntegrity();
-      const namespace = (await import(pathToFileURL(entrypoint).href)) as { default?: unknown };
-      const entry = namespace.default;
-      if (typeof (entry as PluginModuleEntrypointShape | undefined)?.create !== 'function') {
-        throw new ExternalPluginRuntimeError(
-          'INVALID_ENTRYPOINT',
-          `${packageRecord.pluginId} entrypoint must default-export a module with create()`,
-        );
-      }
-      // The package may mutate its own view, but no mutation can alter Host authority.
-      plugin = (entry as PluginModuleEntrypointShape).create(structuredClone(packageRecord.manifest));
+      const loadedExecution = await loadExecutionDefinition<PluginModuleDefinitionShape>(
+        this.#execution,
+        pluginInstanceId,
+        entrypoint,
+        packageRecord.manifest,
+      );
+      execution = loadedExecution.lease;
+      execution.onExit(() => {
+        if (this.#neutralActivations.get(pluginInstanceId) === activationToken) {
+          operationActivation.abort();
+          this.#neutralActivations.delete(pluginInstanceId);
+        }
+      });
+      plugin = loadedExecution.definition;
       if ((typeof plugin !== 'object' && typeof plugin !== 'function') || typeof plugin?.start !== 'function') {
         throw new ExternalPluginRuntimeError(
           'INVALID_ENTRYPOINT',
@@ -375,9 +402,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         log: (level, message, fields) =>
           this.options.log(level, message, { ...fields, pluginId: packageRecord.pluginId, pluginInstanceId }),
       };
-      await plugin.preStart?.(host);
+      await plugin.preStart?.(execution.retain(host) as unknown as ModulePluginHostShape);
       assertActivation();
-      const candidate = await plugin.start(host);
+      const remoteCandidate = await plugin.start(execution.retain(host) as unknown as ModulePluginHostShape);
+      const managed = manageExecutionActivation(remoteCandidate, execution, mcpScopes);
+      ownsExecution = managed.ownsExecution;
+      const candidate = managed.candidate as PluginModuleActivationShape;
       const stop = (candidate as Partial<PluginModuleActivationShape> | undefined)?.stop;
       const actions = (candidate as Partial<PluginModuleActivationShape> | undefined)?.actions;
       if (
@@ -404,6 +434,8 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         publicActions: actions,
         hasSettings,
         subscriptions,
+        execution,
+        mcpScopes,
         packageDigest: packageRecord.packageDigest,
         manifest: packageRecord.manifest,
       });
@@ -425,6 +457,18 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
    * teardown step that fails is kept, and the next stop retries it (F202 W2-3 h2 ⑥).
    */
   async stop(pluginInstanceId: string, reason: string): Promise<void> {
+    const pending = this.#stops.get(pluginInstanceId);
+    if (pending) return pending;
+    const work = this.#stopOnce(pluginInstanceId, reason);
+    this.#stops.set(pluginInstanceId, work);
+    try {
+      await work;
+    } finally {
+      if (this.#stops.get(pluginInstanceId) === work) this.#stops.delete(pluginInstanceId);
+    }
+  }
+
+  async #stopOnce(pluginInstanceId: string, reason: string): Promise<void> {
     const deactivate = () => {
       this.#operationActivations.get(pluginInstanceId)?.abort();
       this.#operationActivations.delete(pluginInstanceId);
@@ -460,19 +504,37 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
   }
 
   async configRefresh(pluginInstanceId: string): Promise<void> {
+    const running = this.#refreshes.get(pluginInstanceId);
+    if (running) {
+      running.dirty = true;
+      return running.promise;
+    }
     const loaded = this.#loaded.get(pluginInstanceId);
     if (!loaded) throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Module is not active');
-    try {
-      await loaded.activation.configRefresh?.();
-    } catch (error) {
-      // Never leave a previous generation serving after its replacement failed.
-      await this.stop(pluginInstanceId, 'configuration_refresh_failed');
-      throw error;
-    }
+    const work = { dirty: false, promise: Promise.resolve() };
+    work.promise = (async () => {
+      try {
+        do {
+          work.dirty = false;
+          await loaded.activation.configRefresh?.();
+          if (this.#loaded.get(pluginInstanceId) !== loaded)
+            throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Module refresh activation changed');
+        } while (work.dirty);
+      } catch (error) {
+        if (this.#loaded.get(pluginInstanceId) === loaded)
+          await this.stop(pluginInstanceId, 'configuration_refresh_failed');
+        throw error;
+      } finally {
+        if (this.#refreshes.get(pluginInstanceId) === work) this.#refreshes.delete(pluginInstanceId);
+      }
+    })();
+    this.#refreshes.set(pluginInstanceId, work);
+    return work.promise;
   }
 
   async uninstall(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void> {
     const located = await this.#resolvePackage(pluginInstanceId, packageRecord);
+    let execution: ModuleExecutionLease | undefined;
     let disposed = false;
     const current = async () => {
       if (disposed) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Uninstall hook has ended');
@@ -480,16 +542,24 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     try {
       const { entrypoint } = await verifyPackageEntrypoint(packageRecord, located);
       await located.verifyIntegrity();
-      const entry = (await import(pathToFileURL(entrypoint).href)).default as PluginModuleEntrypointShape;
-      if (typeof entry?.create !== 'function')
-        throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'Module must export create()');
-      const definition = entry.create(structuredClone(packageRecord.manifest));
+      const loaded = await loadExecutionDefinition<PluginModuleDefinitionShape>(
+        this.#execution,
+        pluginInstanceId,
+        entrypoint,
+        packageRecord.manifest,
+      );
+      execution = loaded.lease;
+      const definition = loaded.definition;
       const host = await createModuleSettingsHost({ pluginInstanceId, packageRecord }, this.options, current);
-      await definition.preUninstall?.(host);
-      await definition.uninstall?.(host);
+      await definition.preUninstall?.(execution.retain(host) as unknown as ModulePluginSettingsHost);
+      await definition.uninstall?.(execution.retain(host) as unknown as ModulePluginSettingsHost);
     } finally {
       disposed = true;
-      await located.release();
+      try {
+        await execution?.close();
+      } finally {
+        await located.release();
+      }
     }
   }
 
@@ -526,6 +596,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     }
     const located = await this.#resolvePackage(id, admitted.packageRecord);
     return invokeModuleSettings(admitted, {
+      executionWorker: this.#execution,
       located,
       configuration: this.options.configuration,
       ...(this.options.dataDirectoryParent === undefined
@@ -550,7 +621,11 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
   }
 
   actions(pluginInstanceId: string): Readonly<Record<string, unknown>> | undefined {
-    return this.#loaded.get(pluginInstanceId)?.publicActions;
+    const loaded = this.#loaded.get(pluginInstanceId);
+    return loaded?.execution.exited ? undefined : loaded?.publicActions;
+  }
+  completion(pluginInstanceId: string): Promise<Error | undefined> | undefined {
+    return this.#loaded.get(pluginInstanceId)?.execution.completion;
   }
   operationActivationSignal(pluginInstanceId: string): AbortSignal | undefined {
     return this.#operationActivations.get(pluginInstanceId)?.signal;

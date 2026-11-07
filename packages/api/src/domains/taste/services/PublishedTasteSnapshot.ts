@@ -55,18 +55,35 @@ export async function retainPublishedTasteSnapshot(sourceRoot: string, published
 }
 
 export interface PublishedTasteSnapshot {
+  revision?: string;
+  entries?(): Promise<Map<string, string>>;
   read(sourcePath: string): Promise<string | null>;
   list(): Promise<string[]>;
 }
 
-/** Pin one approved Git tree per read operation. Local main may remain dirty or diverged. */
+/**
+ * Pin one approved Git tree per read operation. Local main may remain dirty or diverged.
+ * Existing published repos without a retained publication ref use origin/main for every
+ * consumer (readers, browse and projection writers), rather than dirty local canonical files.
+ */
 export async function publishedTasteSnapshot(root: string): Promise<PublishedTasteSnapshot | null> {
-  let sha = await ref(root, PUBLISHED_REF);
-  if (!sha) return null;
   const synchronized = await ref(root, 'refs/remotes/origin/main');
+  let sha = (await ref(root, PUBLISHED_REF)) ?? synchronized;
+  if (!sha) return null;
   if (synchronized && (await ancestor(root, sha, synchronized))) sha = synchronized;
   const pinnedSha = sha;
   return {
+    revision: pinnedSha,
+    async entries() {
+      const tree = await git(root, ['ls-tree', '-r', '-z', pinnedSha, '--', 'docs/taste/vignettes']);
+      const entries = new Map<string, string>();
+      for (const row of tree.split('\0')) {
+        const match =
+          /^100(?:644|755) blob ([a-f0-9]+)\t(docs\/taste\/vignettes\/[\p{L}\p{N}][\p{L}\p{N}._-]*\.md)$/u.exec(row);
+        if (match) entries.set(match[2], match[1]);
+      }
+      return entries;
+    },
     async read(sourcePath) {
       if (!/^docs\/taste\/vignettes\/[\p{L}\p{N}][\p{L}\p{N}._-]*\.md$/u.test(sourcePath)) return null;
       const entry = await git(root, ['ls-tree', pinnedSha, '--', sourcePath]);

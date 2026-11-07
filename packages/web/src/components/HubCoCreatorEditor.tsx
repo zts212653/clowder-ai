@@ -164,10 +164,10 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                 setNickname(value);
                 setNicknameEdited(true);
               }}
-              placeholder="留空使用 co-creator"
+              placeholder="留空使用co-creator"
             />
             <p className="text-xs text-cafe-secondary">
-              名称用于个人资料；称呼用于猫收到的对话署名和回复，留空使用 co-creator。
+              名称用于个人资料；称呼用于猫收到的对话署名和回复，留空使用co-creator。
             </p>
             {current.nickname && coCreatorNickname(current) === undefined && !nicknameEdited ? (
               <p className="text-xs text-cafe-secondary">历史称呼“{current.nickname}”未启用，需要时可在此重新选择。</p>

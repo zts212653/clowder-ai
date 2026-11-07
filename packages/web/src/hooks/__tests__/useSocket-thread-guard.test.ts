@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * P1 regression test for cross-thread event leakage via useSocket.
  *
@@ -58,6 +59,8 @@ const mockClearThreadActiveInvocation = vi.fn();
 const mockSetPendingPreviewAutoOpen = vi.fn();
 const mockQueueThreadPreview = vi.fn();
 const mockUpsertLifecycleMessage = vi.fn();
+const mockSetLastSeq = vi.fn();
+const mockSetPendingCatchUpTargetSeq = vi.fn();
 // Stateful slot records so spawn_started/intent_mode registration behavior
 // (startedAt preservation, slot-count stability) can be asserted through the
 // real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
@@ -140,6 +143,8 @@ vi.mock('@/stores/chatStore', () => {
     setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
     queueThreadPreview: mockQueueThreadPreview,
     upsertLifecycleMessage: mockUpsertLifecycleMessage,
+    setLastSeq: mockSetLastSeq,
+    setPendingCatchUpTargetSeq: mockSetPendingCatchUpTargetSeq,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
     selector ? selector(getState()) : getState()) as {
@@ -972,7 +977,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1', 'opus', 'execute', undefined);
     expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1-kimi', 'kimi', 'execute', undefined);
     expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });
@@ -1008,7 +1013,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
     await act(async () => Promise.resolve());
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?scope=all', {
       signal: undefined,
     });
   });
@@ -2321,6 +2326,84 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
 
     const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
     expect(new Set(leftRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
+  });
+
+  it('forgets a left thread room sequence so a rejoin seeds instead of reporting a gap', () => {
+    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    mockSetLastSeq.mockClear();
+    mockSetPendingCatchUpTargetSeq.mockClear();
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    expect(mockSetLastSeq).toHaveBeenCalledWith('thread-A', 0);
+    expect(mockSetLastSeq).toHaveBeenCalledWith('thread-B', 0);
+    expect(mockSetPendingCatchUpTargetSeq).toHaveBeenCalledWith('thread-A', 0);
+    expect(mockSetPendingCatchUpTargetSeq).toHaveBeenCalledWith('thread-B', 0);
+    expect(mockSetLastSeq).not.toHaveBeenCalledWith('thread-C', 0);
+  });
+
+  describe('PR-3a: a confirmed thread room join is followed by a History catch-up', () => {
+    type JoinAck = (ack: { ok: boolean; room: string; error?: string }) => void;
+    const joinAcksFor = (room: string): JoinAck[] => {
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      return emitMock.mock.calls
+        .filter(([event, joined]) => event === 'join_room' && joined === room)
+        .map(([, , ack]) => ack as JoinAck);
+    };
+
+    it('requests one catch-up when the server confirms the join, and none before', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      // The latest request is the one the current connection epoch still accepts.
+      const ack = joinAcksFor('thread:thread-B').at(-1);
+      expect(ack).toBeTypeOf('function');
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => ack!({ ok: true, room: 'thread:thread-B' }));
+
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-B');
+    });
+
+    it('requests no catch-up for a rejected join', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      // The latest request is the one the current connection epoch still accepts.
+      const ack = joinAcksFor('thread:thread-B').at(-1);
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => ack!({ ok: false, room: 'thread:thread-B', error: 'forbidden_room' }));
+
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+    });
+
+    it('on reconnect waits for the rejoin to be confirmed before requesting a catch-up', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+      act(() => simulateServerEvent('connect', undefined));
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      mockRequestStreamCatchUp.mockClear();
+
+      act(() => simulateServerEvent('connect', undefined));
+      expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+
+      const rejoinAck = joinAcksFor('thread:thread-B').at(-1);
+      expect(rejoinAck).toBeTypeOf('function');
+      act(() => rejoinAck!({ ok: true, room: 'thread:thread-B' }));
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-B');
+    });
   });
 
   it('retains an active background room while leaving inactive rooms on a foreground switch', () => {

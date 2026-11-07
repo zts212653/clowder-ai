@@ -1,4 +1,8 @@
-import type { ActiveExecutionProjection, DeploymentWaitItemProjection } from '@cat-cafe/shared';
+import type {
+  ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
+  DeploymentWaitItemProjection,
+} from '@cat-cafe/shared';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 
 export const NOW = Date.UTC(2026, 9, 3, 12, 0, 0);
@@ -40,12 +44,32 @@ export function command(
   };
 }
 
-export function seed(executions: ActiveExecutionProjection[]) {
+export function seed(executions: ActiveExecutionProjection[], waits: ActiveHoldWaitProjection[] = []) {
   const store = useActiveExecutionStore.getState();
   store.applySnapshot('thread-here', store.beginHydration('thread-here', '/project'), {
     projectPath: '/project',
     executions,
+    waits,
   });
+}
+
+/** A held ball; `wakeAt` defaults to 02:11 local time so the words hold in every test timezone. */
+export function hold(
+  catId: string,
+  threadId: string,
+  threadTitle: string,
+  over: Partial<ActiveHoldWaitProjection> = {},
+): ActiveHoldWaitProjection {
+  return {
+    waitId: `hold-ball-${threadId}`,
+    threadId,
+    threadTitle,
+    catId,
+    since: NOW - 3 * 60_000,
+    wakeAt: new Date(2026, 9, 3, 2, 11).getTime(),
+    cancelability: { state: 'cancelable', target: { kind: 'hold_ball', taskId: `hold-ball-${threadId}` } },
+    ...over,
+  };
 }
 
 export function waitItem(over: Partial<DeploymentWaitItemProjection>): DeploymentWaitItemProjection {

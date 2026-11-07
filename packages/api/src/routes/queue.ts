@@ -23,6 +23,7 @@ import {
   type AgentSessionMutexLike,
   agentSessionMutex,
 } from '../domains/cats/services/agents/invocation/AgentSessionMutex.js';
+import { ActiveExecutionReadRepair } from '../domains/cats/services/agents/invocation/active-execution-read-repair.js';
 import {
   type ActiveInvocationProjection,
   type InvocationTrackerLike,
@@ -48,13 +49,18 @@ import { capturePendingPrivateTargets } from '../domains/cats/services/agents/in
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { settleResponseFromDraft } from '../domains/cats/services/agents/invocation/response-draft-settlement.js';
+import { responseProducers } from '../domains/cats/services/agents/invocation/response-producer-registry.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
-import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import type {
+  IInvocationRecordStore,
+  InvocationRecord,
+} from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   hasUnconfirmedProviderTeardown,
   type ITurnExecutionStore,
+  type TurnExecutionRecord,
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
@@ -73,6 +79,7 @@ import { registerCollectiveReplyRecovery } from './collective-reply-recovery.js'
 import { resolveQueueAuthorIntentByCatId } from './message-disposition-admission.js';
 import { nativeControlReceiptHooks, nativeQueueControlCommand } from './native-control-receipts.js';
 import { registerQueueRoutingRecovery } from './queue-routing-recovery.js';
+import { closeExecutionChildTurns, type ExecutionTurnClosureDeps, STOP_RESPONSE_REASON } from './queue-turn-closure.js';
 import { admitThreadParticipants } from './thread-participant-admission.js';
 
 interface ManagedCommandWakeRecoveryLike {
@@ -107,8 +114,9 @@ export interface QueueRoutesOptions {
   /** Durable child turns: the KD-21 ledger, and a running child standing in for an owner no snapshot can verify. */
   turnExecutionStore?: Pick<
     ITurnExecutionStore,
-    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending'
-  >;
+    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending' | 'listResponsePending'
+  > &
+    Partial<Pick<ITurnExecutionStore, 'listRunningByUser'>>;
   /** Existing managed-wake receipt owner; late-bound after delivery composition. */
   getManagedCommandWakeRecovery?: () => ManagedCommandWakeRecoveryLike | undefined;
   /** F295: existing durable task truth used only to project active managed commands. */
@@ -122,6 +130,19 @@ export interface QueueRoutesOptions {
   };
   /** Durable OS owner truth used when the in-memory tracker handle is gone. */
   cliExecutionOwnerService?: CliExecutionOwnerService;
+  /**
+   * #1838: Stop of one execution whose provider started and whose stop is unconfirmed. It ends the
+   * execution only with an exact stop proof (the Windows API job it belonged to verifiably closed);
+   * otherwise it names why it could not, and the execution keeps its occupancy.
+   */
+  stopUnconfirmedProvider?: (
+    record: TurnExecutionRecord,
+  ) => Promise<{ stopped: true; record: TurnExecutionRecord } | { stopped: false; reason: string }>;
+  /**
+   * #1838: the first of these executions that a Windows host job or its exact controller API still
+   * owns. No uncontrollable failure may be written over a live owner; an unknown is not one.
+   */
+  findWindowsLiveOwner?: (records: readonly TurnExecutionRecord[]) => Promise<{ invocationId: string } | undefined>;
 }
 
 function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
@@ -404,6 +425,82 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queueProcessor.releaseSlot(threadId, catId);
     }
   };
+  // Durable repair may await while another invocation owns this cat's local
+  // settlement. Never retire that producer's locks or reservation for an older run.
+  const hasReplacementProducer = (threadId: string, catId: string, executionId: string): boolean =>
+    queueProcessor.hasProcessingSlotReservation(threadId, catId) &&
+    !queueProcessor.hasProcessingSlotReservation(threadId, catId, executionId);
+  /**
+   * Whether this run may still produce its R for one cat by evidence the routes' own R claims
+   * (`ResponseProducerRegistry`, read by the closure first) do not cover. A stop then writes neither
+   * the run's turns nor R. A source that cannot answer counts as a yes:
+   * - an active tracker slot of this exact run: its route is running;
+   * - a live CLI owner of this exact run, thread, owner and cat in a complete owner snapshot, unless
+   *   the caller terminated that owner itself and holds the stop proof.
+   * A canceled tombstone or a Queue reservation is not asked: either can outlive the route (the
+   * tombstone until the slot is reused, the reservation while teardown is unconfirmed) or be gone
+   * before it (Steer and per-cat cancel release the reservation early). The registry is exact.
+   */
+  const runMayStillProduce = async (
+    run: { threadId: string; userId: string; catId: string; executionId: string; request: FastifyRequest },
+    proof: { ownerStopped?: boolean } = {},
+  ): Promise<boolean> => {
+    const { threadId, userId, catId, executionId } = run;
+    if (invocationTracker.getExecutionId?.(threadId, catId) === executionId) return true;
+    if (proof.ownerStopped) return false;
+    const owners = await processOwnerSnapshotForRequest(run.request, opts.cliExecutionOwnerService);
+    return (
+      !owners.complete ||
+      owners.owners.some(
+        (owner) =>
+          owner.executionId === executionId &&
+          owner.threadId === threadId &&
+          owner.userId === userId &&
+          owner.catId === catId,
+      )
+    );
+  };
+  const turnClosureDeps: ExecutionTurnClosureDeps = {
+    ...(messageStore ? { messageStore } : {}),
+    ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
+    ...(opts.turnExecutionStore ? { turnExecutionStore: opts.turnExecutionStore } : {}),
+    ...(opts.invocationRecordStore ? { invocationRecordStore: opts.invocationRecordStore } : {}),
+    commitFailedResponse: (response, patch) =>
+      commitRecoveredFailedResponse(
+        { socketManager, ...(messageStore ? { messageStore } : {}), invocationQueue, queueProcessor, log: app.log },
+        response,
+        patch,
+      ),
+    emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message),
+  };
+  // The parent run ends only once no sibling cat of it is still active (tracker or
+  // process owner), behind a running fence; `fence_lost` means another writer ended it.
+  const terminalizeParentUnlessSiblingActive = async (
+    input: { threadId: string; userId: string; catId: string; executionId: string; request: FastifyRequest },
+    record: InvocationRecord | null,
+    terminal: { status: 'failed' | 'canceled'; error?: string },
+  ): Promise<'terminalized' | 'skipped' | 'fence_lost'> => {
+    const siblingCatIds = (record?.targetCats ?? []).filter((catId) => catId !== input.catId);
+    const ownerSnapshot = await processOwnerSnapshotForRequest(input.request, opts.cliExecutionOwnerService);
+    const siblingStillActive = siblingCatIds.some(
+      (catId) =>
+        invocationTracker.has(input.threadId, catId) ||
+        ownerSnapshot.owners.some(
+          (owner) =>
+            owner.executionId === input.executionId &&
+            owner.threadId === input.threadId &&
+            owner.userId === input.userId &&
+            owner.catId === catId,
+        ),
+    );
+    if (!opts.invocationRecordStore || record?.status !== 'running' || siblingStillActive) return 'skipped';
+    const updated = await opts.invocationRecordStore.update(input.executionId, {
+      status: terminal.status,
+      ...(terminal.error ? { error: terminal.error } : {}),
+      expectedStatus: 'running',
+    });
+    return updated ? 'terminalized' : 'fence_lost';
+  };
 
   const preemptSteerTarget = async (
     threadId: string,
@@ -468,22 +565,26 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { ok: true, deferred: false };
   };
 
-  const failUncontrollableInvocation = async (input: {
-    threadId: string;
-    userId: string;
-    catId: string;
-    executionId: string;
-    invocationId?: string;
-    request: FastifyRequest;
-    reason?: ExecutionFailureReason;
-  }): Promise<{ reconciled: boolean }> => {
+  const failUncontrollableInvocation = async (
+    input: {
+      threadId: string;
+      userId: string;
+      catId: string;
+      executionId: string;
+      invocationId?: string;
+      request: FastifyRequest;
+      reason?: ExecutionFailureReason;
+    },
+    retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]),
+  ): Promise<{
+    reconciled: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: 'PROVIDER_LIVE_OWNER';
+  }> => {
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
-    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
-    const hasReplacementProducer = () =>
-      queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId) &&
-      !queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId, input.executionId);
     const failedAt = Date.now();
     const failureReason = input.reason ?? 'control_plane_unavailable';
     const childExecutions = opts.turnExecutionStore
@@ -491,59 +592,39 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (child) => child.threadId === input.threadId && child.userId === input.userId && child.catId === input.catId,
         )
       : [];
-    const childInvocationIds = [
-      ...new Set([
-        ...(input.invocationId ? [input.invocationId] : []),
-        ...childExecutions.map((child) => child.invocationId),
-      ]),
-    ];
+    // #1838: an owner the CLI snapshot cannot list may still be a live Windows host or its API. Its
+    // execution is not lost: nothing is written, and the caller reports the exact owner.
+    const liveOwner = await opts.findWindowsLiveOwner?.(childExecutions);
+    if (liveOwner)
+      return {
+        reconciled: false,
+        // The existing refusal contract: the Stop routes answer 503 with this exact reason.
+        controlPlaneUnavailable: true,
+        error: `原执行仍有存活的 owner，保留执行占用（invocationId=${liveOwner.invocationId}）`,
+        code: 'PROVIDER_LIVE_OWNER',
+      };
     // KD-21: the turn ends first, which enters it in the response-pending ledger atomically; its R
     // settles next, so a settlement that fails here is retried by the next startup.
-    for (const invocationId of childInvocationIds) {
-      await opts.turnExecutionStore?.transitionTerminal(invocationId, {
-        status: 'failed',
-        endedAt: failedAt,
-        terminalReason: failureReason,
-      });
-    }
-    let responseTerminalized = false;
-    for (const invocationId of childInvocationIds) {
-      // KD-21: the failed R carries what the turn had streamed, then the draft goes.
-      const settlement = await settleResponseFromDraft(
-        {
-          messageStore,
-          ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
-          ...(opts.turnExecutionStore ? { turnStore: opts.turnExecutionStore } : {}),
-          ...(opts.invocationRecordStore ? { invocationRecords: opts.invocationRecordStore } : {}),
-          commitFailedResponse: (response, patch) =>
-            commitRecoveredFailedResponse(
-              {
-                socketManager,
-                messageStore,
-                invocationQueue,
-                queueProcessor,
-                log: app.log,
-              },
-              response,
-              patch,
-            ),
-          emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message),
-        },
-        {
-          userId: input.userId,
-          threadId: input.threadId,
-          invocationId,
-          status: 'failed',
-          reason: failureReason,
-          endedAt: failedAt,
-          explanation: executionFailureExplanation(failureReason),
-        },
-      );
-      if (settlement.kind !== 'no_response') responseTerminalized = true;
+    const { responseTerminalized, deferredToProducer } = await closeExecutionChildTurns(turnClosureDeps, {
+      threadId: input.threadId,
+      userId: input.userId,
+      catId: input.catId,
+      executionId: input.executionId,
+      ...(input.invocationId ? { invocationId: input.invocationId } : {}),
+      status: 'failed',
+      reason: failureReason,
+      endedAt: failedAt,
+      explanation: executionFailureExplanation(failureReason),
+    });
+    if (deferredToProducer) {
+      // A route of this process still commits this run's R and ends its turns and parent itself;
+      // failing any of them here would race it. Only the user's Stop of pending notices is kept.
+      await retirePending();
+      return { reconciled: false };
     }
 
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
-    if (!responseTerminalized && inflight && !hasReplacementProducer()) {
+    if (!responseTerminalized && inflight && !hasReplacementProducer(input.threadId, input.catId, input.executionId)) {
       if (queueEntryOwnerId(inflight) !== input.userId) throw new Error('pre-start execution owner changed');
       const outcome = await queueProcessor.failPrestartProcessingGroup(
         input.threadId,
@@ -555,32 +636,14 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
 
     const record = await opts.invocationRecordStore.get(input.executionId);
-    const siblingCatIds = (record?.targetCats ?? []).filter((catId) => catId !== input.catId);
-    const ownerSnapshot = await processOwnerSnapshotForRequest(input.request, opts.cliExecutionOwnerService);
-    const siblingStillActive = siblingCatIds.some(
-      (catId) =>
-        invocationTracker.has(input.threadId, catId) ||
-        ownerSnapshot.owners.some(
-          (owner) =>
-            owner.executionId === input.executionId &&
-            owner.threadId === input.threadId &&
-            owner.userId === input.userId &&
-            owner.catId === catId,
-        ),
-    );
-    if (record?.status === 'running' && !siblingStillActive) {
-      const updated = await opts.invocationRecordStore.update(input.executionId, {
-        status: 'failed',
-        error: failureReason,
-        expectedStatus: 'running',
-      });
-      if (!updated) throw new Error('control-plane failure parent terminalization lost its running fence');
-    }
+    const parent = await terminalizeParentUnlessSiblingActive(input, record, {
+      status: 'failed',
+      error: failureReason,
+    });
+    if (parent === 'fence_lost') throw new Error('control-plane failure parent terminalization lost its running fence');
 
     await retirePending();
-    // Durable repair may await while another invocation owns this cat's local
-    // settlement. Never retire that producer's locks or reservation for this orphan.
-    if (!hasReplacementProducer()) {
+    if (!hasReplacementProducer(input.threadId, input.catId, input.executionId)) {
       releaseAgentSessionLocks(
         { threadId: input.threadId, userId: input.userId, catId: input.catId },
         input.request,
@@ -624,6 +687,42 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     };
   };
 
+  /**
+   * terminateExact proved every provider tree of this (run, cat) gone, so its child turns end
+   * with that proof and their R settle as canceled — unless a route of this process still claims
+   * R (`ResponseProducerRegistry`). A tracker Stop or a Steer leaves that route finishing while its
+   * tree exits, so a second Stop can resolve to the process owner and land here; the route still
+   * commits R and ends its parent, so only the stopped turn's proof is recorded.
+   * A turn terminal that cannot be written throws; an R that cannot settle is left for a recovery
+   * retry, since the stop itself is complete.
+   */
+  const closeStoppedProcessTurns = async (
+    owner: { executionId: string; invocationId: string; threadId: string; catId: string; userId: string },
+    request: FastifyRequest,
+  ): Promise<void> => {
+    const stoppedAt = Date.now();
+    const record = (await opts.invocationRecordStore?.get(owner.executionId)) ?? null;
+    const closure = await closeExecutionChildTurns(turnClosureDeps, {
+      ...owner,
+      status: 'canceled',
+      reason: STOP_RESPONSE_REASON.userStop,
+      endedAt: stoppedAt,
+      providerTeardownAt: stoppedAt,
+      producerMayRemain: () => runMayStillProduce({ ...owner, request }, { ownerStopped: true }),
+      onSettlementError: (invocationId, err) =>
+        request.log.error({ err, ...owner, invocationId }, 'stopped turn response left for recovery retry'),
+    });
+    if (closure.deferredToProducer) return;
+    const stranded = closure.unknownInvocationIds.filter((id) => closure.unsettledInvocationIds.includes(id));
+    if (stranded.length > 0) {
+      // No turn record holds these turns' R pending, so no recovery pass would retry it. The run stays
+      // unfinished rather than looking closed over a processing R.
+      request.log.warn({ ...owner, unknownInvocationIds: stranded }, 'stopped turn R left processing; run unfinished');
+      return;
+    }
+    await terminalizeParentUnlessSiblingActive({ ...owner, request }, record, { status: 'canceled' });
+  };
+
   const cancelProcessOwnedInvocation = async (input: {
     threadId: string;
     userId: string;
@@ -632,7 +731,13 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     invocationId: string;
     ownerUserId?: string;
     request: FastifyRequest;
-  }): Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }> => {
+  }): Promise<{
+    cancelled: boolean;
+    reconciled?: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: string;
+  }> => {
     const executionOwner = {
       executionId: input.executionId,
       invocationId: input.invocationId,
@@ -652,7 +757,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
     if (!processResult?.complete || !processResult.stopped) {
       try {
-        await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        const failed = await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        if (!failed.reconciled) return { cancelled: false, ...failed };
         return { cancelled: false, reconciled: true };
       } catch (err) {
         input.request.log.error({ err, ...executionOwner }, 'failed to persist control-plane failure terminal');
@@ -663,24 +769,20 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // The request already resolved this exact live owner. A zero-signal result
     // means it exited in the snapshot-to-signal race; cancellation is
     // idempotently complete and its durable child truth still needs closing.
-    const stoppedAt = Date.now();
     try {
-      await opts.turnExecutionStore?.transitionTerminal(input.invocationId, {
-        status: 'canceled',
-        endedAt: stoppedAt,
-        terminalReason: 'user_cancel',
-        providerTeardownAt: stoppedAt,
-      });
+      await closeStoppedProcessTurns(executionOwner, input.request);
     } catch (err) {
       input.request.log.error({ err, ...executionOwner }, 'controlled stop proof could not be committed');
       return { cancelled: false, controlPlaneUnavailable: true };
     }
-    releaseAgentSessionLocks(
-      { threadId: input.threadId, userId: input.ownerUserId ?? input.userId, catId: input.catId },
-      input.request,
-      'cancel',
-      [input.executionId],
-    );
+    if (!hasReplacementProducer(input.threadId, input.catId, input.executionId)) {
+      releaseAgentSessionLocks(
+        { threadId: input.threadId, userId: executionOwner.userId, catId: input.catId },
+        input.request,
+        'cancel',
+        [input.executionId],
+      );
+    }
     // terminateExact completed and durable child terminalization succeeded;
     // no live provider remains to publish this exact execution's terminal.
     socketManager.broadcastAgentMessage(
@@ -718,6 +820,158 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       releaseSlotUnlessExecutionOwnsRetirement(input.threadId, input.catId);
     }
     return { cancelled: cancelResult.cancelled };
+  };
+
+  /**
+   * #1838: a member whose provider started and whose stop is unconfirmed ends only with an exact stop
+   * proof. Every such child of this execution is stopped through that proof; the first one that cannot
+   * be names the reason, and the caller then keeps the execution and its occupancy. A child that
+   * already ended but whose reply is still owed settles here too, so a retry of the same Stop closes
+   * that reply instead of reporting a success it did not reach. Null means nothing is left.
+   */
+  const refuseUnconfirmedProviderStop = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    request: FastifyRequest;
+    publishResponse?: boolean;
+  }): Promise<{
+    error: string;
+    code: 'PROVIDER_TEARDOWN_UNCONFIRMED' | 'EXECUTION_RESPONSE_SETTLEMENT_FAILED';
+  } | null> => {
+    const inScope = (child: TurnExecutionRecord) =>
+      child.parentInvocationId === input.executionId &&
+      child.threadId === input.threadId &&
+      child.userId === input.userId &&
+      child.catId === input.catId;
+    const children = ((await opts.turnExecutionStore?.listByParent(input.executionId)) ?? []).filter(inScope);
+    const owed = ((await opts.turnExecutionStore?.listResponsePending?.()) ?? []).filter(inScope);
+    // A terminal child can still have a live route committing R. Its mutex and Queue occupancy
+    // belong to that producer too; check the pending ledger even if the parent index lost it.
+    if ([...children, ...owed].some((child) => responseProducers.has(child.invocationId))) {
+      return { error: '原执行仍有路由在写入，保留执行占用', code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+    }
+    const responsePending = new Map(owed.map((child) => [child.invocationId, child]));
+    const unconfirmed = children.filter((child) => child.status === 'running' && hasUnconfirmedProviderTeardown(child));
+    for (const child of unconfirmed) {
+      let stop: Awaited<ReturnType<NonNullable<QueueRoutesOptions['stopUnconfirmedProvider']>>>;
+      try {
+        stop = opts.stopUnconfirmedProvider
+          ? await opts.stopUnconfirmedProvider(child)
+          : { stopped: false, reason: 'no_stop_proof' };
+      } catch (err) {
+        input.request.log.error({ err, invocationId: child.invocationId }, 'stop proof could not be committed');
+        stop = { stopped: false, reason: 'stop_proof_unavailable' };
+      }
+      if (stop.stopped) {
+        responsePending.set(stop.record.invocationId, stop.record);
+        continue;
+      }
+      // Without a stop proof, only positive proof of a live owner keeps the execution: a host job
+      // still present or its exact controller alive, or this exact child in the CLI owner snapshot.
+      const snapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
+      const liveOwner =
+        snapshot.owners.some((owner) => owner.invocationId === child.invocationId) ||
+        (await opts.findWindowsLiveOwner?.([child])) !== undefined;
+      if (liveOwner)
+        return { error: `原执行停止尚未确认，保留执行占用（${stop.reason}）`, code: 'PROVIDER_TEARDOWN_UNCONFIRMED' };
+      // #1849: an unknown or unlinked one is canceled through its owner path; its physical exit stays
+      // unknown, so no teardown is written. Its R settles from the ledger below.
+      const ended = await opts.turnExecutionStore?.transitionTerminal(child.invocationId, {
+        status: 'canceled',
+        endedAt: Date.now(),
+        terminalReason: 'user_cancel',
+      });
+      if (!ended?.record || ended.record.status === 'running')
+        return { error: '原执行终态未能写入，请重试', code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED' };
+      responsePending.set(ended.record.invocationId, ended.record);
+    }
+    // The KD-21 ledger is the authority on which R is still owed: it holds every ended child of this
+    // execution whose reply never committed, whether the proof above just ended it or an earlier
+    // attempt failed after ending it. Settling from there makes the retry complete the same reply.
+    // Only a canceled turn is a Stop's to settle, and it settles as canceled. A turn of the same
+    // execution that ended any other way keeps its own outcome and its own settlement.
+    // The successful terminal transitions above atomically add their returned records to KD-21.
+    // Combine those with the initial ledger snapshot without another global census per child.
+    for (const child of [...responsePending.values()].filter((record) => record.status === 'canceled')) {
+      try {
+        await settleStoppedChildResponse(child, input);
+      } catch (err) {
+        input.request.log.error(
+          { err, invocationId: child.invocationId },
+          'stopped execution response could not be settled',
+        );
+        return {
+          error: `原执行已停止，但原回复未能结算，请重试（${String(err)}）`,
+          code: 'EXECUTION_RESPONSE_SETTLEMENT_FAILED',
+        };
+      }
+    }
+    return null;
+  };
+
+  /**
+   * #1838: the exact (parent, cat) scopes a Stop entry must reach although the parent record no longer
+   * runs. An older cancel/reset could end the parent and leave a started child running with its stop
+   * unconfirmed; admission reads children by user and still refuses its role. A Stop that then ended
+   * such a child but could not commit its reply leaves it only on the KD-21 ledger, so a retry finds it
+   * there. Only canceled turns qualify: a turn that finished on its own keeps its own settlement.
+   */
+  const endedParentStopScopes = async (threadId: string, userId: string) => {
+    const runningParents = new Set(
+      ((await opts.invocationRecordStore?.listRunningByThread(threadId, userId)) ?? []).map((record) => record.id),
+    );
+    const running = (await opts.turnExecutionStore?.listRunningByUser?.(userId)) ?? [];
+    const owed = (await opts.turnExecutionStore?.listResponsePending?.()) ?? [];
+    const scopes = [
+      ...running.filter((child) => child.status === 'running' && hasUnconfirmedProviderTeardown(child)),
+      ...owed.filter((child) => child.status === 'canceled'),
+    ].flatMap((child) => {
+      const executionId = child.parentInvocationId;
+      return executionId && !runningParents.has(executionId) && child.threadId === threadId && child.userId === userId
+        ? [{ executionId, catId: child.catId as string }]
+        : [];
+    });
+    return [...new Map(scopes.map((scope) => [`${scope.executionId}\u0000${scope.catId}`, scope])).values()];
+  };
+
+  /**
+   * KD-21: the child's terminal transition already ended its turn, so R settles from what it
+   * streamed, keeping the live body and clearing the draft and its pending ledger entry.
+   */
+  const settleStoppedChildResponse = async (
+    child: TurnExecutionRecord,
+    input: { threadId: string; userId: string; request: FastifyRequest; publishResponse?: boolean },
+  ): Promise<void> => {
+    if (!messageStore || !opts.turnExecutionStore || responseProducers.has(child.invocationId)) return;
+    await settleResponseFromDraft(
+      {
+        messageStore,
+        ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
+        turnStore: opts.turnExecutionStore,
+        ...(opts.invocationRecordStore ? { invocationRecords: opts.invocationRecordStore } : {}),
+        commitFailedResponse: (response, patch) =>
+          commitRecoveredFailedResponse(
+            { socketManager, messageStore, invocationQueue, queueProcessor, log: input.request.log },
+            response,
+            patch,
+          ),
+        // Running-parent callers publish through the existing child-turn closure below. Only an
+        // already-ended parent has no later closure, so that caller publishes this settlement.
+        ...(input.publishResponse
+          ? { emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message) }
+          : {}),
+      },
+      {
+        userId: input.userId,
+        threadId: input.threadId,
+        invocationId: child.invocationId,
+        status: 'canceled',
+        reason: child.terminalReason ?? 'user_cancel',
+        endedAt: child.endedAt ?? Date.now(),
+      },
+    );
   };
 
   const reconcileInactiveLiveInvocation = async (input: {
@@ -774,30 +1028,15 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reconciled: result.cancelled || result.reconciled === true,
         ...(processOwner.executionId !== input.executionId ? { replacement: true } : {}),
         ...(result.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.code ? { code: result.code } : {}),
       };
     }
 
     // An empty owner snapshot cannot certify a dispatched child whose exact
     // teardown has never been recorded (including unsupported Windows owners).
-    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
-    if (
-      children?.some(
-        (child) =>
-          child.parentInvocationId === input.executionId &&
-          child.threadId === input.threadId &&
-          child.userId === input.userId &&
-          child.catId === input.catId &&
-          child.status === 'running' &&
-          hasUnconfirmedProviderTeardown(child),
-      )
-    ) {
-      return {
-        reconciled: false,
-        controlPlaneUnavailable: true,
-        error: '原执行停止尚未确认，保留执行占用',
-        code: 'PROVIDER_TEARDOWN_UNCONFIRMED',
-      };
-    }
+    const refusal = await refuseUnconfirmedProviderStop(input);
+    if (refusal) return { reconciled: false, controlPlaneUnavailable: true, ...refusal };
 
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
     if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
@@ -839,6 +1078,32 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         ...(replacementExecutionId !== input.executionId ? { replacement: true } : {}),
       };
     }
+
+    // The run is gone from the tracker and the owner snapshot, so its turns end here, canceled
+    // with R settled, before the parent record — unless a route still claims its R. A closure that
+    // cannot be written is left for a recovery retry rather than turning a reconciled Stop into an
+    // error.
+    const closure = await closeExecutionChildTurns(turnClosureDeps, {
+      threadId: input.threadId,
+      userId: input.userId,
+      catId: input.catId,
+      executionId: input.executionId,
+      status: 'canceled',
+      reason: STOP_RESPONSE_REASON.userStop,
+      endedAt: Date.now(),
+      producerMayRemain: () => runMayStillProduce(input),
+      onSettlementError: (invocationId, err) =>
+        input.request.log.error(
+          { err, threadId: input.threadId, catId: input.catId, executionId: input.executionId, invocationId },
+          'reconciled turn response left for recovery retry',
+        ),
+    }).catch((err: unknown) => {
+      input.request.log.error(
+        { err, threadId: input.threadId, catId: input.catId, executionId: input.executionId },
+        'reconciled turns left for recovery retry',
+      );
+      return null;
+    });
 
     let canceledRecord = false;
     if (opts.invocationRecordStore) {
@@ -891,6 +1156,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reconciled: Boolean(
         inflight ||
           canceledRecord ||
+          (closure && closure.closedInvocationIds.length > 0) ||
           lockRelease.releasedHolders > 0 ||
           lockRelease.rejectedWaiters > 0 ||
           canReleaseSlot,
@@ -898,6 +1164,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     };
   };
 
+  const activeReadRepair = new ActiveExecutionReadRepair();
   const resolveAndRepairLiveExecutions = async (
     threadId: string,
     userId: string,
@@ -906,23 +1173,32 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const candidates = await resolveLiveExecutionCandidates(threadId, userId, request, opts);
     // Without an owner service nobody can tell whether a process owns a running record: the
     // classifier then lists it as unverified, and repairing it here would erase that.
-    if (!opts.invocationRecordStore || !opts.cliExecutionOwnerService) return candidates;
+    const invocationRecords = opts.invocationRecordStore;
+    if (!invocationRecords || !opts.cliExecutionOwnerService) return candidates;
     const processSnapshot = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
-    if (!processSnapshot.complete) return candidates;
+    if (!processSnapshot.complete) {
+      activeReadRepair.forgetThread(threadId, userId);
+      return candidates;
+    }
     const ownerExecutionTargets = new Set(
       processSnapshot.owners
         .filter((owner) => owner.threadId === threadId && owner.userId === userId)
         .map((owner) => `${owner.executionId}\u0000${owner.catId}`),
     );
     const repairedExecutionIds = new Set<string>();
-    const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, userId);
+    const runningRecords = await invocationRecords.listRunningByThread(threadId, userId);
     for (const record of runningRecords) {
-      if (Date.now() - record.updatedAt <= DEFAULT_PRESTART_RESERVATION_TTL_MS) continue;
+      if (Date.now() - record.updatedAt <= DEFAULT_PRESTART_RESERVATION_TTL_MS) {
+        activeReadRepair.forget(record);
+        continue;
+      }
       // Provider/tracker ownership can end before Queue commits the aggregate
       // terminal (outbound delivery and cursor acknowledgement still await).
       // The exact local producer owns that whole parent, including sibling cats.
-      if (record.targetCats.some((catId) => queueProcessor.hasProcessingSlotReservation(threadId, catId, record.id)))
+      if (record.targetCats.some((catId) => queueProcessor.hasProcessingSlotReservation(threadId, catId, record.id))) {
+        activeReadRepair.forget(record);
         continue;
+      }
       const repairTargets = (record.targetCats as string[]).filter((catId) => {
         const canceled = invocationTracker.getCanceledSlotIdentity?.(threadId, catId);
         const exactCanceledOwner = canceled?.executionId === record.id && canceled.userId === userId;
@@ -932,26 +1208,41 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           !ownerExecutionTargets.has(`${record.id}\u0000${catId}`)
         );
       });
-      if (repairTargets.length === 0) continue;
-      try {
-        for (const catId of repairTargets) {
-          await failUncontrollableInvocation({
-            threadId,
-            userId,
-            catId,
-            executionId: record.id,
-            request,
-            reason: 'execution_owner_lost',
-          });
-        }
-        const repairedRecord = await opts.invocationRecordStore.get(record.id);
-        if (repairedRecord?.status !== 'running') repairedExecutionIds.add(record.id);
-      } catch (err) {
-        request.log.error(
-          { err, threadId, userId, executionId: record.id, targetCats: repairTargets },
-          'active execution read-repair failed closed',
-        );
+      if (repairTargets.length === 0) {
+        activeReadRepair.forget(record);
+        continue;
       }
+      // Freeze exactly the backlog owned by this repair before the retry controller awaits
+      // new child evidence. Work arriving during that observation belongs to a later operation.
+      const pendingStops = repairTargets.map((catId) => ({
+        catId,
+        retirePending: snapshotPendingPrivateStop(threadId, userId, [catId]),
+      }));
+      const repaired = await activeReadRepair.run({
+        record,
+        targetCats: repairTargets,
+        owners: processSnapshot.owners,
+        readChildren: () => opts.turnExecutionStore?.listByParent(record.id) ?? [],
+        repair: async () => {
+          for (const { catId, retirePending } of pendingStops) {
+            await failUncontrollableInvocation(
+              {
+                threadId,
+                userId,
+                catId,
+                executionId: record.id,
+                request,
+                reason: 'execution_owner_lost',
+              },
+              retirePending,
+            );
+          }
+          const repairedRecord = await invocationRecords.get(record.id);
+          return repairedRecord?.status !== 'running';
+        },
+        log: request.log,
+      });
+      if (repaired) repairedExecutionIds.add(record.id);
     }
     return candidates.filter((candidate) => !candidate.executionId || !repairedExecutionIds.has(candidate.executionId));
   };
@@ -997,7 +1288,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const snapshot = await retryProcessOwnerSnapshot(request, opts.cliExecutionOwnerService);
       if (!snapshot.complete) {
         try {
-          await failUncontrollableInvocation({
+          const failed = await failUncontrollableInvocation({
             threadId,
             userId,
             catId,
@@ -1005,6 +1296,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             ...(candidate.invocationId ? { invocationId: candidate.invocationId } : {}),
             request,
           });
+          if (!failed.reconciled) return { cancelled: false, ...failed };
           return { cancelled: false, reconciled: true };
         } catch (err) {
           request.log.error({ err, threadId, catId, executionId }, 'failed to persist control-plane failure terminal');
@@ -1029,7 +1321,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return {
         cancelled: false,
         reconciled: reconciled.reconciled,
+        // The exact refusal (its code and its reason) is what the user needs to see, so it travels
+        // with controlPlaneUnavailable instead of being flattened into a generic control-plane error.
         ...(reconciled.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+        ...(reconciled.error ? { error: reconciled.error } : {}),
+        ...(reconciled.code ? { code: reconciled.code } : {}),
       };
     },
     reconcileInactiveLiveInvocation,
@@ -2031,8 +2327,48 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               reply.status(404);
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
             }
+            // #1838: canceling the record must not strand a started provider of any member: that
+            // child would leave the live list while it still blocks its thread/role.
+            for (const memberCat of orphanRecord.targetCats as string[]) {
+              const refusal = await refuseUnconfirmedProviderStop({
+                threadId,
+                userId: guard.userId,
+                catId: memberCat,
+                executionId: orphanRecord.id,
+                request,
+              });
+              if (refusal) {
+                reply.status(503);
+                return refusal;
+              }
+            }
 
             await snapshotPendingPrivateStop(threadId, guard.userId, orphanRecord.targetCats)();
+            // The whole record is canceled, so every cat's turns end with it: canceled, R settled,
+            // before the record — except a cat whose R a route still claims, or whose exact CLI owner
+            // is alive (this route never stops one); that producer ends them.
+            // What cannot be written is left for a recovery retry: this route exists so an
+            // orphan can always be cleared.
+            for (const orphanCat of orphanRecord.targetCats as string[]) {
+              const run = { threadId, userId: guard.userId, catId: orphanCat, executionId: orphanRecord.id, request };
+              await closeExecutionChildTurns(turnClosureDeps, {
+                ...run,
+                status: 'canceled',
+                reason: STOP_RESPONSE_REASON.userStop,
+                endedAt: Date.now(),
+                producerMayRemain: () => runMayStillProduce(run),
+                onSettlementError: (invocationId, err) =>
+                  request.log.error(
+                    { err, threadId, catId: orphanCat, executionId: orphanRecord.id, invocationId },
+                    'orphan turn response left for recovery retry',
+                  ),
+              }).catch((err: unknown) =>
+                request.log.error(
+                  { err, threadId, catId: orphanCat, executionId: orphanRecord.id },
+                  'orphan turns left for recovery retry',
+                ),
+              );
+            }
             await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
             // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
             // done + release slot for EVERY targetCat — not just the requested one.
@@ -2057,7 +2393,34 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             return { ok: true, cancelled: true };
           }
         }
+        // #1838: a started child whose parent already ended is no running record, so the branch above
+        // cannot reach it. Stop it through its exact parent before reporting the cat as inactive.
+        const endedScopes = (await endedParentStopScopes(threadId, guard.userId)).filter(
+          (scope) => scope.catId === catId,
+        );
+        for (const scope of endedScopes) {
+          const refusal = await refuseUnconfirmedProviderStop({
+            threadId,
+            userId: guard.userId,
+            ...scope,
+            request,
+            publishResponse: true,
+          });
+          if (refusal) {
+            reply.status(503);
+            return refusal;
+          }
+        }
         const lockRelease = releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+        if (endedScopes.length > 0) {
+          await retirePending();
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+          if (queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId))
+            queueProcessor.releaseSlot(threadId, catId);
+          return { ok: true, cancelled: true };
+        }
         if (
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
@@ -2109,6 +2472,46 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!guard) return;
 
     const retirePending = snapshotPendingPrivateStop(threadId, guard.userId);
+    // #1838: a running record may still own a started provider whose stop is unconfirmed, exactly
+    // like the orphan-cancel path. Consume the same exact proof *before* mutating anything: a reset
+    // that canceled the parent but left that child running would hide it from the live list while it
+    // still blocks the next message of the same thread and role. A cat this API still controls
+    // locally is not one of those: cancelAll below aborts it through its normal path, so demanding
+    // external kernel proof there would refuse a reset the product can perform itself.
+    const preResetRunningRecords = opts.invocationRecordStore
+      ? await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId)
+      : [];
+    for (const record of preResetRunningRecords) {
+      for (const memberCat of record.targetCats as string[]) {
+        if (invocationTracker.has(threadId, memberCat)) continue;
+        const refusal = await refuseUnconfirmedProviderStop({
+          threadId,
+          userId: guard.userId,
+          catId: memberCat,
+          executionId: record.id,
+          request,
+        });
+        if (refusal) {
+          reply.status(503);
+          return refusal;
+        }
+      }
+    }
+    // A child whose parent already ended is never in the running records above, yet it still blocks.
+    for (const scope of await endedParentStopScopes(threadId, guard.userId)) {
+      if (invocationTracker.has(threadId, scope.catId)) continue;
+      const refusal = await refuseUnconfirmedProviderStop({
+        threadId,
+        userId: guard.userId,
+        ...scope,
+        request,
+        publishResponse: true,
+      });
+      if (refusal) {
+        reply.status(503);
+        return refusal;
+      }
+    }
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
     //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
     //    cancelAll aborts in-flight requests and removes active slots atomically.
@@ -2201,6 +2604,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     //    Sources are guard.userId-scoped, but QueueProcessor slots are not; the final owner check
     //    below prevents a stale source from colliding with a newer foreign tracker slot.
     const slotsToRelease = new Set<string>([...cancelledCatIds, ...prestartRetirement.retiredCatIds]);
+    // The runs cancelAll just aborted still execute here; their routes commit R as canceled.
+    const abortedExecutionIds = new Set(cancelAllResult.executionIds);
     let canceledRecords = 0;
     if (opts.invocationRecordStore) {
       const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
@@ -2208,6 +2613,31 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         for (const c of record.targetCats as string[]) {
           slotsToRelease.add(c);
           addCanceledExecution(c, record.id);
+        }
+        // Every other run's turns end with its record: canceled, R settled, before the record —
+        // except a cat whose R a route still claims (cancelAll just aborted it, or it is finishing
+        // after an earlier Stop), or whose exact CLI owner is alive (force-reset never stops one).
+        // Force-reset is the last escape hatch, so what cannot be written is left for a recovery
+        // retry instead of failing the reset.
+        for (const catId of record.targetCats as string[]) {
+          const run = { threadId, userId: guard.userId, catId, executionId: record.id, request };
+          await closeExecutionChildTurns(turnClosureDeps, {
+            ...run,
+            status: 'canceled',
+            reason: STOP_RESPONSE_REASON.forceReset,
+            endedAt: Date.now(),
+            producerMayRemain: async () => abortedExecutionIds.has(record.id) || (await runMayStillProduce(run)),
+            onSettlementError: (invocationId, err) =>
+              request.log.error(
+                { err, threadId, catId, executionId: record.id, invocationId },
+                'force-reset turn response left for recovery retry',
+              ),
+          }).catch((err: unknown) =>
+            request.log.error(
+              { err, threadId, catId, executionId: record.id },
+              'force-reset turns left for recovery retry',
+            ),
+          );
         }
         await opts.invocationRecordStore.update(record.id, { status: 'canceled' });
         canceledRecords++;

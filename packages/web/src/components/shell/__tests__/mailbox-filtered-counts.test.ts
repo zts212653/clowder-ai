@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import type { UnifiedAttentionReadV1 } from '@cat-cafe/shared';
 import { test } from 'vitest';
-import { projectCompanionDecisions } from '../../../../../api/src/routes/companion-decision-projection.js';
-import type { DecisionSourceRead } from '../../../../../api/src/routes/companion-decision-sources.js';
-import type { UserMentionTodoRead } from '../../../../../api/src/routes/user-mention-todo-projection.js';
+import { projectCompanionDecisions } from '../../../../../api/dist/routes/companion-decision-projection.js';
+import type { DecisionSourceRead } from '../../../../../api/dist/routes/companion-decision-sources.js';
+import type { UserMentionTodoRead } from '../../../../../api/dist/routes/user-mention-todo-projection.js';
 import { approval } from '../../../../../api/test/growing/unified-attention-fixtures.js';
 import { deriveMailboxPanelState, deriveMailboxState } from '../unified-mailbox-state';
 

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from 'vitest';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Connector bubble theming — OKLCH pipeline
  * Tests that ConnectorBubble renders with correct theme colors and icons
@@ -11,7 +12,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ChatMessage } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { ConnectorBubble } from '../ConnectorBubble';
-import { ShellPresentationContext } from '../shell/shell-presentation';
+import {
+  SHELL_PRESENTATION_STORAGE_KEY,
+  ShellPresentationContext,
+  writeShellPresentation,
+} from '../shell/shell-presentation';
 
 // Plugin identities are registered at runtime rather than compiled into the Host.
 // These cases exercise registered presentation, so supply that prerequisite here.
@@ -55,6 +60,8 @@ describe('ConnectorBubble theme', () => {
   });
 
   beforeEach(() => {
+    // These assertions exercise the retained classic presentation explicitly.
+    writeShellPresentation('classic');
     mockApiFetch.mockClear();
     mockApiFetch.mockResolvedValue(new Response('{}', { status: 200 }));
     container = document.createElement('div');
@@ -65,6 +72,7 @@ describe('ConnectorBubble theme', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   function feedbackMessage(signalType?: string): ChatMessage {

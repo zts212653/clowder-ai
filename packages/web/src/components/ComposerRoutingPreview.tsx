@@ -170,8 +170,9 @@ export function ComposerRoutingPreview({
   );
   const readyWithRecipients = preview.status === 'ready' && preview.targetCats.length > 0;
   const visibleRecipientCount = readyWithRecipients ? Math.min(preview.targetCats.length, 3) : 0;
-  const recipientName = useWholeRecipientName(stateLabel, readyWithRecipients && !compact);
-  const recipientNameIsDecorative = compact ? true : !recipientName.fits;
+  const wholeRecipientNames = !compact && visibleRecipientCount > 1;
+  const recipientName = useWholeRecipientName(stateLabel, wholeRecipientNames);
+  const recipientNameIsDecorative = compact || (wholeRecipientNames && !recipientName.fits);
   const compactLayout = useCompactRoutingLayout({
     active: compact,
     hasChevron: !whisperPreview,
@@ -239,9 +240,9 @@ export function ComposerRoutingPreview({
           ) : null}
           {readyWithRecipients ? (
             <span
-              ref={compact ? undefined : recipientName.slot}
+              ref={wholeRecipientNames ? recipientName.slot : undefined}
               data-testid="composer-routing-name"
-              data-name-fits={compact ? undefined : recipientName.fits ? 'true' : 'false'}
+              data-name-fits={wholeRecipientNames ? (recipientName.fits ? 'true' : 'false') : undefined}
               data-compact-name-policy={compact ? 'whole-or-hidden' : undefined}
               aria-hidden={recipientNameIsDecorative}
               className={`${styles.readyName} ${compact ? 'truncate whitespace-nowrap' : ''} text-[var(--shell-ink-soft)]`}
@@ -250,15 +251,15 @@ export function ComposerRoutingPreview({
                   ? compactLayout.mobile && !compactLayout.showName
                     ? { display: 'none' }
                     : undefined
-                  : { visibility: recipientName.fits ? 'visible' : 'hidden' }
+                  : { visibility: wholeRecipientNames && !recipientName.fits ? 'hidden' : 'visible' }
               }
             >
-              {compact ? (
-                stateLabel
-              ) : (
+              {wholeRecipientNames ? (
                 <span ref={recipientName.content} className={styles.readyNameContent}>
                   {stateLabel}
                 </span>
+              ) : (
+                stateLabel
               )}
             </span>
           ) : (

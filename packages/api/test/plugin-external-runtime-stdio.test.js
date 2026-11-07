@@ -410,6 +410,8 @@ test('late lease-expiry close during heartbeat renewal creates exactly one repla
   const delegate = new MemoryHostBrokerStore();
   let beforeTransaction;
   const brokerStore = {
+    read: delegate.read,
+    readConnection: (id) => delegate.readConnection(id),
     snapshot: () => delegate.snapshot(),
     transaction: async (work) => {
       const hook = beforeTransaction;

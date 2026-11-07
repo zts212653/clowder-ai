@@ -131,6 +131,8 @@ export interface RouteStrategyDeps {
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
+  /** Rebuild stale configuration before retrying preflight; never invokes a provider. */
+  refreshServices?: () => Promise<void>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
   dotReplyTarget?: (
@@ -425,6 +427,11 @@ export interface RouteOptions {
         seenAt: number;
       }) => Promise<void>)
     | undefined;
+  /** Give the Queue owner the final binding rejection before any child is admitted. */
+  onExecutionBindingRejected?: (
+    catId: CatId,
+    reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
+  ) => Promise<boolean>;
   /** Create the exact child's durable processing response before provider startup. */
   onLifecycleInvocationStarted?:
     | ((input: {
@@ -2007,6 +2014,7 @@ async function assembleIncrementalContextInternal(
       : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
+    threadTitle: options?.threadTitle,
     currentCatId: catId,
     recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
     ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),

@@ -1550,7 +1550,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           hint: '读取这篇第一人称日记原文与 provenance',
         };
       } else if (item.sourcePath) {
-        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath);
+        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath, item);
         if (filePath) {
           item.drillDown = {
             tool: 'cat_cafe_read_file_slice',
@@ -1563,7 +1563,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return results;
   }
 
-  private resolveSourcePathForDrillDown(sourcePath: string): string | null {
+  private resolveSourcePathForDrillDown(sourcePath: string, item: EvidenceItem): string | null {
+    if (this.sourceRef === 'published:project')
+      return item.sourceHash ? `cat-cafe://published/${item.sourceHash}/${encodeURIComponent(item.anchor)}` : null;
     if (!this.sourceRoot) return null;
     const resolved = isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(this.sourceRoot, sourcePath);
     const rel = relative(this.sourceRoot, resolved);
