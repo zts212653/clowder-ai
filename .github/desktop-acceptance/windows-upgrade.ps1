@@ -54,10 +54,11 @@ try {
   $phase='candidate'
   $env:CANDIDATE_VERSION=$candidateVersion
   $env:CANDIDATE_SOURCE_SHA=$candidateSource
-  & pwsh -NoProfile -NonInteractive -File (Join-Path $PSScriptRoot 'windows.ps1') -Distribution installer -AttemptId ([guid]::NewGuid().ToString()) -Phases restore
+  & pwsh -NoProfile -NonInteractive -File (Join-Path $PSScriptRoot 'windows.ps1') -Distribution installer -AttemptId ([guid]::NewGuid().ToString()) -Phases restore -UseInstalledIdentity
   if ($LASTEXITCODE -ne 0) { throw 'Candidate in-place install or historical state readback failed' }
   if ((Get-FileHash -LiteralPath $marker).Hash -ne $identityBefore) { throw 'Upgrade changed the installation instance marker' }
   $result.instanceMarkerPreserved=$true
+  $result.installedIdentityRestored=$true
   $result.preservedThreadId=$expected.thread.id
   $passed=$true
 } finally {

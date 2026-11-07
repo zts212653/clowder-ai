@@ -7,6 +7,7 @@ param(
   [string]$AttemptId,
   [ValidateSet('create', 'restore')]
   [string[]]$Phases = @('create','restore'),
+  [switch]$UseInstalledIdentity,
   [switch]$ObservePrivatePath
 )
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,7 @@ $browser = Join-Path $PSScriptRoot 'browser.mjs'
 $node = (Get-Command node.exe).Source
 $records = [Collections.Generic.List[object]]::new()
 if ($ObservePrivatePath -and $Distribution -ne 'installer') { throw 'Private-path diagnostic is restricted to the installer restore' }
+if ($UseInstalledIdentity -and ($Distribution -ne 'installer' -or $Phases.Count -ne 1 -or $Phases[0] -ne 'restore')) { throw 'Installed identity is restricted to the installer upgrade restore' }
 
 function Expand-OwnedZip([string]$Zip, [string]$Destination, [bool]$SingleFile) {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -53,7 +55,10 @@ function Start-Owned([string]$File, [string[]]$Arguments, [string]$Working, [str
     if (Test-Path "Env:$key") { $start.Environment[$key] = (Get-Item "Env:$key").Value }
   }
   $start.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
-  foreach ($pair in @{ HOME=$instanceHome; USERPROFILE=$instanceHome; APPDATA=$appdata; LOCALAPPDATA=$local; TEMP=$temp; TMP=$temp; CAT_CAFE_DESKTOP_INSTANCE_ROOT=$State; FRONTEND_PORT=[string]$Ports[0]; API_SERVER_PORT=[string]$Ports[1]; REDIS_PORT=[string]$Ports[2] }.GetEnumerator()) { $start.Environment[$pair.Key] = $pair.Value }
+  foreach ($pair in @{ HOME=$instanceHome; USERPROFILE=$instanceHome; APPDATA=$appdata; LOCALAPPDATA=$local; TEMP=$temp; TMP=$temp }.GetEnumerator()) { $start.Environment[$pair.Key] = $pair.Value }
+  if (-not $UseInstalledIdentity) {
+    foreach ($pair in @{ CAT_CAFE_DESKTOP_INSTANCE_ROOT=$State; FRONTEND_PORT=[string]$Ports[0]; API_SERVER_PORT=[string]$Ports[1]; REDIS_PORT=[string]$Ports[2] }.GetEnumerator()) { $start.Environment[$pair.Key] = $pair.Value }
+  }
   foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
   $process = [Diagnostics.Process]::Start($start)
   $records.Add(@{ phase=$Phase; process=$process; stdout=$process.StandardOutput.ReadToEndAsync(); stderr=$process.StandardError.ReadToEndAsync() })
@@ -174,7 +179,8 @@ foreach ($kind in @($Distribution)) {
   $logsComplete = $true
   try {
     if ($kind -eq 'installer') {
-      $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/NoAutoStart=1',"/DIR=$install","/LOG=$(Join-Path $output 'setup.log')","/DesktopInstanceRoot=$state","/FrontendPort=$($ports[0])","/ApiPort=$($ports[1])","/RedisPort=$($ports[2])")
+      $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/NoAutoStart=1',"/DIR=$install","/LOG=$(Join-Path $output 'setup.log')")
+      if (-not $UseInstalledIdentity) { $arguments += @("/DesktopInstanceRoot=$state","/FrontendPort=$($ports[0])","/ApiPort=$($ports[1])","/RedisPort=$($ports[2])") }
       Wait-Success (Start-Owned $distributionFiles[0].FullName $arguments $root $state $ports 'install') 600
     } else {
       Expand-OwnedZip $distributionFiles[0].FullName $install $false
@@ -289,5 +295,5 @@ foreach ($kind in @($Distribution)) {
   'initial-plugins' | Set-Content (Join-Path $output 'phase.txt')
   & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
   if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
-  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=($Phases -contains 'create' -and $Phases -contains 'restore'); phases=$Phases; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
+  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=($Phases -contains 'create' -and $Phases -contains 'restore'); phases=$Phases; installedIdentityOnly=[bool]$UseInstalledIdentity; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
 }
