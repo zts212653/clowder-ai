@@ -32,6 +32,7 @@ import {
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
 import {
   type InvocationQueue,
+  isQueueMessageSelectionEligible,
   isSystemPinnedQueueEntry,
   type QueueEntry,
   queueEntryMessageIds,
@@ -1468,9 +1469,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (
         !anchor ||
         anchor.status !== 'queued' ||
-        anchor.kind !== 'conversation_input' ||
-        !anchor.payload.messageId ||
-        isSystemPinnedQueueEntry(anchor)
+        !isQueueMessageSelectionEligible(anchor) ||
+        !anchor.payload.messageId
       ) {
         reply.status(409);
         return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
@@ -1671,9 +1671,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         anchor &&
         (!isPublicQueueEntry(anchor) ||
           anchor.status !== 'queued' ||
-          anchor.kind !== 'conversation_input' ||
-          anchor.payload.messageId !== sourceRecordId ||
-          isSystemPinnedQueueEntry(anchor))
+          !isQueueMessageSelectionEligible(anchor) ||
+          anchor.payload.messageId !== sourceRecordId)
       ) {
         reply.status(409);
         return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
@@ -1739,11 +1738,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         intent: anchor?.execution.intent ?? 'execute',
         autoExecute: anchor?.execution.autoExecute ?? true,
         priority: anchor?.priority ?? 'normal',
-        ...(anchor?.sourceCategory
-          ? { sourceCategory: anchor.sourceCategory }
-          : source.from?.kind === 'agent'
-            ? { sourceCategory: 'a2a' as const }
-            : {}),
+        ...(anchor?.sourceCategory ? { sourceCategory: anchor.sourceCategory } : {}),
       });
 
       let reconciled = await invocationQueue.reconcileQueuedMessageTargetsDurable(
@@ -1755,6 +1750,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         authorIntentByCatId,
       );
       if (reconciled.outcome === 'not_found' && addTargetIds.length > 0) {
+        // An A2A row's execution/provenance cannot be rebuilt from History alone.
+        if (source.from.kind === 'agent') {
+          reply.status(409);
+          return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
+        }
         try {
           const admitted = await invocationQueue.enqueueDurable(buildQueueInput(addTargetIds));
           if (admitted.outcome === 'full') {
@@ -1903,7 +1903,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         reply.status(409);
         return { error: '条目正在处理中，无法改派', code: 'ENTRY_PROCESSING' };
       }
-      if (isSystemPinnedQueueEntry(entry) || entry.kind !== 'conversation_input') {
+      if (!isQueueMessageSelectionEligible(entry)) {
         reply.status(409);
         return { error: '该条目不支持不中断发送', code: 'ENTRY_CONTINUE_UNAVAILABLE' };
       }
