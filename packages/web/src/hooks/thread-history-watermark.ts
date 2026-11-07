@@ -18,22 +18,27 @@ export function useThreadHistoryReconciliation(foregroundRoomsKey: string): void
     const probe = () => {
       if (document.visibilityState !== 'visible') return;
       threadIds.forEach((threadId) => {
+        if (!appliedWatermarks.has(threadId)) return;
         const thread = useChatStore.getState().getThreadState(threadId);
         if (
           inFlight.has(threadId) ||
           thread.isLoadingHistory ||
           thread.hasActiveInvocation ||
+          (thread.intentMode === 'execute' && thread.targetCats.length > 0) ||
+          Object.values(thread.catStatuses).some((status) =>
+            ['spawning', 'pending', 'streaming', 'alive_but_silent', 'suspected_stall'].includes(status),
+          ) ||
           thread.messages.some((message) => message.isStreaming)
         )
           return;
         inFlight.add(threadId);
-        void apiFetch(`/api/messages/watermark?${new URLSearchParams({ threadId })}`, { signal: controller.signal })
+        void apiFetch(`/api/threads/${encodeURIComponent(threadId)}/watermark`, { signal: controller.signal })
           .then(async (response) => {
             if (!response.ok) return;
             const data = (await response.json()) as { watermark?: unknown };
             const watermark = data.watermark;
             if (controller.signal.aborted || (watermark !== null && typeof watermark !== 'string')) return;
-            if (!appliedWatermarks.has(threadId) || appliedWatermarks.get(threadId) !== watermark) {
+            if (appliedWatermarks.get(threadId) !== watermark) {
               useChatStore.getState().requestStreamCatchUp(threadId);
             }
           })

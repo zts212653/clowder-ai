@@ -39,11 +39,15 @@ describe('quiet foreground History reconciliation', () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     threadId = `watermark-${++counter}`;
     __resetTaskCacheForTest();
+    acknowledgeThreadHistoryWatermark(threadId, null);
     useChatStore.setState({
       currentThreadId: threadId,
       messages: [],
       hasActiveInvocation: false,
       isLoadingHistory: false,
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
       threadStates: {},
       streamCatchUpVersionByThread: {},
     });
@@ -120,6 +124,7 @@ describe('quiet foreground History reconciliation', () => {
 
   it('checks only foreground panes, leaving cached background threads alone', async () => {
     useChatStore.setState({ threadStates: { background: { ...DEFAULT_THREAD_STATE } } });
+    acknowledgeThreadHistoryWatermark('second-pane', null);
     await render(`${threadId}\0second-pane`);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch.mock.calls.some(([url]) => String(url).includes('background'))).toBe(false);
@@ -135,9 +140,16 @@ describe('quiet foreground History reconciliation', () => {
     expect(catchUps()).toBe(1);
   });
 
+  it('leaves an unknown baseline to initial History hydration', async () => {
+    await render(`${threadId}-unknown`);
+    await tick();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(catchUps(`${threadId}-unknown`)).toBe(0);
+  });
+
   it('acknowledges a successful History page even when its semantic tail is suppressed', async () => {
     fetch.mockImplementation(async (url) => {
-      if (String(url).includes('/watermark?')) return new Response(JSON.stringify({ watermark: 'position-1' }));
+      if (String(url).endsWith('/watermark')) return new Response(JSON.stringify({ watermark: 'position-1' }));
       return new Response(
         JSON.stringify({
           messages: [

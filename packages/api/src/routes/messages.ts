@@ -987,17 +987,27 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     },
   );
 
+  const readBrowserWatermark = async (threadId: string, userId: string) =>
+    (
+      await opts.messageStore.getLatestVisibleCursor(threadId, {
+        evidence: 'browser_timeline',
+        viewerUserId: userId,
+      })
+    )?.cursor ?? null;
+
   // The same durable publication frontier backs discovery and successful History hydration.
-  app.get('/api/messages/watermark', async (request, reply) => {
-    const parsed = getMessagesSchema.pick({ threadId: true }).safeParse(request.query);
+  app.get('/api/threads/:threadId/watermark', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const parsed = getMessagesSchema.pick({ threadId: true }).required().safeParse(request.params);
     if (!parsed.success) return reply.status(400).send({ error: 'Invalid threadId' });
-    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    const userId = resolveUserId(request, {});
     if (!userId) return reply.status(401).send({ error: 'Identity required' });
-    const latest = await opts.messageStore.getLatestVisibleCursor(parsed.data.threadId ?? 'default', {
-      evidence: 'browser_timeline',
-      viewerUserId: userId,
-    });
-    return { watermark: latest?.cursor ?? null };
+    const thread = await opts.threadStore?.get(parsed.data.threadId);
+    if (!thread || thread.deletedAt) return reply.status(404).send({ error: 'Thread not found' });
+    if (thread.createdBy !== 'system' && thread.createdBy !== userId) {
+      return reply.status(403).send({ error: 'Forbidden' });
+    }
+    return { watermark: await readBrowserWatermark(parsed.data.threadId, userId) };
   });
 
   // GET /api/messages - 获取历史消息
@@ -1034,12 +1044,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Capture before reading: a commit during hydration must remain discoverable on the next probe.
     const historyWatermark = before
       ? undefined
-      : ((
-          await opts.messageStore.getLatestVisibleCursor(resolvedThreadId, {
-            evidence: 'browser_timeline',
-            viewerUserId: userId,
-          })
-        )?.cursor ?? null);
+      : await readBrowserWatermark(resolvedThreadId, userId).catch(() => undefined);
 
     // Loop-scan: iteratively fetch batches from the store, filtering out
     // internal system messages, until we have `limit + 1` visible items

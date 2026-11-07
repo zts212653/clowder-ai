@@ -155,9 +155,9 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
-  isThreadMessageVisibleToViewer,
   isTimelinePublished,
   passesManagedHoldViewerBoundary,
   resolveDeliveryTimelineScore,
@@ -3129,9 +3129,7 @@ export class RedisMessageStore {
         }
         const eligible =
           options?.evidence === 'browser_timeline'
-            ? options.viewerUserId !== undefined &&
-              isThreadMessageVisibleToViewer(msg, options.viewerUserId) &&
-              msg.source?.connector !== 'routing-guard-failure'
+            ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
             : options?.evidence === 'durable_owner_read'
               ? isDurableOwnerReadEvidence(msg)
               : isTimelinePublished(msg);

@@ -80,9 +80,9 @@ import { notifyMessageTimelineChange } from '../notify-message-timeline-change.j
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
-  isThreadMessageVisibleToViewer,
   isTimelinePublished as isTimelinePublishedFn,
   passesManagedHoldViewerBoundary,
   resolveDeliveryTimelineScore,
@@ -3544,9 +3544,7 @@ export class MessageStore {
       if (seq === undefined) continue;
       const eligible =
         options?.evidence === 'browser_timeline'
-          ? options.viewerUserId !== undefined &&
-            isThreadMessageVisibleToViewer(msg, options.viewerUserId) &&
-            msg.source?.connector !== 'routing-guard-failure'
+          ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
           : options?.evidence === 'durable_owner_read'
             ? isDurableOwnerReadEvidence(msg)
             : isTimelinePublishedFn(msg);
