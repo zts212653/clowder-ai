@@ -16,6 +16,7 @@ const failed = { type: 'turn.failed', error: { message: 'Fixture turn failed' } 
 
 for (const scenario of [
   { name: 'settles and reaps a child with open stdout', probe: true },
+  { name: 'settles when the response watchdog is omitted', defaultTimeout: true },
   { name: 'wakes an already pending read without a probe', deferSignal: 'pending-read' },
   { name: 'wakes the exit wait when the signal follows stdout EOF', deferSignal: 'stdout-eof' },
   { name: 'reports a late turn.failed even when stdout stays open', tail: [failed], failure: true },
@@ -71,6 +72,9 @@ for (const scenario of [
           'abort',
           () => {
             semanticAt = performance.now();
+            if (scenario.defaultTimeout) {
+              cleanupFallback = setTimeout(() => cancellation.abort(), SEMANTIC_COMPLETION_GRACE_MS + 2_000);
+            }
             trace.push('semantic completion');
             assert.equal(child.stdout.readableEnded, false);
             assert.equal(child.exitCode, null);
@@ -85,7 +89,7 @@ for (const scenario of [
           {
             ...options,
             ...(deferredCompletion ? { semanticCompletionSignal: deferredCompletion.signal } : {}),
-            timeoutMs: 1_500,
+            ...(scenario.defaultTimeout ? {} : { timeoutMs: 1_500 }),
             onStderrLine: (line) => stderrLines.push(line),
           },
           {
