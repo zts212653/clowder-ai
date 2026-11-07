@@ -56,8 +56,8 @@ export function MemberRuntimeFields({
   preparedRuntime?: RuntimeChoice;
   onPreparedRuntime?: (runtime: RuntimeChoice) => void;
 }) {
-  const [runtimes, setRuntimes] = useState<RuntimeChoice[]>([]),
-    [error, setError] = useState(false),
+  const runtimes = useMemberModelCatalogs((state) => state.runtimes);
+  const [error, setError] = useState(false),
     [loading, setLoading] = useState(true),
     [refresh, setRefresh] = useState(0);
   const [localPreparedRuntime, setLocalPreparedRuntime] = useState<RuntimeChoice>();
@@ -69,8 +69,9 @@ export function MemberRuntimeFields({
     [runtimes, preparedRuntime, preparedSelected],
   );
   useEffect(() => {
-    useMemberModelCatalogs.setState({ runtimes: runtimeEvidence });
-  }, [runtimeEvidence]);
+    useMemberModelCatalogs.setState({ preparedRuntime: preparedSelected ? preparedRuntime : undefined });
+    return () => useMemberModelCatalogs.setState({ preparedRuntime: undefined });
+  }, [preparedRuntime, preparedSelected]);
   const { libraries: clientLibraries, error: libraryError } = useAgentClientLibraries(String(refresh), !nativeSetup);
   useEffect(() => {
     const controller = new AbortController();
@@ -83,7 +84,7 @@ export function MemberRuntimeFields({
       })
       .then((data) => {
         if (!controller.signal.aborted) {
-          setRuntimes(data.runtimes);
+          useMemberModelCatalogs.setState({ runtimes: data.runtimes });
         }
       })
       .catch(() => {
@@ -97,7 +98,7 @@ export function MemberRuntimeFields({
   const tools = memberRuntimeTools(
     preparedSelected && preparedRuntime
       ? runtimes.map((runtime) => (runtime.id === preparedRuntime.id ? preparedRuntime : runtime))
-      : runtimes,
+      : [...runtimes],
     clientLibraries,
     runtimeDrafts,
   );
@@ -117,7 +118,7 @@ export function MemberRuntimeFields({
     id: form.catId,
     clientId: form.clientId,
     agentProvider: form.acpAgentProvider,
-    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+    acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs), transport: form.acpTransport },
     accountRef: form.accountRef,
     cliConfigArgs: form.cliConfigArgs,
   };
