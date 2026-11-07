@@ -265,7 +265,10 @@ import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-clea
 import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { AgentService, ClaudeCompactionHooksFactory } from './domains/cats/services/types.js';
 import { EntrustedWorkHumanTerminalService } from './domains/growing/EntrustedWorkHumanTerminalService.js';
-import { EntrustedWorkLifecycleService } from './domains/growing/EntrustedWorkLifecycleService.js';
+import {
+  type EntrustedWorkChangeReason,
+  EntrustedWorkLifecycleService,
+} from './domains/growing/EntrustedWorkLifecycleService.js';
 import {
   EntrustedWorkOwnerReadService,
   type PreparedArtifactReader,
@@ -1057,8 +1060,12 @@ async function main(): Promise<void> {
     readDiagnostics: messageReadDiagnostics,
     onAppend: (msg) => {
       appendListener?.(msg);
-      if (userMentionEvent(msg) || hasRecentWorkPublication(msg))
-        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', { ownerUserId: msg.userId });
+      const worksChanged = hasRecentWorkPublication(msg);
+      if (userMentionEvent(msg) || worksChanged)
+        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: msg.userId,
+          ...(worksChanged ? { reason: 'works_changed' } : {}),
+        });
       custodyOpportunityObservation?.notifySourceChanged(msg);
     },
   });
@@ -1816,9 +1823,11 @@ async function main(): Promise<void> {
   const priorTimelineListener = messageStore.onTimelineChanged;
   messageStore.onTimelineChanged = (message) => {
     priorTimelineListener?.(message);
-    if (userMentionEvent(message) || message.mentionsUser || hasRecentWorkPublication(message))
+    const worksChanged = hasRecentWorkPublication(message);
+    if (userMentionEvent(message) || message.mentionsUser || worksChanged)
       socketManager?.emitToUser(message.userId, 'entrusted_work_projection_invalidated', {
         ownerUserId: message.userId,
+        ...(worksChanged ? { reason: 'works_changed' } : {}),
       });
   };
 
@@ -5573,10 +5582,13 @@ async function main(): Promise<void> {
     threadStore,
     threadBindingStore: connectorBindingStore,
     threadOwnerUserId: privateUserId,
-    onTaskDataChanged: (task) => {
+    onTaskDataChanged: (task, reason) => {
       socketManager?.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
       if (task.userId)
-        socketManager?.emitToUser(task.userId, 'entrusted_work_projection_invalidated', { ownerUserId: task.userId });
+        socketManager?.emitToUser(task.userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: task.userId,
+          ...(reason ? { reason } : {}),
+        });
     },
     members: {
       listCats: () =>
@@ -6260,7 +6272,11 @@ async function main(): Promise<void> {
   );
   const livingWorks = new LivingWorkService({
     changed: (ownerUserId, threadId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId, threadId }),
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        threadId,
+        reason: 'works_changed',
+      }),
     responses: workResponses,
     owner: collaborativeContent.owner,
     versions: artifactReview.store.works,
@@ -6556,8 +6572,11 @@ async function main(): Promise<void> {
       socketManager?.emitToUser(ownerUserId, 'content_modification_source_saved', { threadId, messageId }),
     receiptChanged: (ownerUserId, threadId, messageId) =>
       socketManager?.emitToUser(ownerUserId, 'content_modification_source_saved', { threadId, messageId }),
-    changed: (ownerUserId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    changed: (ownerUserId, reason) =>
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        ...(reason ? { reason } : {}),
+      }),
     onError: (error) => app.log.warn({ err: error }, '[content-modification] request remains pending'),
   });
   acceptedWorkspaceArtifactsHolder.current = modifications.workspaceArtifacts;
@@ -6715,8 +6734,11 @@ async function main(): Promise<void> {
     tracker: invocationTracker,
     ...(taskApprovedDelegateProvider ? { taskApprovedDelegateProvider } : {}),
   });
-  const invalidateEntrustedWorkProjection = (ownerUserId: string) =>
-    socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId });
+  const invalidateEntrustedWorkProjection = (ownerUserId: string, reason?: EntrustedWorkChangeReason) =>
+    socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+      ownerUserId,
+      ...(reason ? { reason } : {}),
+    });
   const entrustedWorkHumanTerminal = new EntrustedWorkHumanTerminalService({
     tasks: taskStore,
     lifecycle: new EntrustedWorkLifecycleService(taskStore, {
@@ -7249,6 +7271,7 @@ async function main(): Promise<void> {
   await app.register(workspaceRoutes, {
     callbackRegistry: registry,
     agentKeyRegistry,
+    socketEmitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
     threadStore,
     skillConsumptionReceipts,
     socketEmit: (event, data, room) => {
