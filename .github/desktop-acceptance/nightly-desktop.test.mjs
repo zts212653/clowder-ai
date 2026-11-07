@@ -40,7 +40,7 @@ test('desktop preparation stages the same attempt and rejects different installe
     cases: [{ id: 'DESKTOP-ONBOARDING', platform, executor: 'computer-use' }],
   };
   const gh =
-    (bytes, reportHasHash = false) =>
+    (bytes, reportHasHash = false, extraCases = []) =>
     (args) => {
       if (args[0] === 'api') {
         return JSON.stringify({
@@ -53,7 +53,10 @@ test('desktop preparation stages the same attempt and rejects different installe
       const [artifact, , destination] = args.slice(-3);
       fs.mkdirSync(destination, { recursive: true });
       if (artifact === 'desktop-nightly-report-attempt-2') {
-        fs.writeFileSync(path.join(destination, 'report.json'), JSON.stringify(report));
+        fs.writeFileSync(
+          path.join(destination, 'report.json'),
+          JSON.stringify({ ...report, cases: [...report.cases, ...extraCases] }),
+        );
         if (reportHasHash) {
           const installer = path.join(destination, 'desktop-evidence-windows-x64-attempt-2', 'installer');
           fs.mkdirSync(installer, { recursive: true });
@@ -121,4 +124,24 @@ test('desktop preparation stages the same attempt and rejects different installe
     /candidate-source-unavailable/,
   );
   assert.equal(fs.existsSync(path.join(root, 'blocked-worker', 'package')), false);
+  const identity = { platform, code: 'windows-installed-identity' };
+  await assert.rejects(
+    prepareDesktop(
+      repo,
+      '123',
+      platform,
+      path.join(root, 'wrong-identity'),
+      gh('candidate bytes', true, [{ ...identity, executor: 'windows-installer' }]),
+    ),
+    /platform verifier rejected the installed candidate identity/,
+  );
+  assert.equal(fs.existsSync(path.join(root, 'wrong-identity', 'package')), false);
+  const portableFailed = await prepareDesktop(
+    repo,
+    '123',
+    platform,
+    path.join(root, 'portable-rejected'),
+    gh('candidate bytes', true, [{ ...identity, executor: 'windows-portable' }]),
+  );
+  assert.equal(portableFailed.packageSha256, digest);
 });

@@ -1,248 +1,142 @@
-name: Desktop Nightly
-
+name: Desktop failure attribution proof
 on:
-  schedule:
-    - cron: '0 16 * * *'
   workflow_dispatch:
-    inputs:
-      branch:
-        description: 'Source branch in this repository'
-        default: next
-        type: string
-      suite:
-        description: 'Smoke selects L0, full selects L0–L3'
-        default: smoke
-        type: choice
-        options: [smoke, full]
-      platform:
-        description: 'Desktop target'
-        default: all
-        type: choice
-        options: [all, windows-x64, macos-arm64, macos-x64]
-      version:
-        description: 'Optional package version override'
-        type: string
-
 permissions:
   contents: read
-
-concurrency:
-  group: desktop-nightly-${{ github.event_name }}-${{ inputs.branch || 'next' }}-${{ inputs.platform || 'all' }}-${{ inputs.suite || 'smoke' }}
-  cancel-in-progress: false
-
+  actions: read
 jobs:
-  resolve:
-    runs-on: ubuntu-latest
-    outputs:
-      source: ${{ steps.target.outputs.source }}
-      version: ${{ steps.target.outputs.version }}
-      date: ${{ steps.selection.outputs.date }}
-      platforms: ${{ steps.selection.outputs.platforms }}
-      mac: ${{ steps.selection.outputs.mac }}
-      arch: ${{ steps.selection.outputs.arch }}
-    steps:
-      - id: selection
-        name: Record the requested coverage
-        env:
-          PLATFORM: ${{ inputs.platform || 'all' }}
-        run: |
-          case "$PLATFORM" in
-            all) platforms='["windows-x64","macos-arm64","macos-x64"]'; mac='["arm64","x64"]'; arch=all ;;
-            windows-x64) platforms='["windows-x64"]'; mac='[]'; arch=all ;;
-            macos-arm64) platforms='["macos-arm64"]'; mac='["arm64"]'; arch=arm64 ;;
-            macos-x64) platforms='["macos-x64"]'; mac='["x64"]'; arch=x64 ;;
-            *) exit 2 ;;
-          esac
-          {
-            echo "date=$(TZ=Asia/Shanghai date +%F)"
-            echo "platforms=$platforms"
-            echo "mac=$mac"
-            echo "arch=$arch"
-          } >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - id: target
-        name: Freeze the source and package version
-        env:
-          BRANCH: ${{ inputs.branch || 'next' }}
-          VERSION_OVERRIDE: ${{ inputs.version }}
-        run: |
-          git check-ref-format "refs/heads/$BRANCH"
-          git fetch --no-tags origin "refs/heads/$BRANCH"
-          source="$(git rev-parse --verify FETCH_HEAD)"
-          echo "source=$source" >> "$GITHUB_OUTPUT"
-          version="$VERSION_OVERRIDE"
-          if [[ -z "$version" ]]; then
-            version="$(git show "$source:desktop/package.json" | jq -er .version)"
-          fi
-          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Report a source or configuration blocker
-        if: failure()
-        run: echo '桌面回归未能冻结待测提交或包版本。检查同一作业中的 Freeze the source and package version。' >> "$GITHUB_STEP_SUMMARY"
-
-  build-windows:
-    needs: resolve
-    if: contains(fromJSON(needs.resolve.outputs.platforms), 'windows-x64')
-    uses: ./.github/workflows/build-windows-desktop.yml
-    with:
-      version: ${{ needs.resolve.outputs.version }}
-      source-sha: ${{ needs.resolve.outputs.source }}
-
-  build-mac:
-    needs: resolve
-    if: needs.resolve.outputs.mac != '[]'
-    uses: ./.github/workflows/build-mac-dmg.yml
-    with:
-      version: ${{ needs.resolve.outputs.version }}
-      source-sha: ${{ needs.resolve.outputs.source }}
-      arch: ${{ needs.resolve.outputs.arch }}
-
-  verify-windows:
-    needs: [resolve, build-windows]
-    if: always() && needs.resolve.result == 'success' && contains(fromJSON(needs.resolve.outputs.platforms), 'windows-x64') && !cancelled()
-    runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
-      CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
-      CANDIDATE_DIRECT_ARTIFACTS: '1'
-      NIGHTLY_SUITE: ${{ inputs.suite || 'smoke' }}
-      NIGHTLY_PLATFORMS: ${{ needs.resolve.outputs.platforms }}
-      NIGHTLY_DATE: ${{ needs.resolve.outputs.date }}
-      NIGHTLY_PLATFORM: windows-x64
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github/desktop-acceptance
-            scripts/test-helpers
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Allocate a fresh verification root
-        shell: pwsh
-        run: |
-          $candidate = Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
-          New-Item -ItemType Directory -Path $candidate | Out-Null
-          "CANDIDATE_ROOT=$candidate" >> $env:GITHUB_ENV
-      - uses: actions/download-artifact@v4
-        id: installer
-        continue-on-error: true
-        with:
-          name: windows-installer-${{ needs.resolve.outputs.version }}-attempt-${{ github.run_attempt }}
-          path: ${{ env.CANDIDATE_ROOT }}/installer-distribution
-      - uses: actions/download-artifact@v4
-        id: portable
-        if: inputs.suite == 'full'
-        continue-on-error: true
-        with:
-          name: windows-portable-${{ needs.resolve.outputs.version }}-attempt-${{ github.run_attempt }}
-          path: ${{ env.CANDIDATE_ROOT }}/portable-distribution
-      - name: Verify the real distributions selected by the suite
-        shell: pwsh
-        env:
-          INSTALLER_DOWNLOAD: ${{ steps.installer.outcome }}
-          PORTABLE_DOWNLOAD: ${{ steps.portable.outcome }}
-        run: |
-          $kinds = @()
-          if ($env:INSTALLER_DOWNLOAD -eq 'success') { $kinds += 'installer' }
-          if ($env:PORTABLE_DOWNLOAD -eq 'success') { $kinds += 'portable' }
-          if ($kinds.Count) { node .github/desktop-acceptance/distributions.mjs @kinds }
-      - name: Collect per-case results
-        if: always() && env.CANDIDATE_ROOT != ''
-        shell: pwsh
-        run: node .github/desktop-acceptance/nightly-evidence.mjs collect (Join-Path $env:CANDIDATE_ROOT 'evidence')
-      - uses: actions/upload-artifact@v4
-        if: always() && env.CANDIDATE_ROOT != ''
-        with:
-          name: desktop-evidence-windows-x64-attempt-${{ github.run_attempt }}
-          path: ${{ env.CANDIDATE_ROOT }}/evidence
-          if-no-files-found: error
-          retention-days: 30
-
-  verify-mac:
-    needs: [resolve, build-mac]
-    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.mac != '[]' && !cancelled()
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ fromJSON(needs.resolve.outputs.mac || '[]') }}
-    runs-on: ${{ matrix.arch == 'x64' && 'macos-15-intel' || 'macos-latest' }}
-    timeout-minutes: 30
+        mode: [baseline, fixed, normal]
     env:
-      CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
-      CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
-      NIGHTLY_SUITE: ${{ inputs.suite || 'smoke' }}
-      NIGHTLY_PLATFORMS: ${{ needs.resolve.outputs.platforms }}
-      NIGHTLY_DATE: ${{ needs.resolve.outputs.date }}
-      NIGHTLY_PLATFORM: macos-${{ matrix.arch }}
+      MODE: ${{ matrix.mode }}
+      CANDIDATE_SOURCE_SHA: 3569a9b6422723faf3a586b68232c140f84b44a1
+      CANDIDATE_VERSION: '1.14.0'
+      NIGHTLY_PLATFORM: macos-arm64
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 2
+          persist-credentials: false
+          sparse-checkout: .github/desktop-acceptance
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg-arm64-1.14.0-attempt-1
+          run-id: 42304140475
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/distribution
+      - name: Exercise Mac with the same real DMG
+        shell: bash
+        run: |
+          files=("$RUNNER_TEMP/distribution"/*.dmg)
+          [[ "${#files[@]}" == 1 ]]
+          [[ "$(shasum -a 256 "${files[0]}" | cut -d ' ' -f1)" == f6963ddc70f1ff054c001f05491e72468f35e7b97dd149fc52052e0bc3b6de4b ]]
+          if [[ "$MODE" == baseline ]]; then
+            git show HEAD^:.github/desktop-acceptance/macos.sh > .github/desktop-acceptance/macos.sh
+          fi
+          if [[ "$MODE" != normal ]]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".github/desktop-acceptance/browser.mjs")
+          source = p.read_text()
+          marker = "  const healthResponse = await fetch("
+          assert source.count(marker) == 1
+          p.write_text(source.replace(marker, "  throw new Error('Injected verification failure after renderer ready');\n" + marker))
+          PY
+          fi
+          result=0
+          bash .github/desktop-acceptance/macos.sh "$RUNNER_TEMP/distribution" "$RUNNER_TEMP/evidence" || result=$?
+          receipt="$RUNNER_TEMP/evidence/dmg-result.json"
+          if [[ "$MODE" == baseline ]]; then
+            [[ "$result" != 0 ]]
+            jq -e '.status == "failed" and .code == "macos-cleanup-unconfirmed" and .cleanupConfirmed == false' "$receipt"
+          elif [[ "$MODE" == fixed ]]; then
+            [[ "$result" != 0 ]]
+            jq -e '.status == "failed" and .code == "macos-create" and .cleanupConfirmed == true' "$receipt"
+          else
+            [[ "$result" == 0 ]]
+            jq -e '.status == "passed" and .code == "macos-complete" and .cleanupConfirmed == true' "$receipt"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-failure-${{ matrix.mode }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 14
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, fixed]
+    env:
+      MODE: ${{ matrix.mode }}
+      CANDIDATE_SOURCE_SHA: 3569a9b6422723faf3a586b68232c140f84b44a1
+      CANDIDATE_VERSION: '1.14.0'
+      CANDIDATE_DIRECT_ARTIFACTS: '1'
+      NIGHTLY_SUITE: full
+      NIGHTLY_DATE: '2026-11-07'
+      NIGHTLY_PLATFORM: windows-x64
+      NIGHTLY_PLATFORMS: '["windows-x64"]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
           sparse-checkout: |
             .github/desktop-acceptance
             scripts/test-helpers
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
-        with:
-          name: macos-dmg-${{ matrix.arch }}-${{ needs.resolve.outputs.version }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/dmg-distribution
-      - name: Verify the installed application from the real DMG
-        run: bash .github/desktop-acceptance/macos.sh "$RUNNER_TEMP/dmg-distribution" "$RUNNER_TEMP/desktop-evidence"
-      - name: Collect per-case results
-        if: always()
-        run: node .github/desktop-acceptance/nightly-evidence.mjs collect "$RUNNER_TEMP/desktop-evidence"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: desktop-evidence-macos-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/desktop-evidence
-          if-no-files-found: error
-          retention-days: 30
-
-  report:
-    needs: [resolve, verify-windows, verify-mac]
-    if: always() && needs.resolve.outputs.platforms != '' && !cancelled()
-    runs-on: ubuntu-latest
-    env:
-      CANDIDATE_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
-      CANDIDATE_VERSION: ${{ needs.resolve.outputs.version }}
-      NIGHTLY_SUITE: ${{ inputs.suite || 'smoke' }}
-      NIGHTLY_PLATFORMS: ${{ needs.resolve.outputs.platforms }}
-      NIGHTLY_DATE: ${{ needs.resolve.outputs.date }}
-      NIGHTLY_BRANCH: ${{ inputs.branch || 'next' }}
-      NIGHTLY_RUN_BLOCKER: ${{ needs.resolve.result != 'success' && (needs.resolve.outputs.source != '' && 'package-version-unavailable' || 'candidate-source-unavailable') || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/desktop-acceptance
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@v4
-        if: needs.resolve.result == 'success'
-        with:
-          pattern: desktop-evidence-*-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/desktop-report
-      - name: Summarize selected cases including missing evidence
-        if: always()
+      - name: Allocate isolated root
+        shell: pwsh
         run: |
-          mkdir -p "$RUNNER_TEMP/desktop-report"
-          node .github/desktop-acceptance/nightly-evidence.mjs report "$RUNNER_TEMP/desktop-report"
+          $root = Join-Path $env:RUNNER_TEMP "f330-candidate-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $root | Out-Null
+          "CANDIDATE_ROOT=$root" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-1.14.0-attempt-1
+          run-id: 42304140475
+          github-token: ${{ github.token }}
+          path: ${{ env.CANDIDATE_ROOT }}/installer-distribution
+      - name: Exercise optional probe interruption with the same real EXE
+        shell: pwsh
+        run: |
+          $files=@(Get-ChildItem -LiteralPath "$env:CANDIDATE_ROOT/installer-distribution" -File)
+          if ($files.Count -ne 1 -or (Get-FileHash -LiteralPath $files[0].FullName).Hash -ne 'DDE5648C0DF73E3D574BA9AA06A548F4452AE5970F5B23E5757C13FD328813D9') {throw 'Installer hash changed'}
+          $file='.github/desktop-acceptance/windows.ps1'
+          if($env:MODE -eq 'baseline'){ git show "HEAD^:$file" | Set-Content -LiteralPath $file }
+          $content=Get-Content -Raw -LiteralPath $file
+          $marker='function Test-PortConflicts([string]$Exe, [string]$Install, [string]$Output, [int[]]$Ports) {'
+          if(-not $content.Contains($marker)){throw 'Expected fault site not found'}
+          $content.Replace($marker,($marker + [char]10 + "  throw 'Injected optional port probe interruption'")) | Set-Content -LiteralPath $file
+          node .github/desktop-acceptance/distributions.mjs installer
+          $nativeExit=$LASTEXITCODE
+          $root="$env:CANDIDATE_ROOT/evidence"
+          node .github/desktop-acceptance/nightly-evidence.mjs collect $root
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $suite=Get-Content -Raw -LiteralPath "$root/receipts.json"|ConvertFrom-Json
+          $l0=$suite.receipts|Where-Object id -eq 'WIN-CLEAN-INSTALL'
+          $l1=$suite.receipts|Where-Object id -eq 'WIN-PORT-PREFLIGHT'
+          if($env:MODE -eq 'baseline'){
+            if($nativeExit -eq 0 -or $l0.code -ne 'windows-install' -or $l1.code -ne 'windows-port-preflight-unavailable'){throw 'Old behavior did not reproduce'}
+          } else {
+            if(-not(Test-Path -LiteralPath "$root/installer/create-checks.json") -or $l0.code -eq 'windows-install' -or $l1.code -ne 'windows-port-preflight-interrupted'){throw 'Optional probe still contaminated L0 attribution'}
+          }
+          $l0,$l1|ConvertTo-Json -Depth 4 -Compress
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: desktop-nightly-report-attempt-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/desktop-report/report.*
-            ${{ runner.temp }}/desktop-report/desktop-evidence-*-attempt-${{ github.run_attempt }}/installer/distribution-sha256.json
-            ${{ runner.temp }}/desktop-report/desktop-evidence-*-attempt-${{ github.run_attempt }}/distribution-sha256.txt
-          if-no-files-found: error
-          retention-days: 30
+          name: windows-failure-${{ matrix.mode }}
+          path: ${{ env.CANDIDATE_ROOT }}/evidence
+          retention-days: 14
