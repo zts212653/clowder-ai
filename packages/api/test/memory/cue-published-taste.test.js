@@ -8,6 +8,7 @@ import {
   tasteTaskBundleAnchor,
 } from '../../dist/domains/memory/cue/sources/TasteMemoryCueSource.js';
 import { TasteMemoryReader } from '../../dist/domains/memory/taste/TasteMemoryReader.js';
+import { FileTasteRepository } from '../../dist/domains/taste/services/TasteRepository.js';
 import { owner, publishedCueFixture, sha, vignette } from '../helpers/cue-published-fixture.js';
 import { git } from '../taste-publication-fixtures.js';
 
@@ -26,6 +27,26 @@ async function readMap(source) {
   assert.equal(result.status, 'ok');
   return { projection, result };
 }
+
+test('published Taste snapshots use repository-relative paths from a nested checkout directory', async (t) => {
+  const approved = vignette('Pinned published scene');
+  const f = publishedCueFixture(t, { [path]: approved });
+  const nested = join(f.runtime, 'nested/consumer');
+  mkdirSync(nested, { recursive: true });
+  const repository = new FileTasteRepository(nested);
+  const snapshot = await repository.publishedSnapshot();
+  assert.ok(snapshot);
+  assert.deepEqual(await snapshot.list(), [path]);
+  assert.deepEqual([...(await snapshot.entries()).keys()], [path]);
+  assert.equal(await snapshot.read(path), approved);
+  const source = new CanonicalTasteMemoryCueSource(repository, owner);
+  assert.equal((await readMap(source)).result.payload.vignettes[0].payload.scene, 'Pinned published scene');
+
+  const corrected = vignette('New published scene');
+  f.publish(path, corrected);
+  assert.equal(await snapshot.read(path), approved, 'an open snapshot keeps its pinned publication');
+  assert.equal(await (await repository.publishedSnapshot()).read(path), corrected, 'the next operation sees new refs');
+});
 
 test('Taste cue discovery and drill use published public files while private sources stay local and owner scoped', async (t) => {
   const approved = vignette('Approved published scene');
