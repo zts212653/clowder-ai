@@ -36,6 +36,7 @@ import {
 } from './preview-auto-open-delivery';
 import { hasStaleActiveThreadPresentation } from './queue-active-invocation-reconciliation';
 import { bumpLiveQueueHydrateEpoch, getLiveQueueHydrateEpoch, reconcileThreadWithServer } from './queue-reconciliation';
+import { useThreadHistoryReconciliation } from './thread-history-watermark';
 
 export { reconcileThreadWithServer } from './queue-reconciliation';
 
@@ -1322,6 +1323,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   );
 
   const foregroundRoomsKey = (foregroundThreadIds ?? (threadId ? [threadId] : [])).join('\u0000');
+  useThreadHistoryReconciliation(foregroundRoomsKey);
   const previousForegroundRoomsKeyRef = useRef<string | null>(null);
 
   // Initial mount restores a bounded legacy set for background catch-up. Once

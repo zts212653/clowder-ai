@@ -157,6 +157,7 @@ import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
+  isThreadMessageVisibleToViewer,
   isTimelinePublished,
   passesManagedHoldViewerBoundary,
   resolveDeliveryTimelineScore,
@@ -3097,7 +3098,7 @@ export class RedisMessageStore {
   async getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): Promise<{ cursor: string; messageId: string } | null> {
@@ -3127,7 +3128,13 @@ export class RedisMessageStore {
           continue;
         }
         const eligible =
-          options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublished(msg);
+          options?.evidence === 'browser_timeline'
+            ? options.viewerUserId !== undefined &&
+              isThreadMessageVisibleToViewer(msg, options.viewerUserId) &&
+              msg.source?.connector !== 'routing-guard-failure'
+            : options?.evidence === 'durable_owner_read'
+              ? isDurableOwnerReadEvidence(msg)
+              : isTimelinePublished(msg);
         if (!eligible) continue;
         if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
         if (msg.deletedAt) continue;

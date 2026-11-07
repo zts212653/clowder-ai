@@ -987,6 +987,19 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     },
   );
 
+  // The same durable publication frontier backs discovery and successful History hydration.
+  app.get('/api/messages/watermark', async (request, reply) => {
+    const parsed = getMessagesSchema.pick({ threadId: true }).safeParse(request.query);
+    if (!parsed.success) return reply.status(400).send({ error: 'Invalid threadId' });
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) return reply.status(401).send({ error: 'Identity required' });
+    const latest = await opts.messageStore.getLatestVisibleCursor(parsed.data.threadId ?? 'default', {
+      evidence: 'browser_timeline',
+      viewerUserId: userId,
+    });
+    return { watermark: latest?.cursor ?? null };
+  });
+
   // GET /api/messages - 获取历史消息
   app.get('/api/messages', async (request) => {
     const parseResult = getMessagesSchema.safeParse(request.query);
@@ -1017,6 +1030,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Always thread-scoped — default to 'default' thread for lobby
     const resolvedThreadId = threadId ?? 'default';
+
+    // Capture before reading: a commit during hydration must remain discoverable on the next probe.
+    const historyWatermark = before
+      ? undefined
+      : ((
+          await opts.messageStore.getLatestVisibleCursor(resolvedThreadId, {
+            evidence: 'browser_timeline',
+            viewerUserId: userId,
+          })
+        )?.cursor ?? null);
 
     // Loop-scan: iteratively fetch batches from the store, filtering out
     // internal system messages, until we have `limit + 1` visible items
@@ -1275,6 +1298,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     return normalizeJsonUnicode({
       messages: chatItems,
       hasMore,
+      ...(historyWatermark !== undefined ? { historyWatermark } : {}),
     });
   });
 };
