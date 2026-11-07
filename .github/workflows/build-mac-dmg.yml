@@ -20,6 +20,15 @@ on:
         required: false
         type: boolean
         default: false
+      source-sha:
+        description: "Exact candidate source commit for an artifact-only build"
+        required: false
+        type: string
+      arch:
+        description: "DMG architecture or all"
+        required: false
+        type: string
+        default: all
   workflow_dispatch:
     inputs:
       version:
@@ -36,8 +45,7 @@ on:
           - x64
         default: all
 
-permissions:
-  contents: write
+# Release builds inherit write access from the release caller.
 
 jobs:
   build:
@@ -58,6 +66,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.source-sha || github.sha }}
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -77,7 +87,7 @@ jobs:
         run: ls -la dist/
 
       - name: Upload DMG to release
-        if: inputs.upload-to-release
+        if: inputs.upload-to-release && !inputs.source-sha
         uses: softprops/action-gh-release@v2
         with:
           files: dist/ClowderAI-*-${{ matrix.arch }}.dmg
@@ -87,6 +97,25 @@ jobs:
         if: ${{ !inputs.upload-to-release }}
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ matrix.arch }}-${{ inputs.version }}
+          name: macos-dmg-${{ matrix.arch }}-${{ inputs.version }}${{ inputs.source-sha && format('-attempt-{0}', github.run_attempt) || '' }}
           path: dist/ClowderAI-*-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+      - name: Record the published DMG SHA-256
+        if: inputs.source-sha && !inputs.upload-to-release
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          shopt -s nullglob
+          images=(dist/ClowderAI-*-"$ARCH".dmg)
+          [[ "${#images[@]}" == 1 ]]
+          shasum -a 256 "${images[0]}" | cut -d ' ' -f 1 > "$RUNNER_TEMP/installer-sha256.txt"
+
+      - name: Upload the DMG checksum
+        if: inputs.source-sha && !inputs.upload-to-release
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-hash-macos-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installer-sha256.txt
           if-no-files-found: error
