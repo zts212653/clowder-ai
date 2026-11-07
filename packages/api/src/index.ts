@@ -1057,8 +1057,12 @@ async function main(): Promise<void> {
     readDiagnostics: messageReadDiagnostics,
     onAppend: (msg) => {
       appendListener?.(msg);
-      if (userMentionEvent(msg) || hasRecentWorkPublication(msg))
-        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', { ownerUserId: msg.userId });
+      const worksChanged = hasRecentWorkPublication(msg);
+      if (userMentionEvent(msg) || worksChanged)
+        socketManager?.emitToUser(msg.userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: msg.userId,
+          ...(worksChanged ? { reason: 'works_changed' } : {}),
+        });
       custodyOpportunityObservation?.notifySourceChanged(msg);
     },
   });
@@ -1816,9 +1820,11 @@ async function main(): Promise<void> {
   const priorTimelineListener = messageStore.onTimelineChanged;
   messageStore.onTimelineChanged = (message) => {
     priorTimelineListener?.(message);
-    if (userMentionEvent(message) || message.mentionsUser || hasRecentWorkPublication(message))
+    const worksChanged = hasRecentWorkPublication(message);
+    if (userMentionEvent(message) || message.mentionsUser || worksChanged)
       socketManager?.emitToUser(message.userId, 'entrusted_work_projection_invalidated', {
         ownerUserId: message.userId,
+        ...(worksChanged ? { reason: 'works_changed' } : {}),
       });
   };
 
@@ -6260,7 +6266,11 @@ async function main(): Promise<void> {
   );
   const livingWorks = new LivingWorkService({
     changed: (ownerUserId, threadId) =>
-      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId, threadId }),
+      socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        threadId,
+        reason: 'works_changed',
+      }),
     responses: workResponses,
     owner: collaborativeContent.owner,
     versions: artifactReview.store.works,
@@ -7247,6 +7257,7 @@ async function main(): Promise<void> {
   }
 
   await app.register(workspaceRoutes, {
+    socketEmitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
     callbackRegistry: registry,
     agentKeyRegistry,
     threadStore,
