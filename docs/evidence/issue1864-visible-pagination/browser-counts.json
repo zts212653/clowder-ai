@@ -7,7 +7,7 @@
           "label": "initial single page",
           "pages": 1,
           "recent": 0,
-          "cards": 24,
+          "cards": 48,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -20,7 +20,20 @@
           "label": "scroll admits no GET",
           "pages": 1,
           "recent": 0,
-          "cards": 24,
+          "cards": 128,
+          "preview": 0,
+          "counter": "已加载 128 件",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "scroll expands all loaded cards before server continuation",
+          "pages": 1,
+          "recent": 0,
+          "cards": 128,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -43,10 +56,23 @@
           }
         },
         {
+          "label": "newly read cards expand locally before the next server batch",
+          "pages": 3,
+          "recent": 0,
+          "cards": 256,
+          "preview": 0,
+          "counter": "已加载 256 件",
+          "routeCounts": {
+            "started": 3,
+            "completed": 3,
+            "cancelled": 0
+          }
+        },
+        {
           "label": "second explicit batch reaches end",
           "pages": 4,
           "recent": 0,
-          "cards": 0,
+          "cards": 272,
           "preview": 0,
           "counter": "共 272 件 · 最新在前",
           "routeCounts": {
@@ -59,7 +85,7 @@
           "label": "material marks stale; explicit refresh replaces first page",
           "pages": 5,
           "recent": 0,
-          "cards": 24,
+          "cards": 128,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -72,7 +98,7 @@
           "label": "temporary continuation failure retains rows",
           "pages": 6,
           "recent": 0,
-          "cards": 24,
+          "cards": 128,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -113,7 +139,7 @@
           "recent": 0,
           "cards": 0,
           "preview": 0,
-          "counter": "已加载 0 件",
+          "counter": "作品暂不可读",
           "routeCounts": {
             "started": 9,
             "completed": 9,
@@ -196,7 +222,7 @@
           "label": "bottom opens existing global catalogue",
           "pages": 1,
           "recent": 1,
-          "cards": 24,
+          "cards": 48,
           "preview": 12,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -209,7 +235,7 @@
           "label": "top reopens same catalogue without another reader",
           "pages": 1,
           "recent": 1,
-          "cards": 24,
+          "cards": 128,
           "preview": 12,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -222,7 +248,7 @@
           "label": "one publication coalesces recent refresh; global cursor is retained",
           "pages": 1,
           "recent": 2,
-          "cards": 24,
+          "cards": 128,
           "preview": 12,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -281,7 +307,7 @@
           "label": "bottom opens existing global catalogue",
           "pages": 1,
           "recent": 1,
-          "cards": 24,
+          "cards": 96,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -294,7 +320,7 @@
           "label": "top reopens same catalogue without another reader",
           "pages": 1,
           "recent": 1,
-          "cards": 24,
+          "cards": 128,
           "preview": 0,
           "counter": "已加载 128 件",
           "routeCounts": {
@@ -310,6 +336,68 @@
       "routeCompleted": 2,
       "routeCancellationObserved": 0,
       "errors": []
+    },
+    "task-pr": {
+      "steps": [
+        {
+          "label": "complete empty catalogue before real Task mutation",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "real Task artifact producer marks the complete catalogue stale",
+          "pages": 1,
+          "recent": 0,
+          "cards": 0,
+          "preview": 0,
+          "counter": "共 0 件 · 最新在前",
+          "routeCounts": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0
+          }
+        },
+        {
+          "label": "explicit refresh reads the real Task PR work",
+          "pages": 2,
+          "recent": 0,
+          "cards": 1,
+          "preview": 0,
+          "counter": "共 1 件 · 最新在前",
+          "routeCounts": {
+            "started": 2,
+            "completed": 2,
+            "cancelled": 0
+          }
+        }
+      ],
+      "browserGETs": 2,
+      "browserCancelled": 0,
+      "routeStarted": 2,
+      "routeCompleted": 2,
+      "routeCancellationObserved": 0,
+      "errors": []
     }
+  },
+  "taskPublication": {
+    "activity": [
+      {
+        "ownerUserId": "issue1864-owner"
+      }
+    ],
+    "publication": [
+      {
+        "ownerUserId": "issue1864-owner",
+        "reason": "works_changed"
+      }
+    ]
   }
 }

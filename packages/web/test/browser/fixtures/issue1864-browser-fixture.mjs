@@ -67,7 +67,7 @@ export async function createWorksFixture(api, scenario, script, css) {
     thread = 'issue1864-thread';
   const messages = new MessageStore(),
     tasks = new TaskStore();
-  const total = scenario === 'sparse' ? 1100 : scenario === 'home-empty' ? 0 : 400;
+  const total = scenario === 'sparse' ? 1100 : scenario === 'home-empty' || scenario === 'task-pr' ? 0 : 400;
   const epoch = Date.now() - 100000;
   const append = (i, work = true) =>
     messages.append({
@@ -93,6 +93,64 @@ export async function createWorksFixture(api, scenario, script, css) {
   let origin;
   const identity = owner;
   const app = Fastify();
+  let mutateTask;
+  if (scenario === 'task-pr') {
+    await load(path.join(api, 'test/helpers/setup-cat-registry.js'));
+    const { InvocationRegistry } = await load(
+      path.join(api, 'src/domains/cats/services/agents/invocation/InvocationRegistry.ts'),
+    );
+    const { EntrustedWorkLifecycleService } = await load(
+      path.join(api, 'src/domains/growing/EntrustedWorkLifecycleService.ts'),
+    );
+    const { registerCallbackAuthHook } = await load(path.join(api, 'src/routes/callback-auth-prehandler.ts'));
+    const { registerCallbackTaskRoutes } = await load(path.join(api, 'src/routes/callback-task-routes.ts'));
+    const registry = new InvocationRegistry();
+    const credentials = await registry.create(owner, 'codex', thread);
+    const lifecycle = new EntrustedWorkLifecycleService(tasks);
+    const admitted = await lifecycle.admitOrResume({
+      task: {
+        threadId: thread,
+        title: 'Real Task publication',
+        why: '',
+        createdBy: 'user',
+        userId: owner,
+        ownerCatId: 'codex',
+      },
+      admission: {
+        basis: 'explicit_entrustment',
+        sourceRefs: ['message:fixture'],
+        idempotencyKey: 'fixture-task-pr',
+        intendedOutcome: 'Publish the accepted Task PR into Works',
+      },
+      closure: { condition: 'Fixture publication is visible', expectedSignal: 'works' },
+    });
+    if (admitted.result === 'needs_clarification') throw new Error(JSON.stringify(admitted));
+    const taskId = admitted.ownerRef.slice('task:item:'.length);
+    const events = [];
+    registerCallbackAuthHook(app, registry);
+    registerCallbackTaskRoutes(app, {
+      taskStore: tasks,
+      messageStore: messages,
+      socketManager: {
+        broadcastToRoom() {},
+        emitToUser: (_user, event, data) => {
+          if (event === 'entrusted_work_projection_invalidated') events.push(data);
+        },
+      },
+    });
+    mutateTask = async (change) => {
+      const current = await tasks.get(taskId);
+      events.length = 0;
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/update-entrusted-work',
+        headers: { 'x-invocation-id': credentials.invocationId, 'x-callback-token': credentials.callbackToken },
+        payload: { taskId, expectedRevision: current.entrustedWork.revision, ...change },
+      });
+      if (response.statusCode !== 200) throw new Error(response.body);
+      return [...events];
+    };
+  }
   app.addHook('onRequest', async (request) => {
     request.headers['x-cat-cafe-user'] = identity;
     if (!request.url.startsWith('/api/artifacts')) return;
@@ -167,5 +225,5 @@ export async function createWorksFixture(api, scenario, script, css) {
   app.get('/api/config/cat-order', async () => ({ catOrder: [] }));
   origin = await app.listen({ host: '127.0.0.1', port: 0 });
 
-  return { app, origin, routes, append, control };
+  return { app, origin, routes, append, control, mutateTask };
 }

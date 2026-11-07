@@ -302,7 +302,7 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
             )}
           </>
         )}
-        {scope === 'global' && global.hasMore && (
+        {scope === 'global' && !progressive.more && global.hasMore && (
           <button
             type="button"
             className="work-gallery-more shell-focusable"

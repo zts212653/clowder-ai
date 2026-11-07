@@ -13,6 +13,7 @@ import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../growing/EntrustedWorkLifecycleService.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { MessagingLedger } from '../messaging/ledger.js';
 import {
@@ -201,7 +202,10 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly threadStore?: IThreadStore;
   readonly threadBindingStore?: IConnectorThreadBindingStore;
   readonly threadOwnerUserId?: string;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (
+    task: import('@cat-cafe/shared').TaskItem,
+    reason?: EntrustedWorkChangeReason,
+  ) => void;
   readonly threadProjections?: import('./host-surface/plugin-thread-projections.js').PluginThreadProjectionDeps;
   readonly threadDeepLinkUrl?: (threadId: string) => string;
   readonly desktopExecutor?: DesktopWindowExecutor;

@@ -24,22 +24,27 @@ const evidence = {
 };
 let app;
 try {
-  for (const scenario of ['works', 'sparse', 'home', 'home-empty', 'home-error']) {
+  for (const scenario of ['works', 'sparse', 'home', 'home-empty', 'home-error', 'task-pr']) {
     const gets = [],
       steps = [],
       errors = [];
+    const requests = new Map();
     const fixture = await createWorksFixture(api, scenario, script, css);
     app = fixture.app;
-    const { append, origin, routes, control } = fixture;
+    const { append, origin, routes, control, mutateTask } = fixture;
     evidence.scenarios[scenario] = { origin, routes, gets, steps, errors };
     const context = await browser.newContext({ viewport: { width: 1250, height: 820 } });
     const page = await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
     page.on('request', (request) => {
-      if (new URL(request.url()).pathname === '/api/artifacts') gets.push({ url: request.url(), cancelled: false });
+      if (new URL(request.url()).pathname === '/api/artifacts') {
+        const item = { url: request.url(), cancelled: false };
+        requests.set(request, item);
+        gets.push(item);
+      }
     });
     page.on('requestfailed', (request) => {
-      const item = gets.findLast((item) => item.url === request.url());
+      const item = requests.get(request);
       if (item) {
         item.cancelled = true;
         item.error = request.failure()?.errorText;
@@ -69,15 +74,19 @@ try {
       for (let i = 0; i < 300 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 20));
       assert.ok(condition(), JSON.stringify({ routes: routes.slice(-2), errors }));
     };
-    await page.addInitScript(() => {
-      const Observer = window.IntersectionObserver;
-      window.IntersectionObserver = class extends Observer {
-        observe(target) {
-          if (target.matches('.v2-works-scroll .work-gallery-more')) return;
-          super.observe(target);
-        }
-      };
-    });
+    const expandLoaded = async () => {
+      const before = count();
+      await panel.locator('.v2-works-scroll').evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await page.waitForFunction(() => {
+        const scroll = document.querySelector('.v2-works-scroll');
+        if (!scroll) return false;
+        scroll.scrollTop = scroll.scrollHeight;
+        return ![...scroll.querySelectorAll('button')].some((button) => button.textContent === '展开更多已读作品');
+      });
+      assert.equal(count(), before, 'expanding loaded cards must not read another server page');
+    };
     await page.goto(`${origin}/?mode=${scenario.startsWith('home') ? 'home' : 'works'}`);
     if (scenario.startsWith('home')) {
       await recent.waitFor();
@@ -127,6 +136,31 @@ try {
         assert.equal(count(), 1);
         await record('one publication coalesces recent refresh; global cursor is retained');
       }
+    } else if (scenario === 'task-pr') {
+      await panel.locator('.v2-works-count').filter({ hasText: '共 0 件' }).waitFor();
+      await record('complete empty catalogue before real Task mutation');
+      const relay = (events) =>
+        page.evaluate((payloads) => {
+          payloads.forEach((detail) =>
+            window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail })),
+          );
+        }, events);
+      const activity = await mutateTask({ status: 'doing' });
+      await relay(activity);
+      await page.waitForTimeout(100);
+      assert.equal(count(), 1);
+      assert.equal(await panel.getByText('目录可能有更新', { exact: true }).count(), 0);
+      const publication = await mutateTask({ artifactRefs: ['https://github.com/example/project/pull/12'] });
+      evidence.taskPublication = { activity, publication };
+      await relay(publication);
+      await panel.getByText('目录可能有更新', { exact: true }).waitFor();
+      assert.equal(count(), 1, 'a real Task publication marks stale without an automatic read');
+      await record('real Task artifact producer marks the complete catalogue stale');
+      await panel.getByRole('button', { name: '刷新目录', exact: true }).click();
+      await panel.locator('.v2-works-count').filter({ hasText: '共 1 件' }).waitFor();
+      assert.equal(count(), 2);
+      assert.equal(await panel.locator('[data-work-anchor]').count(), 1);
+      await record('explicit refresh reads the real Task PR work');
     } else {
       await panel.waitFor();
       await wait(() => routes.length === 1 && routes[0].completed);
@@ -136,7 +170,11 @@ try {
         .waitFor();
       await record('initial single page');
       assert.equal(count(), 1);
-      assert.ok((await panel.locator('[data-work-anchor]').count()) <= 24);
+      if (scenario === 'works') {
+        assert.ok((await panel.locator('[data-work-anchor]').count()) < 128);
+        assert.equal(await panel.getByRole('button', { name: '继续读取', exact: true }).count(), 0);
+        assert.equal(await panel.getByRole('button', { name: '展开更多已读作品', exact: true }).count(), 1);
+      }
       await panel.locator('.v2-works-scroll').evaluate((node) => {
         node.scrollTop = 1800;
         node.dispatchEvent(new Event('scroll'));
@@ -145,6 +183,9 @@ try {
       assert.equal(count(), 1);
       await record('scroll admits no GET');
       if (scenario === 'works') {
+        await expandLoaded();
+        assert.equal(await panel.locator('[data-work-anchor]').count(), 128);
+        await record('scroll expands all loaded cards before server continuation');
         await panel.getByRole('textbox').fill('no-matching-work');
         await panel.getByText('已读结果中匹配 0 件', { exact: true }).waitFor();
         assert.equal(await panel.getByRole('button', { name: '继续读取', exact: true }).count(), 1);
@@ -155,6 +196,11 @@ try {
       await record('first explicit batch');
       await page.screenshot({ path: path.join(out, `${scenario}-partial.png`) });
       assert.equal(count(), scenario === 'sparse' ? 5 : 3);
+      if (scenario === 'works') {
+        await panel.getByRole('textbox').fill('');
+        await expandLoaded();
+        await record('newly read cards expand locally before the next server batch');
+      }
       assert.equal(await panel.getByRole('button', { name: '继续读取', exact: true }).count(), 1);
       await panel.getByRole('button', { name: '继续读取', exact: true }).click();
       await wait(() => routes.some((item) => item.complete));

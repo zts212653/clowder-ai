@@ -37,6 +37,31 @@ let host: HTMLDivElement;
 let root: Root;
 const open = vi.fn();
 
+it('expands loaded cards before offering a global server continuation', async () => {
+  const loaded = Array.from({ length: 50 }, (_, index) => ({
+    ...items[0],
+    name: `Loaded-${index}.md`,
+    url: `/uploads/loaded-${index}.md`,
+    sourceMessageId: `loaded-${index}`,
+    threadId: 'T',
+  }));
+  data.fetch.mockResolvedValue(
+    Response.json({ artifacts: loaded, view: 'works', workLineage: 'resolved', complete: false, nextCursor: 'more' }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  const button = (label: string) => [...host.querySelectorAll('button')].find((item) => item.textContent === label);
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(24);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(48);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(50);
+  expect(button('Expand more loaded works')).toBeUndefined();
+  expect(button('Read more works')).toBeDefined();
+  expect(data.fetch.mock.calls.filter(([url]) => String(url).includes('/api/artifacts'))).toHaveLength(1);
+});
+
 it('keeps a zero-match selected filter and continuation in a partial global catalogue', async () => {
   data.fetch.mockResolvedValue(
     Response.json({
