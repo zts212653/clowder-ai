@@ -47,8 +47,12 @@ if (command === 'collect') {
   const receipts = selected
     .filter((entry) => entry.platform === platform)
     .flatMap(({ id, executor }) => {
-      if (executor === 'windows-port-preflight' || executor === 'installed-auth') {
-        const evidence = executor === 'installed-auth' ? 'native-auth-checks.json' : 'installer/port-conflicts.json';
+      const evidence = {
+        'installed-auth': 'native-auth-checks.json',
+        'windows-port-preflight': 'installer/port-conflicts.json',
+        'macos-port-preflight': 'mac-port-conflicts.json',
+      }[executor];
+      if (evidence) {
         const receipt = readJson(path.join(directory, evidence));
         return [
           receipt

@@ -233,4 +233,21 @@ test('a Windows desktop receipt completes its case and preserves the remote Mac 
   assert.equal(conflict.status, 'failed');
   assert.equal(conflict.cases.find(({ id }) => id === 'WIN-CLEAN-INSTALL').code, 'candidate-package-hash-conflict');
   assert.match(run('reconcile', buildOnly, receipt).stderr, /build and native verifier hashes disagree/);
+
+  write(path.join(mac, 'mac-port-conflicts.json'), { status: 'passed' });
+  const collectMacFull = spawnSync(process.execPath, [script, 'collect', mac], {
+    env: { ...env, NIGHTLY_SUITE: 'full', NIGHTLY_PLATFORM: 'macos-arm64' },
+    encoding: 'utf8',
+  });
+  assert.equal(collectMacFull.status, 0, collectMacFull.stderr);
+  const macReceipts = JSON.parse(fs.readFileSync(path.join(mac, 'receipts.json'), 'utf8')).receipts;
+  assert.deepEqual(
+    macReceipts.find(({ id }) => id === 'MAC-PORT-PREFLIGHT'),
+    {
+      id: 'MAC-PORT-PREFLIGHT',
+      platform: 'macos-arm64',
+      status: 'passed',
+      evidence: 'desktop-evidence-macos-arm64-attempt-2/mac-port-conflicts.json',
+    },
+  );
 });

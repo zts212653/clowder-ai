@@ -15,7 +15,7 @@ created: 2026-11-07
 - PR 改变安装或产品旅程时，在 PR 中列出受影响的用例 ID，随改动更新其步骤、断言、适用性或证据。按周从上次复盘 SHA 起扫合入记录，核对遗漏和失效样本。产品负责人决定等级，执行维护人核对证据和可重复性。
 - 预期失败提前登记 `id`、`platform`、`code`、`issue`、`expires`。实际失败须匹配平台、用例和失败码，且仍在有效期。登记不会把缺测、其他失败或原始失败改成通过。
 
-首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，干净首装也不会制造争抢。Windows 全量的 `WIN-PORT-PREFLIGHT` 用已安装的 EXE 和受控监听者复测启动前的 API、Web 和同时占用，保存端口监听 PID、启动状态和 Electron 页面。各平台的健康实例冲突和预查后抢占由 `DESKTOP-PORT-OWNERSHIP` 验证。旧 Windows 包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
+首次回溯示例是 [#1749](https://github.com/zts212653/clowder-ai/issues/1749)。窗口打开和 HTTP 200 都可能来自外来实例，干净首装也不会制造争抢。全量的 `WIN-PORT-PREFLIGHT` 和 `MAC-PORT-PREFLIGHT` 用实际安装包和受控监听者复测启动前的 API、Web 和同时占用，保存端口监听 PID、启动状态和 Electron 页面。各平台的健康实例冲突和预查后抢占由 `DESKTOP-PORT-OWNERSHIP` 验证。旧 Windows 包曾在预查后显示外来页面，修复包在同一场景拒绝就绪。见 [修复及回归入口](https://github.com/zts212653/clowder-ai/pull/1870)。
 
 首次合入复盘从试跑源码 `b58412451` 扫到 `12514727`，范围内只有 DSH 图片路由修复。原有续聊用例只验证文本上下文，无法发现图片握手仍绑定旧路由。新增 `DESKTOP-DSH-IMAGE-ROUTE` 为 L2，覆盖视觉、文本和恢复原会话三种结果。该用例依赖专用 DSH 和模型额度，保留在全量选集。见 [合入变更与已有证据](https://github.com/zts212653/clowder-ai/pull/1896)。
 
