@@ -44,6 +44,8 @@ interface PendingSave {
   /** A clear owns the row; load waits for the delete instead of returning this snapshot. */
   clearing: boolean;
   controller: AbortController;
+  /** Settles the caller without waiting for a queued commit op behind an earlier write. */
+  rejectCancellation?: (error: Error) => void;
   promise: Promise<void>;
 }
 
@@ -222,6 +224,7 @@ async function runAttempt(attempt: PendingSave): Promise<void> {
         throw abortError();
       }
       attempt.phase = 'writing';
+      notifySaveState(ownerUserId);
       await (await database()).put(STORE, {
         ownerUserId: attempt.value.ownerUserId,
         intent: { ...attempt.value.intent, preferredCats: [...attempt.value.intent.preferredCats] },
@@ -273,7 +276,10 @@ function startSave(value: PersistedNewConversationIntent, force: boolean): Promi
     promise: Promise.resolve(),
   };
   pendingSaves.set(ownerUserId, attempt);
-  const promise = runAttempt(attempt);
+  const cancellation = new Promise<never>((_, reject) => {
+    attempt.rejectCancellation = reject;
+  });
+  const promise = Promise.race([runAttempt(attempt), cancellation]);
   attempt.promise = promise;
   notifySaveState(ownerUserId);
   return promise;
@@ -373,12 +379,20 @@ export function subscribeNewConversationIntentSaveState(ownerUserId: string, lis
   };
 }
 
+export function canCancelNewConversationIntentSave(ownerUserId: string | null): boolean {
+  if (!ownerUserId) return false;
+  const attempt = pendingSaves.get(ownerUserId);
+  if (!attempt || attempt.status !== 'saving' || attempt.clearing) return false;
+  return attempt.phase === 'reading' || attempt.phase === 'queued';
+}
+
 export function cancelNewConversationIntentSave(ownerUserId: string): void {
   const attempt = pendingSaves.get(ownerUserId);
   if (!attempt || attempt.status !== 'saving' || attempt.clearing) return;
   if (attempt.phase === 'writing' || attempt.phase === 'settled') return;
   attempt.status = 'cancelled';
   attempt.controller.abort();
+  attempt.rejectCancellation?.(abortError());
   notifySaveState(ownerUserId);
 }
 
