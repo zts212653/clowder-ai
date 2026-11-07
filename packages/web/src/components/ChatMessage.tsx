@@ -648,10 +648,11 @@ function ChatMessageContent({
     // The human colour's light step. With no colour configured the role is the shared cocoa (shell-v2.css bakes its hue and
     // chroma, and CoCreatorHueInjector replaces them when the config has one), so there is no separate neutral fallback.
     const humanFill = 'var(--color-cocreator-surface)';
+    // The action plane measures this zero-size slot; keep it before the human block, outside its text.
     const humanHeader = (
       <div
         data-testid="human-message-header"
-        className={`relative flex w-full justify-end items-center gap-2${humanHasMarks ? ' mb-1' : ''}`}
+        className={`relative flex w-full justify-end items-center gap-2 [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-1/2${humanHasMarks ? ' mb-1' : ''}`}
       >
         <MessageActionSlot />
         {isWhisper && (

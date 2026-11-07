@@ -85,11 +85,13 @@ export class EntrustedWorkLifecycleError extends Error {
   }
 }
 
+export type EntrustedWorkChangeReason = 'works_changed';
+
 export interface EntrustedWorkLifecycleOptions {
   readonly expectedThreadId?: string;
   readonly now?: () => number;
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
-  readonly onChanged?: (ownerUserId: string) => void;
+  readonly onChanged?: (ownerUserId: string, reason?: EntrustedWorkChangeReason) => void;
   readonly artifactReader?: PreparedArtifactReader;
   /** Checked by the Task store at the aggregate's actual write boundary. */
   readonly writeFence?: TaskMutationWriteFence;
@@ -130,7 +132,8 @@ export class EntrustedWorkLifecycleService {
     const prepared = this.prepareAdmission(input, sourceContext);
     if ('result' in prepared) return prepared;
     const result = await this.tasks.admitEntrustedWork(prepared);
-    if (result.kind === 'admitted') this.notifyChanged(result.task);
+    if (result.kind === 'admitted')
+      this.notifyChanged(result.task, result.task.entrustedWork?.artifactRefs.length ? 'works_changed' : undefined);
     return custodyAdmissionResultV1Schema.parse({
       result: result.kind,
       subjectRef: `task:work:${result.task.id}`,
@@ -260,7 +263,7 @@ export class EntrustedWorkLifecycleService {
     }
   }
 
-  async update(input: EntrustedWorkUpdateActionV1): Promise<TaskItem> {
+  async update(input: EntrustedWorkUpdateActionV1, beforeTask?: TaskItem | null): Promise<TaskItem> {
     const command = entrustedWorkUpdateActionV1Schema.parse(input);
     const hasTimePatch = command.time !== undefined && Object.values(command.time).some((value) => value !== undefined);
     if (
@@ -271,6 +274,12 @@ export class EntrustedWorkLifecycleService {
     ) {
       throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NO_OP', 'Entrusted-work update has no mutation');
     }
+    const previous =
+      beforeTask !== undefined
+        ? beforeTask
+        : command.artifactRefs === undefined
+          ? null
+          : await this.tasks.get(command.taskId);
     const result = await this.tasks.updateEntrustedWork(
       command.taskId,
       {
@@ -285,7 +294,12 @@ export class EntrustedWorkLifecycleService {
     );
     switch (result.kind) {
       case 'updated':
-        this.notifyChanged(result.task);
+        this.notifyChanged(
+          result.task,
+          command.artifactRefs !== undefined && entrustedWorkArtifactRefsChanged(previous, result.task)
+            ? 'works_changed'
+            : undefined,
+        );
         return result.task;
       case 'not_found':
         throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NOT_FOUND', 'Task not found');
@@ -308,8 +322,8 @@ export class EntrustedWorkLifecycleService {
     }
   }
 
-  private notifyChanged(task: TaskItem): void {
-    if (task.userId) this.onChanged?.(task.userId);
+  private notifyChanged(task: TaskItem, reason?: EntrustedWorkChangeReason): void {
+    if (task.userId) this.onChanged?.(task.userId, reason);
   }
 
   assertCurrentAuthorization(admission: Extract<CustodyAdmissionRequestV1, { basis: 'authorized_source' }>): void {
@@ -349,4 +363,12 @@ export class EntrustedWorkLifecycleService {
       );
     }
   }
+}
+
+/** Compare formal artifact coordinates without treating order as a new work. */
+export function entrustedWorkArtifactRefsChanged(before: TaskItem | null, after: TaskItem): boolean {
+  const previous = new Set(before?.entrustedWork?.artifactRefs ?? []);
+  const next = new Set(after.entrustedWork?.artifactRefs ?? []);
+  if (previous.size === next.size && [...previous].every((ref) => next.has(ref))) return false;
+  return previous.size > 0 || next.size > 0;
 }

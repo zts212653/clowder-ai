@@ -13,7 +13,8 @@ const web = fileURLToPath(new URL('../..', import.meta.url)),
   tree = path.resolve(web, '../..');
 const evidenceRoot = process.env.F322_INBOX_PARITY_EVIDENCE ?? path.join(tree, '.tmp/f322-memory-correction');
 async function freeze(page, card) {
-  await card.scrollIntoViewIfNeeded();
+  // This is screenshot positioning, not an input action; resolve the current result node in one DOM operation.
+  await card.evaluate((node) => node.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }));
   await page.evaluate(async () => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await Promise.all(
@@ -81,9 +82,14 @@ for (const language of ['zh', 'en'])
           const results = await Promise.allSettled([
             browser?.close(),
             server ? stopChild(server) : undefined,
-            env?.cleanup(),
             f.close(),
           ]);
+          // Next can still write its output while stopping; remove it only after exit.
+          if (!server || server.exitCode !== null || server.signalCode !== null) {
+            results.push(...(await Promise.allSettled([env?.cleanup()])));
+          } else {
+            results.push({ status: 'rejected', reason: new Error('Next server has not exited; test output retained') });
+          }
           const failures = results.filter((r) => r.status === 'rejected');
           if (failures.length)
             throw new AggregateError(
@@ -150,7 +156,7 @@ for (const language of ['zh', 'en'])
       await chat.locator('button[aria-expanded="false"]').click();
       await chat.getByTestId('memory-correction-chat-result').waitFor();
       await freeze(page, chat);
-      assert.match(await chat.innerText(), language === 'en' ? /Rejected.*You/ : /已拒绝.*你/);
+      assert.match(await chat.innerText(), language === 'en' ? /Declined.*You/ : /已拒绝.*你/);
       await page.screenshot({ path: path.join(evidence, 'chat-result.png'), fullPage: true });
       const draft = page.locator('[data-testid="chat-input-composer-row"] textarea'),
         draftText = 'Preserved original correction draft';
@@ -182,14 +188,11 @@ for (const language of ['zh', 'en'])
       await freeze(page, card);
       await page.screenshot({ path: path.join(evidence, 'inbox-open.png'), fullPage: true });
       await decide(page, card, approved, language === 'en' ? 'Accept this suggestion' : '接受这条建议', responses);
-      const result = page
-        .getByTestId('mailbox-retained-result')
-        .filter({ hasText: language === 'en' ? 'Memory correction' : '记忆纠错' });
-      await result.waitFor();
-      await page.waitForFunction(({ element, word }) => element.textContent.includes(word), {
-        element: await result.elementHandle(),
-        word: language === 'en' ? 'Original memory corrected' : '原记忆已更正',
-      });
+      // Confirming and decided have different DOM; wait for the final decision before taking its geometry.
+      const result = page.locator(
+        `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F321', approved.proposalId])}']`,
+      );
+      await result.filter({ hasText: language === 'en' ? 'Original memory corrected' : '原记忆已更正' }).waitFor();
       await freeze(page, result);
       const resultText = await result.innerText();
       assert.ok(!resultText.includes('default-user') && !resultText.includes(approved.eventId));
@@ -258,12 +261,12 @@ for (const language of ['zh', 'en'])
       assert.equal(recovered.proposal.appliedRevision, interrupted.evidence.revision);
       assert.deepEqual(recovered.evidence, interrupted.evidence);
       assert.equal(recovered.event.summary, interrupted.event.summary);
-      const recoveryResult = page.getByTestId('mailbox-retained-result');
-      await recoveryResult.waitFor();
-      await page.waitForFunction(({ element, word }) => element.textContent.includes(word), {
-        element: await recoveryResult.elementHandle(),
-        word: language === 'en' ? 'Original memory corrected' : '原记忆已更正',
-      });
+      const recoveryResult = page.locator(
+        `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F321', recovering.proposalId])}']`,
+      );
+      await recoveryResult
+        .filter({ hasText: language === 'en' ? 'Original memory corrected' : '原记忆已更正' })
+        .waitFor();
       await freeze(page, recoveryResult);
       await page.screenshot({ path: path.join(evidence, 'inbox-recovery-result.png'), fullPage: true });
       assert.equal(decisions.length, 4);

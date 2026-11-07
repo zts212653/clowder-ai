@@ -626,18 +626,28 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         window.dispatchEvent(new CustomEvent('cat-cafe:runtime-interaction-updated', { detail: interaction }));
       }
     });
-    socket.on('entrusted_work_projection_invalidated', (data: { ownerUserId: string; threadId?: string }) => {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail: data }));
-      }
-    });
+    socket.on(
+      'entrusted_work_projection_invalidated',
+      (data: { ownerUserId: string; threadId?: string; reason?: 'works_changed' | 'access_revoked' }) => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', { detail: data }));
+        }
+      },
+    );
     const onArtifactReviewChanged = (data: { reviewId: string }) => {
       if (typeof window !== 'undefined')
         window.dispatchEvent(new CustomEvent('cat-cafe:artifact-review-changed', { detail: data }));
     };
     const onContentModificationSourceSaved = (data: { threadId: string; messageId: string }) => {
-      if (typeof data.threadId === 'string' && data.threadId && typeof data.messageId === 'string' && data.messageId)
+      if (typeof data.threadId === 'string' && data.threadId && typeof data.messageId === 'string' && data.messageId) {
         useChatStore.getState().requestStreamCatchUp(data.threadId);
+        if (typeof window !== 'undefined')
+          window.dispatchEvent(
+            new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', {
+              detail: { threadId: data.threadId, reason: 'works_changed' },
+            }),
+          );
+      }
     };
     socket.on('artifact_review_changed', onArtifactReviewChanged);
     socket.on('content_modification_source_saved', onContentModificationSourceSaved);

@@ -4,6 +4,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
 import { INIT_DARK, INIT_LIGHT, type TunerState } from '@/components/dev/oklch-tuner-engine';
 import { HubCoCreatorOverviewCard } from '@/components/HubMemberOverviewCard';
+import { MessageActions } from '@/components/MessageActions';
 import { ReplyPill } from '@/components/ReplyPill';
 import { ReplyPreviewBar } from '@/components/ReplyPreviewBar';
 import { ThemeApplier } from '@/components/ThemeApplier';
@@ -147,17 +148,20 @@ function Thread() {
   return (
     <div
       data-testid="column"
+      data-thread-chat-reading-column
+      data-chat-container
       style={{ width, padding: '16px 20px', background: 'var(--shell-work)', color: 'var(--cafe-text)' }}
     >
       {messages.map((message) => (
-        <ChatMessage
-          key={message.id}
-          message={message}
-          threadId="thread-human"
-          timelineMessages={messages}
-          getCatById={getCatById}
-          onEditCoCreator={() => undefined}
-        />
+        <MessageActions key={message.id} message={message} threadId="thread-human">
+          <ChatMessage
+            message={message}
+            threadId="thread-human"
+            timelineMessages={messages}
+            getCatById={getCatById}
+            onEditCoCreator={() => undefined}
+          />
+        </MessageActions>
       ))}
     </div>
   );
@@ -186,14 +190,19 @@ function Consumers() {
     <div data-testid="consumers" style={{ width: 720, padding: '16px 20px', background: 'var(--shell-work)' }}>
       <div data-consumer="reply-pill" style={{ padding: 12 }}>
         <ReplyPill
-          replyPreview={{ senderCatId: null, content: '三版封面，暖一点。' }}
+          replyPreview={{ from: { kind: 'user', userId: 'default-user' }, senderCatId: null, content: SHORT }}
           replyToId="h-short"
           getCatById={getCatById}
         />
       </div>
       <div data-consumer="reply-bar" style={{ padding: 12 }}>
         <ReplyPreviewBar
-          replyToMessage={{ id: 'h-short', senderCatId: null, content: '三版封面，暖一点。' }}
+          replyToMessage={{
+            id: 'h-short',
+            from: { kind: 'user', userId: 'default-user' },
+            senderCatId: null,
+            content: SHORT,
+          }}
           cats={cats}
           onClear={() => undefined}
         />

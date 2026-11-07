@@ -11,6 +11,7 @@ import type {
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import { isTaskSubjectSnapshotConflictError } from '../../../cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import { currentPluginCallContext, currentPluginOwnerRequestContext } from '../../carrier/plugin-call-context.js';
 import { currentOwnerOperation, currentOwnerTaskReadScope } from '../../carrier/plugin-owner-operation-context.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
@@ -87,7 +88,7 @@ export interface PluginTaskHost {
 
 export interface PluginTaskHostDeps {
   readonly artifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
-  readonly onTaskDataChanged?: (task: TaskItem) => void;
+  readonly onTaskDataChanged?: (task: TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly admission?: PluginTaskAdmissionServices;
   readonly pluginInstanceId?: string;
   readonly pluginId: string;

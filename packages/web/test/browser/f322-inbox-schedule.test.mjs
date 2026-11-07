@@ -81,9 +81,14 @@ for (const language of ['zh', 'en'])
           const results = await Promise.allSettled([
             browser?.close(),
             server ? stopChild(server) : undefined,
-            env?.cleanup(),
             f.close(),
           ]);
+          // Next can still write its output while stopping; remove it only after exit.
+          if (!server || server.exitCode !== null || server.signalCode !== null) {
+            results.push(...(await Promise.allSettled([env?.cleanup()])));
+          } else {
+            results.push({ status: 'rejected', reason: new Error('Next server has not exited; test output retained') });
+          }
           const failures = results.filter((r) => r.status === 'rejected');
           if (failures.length)
             throw new AggregateError(
@@ -148,7 +153,7 @@ for (const language of ['zh', 'en'])
       await decide(page, chat, rejected, rejectWord, responses);
       await chat.getByTestId('decision-result-label').waitFor();
       await freeze(page, chat);
-      assert.match(await chat.innerText(), language === 'en' ? /Rejected.*You/ : /已拒绝.*你/);
+      assert.match(await chat.innerText(), language === 'en' ? /Declined.*You/ : /已拒绝.*你/);
       await page.screenshot({ path: path.join(evidence, 'chat-result.png'), fullPage: true });
       const draft = page.locator('[data-testid="chat-input-composer-row"] textarea'),
         draftText = 'Preserved original scheduled-task draft';
@@ -227,23 +232,25 @@ for (const language of ['zh', 'en'])
           await page.screenshot({ path: path.join(evidence, 'inbox-recovery.png'), fullPage: true });
           await decide(page, card, record, resume, responses);
         } else await decide(page, card, record, word, responses);
-        const result = page.getByTestId('mailbox-retained-result').filter({ hasText: record.task.display.label });
-        await result.waitFor();
-        await page.waitForFunction(({ element, word }) => element.textContent.includes(word), {
-          element: await result.elementHandle(),
-          word:
-            language === 'en'
-              ? action === 'delete'
-                ? 'Scheduled task permanently deleted'
-                : action === 'update'
-                  ? 'Scheduled task parameters updated'
-                  : 'Scheduled task created and registered'
-              : action === 'delete'
-                ? '定时任务已永久删除'
-                : action === 'update'
-                  ? '定时任务参数已更新'
-                  : '定时任务已创建并注册',
-        });
+        const result = page.locator(
+          `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F139', record.proposalId])}']`,
+        );
+        await result
+          .filter({
+            hasText:
+              language === 'en'
+                ? action === 'delete'
+                  ? 'Scheduled task permanently deleted'
+                  : action === 'update'
+                    ? 'Scheduled task parameters updated'
+                    : 'Scheduled task created and registered'
+                : action === 'delete'
+                  ? '定时任务已永久删除'
+                  : action === 'update'
+                    ? '定时任务参数已更新'
+                    : '定时任务已创建并注册',
+          })
+          .waitFor();
         await freeze(page, result);
         assert.match(await result.innerText(), language === 'en' ? /You/ : /你/);
         await page.screenshot({ path: path.join(evidence, `inbox-${action}-result.png`), fullPage: true });

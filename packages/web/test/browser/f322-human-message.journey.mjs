@@ -95,6 +95,7 @@ after(async () => {
 async function open({
   shell = 'v2',
   width = 720,
+  viewportWidth = Math.max(width + 40, 480),
   base = 'light',
   variant = 'default',
   color = COCOA,
@@ -102,7 +103,7 @@ async function open({
   consumers = false,
 } = {}) {
   const context = await browser.newContext({
-    viewport: { width: Math.max(width + 40, 480), height: 1300 },
+    viewport: { width: viewportWidth, height: 1300 },
     deviceScaleFactor: scale,
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
@@ -115,7 +116,10 @@ async function open({
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(`console: ${msg.text()}`);
   });
-  await context.addInitScript((value) => localStorage.setItem('cat-cafe:shell-presentation', value), shell);
+  await context.addInitScript((value) => {
+    localStorage.setItem('cat-cafe:shell-presentation', value);
+    localStorage.setItem('cat-cafe:shell-language', 'zh');
+  }, shell);
   await page.route('**/*', async (handler) => {
     const request = handler.request();
     const url = new URL(request.url());
@@ -141,6 +145,11 @@ async function open({
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ cats }) });
     if (url.pathname === '/api/config/cat-order')
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ catOrder: [] }) });
+    if (request.method() === 'GET' && url.pathname === '/api/config/process-talk')
+      return handler.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ownerUserId: 'owner-1', mode: 'whole' }),
+      });
     // ThemeApplier asks the server for a saved theme when this browser has none; the answer is "nothing saved".
     if (url.pathname === '/api/config/env-summary')
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ variables: [] }) });
@@ -368,8 +377,8 @@ test('v2: one right-aligned 12px block, no avatar and no name, the blank on the 
   assert.ok(code.bubble.rect.w <= code.content.w * 0.8 + 0.6, 'and the block stays within the cap');
 
   await shot(page, 'v2-light-cocoa-720.png');
-  assert.deepEqual(errors, []);
   assert.deepEqual(unexpected, []);
+  assert.deepEqual(errors, []);
   await context.close();
 });
 
@@ -400,18 +409,35 @@ test('the time sits once under the last message of a run, and not under the othe
   await context.close();
 });
 
-test('the copy-id control stays reachable: hidden at rest, revealed on hover, in the blank left of the block', async () => {
-  const { page, context } = await open({ shell: 'v2', width: 720 });
-  const button = page.locator('[data-message-id="h-short"] button[aria-label^="复制消息 ID"]');
-  assert.equal(await button.count(), 1);
-  const rest = await button.evaluate((el) => getComputedStyle(el).opacity);
-  assert.equal(rest, '0');
-  await page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]').hover();
-  await page.waitForTimeout(400);
-  assert.equal(await button.evaluate((el) => getComputedStyle(el).opacity), '1');
-  const box = await button.boundingBox();
-  const bubble = await page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]').boundingBox();
-  assert.ok(box.x + box.width <= bubble.x + 0.5, 'left of the block, not over it');
+test('the copy-id action stays reachable through the hover toolbar and its More menu, left of the block', async () => {
+  const { page, context, errors, unexpected } = await open({ shell: 'v2', width: 720, viewportWidth: 1000 });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+  const plane = page.locator('[data-message-actions-owner="h-short"]');
+  const toolbar = plane.getByRole('toolbar');
+  await toolbar.waitFor({ state: 'attached' });
+  assert.equal(await plane.evaluate((el) => getComputedStyle(el).opacity), '0');
+  const bubble = page.locator('[data-message-id="h-short"] [data-testid="message-bubble"]');
+  const before = await bubble.boundingBox();
+  await bubble.hover();
+  await page.waitForFunction(() => {
+    const node = document.querySelector('[data-message-actions-owner="h-short"]');
+    return node && getComputedStyle(node).opacity === '1' && getComputedStyle(node).visibility === 'visible';
+  });
+  const box = await toolbar.boundingBox();
+  await shot(page, 'v2-human-action-toolbar.png');
+  await toolbar.getByRole('button', { name: '更多消息操作', exact: true }).click();
+  const copy = plane.getByRole('menuitem', { name: '复制消息 ID', exact: true });
+  await copy.waitFor();
+  await shot(page, 'v2-human-copy-id-menu.png');
+  await copy.click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'h-short');
+  assert.deepEqual(await bubble.boundingBox(), before, 'actions do not move the message');
+  assert.deepEqual(unexpected, []);
+  assert.deepEqual(errors, []);
+  assert.ok(
+    box.x + box.width <= before.x + 0.5,
+    `left of the block, not over it: ${JSON.stringify({ toolbar: box, bubble: before })}`,
+  );
   await context.close();
 });
 
@@ -773,7 +799,7 @@ for (const [base, variant] of [
 }
 
 test('the Studio chat bar (400px): nothing leaves the column and the cap holds', async () => {
-  const { page, context, errors } = await open({ shell: 'v2', width: 400 });
+  const { page, context, errors, unexpected } = await open({ shell: 'v2', width: 400 });
   for (const id of ['h-short', 'h-run-a', 'h-run-b', 'h-code', 'h-whisper']) {
     const m = await measure(page, id);
     assert.ok(m.message.r <= m.column.r + 0.5, `${id}: stays inside the column`);
@@ -783,6 +809,7 @@ test('the Studio chat bar (400px): nothing leaves the column and the cap holds',
     assert.ok(Math.abs(m.bubble.rect.r - m.content.right) < 0.6, `${id}: right-aligned`);
   }
   await shot(page, 'v2-light-cocoa-400.png');
+  assert.deepEqual(unexpected, []);
   assert.deepEqual(errors, []);
   await context.close();
 });

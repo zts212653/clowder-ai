@@ -2,6 +2,7 @@ import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
@@ -116,7 +117,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 
 export interface ModulePluginRuntimeOptions {
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;

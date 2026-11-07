@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, CLIENT_SENT_AT_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
 import { chromium } from 'playwright';
 import { countMagentaPixels, runF294HtmlWidgetExportContract } from './f294-html-widget-export.harness.mjs';
 import { startHtmlWidgetFixtureApi } from './html-widget-api.fixture.mjs';
@@ -34,7 +35,10 @@ async function waitForPage(url, server, output) {
     if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.ok) {
+        await response.arrayBuffer();
+        return;
+      }
     } catch {
       // The dev server is still compiling or has not opened its socket yet.
     }
@@ -63,9 +67,9 @@ let server;
 let nextDev;
 let fixtureApi;
 let url;
+const output = [];
 before(async () => {
   const port = await findFreePort();
-  const output = [];
   fixtureApi = await startHtmlWidgetFixtureApi();
   nextDev = await createNextDevTestEnvironment('html-widget-responsive', {
     NEXT_PUBLIC_API_URL: fixtureApi.origin,
@@ -163,14 +167,21 @@ test(
   { timeout: 120_000 },
   async (t) => {
     let browser;
+    const pageErrors = [];
     const exporter = new ImageExporter();
     try {
       browser = await chromium.launch({ headless: true });
+      // Compiling the sibling route can rewrite app/layout.js while the parent
+      // downloads it. Finish that compilation before opening either live page.
+      await waitForPage(new URL('/dev/f294-html-widget-live-message', url).href, server, output);
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      page.on('pageerror', (error) => pageErrors.push(error.message));
       await page.goto(url, { waitUntil: 'domcontentloaded' });
 
       await t.test('live 14KB message mounts and refreshes without ever committing an empty iframe', async () => {
         const livePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+        const liveErrors = [];
+        livePage.on('pageerror', (error) => liveErrors.push(error.message));
         const liveUrl = new URL('/dev/f294-html-widget-live-message', url).href;
         const assertVisibleLiveWidget = async () => {
           const liveWidget = await waitForWidgetMeasurement(livePage);
@@ -198,8 +209,23 @@ test(
         try {
           await livePage.goto(liveUrl, { waitUntil: 'domcontentloaded' });
           await assertVisibleLiveWidget();
+          const session = await livePage.evaluate(
+            async ({ origin, headers }) => {
+              const response = await fetch(origin + '/api/session', { credentials: 'include', headers });
+              return { status: response.status, body: await response.json() };
+            },
+            {
+              origin: fixtureApi.origin,
+              headers: {
+                [CLIENT_REQUEST_DIAGNOSTIC_HEADER]: 'widget-fixture-bootstrap',
+                [CLIENT_SENT_AT_DIAGNOSTIC_HEADER]: String(Date.now()),
+              },
+            },
+          );
+          assert.deepEqual(session, { status: 200, body: { ok: true, userId: 'browser-test-user' } });
           await livePage.reload({ waitUntil: 'domcontentloaded' });
           await assertVisibleLiveWidget();
+          assert.deepEqual(liveErrors, [], 'live message route must hydrate without browser errors');
         } finally {
           await livePage.close();
         }
@@ -384,6 +410,7 @@ test(
         const pagesAfterFailure = (await exporterBrowser.pages()).length;
         assert.equal(pagesAfterFailure, pagesBeforeFailure, 'a failed capture must close its Puppeteer page');
       });
+      assert.deepEqual(pageErrors, [], 'responsive route must hydrate without browser errors');
     } finally {
       await exporter.close();
       if (browser) await browser.close();
