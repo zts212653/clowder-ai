@@ -226,8 +226,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
+      - name: Download the build checksums
         if: needs.resolve.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-build-hash-*-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/desktop-report
+      - uses: actions/download-artifact@v4
+        if: always() && needs.resolve.result == 'success'
         with:
           pattern: desktop-evidence-*-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/desktop-report

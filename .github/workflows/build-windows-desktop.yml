@@ -105,6 +105,23 @@ jobs:
           path: dist/ClowderAI-Setup-*.exe
           if-no-files-found: error
 
+      - name: Record the published installer SHA-256
+        if: inputs.source-sha && !inputs.upload-to-release
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -File dist/ClowderAI-Setup-*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one published Windows installer' }
+          $hash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'installer-sha256.txt'), $hash)
+
+      - name: Upload the installer checksum
+        if: inputs.source-sha && !inputs.upload-to-release
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-hash-windows-x64-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installer-sha256.txt
+          if-no-files-found: error
+
       - name: Upload portable zip as workflow artifact
         if: ${{ !inputs.upload-to-release }}
         uses: actions/upload-artifact@v4
