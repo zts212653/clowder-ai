@@ -77,7 +77,7 @@ assert_free() {
 launch() {
   exec env -i PATH='/usr/bin:/bin:/usr/sbin:/sbin' HOME="$root/home" TMPDIR="$root/temp" \
     CAT_CAFE_DESKTOP_INSTANCE_ROOT="$state" FRONTEND_PORT="$frontend" API_SERVER_PORT="$api" REDIS_PORT="$redis" \
-    "$executable" "$@"
+    "$@"
 }
 
 wait_for_exit() {
@@ -91,7 +91,7 @@ wait_for_exit() {
 
 quit_owned() {
   if ! kill -0 "$pid" 2>/dev/null; then return 0; fi
-  (launch --quit-owned-installation) >> "$evidence/quit-$phase.log" 2>&1 &
+  (launch "$executable" --quit-owned-installation) >> "$evidence/quit-$phase.log" 2>&1 &
   quit_pid=$!
   wait_for_exit "$quit_pid" 30 && wait "$quit_pid" || return 1
   quit_pid=''
@@ -137,7 +137,7 @@ fi
 
 for phase in create restore; do
   assert_free
-  launch "--remote-debugging-port=$debug" --remote-debugging-address=127.0.0.1 \
+  launch "$executable" "--remote-debugging-port=$debug" --remote-debugging-address=127.0.0.1 \
     > "$evidence/app-$phase.log" 2>&1 &
   # Exec in the asynchronous subshell so the PID refers to the launched app.
   pid=$!
@@ -152,3 +152,7 @@ for phase in create restore; do
 done
 node "$(dirname "$0")/initial-plugins.mjs" --logs "$evidence"
 phase=complete
+if [[ "${NIGHTLY_SUITE:-}" == full ]]; then
+  (launch "$(command -v node)" "$(dirname "$0")/macos-port-conflicts.mjs" "$executable" "$evidence" "$debug") ||
+    echo 'macOS port preflight verifier did not write a result' >&2
+fi
