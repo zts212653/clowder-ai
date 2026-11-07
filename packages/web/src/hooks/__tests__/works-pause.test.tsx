@@ -6,7 +6,6 @@ const fetch = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/api-client', () => ({ apiFetch: fetch }));
 
 import { useGlobalArtifacts } from '../useGlobalArtifacts';
-import { GLOBAL_WORKS_SOURCE_REFRESH_COOLDOWN_MS } from '../usePagedGlobalWorks';
 import { useThreadArtifacts } from '../useThreadArtifacts';
 
 const artifact = (name: string) => ({ type: 'file', name, createdAt: 1, url: `/uploads/${name}`, catId: null });
@@ -168,6 +167,7 @@ it('pauses a global continuation, keeps partial results during resume, and isola
       }),
   );
   await render(false);
+  await act(async () => result?.loadMore?.());
   const signal = fetch.mock.calls[1][1].signal as AbortSignal;
   expect(result?.artifacts[0]?.name).toBe('partial');
   await render(true);
@@ -187,7 +187,9 @@ it('pauses a global continuation, keeps partial results during resume, and isola
       }),
   );
   await render(false);
+  expect(fetch).toHaveBeenCalledTimes(2);
   expect(result?.artifacts[0]?.name).toBe('partial');
+  await act(async () => result?.loadMore?.());
   await render(true, 'different-owner');
   await act(async () => {
     finish(page('late-old-owner'));
@@ -196,7 +198,7 @@ it('pauses a global continuation, keeps partial results during resume, and isola
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
-it('clears the global refresh timer when the retained owner hides', async () => {
+it('preserves a global catalogue without issuing a new page when the retained owner resumes', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   function Panel({ paused }: { paused: boolean }) {
     useGlobalArtifacts(true, { view: 'works' }, undefined, { paused });
@@ -210,11 +212,11 @@ it('clears the global refresh timer when the retained owner hides', async () => 
   await act(async () => root.render(<Panel paused />));
   await act(async () => {
     invalidate();
-    await vi.advanceTimersByTimeAsync(GLOBAL_WORKS_SOURCE_REFRESH_COOLDOWN_MS);
+    await vi.advanceTimersByTimeAsync(120_000);
   });
   expect(fetch).toHaveBeenCalledTimes(1);
   await act(async () => root.render(<Panel paused={false} />));
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
 
 it('keeps classic global results when hiding during a reread', async () => {
