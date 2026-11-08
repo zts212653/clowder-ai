@@ -1,5 +1,12 @@
+import {
+  parseServicePort,
+  resolveConfiguredServiceEndpoint,
+  TTS_ENDPOINT,
+} from '../../../runtime/services/service-config-core.mjs';
 import { maskUrlCredentials } from '../../config/env-registry.js';
-import { normalizeLoopbackUrl } from './loopback-url.js';
+
+export { parseServicePort } from '../../../runtime/services/service-config-core.mjs';
+
 import { getServiceConfig } from './service-config.js';
 
 export type ServiceLifecycleStateAction = 'install' | 'start' | 'stop' | 'uninstall' | 'toggle';
@@ -120,7 +127,7 @@ export const MODEL_ENV_VARS: Record<string, string> = {
 /** Env var each server script reads to bind its listening port. */
 export const PORT_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_PORT',
-  'mlx-tts': 'TTS_PORT',
+  'mlx-tts': TTS_ENDPOINT.portEnvKey,
   'embedding-model': 'EMBED_PORT',
   'llm-postprocess': 'LLM_POSTPROCESS_PORT',
   'audio-capture': 'AUDIO_SERVICE_PORT',
@@ -218,16 +225,16 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     },
   },
   {
-    id: 'mlx-tts',
+    id: TTS_ENDPOINT.id,
     name: 'MLX TTS',
     description: 'Local text-to-speech endpoint',
     category: 'voice',
     type: 'python',
-    port: 9879,
+    port: TTS_ENDPOINT.port,
     features: ['voice-output', 'voice-companion'],
     envVars: ['TTS_URL'],
-    endpointEnvVars: ['TTS_URL'],
-    defaultEndpoint: 'http://localhost:9879',
+    endpointEnvVars: [...TTS_ENDPOINT.endpointEnvVars],
+    defaultEndpoint: TTS_ENDPOINT.defaultEndpoint,
     healthPath: '/health',
     deepHealthPath: '/health/deep',
     healthIdentity: 'tts-stream-route-v1',
@@ -364,12 +371,6 @@ export function getServiceManifest(id: string): ServiceManifest | null {
   return null;
 }
 
-export function parseServicePort(value: string | undefined): number | null {
-  if (!value || !/^\d+$/.test(value)) return null;
-  const port = Number.parseInt(value, 10);
-  return port > 0 && port <= 65535 ? port : null;
-}
-
 function parseEnabledEnv(value: string | undefined): boolean | null {
   if (value === undefined) return null;
   const normalized = value.trim().toLowerCase();
@@ -378,7 +379,7 @@ function parseEnabledEnv(value: string | undefined): boolean | null {
   return null;
 }
 
-function getDefaultServiceModel(service: ServiceManifest): string | undefined {
+export function getDefaultServiceModel(service: ServiceManifest): string | undefined {
   const models = service.prerequisites?.models;
   return (models?.find((model) => model.isDefault) ?? models?.[0])?.name;
 }
@@ -435,12 +436,14 @@ export function deriveLegacyServiceConfig(
     // but no model env was set.  Use the old service's implicit default so users
     // aren't silently migrated to a different backend.
     config.selectedModel = fallbacks.defaultModel;
-  } else {
+  } else if (service.id !== 'mlx-tts') {
     // Fall back to manifest's recommended default model so that legacy
     // env bridge users (ENABLED=1 without MODEL) get a working service
     // instead of a "MODEL required" startup failure.  The manifest's
     // isDefault model is the single source of truth for defaults (see
     // b29c04d05 — hardcoded script defaults were removed intentionally).
+    // TTS keeps unknown identity for existing listeners; buildLifecycleEnv
+    // applies its default only when a new process actually needs launching.
     const defaultModel = getDefaultServiceModel(service);
     if (defaultModel) config.selectedModel = defaultModel;
   }
@@ -471,6 +474,12 @@ export function resolveEffectiveServiceConfig(
   const effective = config === undefined ? legacy : config;
   if (effective === undefined) return undefined;
   if (effective.selectedModel?.trim()) return effective;
+  if (service.id === 'mlx-tts') {
+    const model = env.TTS_MODEL?.trim();
+    // No selection means unknown for an existing listener. The launch helper
+    // applies the manifest default only when starting a new process.
+    return model ? { ...effective, selectedModel: model } : effective;
+  }
 
   // Older services.json rows predate explicit model selection. Start scripts
   // now require their MODEL env, so project the manifest default into the
@@ -479,46 +488,12 @@ export function resolveEffectiveServiceConfig(
   return defaultModel ? { ...effective, selectedModel: defaultModel } : effective;
 }
 
-function replaceEndpointPort(endpoint: string | null, port: number): string | null {
-  if (!endpoint) return null;
-  try {
-    const url = new URL(endpoint);
-    const hadTrailingSlash = endpoint.endsWith('/');
-    url.port = String(port);
-    const serialized = url.toString();
-    return !hadTrailingSlash && url.pathname === '/' ? serialized.replace(/\/$/, '') : serialized;
-  } catch {
-    return endpoint.replace(/:\d+($|[/?#])/, `:${port}$1`);
-  }
-}
-
 export function resolveServiceEndpoint(
   service: ServiceManifest,
   env: NodeJS.ProcessEnv = process.env,
   config: ServiceConfig | undefined = getServiceConfig(service.id),
 ): string | null {
-  for (const key of service.endpointEnvVars) {
-    const value = env[key]?.trim();
-    if (value) return normalizeLoopbackUrl(value);
-  }
-  // Persisted user-chosen port (from install modal) takes precedence over
-  // static env port overrides, while explicit URL envs above remain highest
-  // priority. This must apply to every scripted service, not just embedding,
-  // otherwise start/stop use cfg.port but /api/services health probes the
-  // manifest default and reports a healthy custom-port sidecar as broken.
-  const configuredPort =
-    typeof config?.port === 'number' && config.port > 0 && config.port <= 65535 ? config.port : null;
-  const portEnvKey = PORT_ENV_VARS[service.id];
-  const envPort = parseServicePort(portEnvKey ? env[portEnvKey]?.trim() : undefined);
-  const effectivePort = configuredPort ?? envPort;
-  if (effectivePort) {
-    if (service.portFallback) {
-      return `${service.portFallback.host.replace(/\/+$/, '')}:${effectivePort}`;
-    }
-    const endpoint = replaceEndpointPort(service.defaultEndpoint, effectivePort);
-    return endpoint ? normalizeLoopbackUrl(endpoint) : null;
-  }
-  return service.defaultEndpoint ? normalizeLoopbackUrl(service.defaultEndpoint) : null;
+  return resolveConfiguredServiceEndpoint(service, env, config, PORT_ENV_VARS[service.id]);
 }
 
 function buildClientServiceManifest(service: ServiceManifest) {
@@ -628,11 +603,7 @@ export function serviceHealthIdentityMatches(
 ): { matches: boolean; reason?: string } {
   if (!service.healthIdentity) return { matches: true };
   if (service.healthIdentity === 'tts-stream-route-v1') {
-    const capabilities = health.details?.capabilities;
-    if (!Array.isArray(capabilities) || !capabilities.includes('speech-stream-route-v1')) {
-      return { matches: false, reason: 'health response omitted speech-stream-route-v1 capability' };
-    }
-    return { matches: true };
+    return ttsHealthIdentityMatches(config, health);
   }
   const desiredModel = config?.selectedModel?.trim();
   if (!desiredModel) return { matches: false, reason: 'desired model is not configured' };
@@ -651,6 +622,42 @@ export function serviceHealthIdentityMatches(
     };
   }
   return { matches: true };
+}
+
+function ttsHealthIdentityMatches(
+  config: ServiceConfig | undefined,
+  health: ServiceHealthResult,
+): { matches: boolean; reason?: string } {
+  const capabilities = health.details?.capabilities;
+  if (!Array.isArray(capabilities) || !capabilities.includes('speech-stream-route-v1')) {
+    return { matches: false, reason: 'health response omitted speech-stream-route-v1 capability' };
+  }
+  const desiredModel = config?.selectedModel?.trim();
+  if (!desiredModel) return { matches: true };
+  const backend = expectedTtsBackend(desiredModel);
+  if (health.details?.backend != null && health.details.backend !== backend) {
+    return { matches: false, reason: `TTS is not running selected backend=${logSafeIdentity(backend)}` };
+  }
+  if (backend === 'edge-tts' || backend === 'sapi') {
+    return { matches: health.details?.backend === backend, reason: 'TTS model-less backend identity required' };
+  }
+  if (health.details?.model !== normalizeTtsModelId(desiredModel)) {
+    return { matches: false, reason: `TTS is not running selected model=${logSafeIdentity(desiredModel)}` };
+  }
+  return { matches: true };
+}
+
+function expectedTtsBackend(model: string): string {
+  if (model === 'edge-tts' || model === 'sapi') return model;
+  if (model === 'piper' || /^(zh_CN|en_US|en_GB)-/.test(model)) return 'piper';
+  return model === 'mlx-audio' || model.startsWith('mlx-community/Kokoro-') ? 'mlx-audio' : 'qwen3-clone';
+}
+
+/** The wrapper accepts this legacy provider token but loads a concrete checkpoint. */
+export function normalizeTtsModelId(model = 'qwen3-clone'): string {
+  if (model === 'qwen3-clone') return 'mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16';
+  if (model === 'mlx-audio') return 'mlx-community/Kokoro-82M-bf16';
+  return model === 'piper' ? 'zh_CN-huayan-medium' : model;
 }
 
 export async function resolveServiceState(

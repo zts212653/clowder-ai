@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { completedMergedNoticeRelease, mergedNoticeKey, releasedNoticeKey } from './lib/worktree-merged-notices.mjs';
 import { validateOrigin } from './lib/worktree-origin.mjs';
-import { parsePrSource, readPrTruth } from './lib/worktree-pr.mjs';
+import { parsePrSource, readPrTruth, worktreePrBinding } from './lib/worktree-pr.mjs';
 import { isAncestor, lifecycleConfig, safeRealpath } from './lib/worktree-reaper-probes.mjs';
 import { automaticReleasePaused, reconcileAutomaticReleases } from './lib/worktree-release-transactions.mjs';
 import { retentionStatus } from './lib/worktree-retention.mjs';
@@ -61,6 +61,9 @@ export function retireMergedWorktree({ repo, path, head, sourceRef, threadId, us
     )
       throw new Error('automatic release checkout generation changed');
     if (origin.role === 'alpha') throw new Error('Alpha requires explicit owner finish');
+    const binding = worktreePrBinding(entry.lifecycle, entry.head);
+    if (binding.sourceRef !== sourceRef)
+      throw new Error(`automatic release PR association unverified: ${binding.reason ?? 'different PR source'}`);
     const retention = retentionStatus(entry.lifecycle, probes.now);
     if (retention && (retention !== 'retention-expired' || entry.lifecycle.retention.head !== entry.head))
       throw new Error(`automatic release protected: ${retention}`);

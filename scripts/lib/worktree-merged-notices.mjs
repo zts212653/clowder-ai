@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { completedDirectRelease, directReleaseReceipt } from './worktree-direct-release.mjs';
 import { validateOrigin } from './worktree-origin.mjs';
-import { readPrTruth } from './worktree-pr.mjs';
+import { readPrTruth, worktreePrBinding } from './worktree-pr.mjs';
 import { git } from './worktree-reaper-probes.mjs';
 import { automaticReleaseTransactions, releaseRoot } from './worktree-release-transactions.mjs';
 
@@ -191,14 +191,16 @@ export function mergedWorktreeNotices(repo, rows, { now = Date.now(), readPr, fi
   const unknown = [];
   for (const row of selected) {
     try {
-      const bound = [row.lifecycle.prSource, row.lifecycle.origin.sourceRef, row.lifecycle.retention?.sourceRef].find(
-        prRef,
-      );
-      const sources = bound ? [bound] : findSources(row.head);
-      for (const sourceRef of sources) {
+      const binding = worktreePrBinding(row.lifecycle, row.head);
+      const sources = binding.sourceRef ? [binding.sourceRef] : findSources(row.head);
+      for (const sourceRef of new Set(sources)) {
         if (!cache.has(sourceRef)) cache.set(sourceRef, readPr(sourceRef));
         const pr = cache.get(sourceRef);
         if (pr.sourceRef !== sourceRef || pr.state !== 'MERGED' || !pr.commits.includes(row.head)) continue;
+        if (binding.sourceRef !== sourceRef) {
+          unknown.push({ path: row.path, sourceRef, reason: binding.reason });
+          continue;
+        }
         const origin = row.lifecycle.origin;
         notices.push({
           kind: 'merged-unfinished',

@@ -65,7 +65,8 @@ export async function alphaManagedFixture(t, options = {}) {
   const sources = options.sources?.(parent) ?? {
     'sample.mjs': `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(marker)}, 'once\\n');\n`,
   };
-  for (const [name, content] of Object.entries(sources)) writeFileSync(join(repoRoot, name), content);
+  const sourceInputs = { ...sources, ...options.preparationSources?.(parent) };
+  for (const [name, content] of Object.entries(sourceInputs)) writeFileSync(join(repoRoot, name), content);
   const installLog = join(parent, 'installs.log');
   if (options.materializationExitCode !== undefined) {
     mkdirSync(join(repoRoot, 'packages/web'), { recursive: true });
@@ -84,7 +85,7 @@ export async function alphaManagedFixture(t, options = {}) {
   }
   git(repoRoot, [
     'add',
-    ...Object.keys(sources),
+    ...Object.keys(sourceInputs),
     ...(options.materializationExitCode === undefined ? [] : ['packages/web/.fixture']),
   ]);
   git(repoRoot, ['commit', '-qm', 'one small verification unit']);
@@ -154,9 +155,15 @@ export async function alphaManagedFixture(t, options = {}) {
       command: {
         cwd: '.',
         argv: [process.execPath, ...(name.endsWith('.test.mjs') ? ['--test'] : []), name],
-        env: { NODE_ENV: 'test', CAT_CAFE_DEPLOYMENT_ID: 'test', REDIS_URL: 'redis://127.0.0.1:6398' },
+        // Generated units belong to this private execution tree, not the outer API test-file manifest.
+        env: {
+          NODE_ENV: 'test',
+          NODE_OPTIONS: '',
+          CAT_CAFE_DEPLOYMENT_ID: 'test',
+          REDIS_URL: 'redis://127.0.0.1:6398',
+        },
       },
-      preparations: [],
+      preparations: options.preparations ?? [],
     })),
   };
   const priorOwner = process.env.CAT_CAFE_MANAGED_JOB_ID;

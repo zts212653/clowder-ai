@@ -3,14 +3,15 @@ import { createWatcherNativeBridge } from '@cat-cafe/mcp-server/dist/watcher-nat
 import { parseWatcherSessionState } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../utils/token-counter.js';
 import { createRequestGenerationRecorder } from '../../cats/services/agents/invocation/request-generation-recorder.js';
-import { awaitStoreRead } from '../../cats/services/stores/ports/StoreReadOptions.js';
+import { watcherBudgetFailure, watcherBudgetRecovery } from './context/watcher-budget-progress.js';
+import { WATCHER_TURN_RESERVE_TOKENS } from './context/watcher-context-budget.js';
+import { watcherWindow } from './context/watcher-window.js';
 import {
   loadWatcherInvocationSession,
   watcherInvocationAuthority,
   watcherProviderLaunch,
 } from './watcher-authority.js';
 import { saveWatcherState } from './watcher-checkpoint.js';
-import { WATCHER_TURN_RESERVE_TOKENS } from './watcher-context-budget.js';
 import { finalizeWatcherWake, finishIdleWatcherWake } from './watcher-finalization.js';
 import type {
   WatcherInvocationInput,
@@ -18,7 +19,7 @@ import type {
   WatcherRunState,
 } from './watcher-invocation-contract.js';
 import { watcherNativePort } from './watcher-native-run.js';
-import { watcherRawWindow, watcherSystemPrompt } from './watcher-prompt.js';
+import { watcherSystemPrompt } from './watcher-prompt.js';
 import { settleWatcherStartupFailure } from './watcher-startup-failure.js';
 import { watcherToolSurface } from './watcher-surface.js';
 
@@ -32,7 +33,16 @@ export async function runWatcherInvocation(
   const timer = setTimeout(() => abort.abort(new Error('watcher_deadline_exceeded')), input.deadlineMs ?? 90_000);
   timer.unref?.();
   try {
-    await invokeWatcher(owners, { ...input, service, signal });
+    for (;;) {
+      try {
+        await invokeWatcher(owners, { ...input, service, signal });
+        break;
+      } catch (error) {
+        const latest = parseWatcherSessionState((await owners.sessions.get(input.session.id))?.watcherState);
+        if (signal.aborted || input.recoveryOnly || !watcherBudgetFailure(error) || !latest.attempt) throw error;
+        // The next native admission proves the prior turn idle before shrinking or skipping.
+      }
+    }
   } finally {
     clearTimeout(timer);
     await service.releaseInvocation?.();
@@ -65,35 +75,7 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
   const recovery = run.state.attempt !== undefined;
   const instructions = watcherSystemPrompt(run.session.catId);
   const catalog = watcherToolSurface({});
-  const fixedPrefix =
-    estimateTokens(
-      JSON.stringify(
-        catalog.tools.map((tool) => ({
-          type: 'function',
-          name: tool.name,
-          description: tool.description ?? '',
-          inputSchema: tool.inputSchema,
-        })),
-      ),
-    ) +
-    estimateTokens(instructions) +
-    estimateTokens(run.state.notes) +
-    1024;
-  const rawBudget = Math.min(2500, 30_000 - WATCHER_TURN_RESERVE_TOKENS - fixedPrefix);
-  if (rawBudget < 128) throw new Error('watcher_tool_surface_exceeds_context_budget');
-  const raw = await awaitStoreRead(
-    watcherRawWindow(
-      owners.messages,
-      source.userId,
-      source.threadId,
-      run.state,
-      source.responseSettlement?.kind === 'message' ? source.responseSettlement.messageId : undefined,
-      source.responseSettlement?.settledAt,
-      rawBudget,
-      input.signal,
-    ),
-    { signal: input.signal },
-  );
+  const raw = await watcherWindow(owners.messages, source, run.state, instructions, catalog.tools, input.signal);
   const { scopeEnv, configuredSurface, parentInvocationId, auth } = await watcherInvocationAuthority(
     owners,
     run,
@@ -101,6 +83,15 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
     raw.messageIds,
     input.recoveryOnly,
   );
+  run.window = {
+    frontier: raw.frontier,
+    offset: raw.offset,
+    complete: raw.complete,
+    messageIds: raw.messageIds,
+    tokenBudget: raw.tokenBudget,
+    ...(raw.blockedMessageId ? { blockedMessageId: raw.blockedMessageId } : {}),
+    ...(raw.resumeCursor ? { resumeCursor: raw.resumeCursor } : {}),
+  };
   const abort = new AbortController();
   const signal = input.signal ? AbortSignal.any([input.signal, abort.signal]) : abort.signal;
   let actualSchemas: unknown[] = [];
@@ -132,21 +123,32 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
     if (!recovery)
       run.state = await saveWatcherState(owners.sessions, run.session.id, run.state, {
         wakeInvocationId: auth.invocationId,
+        ...(run.state.wakeInvocationId !== auth.invocationId
+          ? { rawWindowTokens: undefined, directoryReads: undefined, skippedWindows: undefined }
+          : {}),
         attempt: {
           invocationId: auth.invocationId,
           sourceInvocationId: source.invocationId,
           sourceSequence: source.settledSequence!,
           startedAt: Date.now(),
           phase: 'running',
-          window: {
-            frontier: raw.frontier,
-            offset: raw.offset,
-            messageIds: raw.messageIds,
-            complete: raw.complete,
-            ...(raw.resumeCursor ? { resumeCursor: raw.resumeCursor } : {}),
-          },
+          window: run.window,
         },
       });
+    if (!recovery && raw.messageIds.length === 0 && raw.blockedMessageId) {
+      const execution = await owners.executions.get(auth.invocationId);
+      if (!execution || (execution.providerStartedAt !== undefined && execution.providerTeardownAt === undefined))
+        throw new Error('watcher_unadmitted_window_proof_missing');
+      // No native provider was launched for this empty window. The original is retained in the skip audit.
+      run.state = await saveWatcherState(
+        owners.sessions,
+        run.session.id,
+        run.state,
+        await watcherBudgetRecovery(owners, run.session, run.state, run.window),
+      );
+      run.committed = true;
+      return;
+    }
     bridge = await createWatcherNativeBridge({
       credentials: {
         invocationId: auth.invocationId,

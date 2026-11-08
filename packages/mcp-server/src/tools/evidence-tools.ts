@@ -70,7 +70,7 @@ export const searchEvidenceInputSchema = {
     .enum(['time', 'relevance'])
     .optional()
     .describe(
-      'Message mode only: time (oldest candidate first, default) or relevance. Limited recall does not prove the first occurrence in all history.',
+      'Message mode only: time (default) orders the first 32 admitted relevance sources by canonical time; relevance returns a relevance-ranked page. A partial window reports its actual size. Neither proves the earliest occurrence in all history.',
     ),
   agentKeyCatId: z
     .string()
@@ -790,8 +790,8 @@ export const evidenceTools = [
       'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
       'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
       'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
-      'To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. ' +
-      'MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
+      'To prepare an answer card, explicitly use cat_cafe_prepare_message_search_answer with your chosen sources, exact quotations and selection reasons; Host verifies provenance while your reasons remain your judgment. New cards require selections. Only saved legacy query-only operations accept retries without selections, using their original arguments without new search or qualification. Ordinary recall never publishes a card or launches a generative judge. ' +
+      'MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=time (default) orders the first 32 admitted relevance sources by canonical time; relevance stops at the admitted page plus one witness. Incomplete windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
       'GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
       'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +

@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createMemoryServices } from '../../dist/domains/memory/factory.js';
 import { IndexBuilder } from '../../dist/domains/memory/IndexBuilder.js';
+import { KnowledgeAssociations } from '../../dist/domains/memory/knowledge-associations.js';
 import { PublishedDocumentIndex } from '../../dist/domains/memory/PublishedDocumentIndex.js';
 import { PublishedDocumentSource } from '../../dist/domains/memory/PublishedDocumentSource.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
-import { TopkExpansionService } from '../../dist/domains/memory/TopkExpansionService.js';
 import { resolveMemoryRepoPaths } from '../../dist/utils/memory-root.js';
 
 function git(root: string, ...args: string[]): string {
@@ -205,7 +205,7 @@ test('a ranked result with generic section headings does not invent related dire
     updatedAt: '2026-11-05',
     keywords: ['背景', '验收', '风险', 'Summary'],
   };
-  const service = new TopkExpansionService({
+  const service = new KnowledgeAssociations({
     searchWithMeta: async (query) => {
       probes.push(query);
       return { items: [{ ...item, anchor: 'doc:unrelated' }], meta: { degraded: false } };
@@ -227,7 +227,7 @@ test('exact anchors do not turn common headings into topics or invent source-thr
     keywords: ['验收'],
     summary: 'Source: thread-thread_target',
   };
-  const service = new TopkExpansionService({
+  const service = new KnowledgeAssociations({
     searchWithMeta: async (query, options) => {
       probes.push(query);
       return {
@@ -251,7 +251,7 @@ test('multiword and natural questions retain query-supported keywords without ex
     status: 'active' as const,
     updatedAt: '2026-11-05',
   };
-  const service = new TopkExpansionService({
+  const service = new KnowledgeAssociations({
     searchWithMeta: async (term) => ({
       items: [{ ...seed, anchor: `doc:related-${term}`, title: `${term} 的来源`, keywords: [term] }],
       meta: { degraded: false },

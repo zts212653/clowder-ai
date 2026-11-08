@@ -61,6 +61,7 @@
   outline-offset: 2px;
 }
 .menu {
+  user-select: none;
   --file-menu-width: min(300px, calc(100vw - 16px));
   --file-menu-height: min(550px, calc(100dvh - 24px));
   position: fixed;
@@ -155,6 +156,7 @@
   font-size: var(--console-font-label);
 }
 .notice {
+  user-select: none;
   position: absolute;
   top: 52px;
   left: 50%;

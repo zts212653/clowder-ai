@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, resolveMemberIdentity } from '@cat-cafe/shared';
+import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import { compileL0 } from '../../../scripts/compile-system-prompt-l0.mjs';
 import {
   _resetCachedConfig,
@@ -15,16 +16,20 @@ import { buildTeammateRoster } from '../dist/domains/cats/services/context/Syste
 import { writeDossierFixture } from './helpers/dossier-fixture.js';
 
 const originalTemplate = process.env.CAT_TEMPLATE_PATH;
+const fixtureRoots = new Set();
 beforeEach(() => catRegistry.reset());
 afterEach(() => {
   catRegistry.reset();
   _resetCachedConfig();
   if (originalTemplate === undefined) delete process.env.CAT_TEMPLATE_PATH;
   else process.env.CAT_TEMPLATE_PATH = originalTemplate;
+  for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
+  fixtureRoots.clear();
 });
 
-function prepare(override) {
+function prepare(override, breedOverride) {
   const root = mkdtempSync(join(tmpdir(), 'member-identity-authority-'));
+  fixtureRoots.add(root);
   const template = JSON.parse(readFileSync(resolve('../../cat-template.json'), 'utf8'));
   const breed = {
     ...template.breeds[0],
@@ -49,7 +54,7 @@ function prepare(override) {
   };
   const templatePath = join(root, 'cat-template.json');
   writeFileSync(templatePath, JSON.stringify({ ...template, breeds: [breed], roster: {} }));
-  if (override) {
+  if (override || breedOverride) {
     mkdirSync(join(root, '.cat-cafe'));
     writeFileSync(
       join(root, '.cat-cafe/cat-catalog.json'),
@@ -59,6 +64,7 @@ function prepare(override) {
           {
             id: breed.id,
             catId: breed.catId,
+            ...breedOverride,
             defaultVariantId: 'fable-default',
             variants: [{ id: 'fable-default', ...override }],
           },
@@ -73,12 +79,24 @@ function prepare(override) {
   return { root, config: config['fable-5'] };
 }
 
+async function compileTeammateL0(root) {
+  catRegistry.register('observer', {
+    ...catRegistry.getOrThrow('fable-5').config,
+    id: 'observer',
+    roleDescription: 'observer role',
+    personality: '',
+    teamStrengths: undefined,
+    caution: undefined,
+  });
+  return compileL0({ catId: 'observer', dossierRoot: root, profileDir: root });
+}
+
 test('configured identity wins over dossier in the actual L0 and teammate roster', async () => {
   const { root, config } = prepare({
     roleDescription: '新角色',
     personality: '新性格',
     teamStrengths: '新团队定位',
-    caution: null,
+    caution: '新限制',
   });
   const l0 = await compileL0({ catId: 'fable-5', dossierRoot: root, profileDir: root });
   assert.match(l0, /角色：新角色/);
@@ -86,8 +104,15 @@ test('configured identity wins over dossier in the actual L0 and teammate roster
   assert.doesNotMatch(l0, /fixture-self-canary/);
   const roster = buildTeammateRoster('observer', root);
   assert.match(roster, /新团队定位/);
+  assert.match(roster, /新限制/);
+  const teammateL0 = await compileTeammateL0(root);
+  assert.match(teammateL0, /新限制/);
   assert.doesNotMatch(roster, /fixture-roster-canary/);
+  assert.doesNotMatch(roster, /fixture-route-canary/);
+  assert.doesNotMatch(teammateL0, /fixture-route-canary/);
   assert.equal(config.identitySources.roleDescription, 'variant');
+  assert.equal(config.identitySources.teamStrengths, 'variant');
+  assert.equal(config.identitySources.caution, 'variant');
 });
 
 test('template-only historical identity keeps dossier compatibility with provenance', async () => {
@@ -98,13 +123,80 @@ test('template-only historical identity keeps dossier compatibility with provena
   assert.match(buildTeammateRoster('observer', root), /fixture-roster-canary/);
 });
 
-test('an explicit empty identity is authoritative and cannot resurrect dossier text', async () => {
-  const { root, config } = prepare({ personality: '', teamStrengths: '', caution: null });
+test('an explicitly empty personality remains authoritative', async () => {
+  const { root, config } = prepare({ personality: '' });
   assert.equal(config.personality, '');
   const l0 = await compileL0({ catId: 'fable-5', dossierRoot: root, profileDir: root });
   assert.doesNotMatch(l0, /fixture-self-canary/);
-  assert.doesNotMatch(buildTeammateRoster('observer', root), /fixture-roster-canary/);
+  assert.match(buildTeammateRoster('observer', root), /fixture-roster-canary/);
 });
+
+test('editor drafts use the same field-level decisions as the next persisted prompt', () => {
+  const { root, config } = prepare({ roleDescription: 'own role', caution: null });
+  const dossier = loadDossierProfiles(root).get('fable-5');
+  const draft = resolveMemberIdentity(config, dossier, { caution: 'draft limitation' });
+  assert.equal(draft.routingNote, 'draft limitation');
+  assert.equal(draft.rosterFields.caution.replacedValue, 'fixture-route-canary');
+  assert.equal(draft.sources.fields.roleDescription, config.identitySources.roleDescription);
+  assert.equal(draft.rosterDescription, 'fixture-roster-canary');
+  const cleared = resolveMemberIdentity(
+    { ...config, caution: 'saved limitation', identitySources: { ...config.identitySources, caution: 'variant' } },
+    dossier,
+    { caution: '' },
+  );
+  assert.equal(cleared.routingNote, 'fixture-route-canary');
+  assert.equal(cleared.rosterFields.caution.configuredValue, '');
+  assert.equal(cleared.rosterFields.caution.replacedValue, undefined);
+});
+
+for (const [label, teamStrengths, withoutDossier] of [
+  ['empty', '', 'authored role'],
+  ['whitespace', ' \t ', 'authored role'],
+  ['inherited template', undefined, 'template strengths'],
+]) {
+  test(`${label} team strengths use dossier independently of an authored role`, async () => {
+    const { root, config } = prepare({ roleDescription: 'authored role', teamStrengths, caution: null });
+    const selfL0 = await compileL0({ catId: 'fable-5', dossierRoot: root, profileDir: root });
+    assert.match(selfL0, /角色：authored role/);
+    assert.doesNotMatch(selfL0, /fixture-self-canary/);
+    assert.match(buildTeammateRoster('observer', root), /fixture-roster-canary/);
+    assert.match(buildTeammateRoster('observer', join(root, 'absent')), new RegExp(withoutDossier));
+
+    const identity = resolveMemberIdentity(config, loadDossierProfiles(root).get('fable-5'));
+    assert.equal(identity.rosterDescription, 'fixture-roster-canary');
+    assert.equal(identity.sources.rosterDescription, 'dossier');
+    assert.ok(!identity.suppressedDossierFields.includes('l0RosterSummary'));
+    assert.ok(identity.suppressedDossierFields.includes('l0SelfDescription'));
+    const teammateL0 = await compileTeammateL0(root);
+    const row = teammateL0.split('\n').find((line) => line.includes('@fable-5'));
+    assert.match(row, /fixture-route-canary/);
+  });
+}
+
+for (const [label, override, breedOverride] of [
+  ['null caution', { caution: null }],
+  ['empty routing text', { caution: '', teamStrengths: '' }],
+  ['whitespace routing text', { caution: ' \t ', teamStrengths: ' \t ' }],
+  ['empty breed routing text', undefined, { caution: null, teamStrengths: '' }],
+  [
+    'empty variant routing text masking breed text',
+    { caution: null, teamStrengths: '' },
+    { caution: 'masked breed caution', teamStrengths: 'masked breed strengths' },
+  ],
+]) {
+  test(`${label} keeps dossier routing in actual L0 and teammate roster`, async () => {
+    const { root, config } = prepare(override, breedOverride);
+    const l0 = await compileTeammateL0(root);
+    const roster = buildTeammateRoster('observer', root);
+    const l0Row = l0.split('\n').find((line) => line.includes('@fable-5'));
+    assert.match(l0Row, /fixture-route-canary/);
+    assert.match(roster, /fixture-roster-canary/);
+    assert.match(roster, /fixture-route-canary/);
+    assert.doesNotMatch(roster, /masked breed/);
+    assert.equal(config.identitySources.caution, 'template');
+    assert.equal(config.identitySources.teamStrengths, 'template');
+  });
+}
 
 test('an explicitly supplied complete config is authoritative rather than treated as a template fallback', async () => {
   const { root } = prepare();
@@ -155,7 +247,7 @@ function prepareInheritedVariant(personality) {
   );
   const configs = toAllCatConfigs(loadResolvedCatConfig(path));
   catRegistry.reset();
-  Object.entries(configs).forEach(([id, config]) => catRegistry.register(id, config));
+  for (const [id, config] of Object.entries(configs)) catRegistry.register(id, config);
   return { root, config: configs['fable-5'] };
 }
 

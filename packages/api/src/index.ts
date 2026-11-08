@@ -1118,6 +1118,8 @@ async function main(): Promise<void> {
     // whether it was applied now; the snapshots exits still emit themselves stay unmarked.
     lifecycleObserver: {
       committed: (message, commit) => {
+        // PR-3a2: a committed response is no longer replayed to pages joining its thread.
+        socketManager?.closeResponseStream(message.id);
         void ownerRoom.lifecycleCommitted(message, commit);
       },
       failed: (error, message) => {
@@ -1578,6 +1580,9 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     threadStore,
     messageStore,
+    selectedSourceReadFence: redis
+      ? (await import('./domains/memory/message-selected-read-fence.js')).redisSelectedSourceReadFence(redis)
+      : undefined,
   });
   const messageSearchAnswerService = new MessageSearchAnswerPublicationService(
     new MessageSearchAnswerPublicationStore(memoryServices.store.getDb(), (work) =>
@@ -1672,7 +1677,15 @@ async function main(): Promise<void> {
     runWrite: (operation) => memoryServices.store.runExclusive(operation),
     onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
   });
-  const memoryCueHandles = new MemoryCueDrillHandleService(createProcessMemoryCueDrillSecret(), memoryCueEpisodeStore);
+  const { WorkPreparationOpportunityStore } = await import(
+    './domains/memory/cue/preparation/WorkPreparationOpportunityStore.js'
+  );
+  const { WorkPreparationAuthority } = await import('./domains/memory/cue/preparation/WorkPreparationAuthority.js');
+  const workPreparationStore = new WorkPreparationOpportunityStore(memoryServices.store.getDb());
+  const memoryCueHandles = new MemoryCueDrillHandleService(createProcessMemoryCueDrillSecret(), {
+    findPresentedCoordinate: (...args) => memoryCueEpisodeStore.findPresentedCoordinate(...args),
+    findPreparedCoordinate: (...args) => workPreparationStore.findPreparedCoordinate(...args),
+  });
   const memoryCueDeps: CallbackMemoryCueDeps = {
     episodeStore: memoryCueEpisodeStore,
     handles: memoryCueHandles,
@@ -2796,14 +2809,22 @@ async function main(): Promise<void> {
     logger: app.log,
   });
   const memoryCueRuntime = createMemoryCueRuntime({
+    workPreparation: {
+      store: workPreparationStore,
+      messages: messageSearchService,
+      authority: new WorkPreparationAuthority({
+        threads: threadStore,
+        messages: messageStore,
+        epochs: contextEpochStore,
+      }),
+    },
     matterMemoryService,
-    ...(memoryServices.catalog && memoryServices.collectionStores && memoryServices.knowledgeResolver
+    ...(memoryServices.catalog && memoryServices.collectionStores
       ? {
           contextProjectDiscovery: {
             threads: threadStore,
             catalog: memoryServices.catalog,
             stores: memoryServices.collectionStores,
-            resolver: memoryServices.knowledgeResolver,
             homeProjectPath: resolveActiveProjectRoot(),
             homeDocsRoot: docsRoot,
           },
@@ -2831,9 +2852,11 @@ async function main(): Promise<void> {
     ownerUserId: privateUserId,
     profileRepository,
     projectDocsRoot: docsRoot,
+    ...(memoryServices.publishedDocuments ? { publishedProjectSource: memoryServices.publishedDocuments.source } : {}),
     autoDreamStore: autoDream.services.store,
   });
   memoryCueDeps.sourceReader = memoryCueRuntime.sourceReader;
+  memoryCueDeps.preparation = memoryCueRuntime.preparation;
   const threadExecutionSituationSource = createThreadExecutionSituationSource({
     messageStore,
     listActiveRuns: (threadId) =>

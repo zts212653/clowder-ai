@@ -4,7 +4,7 @@ related_features: [F335, F287, F200]
 doc_kind: architecture
 topics: [memory, matter, provenance, callback]
 created: 2026-11-02
-updated: 2026-11-04
+updated: 2026-11-07
 owner: codex-astra
 description: "Canonical matter pages, exact-source access and explicit-read receipts shared by opening recall and watcher consumers."
 mcp_admission_status: accepted
@@ -84,3 +84,22 @@ Reply expansion displays the exact validated receipt's description as “猫的�
 page revision, followed by original speech, speaker attribution and source links. Empty descriptions
 have an explicit empty state. A changed or unavailable receipt never substitutes today's description
 into an old reply; the existing complete-page link is the route to the current editable page.
+
+## Indexed discovery increment (F332 W1, implementation pending)
+
+The directory now takes bounded coordinate batches from the existing SQLite page table and an external-content
+trigram index, then calls the same `project()` for every supporting source. Query matching keeps the existing
+case-insensitive literal meaning, including short queries; page order and visible-item cursors retain their contract.
+A second current-source check precedes publication. No index hit records an explicit read.
+
+After 1,000 inspected candidates without a full page, continuation represents unfinished discovery, including when
+no item is visible yet. Scan progress is encrypted and bound to the original reader/query/cursor; it exposes neither
+hidden page coordinates nor their count. This transient progress token requires restarting directory discovery after
+an API restart; ordinary cursors after visible items remain restart-stable. It is a rebuildable read view, not a TTL
+on user pages, sources or receipts. Opening/watcher consumers continue using the returned cursor and their original
+material budgets; they do not gain action authority or a second directory cache.
+
+SQLite V79 installs the indexes and insert/update/delete triggers in one transaction. Editing or forgetting a page
+updates the search tokens in that same canonical write; the index has no second text payload or vector store.
+Rebuilding evidence does not delete canonical pages, source associations or forget fences. Reverting W1 code leaves
+these additive indexes harmless; production loading/migration still requires its original operational authorization.

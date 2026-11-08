@@ -37,6 +37,11 @@ import {
   reconcileManagedJobsOffLoop,
 } from './managed-job-reconciliation.js';
 import { readManagedJobRecovery } from './managed-job-recovery-ledger.js';
+import {
+  type ManagedJobStatusRequest,
+  type ManagedJobStatusSnapshot,
+  readManagedJobStatus,
+} from './managed-job-status.js';
 import type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
 
 export type { ManagedJobAccess, ManagedJobSubmission } from './managed-job-types.js';
@@ -243,6 +248,7 @@ export class ManagedJobService {
     });
   }
 
+  /** Synchronous worker/internal projection. HTTP/scheduler observations enter through readStatus. */
   get(principal: ManagedJobAccess, jobId: string) {
     const job = this.authorized(principal, jobId);
     const record = readDurableGateRecord(job);
@@ -269,6 +275,25 @@ export class ManagedJobService {
       retryEpoch: job.definition?.retryEpoch ?? 0,
       ...(job.definition?.retryOfJobId ? { retryOfJobId: job.definition.retryOfJobId } : {}),
     };
+  }
+
+  /** One authorized status snapshot off the API loop, including any requested output/history. */
+  readStatus(
+    principal: ManagedJobAccess,
+    jobId: string,
+    options: Pick<ManagedJobStatusRequest, 'tailBytes' | 'gateRecovery'> = {},
+  ): Promise<ManagedJobStatusSnapshot> {
+    return reconcileManagedJobsOffLoop<ManagedJobStatusSnapshot>({
+      kind: 'status',
+      principal,
+      jobId,
+      ...options,
+      now: Date.now(),
+      dataRoot: this.dataRoot,
+      maxConcurrent: this.maxConcurrent,
+      operatorUserId: this.operatorUserId,
+      supervisorEpoch: this.supervisorEpoch,
+    });
   }
 
   cancel(principal: ManagedJobAccess, jobId: string) {
@@ -371,6 +396,7 @@ export function reconcileManagedJobsInWorker(input: ManagedJobReconciliationRequ
     input.operatorUserId,
     input.supervisorEpoch,
   );
+  if (input.kind === 'status') return readManagedJobStatus(service, input);
   return input.kind === 'one'
     ? service.reconcileJob(input.principal, input.jobId, input.now)
     : service.reconcile(input.legacyJobs, input.now);

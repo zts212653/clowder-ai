@@ -164,6 +164,12 @@ function ScrollConversation({ activeThread }: { activeThread: string }) {
     </>
   );
 }
+/** Like ChatContainer, the open thread is this page's foreground room (PR-3a2 journeys, `?rooms`). */
+function ForegroundRoom({ activeThread }: { activeThread: string }) {
+  useThreadChatRuntime([activeThread]);
+  return null;
+}
+
 function ScrollProof() {
   const [activeThread, setActiveThread] = useState(() => location.pathname.slice(1) || threadId);
   useEffect(() => {
@@ -175,11 +181,13 @@ function ScrollProof() {
     useChatStore.getState().setCurrentThread(activeThread);
   }, [activeThread]);
   const navigate = (id: string) => {
-    history.pushState({}, '', `/${id}?scroll=1`);
+    const rooms = new URLSearchParams(location.search).has('rooms') ? '&rooms=1' : '';
+    history.pushState({}, '', `/${id}?scroll=1${rooms}`);
     setActiveThread(id);
   };
   return (
     <ThreadChatRuntimeProvider routeThreadId={activeThread}>
+      {new URLSearchParams(location.search).has('rooms') ? <ForegroundRoom activeThread={activeThread} /> : null}
       <button type="button" onClick={() => navigate('chat-other')}>
         Other thread
       </button>

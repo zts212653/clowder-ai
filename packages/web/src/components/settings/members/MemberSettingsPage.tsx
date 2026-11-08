@@ -241,6 +241,7 @@ export function MemberSettingsPage({
                 ) : null
               ) : (
                 <MemberAdditionalFields
+                  cat={baseline}
                   section={section}
                   visualAssets={draft.baseline?.visualAssets}
                   onAvatarCommitted={editor.avatarCommitted}

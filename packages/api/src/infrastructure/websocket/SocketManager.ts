@@ -4,7 +4,13 @@
  */
 
 import { Server as HttpServer } from 'node:http';
-import { createCatId, isExplicitStopGesture, isExplicitStopSourceControl, type RoomJoinAck } from '@cat-cafe/shared';
+import {
+  createCatId,
+  isExplicitStopGesture,
+  isExplicitStopSourceControl,
+  type ResponseStreamReplay,
+  type RoomJoinAck,
+} from '@cat-cafe/shared';
 import { fastifyCookie } from '@fastify/cookie';
 import { Server, Socket } from 'socket.io';
 import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
@@ -16,10 +22,13 @@ import type {
   CancelResult,
   InvocationTracker,
 } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
+import type { StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
+import { isThreadMessageVisibleToViewer } from '../../domains/cats/services/stores/visibility.js';
 import type { AgentMessage } from '../../domains/cats/services/types.js';
 import { createModuleLogger } from '../logger.js';
 import { sessionUserIdForCookies } from '../session-auth.js';
 import { BroadcastRateMonitor, type BroadcastRateMonitorOptions } from './BroadcastRateMonitor.js';
+import { ResponseStreamRecords } from './ResponseStreamRecords.js';
 import { ThreadSequencer } from './ThreadSequencer.js';
 
 const log = createModuleLogger('ws');
@@ -32,6 +41,8 @@ interface QueueProcessorLike {
 }
 
 type RoomJoinAcknowledge = (result: RoomJoinAck) => void;
+
+const THREAD_ROOM_PREFIX = 'thread:';
 
 function validateRoomJoin(roomInput: unknown, userId: string): RoomJoinAck {
   const room = typeof roomInput === 'string' ? roomInput : '';
@@ -94,6 +105,14 @@ export class SocketManager {
    * Public for test/admin introspection via getStats(threadId).
    */
   readonly rateMonitor: BroadcastRateMonitor;
+  /** PR-3a2: what each response still streaming has broadcast, replayed to a connection that joins mid-reply. */
+  private readonly responseStreams = new ResponseStreamRecords({
+    onCeilingExceeded: (info) =>
+      log.error(
+        { event: 'response_stream_record_ceiling', ...info },
+        'Response stream record hit its ceiling; joins now treat this response as incomplete',
+      ),
+  });
 
   constructor(
     httpServer: HttpServer,
@@ -180,6 +199,8 @@ export class SocketManager {
         log.info({ socketId: socket.id }, 'Client disconnected');
       });
 
+      // PR-3a2: names each thread-room join on this connection; carried by its replay and its ack.
+      let threadRoomJoins = 0;
       socket.on('join_room', async (roomInput: unknown, acknowledgeInput?: unknown) => {
         const acknowledge =
           typeof acknowledgeInput === 'function' ? (acknowledgeInput as RoomJoinAcknowledge) : undefined;
@@ -192,7 +213,16 @@ export class SocketManager {
         const { room } = validation;
         try {
           await socket.join(room);
-          acknowledge?.({ ok: true, room });
+          if (!room.startsWith(THREAD_ROOM_PREFIX)) {
+            acknowledge?.({ ok: true, room });
+          } else {
+            // No await from here to the acknowledgement: the replay holds every event broadcast before
+            // this instant, and every later broadcast reaches this connection after the acknowledgement.
+            const joinId = `${socket.id}:${++threadRoomJoins}`;
+            const threadId = room.slice(THREAD_ROOM_PREFIX.length);
+            socket.emit('response_stream_replay', this.responseStreamReplay(threadId, joinId, userId));
+            acknowledge?.({ ok: true, room, joinId });
+          }
           log.info({ socketId: socket.id, room }, 'Joined room');
         } catch (error) {
           log.error({ socketId: socket.id, room, error }, 'Failed to join room');
@@ -441,7 +471,53 @@ export class SocketManager {
     // F183 Phase C2/C3 — record per-thread emit rate; warn callback fires when
     // sliding-window count exceeds threshold (debounced per thread).
     this.rateMonitor.record(tid);
-    this.io.to(room).emit('agent_message', { ...message, threadId: tid, seq, seqEpoch });
+    // PR-3a2: recorded in the same step it is sent, so a join replays exactly what was sent before it.
+    // The position tells a page whether it holds the response's stream from its first broadcast.
+    const streamIndex = this.responseStreams.record(message, tid);
+    this.io.to(room).emit('agent_message', {
+      ...message,
+      ...(streamIndex === undefined ? {} : { streamIndex }),
+      threadId: tid,
+      seq,
+      seqEpoch,
+    });
+  }
+
+  /** PR-3a2: R was admitted; record its broadcasts from here on. Re-admitting R keeps its record. */
+  openResponseStream(response: StoredMessage): void {
+    this.responseStreams.open(response);
+  }
+
+  /** PR-3a2: R reached its terminal commit or was deleted; no later join replays it. */
+  closeResponseStream(messageId: string): void {
+    this.responseStreams.close(messageId);
+  }
+
+  /**
+   * The open responses of a thread that this connection's session user can read through History
+   * (contract §3.11.3). Room validation only proves the room name; it says nothing about content
+   * produced before the join.
+   */
+  private responseStreamReplay(
+    threadId: string,
+    joinId: string,
+    viewerUserId: string,
+  ): ResponseStreamReplay<AgentMessage> {
+    return {
+      threadId,
+      joinId,
+      responses: this.responseStreams
+        .forThread(threadId)
+        .filter((entry) => isThreadMessageVisibleToViewer(entry.response, viewerUserId))
+        .map((entry) => ({
+          messageId: entry.response.id,
+          catId: entry.response.catId,
+          timestamp: entry.response.timestamp,
+          events: entry.events,
+          complete: entry.complete,
+          nextIndex: entry.nextIndex,
+        })),
+    };
   }
 
   /** `exceptRoom` skips sockets that are also in that room. */

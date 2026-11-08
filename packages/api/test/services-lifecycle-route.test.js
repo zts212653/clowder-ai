@@ -3103,7 +3103,7 @@ describe('deep health probe (zombie detection)', () => {
         ok: true,
         status: 200,
         error: null,
-        details: { capabilities: ['speech', 'speech-stream-route-v1'] },
+        details: { model: 'mlx-community/Kokoro-82M-bf16', capabilities: ['speech', 'speech-stream-route-v1'] },
       }),
       lifecycle: {
         serviceConfig: {

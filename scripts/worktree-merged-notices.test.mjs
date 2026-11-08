@@ -6,9 +6,15 @@ const origin = { threadId: 'thread_original', userId: 'owner', sourceRef: 'invoc
 const head = 'a'.repeat(40);
 const mergedAt = 'b'.repeat(40);
 const sourceRef = 'pr:fixture/repo#42';
-const row = { path: '/fixture/raw-review', owner: 'kimi', head, retentionStatus: null, lifecycle: { origin } };
+const row = {
+  path: '/fixture/raw-review',
+  owner: 'kimi',
+  head,
+  retentionStatus: null,
+  lifecycle: { origin, prSource: sourceRef },
+};
 const truth = { sourceRef, state: 'MERGED', head: 'c'.repeat(40), mergedAt, commits: [head, 'c'.repeat(40)] };
-test('raw intermediate review is found by exact commit association and notified in its recorded thread', () => {
+test('bound intermediate review is found by exact commits and notified in its recorded thread', () => {
   const deps = {
     now: 0,
     findSources: (h) => {

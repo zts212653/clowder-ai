@@ -4,8 +4,9 @@ import { estimateTokens } from '../../../utils/token-counter.js';
 import type { createRequestGenerationRecorder } from '../../cats/services/agents/invocation/request-generation-recorder.js';
 import type { BoundedWatcherRunPort } from '../../cats/services/agents/providers/BoundedWatcherRunPort.js';
 import { asCodexAppServerRecord } from '../../cats/services/agents/providers/CodexAppServerEventMapper.js';
+import { boundedWatcherResult } from './context/watcher-context-budget.js';
+import { compactWatcherDirectory, watcherDirectoryReader } from './context/watcher-directory-read.js';
 import { commitWatcherCheckpoint, recoverWatcherAttempt, saveWatcherState } from './watcher-checkpoint.js';
-import { boundedWatcherResult } from './watcher-context-budget.js';
 import type { WatcherInvocationOwners, WatcherRunState } from './watcher-invocation-contract.js';
 import { watcherProviderOverrides } from './watcher-provider-config.js';
 import { createWatcherRequestBoundary } from './watcher-request-boundary.js';
@@ -28,6 +29,7 @@ export function watcherNativePort(input: {
 }): BoundedWatcherRunPort {
   const { owners, run, bridge, surface, instructions, signal, recovery, accepted, acceptToolCalls, recorder } = input;
   let calls = 0;
+  const directoryRead = watcherDirectoryReader(owners, run, bridge);
   return {
     configureProvider: async ({ config, account, transportEnv }) => {
       const id = typeof config.model_provider === 'string' ? config.model_provider : 'openai';
@@ -122,12 +124,15 @@ export function watcherNativePort(input: {
       if (calls > 6 || (await owners.registry.watcherToolCallCount(run.state.attempt!.invocationId)) >= 6) {
         const firstDenial = await owners.registry.claimClientMessageId(
           run.state.attempt!.invocationId,
-          'watcher-native-budget-denial:v1',
+          `watcher-native-budget-denial:v1:${run.state.attempt!.nativeTurnId}`,
         );
         if (!firstDenial) input.abort(new Error('watcher_repeated_tool_budget_denial'));
         throw new Error('watcher_tool_budget_exhausted: 请直接输出最终 checkpoint');
       }
-      const result = await bridge.call(params.tool, params.arguments, `native:${params.callId}`, signal);
+      const result =
+        params.tool === 'cat_cafe_list_memory_matters'
+          ? await directoryRead(params.arguments, `native:${params.callId}`, signal)
+          : await bridge.call(params.tool, params.arguments, `native:${params.callId}`, signal);
       await owners.transcript.appendDurableEvent(
         {
           sessionId: run.session.id,
@@ -146,7 +151,15 @@ export function watcherNativePort(input: {
       );
       return {
         success: result.isError !== true,
-        contentItems: [{ type: 'inputText', text: boundedWatcherResult(result, String(params.callId)) }],
+        contentItems: [
+          {
+            type: 'inputText',
+            text: boundedWatcherResult(
+              params.tool === 'cat_cafe_list_memory_matters' ? compactWatcherDirectory(result) : result,
+              String(params.callId),
+            ),
+          },
+        ],
       };
     },
     outputSchema: {
@@ -165,7 +178,14 @@ export function watcherNativePort(input: {
       if (!run.session || run.session.cliSessionId !== threadId) throw new Error('watcher_native_binding_mismatch');
       if (recovery) {
         const active = parseWatcherSessionState(run.session.watcherState);
-        run.state = await recoverWatcherAttempt(owners, run.session, active, client, input.recoveryOnly !== true);
+        run.state = await recoverWatcherAttempt(
+          owners,
+          run.session,
+          active,
+          client,
+          input.recoveryOnly !== true,
+          run.window,
+        );
         run.recoveredIdle = true;
         if (run.state.attempt?.phase === 'finalize_pending') {
           run.committed = true;

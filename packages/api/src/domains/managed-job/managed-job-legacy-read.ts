@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { validateDurableManagedGateJob } from './durable-managed-gate-job-validation.js';
-import { closeSupervisorStore } from './managed-job-database.js';
+import { closeSupervisorStore, isManagedJobStoreBusy } from './managed-job-database.js';
 import { openLegacyReferenceStore, readLegacyManagedJobReference } from './managed-job-legacy-reference-store.js';
 import type { DurableManagedGateJob } from './managed-job-types.js';
 
@@ -60,7 +60,8 @@ export function readLegacyManagedJobById(dataRoot: string, jobId: string): Legac
         ? candidate
         : null;
     return { kind: 'record', jobId, sourcePath: ref.sourcePath, job, record };
-  } catch {
+  } catch (error) {
+    if (isManagedJobStoreBusy(error)) throw error;
     return { kind: 'unknown', jobId, sourcePath: ref.sourcePath, reason: 'legacy_record_unreadable' };
   }
 }

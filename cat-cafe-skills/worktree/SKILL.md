@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "2026-10-27: developer CLI birth/inventory/finish and automatic merged-checkout retirement; no separate end-user Hub action."
+tips_exempt: "Renewed 2026-11-07: developer CLI birth, PR provenance, unknown-worktree inventory and merged-checkout retirement; existing bind-pr/finish/retain commands remain the entrypoints, with no separate end-user Hub action."
 description: "Use when: 创建代码/脚本/API工位或收尾。Not for: docs直推、代清其他owner。Output: 隔离worktree（Redis6398）、实际移除工位的released回执或具名retained回执。"
 triggers:
   - "开始开发"
@@ -226,7 +226,8 @@ pnpm worktree:bind-pr {精确工位路径} pr:{OWNER}/{REPO}#{PR_NUMBER}
 
 只读普查用 `pnpm worktree:inventory`，包含 legacy 与非标准路径；capacity 只回答名额，不是完整库存。
 API 每五分钟扫描本部署仓库的续留及已合入未收尾事实，每轮最多四个 PR subject 轮转。
-已登记且来源 thread/user 核对通过、PR 已合入并包含当前 exact HEAD、没有有效续留的工位，
+工位须有明确的本地 PR 来源证据（`bind-pr`、原 PR 来源或同 HEAD 的有效保留来源）；相同 HEAD 只证明提交成员，不能证明责任。
+已登记且本地 PR 来源、thread/user 核对通过、PR 已合入并包含当前 exact HEAD、没有有效续留的工位，
 扫描会调用原生收尾：再次核对干净状态、进程与持久任务、保护名单及 Git 可见 index，
 保全被忽略的本地数据/环境配置和私有 Git metadata，再用无 force 的 Git remove 释放目录、保留分支。
 常驻目录、Alpha、policy=never、locked、未提交改动和仍有消费者的工位保留。
@@ -236,6 +237,7 @@ API 每五分钟扫描本部署仓库的续留及已合入未收尾事实，每�
 下轮扫描从同一账本核对中断：目录和登记已消失、归档验证通过时补发明确的中断对账通知，
 不伪造原 finish 的完成回执。可能部分删除或无法核验时保留归档并报原 thread。
 来源缺失/损坏会写运行日志并保留在 inventory 中，由原维护查证，不能猜同 catId 的另一个线程。
+`--pr` 回执中的 `unknownWorktrees` 仍须查证；`associationComplete=false` 时不能宣称该 PR 零残留，也不能据此代清工位。
 过期提醒在代码部署后才生效，源码存在不算线上已验收。
 
 ## 收工：核验释放或具名续留

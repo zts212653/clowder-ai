@@ -6,6 +6,7 @@ import {
   writeStreamText,
   writeToolEvent,
 } from '@/hooks/named-message-writer';
+import { admitStreamEvent } from '@/hooks/stream-position';
 import type { CatStatusType } from '@/stores/chat-types';
 import { invocationErrorRowId, isRecoverableInFlightError, upsertErrorRow } from './error-rows';
 import { isStaleTerminalEvent, markThreadInvocationActive, markThreadInvocationComplete } from './invocation-slots';
@@ -88,6 +89,8 @@ export function consumeBackgroundSystemInfo(msg: BackgroundAgentMessage, options
 }
 
 export function handleBackgroundAgentMessage(msg: BackgroundAgentMessage, options: Options): void {
+  // PR-3a2: one position step per numbered event, before any branch draws, hides or ignores it.
+  if (!admitStreamEvent(msg, msg.threadId, writerStore(options))) return;
   if (msg.semanticEvent && applySemanticEvent(msg, systemInfoPort(msg, options))) return;
   const isStreamOutput = msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result';
   // A late stream event for a committed response must not reopen the thread's activity or slots.
