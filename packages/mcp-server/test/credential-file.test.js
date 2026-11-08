@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
+import { resolveModeFilePath } from '../../../.claude/hooks/f236-anchor-posttool.mjs';
 
 describe('#1092 credential file refresh', () => {
   let originalEnv;
@@ -140,7 +141,7 @@ describe('#1092 credential file refresh', () => {
   test('set_read_mode derives its session file from credential-file invocation identity', async () => {
     const invocationId = `pooled-read-mode-${Date.now()}-${Math.random()}`;
     const credFile = join(credDir, 'read-mode.json');
-    const modeFile = `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    const modeFile = resolveModeFilePath({ CAT_CAFE_INVOCATION_ID: invocationId });
     writeFileSync(credFile, JSON.stringify({ invocationId, callbackToken: 'fresh-token' }));
     process.env.CAT_CAFE_CREDENTIAL_FILE = credFile;
     delete process.env.CAT_CAFE_INVOCATION_ID;

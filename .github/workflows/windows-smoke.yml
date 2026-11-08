@@ -38,6 +38,8 @@ jobs:
         run: node --test packages/api/test/windows-temp-lifecycle.test.mjs packages/api/test/isolated-template-root.test.js
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Anchor mode writer, hook and eval bridge temporary paths (#1912)
+        run: node --test packages/api/test/f236-temp-protocol.test.js packages/api/test/f236-set-read-mode.test.js
       - name: Git marketplace pnpm isolation and diagnostic sanitization
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
