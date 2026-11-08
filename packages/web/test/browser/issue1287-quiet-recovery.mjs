@@ -765,7 +765,7 @@ try {
     await p.joined(p.other);
     // PR-3b on next: live background work also leaves the foreground room.
     await p.unjoined();
-    const requestedBeforeDisconnect = (await readState(p.page, p.id)).requested ?? 0;
+    const foregroundRequestedBeforeDisconnect = (await readState(p.page, p.other)).requested ?? 0;
     await p.offline(p.other);
     await p.saveTerminal();
     assert.equal((await p.snapshot('background response persisted offline')).visibleFinal, 0);
@@ -774,14 +774,13 @@ try {
     await p.joined(p.other);
     await p.unjoined();
     await waitFor(
-      async () => (await readState(p.page, p.id)).requested > requestedBeforeDisconnect,
-      'background catch-up requested after reconnect',
+      async () => (await readState(p.page, p.other)).requested > foregroundRequestedBeforeDisconnect,
+      'confirmed foreground join requests catch-up after reconnect',
     );
-    const bg = await p.snapshot('reconnect marks background catch-up');
-    assert(bg.local.requested > 0);
+    const bg = await p.snapshot('reconnected foreground while target remains outside rooms');
     assert.equal(bg.visibleFinal, 0);
     await p.switchTo(p.id);
-    await p.expectFinal('pending background catch-up consumed on return');
+    await p.expectFinal('background completion recovered on foreground return');
     p.rows.result = 'PASS';
   });
   await scenario('sequence-gap', async (p) => {
