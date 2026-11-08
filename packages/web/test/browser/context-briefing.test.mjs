@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { buildChatProof, origin } from './fixtures/f322-chat-real-page-build.mjs';
 
 const evidence = process.env.BRIEFING_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'context-briefing');
+const longExcerpt = '请核对侧栏菜单的窄屏布局与长标题'.repeat(18);
 let browser;
 let built;
 before(
@@ -29,6 +30,9 @@ after(async () => browser?.close());
   { name: 'mobile-missing-dark', width: 320, theme: 'dark', sample: 'missing' },
   { name: 'desktop-warning', width: 1280, theme: 'light', sample: 'warning' },
   { name: 'mobile-warning', width: 320, theme: 'dark', sample: 'warning' },
+  { name: 'desktop-long-excerpt', width: 1280, theme: 'light', sample: 'long' },
+  { name: 'mobile-long-excerpt', width: 320, theme: 'dark', sample: 'long' },
+  { name: 'mobile-375-long-excerpt', width: 375, theme: 'light', sample: 'long' },
 ].forEach(({ name, width, theme, sample }) => {
   test(`${name}: long briefing content remains inside the real chat card`, { timeout: 30_000 }, async (t) => {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
@@ -46,7 +50,9 @@ after(async () => browser?.close());
         body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/proof.css"><div id="root"></div><script type="module" src="/proof.js"></script>',
       });
     });
-    await page.goto(`${origin}/?theme=${theme}&case=${sample}`);
+    const params = new URLSearchParams({ theme, case: sample });
+    if (sample === 'long') params.set('excerpt', longExcerpt);
+    await page.goto(`${origin}/?${params}`);
     const row = page.locator('[data-message-id="context-briefing-proof"]');
     await row.waitFor();
     assert.match(await row.innerText(), /上下文交接/);
@@ -61,6 +67,8 @@ after(async () => browser?.close());
       row.evaluate((element) => {
         const card = element.querySelector('[data-context-receipt]');
         const bounds = card.getBoundingClientRect();
+        const summary = card.querySelector(':scope > p');
+        const summaryStyle = getComputedStyle(summary);
         const overflowing = [...card.querySelectorAll('*')]
           .filter((child) => {
             const style = getComputedStyle(child);
@@ -76,6 +84,12 @@ after(async () => browser?.close());
           cardWidth: bounds.width,
           pageWidth: document.documentElement.clientWidth,
           pageScroll: document.documentElement.scrollWidth,
+          summary: {
+            height: summary.getBoundingClientRect().height,
+            lineHeight: Number.parseFloat(summaryStyle.lineHeight),
+            clientHeight: summary.clientHeight,
+            scrollHeight: summary.scrollHeight,
+          },
           overflowing,
         };
       });
@@ -83,6 +97,14 @@ after(async () => browser?.close());
     writeFileSync(path.join(evidence, `${name}-collapsed.json`), JSON.stringify(collapsed, null, 2));
     assert.deepEqual(collapsed.overflowing, [], 'default card must not clip or overlap its content');
     assert.ok(collapsed.pageScroll <= collapsed.pageWidth + 1);
+    if (sample === 'long') {
+      const maxLines = width <= 440 ? 3 : 2;
+      assert.ok(
+        collapsed.summary.height <= collapsed.summary.lineHeight * maxLines + 1,
+        `collapsed excerpt must fit ${maxLines} lines: ${JSON.stringify(collapsed.summary)}`,
+      );
+      assert.ok(collapsed.summary.scrollHeight > collapsed.summary.clientHeight, 'long excerpt must be clipped');
+    }
     await row.getByRole('button').first().click();
     assert.equal(await row.locator('details').count(), 0, 'one disclosure opens every detail');
     assert.match(await row.innerText(), /诊断/);
@@ -98,6 +120,14 @@ after(async () => browser?.close());
     writeFileSync(path.join(evidence, `${name}-expanded.json`), JSON.stringify(expanded, null, 2));
     assert.deepEqual(expanded.overflowing, [], 'expanded commands, IDs and paths must wrap without clipping');
     assert.ok(expanded.pageScroll <= expanded.pageWidth + 1);
+    if (sample === 'long') {
+      assert.equal(await row.locator('[data-context-receipt] > p').first().textContent(), longExcerpt);
+      assert.ok(expanded.summary.height > collapsed.summary.height, 'expanding must show the full recorded excerpt');
+      assert.ok(
+        expanded.summary.scrollHeight <= expanded.summary.clientHeight + 1,
+        'expanded excerpt must not be clipped',
+      );
+    }
     assert.match(await row.innerText(), /cat_cafe_search_evidence/);
     await row.getByRole('button').first().press('Enter');
     assert.equal(await row.getByRole('button').first().getAttribute('aria-expanded'), 'false');

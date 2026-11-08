@@ -41,7 +41,7 @@ const card = {
                   handoff: {
                     from: '砚砚',
                     time: '08:02',
-                    excerpt: '请核对侧栏菜单。先复现窗口缩窄的情况，再核对长标题。',
+                    excerpt: params.get('excerpt') ?? '请核对侧栏菜单。先复现窗口缩窄的情况，再核对长标题。',
                     warning,
                   },
                 }

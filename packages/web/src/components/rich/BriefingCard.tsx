@@ -125,7 +125,9 @@ export function BriefingCard({
           {expanded ? '收起' : '详情'} {expanded ? '⌃' : '⌄'}
         </span>
       </button>
-      <p className="mt-2 text-[13px] leading-relaxed">{expanded && excerpt ? excerpt : summary}</p>
+      <p className={`mt-2 text-[13px] leading-relaxed ${expanded ? '' : 'line-clamp-2 max-[440px]:line-clamp-3'}`}>
+        {expanded && excerpt ? excerpt : summary}
+      </p>
       <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-cafe-secondary">
         {handoff ? (
           <span>
