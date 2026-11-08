@@ -169,6 +169,16 @@ it('dispatches plugin queue recipients through Manager, leaving ordinary member 
   assert.equal(harness.router.routeExecution.mock.callCount(), 0);
   assert.equal(harness.invocationRecordStore.create.mock.callCount(), 0, 'plugin receipt creates no member invocation');
   assert.equal(deliveries[0][1].envelope.messageId, admitted.message.id);
+  const receiptEvents = harness.socketManager.emitToUser.mock.calls
+    .filter(
+      ({ arguments: args }) => args[1] === 'message_snapshot_updated' && args[2].message.extra?.pluginAddressedReceipt,
+    )
+    .map(({ arguments: args }) => args[2].message);
+  assert.equal(receiptEvents[0].extra.pluginAddressedReceipt.phase, 'sending');
+  assert.equal(receiptEvents.at(-1).extra.pluginAddressedReceipt.phase, 'accepted');
+  assert.equal(receiptEvents[0].id, receiptEvents.at(-1).id);
+  assert.equal(receiptEvents[0].lifecycle, undefined);
+
   await admitMessage(harness, { targetCats: ['opus'], content: 'ordinary member input' });
   await waitFor(() => harness.router.routeExecution.mock.callCount() === 1);
   assert.deepEqual(harness.router.routeExecution.mock.calls[0].arguments[4], ['opus']);

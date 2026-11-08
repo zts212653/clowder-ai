@@ -229,4 +229,83 @@ describe('dispatch receipt Queue publication', () => {
       useChatStore.getState().messages.find((message) => message.id === source.id)?.extra ?? {},
     ).not.toHaveProperty('queueReceipt');
   });
+  it.each([
+    THREAD_ID,
+    'thread-background',
+  ])('upserts lifecycle-free stored snapshots in their exact thread: %s', async (threadId) => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const receipt = {
+      id: 'plugin-receipt',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: '插件投递与接收状态。',
+      timestamp: Date.now(),
+      extra: {
+        pluginAddressedReceipt: { inputMessageId: 'source', targetId: 'pi_helper', accepted: false, phase: 'sending' },
+      },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: receipt }));
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.find((message) => message.id === receipt.id)?.extra?.pluginAddressedReceipt?.phase,
+    ).toBe('sending');
+    const accepted = {
+      ...receipt,
+      extra: { pluginAddressedReceipt: { ...receipt.extra.pluginAddressedReceipt, phase: 'accepted', accepted: true } },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: accepted }));
+    const rows = useChatStore
+      .getState()
+      .getThreadState(threadId)
+      .messages.filter((message) => message.id === receipt.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.extra?.pluginAddressedReceipt?.accepted).toBe(true);
+    expect(rows[0]?.lifecycle).toBeUndefined();
+    expect(rows[0]?.type).toBe('system');
+    const reply = {
+      id: 'plugin-reply',
+      from: { kind: 'plugin', instanceId: 'pi_helper' },
+      catId: null,
+      content: '',
+      timestamp: Date.now(),
+      replyTo: 'source',
+      contentBlocks: [{ type: 'image', url: '/uploads/fixture.png' }],
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: reply }));
+    const visible = useChatStore
+      .getState()
+      .getThreadState(threadId)
+      .messages.find((message) => message.id === reply.id);
+    expect(visible?.from).toEqual(reply.from);
+    expect(visible?.replyTo).toBe('source');
+    expect(visible?.contentBlocks).toEqual(reply.contentBlocks);
+    expect(visible?.lifecycle).toBeUndefined();
+
+    if (threadId !== THREAD_ID) expect(useChatStore.getState().messages).toHaveLength(0);
+    expect(useChatStore.getState().catInvocations).toEqual({});
+  });
+
+  it('keeps lifecycle-only events strict and rejects invalid snapshot lifecycle or missing canonical sender', async () => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const message = {
+      id: 'bad',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: 'state',
+      timestamp: Date.now(),
+    };
+    act(() => {
+      emitServerEvent('message_lifecycle_updated', { threadId: THREAD_ID, message });
+      emitServerEvent('message_snapshot_updated', {
+        threadId: THREAD_ID,
+        message: { ...message, lifecycle: { kind: 'pretend' } },
+      });
+      emitServerEvent('message_snapshot_updated', { threadId: THREAD_ID, message: { ...message, from: undefined } });
+    });
+    expect(useChatStore.getState().messages).toHaveLength(0);
+  });
 });

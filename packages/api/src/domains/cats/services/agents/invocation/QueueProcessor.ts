@@ -140,7 +140,7 @@ import {
   type ExecutionOwnerMatch,
 } from './InvocationTracker.js';
 import { projectLifecycleAppendAction } from './lifecycle-append-projection.js';
-import { emitLifecycleMessageUpdated } from './lifecycle-message-update.js';
+import { emitLifecycleMessageUpdated, emitStoredMessageUpdated } from './lifecycle-message-update.js';
 import {
   appendLifecycleResponseWithReadBack,
   LifecycleResponseAdmissionUnknownError,
@@ -4626,9 +4626,9 @@ export class QueueProcessor {
           for (const target of pluginTargets) {
             if (source.targets.includes(target)) {
               const receipt = await this.addressedDelivery!.deliver(source, target, (message) => {
-                this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), message);
+                emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), message);
               });
-              this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), receipt);
+              emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), receipt);
               if (source.payload.messageId) {
                 const settledSource = await messageStore.getById(source.payload.messageId);
                 if (settledSource) {

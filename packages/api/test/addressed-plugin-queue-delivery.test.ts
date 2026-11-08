@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { emitStoredMessageUpdated } from '../src/domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { AddressedPluginQueueDelivery } from '../src/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js';
 
@@ -54,9 +55,17 @@ test('publishes a durable plugin dispatch while delivery is still awaiting ackno
   );
   if (sent.outcome !== 'enqueued') throw new Error('not admitted');
   const claimed = (await queue.markProcessingByIdDurable('thread', sent.entries[0]!.id, 'pi_original'))!;
-  const updates: unknown[] = [];
+  const updates: Array<{ event: string; data: { message: { id: string; lifecycle?: unknown } } }> = [];
   const pending = delivery.deliver(claimed, 'pi_original', (message) => {
-    updates.push(message);
+    emitStoredMessageUpdated(
+      {
+        emitToUser(_owner, event, data) {
+          updates.push({ event, data: data as { message: { id: string; lifecycle?: unknown } } });
+        },
+      },
+      'owner',
+      message,
+    );
   });
   await started;
   try {
@@ -67,7 +76,19 @@ test('publishes a durable plugin dispatch while delivery is still awaiting ackno
     const receipt = (await store.getById(ref.statusMessageId))!;
     assert.equal((receipt.extra?.pluginAddressedReceipt as { phase?: string })?.phase, 'sending');
     assert.equal(receipt.lifecycle?.kind === 'response', false);
-    assert.ok(updates.length >= 2, 'both source and receipt reach the live client');
+    assert.ok(
+      updates.some(
+        (row) =>
+          row.event === 'message_snapshot_updated' &&
+          row.data.message.id === receipt.id &&
+          row.data.message.lifecycle === undefined,
+      ),
+      'lifecycle-free receipt reaches the real emitter',
+    );
+    assert.ok(
+      updates.some((row) => row.data.message.id === source.id),
+      'source reaches the real emitter',
+    );
   } finally {
     finish();
     await pending;
