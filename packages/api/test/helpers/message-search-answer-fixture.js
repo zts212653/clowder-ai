@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { MessageSearchAnswerPublicationService } from '../../dist/domains/memory/MessageSearchAnswerPublicationService.js';
-import { MessageSearchAnswerPublicationStore } from '../../dist/domains/memory/MessageSearchAnswerPublicationStore.js';
+import {
+  answerDigest,
+  MessageSearchAnswerPublicationStore,
+} from '../../dist/domains/memory/MessageSearchAnswerPublicationStore.js';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { MESSAGE_SEARCH_ANSWER_SCHEMA } from '../../dist/domains/memory/message-search-answer-schema.js';
 
 export const producer = { kind: 'invocation', id: 'inv-one', catId: 'codex61-sol' };
@@ -52,7 +56,7 @@ export function fixture(path = ':memory:') {
     factPatch = {};
   const deps = {
     messageStore: messages,
-    threadStore: { get: async (id) => threads.get(id) ?? null, list: async () => [...threads.values()] },
+    threadStore: { get: (id) => threads.get(id) ?? null, list: () => [...threads.values()] },
     evidenceStore: {
       readMessagePassageState: () => ({ current: true, suppressThreadTitle: false }),
       searchMessagePassages: async () => {
@@ -80,10 +84,11 @@ export function fixture(path = ':memory:') {
         };
       },
     },
-    qualifier: new MessageQueryQualifier(async () => {
+    // A regression must fail locally instead of reaching a retired provider path.
+    get qualifier() {
       calls++;
-      throw new Error('No provider in publication tests');
-    }),
+      throw new Error('Retired qualification dependency accessed');
+    },
     decisionIndex: {
       lookup: async () => ({
         status: 'ready',
@@ -109,6 +114,13 @@ export function fixture(path = ':memory:') {
     principal,
     producer,
     targetThreadId: 'origin',
+    selections: source.slice(0, 3).map((row) => ({
+      threadId: row.threadId,
+      messageId: row.id,
+      contentRevision: createHash('sha256').update(row.content).digest('hex'),
+      quote: row.content,
+      reason: 'The answering cat selected this original source.',
+    })),
   };
   return {
     db,
@@ -116,6 +128,8 @@ export function fixture(path = ':memory:') {
     source,
     threads,
     threadStore: deps.threadStore,
+    evidenceStore: deps.evidenceStore,
+    decisionIndex: deps.decisionIndex,
     search,
     store,
     service,
@@ -140,6 +154,30 @@ export function fixture(path = ':memory:') {
       ),
   };
 }
+
+/** Seed the captured old format directly; tests never regenerate qualification. */
+export function claimHistoricalOperation(f) {
+  return f.store.claim({
+    ownerUserId: 'owner',
+    producer: f.request.producer,
+    operationId: f.request.operationId,
+    targetThreadId: f.request.targetThreadId,
+    requestDigest: answerDigest({ input: f.request.input, targetThreadId: f.request.targetThreadId }),
+  });
+}
+
+export async function seedHistoricalAnswer(f) {
+  const captured = JSON.parse(readFileSync(new URL('./message-search-legacy-supported.json', import.meta.url), 'utf8'));
+  let text = JSON.stringify(captured.response);
+  f.source.forEach((row, index) => {
+    text = text.replaceAll(`$source_${index}`, row.id);
+  });
+  const legacy = JSON.parse(text);
+  const claimed = await claimHistoricalOperation(f);
+  await f.store.complete(claimed.record.publication_ref, legacy);
+  return { status: 'prepared', publicationRef: claimed.record.publication_ref, response: legacy };
+}
+
 export async function post(f, prepared, overrides = {}) {
   const selection = { publicationRef: prepared.publicationRef, ...overrides.selection };
   const target = overrides.threadId ?? 'origin',

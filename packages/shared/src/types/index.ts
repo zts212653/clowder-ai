@@ -1024,6 +1024,7 @@ export {
   subjectSeenOpportunityV1Schema,
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
+  workPreparationOpportunityV1Schema,
 } from './memory-cue.js';
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
@@ -1636,7 +1637,7 @@ export type {
   UpdateSliceInput,
 } from './slice.js';
 // Socket.IO room membership convergence contract shared by API and Web.
-export type { RoomJoinAck } from './socket-room.js';
+export type { ResponseStreamReplay, RoomJoinAck } from './socket-room.js';
 // SOP definition generated truth source (#748)
 export {
   DEVELOPMENT_SOP_DEFINITION,

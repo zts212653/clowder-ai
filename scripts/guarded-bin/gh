@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { prepareSecretSafeSend } from '../lib/secret-outbound-args.mjs';
 import { assertSecretFree } from '../lib/secret-payload-files.mjs';
 import { executeSecretSafeCommand } from '../lib/secret-command-execution.mjs';
+import { withIsolatedGhReadCache } from '../lib/gh-read-cache.mjs';
 
 const args = process.argv.slice(2);
 const ownDir = dirname(fileURLToPath(import.meta.url));
@@ -70,14 +71,14 @@ function commandArgs() {
       index += hostname.width;
       continue;
     }
-    if (arg === 'pr') {
+    if (arg === 'pr' || arg === 'issue') {
       index += 1;
       while (index < args.length) {
         const inheritedRepository = valueOptionAt(index, VALUE_OPTION_ALIASES.repository);
         if (!inheritedRepository) break;
         index += inheritedRepository.width;
       }
-      return ['pr', ...args.slice(index)];
+      return [arg, ...args.slice(index)];
     }
     if (!arg.startsWith('-')) return args.slice(index);
     index += 1;
@@ -181,4 +182,8 @@ try {
 } catch {
   fail('secret_send_blocked', 'content was unsafe or could not be inspected; use explicit body/file input.');
 }
-process.exit(await executeSecretSafeCommand(delegate, prepared.args, { ...process.env, PATH: delegatePath }));
+process.exit(
+  await withIsolatedGhReadCache(commandArgs(), { ...process.env, PATH: delegatePath }, (env) =>
+    executeSecretSafeCommand(delegate, prepared.args, env),
+  ),
+);

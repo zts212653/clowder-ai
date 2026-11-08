@@ -1,6 +1,7 @@
 import type { SettingsReturnDiagnostic } from '@cat-cafe/shared';
 import { readChatReadingRef, releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import { connectionDiagnosticId, recordConnectionDiagnostic } from '@/utils/connection-diagnostics';
+import { readingDiagnosticId } from '@/utils/reading-restore-diagnostics';
 import { verifyMessageNavigationSource } from '../message-search/verify-message-navigation-source';
 import { getThreadHref, getThreadIdFromPathname } from '../ThreadSidebar/thread-navigation';
 import type { ChatReadingPort } from '../thread-chat/useThreadChatReadingPort';
@@ -23,6 +24,7 @@ export interface SettingsReadingView {
 }
 interface PendingReturn {
   sessionId: string;
+  diagnosticId?: string;
   controller: AbortController;
   admitted: boolean;
   port: ChatReadingPort | null;
@@ -64,6 +66,7 @@ export class SettingsReadingBridge {
     recordConnectionDiagnostic({
       kind: 'settings_return',
       bridgeId: this.diagnosticId,
+      operationId: this.pending?.diagnosticId,
       phase,
       cause,
       notice,
@@ -217,6 +220,7 @@ export class SettingsReadingBridge {
     this.attempted = true;
     const operation: PendingReturn = {
       sessionId: source.id,
+      diagnosticId: readingDiagnosticId(),
       controller: new AbortController(),
       admitted: false,
       port: null,
@@ -250,7 +254,12 @@ export class SettingsReadingBridge {
     operation.port = port;
     let receipt: Awaited<ReturnType<ChatReadingPort['restoreReadingRef']>>;
     try {
-      receipt = await port.restoreReadingRef(source.readingRef, operation.controller.signal, { refresh: true });
+      receipt = await port.restoreReadingRef(source.readingRef, operation.controller.signal, {
+        refresh: true,
+        diagnostic: operation.diagnosticId
+          ? { bridgeId: this.diagnosticId, operationId: operation.diagnosticId }
+          : undefined,
+      });
     } catch {
       receipt = { status: 'unavailable' };
     }

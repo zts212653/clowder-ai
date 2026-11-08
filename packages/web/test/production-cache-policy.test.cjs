@@ -3,7 +3,14 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { after, before, describe, it } = require('node:test');
+const vm = require('node:vm');
 const next = require('next');
+const {
+  API_TRAFFIC_SAMPLES,
+  SERVICE_WORKER_ORIGIN,
+  matchRoute,
+  routesFromServiceWorker,
+} = require('./helpers/service-worker-routes.cjs');
 
 const WEB_ROOT = path.resolve(__dirname, '..');
 const SERVICE_WORKER_PATH = path.join(WEB_ROOT, 'public', 'sw.js');
@@ -74,6 +81,55 @@ describe('production PWA cache policy', () => {
       'the start document must retain NetworkFirst runtime caching for offline fallback',
     );
     findHashedChunkUrl(artifacts.serviceWorker);
+  });
+
+  it('leaves API and Socket.IO requests to the browser', () => {
+    const routes = routesFromServiceWorker(artifacts.serviceWorker);
+    for (const href of API_TRAFFIC_SAMPLES) {
+      assert.equal(matchRoute(routes, href), null, `${href} must not be handled by the service worker`);
+    }
+    assert.equal(matchRoute(routes, `${SERVICE_WORKER_ORIGIN}/`), 'start-url');
+    assert.equal(
+      matchRoute(routes, `${SERVICE_WORKER_ORIGIN}/_next/static/chunks/main-abc123.js`),
+      'next-static-js-assets',
+    );
+    assert.equal(matchRoute(routes, `${SERVICE_WORKER_ORIGIN}/thread/probe`), 'pages');
+  });
+
+  it('lets Chromium send API and Socket.IO requests to the network without starting the worker', async () => {
+    const workerChunk = artifacts.serviceWorker.match(/importScripts\("\/(worker-[\w-]+\.js)"\)/);
+    assert.ok(workerChunk, 'the generated service worker must import the custom worker chunk');
+    const listeners = {};
+    const self = {
+      addEventListener: (type, listener) => {
+        listeners[type] = listener;
+      },
+      clients: {},
+      registration: {},
+      location: new URL(SERVICE_WORKER_ORIGIN),
+    };
+    self.self = self;
+    vm.runInNewContext(fs.readFileSync(path.join(WEB_ROOT, 'public', workerChunk[1]), 'utf8'), self);
+    assert.equal(typeof listeners.install, 'function', 'the worker must register an install listener');
+
+    let registered;
+    let pending;
+    listeners.install({
+      addRoutes: async (routes) => {
+        registered = routes;
+      },
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
+    await pending;
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(registered)),
+      ['/api/*', '/socket.io/*'].map((pathname) => ({
+        condition: { urlPattern: { protocol: '*', hostname: '*', port: '*', pathname } },
+        source: 'network',
+      })),
+    );
   });
 
   it('serves documents as non-cacheable while keeping hashed assets immutable', async () => {

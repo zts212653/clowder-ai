@@ -1,4 +1,10 @@
-import type { CatBreed, CatCafeConfig, CatConfig, CatVariant } from '@cat-cafe/shared';
+import {
+  type CatBreed,
+  type CatCafeConfig,
+  type CatConfig,
+  type CatVariant,
+  hasAuthoredMemberIdentityValue,
+} from '@cat-cafe/shared';
 
 // Provenance travels with this parsed snapshot; it is never another persisted catalog or a disk reread.
 const authoredCatalogs = new WeakMap<CatCafeConfig, CatCafeConfig | null>();
@@ -29,18 +35,14 @@ export function projectMemberIdentitySources(config: CatCafeConfig, breed: CatBr
         field === 'name' && variant.name === undefined && variant.displayName !== undefined
           ? 'displayName'
           : (field as keyof CatVariant);
-      const source =
-        variant[key] !== undefined
-          ? ownVariant?.[key] !== undefined
-            ? 'variant'
-            : 'template'
-          : field === 'personality'
-            ? defaultVariant?.personality !== undefined
-              ? 'default_variant'
-              : 'template'
-            : ownBreed?.[field as keyof CatBreed] !== undefined
-              ? 'breed'
-              : 'template';
+      let source = 'template';
+      if (variant[key] !== undefined) {
+        if (hasAuthoredMemberIdentityValue(field, ownVariant?.[key])) source = 'variant';
+      } else if (field === 'personality') {
+        if (defaultVariant?.personality !== undefined) source = 'default_variant';
+      } else if (hasAuthoredMemberIdentityValue(field, ownBreed?.[field as keyof CatBreed])) {
+        source = 'breed';
+      }
       return [field, source];
     }),
   );

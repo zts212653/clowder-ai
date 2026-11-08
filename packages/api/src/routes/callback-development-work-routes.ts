@@ -17,6 +17,7 @@ import {
 import {
   EntrustedWorkLifecycleError,
   EntrustedWorkLifecycleService,
+  entrustedWorkArtifactRefsChanged,
 } from '../domains/growing/EntrustedWorkLifecycleService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -157,6 +158,7 @@ async function handleDevelopmentWorkRequest(request: FastifyRequest, reply: Fast
     if ('task' in result && result.result !== 'resume_required') {
       deps.socketManager.emitToUser(actor.userId, 'entrusted_work_projection_invalidated', {
         ownerUserId: actor.userId,
+        ...(entrustedWorkArtifactRefsChanged(existing, result.task) ? { reason: 'works_changed' } : {}),
       });
       deps.socketManager.broadcastToRoom(
         `thread:${actor.threadId}`,

@@ -48,7 +48,7 @@ export function registerF326C7ArtworkToolsJourney() {
               ? ['cat-planet-cover-landscape-1920x1080.png', 'cat-planet-cover-portrait-1080x1440.png'].map((name) =>
                   path.join(process.env.F326_C7_COVER_DIR, name),
                 )
-              : ['antig-opus.png', 'codex.png'].map((name) => path.resolve(WEB_ROOT, '../../assets/avatars', name));
+              : ['antig-opus.png', 'codex.png'].map((name) => path.resolve(WEB_ROOT, 'public/avatars', name));
         const imageNames = sourceCovers.map((_source, i) => `c7-cover-${i}.png`);
         for (const [i, source] of sourceCovers.entries())
           await copyFile(source, path.join(path.dirname(fixture.absolute), imageNames[i]));

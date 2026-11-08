@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { messageSearchResponseSchema } from '@cat-cafe/shared';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { boundMessageSearchResponse } from '../../dist/domains/memory/message-search-budget.js';
 
 const response = (qualification) => ({
@@ -75,28 +74,29 @@ test('candidate counts are not assessed counts, indeterminate is separate, and l
   assert.doesNotMatch(rejected.notice.summary, /尚未评估/);
 });
 
-test('the owner exposes only aggregate batch lifecycle, distinguishing no start, cancellation and literal support', async (t) => {
-  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1700000000000 });
-  const rows = [
-    { threadId: 'PRIVATE-THREAD', messageId: 'PRIVATE-ID', content: 'plain body', contentRevision: 'PRIVATE-REV' },
-  ];
-  const qualifier = new MessageQueryQualifier(async (_batch, ctx) => {
-    await new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve(), { once: true }));
-    return '{}';
-  });
-  const stopped = await qualifier.qualify('different topic', rows, { userId: 'owner', deadlineAt: Date.now() + 1000 });
-  assert.deepEqual(stopped.meta.batches, { started: 0, completed: 0, cancelled: 0, failed: 0 });
-  const pending = qualifier.qualify('different topic', rows, { userId: 'owner', deadlineAt: Date.now() + 3000 });
-  t.mock.timers.tick(1000);
-  const cancelled = await pending;
-  assert.deepEqual(cancelled.meta.batches, { started: 1, completed: 0, cancelled: 1, failed: 0 });
-  assert.equal(cancelled.meta.unassessed, 1);
-  assert.doesNotMatch(JSON.stringify(cancelled.meta), /PRIVATE/);
-  const literal = await qualifier.qualify('plain', rows, { userId: 'owner', deadlineAt: Date.now() + 3000 });
-  assert.equal(literal.meta.supported, 1);
-  assert.equal(literal.meta.unassessed, 0);
-  assert.equal(literal.nativeCalls, 0);
-  assert.deepEqual(literal.meta.batches, { started: 0, completed: 0, cancelled: 0, failed: 0 });
+test('historical qualification keeps aggregate batch states without reviving a runner or exposing private payloads', () => {
+  for (const batches of [
+    { started: 0, completed: 0, cancelled: 0, failed: 0 },
+    { started: 1, completed: 0, cancelled: 1, failed: 0 },
+    { started: 2, completed: 1, cancelled: 0, failed: 1 },
+  ]) {
+    const saved = messageSearchResponseSchema.parse(
+      response({
+        status: 'partial',
+        examined: 1,
+        supported: 0,
+        rejected: 0,
+        indeterminate: 0,
+        unassessed: 1,
+        batches,
+        privatePayload: 'PRIVATE OLD RUNNER OUTPUT',
+      }),
+    );
+    const wire = boundMessageSearchResponse(saved);
+    assert.deepEqual(wire.meta.qualification.batches, batches);
+    assert.equal(wire.meta.qualification.unassessed, 1);
+    assert.doesNotMatch(JSON.stringify(wire), /PRIVATE/);
+  }
 });
 
 test('whole-row budget truncation recomputes the explanation and preserves optional schema compatibility', () => {

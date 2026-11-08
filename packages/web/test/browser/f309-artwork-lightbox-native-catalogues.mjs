@@ -9,7 +9,10 @@ export async function verifyNativeArtworkCatalogues(page, returned, observed = [
   const check = async (origin) => {
     const dialog = page.getByRole('dialog');
     const surface = dialog.getByTestId('workspace-content-review-surface');
-    await surface.getByTestId('workspace-content-review-media').waitFor();
+    await surface
+      .locator('[data-testid=workspace-content-review-media],[data-testid=gif-frame-media]')
+      .first()
+      .waitFor();
     assert.equal(await composer.evaluate((node, original) => node === original, original), true);
     assert.equal(await composer.inputValue(), '三处入口都保留这份未发送草稿');
     assert.equal(await surface.getAttribute('data-navigation-origin'), origin);
@@ -18,10 +21,7 @@ export async function verifyNativeArtworkCatalogues(page, returned, observed = [
     await dialog.waitFor({ state: 'hidden' });
     assert.equal(await composer.inputValue(), '三处入口都保留这份未发送草稿');
   };
-  await page
-    .locator(`[data-message-id="${returned.published.id}"]`)
-    .getByRole('button', { name: /打开作品/ })
-    .click();
+  await page.locator(`[data-message-id="${returned.published.id}"]`).getByTestId('file-block-cover').click();
   await check('chat-file-link');
   await openWorkspaceTools(page);
   await page.getByTestId('v2-workspace-home').click();

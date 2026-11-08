@@ -40,6 +40,7 @@ import { remarkChatReferences } from './chat-references/remark-chat-references';
 import { ChatReferenceDemand, useChatReferenceDemand } from './chat-references/useChatReferenceDemand';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
+import { ProviderCitationContext, projectProviderCitations } from './markdown-provider-citations';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 const BARE_MARKDOWN_LINE_HREF_RE = /^[^/:\\?#]+\.mdx?:\d+$/i;
@@ -123,11 +124,21 @@ export function normalizeMathDelimiters(md: string): string {
 
 const InsideMarkdownLinkContext = createContext(false);
 
-function Mention({ catId, text, style }: { catId: string; text: string; style: CSSProperties }) {
+function Mention({
+  catId,
+  text,
+  sourceText,
+  style,
+}: {
+  catId: string;
+  text: string;
+  sourceText: string;
+  style: CSSProperties;
+}) {
   const insideLink = useContext(InsideMarkdownLinkContext);
   if (insideLink) {
     return (
-      <span className="font-semibold" style={style}>
+      <span data-quote-source-text={sourceText} className="font-semibold" style={style}>
         {text}
       </span>
     );
@@ -135,6 +146,7 @@ function Mention({ catId, text, style }: { catId: string; text: string; style: C
   return (
     <button
       type="button"
+      data-quote-source-text={sourceText}
       className="cursor-pointer font-semibold"
       onClick={() => useChatStore.getState().openTeamSubject({ type: 'cat', id: catId })}
       aria-label={`在猫猫团队中查看 ${catId}`}
@@ -168,7 +180,7 @@ function highlightMentions(text: string): ReactNode[] {
       padding: '1px 5px',
     };
     const displayText = isCanonicalOnlyMentionAlias(alias) ? `@${labelMap[catId] ?? catId}` : m[0];
-    parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} style={style} />);
+    parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} sourceText={m[0]} style={style} />);
     lastIdx = re.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
@@ -359,6 +371,11 @@ function buildMdComponents(
         {referenceThreadId && typeof node?.properties?.['data-chat-reference'] === 'string' ? (
           <ChatReference
             reference={node.properties['data-chat-reference']}
+            sourceText={
+              typeof node.properties['data-chat-source-text'] === 'string'
+                ? node.properties['data-chat-source-text']
+                : undefined
+            }
             format={String(node.properties['data-chat-format'] ?? 'link')}
             layout={String(node.properties['data-chat-layout'] ?? 'inline')}
             threadId={referenceThreadId}
@@ -428,6 +445,8 @@ const mdComponents = buildMdComponents();
 /* ── Exported component ────────────────────────────────────── */
 interface Props {
   content: string;
+  /** Cloud-assistant display only; ordinary/user Markdown remains literal. */
+  providerCitations?: boolean;
   referenceThreadId?: string;
   className?: string;
   /** Skip slash-command prefix detection (e.g. for rich block bodyMarkdown) */
@@ -478,6 +497,7 @@ export function resolveRelativePath(base: string, relative: string): string {
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
+  providerCitations,
   referenceThreadId: sourceThreadId,
   className,
   disableCommandPrefix,
@@ -494,7 +514,17 @@ export const MarkdownContent = memo(function MarkdownContent({
   const referenceAnchor = useRef<HTMLDivElement>(null);
   const referenceDemand = useChatReferenceDemand(referenceAnchor, !!referenceThreadId);
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
-  const md = normalizeMathDelimiters(cmdMatch ? content.slice(cmdMatch[1].length) : content);
+  const inheritedCitations = useContext(ProviderCitationContext);
+  const citationDisplay = useMemo(
+    () =>
+      (providerCitations ?? inheritedCitations)
+        ? projectProviderCitations(content)
+        : { markdown: content, unresolved: 0 },
+    [content, inheritedCitations, providerCitations],
+  );
+  const md = normalizeMathDelimiters(
+    cmdMatch ? citationDisplay.markdown.slice(cmdMatch[1].length) : citationDisplay.markdown,
+  );
 
   const listen = useMemo(
     () =>
@@ -544,6 +574,11 @@ export const MarkdownContent = memo(function MarkdownContent({
         >
           {md}
         </MarkdownSurface>
+        {citationDisplay.unresolved > 0 && (
+          <p className="mt-2 text-xs text-cafe-secondary" data-provider-citation-disclosure>
+            部分引用未附来源链接；正文中的原有链接仍可查看。
+          </p>
+        )}
       </div>
     </ChatReferenceDemand.Provider>
   );

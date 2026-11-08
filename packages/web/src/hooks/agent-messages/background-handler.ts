@@ -6,6 +6,7 @@ import {
   writeStreamText,
   writeToolEvent,
 } from '@/hooks/named-message-writer';
+import { admitStreamEvent } from '@/hooks/stream-position';
 import type { CatStatusType } from '@/stores/chat-types';
 import { invocationErrorRowId, isRecoverableInFlightError, upsertErrorRow } from './error-rows';
 import { isStaleTerminalEvent, markThreadInvocationActive, markThreadInvocationComplete } from './invocation-slots';
@@ -88,6 +89,8 @@ export function consumeBackgroundSystemInfo(msg: BackgroundAgentMessage, options
 }
 
 export function handleBackgroundAgentMessage(msg: BackgroundAgentMessage, options: Options): void {
+  // PR-3a2: one position step per numbered event, before any branch draws, hides or ignores it.
+  if (!admitStreamEvent(msg, msg.threadId, writerStore(options))) return;
   if (msg.semanticEvent && applySemanticEvent(msg, systemInfoPort(msg, options))) return;
   const isStreamOutput = msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result';
   // A late stream event for a committed response must not reopen the thread's activity or slots.
@@ -121,13 +124,11 @@ export function handleBackgroundAgentMessage(msg: BackgroundAgentMessage, option
 function handleText(msg: BackgroundAgentMessage, options: Options): void {
   if (!msg.content) return;
   const { store } = options;
-  let finalMessageId: string | undefined;
   if (msg.origin === 'callback') {
     // A post_message is its own persisted message beside the response; a replay adds nothing.
     const post = callbackPost(msg, msg.timestamp);
     if (post) {
       writePersistedPost(post, msg.threadId, writerStore(options));
-      finalMessageId = post.id;
     } else {
       dropUnnamedBodyWrite('callback', msg, msg.threadId);
     }
@@ -139,27 +140,15 @@ function handleText(msg: BackgroundAgentMessage, options: Options): void {
       writeStreamText(target, streamTextWrite(msg), writerStore(options));
       touchStreamActivity(store, msg.threadId, target.messageId);
       if (msg.isFinal) finishNamedMessage(target, writerStore(options));
-      finalMessageId = target.messageId;
     } else {
       dropUnnamedBodyWrite('text', msg, msg.threadId);
     }
     store.updateThreadCatStatus(msg.threadId, msg.catId, msg.isFinal ? 'done' : 'streaming');
   }
   if (!msg.isFinal) return;
-
-  // Completion uses the original response; the toast only notifies another thread.
-  const finalMessage = finalMessageId
-    ? store.getThreadState(msg.threadId).messages.find((message) => message.id === finalMessageId)
-    : undefined;
-  const preview = finalMessage?.content ?? msg.content;
+  // PR-3a: the background completion toast is owned by the user-room lifecycle snapshot
+  // (lifecycle-terminal.ts); a room event toasting too would announce a split pane twice.
   markThreadInvocationComplete(msg, options);
-  options.addToast({
-    type: 'success',
-    title: `${catName(options, msg.catId)} 完成`,
-    message: preview,
-    threadId: msg.threadId,
-    duration: 5000,
-  });
 }
 
 /** F117 error rule: an error naming the response writes no row; the response carries the failure. */
@@ -198,13 +187,7 @@ function handleError(msg: BackgroundAgentMessage, options: Options): void {
   if (msg.isFinal) {
     markThreadInvocationComplete(msg, options);
   }
-  options.addToast({
-    type: 'error',
-    title: `${catName(options, msg.catId)} 出错`,
-    message: msg.error ?? 'Unknown error',
-    threadId: msg.threadId,
-    duration: 8000,
-  });
+  // PR-3a: the failure toast comes from the failed response or delivery_failure snapshot.
 }
 
 function handleDone(msg: BackgroundAgentMessage, options: Options): void {
@@ -223,23 +206,10 @@ function handleDone(msg: BackgroundAgentMessage, options: Options): void {
     )
   )
     return;
-  // An error already reported this turn: done keeps it and shows no success toast.
+  // An error already reported this turn: done keeps it. Toasts come from the lifecycle snapshot.
   if (options.store.getThreadState(msg.threadId).catStatuses[msg.catId] !== 'error') {
     const failure = msg.errorCode === 'cancelled' ? undefined : msg.errorCode;
     options.store.updateThreadCatStatus(msg.threadId, msg.catId, failure ? 'error' : 'done');
-    const notification = failure
-      ? { type: 'error' as const, title: '出错', message: msg.error ?? failure, duration: 8000 }
-      : {
-          type: 'success' as const,
-          title: '完成',
-          message: `${catName(options, msg.catId)} 已完成处理`,
-          duration: 5000,
-        };
-    options.addToast({
-      ...notification,
-      title: `${catName(options, msg.catId)} ${notification.title}`,
-      threadId: msg.threadId,
-    });
   }
   if (msg.isFinal) {
     markThreadInvocationComplete(msg, options);

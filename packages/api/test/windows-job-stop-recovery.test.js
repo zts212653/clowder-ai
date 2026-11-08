@@ -240,3 +240,121 @@ test('Stop ends a dead API s execution only with its exact job proof, and names 
     assert.equal(hasUnconfirmedProviderTeardown(store.get('child-1')), true, name);
   }
 });
+
+for (const status of ['canceled', 'failed', 'interrupted']) {
+  test(`Stop keeps ${status} outcome and records physical proof across a terminal race`, async (t) => {
+    const f = fixture(t);
+    f.link(f.start('race-child'));
+    const before = f.store.get('race-child');
+    const execute = async () => {
+      f.store.transitionTerminal('race-child', { status, endedAt: 4, terminalReason: 'original-ending' });
+      return ABSENT();
+    };
+    const result = await stopWithWindowsJobProof({ store: f.store, record: before, dataDir: f.dataDir, execute });
+    assert.equal(result.stopped, true);
+    const current = f.store.get('race-child');
+    assert.equal(current.status, status);
+    assert.equal(current.terminalReason, 'original-ending');
+    assert.ok(current.providerTeardownAt >= current.startedAt, 'proof is durable before the last link is removed');
+    assert.deepEqual(readdirSync(resolveWindowsJobLinksDirectory(f.dataDir)), []);
+  });
+
+  test(`startup records physical stop separately from an already ${status} child`, async (t) => {
+    const f = fixture(t);
+    f.link(f.start('ended-child'));
+    f.store.transitionTerminal('ended-child', { status, endedAt: 4, terminalReason: 'original-ending' });
+    const pass = await recordVerifiedWindowsJobTeardowns({ store: f.store, dataDir: f.dataDir, execute: ABSENT });
+    assert.deepEqual(pass.released, ['ended-child']);
+    assert.equal(f.store.get('ended-child').status, status);
+    assert.ok(f.store.get('ended-child').providerTeardownAt >= 1);
+    assert.deepEqual(await clearSettledWindowsJobEvidence({ store: f.store, pass }), {
+      clearedLinks: 1,
+      clearedJobs: 1,
+    });
+  });
+}
+
+for (const path of ['Stop', 'startup']) {
+  for (const failure of ['throw', 'not-committed']) {
+    test(`${path} retains the exact evidence after a ${failure} teardown write and retries it`, async (t) => {
+      const f = fixture(t);
+      f.link(f.start('pending-child'));
+      f.store.transitionTerminal('pending-child', { status: 'canceled', endedAt: 4, terminalReason: 'user_cancel' });
+      const realWrite = f.store.recordProviderTeardown.bind(f.store);
+      f.store.recordProviderTeardown = () => {
+        if (failure === 'throw') throw new Error('teardown store unavailable');
+      };
+      const run = () =>
+        path === 'Stop'
+          ? stopWithWindowsJobProof({
+              store: f.store,
+              record: f.store.get('pending-child'),
+              dataDir: f.dataDir,
+              execute: ABSENT,
+            })
+          : recordVerifiedWindowsJobTeardowns({ store: f.store, dataDir: f.dataDir, execute: ABSENT });
+      if (path === 'Stop' && failure === 'throw') await assert.rejects(run, /teardown store unavailable/);
+      else {
+        const result = await run();
+        if (path === 'Stop') assert.deepEqual(result, { stopped: false, reason: 'teardown_not_committed' });
+        else {
+          assert.deepEqual(result.released, []);
+          assert.deepEqual(await clearSettledWindowsJobEvidence({ store: f.store, pass: result }), {
+            clearedLinks: 0,
+            clearedJobs: 0,
+          });
+        }
+      }
+      assert.equal(readdirSync(resolveWindowsJobLinksDirectory(f.dataDir)).length, 1);
+      assert.equal(readdirSync(resolveWindowsJobDirectory(f.dataDir)).length, 1);
+      assert.equal(f.store.get('pending-child').providerTeardownAt, undefined);
+      f.store.recordProviderTeardown = realWrite;
+      const retried = await run();
+      if (path === 'Stop') assert.equal(retried.stopped, true);
+      else {
+        assert.deepEqual(retried.released, ['pending-child']);
+        assert.deepEqual(await clearSettledWindowsJobEvidence({ store: f.store, pass: retried }), {
+          clearedLinks: 1,
+          clearedJobs: 1,
+        });
+      }
+      assert.ok(f.store.get('pending-child').providerTeardownAt >= 1);
+      assert.equal(f.store.get('pending-child').status, 'canceled');
+      assert.deepEqual(readdirSync(resolveWindowsJobLinksDirectory(f.dataDir)), []);
+    });
+  }
+}
+
+test('cleanup keeps an ended child link when its exact identity mismatches', async (t) => {
+  const f = fixture(t);
+  f.link({ ...f.start('foreign-child'), threadId: 'another-thread' });
+  f.store.transitionTerminal('foreign-child', { status: 'canceled', endedAt: 4, terminalReason: 'user_cancel' });
+  const pass = await recordVerifiedWindowsJobTeardowns({ store: f.store, dataDir: f.dataDir, execute: ABSENT });
+  assert.deepEqual(pass.released, []);
+  assert.deepEqual(await clearSettledWindowsJobEvidence({ store: f.store, pass }), { clearedLinks: 0, clearedJobs: 0 });
+  assert.equal(f.store.get('foreign-child').providerTeardownAt, undefined);
+});
+
+test('an ended child keeps every link until all its job owners have closed', async (t) => {
+  const f = fixture(t);
+  const execution = f.start('two-jobs');
+  f.link(execution);
+  recordWindowsJobExecutionLink({ dataDir: f.dataDir, jobName: `${JOB}-missing-owner`, execution });
+  f.store.transitionTerminal('two-jobs', { status: 'canceled', endedAt: 4, terminalReason: 'user_cancel' });
+  const pass = await recordVerifiedWindowsJobTeardowns({ store: f.store, dataDir: f.dataDir, execute: ABSENT });
+  assert.deepEqual(pass.released, []);
+  assert.deepEqual(await clearSettledWindowsJobEvidence({ store: f.store, pass }), { clearedLinks: 0, clearedJobs: 0 });
+  assert.equal(readdirSync(resolveWindowsJobLinksDirectory(f.dataDir)).length, 2);
+  assert.equal(f.store.get('two-jobs').providerTeardownAt, undefined);
+});
+
+test('Stop checks the canonical identity before writing proof from a stale caller record', async (t) => {
+  const f = fixture(t);
+  const execution = f.start('canonical-child');
+  f.link({ ...execution, threadId: 'stale-thread' });
+  const caller = { ...f.store.get('canonical-child'), threadId: 'stale-thread' };
+  const result = await stopWithWindowsJobProof({ store: f.store, record: caller, dataDir: f.dataDir, execute: ABSENT });
+  assert.deepEqual(result, { stopped: false, reason: 'link_identity_mismatch' });
+  assert.equal(f.store.get('canonical-child').providerTeardownAt, undefined, 'no foreign proof written to this child');
+  assert.equal(readdirSync(resolveWindowsJobLinksDirectory(f.dataDir)).length, 1);
+});

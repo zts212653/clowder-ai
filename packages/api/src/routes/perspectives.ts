@@ -12,6 +12,7 @@ import type {
   IKnowledgeResolver,
   SearchOptions,
 } from '../domains/memory/interfaces.js';
+import { KnowledgeResolver } from '../domains/memory/KnowledgeResolver.js';
 import { PerspectivePlanLoader } from '../domains/memory/PerspectivePlanLoader.js';
 import { PerspectiveRunner, type PerspectiveRunnerDeps } from '../domains/memory/PerspectiveRunner.js';
 import type {
@@ -78,24 +79,13 @@ export const perspectiveRoutes: FastifyPluginAsync<PerspectiveRoutesOptions> = a
 };
 
 function buildSearchEvidence(opts: PerspectiveRoutesOptions): PerspectiveRunnerDeps['searchEvidence'] {
+  const resolver =
+    opts.knowledgeResolver ??
+    (opts.evidenceStore ? new KnowledgeResolver({ projectStore: opts.evidenceStore }) : undefined);
   return async (query: string, searchOptions: SearchOptions) => {
-    if (opts.knowledgeResolver) {
-      const result = await opts.knowledgeResolver.resolve(query, searchOptions);
-      return {
-        items: result.results,
-        meta: result.meta ?? { degraded: false },
-      };
-    }
-    if (opts.evidenceStore?.searchWithMeta) {
-      return opts.evidenceStore.searchWithMeta(query, searchOptions);
-    }
-    if (opts.evidenceStore) {
-      return {
-        items: await opts.evidenceStore.search(query, searchOptions),
-        meta: { degraded: false },
-      };
-    }
-    throw new Error('Perspective routes require searchEvidence, knowledgeResolver, or evidenceStore');
+    if (!resolver) throw new Error('Perspective routes require searchEvidence, knowledgeResolver, or evidenceStore');
+    const result = await resolver.resolve(query, searchOptions);
+    return { items: result.results, meta: result.meta ?? { degraded: false } };
   };
 }
 

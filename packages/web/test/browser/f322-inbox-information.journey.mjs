@@ -91,9 +91,17 @@ export function registerInformationJourneys(evidenceRoot) {
             const results = await Promise.allSettled([
               browser?.close(),
               server ? stopChild(server) : undefined,
-              env?.cleanup(),
               f.close(),
             ]);
+            // Next can still write its output while stopping; remove it only after exit.
+            if (!server || server.exitCode !== null || server.signalCode !== null) {
+              results.push(...(await Promise.allSettled([env?.cleanup()])));
+            } else {
+              results.push({
+                status: 'rejected',
+                reason: new Error('Next server has not exited; test output retained'),
+              });
+            }
             const failures = results.filter((r) => r.status === 'rejected');
             if (failures.length)
               throw new AggregateError(
@@ -163,7 +171,7 @@ export function registerInformationJourneys(evidenceRoot) {
           await freeze(page, card);
           assert.match(
             await card.getByTestId('domain-approval-result').innerText(),
-            language === 'en' ? /Rejected.*You/ : /已拒绝.*你/,
+            language === 'en' ? /Declined.*You/ : /已拒绝.*你/,
           );
           await page.screenshot({ path: path.join(evidence, `chat-${record.kind}-after.png`), fullPage: true });
         }
@@ -282,13 +290,17 @@ export function registerInformationJourneys(evidenceRoot) {
         await oldChat.screenshot({ path: path.join(evidence, 'F193-superseded-chat-cold.png') });
         await page.getByTestId('mailbox-button').click();
         await page.getByTestId('approval-item-inbox-native-approve').waitFor();
-        assert.equal(await page.locator('[data-testid^="approval-item-information-"]').count(), 0);
+        assert.equal(
+          await page.getByTestId('mailbox-panel').locator('[data-testid^="approval-item-information-"]').count(),
+          0,
+        );
+        await page.getByTestId('mailbox-history').click();
         const oldInbox = page.locator(
-          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F193', superseded.proposalId])}']`,
+          `[data-testid="mailbox-history-row"][data-proposal-id="${superseded.proposalId}"]`,
         );
         await oldInbox.getByTestId('decision-result-label').waitFor();
         assert.equal(await oldInbox.getByTestId('decision-result-dot').getAttribute('data-status'), 'closed');
-        await oldInbox.locator('button[aria-expanded="false"]').click();
+        await oldInbox.getByTestId('decision-result-label').locator('..').click();
         assert.match(await oldInbox.innerText(), /This assignment was replaced by a newer request/);
         assert.equal(
           await oldInbox.locator('form, input, [data-testid="approve-btn"], [data-testid="reject-btn"]').count(),
@@ -325,10 +337,9 @@ export function registerInformationJourneys(evidenceRoot) {
             );
           }
           await page.getByTestId('mailbox-button').click();
+          await page.getByTestId('mailbox-history').click();
           for (const record of records) {
-            const row = page.locator(
-              `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify([record.kind, record.proposalId])}']`,
-            );
+            const row = page.locator(`[data-testid="mailbox-history-row"][data-proposal-id="${record.proposalId}"]`);
             const expected =
               verb === 'unknown'
                 ? language === 'en'
@@ -345,7 +356,7 @@ export function registerInformationJourneys(evidenceRoot) {
             await freeze(page, row);
             await row.screenshot({ path: path.join(evidence, `${record.kind}-${verb}-inbox-cold.png`) });
             coldEffects.push({ entrance: 'Inbox', kind: record.kind, verb, text: await row.innerText() });
-            await row.locator('button[aria-expanded="false"]').click();
+            await row.getByTestId('decision-result-label').locator('..').click();
             assert.equal(
               await row.locator('[data-testid="approve-btn"], [data-testid="reject-btn"], form, input').count(),
               0,

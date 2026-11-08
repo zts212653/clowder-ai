@@ -36,6 +36,7 @@ import {
   type ActionSuccessorFence,
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import { isTaskHandoffSource } from '../../../../ball-custody/task-handoff-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import type { LifecycleAppendRecoveryInput } from '../../stores/lifecycle-append-recovery.js';
 import { type LifecycleWakeCoverageInput, ordinaryWakeCoverageEligible } from '../../stores/lifecycle-wake-coverage.js';
@@ -1760,6 +1761,7 @@ export class InvocationQueue {
         source &&
         source.userId === userId &&
         source.threadId === threadId &&
+        !isTaskHandoffSource(source) &&
         source.visibility !== 'whisper' &&
         isTimelinePublished(source) &&
         !source.recall &&

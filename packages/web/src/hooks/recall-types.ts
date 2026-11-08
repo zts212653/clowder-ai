@@ -15,6 +15,8 @@ export interface RecallResultItem {
   /** Null explicitly means this source has no verified owner-readable destination. */
   href?: string | null;
   matchRank?: RecallMatchRank;
+  rank?: number;
+  relevance?: { state: string };
   matchType?: RecallMatchType;
   authority?: string;
   updatedAt?: string;

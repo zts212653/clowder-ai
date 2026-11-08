@@ -66,6 +66,7 @@ import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpSe
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
+  captureSessionMcpServers,
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
@@ -329,10 +330,11 @@ export class AcpAgentService implements AgentService {
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
     const userProjectRoot = input.workingDirectory;
     const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
+    const mcpWhitelist = input.mcpWhitelist ?? this.mcpWhitelist;
     let baseMcpServers: AcpMcpServer[];
     if (!mcpSupport) {
       baseMcpServers = [];
-    } else if (this.mcpWhitelist !== null) {
+    } else if (mcpWhitelist !== null) {
       const binaryRoot = resolveBinaryRoot(this.projectRoot);
       const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
       const {
@@ -342,7 +344,7 @@ export class AcpAgentService implements AgentService {
       } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
       assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
       const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
+      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, [...mcpWhitelist], undefined, {
         mcpSupport,
         disabledServerIds: disabled,
         catId: this.catId as string,
@@ -359,7 +361,7 @@ export class AcpAgentService implements AgentService {
       const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
       if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
     }
-    return { frozenAcpMcpServers: structuredClone(invokeServers) };
+    return { frozenAcpMcpServers: captureSessionMcpServers(invokeServers) };
   }
 
   /**

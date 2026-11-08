@@ -6,11 +6,25 @@ import { apiSessionIdentity } from '../utils/api-session-identity';
 import { threadArtifactsEntry } from './thread-artifacts-store';
 import { selectThreadMessagesRaw, useThreadLiveness } from './useThreadScopedSelectors';
 
-/** Material publication and invocation completion invalidate works; ordinary text/tools do not. */
+export type WorksSourceChange = { reason: 'material' | 'activity' | 'access' };
+
+/** Validate the socket-event boundary once; coordinates are optional even for explicit revocation. */
+export function worksSourceInvalidation(event: Event) {
+  const raw: unknown = (event as CustomEvent<unknown>).detail;
+  const detail = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const ownerUserId = typeof detail.ownerUserId === 'string' ? detail.ownerUserId : undefined;
+  const currentOwner = apiSessionIdentity.getSnapshot().ownerUserId;
+  if (ownerUserId && currentOwner && ownerUserId !== currentOwner) return null;
+  const reason: WorksSourceChange['reason'] =
+    detail.reason === 'access_revoked' ? 'access' : detail.reason === 'works_changed' ? 'material' : 'activity';
+  return { reason, threadId: typeof detail.threadId === 'string' ? detail.threadId : undefined };
+}
+
+/** Thread readers may revalidate on completion; global catalogues distinguish material from ordinary activity. */
 export function useWorksSourceRefresh(
   threadId: string | undefined,
   enabled: boolean,
-  refetch: () => void,
+  refetch: (change: WorksSourceChange) => void,
   scopeToThread = true,
 ) {
   const messages = useChatStore((state) => selectThreadMessagesRaw(state, enabled ? (threadId ?? null) : null));
@@ -42,20 +56,14 @@ export function useWorksSourceRefresh(
       before.threadId === threadId &&
       (before.materialKey !== materialKey || (before.hasActive && !hasActive))
     )
-      refetch();
+      refetch({ reason: before.materialKey !== materialKey ? 'material' : 'activity' });
   }, [enabled, materialKey, threadId, refetch, hasActive]);
   useEffect(() => {
     if (!enabled) return;
     const changed = (event: Event) => {
-      const detail = (event as CustomEvent<{ threadId?: string; ownerUserId?: string }>).detail;
-      if (scopeToThread && threadId && detail?.threadId && detail.threadId !== threadId) return;
-      if (
-        detail?.ownerUserId &&
-        apiSessionIdentity.getSnapshot().ownerUserId &&
-        detail.ownerUserId !== apiSessionIdentity.getSnapshot().ownerUserId
-      )
-        return;
-      refetch();
+      const change = worksSourceInvalidation(event);
+      if (!change || (scopeToThread && threadId && change.threadId && change.threadId !== threadId)) return;
+      refetch(change);
     };
     window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', changed);
     return () => {

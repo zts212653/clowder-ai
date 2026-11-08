@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import {
   addToastMock,
@@ -26,6 +27,7 @@ describe('ThreadSidebar create error feedback', () => {
 
   beforeEach(() => {
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     harness = createThreadSidebarHarness();
   });
 

@@ -231,7 +231,10 @@ describe('Settings bridge uses the remounted original reading owner', () => {
     const next = reader('remounted');
     bridge.registerReadingPort(next, () => 'Actual origin title');
     await tick();
-    expect(next.restoreReadingRef).toHaveBeenCalledWith(source.readingRef, expect.any(AbortSignal), { refresh: true });
+    expect(next.restoreReadingRef).toHaveBeenCalledWith(source.readingRef, expect.any(AbortSignal), {
+      refresh: true,
+      diagnostic: { bridgeId: expect.any(String), operationId: expect.any(String) },
+    });
     expect(bridge.getSnapshot().source).toBeNull();
     expect(readChatReadingRef(source.readingRef)).toBeUndefined();
   });
