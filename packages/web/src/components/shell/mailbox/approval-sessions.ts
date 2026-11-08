@@ -132,7 +132,8 @@ function attemptFor(
   if (raw.createdAt === undefined || raw.createdAt !== session.approval.createdAt) return null;
   const state = raw.state;
   if (state.phase === 'response_received' && session.address.sourceFeatureId !== 'F139') {
-    const { errorCode: _errorCode, ...response } = state;
+    const response = { ...state };
+    delete response.errorCode;
     return { attemptId: raw.attemptId, state: response };
   }
   return { attemptId: raw.attemptId, state };
