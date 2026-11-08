@@ -5,8 +5,9 @@
  * Fetches once per session, caches module-level. All consumers share same data.
  */
 
-import type { AgyProfileConfig, MemberVisualAssets } from '@cat-cafe/shared';
+import type { AgyProfileConfig, CatConfig, MemberVisualAssets } from '@cat-cafe/shared';
 import { type BuiltinCloudIdentityProtection, CAT_CARRIERS, type CatCarrier } from '@cat-cafe/shared';
+import type { DossierProfile } from '@cat-cafe/shared/dossier';
 import { useEffect, useMemo, useState } from 'react';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
@@ -94,6 +95,9 @@ export interface CatData {
   banner?: string;
   roleDescription: string;
   personality: string;
+  identitySources?: CatConfig['identitySources'];
+  /** Same snapshot inputs used by the prompt compiler; never submitted as member edits. */
+  identityProfile?: Pick<DossierProfile, 'entityId' | 'l0RosterSummary' | 'l0RoutingNote'> | null;
   teamStrengths?: string;
   caution?: string | null;
   strengths?: string[];

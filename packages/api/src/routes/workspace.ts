@@ -32,7 +32,7 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
-import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
 import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
 import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
@@ -67,6 +67,7 @@ import {
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
 import { registerWorkspaceMediaFileActions } from './local-media-file-actions.js';
+import { sendStoredGifPoster } from './uploaded-gif-poster.js';
 import { registerChatChanges } from './workspace-chat-changes.js';
 import { registerWorkspaceChatReferences } from './workspace-chat-references.js';
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
@@ -172,6 +173,8 @@ interface WorkspaceRouteOpts extends WorkspaceNavigationEmitter {
   agentKeyRegistry?: AgentKeyAuthRegistry;
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
   skillConsumptionReceipts?: SkillConsumptionReceiptService;
+  /** Optional per-user invalidation for consumers whose cached workspace catalogue lost access. */
+  socketEmitToUser?: (userId: string, event: string, data: unknown) => void;
 }
 
 function resolveWorkspaceInteractiveUserId(request: FastifyRequest): string | null {
@@ -447,8 +450,10 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
   // GET /api/workspace/file/raw?worktreeId=&path= — stream raw binary content
   app.get<{
-    Querystring: { worktreeId?: string; path?: string };
+    Querystring: { worktreeId?: string; path?: string; display?: string };
   }>('/api/workspace/file/raw', async (request, reply) => {
+    if (request.query.display === 'gif-poster' && !resolveWorkspaceInteractiveUserId(request))
+      return reply.code(401).send({ error: 'identity_required' });
     const { worktreeId, path: filePath } = request.query;
     if (!worktreeId || !filePath) {
       reply.status(400);
@@ -475,6 +480,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         reply.status(413);
         return { error: `File too large (${Math.round(fileStat.size / 1024 / 1024)}MB, max 10MB)` };
       }
+      if (request.query.display === 'gif-poster') return await sendStoredGifPoster(reply, resolved);
       return sendWorkspaceFileBytes(request, reply, resolved, fileStat.size, mime);
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
@@ -485,6 +491,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         reply.status(404);
         return { error: 'File not found' };
       }
+      if (request.query.display === 'gif-poster') return reply.code(400).send({ error: 'gif_preview_unavailable' });
       reply.status(500);
       return { error: 'Internal error' };
     }
@@ -550,7 +557,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitWorkTree(root);
+      const probe = await probeGitRepository(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
@@ -671,8 +678,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.delete<{
     Querystring: { id?: string; expectedEpoch?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
-    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
-      return reply.code(401).send({ error: 'identity_required' });
+    const userId = workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId);
+    if (!userId) return reply.code(401).send({ error: 'identity_required' });
     const { id, expectedEpoch } = request.query;
     const epoch = expectedEpoch !== undefined && /^\d+$/.test(expectedEpoch) ? Number(expectedEpoch) : NaN;
     if (!id || !Number.isSafeInteger(epoch) || epoch < 0) {
@@ -681,6 +688,12 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     }
     try {
       const removed = await removeLinkedRoot(id, epoch);
+      if (removed) {
+        opts.socketEmitToUser?.(userId, 'entrusted_work_projection_invalidated', {
+          ownerUserId: userId,
+          reason: 'access_revoked',
+        });
+      }
       return { ok: true, removed };
     } catch (error) {
       if (error instanceof WorkspaceSecurityError) return reply.code(409).send({ error: 'connection_changed' });

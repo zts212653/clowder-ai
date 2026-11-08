@@ -141,7 +141,9 @@ export class ProjectContentOwnerStore {
     for await (const state of readOwnerManifests(this.rootDir)) {
       if (
         state?.publicationScope?.ownerUserId !== ownerUserId ||
-        (!['image/png', 'video/mp4'].includes(state.mediaType) &&
+        (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml', 'video/mp4'].includes(
+          state.mediaType,
+        ) &&
           !(
             includeHtmlWorks &&
             state.mediaType === 'text/html' &&

@@ -8,7 +8,7 @@ function within(root: string, path: string): boolean {
   return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
 }
 
-/** Headless accepts text; view_file delivers image/PDF/audio/video bytes as native tool parts. */
+/** Headless accepts text; the native file reader delivers media bytes as tool parts. */
 export function prepareAgyNativeInput(
   prompt: string,
   contentBlocks: readonly MessageContent[] | undefined,
@@ -27,7 +27,7 @@ export function prepareAgyNativeInput(
     const path = realpathSync(logical);
     if (!within(root, path) || !statSync(path).isFile()) throw new Error('Native attachment is not an in-scope file');
     directories.add(dirname(path));
-    return `${block.type} file for view_file: ${JSON.stringify(path)}`;
+    return `${block.type} file for read_file (view_file on older CLI): ${JSON.stringify(path)}`;
   });
   return {
     prompt: `${prompt}\n\n[User attachments — read their contents before answering]\n${references.join('\n')}`,

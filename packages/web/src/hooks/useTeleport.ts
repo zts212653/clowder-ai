@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
-import { joinSocketRoomOnConnect } from '@/utils/socket-room';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 
 /**
@@ -103,6 +102,7 @@ function scrollToMessageWithRetry(messageId: string, maxFrames = 60): void {
 
 export function useTeleport(): void {
   const lastEventIdRef = useRef<string | null>(null);
+  const hub = useHubSocket();
 
   useEffect(() => {
     const initialSource = readCompanionDecisionLink(window.location);
@@ -112,43 +112,28 @@ export function useTeleport(): void {
       openExactPlace(initialSource, window.location.pathname);
       window.history.replaceState(window.history.state, '', window.location.pathname);
     }
-    let cancelled = false;
-    let cleanup: (() => void) | null = null;
-
-    import('socket.io-client').then(({ io }) => {
-      if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
-      const stopJoiningRoom = joinSocketRoomOnConnect(socket, 'workspace:global');
-
-      const handler = (data: TeleportEvent) => {
-        // Dedup: the socket may redeliver the same teleport event.
-        if (data.eventId && data.eventId === lastEventIdRef.current) return;
-        if (data.eventId) lastEventIdRef.current = data.eventId;
-        handleTeleportEvent(data, useChatStore.getState().currentThreadId, {
-          // URL-based navigation: changes the route so the (chat) layout's
-          // URL-derived threadId updates, useChatHistory mounts for the new
-          // thread, and resolvePendingTeleport fires after render.
-          pushThreadRoute: (tid) => pushThreadRouteWithHistory(tid, window),
-          scrollToMessage: scrollToMessageWithRetry,
-          openSourceAction: (actionRef) => {
-            openExactPlace(actionRef, window.location.pathname);
-            return true;
-          },
-        });
-      };
-
-      socket.on('thread:teleport', handler);
-      cleanup = () => {
-        stopJoiningRoom();
-        socket.off('thread:teleport', handler);
-        socket.disconnect();
-      };
-    });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
+    const handler = (data: TeleportEvent) => {
+      // Dedup: the socket may redeliver the same teleport event.
+      if (data.eventId && data.eventId === lastEventIdRef.current) return;
+      if (data.eventId) lastEventIdRef.current = data.eventId;
+      handleTeleportEvent(data, useChatStore.getState().currentThreadId, {
+        // URL-based navigation: changes the route so the (chat) layout's
+        // URL-derived threadId updates, useChatHistory mounts for the new
+        // thread, and resolvePendingTeleport fires after render.
+        pushThreadRoute: (tid) => pushThreadRouteWithHistory(tid, window),
+        scrollToMessage: scrollToMessageWithRetry,
+        openSourceAction: (actionRef) => {
+          openExactPlace(actionRef, window.location.pathname);
+          return true;
+        },
+      });
     };
-  }, []); // no reactive deps — reads store via getState() in handler
+    // The page connection carries teleports; this hook only holds the room and the listener.
+    const releaseRoom = hub.retainRoom('workspace:global');
+    const releaseListener = hub.on('thread:teleport', handler);
+    return () => {
+      releaseListener();
+      releaseRoom();
+    };
+  }, [hub]); // the store is read via getState() in the handler
 }

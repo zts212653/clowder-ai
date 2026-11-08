@@ -238,7 +238,7 @@
       "roles": ["architect"],
       "lead": false,
       "available": true,
-      "evaluation": "claude-fable-5 新布偶猫，Opus x2 猫粮，能力画像待校准"
+      "evaluation": "claude-fable-5 新布偶猫，Opus x2 猫粮"
     }
   },
   "reviewPolicy": {
@@ -377,10 +377,10 @@
             "effort": "max"
           },
           "roleDescription": "新来的布偶猫，擅长深度推理、故事化表达和架构判断",
-          "personality": "安静聪明，有寓言书气质，喜欢把复杂判断讲成可验证的故事；新猫能力画像待校准",
+          "personality": "安静聪明，有寓言书气质，喜欢把复杂判断讲成可验证的故事",
           "strengths": ["deep-reasoning", "architecture", "writing", "synthesis"],
-          "teamStrengths": "深度推理、架构判断、长文共创（新猫，待校准）",
-          "caution": "新猫，能力画像待校准",
+          "teamStrengths": "深度推理、架构判断、长文共创",
+          "caution": "",
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -741,7 +741,7 @@
       "mentionPatterns": ["@glm52", "@glm5.2", "@glm-5.2", "@狸花glm52", "@小狸花", "@狸花猫"],
       "roleDescription": "GLM-5.2 新猫；中文实证",
       "teamStrengths": "实证",
-      "caution": "新猫",
+      "caution": "",
       "defaultVariantId": "glm52-default",
       "features": {
         "sessionChain": true

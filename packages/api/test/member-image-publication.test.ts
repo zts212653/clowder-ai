@@ -239,7 +239,7 @@ test('missing, forged, stale, restricted and deleted-thread credentials cannot p
   assert.equal((await readdir(dir)).length, 0);
 });
 
-test('rejects identity selectors and malformed or non-PNG bytes before publication', async () => {
+test('rejects identity selectors and malformed or unsupported image bytes before publication', async () => {
   for (const body of [
     { ...payload, threadId: 'another-thread' },
     { ...payload, catId: 'sonnet' },
@@ -321,4 +321,39 @@ test('two actual published messages enter F232/F138 and the existing review on o
   assert.deepEqual(fixture.task.current.entrustedWork.artifactRefs, [`content:${prepared.contentRef}`]);
   assert.equal(fixture.task.current.ownerCatId, 'codex-astra');
   assert.equal(fixture.task.current.status, 'doing');
+});
+
+for (const kind of ['gif', 'svg'] as const)
+  test(`publishes original ${kind} bytes through the authenticated member callback, including a misleading .png source name`, async () => {
+    const bytes =
+      kind === 'svg'
+        ? Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 20 32 24"><path fill="red" d="M0 20h20v20z"/></svg>',
+          )
+        : await sharp(Buffer.from([255, 0, 0, 255, 0, 0, 255, 255]), {
+            raw: { width: 1, height: 2, channels: 4, pageHeight: 1 },
+          })
+            .gif({ delay: [80, 230], loop: 0 })
+            .toBuffer();
+    const response = await send({
+      ...payload,
+      sourcePath: '/member/work/mislabeled.png',
+      imageBase64: bytes.toString('base64'),
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const result = response.json();
+    assert.ok(result.url.endsWith(`.${kind}`));
+    assert.deepEqual(await readFile(join(dir, result.url.slice('/uploads/'.length))), bytes);
+    assert.equal(result.provenance.originalPath, '/member/work/mislabeled.png');
+    assert.equal(messages.getByThread('thread-cover').length, 1);
+  });
+
+test('unsafe SVG is rejected before a durable member message or upload is written', async () => {
+  const response = await send({
+    ...payload,
+    imageBase64: Buffer.from('<svg width="20" height="20" onload="alert(1)"/>').toString('base64'),
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(messages.getByThread('thread-cover').length, 0);
+  assert.deepEqual(await readdir(dir), []);
 });

@@ -4,7 +4,8 @@ import {
   isInstalledManagedMcpServer,
   materializeNativeMcpHttp,
 } from '../../../../../../config/capabilities/managed-mcp-config.js';
-import { pluginMcpEnvironment } from '../../../../../../config/capabilities/plugin-mcp-environment.js';
+import { bindPluginMcpEnvironment } from '../../../../../../config/capabilities/plugin-mcp-environment.js';
+import { resolveEnvReferences } from '../../../../../../utils/env-references.js';
 /**
  * Per-invocation MCP server env materialization for ACP sessions.
  *
@@ -14,6 +15,20 @@ import { pluginMcpEnvironment } from '../../../../../../config/capabilities/plug
  */
 
 import type { AcpMcpServer } from './types.js';
+
+/** Resolve ordinary references before lease waits. Materialization below only binds turn authority. */
+export function captureSessionMcpServers(servers: readonly AcpMcpServer[]): AcpMcpServer[] {
+  const capture = (entries: { name: string; value: string }[]) =>
+    Object.entries(resolveEnvReferences(Object.fromEntries(entries.map(({ name, value }) => [name, value])))).map(
+      ([name, value]) => ({ name, value }),
+    );
+  return servers.map((source) => {
+    const server = structuredClone(source);
+    return 'command' in server
+      ? { ...server, env: capture(server.env) }
+      : { ...server, headers: capture(server.headers) };
+  });
+}
 
 /** Callback env keys injected per-invocation into cat-cafe MCP servers. */
 const _CALLBACK_ENV_KEYS = [
@@ -44,10 +59,7 @@ export function materializeSessionMcpServers(
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
     const nativeActionServer = server.hostSource === 'plugin' && Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
-    const env = pluginMcpEnvironment(
-      { source: nativeActionServer ? 'plugin' : undefined, env: registered },
-      callbackEnv ?? {},
-    );
+    const env = nativeActionServer ? bindPluginMcpEnvironment(registered, callbackEnv ?? {}) : registered;
     const entries = Object.entries(env ?? {}).map(([name, value]) => ({ name, value }));
     // Only the installed-entrypoint binder below may add callback authority.
     // A foreign server cannot acquire it by reusing a cat-cafe name prefix.

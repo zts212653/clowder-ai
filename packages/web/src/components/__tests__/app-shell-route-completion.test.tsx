@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const query = vi.hoisted(() => ({ pending: undefined as Promise<void> | undefined }));
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/collective',
@@ -14,7 +15,17 @@ vi.mock('next/navigation', () => ({
   },
 }));
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => false }));
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: vi.fn(),
   useSidebarStore: () => ({ isOpen: false, width: 260, close: vi.fn(), handleResize: vi.fn(), resetWidth: vi.fn() }),

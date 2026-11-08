@@ -96,7 +96,8 @@ export function removeFinishedWorktree({ repo, root, entry, validate, actor, aut
   return done;
 }
 
-export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
+/** The latest matched pending/done pair; later attempts or quarantine invalidate an older release. */
+export function completedDirectRelease({ repo, root, path }) {
   let lines;
   try {
     lines = readFileSync(join(root, 'ledger.jsonl'), 'utf8').split('\n');
@@ -116,7 +117,7 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
       records.delete(path);
       continue;
     }
-    if (r.action !== 'release') continue;
+    if (r.action !== 'release' || (r.repo !== undefined && r.repo !== repo)) continue;
     const previous = records.get(r.from);
     if (r.state === 'pending') records.set(r.from, { pending: r, done: null });
     else if (
@@ -135,15 +136,29 @@ export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
         'mergedAt',
         'mergedPr',
       ].every((key) => previous.pending[key] === r[key]) &&
+      JSON.stringify(previous.pending.origin) === JSON.stringify(r.origin) &&
       Number.isFinite(Date.parse(r.at)) &&
       Date.parse(r.at) >= Date.parse(previous.pending.at)
     )
       records.set(r.from, { ...previous, done: r });
     else records.delete(r.from);
   }
-  const r = records.get(path)?.done;
-  if (!r || r.owner !== owner || r.sourceRef !== sourceRef || existsSync(path) || existsSync(r.removedPath))
-    return null;
+  return records.get(path)?.done ?? null;
+}
+
+function present(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return false;
+  }
+}
+
+export function directReleaseReceipt({ repo, root, path, owner, sourceRef }) {
+  const r = completedDirectRelease({ repo, root, path });
+  if (!r || r.owner !== owner || r.sourceRef !== sourceRef || present(path) || present(r.removedPath)) return null;
   const registration = git(repo, ['worktree', 'list', '--porcelain']);
   if (!registration.ok || [path, r.removedPath].some((p) => registration.out.split('\n').includes(`worktree ${p}`)))
     return null;

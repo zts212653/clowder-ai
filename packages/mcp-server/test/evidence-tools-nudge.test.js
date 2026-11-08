@@ -62,7 +62,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     assert.ok(text.includes('memory-search-best-practices'), 'low_hit nudge links to search skill');
   });
 
-  test('high match-rank doc anchor present → NO nudge (would be noise)', async () => {
+  test('exact anchor evidence present at high rank → NO nudge (would be noise)', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -73,6 +73,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'F102: Memory System',
             anchor: 'F102',
             snippet: 'core',
+            relevance: { state: 'exact_anchor' },
             matchRank: 'high',
             sourceType: 'feature',
           },
@@ -82,11 +83,11 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     const result = await handleSearchEvidence({ query: 'F102' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'high match-rank hit must NOT emit nudge');
-    // But the existing "高匹配文档命中" Read-reminder hook should still appear
-    assert.ok(text.includes('高匹配文档命中'));
+    // But the existing "有文本匹配依据的候选" Read-reminder hook should still appear
+    assert.ok(text.includes('有文本匹配依据的候选'));
   });
 
-  test('high match-rank architecture doc anchor present → NO nudge and still emits Read reminder', async () => {
+  test('exact architecture title evidence present → NO nudge and still emits Read reminder', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -97,16 +98,17 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'Memory System Overview',
             anchor: 'doc:architecture/memory-system-overview',
             snippet: 'architecture map',
+            relevance: { state: 'exact_title' },
             matchRank: 'high',
             sourceType: 'architecture',
           },
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: '记忆系统全景 overview' });
+    const result = await handleSearchEvidence({ query: 'Memory System Overview' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'architecture docs are document hits, not low-hit noise');
-    assert.ok(text.includes('高匹配文档命中'), 'architecture docs should trigger the Read reminder');
+    assert.ok(text.includes('有文本匹配依据的候选'), 'architecture docs should trigger the Read reminder');
     assert.ok(text.includes('doc:architecture/memory-system-overview'));
   });
 
@@ -208,7 +210,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     assert.ok(text.includes('Coverage task'), 'mention should emit coverage nudge');
   });
 
-  test('mid match-rank doc anchor → NO nudge (still relevant doc match)', async () => {
+  test('exact title at mid rank → NO nudge (still relevant doc match)', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -217,6 +219,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         results: [
           {
             title: 'ADR-019',
+            relevance: { state: 'exact_title' },
             anchor: 'docs/decisions/019',
             snippet: 'related',
             matchRank: 'mid',
@@ -225,7 +228,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'hooks' });
+    const result = await handleSearchEvidence({ query: 'ADR-019' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'mid match-rank doc hit must NOT emit nudge');
   });

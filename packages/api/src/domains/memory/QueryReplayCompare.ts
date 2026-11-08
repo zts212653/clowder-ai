@@ -15,6 +15,7 @@ interface QueryReplayResult {
   capturedAt: string;
   query: string;
   params: { scope?: string; dimension?: string; collections?: string[] };
+  resolverVersions: { captured: string; replayed: string; comparable: boolean };
   perCollection: PerCollectionDiff[];
   aggregated: {
     capturedAnchors: string[];
@@ -96,6 +97,11 @@ export class QueryReplayCompare {
       capturedAt: row.created_at,
       query,
       params: { scope, dimension, collections },
+      resolverVersions: {
+        captured: typeof payload.resolverVersion === 'string' ? payload.resolverVersion : 'unknown',
+        replayed: result.resolverVersion ?? 'unknown',
+        comparable: Boolean(payload.resolverVersion && payload.resolverVersion === result.resolverVersion),
+      },
       perCollection,
       aggregated: {
         capturedAnchors: allCapturedAnchors,

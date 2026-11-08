@@ -1,5 +1,7 @@
 import { type ImmutableMedia, immutableMediaSchema, type ReviewedMediaType } from '@cat-cafe/shared';
 import sharp from 'sharp';
+import { probeSvgImage } from '../../../utils/svg-image.js';
+import { inspectGifImage } from './gif-image.js';
 import { MediaOwnerError } from './media-errors.js';
 
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -10,6 +12,11 @@ export async function probeImmutableImage(
   mime: Exclude<ReviewedMediaType, 'video/mp4'>,
 ): Promise<ImmutableMedia> {
   try {
+    if (mime === 'image/gif') return immutableMediaSchema.parse(await inspectGifImage(bytes));
+    if (mime === 'image/svg+xml') {
+      const geometry = await probeSvgImage(bytes);
+      return immutableMediaSchema.parse({ kind: 'image', ...geometry });
+    }
     if (mime === 'image/png' && !bytes.subarray(0, 8).equals(pngSignature)) throw new MediaOwnerError('invalid_media');
     const decoder = sharp(bytes, { limitInputPixels: 40_000_000, failOn: 'error' });
     const metadata = await decoder.metadata();

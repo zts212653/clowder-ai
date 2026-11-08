@@ -67,6 +67,10 @@ export interface ITtsProvider {
   readonly id: string;
   /** Model identifier — included in cache key to avoid stale hits across model swaps */
   readonly model: string;
+  /** Frozen endpoint and generation identity for content-addressed audio. */
+  readonly cacheIdentity?: string;
+  /** Freeze identity for cache lookup and multi-part synthesis; cacheDir may permit verified cache-only replay. */
+  snapshot?(options?: { readonly cacheDir?: string }): Promise<ITtsProvider>;
   synthesize(request: TtsSynthesizeRequest): Promise<TtsSynthesizeResult>;
   /** Native model streaming when supported; final carries the complete cacheable asset. */
   stream?(request: TtsSynthesizeRequest, options?: TtsSynthesizeStreamOptions): AsyncIterable<TtsSynthesizeStreamEvent>;

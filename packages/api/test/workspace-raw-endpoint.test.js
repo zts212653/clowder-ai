@@ -18,6 +18,7 @@ import { basename, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import sharp from 'sharp';
 
 // 1x1 transparent PNG (68 bytes)
 const TINY_PNG = Buffer.from(
@@ -71,6 +72,12 @@ describe('workspace file/raw endpoint (integration)', () => {
     testBase = await mkdtemp(join(wt.root, '__raw_endpoint_test__-'));
     testDir = basename(testBase);
     await writeFile(join(testBase, 'logo.png'), TINY_PNG);
+    await writeFile(
+      join(testBase, 'animation.gif'),
+      await sharp({ create: { width: 4, height: 4, channels: 4, background: 'red' } })
+        .gif()
+        .toBuffer(),
+    );
     await writeFile(join(testBase, 'photo.jpg'), TINY_PNG); // fake jpg
     await writeFile(join(testBase, 'literal%20image.png'), Buffer.from([0x11, 0x22, 0x33]));
     await writeFile(join(testBase, 'literal image.png'), Buffer.from([0x44, 0x55, 0x66]));
@@ -91,6 +98,23 @@ describe('workspace file/raw endpoint (integration)', () => {
   });
 
   // ── Image files served correctly via real route ──
+
+  it('requires user identity for bounded GIF poster decoding and preserves the raw original', async () => {
+    const url = `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/animation.gif`;
+    assert.equal((await app.inject({ url: url + '&display=gif-poster' })).statusCode, 401);
+    const poster = await app.inject({
+      url: url + '&display=gif-poster',
+      headers: { 'x-cat-cafe-user': 'local-owner' },
+    });
+    assert.equal(poster.statusCode, 200, poster.body);
+    assert.equal(poster.headers['content-type'], 'image/png');
+    assert.equal(poster.headers['cache-control'], 'private, no-store');
+    assert.deepEqual(
+      [...(await sharp(poster.rawPayload).ensureAlpha().raw().toBuffer()).subarray(0, 4)],
+      [255, 0, 0, 255],
+    );
+    assert.equal((await app.inject({ url })).headers['content-type'], 'image/gif');
+  });
 
   it('serves PNG with correct Content-Type', async () => {
     const res = await app.inject({

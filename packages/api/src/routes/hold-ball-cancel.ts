@@ -101,13 +101,24 @@ export const isPendingHoldBallTask = isPendingHoldBallWakeTask;
 /** 判别 owner 在 ball-custody domain（R4 P2-1）；此处只保留既有 import 路径。 */
 export const isRetiredWakeWithRunningManagedCommand = isRetiredWakeWithRunningManagedCommandTask;
 
+const CANCELABLE_MANAGED_JOB_STATES = new Set(['queued', 'running', 'waiting', 'cancelling']);
+
+/** The mutation path and the worker-backed read view use the same admission/state predicate. */
+export function isCancelableHoldJobRecord(
+  record: { readonly admissionMessageId?: string; readonly state?: string | null } | null | undefined,
+): boolean {
+  return (
+    !!record?.admissionMessageId && typeof record.state === 'string' && CANCELABLE_MANAGED_JOB_STATES.has(record.state)
+  );
+}
+
 export function isCancelableHoldBallTask(task: DynamicTaskDef): boolean {
   const lifecycle = task.params.holdLifecycle as Record<string, unknown> | undefined;
   const command = lifecycle?.managedCommand as Record<string, unknown> | undefined;
   if (command?.jobId) {
     const job = resolveManagedCommandJob(task);
     const record = job ? readDurableGateRecord(job) : null;
-    return !!record?.admissionMessageId && record.state !== 'terminal';
+    return isCancelableHoldJobRecord(record);
   }
   return isPendingHoldBallTask(task) || isRetiredWakeWithRunningManagedCommand(task);
 }

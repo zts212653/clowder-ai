@@ -75,6 +75,7 @@
       "renderer-link-policy.js",
       "renderer-navigation.js",
       "service-manager.js",
+      "service-failure-handler.js",
       "project-mirrors.js",
       "project-provider-directory.js",
       "project-resource-tree.js",

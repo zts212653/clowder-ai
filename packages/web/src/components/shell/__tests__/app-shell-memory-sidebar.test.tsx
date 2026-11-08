@@ -10,13 +10,24 @@ const nav = vi.hoisted(() => ({
   openSidebar: vi.fn(),
 }));
 const sidebarProps = vi.hoisted(() => ({ last: null as null | { activeDestination?: string | null } }));
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => nav.pathname,
   useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => true }));
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: vi.fn(),
   useSidebarStore: () => ({

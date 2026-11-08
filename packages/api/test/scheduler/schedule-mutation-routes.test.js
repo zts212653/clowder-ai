@@ -99,6 +99,91 @@ describe('schedule mutation principal routing', () => {
     else process.env.DEFAULT_OWNER_USER_ID = previousOwnerUserId;
   });
 
+  it('proposes parameter updates without replacing the existing recurring task or touching its live spec', async () => {
+    const original = {
+      id: 'dyn-existing-parameter-update',
+      templateId: 'reminder',
+      trigger: { type: 'interval', ms: 60_000 },
+      params: { message: 'before', targetCatId: 'codex-sol', triggerUserId: OWNER },
+      display: { label: 'Existing reminder', category: 'system' },
+      deliveryThreadId: 'thread-owner',
+      enabled: true,
+      createdBy: 'codex-sol',
+      createdAt: '2026-11-05T00:00:00.000Z',
+    };
+    dynamicStore.insert(original);
+    const template = templateRegistry.get(original.templateId);
+    runner.registerDynamic(template.createSpec(original.id, original), original.id);
+    const before = dynamicStore.getById(original.id);
+    const summaries = runner.getTaskSummaries();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/schedule/tasks/${original.id}/parameters`,
+      headers: { 'x-test-principal': 'cat' },
+      payload: { paramsPatch: { message: 'after' } },
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.json().proposed, true);
+    assert.deepEqual(dynamicStore.getById(original.id), before);
+    assert.deepEqual(runner.getTaskSummaries(), summaries);
+    assert.equal(invokeCalls.length, 0);
+    const proposal = proposalStore.getById(response.json().proposalId);
+    assert.equal(proposal.mutation.kind, 'update');
+    assert.equal(proposal.mutation.taskId, original.id);
+    assert.deepEqual(proposal.mutation.taskSnapshot, before);
+    assert.deepEqual(proposal.mutation.params, { ...before.params, message: 'after' });
+    assert.equal(proposal.publication.state, 'anchored');
+  });
+
+  it('validates parameter patches before proposal writes and lets the owner update the original task directly', async () => {
+    const original = {
+      id: 'dyn-update-validation',
+      templateId: 'reminder',
+      trigger: { type: 'interval', ms: 60_000 },
+      params: { message: 'before', targetCatId: 'codex-sol', triggerUserId: OWNER },
+      display: { label: 'Update validation', category: 'system' },
+      deliveryThreadId: 'thread-owner',
+      enabled: true,
+      createdBy: 'codex-sol',
+      createdAt: '2026-11-05T00:00:00.000Z',
+    };
+    dynamicStore.insert(original);
+    runner.registerDynamic(templateRegistry.get('reminder').createSpec(original.id, original), original.id);
+    const request = (payload, principal = 'cat') =>
+      app.inject({
+        method: 'POST',
+        url: `/api/schedule/tasks/${original.id}/parameters`,
+        headers: { 'x-test-principal': principal },
+        payload,
+      });
+    assert.equal((await request({ paramsPatch: { message: 'after' } }, 'none')).statusCode, 401);
+    for (const payload of [
+      { paramsPatch: {} },
+      { paramsPatch: [] },
+      { paramsPatch: { message: 42 } },
+      { paramsPatch: { triggerUserId: 'other' } },
+      { paramsPatch: { unknown: true } },
+      { paramsPatch: { message: 'after' }, deliveryThreadId: 'other' },
+      { paramsPatch: { targetCatId: 'nonexistent-cat' } },
+    ]) {
+      assert.equal((await request(payload)).statusCode, 400, JSON.stringify(payload));
+    }
+    assert.deepEqual(dynamicStore.getById(original.id), original);
+    assert.equal(proposalStore.listPending(OWNER).length, 0);
+    const updated = await request({ paramsPatch: { message: 'after' } }, 'cvo');
+    assert.equal(updated.statusCode, 200);
+    assert.equal(updated.json().proposed, false);
+    assert.deepEqual(dynamicStore.getById(original.id), {
+      ...original,
+      params: { ...original.params, message: 'after' },
+    });
+    await runner.triggerNow(original.id);
+    assert.match(invokeCalls[0].content, /after/);
+    assert.equal(proposalStore.listAudit(OWNER)[0].action, 'update');
+  });
+
   it('rejects an unauthenticated create before any task or proposal write', async () => {
     const response = await createReminder();
     assert.equal(response.statusCode, 401);

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { readDurableGateRecovery } from '../../../domains/ball-custody/durable-managed-gate-recovery.js';
 import { ManagedJobService } from '../../../domains/managed-job/ManagedJobService.js';
 import { validAlphaRevisionConsumer } from '../../../domains/managed-job/managed-job-admission.js';
+import { isManagedJobStoreBusy } from '../../../domains/managed-job/managed-job-database.js';
 import { managedJobPrincipalKey } from '../../../domains/managed-job/managed-job-ledger.js';
 import type { ManagedJobPrincipal } from '../../../domains/managed-job/managed-job-types.js';
 import { resolveCatCafeDataRoot } from '../../../utils/cli-process-ownership.js';
@@ -56,13 +56,13 @@ export function createAlphaManagedControl(options: {
     }
     if (typeof request.jobId !== 'string') throw new Error('Alpha managed control requires a job identity');
     // A valid principal may own other jobs; this adapter is restricted to this subscription.
-    service.get(options.principal, request.jobId);
-    const job = service.resolve(request.jobId);
+    let snapshot = await service.readStatus(options.principal, request.jobId, { gateRecovery: true });
+    const job = snapshot.job;
     if (job?.kind !== 'alpha_revision_v1' || job.consumer?.subscriptionId !== options.subscriptionId) {
       throw new Error('Alpha managed control cannot access an unrelated job');
     }
     if (request.action === 'start') {
-      const record = service.get(options.principal, job.jobId);
+      const record = snapshot.status;
       if (record.state === 'queued') {
         service.admitSchedule(options.principal, job.jobId, options.subscriptionId);
         const started = service.start(options.principal, job.jobId, runner);
@@ -74,18 +74,25 @@ export function createAlphaManagedControl(options: {
       service.cancel(options.principal, job.jobId);
     } else if (request.action === 'inspect') {
       if (Date.now() - (reconciledAt.get(job.jobId) ?? 0) >= 5000) {
-        await service.reconcileJob(options.principal, job.jobId);
-        reconciledAt.set(job.jobId, Date.now());
+        try {
+          await service.reconcileJob(options.principal, job.jobId);
+          reconciledAt.set(job.jobId, Date.now());
+        } catch (error) {
+          if (!isManagedJobStoreBusy(error)) throw error;
+          // Keep reconciliation due. Observation may continue only if the fresh,
+          // bounded status read below succeeds; no stale snapshot is returned.
+        }
       }
     } else throw new Error('Unsupported Alpha managed action');
-    const record = service.get(options.principal, job.jobId);
+    snapshot = await service.readStatus(options.principal, job.jobId, { gateRecovery: true });
+    const record = snapshot.status;
     return {
       jobId: job.jobId,
       state: record.state,
       cleanupProven: record.cleanupProven,
       result: record.result,
       attemptToken: record.attemptToken,
-      recoveryBlockedReason: readDurableGateRecovery(job)?.blockReason,
+      recoveryBlockedReason: snapshot.recoveryBlockedReason,
     };
   };
 }

@@ -11,6 +11,7 @@ import { renderChatContainer, resetChatContainerMocks, storeState } from './chat
 
 let workScope: ReturnType<typeof useWorkspaceChatWorkScope>;
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('../execution-row/ExecutionRow', () => ({ ExecutionRow: () => null }));
 
 vi.mock('../workbench/WorkspaceChatWorkScope', async (importOriginal) => {

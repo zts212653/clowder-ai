@@ -4,7 +4,7 @@ related_features: [F056, F083, F147, F229, F232, F269, F277, F283, F284, F290, F
 topics: [frontend, ux, discoverability, navigation, continuity, accessibility]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-11-02
+updated: 2026-11-06
 description: "把日常主屏与跨面板操作整理成看得懂、找得到、能继续的工作体验，并逐项结算已有前端承诺。"
 description_source: model
 description_author: codex-astra
@@ -30,6 +30,10 @@ mcp_admission_claims:
 > **10-10 17:06 派工补充**：后续 F322 及协同的 F309/F320/F326 coding/review 由Maine Coon自己安排，非作者审查可用作者自己的独立 subagent 或 Kimi，不再新派 Sonnet/其他 Claude 猫消耗同一额度；已在跑的审查沿原来源完成，F309 #5370 的 Sonnet 明确保留。ROOT 已全文核 You 原话 `[thread-id]#private-source-id` 与设计协调 `[thread-id]#private-source-id`。此条只改后续派工，不转移已有责任，不撤销已获得的独立审查。
 
 ## 路线图与已定事项（You 看这一节）
+
+**11-06 Human582组织归属更正**：这次完整新记忆搜索方案由复查线程`[thread-id]`的小星星组织开线与合后验收。F322此前为适配旧Task168绑定而重发施工卡，已按人类原话撤回`proposal_mw4s7y3iviad4qct`（实际withdrawn）；不再要求在本线程批准。合同、K32、ff90a2dbe5准备及#6717/reader实物已601交回指定现场；这里保旧Phase的接口、交付记录和结果依赖，不复制或迁移整Phase C。指定现场现已正式接Task`private-source-id`（owner=Astra/home=`[thread-id]`，ROOT核r3/admitted），以`03bfead5a3`发布两阶段与六题验收原参数；正确绑定卡`proposal_mw4u7cmf86nn53ft`在655来件时pending，不当作已开工。新方案等待与验收落616，原168保其它责任，reader交付直接接获批施工。以下较早开线坐标以此为准。
+
+**11-06 原C资格机制控制核验已交，非恢复GREEN**：C154用与boot75同blob的源TS、假runner和受控时钟完成6+1例；ROOT核三件原件、三源码hash及两份released/proven资源回执。截止后检查、截止前Host2已满、Host2拒绝后才延迟跨截止三种路径，能产生逐字段相同的零启动汇总；因此不能把373ms全算为评分CPU，真实skip仍缺启动检查当时的时间/占用/信号及await前后分段。控制下未复现错误接纳、提前释放或漏释放，不据此造修复SHA；七例通过不替代原三题FAIL。原C本次机制核验和reader的冻结件消费均已交，新职责已由395决定，真实恢复及整体F322继续开放。来源：`[thread-id]#private-source-id`。
 
 Ragdoll（设计，@opus55）和小星星（ROOT，@codex-astra）共同维护：Ragdoll管「已定」和设计行，小星星管工程与验收行。由来：You 10-09 17:34 PDT（`[thread-id]#private-source-id`）原话「你真的最好维护一个和 F322 的小星星一起维护一下我们的进展……用我们的 feat md 不然我发现你现在有很多事儿我决策过了你要我反复决策」。
 

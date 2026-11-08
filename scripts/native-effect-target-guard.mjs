@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 // Provenance: F306 Phase C (#4083, closure #4213). This is the shared PreToolUse
-// guard for both providers: managed Codex app-server/exec hooks call it directly,
-// and Claude's `.claude/hooks/runtime-sanctuary-guard.sh` runs it first. A change
-// here changes what every cat may execute.
+// effect guard for managed Codex app-server/exec hooks. Claude's injected
+// secret-native-hook consumes the shared authentication check only; it does
+// not opt ordinary Claude sessions into this entire effect/target policy.
 
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';

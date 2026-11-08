@@ -25,15 +25,17 @@ export function watcherToolSurface(callbackEnv: Record<string, string>) {
     config: {
       mcp_servers: {},
       model_context_window: 30000,
-      features: Object.fromEntries(
-        [
-          ...CODEX_LIVE_DISABLED_FEATURES,
-          'hooks',
-          'multi_agent',
-          'code_mode_host',
-          'default_mode_request_user_input',
-        ].map((feature) => [feature, false]),
-      ),
+      agents: { enabled: false },
+      features: {
+        ...Object.fromEntries(
+          [...CODEX_LIVE_DISABLED_FEATURES, 'hooks', 'multi_agent', 'default_mode_request_user_input'].map(
+            (feature) => [feature, false],
+          ),
+        ),
+        // Keep the model's dispatcher available; native feature flags and the read-only sandbox still apply.
+        code_mode_host: true,
+        multi_agent_v2: { enabled: false, disable_native_tools: true },
+      },
       tools: { experimental_request_user_input: { enabled: false } },
       include_permissions_instructions: false,
       include_environment_context: false,

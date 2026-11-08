@@ -10,6 +10,7 @@ let reviewThreadId = 'test-thread';
 
 const mockApiFetch = vi.fn();
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
   API_URL: 'http://test',

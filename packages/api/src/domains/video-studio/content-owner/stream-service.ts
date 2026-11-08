@@ -1,4 +1,4 @@
-import { MAX_HTML_WORK_BYTES } from '@cat-cafe/shared';
+import { MAX_HTML_WORK_BYTES, reviewedMediaTypeSchema } from '@cat-cafe/shared';
 import { commitContentRevision, resolveReplay } from './commit-revision.js';
 import { ContentOwnerConflictError, ContentOwnerIdempotencyError, ContentOwnerNotFoundError } from './errors.js';
 import { validateActor, validateIdentity, validateRevision } from './input-validation.js';
@@ -80,8 +80,17 @@ function streamMetadata(input: StreamMutation, state: ProjectContentStateV1 | un
   if ('collectiveScope' in source && source.collectiveScope)
     throw new TypeError('Collective stream publication is unsupported');
   const { mediaType, publicationScope, projectScope, projectMediaScope } = source;
-  if (mediaType !== 'video/mp4' && !(mediaType === 'text/html' && isWorkPublicationScope(publicationScope)))
+  const imageWork =
+    isWorkPublicationScope(publicationScope) &&
+    mediaType.startsWith('image/') &&
+    reviewedMediaTypeSchema.safeParse(mediaType).success;
+  if (
+    mediaType !== 'video/mp4' &&
+    !imageWork &&
+    !(mediaType === 'text/html' && isWorkPublicationScope(publicationScope))
+  )
     throw new TypeError('Unsupported streamed publication format');
+  if (imageWork && input.byteLength > 10 * 1024 * 1024) throw new TypeError('Image exceeds the owner size limit');
   if (mediaType === 'text/html' && input.byteLength > MAX_HTML_WORK_BYTES)
     throw new TypeError('HTML exceeds the owner size limit');
   validateContentPublication(publicationScope, input.sourcePublication, mediaType);
