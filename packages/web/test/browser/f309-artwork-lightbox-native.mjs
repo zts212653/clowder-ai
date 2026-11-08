@@ -11,6 +11,7 @@ import {
 } from './f309-artwork-lightbox-image-formats.mjs';
 import { verifyNativeArtworkCatalogues } from './f309-artwork-lightbox-native-catalogues.mjs';
 import { createNativeArtworkFixture, digest } from './f309-artwork-lightbox-native-fixture.mjs';
+import { downloadNativeOriginal, openNativeArtwork } from './f309-artwork-native-opening.mjs';
 import { openDocumentSession } from './f309-ordinary-document-session.mjs';
 import {
   startF309OrdinaryWorkspaceJourney,
@@ -35,34 +36,14 @@ async function selectPlaces(page, f, kind) {
         height: img.naturalHeight,
       }));
   }
-  await original.getByTestId('file-block-cover').click();
-  const dialog = page.getByRole('dialog');
-  const surface = dialog.getByTestId('workspace-content-review-surface');
-  await surface.getByTestId(kind === 'gif' ? 'gif-frame-media' : 'workspace-content-review-media').waitFor();
+  const { dialog, surface } = await openNativeArtwork(page, original, f, kind);
   if (kind === 'jpg' || kind === 'webp') {
     await page.waitForFunction(() => {
       const img = document.querySelector('[role="dialog"] img[data-testid="workspace-content-review-media"]');
       return img?.complete && img.naturalWidth > 0;
     });
     f.displayCoordinates = await checkNativeImageCoordinates(surface, f.original, f.source.media);
-    const download = dialog.locator('a[download]').first();
-    assert.ok((await download.getAttribute('download')).endsWith(`.${kind}`));
-    const href = await download.getAttribute('href');
-    assert.ok(href && !href.includes('display=oriented'));
-    const downloaded = await download.evaluate(async (link) => {
-      const response = await fetch(link.href, { headers: { 'x-cat-cafe-user': 'operator' } });
-      const data = await response.arrayBuffer();
-      const hash = await crypto.subtle.digest('SHA-256', data);
-      return {
-        status: response.status,
-        mime: response.headers.get('content-type'),
-        sha256: [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join(''),
-      };
-    });
-    assert.equal(downloaded.status, 200);
-    assert.equal(downloaded.mime, f.source.mime);
-    assert.equal(downloaded.sha256, digest(f.original));
-    f.displayCoordinates.download = downloaded;
+    f.displayCoordinates.download = await downloadNativeOriginal(page, dialog, f, kind);
   }
   if (kind === 'gif') {
     const snapshot = () =>
@@ -245,6 +226,8 @@ export function registerNativeArtworkLightboxJourneys() {
           const send = async () => {
             const originalComposer = await composer.elementHandle();
             const dialog = await selectPlaces(page, f, kind);
+            observations.opening = f.opening;
+            observations.openingResponse = f.openingResponse;
             assert.equal(await composer.evaluate((node, original) => node === original, originalComposer), true);
             await page.screenshot({ path: path.join(evidence, `selected-${f.sent.length}.png`) });
             await dialog.getByRole('button', { name: '发送消息', exact: true }).click();
@@ -374,7 +357,10 @@ export function registerNativeArtworkLightboxJourneys() {
           observations.calls = session.calls;
         } catch (error) {
           observations.failure = { error: String(error), stack: error.stack };
+          observations.opening = f.opening;
+          observations.openingResponse = f.openingResponse;
           if (session) {
+            observations.calls = session.calls;
             observations.body = await session.page.locator('body').innerText();
             await session.page.screenshot({ path: path.join(evidence, 'failure.png') });
           }

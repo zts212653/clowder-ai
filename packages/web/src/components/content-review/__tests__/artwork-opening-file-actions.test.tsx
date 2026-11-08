@@ -137,12 +137,18 @@ it.each([
   expect(document.querySelector('[data-testid="workspace-content-review-media"]')).not.toBeNull();
   expect(document.querySelector('[data-testid="artwork-chat-preview"]')).not.toBeNull();
   expect(document.querySelectorAll('button[aria-label="作品更多操作"]')).toHaveLength(1);
+  expect(
+    button('圈选')?.disabled ?? true,
+    'a portaled annotation tool must not invite a gesture on the Chat preview',
+  ).toBe(true);
   const composer = document.querySelector<HTMLTextAreaElement>('textarea');
   const focused = focus === '原输入框' ? composer : button(focus);
   focused!.focus();
   await act(async () => decode());
   expect(document.querySelector('[data-testid="artwork-chat-preview"]')).toBeNull();
   expect(button('作品更多操作')).toBeDefined();
+  expect(button('圈选'), 'the original becomes annotatable after its decoded pixels are presented').toBeDefined();
+  expect(button('圈选')?.disabled).toBe(false);
   expect(document.querySelectorAll('button[aria-label="作品更多操作"]')).toHaveLength(1);
   expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull();
   if (focus === '原输入框') expect(document.activeElement).toBe(composer);
