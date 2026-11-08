@@ -19,6 +19,7 @@ import type {
   DevelopmentWorkResult,
   DevelopmentWorkTransition,
 } from './DevelopmentWorkTransition.js';
+import type { DeploymentRecoveryFacts, DeploymentWaitAudit } from './deployment-wait/recovery-facts.js';
 import type {
   AttachEntrustedWorkArtifactInput,
   AttachEntrustedWorkArtifactResult,
@@ -28,6 +29,7 @@ import type {
   EntrustedTaskDataControllerTransition,
   EntrustedTaskDataControllerTransitionResult,
 } from './TaskDataControllerTransition.js';
+import type { TaskProbeSource } from './TaskProbeSource.js';
 
 export const ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED = 'ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED' as const;
 export const ENTRUSTED_WORK_ADMISSION_CONFLICT = 'ENTRUSTED_WORK_ADMISSION_CONFLICT' as const;
@@ -236,6 +238,7 @@ export interface ITaskStore {
   create(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
   get(taskId: string): TaskItem | null | Promise<TaskItem | null>;
   update(taskId: string, input: UpdateTaskInput): TaskItem | null | Promise<TaskItem | null>;
+  completeProbeIfCurrent(taskId: string, source: TaskProbeSource): TaskItem | null | Promise<TaskItem | null>;
   updateIfThreadId(
     taskId: string,
     expectedThreadId: string,
@@ -260,7 +263,17 @@ export interface ITaskStore {
     binding: ManagedWorkBinding,
   ): TaskItem | Promise<TaskItem>;
   listByKind(kind: TaskKind): TaskItem[] | Promise<TaskItem[]>;
-  listDeploymentWaitProjectionCandidates?(): TaskItem[] | Promise<TaskItem[]>;
+  listDueDeploymentWaitRecovery(limit?: number, now?: number): TaskItem[] | Promise<TaskItem[]>;
+  listDeploymentWaitProjectionCandidates(): TaskItem[] | Promise<TaskItem[]>;
+  listDeploymentWaitAuditCandidates(
+    limit?: number,
+    now?: number,
+  ): DeploymentWaitAudit[] | Promise<DeploymentWaitAudit[]>;
+  ackDeploymentWaitAudit(entry: DeploymentWaitAudit): boolean | Promise<boolean>;
+  failDeploymentWaitAudit(entry: DeploymentWaitAudit, now: number): void | Promise<void>;
+  finishDeploymentWaitRecovery(task: TaskItem, now: number, failed: boolean): void | Promise<void>;
+  getDeploymentWaitRecoveryFacts(id: string): DeploymentRecoveryFacts | null | Promise<DeploymentRecoveryFacts | null>;
+
   patchAutomationState(taskId: string, patch: Partial<AutomationState>): TaskItem | null | Promise<TaskItem | null>;
   bindManagedWorkBinding(
     taskId: string,

@@ -1,5 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { ArtifactReview, ReviewedMediaAsset, SubmitWork, WorkCommand } from '@cat-cafe/shared';
+import {
+  type ArtifactReview,
+  type ReviewedMediaAsset,
+  reviewedMediaTypeSchema,
+  type SubmitWork,
+  type WorkCommand,
+} from '@cat-cafe/shared';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
 import {
   type ContentSettlementReceiptV1,
@@ -110,7 +116,7 @@ export class WorkReviewResponseService {
         contentRef: command.contentRef,
         ownerRevision: command.expectedOwnerRevision + 1,
         blobDigest: accepted.blobDigest,
-        mediaType: 'video/mp4',
+        mediaType: reviewedMediaTypeSchema.parse(opened.mediaType),
         media: accepted.media,
         sourcePublication: accepted.publication,
         ownerReceiptRef: 'pending-owner-receipt',

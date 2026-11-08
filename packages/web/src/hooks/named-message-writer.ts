@@ -104,6 +104,9 @@ function writeStreamed(target: NamedMessageTarget, write: (store: NamedMessageSt
   }
   // A committed response is the server's final truth; stream output can no longer change it.
   if (before.lifecycle?.kind === 'response' && before.lifecycle.status !== 'processing') return;
+  // PR-3a2: this page does not hold the start of the response's stream (`stream-position`), so it
+  // cannot tell where a live delta goes; the History draft shows until the terminal snapshot.
+  if (before.streamPrefix === 'incomplete') return;
   const hadBody = hasAssistantBody(before);
   write(store);
   if (before.isStreaming !== true) source().setThreadMessageStreaming(target.threadId, target.messageId, true);

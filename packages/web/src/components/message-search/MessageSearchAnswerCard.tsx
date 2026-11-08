@@ -1,17 +1,12 @@
 'use client';
-import {
-  type MessageSearchAnswerView,
-  type MessageSearchResult,
-  messageSearchAnswerRefSchema,
-  messageSearchResponseSchema,
-} from '@cat-cafe/shared';
+import { type MessageSearchAnswerView, type MessageSearchResult } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { MessageDecisionSummary } from './MessageDecisionSummary';
 import { MessageSearchResultRow } from './MessageSearchResultRow';
+import { readAnswer } from './message-answer-read';
 import { requestMessageFindOpen } from './message-find-events';
 
 function rank(result: MessageSearchResult): number {
@@ -21,32 +16,6 @@ function rank(result: MessageSearchResult): number {
       ? 1
       : 2;
 }
-async function readAnswer(
-  messageId: string,
-  blockId: string,
-  signal?: AbortSignal,
-): Promise<MessageSearchAnswerView | null> {
-  const response = await apiFetch(`/api/evidence/answer?${new URLSearchParams({ messageId, blockId })}`, { signal });
-  if (!response.ok) return null;
-  const value: unknown = await response.json();
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const parsed = messageSearchResponseSchema.safeParse(record.response);
-  if (
-    record.status !== 'available' ||
-    !parsed.success ||
-    !messageSearchAnswerRefSchema.safeParse(record.publicationRef).success
-  )
-    return null;
-  return {
-    status: 'available',
-    response: parsed.data,
-    publicationRef: String(record.publicationRef),
-    changedSources: typeof record.changedSources === 'number' ? record.changedSources : 0,
-    decisionUpdated: record.decisionUpdated === true,
-  };
-}
-
 /** No title, conclusion, source or verification bit is taken from rich meta. */
 export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: string; blockId: string }) {
   const journey6 = useShellPresentation() === 'v2';
@@ -128,7 +97,9 @@ export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: st
   const response = view.response;
   const visible = response.results
     .map((result, index) => ({ result, index }))
-    .sort((a, b) => rank(a.result) - rank(b.result) || a.index - b.index)
+    .sort((a, b) =>
+      response.meta.answerSelection ? a.index - b.index : rank(a.result) - rank(b.result) || a.index - b.index,
+    )
     .slice(0, 3);
   const resolveSpeaker = (id: string) => (id === 'user' ? 'co-creator' : getCatById(id)?.nickname || id);
   return (
@@ -136,7 +107,11 @@ export function MessageSearchAnswerCard({ messageId, blockId }: { messageId?: st
       data-message-search-answer
       className="my-2 rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] text-cafe"
     >
-      <p className="px-3 pt-3 text-xs text-cafe-muted">「{response.query}」的查找来源</p>
+      <p className="px-3 pt-3 text-xs text-cafe-muted">
+        {response.meta.answerSelection
+          ? `「${response.query}」 · 由 ${resolveSpeaker(response.meta.answerSelection.catId)} 选出 ${response.results.length} 处来源（系统已核原句与结构归属；是否支持结论由选材猫判断）`
+          : `「${response.query}」的查找来源`}
+      </p>
       <MessageDecisionSummary
         response={response}
         threadId={threadId}

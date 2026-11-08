@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { stringify } from 'yaml';
-import { AGY_NATIVE_READ_TOOLS, AGY_NATIVE_TOOLS } from './agy-native-tools.js';
+import { AGY_NATIVE_READ_TOOLS, AGY_NATIVE_TOOLS, deduplicateAgyNativeFileTools } from './agy-native-tools.js';
 
 export interface AgyNativeAgentFileInput {
   readonly profileHome: string;
@@ -70,6 +70,9 @@ export function materializeAgyNativeAgentFile(input: AgyNativeAgentFileInput): {
 
   const l0Hash = createHash('sha256').update(input.systemPrompt).digest('hex');
   const autoApprove = input.autoApprove === true;
+  // CLI 1.5 resolves legacy names to modern names and rejects duplicate capabilities.
+  const defaultTools = autoApprove ? AGY_NATIVE_TOOLS : AGY_NATIVE_READ_TOOLS;
+  const tools = deduplicateAgyNativeFileTools(input.tools ?? defaultTools);
   const toolHash = input.tools
     ? `-${createHash('sha256').update(input.tools.join('\n')).digest('hex').slice(0, 8)}`
     : '';
@@ -88,12 +91,7 @@ export function materializeAgyNativeAgentFile(input: AgyNativeAgentFileInput): {
     'subagent: false',
     ...(autoApprove || input.tools?.includes('run_command') ? [] : ['commandExecutionPolicy: off']),
     'inheritMcp: true',
-    ...(input.tools?.length === 0
-      ? ['tools: []']
-      : [
-          'tools:',
-          ...(input.tools ?? (autoApprove ? AGY_NATIVE_TOOLS : AGY_NATIVE_READ_TOOLS)).map((tool) => `  - ${tool}`),
-        ]),
+    ...(tools.length === 0 ? ['tools: []'] : ['tools:', ...tools.map((tool) => `  - ${tool}`)]),
     '---',
     input.systemPrompt,
   ].join('\n');

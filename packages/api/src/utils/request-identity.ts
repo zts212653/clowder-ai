@@ -72,10 +72,17 @@ export function resolveSessionUserId(request: FastifyRequest): string | null {
  * authorization principal outside a direct loopback request. The header also
  * remains unavailable to browser-originated requests.
  */
-export function resolveDirectLocalAuthorizationUserId(request: FastifyRequest): string | null {
+export function resolveDirectLocalAuthorizationUserId(
+  request: FastifyRequest,
+  options?: { requireOwnerSession?: boolean },
+): string | null {
   if (!isDirectLoopbackRequest(request)) return null;
   const fromSession = resolveSessionUserId(request);
-  if (fromSession) return fromSession;
+  if (fromSession) {
+    // Owner-binding writes need issuance authority, not merely a current local peer.
+    if (options?.requireOwnerSession && request.sessionIsLocalOwner !== true) return null;
+    return fromSession;
+  }
   if (request.headers.origin) return null;
   return nonEmptyString(request.headers['x-cat-cafe-user']);
 }

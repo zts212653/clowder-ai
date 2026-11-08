@@ -1,26 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readServiceConfigFile, resolveServiceConfigPath } from '../../../runtime/services/service-config-core.mjs';
 import type { ServiceConfig } from './service-manifest.js';
 
-function expandHomePath(value: string): string {
-  if (value === '~') return homedir();
-  if (value.startsWith('~/')) return resolve(homedir(), value.slice(2));
-  return value;
-}
-
-function resolveDefaultCatCafeHome(): string {
-  const raw = process.env.CAT_CAFE_HOME?.trim();
-  if (raw) return expandHomePath(raw);
-  const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, '../../../../..', '.cat-cafe');
-}
-
 function resolveConfigPath(): string {
-  return process.env.CAT_CAFE_SERVICES_CONFIG
-    ? resolve(process.env.CAT_CAFE_SERVICES_CONFIG)
-    : resolve(resolveDefaultCatCafeHome(), 'services.json');
+  return resolveServiceConfigPath(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..'));
 }
 
 type ServiceConfigMap = Record<string, ServiceConfig>;
@@ -81,7 +66,7 @@ function load(): ServiceConfigMap {
     return cache;
   }
   try {
-    const data = JSON.parse(readFileSync(configPath, 'utf-8')) as ServiceConfigMap;
+    const data = readServiceConfigFile(configPath) as ServiceConfigMap;
     if (migrateServiceConfig(data)) {
       save(data);
     }

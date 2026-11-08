@@ -1274,7 +1274,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
       logPath: path.join(tempDir, 'managed-gate-jobs', `${jobId}.log`),
       executionSlaMs: 3_600_000,
       wallSlaMs: 10_800_000,
-      wakeTarget: { threadId: 'thread-1', catId: 'codex', userId: 'user-1' },
+      wakeTarget: { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
     };
     writeFileSync(
       recordPath,

@@ -10,6 +10,7 @@ import { ContentLandingHeader } from '../content-review/ContentLandingHeader';
 import { parseFileNavigationOrigin } from '../file-navigation-origin';
 import { workspaceFileReturnAction } from '../workspace-file-return';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));

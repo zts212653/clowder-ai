@@ -175,6 +175,61 @@ after(async () => proof?.close());
   );
 });
 
+test(
+  'layout scroll compensation keeps stationary conversation and export menus open',
+  { timeout: 90_000 },
+  async (t) => {
+    const context = await proof.browser.newContext({ viewport: { width: 1228, height: 700 } });
+    t.after(() => context.close());
+    await context.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'v2'));
+    const page = await proof.openPage(context);
+    const list = page.getByTestId('sidebar-thread-list');
+    await list.evaluate((element) => {
+      element.style.overflowAnchor = 'none';
+      element.scrollTop = element.scrollHeight;
+    });
+    const trigger = list.locator('[data-thread-id]').last().getByRole('button', { name: '更多操作', exact: true });
+    const menu = page.getByRole('menu', { name: '对话操作', exact: true });
+    const formats = page.getByRole('menu', { name: '导出格式', exact: true });
+    await trigger.click();
+    await menu.waitFor();
+    const anchorBefore = await trigger.boundingBox();
+    // Live row measurement/reordering changes content above the visible row and
+    // compensates scrollTop. A real scroll event does not mean its trigger moved.
+    const scrolls = await list.evaluate(async (element) => {
+      const before = element.scrollTop;
+      const scrolled = new Promise((resolve) => element.addEventListener('scroll', resolve, { once: true }));
+      element.style.paddingTop = '40px';
+      element.scrollTop = before + 40;
+      await scrolled;
+      return { before, after: element.scrollTop };
+    });
+    assert.equal(scrolls.after, scrolls.before + 40);
+    assert.deepEqual(await trigger.boundingBox(), anchorBefore);
+    assert.equal(await menu.count(), 1, 'compensated layout scrolling must not dismiss a stationary menu');
+    await assertVisibleMenu(menu);
+    await menu.getByRole('menuitem', { name: '导出对话', exact: true }).click();
+    await formats.waitFor();
+    await list.evaluate(async (element) => {
+      const before = element.scrollTop;
+      const scrolled = new Promise((resolve) => element.addEventListener('scroll', resolve, { once: true }));
+      element.style.paddingTop = '80px';
+      element.scrollTop = before + 40;
+      await scrolled;
+    });
+    assert.deepEqual(await trigger.boundingBox(), anchorBefore);
+    await assertVisibleMenu(menu);
+    await assertVisibleMenu(formats);
+    await page.screenshot({ path: path.join(evidence, 'stationary-menu-after-compensation.png') });
+    await page.keyboard.press('Escape');
+    await formats.waitFor({ state: 'detached' });
+    await menu.getByRole('menuitem', { name: '重命名对话', exact: true }).click();
+    await menu.waitFor({ state: 'detached' });
+    assert.equal(await list.locator('input').count(), 1);
+    assert.deepEqual(proof.errors, []);
+  },
+);
+
 test('scroll and Tab respect the menu anchor and leave the whole menu hierarchy', { timeout: 90_000 }, async (t) => {
   const context = await proof.browser.newContext({ viewport: { width: 1228, height: 700 } });
   t.after(() => context.close());
