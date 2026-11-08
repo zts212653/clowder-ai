@@ -30,6 +30,7 @@ export interface BootstrapResult {
 }
 
 export interface BootstrapOptions {
+  ownerUserId?: string;
   onProgress?: (progress: BootstrapProgress) => void;
   maxFiles?: number;
   maxBytes?: number;
@@ -37,7 +38,7 @@ export interface BootstrapOptions {
 }
 
 interface BootstrapDeps {
-  rebuildIndex: (projectPath: string) => Promise<{ docsIndexed: number; durationMs: number }>;
+  rebuildIndex: (projectPath: string, ownerUserId: string) => Promise<{ docsIndexed: number; durationMs: number }>;
   getFingerprint: (projectPath: string) => string;
   /** Query evidence store for real tier stats (architectural alignment with F102). Falls back to structural summary classification when absent. */
   getTierCoverage?: (projectPath: string) => Promise<Record<string, number>>;
@@ -55,6 +56,8 @@ export class ExpeditionBootstrapService {
   ) {}
 
   async bootstrap(projectPath: string, options: BootstrapOptions = {}): Promise<BootstrapResult> {
+    const ownerUserId = options.ownerUserId?.trim();
+    if (!ownerUserId) throw new Error('project_bootstrap_identity_required');
     const startTime = Date.now();
     const elapsed = () => Date.now() - startTime;
     const fp = this.deps.getFingerprint(projectPath);
@@ -81,7 +84,7 @@ export class ExpeditionBootstrapService {
       const summary = buildStructuralSummary(projectPath, options);
 
       emit('indexing', 2, 0, summary.docsList.length);
-      const { docsIndexed } = await this.deps.rebuildIndex(projectPath);
+      const { docsIndexed } = await this.deps.rebuildIndex(projectPath, ownerUserId);
 
       // Overlay real tier stats from evidence store when available (F102 alignment)
       // Both tierCoverage and docsIndexed must come from the same source to stay consistent

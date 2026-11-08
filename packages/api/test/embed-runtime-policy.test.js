@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 test('embedding runtime policy enforces bounded admission and memory scope', () => {
-  execFileSync('python3', [resolve(repoRoot, 'scripts/services/test_embed_runtime_policy.py')], {
+  execFileSync('python3', ['-B', '-m', 'unittest', 'discover', '-p', 'test_embed_*.py'], {
     cwd: resolve(repoRoot, 'scripts/services'),
     encoding: 'utf8',
     stdio: 'pipe',

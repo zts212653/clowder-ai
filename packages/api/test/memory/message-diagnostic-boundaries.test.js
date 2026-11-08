@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 import { MessageSearchDiagnostics } from '../../dist/domains/memory/message-search-diagnostics.js';
 import { privateMessageSearchTrace } from '../../dist/domains/memory/message-search-trace.js';
 
@@ -24,9 +23,11 @@ test('parallel requests keep successful worker snapshots isolated and late obser
   });
   const reason = new DOMException('controlled late failure', 'TimeoutError');
   const service = new MessageSearchService({
-    qualifier: new MessageQueryQualifier(async () => {
-      assert.fail('fixture must not invoke a model');
-    }),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     threadStore: { list: () => [{ id: 'neutral', createdBy: 'owner' }] },
     messageStore: {
       getById: async (id) => {
@@ -75,22 +76,22 @@ test('parallel requests keep successful worker snapshots isolated and late obser
   assert.doesNotMatch(JSON.stringify(traces), /LEAK|private-body/);
 });
 
-test('trace allow-list, event cap, zero-cost receipt and unknown usage remain private and bounded', () => {
+test('ordinary trace allow-list and event cap remain private and bounded', () => {
   const traces = [];
   const d = new MessageSearchDiagnostics((t) => traces.push(t));
   for (let i = 0; i < 100; i++)
     d.trace({
-      phase: 'native-usage',
-      costUsd: 0,
+      phase: 'retrieval',
+      elapsedMs: 0,
       usage: { input_tokens: 3, body: 'PRIVATE-BODY', userId: 'PRIVATE-USER' },
       query: 'PRIVATE-QUERY',
       modelUsage: { neutral: { inputTokens: 3, prompt: 'PRIVATE-PROMPT' } },
     });
   assert.equal(traces.length, 32);
-  assert.equal(traces[0].costUsd, 0);
-  assert.equal(traces[0].usage.input_tokens, 3);
+  assert.equal(traces[0].elapsedMs, 0);
+  assert.equal(traces[0].usage, undefined);
   assert.doesNotMatch(JSON.stringify(traces), /PRIVATE/);
-  assert.equal(privateMessageSearchTrace({ phase: 'native-usage' }).costUsd, undefined);
+  assert.equal(privateMessageSearchTrace({ phase: 'retrieval' }).elapsedMs, undefined);
   const hostile = {
     get phase() {
       throw new Error('observer down');
@@ -104,38 +105,29 @@ test('trace allow-list, event cap, zero-cost receipt and unknown usage remain pr
   assert.deepEqual(d.snapshot().workerReads, []);
 });
 
-test('qualification traces carry bounded batch coordinates and output counts, without thinking or prompt text', () => {
-  const event = {
-    phase: 'native-output',
-    batchIndex: 1,
-    outputChars: 227,
-    usage: {
-      output_tokens: 1200,
-      output_tokens_details: { thinking_tokens: 1080, thinking: 'PRIVATE-THINKING' },
-    },
-    thinking: 'PRIVATE-THINKING',
-    prompt: 'PRIVATE-PROMPT',
-  };
-  assert.deepEqual(privateMessageSearchTrace(event), {
-    phase: 'native-output',
-    batchIndex: 1,
-    outputChars: 227,
-    usage: { output_tokens: 1200, output_tokens_details: { thinking_tokens: 1080 } },
-  });
-  const safe = privateMessageSearchTrace({
-    phase: 'native-completed',
-    batchIndex: 0,
-    outputChars: 272,
-    afterUsageMs: 700,
-    permissionMode: 'dontAsk',
-    effort: 'low',
-  });
-  assert.equal(safe.afterUsageMs, 700);
-  assert.equal(safe.permissionMode, 'dontAsk');
-  assert.equal(safe.effort, 'low');
-  for (const batchIndex of [-1, 2, 0.5, NaN, Infinity, 'PRIVATE-QUERY']) {
-    assert.equal(privateMessageSearchTrace({ phase: 'native-response', batchIndex }).batchIndex, undefined);
+test('retired judge and native phases cannot create a current message-search trace', () => {
+  for (const phase of [
+    'qualification',
+    'qualification-unavailable',
+    'native-prepared',
+    'native-launch',
+    'native-init',
+    'native-response',
+    'native-usage',
+    'native-output',
+    'native-completed',
+    'native-terminal',
+    'native-exit',
+    'native-closed',
+    'native-seal',
+    'native-root-exit',
+  ]) {
+    assert.equal(privateMessageSearchTrace({ phase, batchIndex: 0, text: 'PRIVATE-BODY' }), undefined, phase);
   }
+  assert.deepEqual(privateMessageSearchTrace({ phase: 'retrieval', elapsedMs: 0, usage: { input_tokens: 3 } }), {
+    phase: 'retrieval',
+    elapsedMs: 0,
+  });
 });
 
 test('overlapping operation time is explicitly a settled sum and late work cannot alter a closed snapshot', async () => {
@@ -210,9 +202,11 @@ test('ordinary canonical search attributes all five actual operations without ch
   const body = '中性柚子材料';
   const traces = [];
   const service = new MessageSearchService({
-    qualifier: new MessageQueryQualifier(async () => {
-      assert.fail('literal witness must not invoke a model');
-    }),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     threadStore: { get: () => thread, list: () => [thread] },
     messageStore: {
       getById: async (id) => ({
@@ -249,5 +243,5 @@ test('ordinary canonical search attributes all five actual operations without ch
     assert.ok(d.operations[key].elapsedMs >= 0);
   }
   assert.doesNotMatch(JSON.stringify(traces), /中性柚子|owner/);
-  assert.equal(result.meta.qualification.nativeCalls, undefined);
+  assert.equal(result.meta.qualification, undefined);
 });

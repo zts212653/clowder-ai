@@ -15,6 +15,7 @@ import type { PublishedMediaService } from '../../video-studio/content-owner/pub
 import { isWorkResponseIntent } from '../works/review-response-contract.js';
 import { ArtifactReviewError } from './errors.js';
 import { commitReviewAction } from './linked-review-action.js';
+import { readReviewMediaEvidence } from './media-evidence.js';
 import { currentReviewModification } from './modification-request-reference.js';
 import { applyArtifactReviewAction } from './reducer.js';
 import {
@@ -127,6 +128,33 @@ export class ArtifactReviewService {
       }
     }
     return this.readCurrent(reviewId, principal);
+  }
+
+  async readMedia(
+    reviewId: string,
+    principal: MediaReviewPrincipal,
+    input: { round?: number; expectedRevision?: number; annotationId?: string },
+  ) {
+    const view = await this.read(reviewId, principal);
+    if (input.expectedRevision && input.expectedRevision !== view.review.revision)
+      throw new ArtifactReviewError('revision_conflict');
+    const round = input.round
+      ? view.review.rounds.find((item) => item.number === input.round)
+      : view.review.rounds.at(-1);
+    const annotation = input.annotationId
+      ? round?.annotations.find((item) => item.id === input.annotationId)
+      : undefined;
+    if (!round || (input.annotationId && !annotation)) throw new ArtifactReviewError('not_found');
+    const evidence = await readReviewMediaEvidence(
+      this.deps.media,
+      round.asset,
+      withContentTask(principal, view.review.task.taskId),
+      annotation?.anchor,
+    );
+    await this.authorizeReview(view.review, withContentTask(principal, view.review.task.taskId));
+    if (this.deps.store.get(reviewId)?.revision !== view.review.revision)
+      throw new ArtifactReviewError('revision_conflict');
+    return evidence;
   }
 
   /** Fresh authorized projection for read-only catalogs; never resumes an accepted write. */

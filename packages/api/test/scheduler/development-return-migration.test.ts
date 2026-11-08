@@ -17,7 +17,7 @@ test('V46 preserves existing execution rows and rolls back its private column if
   db.prepare(`INSERT INTO dynamic_task_defs
     (id, template_id, trigger_json, params_json, display_json, enabled, created_by, created_at)
     VALUES ('existing', 'reminder', '{"type":"once","fireAt":42}', '{"message":"retained"}', '{"label":"Legacy","category":"system"}', 1, 'codex-sol', '2026-09-19')`).run();
-  const before = db.prepare('SELECT * FROM dynamic_task_defs').all();
+  const before = db.prepare('SELECT * FROM dynamic_task_defs').all() as Array<Record<string, unknown>>;
   db.exec(
     "CREATE TRIGGER reject_v46 BEFORE INSERT ON schema_version WHEN NEW.version = 46 BEGIN SELECT RAISE(ABORT, 'injected V46 failure'); END",
   );
@@ -43,7 +43,8 @@ test('V46 preserves existing execution rows and rolls back its private column if
         assert.equal(successor_development_return_json, null);
         assert.equal(parent_bound_development_return_json, null);
         assert.equal(tool_execution_policy_json, null);
-        return row;
+        // Preserve every legacy value; later migrations may legitimately add columns.
+        return Object.fromEntries(Object.keys(before[0]).map((name) => [name, row[name]]));
       },
     );
   assert.deepEqual(after, before);

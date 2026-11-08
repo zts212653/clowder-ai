@@ -3,6 +3,7 @@ import type { TaskContractContinuationV1, TaskItem, ThreadProposal } from '@cat-
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import { matchesApprovedTaskIdentity } from './approved-development-proposal.js';
 import { approvedGenericTaskContinuation } from './approved-generic-task-proposal.js';
+import type { ApprovedTaskContinuationDiagnostic } from './approved-task-continuation-diagnostics.js';
 import { deriveApprovedTaskContract } from './approved-task-contract.js';
 import type { ApprovedTaskImplementationHistory } from './approved-task-implementation-history.js';
 
@@ -48,6 +49,8 @@ export type ApprovedTaskContinuationResult =
   | { outcome: 'continued' | 'replayed'; receipt: TaskContractContinuationV1 }
   | {
       outcome: 'rejected';
+      /** Internal only: the callback logs this and omits it from its public response. */
+      diagnostic?: ApprovedTaskContinuationDiagnostic;
       reason:
         | 'unavailable'
         | 'scope_present'

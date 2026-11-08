@@ -4,6 +4,7 @@ const Module = require('node:module');
 const path = require('node:path');
 const { describe, it } = require('node:test');
 const { pathToFileURL } = require('node:url');
+const { API_TRAFFIC_SAMPLES, matchRoute, routesFromRuntimeCaching } = require('./helpers/service-worker-routes.cjs');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
@@ -50,6 +51,7 @@ function loadConfigWithPwaCapture() {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === '@ducanh2912/next-pwa') {
       return {
+        ...originalLoad.call(this, request, parent, isMain),
         default: (pwaOptions) => {
           capturedPwaOptions = pwaOptions;
           return (config) => config;
@@ -82,6 +84,32 @@ it('precache includes current CSS without eagerly caching every retained histori
   const result = await options.workboxOptions.manifestTransforms[0](entries);
   assert.deepEqual(result.manifest, [entries[0], entries[2], entries[3]]);
   assert.deepEqual(result.warnings, []);
+});
+
+describe('service worker runtime routes', () => {
+  const routes = () => routesFromRuntimeCaching(loadConfigWithPwaCapture().workboxOptions.runtimeCaching);
+
+  it('leaves API and Socket.IO requests to the browser so aborts and redelivery stay native', () => {
+    // Library defaults would bring back the `apis` and `cross-origin` caching routes.
+    assert.equal(loadConfigWithPwaCapture().extendDefaultRuntimeCaching, false);
+    for (const href of API_TRAFFIC_SAMPLES) {
+      assert.equal(matchRoute(routes(), href), null, `${href} must not be handled by the service worker`);
+    }
+  });
+
+  it('keeps the offline shell and static asset caches', () => {
+    const expected = [
+      ['http://localhost:3003/_next/static/chunks/main-abc123.js', {}, 'next-static-js-assets'],
+      ['http://localhost:3003/icons/icon-192x192.png', {}, 'static-assets'],
+      ['http://localhost:3003/uploads/cat.png', {}, 'static-assets'],
+      ['http://localhost:3003/thread/thread_a', {}, 'pages'],
+      ['http://localhost:3003/thread/thread_a', { RSC: '1' }, 'pages-rsc'],
+      ['https://fonts.gstatic.com/s/inter/v1/a.woff2', {}, 'google-fonts-webfonts'],
+    ];
+    for (const [href, headers, cacheName] of expected) {
+      assert.equal(matchRoute(routes(), href, { headers }), cacheName, href);
+    }
+  });
 });
 
 describe('next.config rewrites', () => {
@@ -254,6 +282,8 @@ describe('next.config rewrites', () => {
       assert.match(isolation.env.CAT_CAFE_WEB_TEST_DIST_DIR, /^\.next-test-contract-/);
       assert.match(isolation.env.CAT_CAFE_WEB_TEST_TSCONFIG, /^tsconfig\.next-test-contract-.*\.json$/);
       assert.equal(isolation.env.NEXT_PUBLIC_API_URL, 'http://fixture');
+      assert.equal(isolation.env.API_SERVER_PORT, undefined);
+      assert.equal(isolation.env.FRONTEND_PORT, undefined);
       assert.equal(fs.existsSync(isolation.distDirPath), true);
       assert.equal(fs.existsSync(isolation.tsconfigPath), true);
     } finally {
@@ -263,6 +293,67 @@ describe('next.config rewrites', () => {
     assert.equal(fs.existsSync(isolation.distDirPath), false);
     assert.equal(fs.existsSync(isolation.tsconfigPath), false);
   });
+
+  it('binds an explicit test backend after discarding inherited runtime ports', async () => {
+    const { createNextDevTestEnvironment } = await import(pathToFileURL(nextDevTestEnvironmentPath));
+    const isolation = await createNextDevTestEnvironment('contract-backend', {
+      NEXT_PUBLIC_API_URL: 'http://127.0.0.1:59231',
+      API_SERVER_PORT: '59231',
+    });
+    try {
+      assert.equal(isolation.env.API_SERVER_PORT, '59231');
+      assert.equal(isolation.env.FRONTEND_PORT, undefined);
+      await withEnv(isolation.env, async (config) => {
+        assert.deepEqual(
+          (await config.rewrites()).map((rule) => new URL(rule.destination).origin),
+          Array(3).fill('http://localhost:59231'),
+        );
+      });
+    } finally {
+      await isolation.cleanup();
+    }
+  });
+
+  for (const apiUrl of [undefined, '']) {
+    it(`isolates actual rewrites when the fixture backend is ${apiUrl === '' ? 'empty' : 'omitted'}`, async () => {
+      const { createNextDevTestEnvironment } = await import(pathToFileURL(nextDevTestEnvironmentPath));
+      const overrides =
+        apiUrl === undefined ? {} : { NEXT_PUBLIC_API_URL: apiUrl, CAT_CAFE_DEPLOYMENT_ID: 'feature-test' };
+      const isolation = await createNextDevTestEnvironment('contract-no-backend', overrides);
+      let origin;
+      try {
+        const rules = await withEnv(isolation.env, (config) => config.rewrites());
+        assert.ok(
+          rules.every((rule) => new URL(rule.destination).port !== '3002'),
+          JSON.stringify(rules),
+        );
+        assert.ok(
+          Number(isolation.env.API_SERVER_PORT) > 0,
+          'A backend-free fixture must own an explicit isolated target',
+        );
+        origin = `http://localhost:${isolation.env.API_SERVER_PORT}`;
+        assert.notEqual(new URL(origin).port, '3002');
+        assert.equal(new URL(isolation.env.NEXT_PUBLIC_API_URL).port, new URL(origin).port);
+        await withEnv(isolation.env, async (config) => {
+          const rules = await config.rewrites();
+          assert.deepEqual(
+            rules.map((rule) => new URL(rule.destination).origin),
+            Array(3).fill(origin),
+          );
+          for (const rule of rules) {
+            const response = await fetch(rule.destination.replace(':path*', 'missing-fixture'));
+            assert.equal(response.status, 503);
+            assert.deepEqual(await response.json(), { error: 'test_backend_not_configured' });
+          }
+        });
+      } finally {
+        await isolation.cleanup();
+      }
+      await assert.rejects(fetch(`${origin}/api/missing-fixture`), /fetch failed/);
+      assert.equal(fs.existsSync(isolation.distDirPath), false);
+      assert.equal(fs.existsSync(isolation.tsconfigPath), false);
+    });
+  }
 
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));

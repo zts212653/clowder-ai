@@ -43,7 +43,7 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
 
     assert.ok(result.docsIndexed >= 2, `expected ≥2 docs indexed, got ${result.docsIndexed}`);
     assert.ok(result.durationMs >= 0);
@@ -54,17 +54,136 @@ describe('ensureProjectCollection', () => {
     assert.equal(manifest.kind, 'project');
     assert.equal(manifest.sensitivity, 'private');
     assert.equal(manifest.root, tmpProject);
+    assert.equal(manifest.ownerUserId, 'owner-a');
 
     const store = stores.get(expectedId);
     assert.ok(store, `store for ${expectedId} not in stores map`);
+  });
+
+  it('makes a new private collection visible only to its owner', async () => {
+    const { visibleMemoryCollections } = await import('../../dist/routes/memory-library-read.js');
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
+    const manifests = catalog.list();
+
+    assert.equal(
+      visibleMemoryCollections(manifests, 'owner-a').some((m) => m.id === expectedCollectionId(tmpProject)),
+      true,
+    );
+    assert.equal(
+      visibleMemoryCollections(manifests, 'owner-b').some((m) => m.id === expectedCollectionId(tmpProject)),
+      false,
+    );
+  });
+
+  it('serves actual evidence search to the owner and excludes another identity', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    const { KnowledgeResolver } = await import('../../dist/domains/memory/KnowledgeResolver.js');
+    const project = mkdtempSync(join(tmpdir(), 'f152-search-'));
+    mkdirSync(join(project, 'docs'));
+    writeFileSync(join(project, 'docs', 'README.md'), '# Calibration\n\ncalibration paragraph\n');
+    const dataDir = mkdtempSync(join(tmpdir(), 'f152-search-data-'));
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    await ensureProjectCollection(project, catalog, stores, dataDir, 'owner-a');
+    const collectionId = expectedCollectionId(project);
+    const store = stores.get(collectionId);
+    const app = Fastify();
+    await app.register(evidenceRoutes, {
+      evidenceStore: store,
+      knowledgeResolver: new KnowledgeResolver({ projectStore: store, catalog, stores }),
+      catalog,
+    });
+    await app.ready();
+    try {
+      const url =
+        `/api/evidence/search?q=calibration&scope=docs&mode=lexical` +
+        `&dimension=collection&collections=${encodeURIComponent(collectionId)}`;
+      const ownerResponse = await app.inject({
+        method: 'GET',
+        url,
+        headers: { 'x-cat-cafe-user': 'owner-a' },
+      });
+      assert.equal(ownerResponse.statusCode, 200);
+      assert.equal(JSON.parse(ownerResponse.payload).results.length, 1, ownerResponse.payload);
+
+      const otherResponse = await app.inject({
+        method: 'GET',
+        url,
+        headers: { 'x-cat-cafe-user': 'owner-b' },
+      });
+      assert.equal(otherResponse.statusCode, 200);
+      assert.equal(JSON.parse(otherResponse.payload).results.length, 0);
+    } finally {
+      await app.close();
+      store.close();
+      rmSync(project, { recursive: true, force: true });
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a missing owner before creating collection state', async () => {
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+
+    await assert.rejects(
+      () => ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, '   '),
+      /project_collection_owner_required/,
+    );
+    assert.equal(catalog.get(expectedCollectionId(tmpProject)), undefined);
+    assert.equal(stores.size, 0);
+  });
+
+  it('rejects a rebuild from a different owner without mutating the collection', async () => {
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
+    const collectionId = expectedCollectionId(tmpProject);
+    const before = catalog.get(collectionId);
+    assert.ok(before);
+
+    await assert.rejects(
+      () => ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-b'),
+      /project_collection_owner_mismatch/,
+    );
+    assert.equal(catalog.get(collectionId).ownerUserId, 'owner-a');
+    assert.equal(catalog.get(collectionId).updatedAt, before.updatedAt);
+  });
+
+  it('rejects an unbound historical manifest instead of claiming it', async () => {
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    const collectionId = expectedCollectionId(tmpProject);
+    const now = new Date().toISOString();
+    catalog.register({
+      id: collectionId,
+      kind: 'project',
+      name: collectionId.replace('project:', ''),
+      displayName: 'legacy',
+      root: tmpProject,
+      sensitivity: 'private',
+      scannerLevel: 'auto',
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'candidate', requireOwnerApproval: false },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await assert.rejects(
+      () => ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a'),
+      /project_collection_owner_unbound/,
+    );
+    assert.equal(catalog.get(collectionId).ownerUserId, undefined);
   });
 
   it('skips re-registration if collection already exists in catalog', async () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
-    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
+    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
 
     assert.ok(result1.docsIndexed >= 2);
     assert.ok(result2.docsIndexed >= 0);
@@ -75,7 +194,7 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
 
     const collectionsPath = join(tmpDataDir, 'library', 'collections.json');
     assert.ok(existsSync(collectionsPath), 'collections.json should be created');
@@ -90,7 +209,7 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
 
     const expectedId = expectedCollectionId(tmpProject);
     const safeId = expectedId.replace(/:/g, '-');
@@ -111,8 +230,8 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    await ensureProjectCollection(projA, catalog, stores, tmpDataDir);
-    await ensureProjectCollection(projB, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(projA, catalog, stores, tmpDataDir, 'owner-a');
+    await ensureProjectCollection(projB, catalog, stores, tmpDataDir, 'owner-a');
 
     const allManifests = catalog.list();
     const projectManifests = allManifests.filter((m) => m.kind === 'project');
@@ -137,7 +256,7 @@ describe('ensureProjectCollection', () => {
     const stores = new Map();
 
     await assert.rejects(
-      () => ensureProjectCollection(secretProject, catalog, stores, tmpDataDir),
+      () => ensureProjectCollection(secretProject, catalog, stores, tmpDataDir, 'owner-a'),
       (err) => {
         assert.ok(err.message.includes('secret'), `error should mention secret: ${err.message}`);
         return true;
@@ -155,7 +274,7 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    const result = await ensureProjectCollection(digitProject, catalog, stores, tmpDataDir);
+    const result = await ensureProjectCollection(digitProject, catalog, stores, tmpDataDir, 'owner-a');
     assert.ok(result.docsIndexed >= 1);
 
     const expectedId = expectedCollectionId(digitProject);
@@ -180,7 +299,14 @@ describe('ensureProjectCollection', () => {
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
     };
 
-    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, () => mockEmbeddingService);
+    const result = await ensureProjectCollection(
+      tmpProject,
+      catalog,
+      stores,
+      tmpDataDir,
+      'owner-a',
+      () => mockEmbeddingService,
+    );
 
     assert.ok(result.docsIndexed >= 2, `expected ≥2 docs, got ${result.docsIndexed}`);
     assert.ok(embedCallCount >= 2, `expected ≥2 embed calls, got ${embedCallCount}`);
@@ -196,10 +322,10 @@ describe('ensureProjectCollection', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
     assert.ok(result1.docsIndexed >= 2, `first run should index ≥2 docs, got ${result1.docsIndexed}`);
 
-    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, 'owner-a');
     assert.ok(result2.docsIndexed >= 2, `second run should report ≥2 total docs (not 0), got ${result2.docsIndexed}`);
   });
 });

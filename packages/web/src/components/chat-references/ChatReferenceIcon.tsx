@@ -46,11 +46,10 @@ export function ChatReferenceIcon({ target }: { target: Pick<ChatFileReference, 
     return (
       <span
         aria-hidden="true"
+        data-file-symbol={office[0]}
         className={`${styles.officeIcon} ${type === 'PDF' ? styles.pdfIcon : ''}`}
         style={{ background: office[1] }}
-      >
-        {office[0]}
-      </span>
+      />
     );
   const code = /\.(?:[cm]?[jt]sx?|py|rs|go|sh|css|html|json|ya?ml|toml)$/i.test(target.path);
   return (

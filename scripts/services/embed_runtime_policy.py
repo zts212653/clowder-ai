@@ -7,13 +7,12 @@ machine can be tested without importing FastAPI, NumPy, or MLX.
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import subprocess
 import sys
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Awaitable, Callable, Protocol
+
+from embed_process_footprint import read_process_footprint_bytes
 
 
 MIB = 1024 * 1024
@@ -193,34 +192,6 @@ class MlxMemoryApi(Protocol):
     def get_cache_memory(self) -> int: ...
 
     def get_peak_memory(self) -> int: ...
-
-
-def read_process_footprint_bytes(pid: int | None = None) -> int | None:
-    """Return macOS phys_footprint without confusing it with RSS/MLX counters."""
-
-    if sys.platform != "darwin":
-        return None
-    try:
-        result = subprocess.run(
-            [
-                "/usr/bin/footprint",
-                "--pid",
-                str(pid or os.getpid()),
-                "--format",
-                "bytes",
-                "--noCategories",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        return None
-    match = re.search(
-        r"^\s*phys_footprint:\s+(\d+)\s+B\s*$", result.stdout, re.MULTILINE
-    )
-    return int(match.group(1)) if match else None
 
 
 class MemoryBudgetExceeded(RuntimeError):

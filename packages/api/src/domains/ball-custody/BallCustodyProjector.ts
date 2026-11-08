@@ -25,6 +25,13 @@ export class BallCustodyProjector {
     private readonly store: IBallCustodyProjectionStore,
   ) {}
 
+  prepareConfirmed(event: BallCustodyEvent): Promise<boolean> {
+    return this.store.prepareConfirmedEvent(event);
+  }
+  applyConfirmed(event: BallCustodyEvent): Promise<void> {
+    return this.store.commitConfirmedEvent(event);
+  }
+
   /**
    * 应用单事件到 projection。事件须已在 event log（append first）。
    * 事件语义全在共享 reducer（ball-custody-projection-reducer.ts）；这里只负责读 + 存。
@@ -44,7 +51,9 @@ export class BallCustodyProjector {
     const events = await this.eventLog.read(subjectKey);
     for (const event of events) {
       await this.apply(event);
+      await this.store.acknowledgeRebuiltEvent?.(event);
     }
+    await this.store.finishRecoveryRebuild?.(subjectKey);
   }
 
   /** 重建所有 subject projection。 */

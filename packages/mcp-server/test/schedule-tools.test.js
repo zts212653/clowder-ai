@@ -41,6 +41,8 @@ async function withScheduleCallbackServer(handler) {
     agentKeySecret: process.env.CAT_CAFE_AGENT_KEY_SECRET,
     agentKeyFile: process.env.CAT_CAFE_AGENT_KEY_FILE,
     agentKeyFiles: process.env.CAT_CAFE_AGENT_KEY_FILES,
+    credentialFile: process.env.CAT_CAFE_CREDENTIAL_FILE,
+    nativeTurnCredentialFile: process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE,
     retryDelaysMs: process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS,
   };
 
@@ -49,6 +51,9 @@ async function withScheduleCallbackServer(handler) {
   delete process.env.CAT_CAFE_CALLBACK_TOKEN;
   delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
   delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+  delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+  delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+  delete process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE;
   process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
 
   try {
@@ -66,6 +71,10 @@ async function withScheduleCallbackServer(handler) {
     else process.env.CAT_CAFE_AGENT_KEY_FILE = oldEnv.agentKeyFile;
     if (oldEnv.agentKeyFiles === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILES;
     else process.env.CAT_CAFE_AGENT_KEY_FILES = oldEnv.agentKeyFiles;
+    if (oldEnv.credentialFile === undefined) delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+    else process.env.CAT_CAFE_CREDENTIAL_FILE = oldEnv.credentialFile;
+    if (oldEnv.nativeTurnCredentialFile === undefined) delete process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE;
+    else process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE = oldEnv.nativeTurnCredentialFile;
     if (oldEnv.retryDelaysMs === undefined) delete process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS;
     else process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = oldEnv.retryDelaysMs;
     await new Promise((resolve) => server.close(resolve));
@@ -73,9 +82,45 @@ async function withScheduleCallbackServer(handler) {
 }
 
 describe('Schedule MCP Tools — module exports', () => {
-  test('scheduleTools array exports 4 tools', async () => {
+  test('parameter updates preserve caller scope and send only the requested patch to the original task', async () => {
+    const { handleUpdateScheduledTaskParams } = await import('../dist/tools/schedule-parameter-tools.js');
+    await withScheduleCallbackServer(async (requests) => {
+      process.env.CAT_CAFE_INVOCATION_ID = 'test-invocation';
+      process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-token';
+      const result = await handleUpdateScheduledTaskParams({
+        taskId: 'dyn/task',
+        paramsPatch: '{"executionCarrier":"managed"}',
+      });
+      assert.notEqual(result.isError, true);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, '/api/schedule/tasks/dyn%2Ftask/parameters');
+      assert.deepEqual(requests[0].body, { paramsPatch: { executionCarrier: 'managed' } });
+      assert.equal(requests[0].headers['x-invocation-id'], 'test-invocation');
+      for (const paramsPatch of ['null', '{}', '[]', 'broken']) {
+        assert.equal((await handleUpdateScheduledTaskParams({ taskId: 'dyn/task', paramsPatch })).isError, true);
+      }
+      assert.equal(requests.length, 1, 'invalid patches never reach the API');
+      delete process.env.CAT_CAFE_INVOCATION_ID;
+      delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+      process.env.CAT_CAFE_AGENT_KEY_SECRET = 'test-agent-key';
+      assert.equal(
+        (await handleUpdateScheduledTaskParams({ taskId: 'dyn/task', paramsPatch: '{"message":"new"}' })).isError,
+        true,
+      );
+      assert.equal(requests.length, 1);
+      const scoped = await handleUpdateScheduledTaskParams({
+        taskId: 'dyn/task',
+        paramsPatch: '{"message":"new"}',
+        sourceThreadId: 'owned-thread',
+      });
+      assert.notEqual(scoped.isError, true);
+      assert.deepEqual(requests[1].body, { paramsPatch: { message: 'new' }, sourceThreadId: 'owned-thread' });
+    });
+  });
+
+  test('scheduleTools exports its parameter update tool', async () => {
     const { scheduleTools } = await import('../dist/tools/schedule-tools.js');
-    assert.equal(scheduleTools.length, 4);
+    assert.ok(scheduleTools.some((tool) => tool.name === 'cat_cafe_update_scheduled_task_params'));
   });
 
   test('cat_cafe_preview_scheduled_task exists with templateId + trigger (P1-1: draft step)', async () => {

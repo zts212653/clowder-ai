@@ -134,7 +134,7 @@ export function registerOrdinaryEntryJourneys(suite) {
       await home
         .getByTestId('workspace-launcher-file-result')
         .filter({ has: page.getByText('opus.png', { exact: true }) })
-        .filter({ has: page.getByText('assets/avatars/', { exact: true }) })
+        .filter({ has: page.getByText('packages/web/public/avatars/', { exact: true }) })
         .click();
       const surface = page.getByTestId('workspace-content-review-surface');
       await surface.getByRole('alert').filter({ hasText: '实际内容不是可协作的图片或视频格式' }).waitFor();

@@ -65,7 +65,9 @@ async function retrieveVectors(
             lexical,
             meta.candidateLimit,
             accept,
-            options.sort === 'relevance' ? messageLiteralRelevance(query)?.compareHybrid : undefined,
+            options.candidateOrder !== 'relevance' && options.sort === 'relevance'
+              ? messageLiteralRelevance(query)?.compareHybrid
+              : undefined,
           );
     meta.semanticCandidatesLimited = true;
     return passages;
@@ -88,7 +90,10 @@ export async function searchMessagePassages(
   if (!Number.isInteger(pool) || pool < 1 || pool > 2000) throw new Error('Invalid message candidate limit');
   options.signal?.throwIfAborted();
   const anchors = eligibleAnchors(options);
-  const sort = options.sort ?? 'time';
+  // Ordinary-search consumers own canonical display sorting. Both display
+  // choices use the same relevance-ranked lexical input and RRF queue here.
+  const sort = options.candidateOrder === 'relevance' ? 'relevance' : (options.sort ?? 'time');
+  const retrievalOptions = options.candidateOrder === 'relevance' ? { ...options, sort } : options;
   const mode = options.mode ?? 'hybrid';
   const meta: MessagePassageSearchExecution['meta'] = {
     sort,
@@ -101,10 +106,10 @@ export async function searchMessagePassages(
     effectiveMode: mode,
   };
   if (!query.trim() || anchors.size === 0) return { passages: [], meta };
-  const lexical = lexicalMessagePassages(deps.db, query, options, anchors, pool);
+  const lexical = lexicalMessagePassages(deps.db, query, retrievalOptions, anchors, pool);
   meta.truncated = lexical.length > pool;
   const accept = messageAdmission(deps.db, anchors, options);
-  const passages = await retrieveVectors(query, lexical.slice(0, pool), options, deps, meta, accept);
+  const passages = await retrieveVectors(query, lexical.slice(0, pool), retrievalOptions, deps, meta, accept);
   options.signal?.throwIfAborted();
   const seen = new Set<string>();
   const eligible = passages.filter((passage) => {

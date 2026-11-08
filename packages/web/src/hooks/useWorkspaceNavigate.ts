@@ -1,15 +1,13 @@
 import { APPROVAL_PRODUCER_IDS, type ApprovalProducerId, approvalProducerMeta } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
 import {
   type CollectiveWorkActionTarget,
   parseCollectiveWorkActionRef,
 } from '@/components/collective/collective-work-action';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
-import { joinSocketRoomOnConnect } from '@/utils/socket-room';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import {
   areWorktreeIdsEquivalent,
@@ -277,6 +275,7 @@ export function useWorkspaceNavigate(
   threadId: string | null,
   options: { isChatRoute: boolean; isWorkspaceVisible?: boolean; enabled?: boolean } = { isChatRoute: true },
 ) {
+  const hub = useHubSocket();
   const setWorkspaceWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
   const openWorkspacePath = useChatStore((s) => s.openWorkspacePath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
@@ -353,10 +352,8 @@ export function useWorkspaceNavigate(
 
   useEffect(() => {
     if (options.enabled === false) return;
-    const apiUrl = new URL(API_URL);
-    const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
-
-    const stopJoiningRoom = joinSocketRoomOnConnect(socket, WORKSPACE_NAVIGATION_ACK_ROOM);
+    // Acknowledged delivery reaches this page only through the ack room on the page connection.
+    const releaseRoom = hub.retainRoom(WORKSPACE_NAVIGATION_ACK_ROOM);
 
     const handler = (data: NavigateEvent, acknowledge?: (receipt: WorkspaceNavigationReceipt) => void) => {
       if (!shouldProcessNavigateEvent(data, lastEventIdRef)) return;
@@ -390,12 +387,28 @@ export function useWorkspaceNavigate(
       }
     };
 
-    socket.on('workspace:navigate', handler);
+    const releaseListener = hub.on('workspace:navigate', handler);
 
     return () => {
-      stopJoiningRoom();
-      socket.off('workspace:navigate', handler);
-      socket.disconnect();
+      releaseListener();
+      releaseRoom();
     };
-  }, [options.enabled]);
+  }, [hub, options.enabled]);
+}
+
+/**
+ * Mounts workspace navigation inside ThreadChatRuntimeProvider, which owns the page
+ * connection. AppShell renders it in place of calling the hook above the provider.
+ */
+export function WorkspaceNavigateHost({
+  threadId,
+  ...options
+}: {
+  threadId: string | null;
+  isChatRoute: boolean;
+  isWorkspaceVisible?: boolean;
+  enabled?: boolean;
+}) {
+  useWorkspaceNavigate(threadId, options);
+  return null;
 }

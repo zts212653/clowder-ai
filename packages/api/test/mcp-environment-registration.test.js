@@ -6,7 +6,10 @@ import { test } from 'node:test';
 import { resolveServersForCat } from '../dist/config/capabilities/capability-orchestrator.js';
 import { readInvocationMcpConfig } from '../dist/config/capabilities/invoke-mcp-config.js';
 import { resolveAcpMcpServers } from '../dist/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
-import { materializeSessionMcpServers } from '../dist/domains/cats/services/agents/providers/acp/acp-session-env.js';
+import {
+  captureSessionMcpServers,
+  materializeSessionMcpServers,
+} from '../dist/domains/cats/services/agents/providers/acp/acp-session-env.js';
 import { resolveKimiMcpSurface } from '../dist/domains/cats/services/agents/providers/kimi-mcp-surface.js';
 import { buildOpenCodeMcpSync } from '../dist/domains/cats/services/agents/providers/opencode-mcp-injection.js';
 import { resolveProviderMcpConfig } from '../dist/domains/cats/services/agents/providers/provider-mcp-config.js';
@@ -118,7 +121,7 @@ test('registration references leave project access, transport overrides and lite
   assert.equal(readInvocationMcpConfig(root(t), project).accessScope, 'project');
 });
 
-test('client config adapters share generic env expansion, including ACP session callback materialization', async (t) => {
+test('client config adapters expand env references before ACP session callback materialization', async (t) => {
   const host = root(t),
     project = root(t);
   const saved = Object.fromEntries(
@@ -171,7 +174,7 @@ test('client config adapters share generic env expansion, including ACP session 
     capabilitiesConfig: config,
     configSourceRoot: project,
   });
-  const acpContract = directMcpContract(materializeSessionMcpServers(acp)[0]);
+  const acpContract = directMcpContract(materializeSessionMcpServers(captureSessionMcpServers(acp))[0]);
   assert.equal(acpContract.upstream.env.CUSTOM, 'prefix:current-value');
   assert.equal(acpContract.launchEnv.CUSTOM, 'prefix:current-value');
   assert.equal(acpContract.upstream.command, entry.mcpServer.command);
@@ -189,7 +192,7 @@ test('client config adapters share generic env expansion, including ACP session 
       ],
     },
   ];
-  const result = materializeSessionMcpServers(native, {
+  const result = materializeSessionMcpServers(captureSessionMcpServers(native), {
     CAT_CAFE_CALLBACK_TOKEN: 'current-callback',
     CAT_CAFE_INVOCATION_ID: 'current-invocation',
   });
@@ -204,17 +207,22 @@ test('client config adapters share generic env expansion, including ACP session 
   assert.equal(native[0].env[0].value, '${MCP_FIXTURE_TOKEN}');
 });
 
-test('ACP expands references once at session launch, preserving replacement values verbatim', (t) => {
-  const old = process.env.MCP_FIXTURE_VALUE;
+test('ACP captures references before session launch, preserving replacement values verbatim', (t) => {
+  const saved = Object.fromEntries(['MCP_FIXTURE_VALUE', 'NOT_A_SECOND_LOOKUP'].map((key) => [key, process.env[key]]));
   process.env.MCP_FIXTURE_VALUE = 'literal:${NOT_A_SECOND_LOOKUP}';
   t.after(() => {
-    if (old === undefined) delete process.env.MCP_FIXTURE_VALUE;
-    else process.env.MCP_FIXTURE_VALUE = old;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
   const base = [
     { name: 'ordinary', command: process.execPath, args: [], env: [{ name: 'VALUE', value: '${MCP_FIXTURE_VALUE}' }] },
   ];
-  const materialized = materializeSessionMcpServers(base);
+  const captured = captureSessionMcpServers(base);
+  process.env.MCP_FIXTURE_VALUE = 'changed-after-capture';
+  process.env.NOT_A_SECOND_LOOKUP = 'must-not-expand';
+  const materialized = materializeSessionMcpServers(captured);
   const { launchEnv, upstream } = directMcpContract(materialized[0]);
   assert.equal(upstream.command, base[0].command);
   assert.deepEqual(upstream.args, base[0].args);

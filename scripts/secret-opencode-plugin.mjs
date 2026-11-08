@@ -1,3 +1,5 @@
+import { nativeAuthenticationDenial } from './native-auth-effect.mjs';
+
 /** The provider owns execution; this plugin only checks arguments and payloads. */
 export async function SecretContentProtection({ directory }) {
   const nodeCommand = process.env.CAT_CAFE_GUARD_NODE;
@@ -22,6 +24,8 @@ export async function SecretContentProtection({ directory }) {
       // A missing MCP adapter must not take away the native tools used to repair
       // it. Those tools still run the complete shared input/read check below.
       if (pending.size >= 256 || pending.has(input.callID)) throw new Error('secret_tool_lease_unavailable');
+      const authentication = nativeAuthenticationDenial(output.args);
+      if (authentication) throw new Error(authentication);
       try {
         const { prepareSecretToolInput } = await import('./lib/secret-tool-io.mjs');
         const prepared = prepareSecretToolInput(input.tool, output.args, { cwd: directory });

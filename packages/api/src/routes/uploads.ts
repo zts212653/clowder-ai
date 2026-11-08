@@ -10,6 +10,7 @@ import { setStoredFileHeaders } from './file-byte-response-headers.js';
 import { registerUploadedMediaFileActions } from './local-media-file-actions.js';
 import { resolveMessageStickerDirectories } from './message-sticker-runtime-assets.js';
 import { registerMessageStickerRoutes } from './message-stickers.js';
+import { registerUploadedGifPoster } from './uploaded-gif-poster.js';
 
 export interface UploadsRoutesOptions {
   uploadDir: string;
@@ -18,6 +19,7 @@ export interface UploadsRoutesOptions {
 export const uploadsRoutes: FastifyPluginAsync<UploadsRoutesOptions> = async (app, opts) => {
   registerMessageStickerRoutes(app, resolveMessageStickerDirectories());
   registerUploadedMediaFileActions(app, resolve(opts.uploadDir));
+  registerUploadedGifPoster(app, resolve(opts.uploadDir));
   await app.register(fastifyStatic, {
     root: resolve(opts.uploadDir),
     prefix: '/uploads/',

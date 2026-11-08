@@ -1,6 +1,7 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { shellSegments } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
+import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import { DELETE_PROGRAMS, findArgvDeletes, findExecutedCommands } from './native-effect-find-classifier.mjs';
 import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
 import { classifyHttpOperation } from './native-effect-http-classifier.mjs';
@@ -41,6 +42,7 @@ export const SHELL_EFFECT_PRIORITY = new Map([
   ['repository_rewrite', 6],
   ['remote_mutation', 7],
   ['service_mutation', 8],
+  ['auth_mutation', 9],
 ]);
 
 export function classifyShellSegment(raw) {
@@ -51,6 +53,8 @@ export function classifyShellSegment(raw) {
   if (httpEffect) return httpEffect;
   const execution = executedInvocations(command);
   const invocations = execution.pipelines.flat();
+  const authEffect = codexAuthenticationEffect(invocations);
+  if (authEffect === 'auth_mutation') return authEffect;
   const signals = invocations.filter(({ name }) => ['kill', 'pkill', 'killall'].includes(name));
   if (signals.some((invocation) => !isLivenessProbe(invocation))) return 'process_control';
   if (isRepositoryRefresh(command)) return 'repository_refresh';
@@ -65,7 +69,7 @@ export function classifyShellSegment(raw) {
   if (isWriteOperation(command)) return 'write';
   if (invocations.some(({ name, operands }) => name === 'find' && findExecutedCommands(operands).length))
     return 'unknown';
-  if (execution.complete && isReadOperation(command)) return 'read';
+  if (execution.complete && (authEffect === 'read' || isReadOperation(command))) return 'read';
   return 'unknown';
 }
 

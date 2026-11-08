@@ -530,7 +530,7 @@ test('real mouse selection on the final CLI signature exposes quote and forward,
     await message.scrollIntoViewIfNeeded();
     const nativeReply = await page.evaluate(() => document.documentElement.dataset.shell === 'v2');
     const sourceSelector = nativeReply
-      ? '[data-testid="message-bubble"] > .markdown-content'
+      ? '[data-testid="message-bubble"] .markdown-content'
       : '[data-context-quote-segment-id="stdout"]';
     if (!nativeReply && (await message.locator(sourceSelector).count()) === 0) {
       await message.getByRole('button', { name: /CLI Output/ }).click();

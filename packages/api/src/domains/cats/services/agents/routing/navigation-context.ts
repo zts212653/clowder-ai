@@ -103,6 +103,7 @@ export interface TruthSourceInfo {
 
 export interface NavigationContext {
   threadId?: string;
+  threadTitle?: string;
   currentCatId?: string;
   baton: BatonContext | null;
   tasks: TaskSummary[];
@@ -144,8 +145,10 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   const nowMs = options?.nowMs;
   if (ctx.recentWorkDirectory) {
     lines.push(
-      '近期工作线: 用户提到本线程外的“那个X/上次的Y” → cat_cafe_list_threads({ includeWork: true }) 按标题+毛线球认线；别只拿原话当keyword；近期没找到≠不存在。',
+      '近期工作线: 用户明确回问本线程外的旧事时，从当前标题与原问题选择短topic → cat_cafe_list_threads({ includeWork: true, topic: "短主题，可用空格分隔" })。无Matter页也沿Thread/Task/Work/roadmap找原线；空页看已查范围与nextCursor/nextSources，不当作不存在。候选只是入口，读当前原话、核范围和版本后再用于回答；普通闲聊不自动检索旧资料。',
     );
+    if (ctx.threadTitle)
+      lines.push(`本线标题线索: ${JSON.stringify(ctx.threadTitle.slice(0, 200))}（标题不是原话或授权）`);
   }
 
   if (typeof nowMs === 'number') {

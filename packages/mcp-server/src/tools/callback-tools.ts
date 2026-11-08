@@ -70,7 +70,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
-import { appendHintToSuccess, htmlWidgetInlineHandlerHint } from './html-widget-publish-hint.js';
+import { appendHintToSuccess, htmlWidgetPublishHint } from './html-widget-publish-hint.js';
 import {
   getInvocationAuthSignal,
   hasInvocationCredentialScope,
@@ -364,6 +364,10 @@ function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | 
 const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
   'The executable proposed action is implement + implementer + task_done with subject:task:<taskId>. Local cat review uses an ordinary durable handoff with localReviewVerdict + reviewedHeadSha + accepted-source fields.';
 
+const LOCAL_REVIEW_MESSAGE_USAGE_DESCRIPTION =
+  'GOTCHA: Ordinary messages, completion reports and review requests omit localReviewVerdict, reviewedHeadSha, reviewSubjectRef, acceptedSourceRef and acceptedRevision. Put the requested PR, exact HEAD and accepted source in content. ' +
+  'Only the reviewer returning a completed local-review result supplies those fields together, with clientMessageId and a routed author target; omit action, proposedAction and coordination on that result. Never invent a verdict to send a request or ordinary report. ';
+
 const IMPLEMENTATION_REVIEW_ANCHOR_ERROR =
   'acceptedSourceRef/acceptedRevision require localReviewVerdict; they are not implementation authorization. ' +
   'For an implement work package, cite the human source in content and use the actual Task/standing in action. ' +
@@ -439,26 +443,30 @@ export const postMessageInputSchema = {
   localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and an ordinary routed @author handoff. It is independent of action lease, coordination generation, and issuer route. Public prose is presentation only.',
+      'Reviewer-authored completed local-review RESULT only; omit from ordinary messages, completion reports and review requests. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and an ordinary routed @author handoff without action, proposedAction or coordination. Public prose is presentation only.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
+      'Local-review RESULT only: exact lowercase 40- or 64-character Git OID. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests. merge-gate compares it with the current HEAD.',
     ),
   reviewSubjectRef: reviewSubjectRefSchema
     .optional()
-    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+    .describe(
+      'Local-review RESULT only: stable review subject, for example pr:owner/repo#123. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests.',
+    ),
   acceptedSourceRef: acceptedSourceRefSchema
     .optional()
     .describe(
-      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+      'Local-review RESULT only: accepted feature-document path or immutable threadId#messageId source. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests. Not implementation authorization.',
     ),
   acceptedRevision: acceptedRevisionSchema
     .optional()
-    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
+    .describe(
+      'Local-review RESULT only: exact feature Git OID or source message id corresponding to acceptedSourceRef. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests.',
+    ),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
@@ -619,13 +627,22 @@ export const listThreadsInputSchema = {
     .describe(
       'Include up to 3 unfinished Task pointers and lifecycle-backed running members per visible thread; page cap 20, 24k characters. Default false.',
     ),
+  topic: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Work mode only: choose up to 6 short topic clues from the current title/question, separated by spaces. Matches title, owner-scoped Tasks including done, attached artifact refs and active roadmap bindings within a bounded scan. Use topic or keyword, not both. Candidates require original reads; zero matches do not establish absence.',
+    ),
   cursor: z
     .string()
     .min(1)
     .max(2000)
     .optional()
     .describe(
-      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.',
+      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword/topic filters. Live pages are not a frozen snapshot.',
     ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
@@ -919,26 +936,30 @@ export const crossPostMessageInputSchema = {
   localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and ordinary targetCats or a line-start @author. It is independent of action lease, coordination generation, and issuer route; public prose is never parsed.',
+      'Reviewer-authored completed local-review RESULT only; omit from ordinary messages, completion reports and review requests. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and ordinary targetCats or a line-start @author without action, proposedAction or coordination; public prose is never parsed.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
+      'Local-review RESULT only: exact lowercase 40- or 64-character Git OID. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests. merge-gate compares it with the current HEAD.',
     ),
   reviewSubjectRef: reviewSubjectRefSchema
     .optional()
-    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+    .describe(
+      'Local-review RESULT only: stable review subject, for example pr:owner/repo#123. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests.',
+    ),
   acceptedSourceRef: acceptedSourceRefSchema
     .optional()
     .describe(
-      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+      'Local-review RESULT only: accepted feature-document path or immutable threadId#messageId source. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests. Not implementation authorization.',
     ),
   acceptedRevision: acceptedRevisionSchema
     .optional()
-    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
+    .describe(
+      'Local-review RESULT only: exact feature Git OID or source message id corresponding to acceptedSourceRef. Only with localReviewVerdict, and required for that result; omit from ordinary messages and review requests.',
+    ),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
@@ -1353,6 +1374,7 @@ export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
   keyword?: string | undefined;
+  topic?: string | undefined;
   includeWork?: boolean | undefined;
   cursor?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -1363,6 +1385,7 @@ export async function handleListThreads(input: {
       ...(input.limit ? { limit: String(input.limit) } : {}),
       ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
+      ...(input.topic ? { topic: input.topic } : {}),
       ...(input.includeWork !== undefined ? { includeWork: String(input.includeWork) } : {}),
       ...(input.cursor ? { cursor: input.cursor } : {}),
     },
@@ -1946,6 +1969,17 @@ export const createRichBlockInputSchema = {
  * legacy 403 / "not configured" path predates Phase A typed reasons and
  * stays inline (preserves pre-Phase-A behavior, marks DEGRADED:true).
  */
+let lastRichBlockPublicationTime = 0;
+
+function newRichBlockPublication(): { requestId: string; issuedAt: number } {
+  // One stamp per tool operation, retained by every HTTP retry and outbox replay.
+  lastRichBlockPublicationTime = Math.max(
+    performance.timeOrigin + performance.now(),
+    lastRichBlockPublicationTime + 0.001,
+  );
+  return { requestId: randomUUID(), issuedAt: lastRichBlockPublicationTime };
+}
+
 export async function handleCreateRichBlock(input: {
   block: string;
   threadId?: string | undefined;
@@ -1977,7 +2011,7 @@ export async function handleCreateRichBlock(input: {
     return errorResult('Invalid rich block: block does not match required fields for its kind');
   }
   const block = parsed;
-  const inlineHandlerHint = htmlWidgetInlineHandlerHint(block);
+  const publishHint = htmlWidgetPublishHint(block);
   const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   const hasAgentKeyCreds = hasUsableAgentKeyCredentials(process.env);
 
@@ -1994,7 +2028,7 @@ export async function handleCreateRichBlock(input: {
       },
       { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
     );
-    return appendHintToSuccess(result, inlineHandlerHint);
+    return appendHintToSuccess(result, publishHint);
   }
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
@@ -2036,7 +2070,7 @@ export async function handleCreateRichBlock(input: {
     if (!input.threadId) {
       return errorResult('threadId is required for create_rich_block when using agent-key auth.');
     }
-    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), inlineHandlerHint);
+    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), publishHint);
   }
 
   // Phase E: framework handles primary call + auth-degradable fallback.
@@ -2044,12 +2078,13 @@ export async function handleCreateRichBlock(input: {
   // returned error text and route to Route B explicitly — preserves the
   // existing behavior without widening the framework's degradable set
   // (AC-E3: framework triggers only on 401-degradable reasons).
+  const publication = newRichBlockPublication();
   const published = await withDegradation({
     toolName: 'create_rich_block',
     primary: async () => {
       const result = await callbackPost(
         '/api/callbacks/create-rich-block',
-        { block, ...(input.threadId ? { threadId: input.threadId } : {}) },
+        { block, publication, ...(input.threadId ? { threadId: input.threadId } : {}) },
         {
           enableOutbox: true,
           agentKeyCatId: input.agentKeyCatId,
@@ -2064,7 +2099,7 @@ export async function handleCreateRichBlock(input: {
     },
     policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
-  return appendHintToSuccess(published, inlineHandlerHint);
+  return appendHintToSuccess(published, publishHint);
 }
 
 /** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
@@ -2167,7 +2202,7 @@ export const registerDeploymentWaitInputSchema = {
     .min(1)
     .max(500)
     .describe(
-      'Concrete verification action the original Task owner will perform after the deployment condition matches.',
+      'Concrete verification action the original Task owner will perform after the deployment condition matches. After trimming: 1–500 UTF-16 code units (JavaScript string.length, not bytes or Unicode code points). Example: "Verify the landed tool descriptions in a fresh MCP tools/list response."',
     ),
 };
 
@@ -2921,7 +2956,7 @@ export const {
   handleForgetPerson,
   handleForgetPersonMemoryProposal,
 } = personMemoryLifecycleToolset;
-export const { handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
+export const { handlePrepareMemoryContext, handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
 
 // ============ F260 Phase A: Propose Entity ============
 
@@ -3535,7 +3570,9 @@ export const setThreadMetadataInputSchema = {
   notes: z
     .record(z.string(), z.string().nullable())
     .optional()
-    .describe('Free-form KV notes: string value sets key, null deletes key'),
+    .describe(
+      'Free-form KV notes MERGE: string sets a key, null deletes it. Each key allows at most 100 UTF-16 code units and each string value at most 2000, without trimming (JavaScript string.length). At most 50 keys per request, including null deletions; at most 200 surviving keys after merge with existing notes. Oversize updates are rejected, never truncated. Example: {"review":"pr:owner/repo#123","obsolete":null}.',
+    ),
   removeWorktrees: z.array(z.string()).optional().describe('Worktree paths to remove'),
   removePrs: z
     .array(z.object({ repo: z.string().min(1), number: z.number().int().positive() }))
@@ -3615,6 +3652,8 @@ export const callbackTools = [
       'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
       'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      LOCAL_REVIEW_MESSAGE_USAGE_DESCRIPTION +
+      'Examples: ordinary update {"content":"Verification complete."}; review request {"content":"@sonnet\\nReview pr:owner/repo#123 at the exact HEAD and accepted source cited here.","targetCats":["sonnet"]}. ' +
       "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
       'GOTCHA: use one delivery carrier per intended hop. After a successful routed post, repeating the same line-start @mention in final text creates another hop; use that text fallback when the post failed. ' +
       'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
@@ -3799,12 +3838,12 @@ export const callbackTools = [
     name: 'cat_cafe_list_threads',
     description:
       'Discover visible threads and recent work without reading conversation bodies. ' +
-      'Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. ' +
+      'Use when: finding an earlier work line such as “那个3D建模” or “昨天做的视频”, even without a Matter page; choose short topic clues from the current title/question and set includeWork=true. Without a topic, browse titles, up to 3 unfinished Tasks and actual running members. ' +
       'NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). ' +
-      'Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. ' +
+      'Output: bounded metadata candidates and original-read pointers; topic mode also searches authorized completed Tasks and attached references, reports checked/uninspected scope, and offers weak recent pointers plus existing Work/evidence tools after a miss. nextCursor continues the same topic. A bound original roadmap includes file version/as-of and its read pointer. ' +
       'GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. ' +
       'Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. ' +
-      'Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
+      'Task and roadmap reads also respect the invocation callback allowlist. Partial scans or an empty page cannot prove absence. Metadata matches are not original reads, relevance judgments, search-qualified message answers or grants. Follow original pointers, read current sources and assess applicability before answering. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
     governance: {
@@ -3862,6 +3901,8 @@ export const callbackTools = [
       'Use when you need to notify a different thread about something relevant. ' +
       'NOT for: posting to your own current thread (use post_message instead). ' +
       'Output: message appears in the target thread as a new message visible to all participants. ' +
+      LOCAL_REVIEW_MESSAGE_USAGE_DESCRIPTION +
+      'Example ordinary report: {"threadId":"thread_target","targetCats":["codex61-sol"],"content":"Verification complete; evidence is cited here."}. Review requests use the same ordinary carrier; add the requested PR/HEAD/source to content. ' +
       'ROUTING: You MUST name recipients — either set `targetCats` array with the recipient catId(s), OR put a line-start `@handle` in content. ' +
       'For scarce dossier engagementPolicy seats, effectClass=fyi or coordination.phase=terminal persists unread without waking; receipt deliveredWithoutWake means delivered, not read. Active coordination, actions, assign_work approval and localReviewVerdict retain their normal routing. ' +
       'Messages without routing (no targetCats, no line-start @) will be REJECTED (F193 AC-A4). ' +
@@ -4143,8 +4184,8 @@ export const callbackTools = [
     name: 'cat_cafe_create_rich_block',
     description:
       'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
-      'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for custom inline HTML. ' +
-      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
+      'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for a small HTML explanation within the conversation. ' +
+      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". For a commissioned single-file HTML explainer/prototype or a reusable/evolving tool, use cat_cafe_work to save, then publish-reference to attach its fixed-version card to this Chat. Choose by purpose, not size; a tiny reusable tool can be a work. Continue existing works under the same contentRef. A one-off typo fix in a widget need not become a work. Use media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
       'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
@@ -4193,6 +4234,7 @@ export const callbackTools = [
       'Use when: code is landed but the exact target deployment has not loaded it yet, or the Task must resume after a later ready boot. ' +
       'NOT for: requesting or authorizing a restart, polling with hold_ball, creating a mirror Task, another cat’s Task, or treating Alpha readiness as runtime readiness. ' +
       'Output: validates the authenticated invocation against the Task owner/thread/user, captures the server boot baseline, atomically installs one F280 generation with autoRenew=false, immediately checks current evidence, and returns the durable Task/wait receipt state. ' +
+      'nextStep allows 1–500 UTF-16 code units after trimming (JavaScript string.length); keep the follow-up action concise. ' +
       'GOTCHA: `revision_included.revision` must be the frozen 40-character landed/build revision, never a mutable branch or PR head. Missing Git/build containment proof stays unknown. A successful registration means main=landed/live=dormant; it grants no stop/restart authority. If the tool is unavailable in the running version or registration fails, do not claim the wait exists—keep the current activation path and report the missing capability.',
     inputSchema: registerDeploymentWaitInputSchema,
     handler: handleRegisterDeploymentWait,
@@ -4888,6 +4930,7 @@ export const callbackTools = [
       'Write low-frequency metadata anchors for the current thread. Merge semantics: ' +
       'title names an untitled conversation once; labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); ' +
       'notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. ' +
+      'Notes limits: keys at most 100 and string values at most 2000 UTF-16 code units, without trimming; at most 50 keys per request including null deletions, and 200 surviving keys after merge. Oversize updates are rejected without truncation. ' +
       'Use when: naming an untitled conversation, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: renaming an already named conversation, taking over a Task or storing derived progress. ' +
       'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
       'SCOPE: current thread only (no threadId param); cross-thread writes are impossible. ' +

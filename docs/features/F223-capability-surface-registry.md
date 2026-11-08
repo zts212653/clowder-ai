@@ -4,7 +4,7 @@ related_features: [F038, F041, F131, F150, F192, F203, F211, F212, F286]
 topics: [capability-surface, skills, mcp, hub-action-surface, harness-eval, workspace-navigator]
 doc_kind: spec
 created: 2026-06-03
-tips_exempt: post-close contract-truth update for the existing workspace-navigator capability; user guidance remains covered by capability-workspace-navigator
+tips_exempt: post-close contract-truth update for the existing workspace-navigator capability (one page connection — the legacy copy skips ack-room members, and the hook mounts on the page connection provider); nothing new for users to learn, guidance remains covered by capability-workspace-navigator
 ---
 
 # F223: Capability Surface Registry — 把隐藏能力产品化成可发现、可执行、可验证的能力面
@@ -201,9 +201,12 @@ agent-key 必须显式提供有权访问的 `threadId`，缺失时不发 HTTP）
 callback-token / agent-key，并用 `resolvePrincipalThread` 绑定 principal 可见 thread →
 `workspace-navigate-handler.ts` 解析 absolute/repo-relative target、canonicalize worktreeId →
 `emitWorkspaceNavigate` 先通过 composition root 注入的 `socketEmit` 向 legacy
-`worktree:*` 与 `workspace:global` fire-and-forget，兼容迁移期旧 Hub；随后通过
-`socketEmitWithAck` 只向 `workspace:navigate:ack` 投递并收集回执 → AppShell 的
-`useWorkspaceNavigate` 返回 `applied / queued / blocked` receipt。legacy 广播不参与
+`worktree:*` 与 `workspace:global` fire-and-forget，兼容迁移期旧 Hub（广播排除同时在
+`workspace:navigate:ack` 里的连接：Hub 每页只有一条连接后，Teleport 让它也在 `workspace:global`，
+不排除的话它会先收到这份无回执副本、再把带回执的那份当重复丢掉）；随后通过
+`socketEmitWithAck` 只向 `workspace:navigate:ack` 投递并收集回执 → AppShell 在
+`ThreadChatRuntimeProvider` 内挂载的 `useWorkspaceNavigate`（经页面唯一连接；无外壳路由没有聊天运行时，
+由 `StandaloneHubSocketProvider` 提供该页唯一的连接，照旧排队；导出页 `export=true` 不挂跳转，与之前一致）返回 `applied / queued / blocked` receipt。legacy 广播不参与
 `deliveryStatus`；服务端只聚合 ack-room 回执，无有效回执保持 `unconfirmed`。可见 chat
 上的 `action=open` 才继续写 `workspaceOpenFilePath` + `_workspaceFileSetAt` stamp，随后
 `WorkspacePanel` 切到 Files view。

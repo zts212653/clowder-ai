@@ -24,8 +24,16 @@ export function parseActionSuccessorLease(raw: string | null): ActionSuccessorLe
       Partial<ActionSuccessorLease['completionCandidates'][string]> & { evidenceRefs: string[]; recordedAt: number }
     >;
     completionCandidate?: { catId: string; evidenceRefs: string[]; recordedAt: number };
+    _recovery?: unknown;
+    _recoveryRevision?: unknown;
   };
-  const { completionCandidate, terminalPredicateState: persistedPredicateState, ...lease } = persisted;
+  const {
+    completionCandidate,
+    terminalPredicateState: persistedPredicateState,
+    _recovery: _privateRecovery,
+    _recoveryRevision: _privateRevision,
+    ...lease
+  } = persisted;
   if (!lease.leaseId || !lease.key || !lease.subjectRef || typeof lease.generation !== 'number') {
     throw new Error('invalid persisted action successor lease');
   }

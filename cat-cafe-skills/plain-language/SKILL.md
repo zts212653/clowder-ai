@@ -1,6 +1,6 @@
 ---
 name: plain-language
-tips_exempt: "2026-10-08 初版是猫面对人的表达与载体路由；不新增 Hub 操作或独立用户功能，发现入口在沟通意图与本 skill 描述。"
+tips_exempt: "2026-11-07 renewal: 校准猫的 HTML 载体路由，复用已有作品保存与版本卡；不新增 Hub 操作或选载体审批，人的入口仍是普通表达委托与现有 HTML 作品指南。"
 description: >
   把跨上下文的工作进度、提问和复杂结果讲到人能理解，并选择合适的说明形式。
   Use when: 工作中途向未跟进的人汇报或提问、用户说看不懂/黑话多，或需在文字/图解/HTML/口播/视频/原型之间选择表达。
@@ -70,8 +70,8 @@ triggers:
 |---|---|---|
 | 知道进度、结果或判断一个取舍 | 自足的文字；长结构化对照可用卡片 | 短汇报直接文字；结构化产物按 [rich-messaging](../rich-messaging/SKILL.md) |
 | 看懂关系、位置或过程顺序 | 图解、Mermaid、SVG；配一句解释 | 能用可编辑图表达就直接画；需新位图才用 [image-generation](../image-generation/SKILL.md) |
-| 对比多项内容，或调变量观察影响 | 自包含 HTML、时间线、带滑块的解释 | 小组件用 rich-messaging 的 html_widget；明确变量、假设和变化，标清模拟数据 |
-| 判断布局、点法或完整使用体验 | 可操作原型 | [concept-demo-design](../concept-demo-design/SKILL.md)；小型自包含体验稿用 html_widget，复杂 localhost 用 [browser-preview](../browser-preview/SKILL.md) |
+| 对比多项内容，或调变量观察影响 | 自包含 HTML、时间线、带滑块的解释 | 随聊天解释局部用 `html_widget`；受托交付图解或复用小工具按 [rich-messaging](../rich-messaging/SKILL.md#html先按用途选再交付) 用 `cat_cafe_work` 保存并附卡回 Chat；明确变量、假设和变化，标清模拟数据 |
+| 判断布局、点法或完整使用体验 | 可操作原型 | [concept-demo-design](../concept-demo-design/SKILL.md)；自包含原型交付按 rich-messaging 保存作品，已有作品沿原身份续版；复杂 localhost 用 [browser-preview](../browser-preview/SKILL.md) |
 | 不盯屏幕也要跟上 | 口播稿 | 重写可听正文；共读走 learning-companion；文件用 [workspace-navigator](../workspace-navigator/SKILL.md) 交到阅读入口 |
 | 跟随时序、动作或连续变化，或明确要可播视频 | 讲解视频 | [video-forge](../video-forge/SKILL.md)；已有产品宣传意图时按其导演入口；图解和分镜不冒充成片 |
 

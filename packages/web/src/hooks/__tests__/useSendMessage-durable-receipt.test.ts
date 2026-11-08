@@ -32,6 +32,14 @@ const stored: ChatMessage = {
 };
 const response = (body: unknown) => ({ ok: true, status: 202, json: async () => body });
 
+/** A record as published: without the page's write counts (PR-3a2 `local-write-clock`, never persisted). */
+function asPublished(message: ChatMessage): ChatMessage {
+  const record = { ...message };
+  delete record.localBodyWriteSeq;
+  delete record.localMetadataWriteSeq;
+  return record;
+}
+
 describe('sent media is published only by the durable message owner', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -122,7 +130,7 @@ describe('sent media is published only by the durable message owner', () => {
       expect(await pending).toBe(true);
     });
     expect(useChatStore.getState().messages).toEqual([]);
-    expect(useChatStore.getState().getThreadState('thread-1').messages).toEqual([stored]);
+    expect(useChatStore.getState().getThreadState('thread-1').messages.map(asPublished)).toEqual([stored]);
   });
 
   it('does not manufacture a publication when Queue admission supplies no stored body', async () => {

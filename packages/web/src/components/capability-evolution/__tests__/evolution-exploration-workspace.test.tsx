@@ -22,6 +22,7 @@ describe('exploration in the actual journey surface', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.clear();
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     useEvolutionReading.setState({ programs: {} });
     host = document.createElement('div');
     document.body.append(host);
@@ -35,6 +36,7 @@ describe('exploration in the actual journey surface', () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
   it('keeps public archives reachable when the Program also has formal owner versions', async () => {

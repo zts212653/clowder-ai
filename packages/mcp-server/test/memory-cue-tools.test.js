@@ -15,7 +15,7 @@ describe('F287 memory cue MCP tools', () => {
 
     assert.deepEqual(
       toolset.tools.map((tool) => tool.name),
-      ['cat_cafe_drill_memory_cue', 'cat_cafe_record_memory_cue_outcome'],
+      ['cat_cafe_prepare_memory_context', 'cat_cafe_drill_memory_cue', 'cat_cafe_record_memory_cue_outcome'],
     );
     assert.deepEqual(Object.keys(drillMemoryCueInputSchema).sort(), ['clientRequestId', 'handle', 'window']);
     assert.deepEqual(Object.keys(recordMemoryCueOutcomeInputSchema).sort(), ['clientRequestId', 'handle', 'outcome']);
@@ -66,6 +66,28 @@ describe('F287 memory cue MCP tools', () => {
         body: { handle: 'opaque-handle', outcome: 'dismissed', requestId: 'outcome-1' },
       },
     ]);
+  });
+
+  it('preparation carries only activity and query into the authenticated owner callback', async () => {
+    const { createMemoryCueTools, prepareMemoryContextInputSchema } = await import('../dist/tools/memory-cue-tools.js');
+    const calls = [];
+    const tools = createMemoryCueTools(async (path, body) => {
+      calls.push({ path, body });
+      return { content: [] };
+    });
+    assert.deepEqual(Object.keys(prepareMemoryContextInputSchema).sort(), ['activity', 'query']);
+    await tools.handlePrepareMemoryContext({ activity: 'video', query: 'paper to video', scope: 'forged' });
+    assert.deepEqual(calls, [
+      { path: '/api/callbacks/memory-cues/prepare', body: { activity: 'video', query: 'paper to video' } },
+    ]);
+    assert.equal(prepareMemoryContextInputSchema.activity.safeParse('other').success, false);
+    assert.equal(prepareMemoryContextInputSchema.query.safeParse(' ').success, false);
+    assert.equal(prepareMemoryContextInputSchema.query.safeParse('x'.repeat(501)).success, false);
+    const tool = tools.tools.find((entry) => entry.name === 'cat_cafe_prepare_memory_context');
+    assert.match(tool.description, /Use when:/);
+    assert.match(tool.description, /NOT for:/);
+    assert.match(tool.description, /Output:/);
+    assert.match(tool.description, /delivery=unknown/);
   });
 
   it('documents the owner-bound drill and content-free outcome boundaries', async () => {

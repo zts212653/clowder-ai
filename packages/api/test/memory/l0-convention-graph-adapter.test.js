@@ -71,7 +71,7 @@ describe('L0ConventionGraphAdapter', () => {
       ]);
 
       // Query a section → dossier (different kind) should come FIRST despite being
-      // last in insertion order. This is critical: TopkExpansionService caps at 3,
+      // last in insertion order. This is critical: KnowledgeAssociations caps at 3,
       // so dossier must be in the first 3 to survive the budget cut.
       const consumers = await adapter.queryConsumers('l3-routing-rules.md');
       assert.equal(consumers.length, 7, 'should have 7 siblings (6 sections + 1 dossier)');

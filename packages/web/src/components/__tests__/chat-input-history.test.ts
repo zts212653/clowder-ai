@@ -21,15 +21,16 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
-vi.mock('@/hooks/useCoCreatorConfig', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useCoCreatorConfig')>()),
-  useCoCreatorConfig: () => ({
+vi.mock('@/hooks/useCoCreatorConfig', async () => {
+  const { coCreatorDisplay } = await import('@cat-cafe/shared');
+  const config = {
     name: 'ME',
     aliases: [],
     mentionPatterns: ['@co-creator'],
     color: { primary: '#D4A76A', secondary: '#FFF8F0' },
-  }),
-}));
+  };
+  return { useCoCreatorConfig: () => config, useCoCreatorDisplay: () => coCreatorDisplay(config) };
+});
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     cats: [
