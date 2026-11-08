@@ -10,6 +10,7 @@ import { ScheduleMutationProposalStore } from '../../dist/infrastructure/schedul
 import { TaskRunnerV2 } from '../../dist/infrastructure/scheduler/TaskRunnerV2.js';
 import { templateRegistry } from '../../dist/infrastructure/scheduler/templates/registry.js';
 import { scheduleRoutes } from '../../dist/routes/schedule.js';
+import { scheduleProposalDecisionRoutes } from '../../dist/routes/schedule-proposal-decision-routes.js';
 
 const OWNER = 'owner-user';
 
@@ -88,6 +89,13 @@ describe('schedule mutation principal routing', () => {
       scheduleMutationProposalStore: proposalStore,
       approvalIngress,
     });
+    await app.register(scheduleProposalDecisionRoutes, {
+      ownerUserId: OWNER,
+      store: proposalStore,
+      taskRunner: runner,
+      templateRegistry,
+      socketManager: { emitToUser() {} },
+    });
     await app.ready();
   });
 
@@ -97,6 +105,59 @@ describe('schedule mutation principal routing', () => {
     db.close();
     if (previousOwnerUserId === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
     else process.env.DEFAULT_OWNER_USER_ID = previousOwnerUserId;
+  });
+
+  it('recovers deletion through owner rejection and a fresh genuine cat proposal without reusing approval', async () => {
+    const original = {
+      id: 'dyn-drift-recovery',
+      templateId: 'reminder',
+      trigger: { type: 'interval', ms: 60000 },
+      params: { message: 'Synthetic reminder', targetCatId: 'codex-sol', triggerUserId: OWNER },
+      display: { label: 'Drift recovery', category: 'system' },
+      deliveryThreadId: 'thread-owner',
+      enabled: true,
+      createdBy: 'codex-sol',
+      createdAt: '2026-11-09T00:00:00Z',
+    };
+    dynamicStore.insert(original);
+    const propose = () =>
+      app.inject({
+        method: 'DELETE',
+        url: `/api/schedule/tasks/${original.id}`,
+        headers: { 'x-test-principal': 'cat' },
+      });
+    const decide = (id, action) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/schedule-proposals/${id}/${action}`,
+        headers: { 'x-test-principal': 'cvo' },
+      });
+    const oldResponse = await propose();
+    assert.equal(oldResponse.statusCode, 202);
+    const oldId = oldResponse.json().proposalId;
+    const paused = await app.inject({
+      method: 'PATCH',
+      url: `/api/schedule/tasks/${original.id}`,
+      headers: { 'x-test-principal': 'cat' },
+      payload: { enabled: false },
+    });
+    assert.equal(paused.statusCode, 200);
+    assert.equal((await decide(oldId, 'approve')).json().code, 'SCHEDULE_TASK_DRIFT');
+    assert.equal(proposalStore.getById(oldId).status, 'pending');
+    assert.equal((await decide(oldId, 'reject')).statusCode, 200);
+    const freshResponse = await propose();
+    assert.equal(freshResponse.statusCode, 202);
+    const fresh = proposalStore.getById(freshResponse.json().proposalId);
+    assert.notEqual(fresh.proposalId, oldId);
+    assert.equal(fresh.status, 'pending');
+    assert.equal(fresh.mutation.taskSnapshot.enabled, false);
+    assert.equal(fresh.requesterCatId, 'codex-sol');
+    assert.equal(fresh.publication.state, 'anchored');
+    assert.equal(dynamicStore.getById(original.id).enabled, false);
+    assert.equal(proposalStore.getById(oldId).mutation.taskSnapshot.enabled, true);
+    assert.equal(proposalStore.getById(oldId).effectCheckpoint, undefined);
+    assert.equal((await decide(fresh.proposalId, 'approve')).statusCode, 200);
+    assert.equal(dynamicStore.getById(original.id), null);
   });
 
   it('proposes parameter updates without replacing the existing recurring task or touching its live spec', async () => {
