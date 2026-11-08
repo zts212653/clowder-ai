@@ -765,6 +765,7 @@ try {
     await p.joined(p.other);
     // PR-3b on next: live background work also leaves the foreground room.
     await p.unjoined();
+    const requestedBeforeDisconnect = (await readState(p.page, p.id)).requested ?? 0;
     await p.offline(p.other);
     await p.saveTerminal();
     assert.equal((await p.snapshot('background response persisted offline')).visibleFinal, 0);
@@ -773,7 +774,7 @@ try {
     await p.joined(p.other);
     await p.unjoined();
     await waitFor(
-      async () => (await readState(p.page, p.id)).requested > 0,
+      async () => (await readState(p.page, p.id)).requested > requestedBeforeDisconnect,
       'background catch-up requested after reconnect',
     );
     const bg = await p.snapshot('reconnect marks background catch-up');
@@ -787,6 +788,11 @@ try {
     await p.submit();
     p.g.start.open();
     await p.page.getByText('Reply sequence-gap partial.', { exact: false }).first().waitFor({ timeout: 8000 });
+    // Finish the first confirmed-join read before isolating a later sequence gap.
+    await waitFor(async () => {
+      const state = await readState(p.page, p.id);
+      return (state.requested ?? 0) === (state.consumed ?? 0);
+    }, 'initial join catch-up applied before dropping the tail');
     await p.snapshot('first stream visible');
     p.mode('all');
     await p.saveTerminal();

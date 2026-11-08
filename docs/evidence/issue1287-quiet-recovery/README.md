@@ -40,6 +40,8 @@ node --import tsx packages/web/test/browser/issue1287-quiet-recovery.mjs
 
 当前 next 在 `4020d9c65` 已带入 PR-3b 的“只订阅前台房间”约定。两条后台旅程因此断言退房，在当前前台房间断开同一 Socket，验证重连后产生后台 catch-up、回前台后应用；不再要求后台工作常驻 room。旧名 `background-joined-quiet` 对应当前 `background-active-quiet`。首轮 10 PASS / 2 join-precondition failures 的证据保留，不能把旧契约的超时冒充产品失败或直接算成通过。
 
+序号缺口夹具先等待初次 confirmed-join 补读的 requested/consumed 版本相等，再丢后续 tail。第二轮记录中 requested=1、consumed 尚未完成便开始丢帧，已有补读先恢复终态，导致“仍未恢复”的前置断言失败；该记录保留。没有放宽缺口前缺席、缺口后唯一完整回复的断言，也没有延长等待上限。
+
 ## 确认语义与查询预算
 
 首次 History 页捕获发布前沿作为“开始观察变化”的基线；它不声称已加载整个历史。已有基线时，最新页不能自行确认线程前沿：`afterVisibility` 只恢复其后的已发布记录，每批最多检查 **50 个原始位置**，确认只推进到实际返回并成功应用的可见记录。旧 R 的时间线位置不影响这种恢复。普通向上翻页使用独立的真实页边界，不会被补回的旧 R 跳过中间区间。
