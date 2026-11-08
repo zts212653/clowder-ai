@@ -104,6 +104,7 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { type RouteResponseProducers, responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
@@ -199,6 +200,9 @@ export async function* routeParallel(
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
   const outputCursorReleases: Array<() => void> = [];
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   try {
     yield* routeParallelPrepared(
       deps,
@@ -209,11 +213,14 @@ export async function* routeParallel(
       options,
       invocationServices,
       outputCursorReleases,
+      routeResponseProducers,
     );
   } finally {
     outputCursorReleases.forEach((release) => {
       release();
     });
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
   }
 }
@@ -227,6 +234,7 @@ async function* routeParallelPrepared(
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
   outputCursorReleases: Array<() => void>,
+  routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -1211,7 +1219,12 @@ async function* routeParallelPrepared(
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -1810,7 +1823,7 @@ async function* routeParallelPrepared(
       // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
       // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
       // parentInvocationId for live bubble identity. Persist formal messages with
       // the same id; otherwise IDB/live bubbles use parent id while hydration uses
@@ -2715,6 +2728,8 @@ async function* routeParallelPrepared(
           },
         ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
       }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvId) routeResponseProducers.leave(ownInvId);
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the

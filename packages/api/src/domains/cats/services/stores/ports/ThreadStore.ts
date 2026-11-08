@@ -763,6 +763,12 @@ export interface IThreadStore {
     options?: ThreadCreateOptions,
   ): Thread | Promise<Thread>;
   get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
+  /** Fresh complete thread+participants reads. Missing/default recovery matches get;
+   * transport/incomplete replies reject before any recovery. No cached authority. */
+  getMany?(
+    ids: readonly string[],
+    options?: StoreReadOptions & { recoverMissing?: false },
+  ): Promise<Map<string, Thread | null>>;
   list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
   /** Read only candidate threads admitted by the durable user visibility index. */

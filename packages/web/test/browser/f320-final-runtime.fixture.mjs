@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLIENT_REQUEST_DIAGNOSTIC_HEADER, catRegistry, routingContextReadModelV1Schema } from '@cat-cafe/shared';
+import { CLIENT_DIAGNOSTIC_REQUEST_HEADERS, catRegistry, routingContextReadModelV1Schema } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { toAllCatConfigs } from '../../../api/src/config/cat-config-loader.ts';
 import { configEventBus } from '../../../api/src/config/config-event-bus.ts';
@@ -189,7 +189,10 @@ export async function startFinalAccountPreview({
       reply
         .header('access-control-allow-origin', origin)
         .header('access-control-allow-credentials', 'true')
-        .header('access-control-allow-headers', `content-type,x-csrf-token,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`)
+        .header(
+          'access-control-allow-headers',
+          `content-type,x-csrf-token,${CLIENT_DIAGNOSTIC_REQUEST_HEADERS.join(',')}`,
+        )
         .header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     if (request.method === 'OPTIONS') return reply.code(204).send();
   });

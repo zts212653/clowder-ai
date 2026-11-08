@@ -1,3 +1,4 @@
+import { outsideRecoveryDeadline } from '../../../../../infrastructure/recovery/recovery-deadline.js';
 import { isTaskHandoffSource } from '../../../../ball-custody/OrdinaryTaskHandoffContract.js';
 import { isRetiredTaskAction } from '../../../../ball-custody/retired-task-action.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
@@ -473,6 +474,8 @@ interface SocketManagerLike {
   broadcastAgentMessage(msg: unknown, threadId: string): void;
   broadcastToRoom(room: string, event: string, data: unknown): void;
   emitToUser(userId: string, event: string, data: unknown): void;
+  /** PR-3a2: record what an admitted response broadcasts, for pages that join mid-reply. */
+  openResponseStream?(response: StoredMessage): void;
 }
 
 interface LoggerLike {
@@ -1766,6 +1769,10 @@ export class QueueProcessor {
     seenAt?: number;
   }): Promise<AdoptExposedQueuedEntriesResult> {
     const { queue, invocationTracker, messageStore } = this.deps;
+    // Sources excluded from public coverage must not fall through to ordinary body adoption.
+    const source = await messageStore.getById(input.candidate.messageId);
+    if (isTaskHandoffSource(source))
+      return { outcome: 'rejected', reason: 'state_changed', entryId: input.candidate.entryId };
     const claimed = await queue.claimExactExposureDurable(
       input.threadId,
       input.userId,
@@ -2047,40 +2054,65 @@ export class QueueProcessor {
     });
   }
 
+  /** Only one withdrawal or failure may write through the same live barrier. */
+  private acquirePrestartRetirements(retirements: readonly PreparedPrestartRetirement[]) {
+    if (
+      retirements.some(({ key, barrier }) => this.processingSlots.get(key) !== barrier || barrier.retirementInProgress)
+    )
+      return null;
+    retirements.forEach(({ barrier }) => {
+      barrier.retirementInProgress = true;
+    });
+    return () =>
+      retirements.forEach(({ barrier }) => {
+        delete barrier.retirementInProgress;
+      });
+  }
+
   private async terminalizePreparedPrestartRetirements(
     retirements: readonly PreparedPrestartRetirement[],
-  ): Promise<boolean> {
-    const retiringEntryIds = new Set(retirements.flatMap((retirement) => retirement.carriers.map((entry) => entry.id)));
-    return terminalizePreparedPrestartRetirements(retirements, {
-      messageStore: this.deps.messageStore,
-      shouldCancelMessage: (entry, messageId) =>
-        !this.deps.queue
-          .listUsersForThread(entry.threadId)
-          .some((userId) =>
-            this.deps.queue
-              .list(entry.threadId, userId)
-              .some(
-                (candidate) =>
-                  !retiringEntryIds.has(candidate.id) && queueEntryMessageIds(candidate).includes(messageId),
-              ),
-          ),
-      commitCarrier: async (entry) =>
-        (await this.deps.queue.removeProcessedAcrossUsersDurable(
-          entry.threadId,
-          entry.id,
-          'interrupted',
-          'invocation_cancelled',
-          Date.now(),
-          entry,
-        )) !== null,
-      emitMessageDeleted: (userId, threadId, messageId) =>
-        this.deps.socketManager.emitToUser(userId, 'message_deleted', {
-          messageId: messageId ?? null,
-          threadId,
-          deletedBy: userId,
-        }),
-      log: this.deps.log,
-    });
+  ): Promise<PrestartRetirementOutcome> {
+    const release = this.acquirePrestartRetirements(retirements);
+    if (!release) return 'state_changed';
+    try {
+      const retiringEntryIds = new Set(
+        retirements.flatMap((retirement) => retirement.carriers.map((entry) => entry.id)),
+      );
+      const terminalized = await terminalizePreparedPrestartRetirements(retirements, {
+        messageStore: this.deps.messageStore,
+        shouldCancelMessage: (entry, messageId) =>
+          !this.deps.queue
+            .listUsersForThread(entry.threadId)
+            .some((userId) =>
+              this.deps.queue
+                .list(entry.threadId, userId)
+                .some(
+                  (candidate) =>
+                    !retiringEntryIds.has(candidate.id) && queueEntryMessageIds(candidate).includes(messageId),
+                ),
+            ),
+        commitCarrier: async (entry) =>
+          (await this.deps.queue.removeProcessedAcrossUsersDurable(
+            entry.threadId,
+            entry.id,
+            'interrupted',
+            'invocation_cancelled',
+            Date.now(),
+            entry,
+          )) !== null,
+        emitMessageDeleted: (userId, threadId, messageId) =>
+          this.deps.socketManager.emitToUser(userId, 'message_deleted', {
+            messageId: messageId ?? null,
+            threadId,
+            deletedBy: userId,
+          }),
+        log: this.deps.log,
+      });
+      if (!terminalized) return 'terminalization_failed';
+      return this.commitPreparedPrestartRetirements(retirements) ? 'retired' : 'state_changed';
+    } finally {
+      release();
+    }
   }
 
   /** Commit disappearance only after every carrier reached durable terminal truth. */
@@ -2105,8 +2137,7 @@ export class QueueProcessor {
   ): Promise<PrestartRetirementOutcome> {
     const retirements = this.preparePrestartRetirements(threadId, [catId], userId);
     if (!retirements || retirements.length !== 1) return 'state_changed';
-    if (!(await this.terminalizePreparedPrestartRetirements(retirements))) return 'terminalization_failed';
-    return this.commitPreparedPrestartRetirements(retirements) ? 'retired' : 'state_changed';
+    return this.terminalizePreparedPrestartRetirements(retirements);
   }
 
   /**
@@ -2124,54 +2155,106 @@ export class QueueProcessor {
     const retirements = this.preparePrestartRetirements(threadId, [catId], userId);
     if (!retirements || retirements.length !== 1) return 'state_changed';
 
-    for (const retirement of retirements) {
-      for (const carrier of retirement.carriers) {
-        if (isPublicQueueEntry(carrier)) {
-          const sourceMessageId = carrier.payload.messageId;
-          const source = sourceMessageId ? await this.deps.messageStore.getById(sourceMessageId) : null;
-          if (!source) return 'terminalization_failed';
-          const requestedTargets = [...queueEntryTargetCats(carrier)];
-          const failedAt = Math.max(Date.now(), source.timestamp);
-          const reasonText =
-            reason === 'control_plane_unavailable'
-              ? '执行控制面不可用'
-              : reason === 'execution_owner_lost'
-                ? '执行进程归属已丢失'
-                : '启动阶段超时';
-          const failure = await this.deps.messageStore.commitLifecyclePreAdmissionFailure({
-            sourceMessageId: source.id,
-            expectedEntryId: carrier.id,
-            requestedTargets,
+    let release: (() => void) | null = null;
+    try {
+      for (const retirement of retirements) {
+        for (const carrier of retirement.carriers) {
+          let source =
+            isPublicQueueEntry(carrier) && carrier.payload.messageId
+              ? await this.deps.messageStore.getById(carrier.payload.messageId)
+              : null;
+          // Source reads may yield to cancellation. Acquire only a still-owned
+          // barrier, then keep it through the transaction and carrier retirement.
+          release ??= this.acquirePrestartRetirements(retirements);
+          if (!release) return 'state_changed';
+          if (isPublicQueueEntry(carrier)) {
+            if (!source) return 'terminalization_failed';
+            const attemptTargets = [...(carrier.claimedTargetIds ?? queueEntryTargetCats(carrier))];
+            while (true) {
+              const dispatchedTargets = new Set(source.lifecycle?.dispatchRefs?.map((ref) => ref.targetId));
+              const requestedTargets =
+                carrier.sourceCategory === 'a2a'
+                  ? attemptTargets.filter((targetId) => !dispatchedTargets.has(targetId)).sort()
+                  : attemptTargets;
+              if (carrier.sourceCategory === 'a2a' && requestedTargets.length === 0) {
+                await this.deps.queue.reprojectFailureWakes(source, attemptTargets);
+                break;
+              }
+              const failedAt = Math.max(Date.now(), source.timestamp);
+              const reasonText =
+                reason === 'control_plane_unavailable'
+                  ? '执行控制面不可用'
+                  : reason === 'execution_owner_lost'
+                    ? '执行进程归属已丢失'
+                    : '启动阶段超时';
+              const content = `唤起${requestedTargets.join('、') || catId}失败：${reasonText}（${reason}）。来源消息：${source.id}。`;
+              // A processing cohort has no ledger row to recover between per-target writes.
+              // Commit its complete failure result and caller wake in one transaction.
+              const failure =
+                carrier.sourceCategory !== 'a2a'
+                  ? await this.deps.messageStore.commitLifecyclePreAdmissionFailure({
+                      sourceMessageId: source.id,
+                      expectedEntryId: carrier.id,
+                      requestedTargets,
+                      reason,
+                      content,
+                      failedAt,
+                    })
+                  : await this.deps.queue.terminalizeClaimedAdmissionFailure(
+                      this.deps.messageStore,
+                      source,
+                      carrier,
+                      requestedTargets,
+                      reason,
+                      content,
+                    );
+              if (failure.kind !== 'applied' && failure.kind !== 'replayed') {
+                if (carrier.sourceCategory === 'a2a' && failure.kind === 'conflict') {
+                  const current = await this.deps.messageStore.getById(source.id);
+                  // Retry only concrete sibling progress. The failed cohort strictly shrinks.
+                  if (
+                    current &&
+                    requestedTargets.some((targetId) =>
+                      current.lifecycle?.dispatchRefs?.some((ref) => ref.targetId === targetId),
+                    )
+                  ) {
+                    source = current;
+                    continue;
+                  }
+                }
+                return 'terminalization_failed';
+              }
+              this.callerDispatchObservations.registerPersistedSource(failure.inputMessage, requestedTargets);
+              this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.inputMessage);
+              this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.failureMessage);
+              break;
+            }
+          }
+          const terminal = await this.deps.queue.removeProcessedAcrossUsersDurable(
+            carrier.threadId,
+            carrier.id,
+            'failed',
             reason,
-            content: `唤起${requestedTargets.join('、') || catId}失败：${reasonText}（${reason}）。来源消息：${source.id}。`,
-            failedAt,
-          });
-          if (failure.kind !== 'applied' && failure.kind !== 'replayed') return 'terminalization_failed';
-          this.callerDispatchObservations.registerPersistedSource(failure.inputMessage, requestedTargets);
-          this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.inputMessage);
-          this.emitLifecycleMessageUpdated(queueEntryOwnerId(carrier), failure.failureMessage);
+            Date.now(),
+            carrier,
+          );
+          if (!terminal) return 'terminalization_failed';
         }
-        const terminal = await this.deps.queue.removeProcessedAcrossUsersDurable(
-          carrier.threadId,
-          carrier.id,
-          'failed',
-          reason,
-          Date.now(),
-          carrier,
-        );
-        if (!terminal) return 'terminalization_failed';
       }
-    }
 
-    if (!this.commitPreparedPrestartRetirements(retirements)) return 'state_changed';
-    await emitQueueUpdated(
-      this.deps.socketManager,
-      userId,
-      threadId,
-      this.deps.queue.list(threadId, userId),
-      'pre_admission_failed',
-    );
-    return 'retired';
+      if (!this.commitPreparedPrestartRetirements(retirements)) return 'state_changed';
+      await emitQueueUpdated(
+        this.deps.socketManager,
+        userId,
+        threadId,
+        this.deps.queue.list(threadId, userId),
+        'pre_admission_failed',
+      );
+      void this.requestDrain(threadId);
+      return 'retired';
+    } finally {
+      release?.();
+    }
   }
 
   /**
@@ -2205,12 +2288,8 @@ export class QueueProcessor {
 
     const retirements = this.preparePrestartRetirements(threadId, catIds, userId);
     if (!retirements || retirements.length === 0) return { outcome: 'state_changed', retiredCatIds: [] };
-    if (!(await this.terminalizePreparedPrestartRetirements(retirements))) {
-      return { outcome: 'terminalization_failed', retiredCatIds: [] };
-    }
-    if (!this.commitPreparedPrestartRetirements(retirements)) {
-      return { outcome: 'state_changed', retiredCatIds: [] };
-    }
+    const outcome = await this.terminalizePreparedPrestartRetirements(retirements);
+    if (outcome !== 'retired') return { outcome, retiredCatIds: [] };
     return {
       outcome: 'retired',
       retiredCatIds: [...new Set(retirements.map((retirement) => retirement.targetCatId))],
@@ -2321,8 +2400,7 @@ export class QueueProcessor {
         );
         return null;
       }
-      if (!(await this.terminalizePreparedPrestartRetirements(retirements))) return null;
-      if (!this.commitPreparedPrestartRetirements(retirements)) {
+      if ((await this.terminalizePreparedPrestartRetirements(retirements)) !== 'retired') {
         this.deps.log.error(
           { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
           '[QueueProcessor] external replacement lost retirement barrier before commit',
@@ -3397,7 +3475,7 @@ export class QueueProcessor {
    * User-level entry: co-creator manually triggers processing their next entry.
    */
   async processNext(threadId: string, userId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
-    return this.tryExecuteNextForUser(threadId, userId);
+    return outsideRecoveryDeadline(() => this.tryExecuteNextForUser(threadId, userId));
   }
 
   /**
@@ -3406,6 +3484,10 @@ export class QueueProcessor {
    * cancellation fence, or start a second invocation for an admitted row.
    */
   async progressOwnedCarrier(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
+    return outsideRecoveryDeadline(() => this.progressOwnedCarrierInQueue(entry, targetCatId));
+  }
+
+  private async progressOwnedCarrierInQueue(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
     const userId = queueEntryOwnerId(entry);
     const current = this.deps.queue.getEntrySnapshot(entry.threadId, userId, entry.id);
     if (!current) {
@@ -3440,6 +3522,13 @@ export class QueueProcessor {
    * it can retire, so enqueue/terminal/reorder races cannot lose the last wake.
    */
   requestDrain(
+    threadId: string,
+    options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
+  ): Promise<void> {
+    return outsideRecoveryDeadline(() => this.requestOwnedDrain(threadId, options));
+  }
+
+  private requestOwnedDrain(
     threadId: string,
     options?: { bypassSuppressionForCatId?: string; bypassSuppressionEpoch?: number },
   ): Promise<void> {
@@ -4616,15 +4705,24 @@ export class QueueProcessor {
    * The structured internal diagnostic is the only lifecycle projection owned here;
    * any typed source owner remains responsible for its own terminal disposition.
    */
-  private async terminalizeUnavailablePrivateEntry(expected: QueueEntry): Promise<QueueEntry | null> {
-    const claimed = await this.deps.queue.claimPreAdmissionFailureAcrossUsersDurable(
-      expected.threadId,
-      expected.id,
-      expected.targets,
-    );
+  private async terminalizeUnavailablePrivateEntry(
+    expected: QueueEntry,
+    alreadyClaimed = false,
+    reason:
+      | 'invalid_explicit_target'
+      | 'execution_binding_conflict'
+      | 'execution_binding_unavailable' = 'invalid_explicit_target',
+  ): Promise<QueueEntry | null> {
+    const claimed = alreadyClaimed
+      ? expected
+      : await this.deps.queue.claimPreAdmissionFailureAcrossUsersDurable(
+          expected.threadId,
+          expected.id,
+          expected.targets,
+        );
     if (!claimed) return null;
-    if (claimed.kind !== 'private_input') {
-      await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
+    if (claimed.kind !== 'private_input' || claimed.status !== 'claimed') {
+      if (!alreadyClaimed) await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
       throw new Error(`private pre-admission terminalization received ${claimed.kind}: ${claimed.id}`);
     }
     const removed = await this.deps.queue.removeProcessedAcrossUsersDurable(
@@ -4635,8 +4733,8 @@ export class QueueProcessor {
       Date.now(),
       claimed,
     );
-    if (!removed) {
-      await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
+    if (!removed || removed.status !== 'terminal') {
+      if (!alreadyClaimed) await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
       throw new Error(`private pre-admission terminalization lost claimed Queue entry: ${claimed.id}`);
     }
     const hooks = this.entryCompleteHooks.get(claimed.id) ?? [];
@@ -4659,7 +4757,8 @@ export class QueueProcessor {
         threadId: claimed.threadId,
         entryId: claimed.id,
         requestedTargets: [...queueEntryTargetCats(claimed)],
-        reason: 'invalid_explicit_target',
+        reason,
+        ...(claimed.sourceCategory === 'a2a_failure' ? { failureMessageId: claimed.payload.sourceRecordId } : {}),
       },
       '[QueueProcessor] private Queue head terminalized before admission',
     );
@@ -4729,6 +4828,7 @@ export class QueueProcessor {
     let lifecycleTransferStarted = false;
     let lifecycleReceiverPersisted = false;
     let preAdmissionSettlementAttempted = false;
+    let undeliverableFailureWake: string | undefined;
     let lifecycleAdmissionUnknown = false;
     const unconfirmedProviderCats = new Set<string>();
     let lifecycleQueueTargetsRetired = false;
@@ -5801,28 +5901,42 @@ export class QueueProcessor {
             reason: 'execution_binding_conflict' | 'execution_binding_unavailable',
           ) => {
             if (entry.execution.actionSuccessorFence || entry.execution.liveSessionId) return false;
-            const sources = admissionEntries.filter((candidate) => candidate.claimedTargetIds?.includes(catId));
-            if (sources.length === 0 || sources.some((candidate) => !candidate.payload.messageId)) return false;
-            for (const candidate of sources) {
-              const source = await messageStore.getById(candidate.payload.messageId!);
-              if (!source) throw new Error(`pre-admission failure source missing: ${candidate.id}`);
-              if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
+            if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
+            if (entry.kind === 'private_input' && entry.sourceCategory === 'a2a_failure') {
+              const terminalError = `a2a_failure_undeliverable:${entry.payload.sourceRecordId}:${reason}`;
+              const diagnosed = await invocationRecordStore.update(invocationId!, {
+                status: 'failed',
+                error: terminalError,
+              });
+              if (!diagnosed) throw new Error(`failure wake diagnostic missing: ${invocationId}`);
+              undeliverableFailureWake = terminalError;
               preAdmissionSettlementAttempted = true;
-              const result = await queue.terminalizeClaimedAdmissionFailure(
-                messageStore,
-                source,
-                candidate,
-                catId,
-                reason,
-              );
-              if (result.kind !== 'applied' && result.kind !== 'replayed')
-                throw new Error(`pre-admission failure transaction rejected ${candidate.id}: ${result.kind}`);
-              this.callerDispatchObservations.registerPersistedSource(result.inputMessage, [catId]);
-              const retired = await queue.retireClaimedLifecycleTarget(threadId, candidate.id, catId);
-              if (retired.outcome !== 'retired')
-                throw new Error(`pre-admission failure target retirement changed: ${candidate.id}/${catId}`);
-              this.emitLifecycleMessageUpdated(userId, result.inputMessage);
-              this.emitLifecycleMessageUpdated(userId, result.failureMessage);
+              if (!(await this.terminalizeUnavailablePrivateEntry(entry, true, reason)))
+                throw new Error(`failure wake terminalization changed: ${entry.id}`);
+            } else {
+              const sources = admissionEntries.filter((candidate) => candidate.claimedTargetIds?.includes(catId));
+              if (sources.length === 0 || sources.some((candidate) => !candidate.payload.messageId)) return false;
+              for (const candidate of sources) {
+                const source = await messageStore.getById(candidate.payload.messageId!);
+                if (!source) throw new Error(`pre-admission failure source missing: ${candidate.id}`);
+                if (admittedControllerByCat.get(catId)?.signal.aborted || controller?.signal.aborted) return false;
+                preAdmissionSettlementAttempted = true;
+                const result = await queue.terminalizeClaimedAdmissionFailure(
+                  messageStore,
+                  source,
+                  candidate,
+                  catId,
+                  reason,
+                );
+                if (result.kind !== 'applied' && result.kind !== 'replayed')
+                  throw new Error(`pre-admission failure transaction rejected ${candidate.id}: ${result.kind}`);
+                this.callerDispatchObservations.registerPersistedSource(result.inputMessage, [catId]);
+                const retired = await queue.retireClaimedLifecycleTarget(threadId, candidate.id, catId);
+                if (retired.outcome !== 'retired')
+                  throw new Error(`pre-admission failure target retirement changed: ${candidate.id}/${catId}`);
+                this.emitLifecycleMessageUpdated(userId, result.inputMessage);
+                this.emitLifecycleMessageUpdated(userId, result.failureMessage);
+              }
             }
             preAdmissionFailedTargets.add(catId);
             lifecycleRetiredTargets.add(catId);
@@ -5926,6 +6040,8 @@ export class QueueProcessor {
               }
               lifecycleResponseMessageIds.add(observed.message.id);
               lifecycleResponseMessageIdByCat.set(input.catId, observed.message.id);
+              // Before the route produces anything: every event it broadcasts into R is recorded.
+              socketManager.openResponseStream?.(observed.message);
               terminalInvocationIdByCatId[input.catId] = input.invocationId;
               lifecycleReceiverPersisted = true;
               interruptLifecycleResponse = async (reason: string): Promise<void> => {
@@ -6320,7 +6436,8 @@ export class QueueProcessor {
         if (continuationCapsule) {
           continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
         }
-        terminalDispositions.observe(msg);
+        // A route's final done frame cannot turn a committed admission failure into success.
+        if (!msg.catId || !preAdmissionFailedTargets.has(msg.catId)) terminalDispositions.observe(msg);
         if (isTerminalDispositionEvent(msg) && msg.catId) {
           const responseId = lifecycleResponseMessageIdByCat.get(msg.catId);
           if (responseId) {
@@ -6563,7 +6680,10 @@ export class QueueProcessor {
 
       if (!entry.execution.actionSuccessorFence && terminalDispositions.getSuccessfulCatIds().length === 0) {
         if (preAdmissionFailedTargets.size === targetCats.length) {
-          await invocationRecordStore.update(invocationId, { status: 'failed', error: 'pre_admission_failed' });
+          await invocationRecordStore.update(invocationId, {
+            status: 'failed',
+            error: undeliverableFailureWake ?? 'pre_admission_failed',
+          });
           await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
           return executionResult('failed');
         }
@@ -6750,7 +6870,7 @@ export class QueueProcessor {
         if (invocationId) {
           await invocationRecordStore.update(invocationId, {
             status: 'failed',
-            error: errMsg,
+            error: undeliverableFailureWake ?? errMsg,
           });
         }
         if (exposeFailure) {

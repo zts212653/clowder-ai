@@ -30,6 +30,7 @@ const FAMILIES: Record<RecallResolverFamily, Parameters<MemoryCueSourceReader['r
   cat_owned_seed: 'owned_seed',
   thread_overview: 'thread_overview',
   matter: 'matter',
+  message_evidence: 'evidence',
 };
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};

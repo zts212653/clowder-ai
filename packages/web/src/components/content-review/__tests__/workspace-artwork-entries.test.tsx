@@ -249,8 +249,8 @@ it.each([
   }
 });
 
-it('an unsupported GIF previews without promising annotations', async () => {
-  mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ path, mime: 'image/gif' })));
+it('an unsupported AVIF previews without promising annotations', async () => {
+  mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ path, mime: 'image/avif' })));
   await render('gallery');
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   expect(useChatStore.getState().workspaceOpenRequest).toBeNull();

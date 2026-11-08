@@ -405,6 +405,8 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /** Server-owned receipt identifying the buffered snapshot actually included in this post. */
+    richBlockPublicationId?: string;
     /** Host-only binding of a durable memory result to this exact rich block. */
     messageSearchAnswer?: import('@cat-cafe/shared').MessageSearchAnswerBinding;
     /** Outbound media owns publication until durable materialization completes. */
@@ -1148,9 +1150,9 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
-  /** Binding rejection belongs to a specific target of the original short claim. */
+  /** Exact failed cohort; omit id only after every failed target left the ledger. */
   claim?: {
-    id: string;
+    id?: string;
     ledger: QueueLedgerStore;
     makeWake?: (failureId: string) => QueueLedgerEntry;
   };
@@ -1166,9 +1168,11 @@ export type CommitLifecyclePreAdmissionFailureResult =
     }
   | { kind: 'not_found' };
 
-export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string): string {
+export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string | readonly string[]): string {
   const key = `message-lifecycle:pre-admission-failure:${entryId}`;
-  return targetId === undefined ? key : `${key}:${JSON.stringify(targetId)}`;
+  if (targetId === undefined) return key;
+  const target = typeof targetId === 'string' ? targetId : targetId.length === 1 ? targetId[0] : [...targetId].sort();
+  return `${key}:${JSON.stringify(target)}`;
 }
 
 export function matchesLifecyclePreAdmissionFailure(
@@ -1188,7 +1192,7 @@ export function matchesLifecyclePreAdmissionFailure(
     lifecycle.status === 'failed' &&
     lifecycle.sourceEntryId === input.expectedEntryId &&
     lifecycle.inputMessageId === sourceMessage.id &&
-    isDeepStrictEqual(lifecycle.requestedTargets, input.requestedTargets) &&
+    isDeepStrictEqual([...lifecycle.requestedTargets].sort(), [...input.requestedTargets].sort()) &&
     lifecycle.reason === input.reason &&
     lifecycle.createdAt === input.failedAt
   );
@@ -2202,6 +2206,9 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Fresh full hashes in bounded batches, with one entry per requested ID.
+   * Missing is null; transport/incomplete replies reject. Never an admission grant. */
+  getByIds?(ids: readonly string[]): Promise<Map<string, StoredMessage | null>>;
   /**
    * Fresh media/visibility projection for exact publication reads. May omit
    * top-level content, thinking, metadata and toolEvents; never an authority verdict.
@@ -2739,6 +2746,7 @@ export class MessageStore {
     }
     message.visibilitySeq = this.visibilitySeq.get(message.id);
     this.userMentionIndex.observe(message);
+    notifyMessageTimelineChange(this, message);
   }
 
   /**
@@ -3946,12 +3954,23 @@ export class MessageStore {
   commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): CommitLifecyclePreAdmissionFailureResult {
+    const result = this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): CommitLifecyclePreAdmissionFailureResult {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
     const idempotencyKey = preAdmissionFailureIdempotencyKey(
       input.expectedEntryId,
-      input.claim ? input.requestedTargets[0] : undefined,
+      input.claim ? input.requestedTargets : undefined,
     );
     const existingFailure = this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
@@ -4072,13 +4091,15 @@ export class MessageStore {
         throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
       }
       const row = ledger.getNow(source.threadId, input.expectedEntryId);
-      if (
-        row?.status !== 'claimed' ||
-        row.claimId !== id ||
-        row.payload.messageId !== source.id ||
-        input.requestedTargets.length !== 1 ||
-        !row.claimedTargetIds?.includes(input.requestedTargets[0]!)
-      )
+      const ownedTarget = id
+        ? row?.status === 'claimed' &&
+          row.claimId === id &&
+          row.payload.messageId === source.id &&
+          input.requestedTargets.every((target) => row.claimedTargetIds?.includes(target))
+        : !row ||
+          (row.payload.messageId === source.id &&
+            input.requestedTargets.every((target) => !row.targets.includes(target)));
+      if (input.requestedTargets.length === 0 || !ownedTarget)
         return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
       if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
         throw new Error('pre-admission failure wake admission conflict');
@@ -4124,6 +4145,7 @@ export class MessageStore {
     }
     if (transition.kind === 'replayed') return { kind: 'replayed', message: structuredClone(message) };
     message.lifecycle = structuredClone(transition.lifecycle);
+    notifyMessageTimelineChange(this, message);
     return { kind: 'applied', message: structuredClone(message) };
   }
 

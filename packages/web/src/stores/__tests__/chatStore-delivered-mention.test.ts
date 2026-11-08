@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
+import { __resetOwnerMentionNotificationsForTests, DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
 const NOW = 1700000000000;
 
@@ -20,6 +20,8 @@ describe('markMessagesDelivered mentionsUser notification', () => {
   beforeEach(() => {
     notifySpy = vi.fn();
     vi.stubGlobal('Notification', Object.assign(notifySpy, { permission: 'granted' }));
+    // PR-3a: a page notifies each message id once; every case here starts from a fresh page.
+    __resetOwnerMentionNotificationsForTests();
     useChatStore.setState({
       currentThreadId: 'thread-1',
       messages: [],

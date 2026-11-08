@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
 import {
   type CompanionDeliveryAcceptance,
   companionDeliveryMatches,
@@ -185,6 +186,7 @@ import {
   serializeExtra,
 } from './redis-message-parsers.js';
 import { parseRedisNumber } from './redis-number.js';
+import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { readRecentMentionIds } from './redis-recent-mentions.js';
 import { readThreadReplyProjection } from './redis-thread-reply-projection.js';
 import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
@@ -727,7 +729,7 @@ local ttlSec = tonumber(ARGV[13])
 local sourceMode = ARGV[14]
 local failureFromRaw = ARGV[15]
 local claimId = ARGV[16]
-local failedTarget = ARGV[17]
+local failedTargetsRaw = ARGV[17]
 local wakeRaw = ARGV[18]
 local wakeFingerprint = ARGV[19]
 
@@ -745,17 +747,30 @@ if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId)
 end
 
 local wakeId = nil
-if claimId ~= '' then
+if #KEYS > 1 then
+  local failedTargets = cjson.decode(failedTargetsRaw)
   local raw = redis.call('HGET', KEYS[2], expectedEntryId)
-  if not raw then return {-4, ''} end
-  local row = cjson.decode(raw)
-  if row.status ~= 'claimed' or row.claimId ~= claimId or
-     row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
-  local found = false
-  for _, target in ipairs(row.claimedTargetIds or {}) do
-    if target == failedTarget then found = true end
+  if claimId ~= '' then
+    if not raw then return {-4, ''} end
+    local row = cjson.decode(raw)
+    if row.status ~= 'claimed' or row.claimId ~= claimId or
+       row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, failedTarget in ipairs(failedTargets) do
+      local found = false
+      for _, target in ipairs(row.claimedTargetIds or {}) do
+        if target == failedTarget then found = true end
+      end
+      if not found then return {-4, ''} end
+    end
+  elseif raw then
+    local row = cjson.decode(raw)
+    if row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, target in ipairs(row.targets) do
+      for _, failedTarget in ipairs(failedTargets) do
+        if target == failedTarget then return {-4, ''} end
+      end
+    end
   end
-  if not found then return {-4, ''} end
   if wakeRaw ~= '' then
     wakeId = cjson.decode(wakeRaw).id
     if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or
@@ -1314,6 +1329,7 @@ function parseUserMentionHandlingMetadata(raw: string): UserMentionHandlingMetad
 }
 
 export class RedisMessageStore {
+  private readonly redisAdmissionIdentity: RedisClient;
   async getLastUserMentionHandling(userId: string) {
     const result = (await this.redis.eval(
       READ_LAST_USER_MENTION_HANDLING_LUA,
@@ -1553,6 +1569,8 @@ export class RedisMessageStore {
       readDiagnostics?: MessageReadObserver;
     },
   ) {
+    this.redisAdmissionIdentity = redis;
+    redis = recoveryRedis(redis);
     this.redis = redis;
     this.readDiagnostics = options?.readDiagnostics;
     this.onAppend = options?.onAppend;
@@ -1593,7 +1611,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     const messageId = input.reservedId ?? generateSortableId(input.timestamp);
@@ -1658,7 +1676,7 @@ export class RedisMessageStore {
     entries: readonly QueueLedgerEntry[],
     ledgerStore: QueueLedgerStore,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     assertPrivateNoticeQueueAdmission(entries);
@@ -1697,7 +1715,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('Queue admission requires at least one row');
@@ -1765,7 +1783,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerLifecycleAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
@@ -1862,6 +1880,7 @@ export class RedisMessageStore {
       if (persisted.some((entry) => entry === null)) {
         throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
       }
+      notifyMessageTimelineChange(this, message);
       return {
         kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
         message,
@@ -2098,6 +2117,20 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getByIds(ids: readonly string[]): Promise<Map<string, StoredMessage | null>> {
+    const result = new Map<string, StoredMessage | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) pipeline.hgetall(MessageKeys.detail(id));
+      const replies = await pipeline.exec();
+      const hashes = batch.map((_id, i) => readAuthoritativeHash(replies?.[i], 'canonical message batch'));
+      batch.forEach((id, i) => result.set(id, hashes[i] ? this.hydrateHash(hashes[i]) : null));
+    }
+    return result;
   }
 
   async getArtifactById(id: string): Promise<StoredMessage | null> {
@@ -3828,7 +3861,9 @@ export class RedisMessageStore {
     id: string,
     patch: LifecycleResponseTerminalPatch,
   ): Promise<CommitLifecycleResponseTerminalResult> {
-    return this.commitLifecycleResponseTerminalInternal(id, patch);
+    const result = await this.commitLifecycleResponseTerminalInternal(id, patch);
+    if (result.kind === 'applied' || result.kind === 'replayed') notifyMessageTimelineChange(this, result.message);
+    return result;
   }
 
   private async commitLifecycleResponseTerminalInternal(
@@ -3880,11 +3915,22 @@ export class RedisMessageStore {
   async commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const result = await this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private async commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
     if (!source) return { kind: 'not_found' };
     const idempotencyKey = preAdmissionFailureIdempotencyKey(
       input.expectedEntryId,
-      input.claim ? input.requestedTargets[0] : undefined,
+      input.claim ? input.requestedTargets : undefined,
     );
     const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
@@ -3940,7 +3986,7 @@ export class RedisMessageStore {
       input.failedAt < source.timestamp ||
       input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
       uniqueTargets.size !== input.requestedTargets.length ||
-      (input.claim && input.requestedTargets.length !== 1) ||
+      (input.claim && input.requestedTargets.length === 0) ||
       (!isQueuedInput && input.requestedTargets.length === 0) ||
       (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
     ) {
@@ -3948,7 +3994,8 @@ export class RedisMessageStore {
     }
     if (
       input.claim &&
-      (!(input.claim.ledger instanceof RedisQueueLedgerStore) || !input.claim.ledger.usesRedisClient(this.redis))
+      (!(input.claim.ledger instanceof RedisQueueLedgerStore) ||
+        !input.claim.ledger.usesRedisClient(this.redisAdmissionIdentity))
     )
       throw new Error('pre-admission failure requires the matching Redis Queue ledger');
     const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
@@ -4027,7 +4074,7 @@ export class RedisMessageStore {
       isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
       JSON.stringify(failureInput.from),
       input.claim?.id ?? '',
-      input.claim ? input.requestedTargets[0]! : '',
+      JSON.stringify(input.requestedTargets),
       wake ? JSON.stringify(wake) : '',
       wake ? queueLedgerAdmissionFingerprint(wake) : '',
     )) as [number | string, string];
@@ -4096,7 +4143,10 @@ export class RedisMessageStore {
     const locked = await this.withLifecycleDispatchLock(id, () =>
       this.advanceLifecycleInputDispatchUnlocked(id, patch),
     );
-    if (locked !== null) return locked;
+    if (locked !== null) {
+      if (locked.kind === 'applied' || locked.kind === 'replayed') notifyMessageTimelineChange(this, locked.message);
+      return locked;
+    }
     const message = await this.getById(id);
     if (!message) return { kind: 'not_found' };
     return { kind: 'conflict', reason: 'contended', message };

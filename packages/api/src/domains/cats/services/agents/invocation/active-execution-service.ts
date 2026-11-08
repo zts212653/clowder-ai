@@ -271,6 +271,10 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       }));
   };
 
+  // The per-thread classifier reads children by parent only. Running children with an ended parent
+  // already reach presence through the user-scoped owner truth, so passing the user-wide child read
+  // here would enumerate that global ledger once more per candidate thread.
+  const turnStore = deps.turnExecutionStore;
   const liveExecutions = (
     threadId: string,
     userId: string,
@@ -282,7 +286,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       deps.invocationTracker,
       deps.recordStore,
       deps.responseStatus,
-      deps.turnExecutionStore,
+      turnStore ? { listByParent: turnStore.listByParent.bind(turnStore) } : undefined,
       ownerSnapshot,
       { verifiedOnly: true },
     );
@@ -388,6 +392,9 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
         deps.turnExecutionStore,
         deps.log,
         await readOwners(),
+        // A degraded parent+child entry stays visible to the Queue list/Stop surface, but it is not
+        // verified active work: this control consumer must not promote it.
+        { verifiedOnly: true },
       ),
 
     listManagedCommandExecutions: listManaged,

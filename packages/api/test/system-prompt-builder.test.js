@@ -780,9 +780,8 @@ describe('SystemPromptBuilder', () => {
       // Find the Sonnet row
       const sonnetRow = rosterSection.split('\n').find((line) => line.includes('Sonnet'));
       assert.ok(sonnetRow, 'Should have a Sonnet row');
-      // Sonnet has caution: null in config → should show "—", NOT "额度消耗大"
+      // null still masks the breed caution; Sonnet's own dossier may supply its routing note.
       assert.ok(!sonnetRow.includes('额度消耗大'), 'Sonnet should not inherit Opus cost caution');
-      assert.ok(sonnetRow.includes('—'), 'Sonnet caution should be "—"');
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {

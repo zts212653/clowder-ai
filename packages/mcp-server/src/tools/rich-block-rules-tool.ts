@@ -48,8 +48,10 @@ export const richBlockRulesTools = [
   defineTool({
     name: 'cat_cafe_get_rich_block_rules',
     description:
-      'Get the full rich block usage rules (card/diff/checklist/media_gallery/audio/interactive). ' +
-      'Call this BEFORE creating your first rich block in a session — it returns the full schema and constraints. ' +
+      'Get the full rich block usage rules, including HTML widget versus versioned-work delivery. ' +
+      'Use before creating your first rich block in a session or choosing how to deliver HTML. ' +
+      'Not for saving or rendering content; use create_rich_block or cat_cafe_work as the returned rules direct. ' +
+      'Output: field specifications, constraints and purpose-based delivery guidance. ' +
       'You only need to call this once per session; the rules do not change within a session. ' +
       'GOTCHA: Without loading these rules first, you will likely produce invalid block JSON (wrong field names, missing required fields).',
     inputSchema: richBlockRulesInputSchema,

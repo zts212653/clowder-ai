@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,6 @@ import { AgentSessionBridgeService } from '../../dist/domains/cats/services/agen
 import { AcpSessionProvider } from '../../dist/domains/cats/services/agents/session-contract/acp-session-provider.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { buildCancelMessages, SocketManager } from '../../dist/infrastructure/websocket/SocketManager.js';
-import { ThreadSequencer } from '../../dist/infrastructure/websocket/ThreadSequencer.js';
 import { appendTestLifecycleResponseSource } from '../helpers/message-from-fixtures.js';
 import { deferred } from './fake-session-provider.js';
 
@@ -143,10 +143,11 @@ for (const { route, mixed } of [
           const batch = tracker.startAll(threadId, targets, 'user1');
           const store = new MessageStore();
           const emitted = [];
-          const socket = Object.create(SocketManager.prototype);
-          socket.sequencer = new ThreadSequencer();
-          socket.rateMonitor = { record() {} };
-          socket.io = { to: (room) => ({ emit: (event, message) => emitted.push({ room, event, message }) }) };
+          const socket = new SocketManager(createServer());
+          t.after(() => socket.close());
+          t.mock.method(socket.getIO(), 'to', (room) => ({
+            emit: (event, message) => emitted.push({ room, event, message }),
+          }));
           let invocationSeq = 0;
           const deps = {
             services: {

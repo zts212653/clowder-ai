@@ -103,12 +103,15 @@ describe('AppendedInputReceipts: expand in place, jump separately', () => {
     resetAppTooltipWarmState();
     container = document.createElement('div');
     document.body.appendChild(container);
+    // This suite protects the retained classic presentation and its original labels.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     resizeCallbacks.clear();
     vi.useRealTimers();
     vi.mocked(focusLineageMessage).mockReset();

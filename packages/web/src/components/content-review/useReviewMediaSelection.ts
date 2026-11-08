@@ -15,6 +15,7 @@ export function useReviewMediaSelection({
   stage,
   frame,
   identity,
+  imageFrame,
 }: {
   media: ImmutableMedia;
   mode: ReviewCanvasMode;
@@ -24,6 +25,7 @@ export function useReviewMediaSelection({
   stage: RefObject<HTMLDivElement>;
   frame: ReviewMarkupFrame | null;
   identity: string;
+  imageFrame?: { frameIndex: number; timestampMs: number };
 }) {
   const [selecting, setSelecting] = useState(false);
   const [drag, setDrag] = useState<ArtifactReviewAnchor | null>(null);
@@ -41,7 +43,11 @@ export function useReviewMediaSelection({
   const commentMode = mode === 'comment';
   const selectionActive = commentMode || (mode === 'view' && selecting);
   const frameIdentity =
-    media.kind === 'image' ? 'image' : frame ? `${frame.streamId}:${frame.tick}` : 'frame-unavailable';
+    media.kind === 'image'
+      ? `image:${imageFrame?.frameIndex ?? 'still'}`
+      : frame
+        ? `${frame.streamId}:${frame.tick}`
+        : 'frame-unavailable';
   const release = useCallback(() => {
     const held = capture.current;
     capture.current = null;
@@ -79,7 +85,7 @@ export function useReviewMediaSelection({
     region: Extract<ArtifactReviewAnchor, { kind: 'image-region' | 'image-point' }>,
     atFrame: ReviewMarkupFrame | null,
   ): ArtifactReviewAnchor | null {
-    if (media.kind === 'image') return region;
+    if (media.kind === 'image') return { ...region, ...imageFrame };
     if (!atFrame || atFrame.tick < media.startTick || atFrame.tick >= media.startTick + media.durationTicks)
       return null;
     const range =

@@ -10,6 +10,7 @@ import { MemoryRecall } from './MemoryRecall';
 import { MemorySearch, MemorySearchBox } from './MemorySearch';
 import { type MaintenanceData, MemoryStatusLine } from './MemoryStatus';
 import { MemoryTaste } from './MemoryTaste';
+import type { SearchType } from './memory-search-types';
 import type { ProfileSourceTarget } from './profile-source-target';
 import { useMemoryRead } from './use-memory-read';
 import { useMemorySearch } from './use-memory-search';
@@ -31,6 +32,8 @@ export function MemoryPagePreview({
   from,
   profileSource,
   initialQuery,
+  initialType,
+  initialDepth,
   findSessionId,
   matterId,
 }: {
@@ -40,10 +43,12 @@ export function MemoryPagePreview({
   from?: string | null;
   profileSource?: ProfileSourceTarget;
   initialQuery?: string;
+  initialType?: SearchType;
+  initialDepth?: 'summary' | 'raw';
   findSessionId?: string | null;
   matterId?: string;
 }) {
-  const search = useMemorySearch(initialQuery);
+  const search = useMemorySearch(initialQuery, initialType, initialDepth);
   const rawIndex = useMemoryRead<Parameters<typeof parseIndexStatus>[0]>('/api/evidence/status');
   const index = { ...rawIndex, data: rawIndex.data ? parseIndexStatus(rawIndex.data) : null };
   const maintenance = useMemoryRead<MaintenanceData>('/api/memory/maintenance');

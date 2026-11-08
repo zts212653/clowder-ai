@@ -208,6 +208,15 @@ export function registerMemorySearchTests(getRuntime) {
       assert.equal(new URL(v.page.url()).pathname, `/thread/${sample.ownThreadId}`);
       await v.page.getByText('搜索设计要显示原话和出处。', { exact: false }).last().waitFor();
       await v.page.screenshot({ path: path.join(EVIDENCE_DIR, 'search-message-1440.png'), fullPage: true });
+      await v.page.goBack();
+      await panel(v.page).getByRole('heading', { name: '搜索设计的讨论', exact: true }).waitFor();
+      assert.equal(await v.page.getByRole('textbox', { name: '搜索记忆和资料' }).inputValue(), '搜索设计');
+      assert.equal(
+        await panel(v.page).getByRole('button', { name: '对话', exact: true }).getAttribute('aria-pressed'),
+        'true',
+      );
+      assert.equal(new URL(v.page.url()).searchParams.get('type'), 'conversations');
+      await v.page.screenshot({ path: path.join(EVIDENCE_DIR, 'search-return-1440.png'), fullPage: true });
       assert.deepEqual(v.errors, []);
     } finally {
       v.release();

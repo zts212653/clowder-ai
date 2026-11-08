@@ -12,6 +12,9 @@ const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-pu
 const RECONCILED_EXCLUSIONS = [
   '^test/alpha-managed-(?:lifecycle|materialization|scheduler|sleep)-integration\\.test\\.js$',
   '^test/alpha-browser-template-source\\.test\\.js$',
+  '^test/scheduler/schedule-parameter-callback-journey\\.test\\.js$',
+  '^test/alpha-managed-preparation-sleep\\.test\\.js$',
+  '^test/memory/matter-memory-w2-pilot\\.test\\.js$',
   '^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-community\\-bootstrap\\.test\\.js|test/redis\\-community\\-event\\-log\\.test\\.js|test/redis\\-community\\-pr\\-lifecycle\\.test\\.js|test/redis\\-community\\-projector\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-f168\\-phase\\-b\\-awaiting\\-external\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-pr\\-tracking\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-repo\\-comment\\-cursor\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/signal\\-intake/redis\\-signal\\-intake\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$',
   '^test/redis-restore-script\\.test\\.js$',
   'workflow-sop-store',
@@ -131,6 +134,34 @@ test('resolver excludes source-only cc anchor hook coverage from the public gate
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
+});
+
+test('private W2 pilot stays home while portable Matter and preparation contracts remain public', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  const pilot = 'test/memory/matter-memory-w2-pilot.test.js';
+  const entry = resolved.registry.entries.find((item) => item.id === 'f332-private-w2-source-replay');
+  assert.ok(entry, 'the private authored pilot needs its exact source-only classification');
+  assert.equal(entry.category, 'source_only');
+  const inventory = [...resolved.selectedFiles, ...resolved.excludedFiles];
+  assert.deepEqual(
+    inventory.filter((file) => new RegExp(entry.match).test(file)),
+    [pilot],
+  );
+  assert.ok(resolved.excludedFiles.includes(pilot));
+  assert.ok(!resolved.selectedFiles.includes(pilot));
+  for (const portable of [
+    'test/memory/matter-memory.test.js',
+    'test/memory/matter-context.test.js',
+    'test/memory/work-preparation-service.test.js',
+    'test/memory/work-preparation-authority.test.js',
+    'test/memory/work-preparation-read.test.js',
+    'test/memory/work-preparation-matter.test.js',
+    'test/work-preparation-journey.test.js',
+  ]) {
+    assert.ok(resolved.selectedFiles.includes(portable), `${portable} must remain in the public plan`);
+    assert.ok(!resolved.excludedFiles.includes(portable));
+  }
 });
 
 test('resource-only SOP coverage stays excluded while portable Codex contracts are re-admitted', async () => {
@@ -329,6 +360,11 @@ test('Alpha browser home integrations are classified precisely while portable sc
   assert.deepEqual(entry.matchedFiles, ['test/alpha-browser-template-source.test.js']);
   assert.ok(resolved.excludedFiles.includes('test/alpha-browser-template-source.test.js'));
   assert.ok(resolved.selectedFiles.includes('test/alpha-browser-template.test.js'));
+  assert.ok(resolved.excludedFiles.includes('test/alpha-managed-scheduler-integration.test.js'));
+  for (const file of ['test/managed-job-status-contention.test.js', 'test/hold-ball-status-contention.test.js']) {
+    assert.ok(resolved.selectedFiles.includes(file), `${file} must retain its portable contention regressions`);
+    assert.ok(!resolved.excludedFiles.includes(file));
+  }
 });
 
 // Each file ran in the unmodified canonical public candidate; do not silently re-exclude it.

@@ -6,6 +6,7 @@ import {
   type MessageSearchPrincipal,
   type MessageSearchService,
 } from '../domains/memory/MessageSearchService.js';
+import { MessageSelectionError } from '../domains/memory/message-selected-quote.js';
 
 const dateOnly = z
   .string()
@@ -96,6 +97,8 @@ export async function executeMessageSearchOperation<T>(
       },
     });
   } catch (error) {
+    if (error instanceof MessageSelectionError)
+      return reply.status(error.statusCode).send({ error: error.message, code: 'ANSWER_SELECTION_INVALID' });
     if (
       error instanceof Error &&
       ['ANSWER_OPERATION_CONFLICT', 'ANSWER_INVOCATION_ALREADY_PREPARED'].includes(error.message)

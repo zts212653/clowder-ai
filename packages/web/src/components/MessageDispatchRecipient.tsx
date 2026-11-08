@@ -7,7 +7,7 @@ import { dispatchReadText, dispatchReceiptDisplay, dispatchReceiptLabel } from '
 import type { ChatMessage } from '@/stores/chat-types';
 import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
-import { cloudDispatchAudit, cloudDispatchReceipt } from './cloud-dispatch-receipt';
+import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } from './cloud-dispatch-receipt';
 import { HistoryAppendActions } from './HistoryAppendActions';
 import type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
 import { focusCausalContinuation, useCausalReplies } from './reply-layers/CausalReplyContext';
@@ -88,6 +88,7 @@ export function MessageDispatchRecipient({
     cloud.receipt.transport === 'none' &&
     cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
+  const pendingCloud = cloud ? pendingCloudDeliveryLabel(cloud) : undefined;
   const progress = notAccepted
     ? '未并进上一轮（未接收）'
     : incomplete
@@ -98,23 +99,25 @@ export function MessageDispatchRecipient({
           ? '收到，已回复'
           : logical.state === 'source_replied'
             ? '这条消息已有回信'
-            : notSent
-              ? '尚未发送'
-              : awaitingCloudReply
-                ? '收到，回复状态待核对'
-                : uncertain
-                  ? checking
-                    ? `正在核对 ${label} 收到没…`
-                    : '已送出，没确认收到'
-                  : failedDelivery
-                    ? '没送到'
-                    : appended
-                      ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
-                      : processing
-                        ? '收到，正在回…'
-                        : outcome
-                          ? `收到，${outcome}`
-                          : '收到，回复状态待核对';
+            : pendingCloud
+              ? pendingCloud
+              : notSent
+                ? '尚未发送'
+                : awaitingCloudReply
+                  ? '收到，回复状态待核对'
+                  : uncertain
+                    ? checking
+                      ? `正在核对 ${label} 收到没…`
+                      : '已送出，没确认收到'
+                    : failedDelivery
+                      ? '没送到'
+                      : appended
+                        ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
+                        : processing
+                          ? '收到，正在回…'
+                          : outcome
+                            ? `收到，${outcome}`
+                            : '收到，回复状态待核对';
   const late = projection.dispatchedAt !== undefined && projection.dispatchedAt - message.timestamp > 60_000;
   return (
     <li

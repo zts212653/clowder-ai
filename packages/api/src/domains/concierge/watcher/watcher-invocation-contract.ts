@@ -35,6 +35,7 @@ export interface WatcherRunState {
   committed: boolean;
   nativeTurnAdmitted?: boolean;
   recoveredIdle?: boolean;
+  window?: NonNullable<WatcherSessionState['attempt']>['window'];
   boundary?: Awaited<ReturnType<typeof createWatcherRequestBoundary>>;
   generation?: ProviderRequestGenerationCommitV1;
 }

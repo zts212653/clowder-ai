@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { LifecycleAppendBoundaryInput } from '@cat-cafe/shared';
+import { isTaskHandoffSource } from '../../../ball-custody/task-handoff-source.js';
 import type { QueueLedgerEntry } from '../agents/invocation/queue-ledger/QueueLedger.js';
 import { prepareLifecycleAppendAdmission, type StoredMessage } from './ports/MessageStore.js';
 import { isTimelinePublished, resolveDeliveryTimelineScore } from './visibility.js';
@@ -89,6 +90,8 @@ export function prepareLifecycleWakeCoverage(
       source.deletedAt
     )
       return { kind: 'conflict', reason: 'source_changed' };
+    // Reading a Task request cannot replace its exact independent start/bind_execution.
+    if (isTaskHandoffSource(source)) return { kind: 'conflict', reason: 'owner_not_bindable' };
     const existing = source.lifecycle?.dispatchRefs?.find((ref) => ref.targetId === input.targetId);
     if (!entry?.targets.includes(input.targetId)) {
       if (

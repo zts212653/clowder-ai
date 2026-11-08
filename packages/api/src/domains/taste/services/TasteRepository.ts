@@ -102,7 +102,8 @@ export class FileTasteRepository implements PublishableTasteRepository {
   }
 
   publishedSnapshot(): Promise<PublishedTasteSnapshot | null> {
-    return publishedTasteSnapshot(this.gitCheckoutRoot());
+    // Git resolves the repository from cwd; published reads need no synchronous root probe.
+    return publishedTasteSnapshot(this.projectRoot);
   }
 
   approvalLockKey(): string {

@@ -192,6 +192,8 @@ describe('F202 live Plugin Manager Console wiring', () => {
     window.history.replaceState({}, '', '/settings?pluginManagerLive=1');
     container = document.createElement('div');
     document.body.appendChild(container);
+    // This suite protects the retained classic presentation and its original labels.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
     mockApiFetch.mockReset();
   });
@@ -199,6 +201,7 @@ describe('F202 live Plugin Manager Console wiring', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     window.history.replaceState({}, '', '/settings');
     vi.useRealTimers();
   });

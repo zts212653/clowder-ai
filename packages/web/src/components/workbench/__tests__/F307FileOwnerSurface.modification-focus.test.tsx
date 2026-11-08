@@ -9,6 +9,7 @@ import {
 } from '@/components/content-review/modification-focus';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { useChatStore } from '@/stores/chatStore';
+import { withHubSocket } from '@/test-utils/fake-hub-socket';
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { createFileSurface } from '../real-surface-adapters';
 
@@ -17,7 +18,6 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3102',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
-vi.mock('socket.io-client', () => ({ io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn() }) }));
 vi.mock('@/hooks/useFileEditing', () => ({
   useFileEditing: () => ({
     editMode: false,
@@ -97,7 +97,7 @@ describe('v2 non-Markdown file owner consumes the disclosure part of a receipt c
     mocks.apiFetch.mockReset().mockImplementation(async () => file());
     container = document.createElement('div');
     document.body.append(container);
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container));
   });
   afterEach(async () => {
     await act(async () => {
@@ -149,7 +149,7 @@ describe('v2 non-Markdown file owner consumes the disclosure part of a receipt c
   it('reopens comparison after a full owner remount without saved tab disclosure', async () => {
     await mount();
     await act(async () => root.unmount());
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container));
     await focus();
     await mount();
     expect(review()?.dataset.pendingCandidate).toBe('candidate-1');

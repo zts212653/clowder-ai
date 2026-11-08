@@ -63,6 +63,19 @@ jobs:
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
           node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
           test/host-media-paths.test.js
+      - name: Windows API job ownership and restart stop evidence (#1838)
+        # The two-host restart test needs redis-server on PATH and skips with that reason here.
+        run: >-
+          pnpm --filter @cat-cafe/api exec node --test --test-timeout=200000
+          test/windows-job-owner.test.js
+          test/windows-job-stop-recovery.test.js
+          test/windows-job-restart-recovery.test.js
+      - name: Windows job link lives only while its turn needs it (#1838)
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --test --test-timeout=60000
+          test/windows-job-execution-link-lifecycle.test.js
       - name: Codex final environment regressions
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -127,6 +140,14 @@ jobs:
           test/f318-claude-sdk.test.ts
           test/f318-claude-sdk-custody.test.ts
           test/f318-claude-sdk-launch.test.ts
+          test/native-auth-carrier.test.js
+      - name: Claude CLI final auth hook contract (fake spawn only)
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import ./test/helpers/setup-cat-registry.js --test
+          --test-name-pattern="F203 AC-C5: -p carrier passes"
+          test/claude-agent-service.test.js
       - name: Desktop isolation and installer profile contracts
         run: >-
           node --test
