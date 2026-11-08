@@ -522,14 +522,17 @@ try {
       await page.getByRole('button', { name: tid === id ? 'Target' : 'Other', exact: true }).click();
       await page.locator('main[data-thread="' + tid + '"]').waitFor();
     };
-    const offline = async () => {
+    const offline = async (foregroundThreadId = id) => {
       mode = 'offline';
       const io = socketManager.getIO();
-      const peers = [...(io.sockets.adapter.rooms.get('thread:' + id) ?? [])];
+      const peers = [...(io.sockets.adapter.rooms.get('thread:' + foregroundThreadId) ?? [])];
       assert.equal(peers.length, 1);
       io.sockets.sockets.get(peers[0]).conn.close(true);
       await page.locator('main[data-connected="false"]').waitFor({ timeout: 8000 });
-      await waitFor(() => !socketManager.getIO().sockets.adapter.rooms.has('thread:' + id), 'socket leaves room');
+      await waitFor(
+        () => !socketManager.getIO().sockets.adapter.rooms.has('thread:' + foregroundThreadId),
+        'socket leaves room',
+      );
     };
     const saveTerminal = async () => {
       g.start.open();
@@ -760,15 +763,19 @@ try {
     await p.waitActive();
     await p.switchTo(p.other);
     await p.joined(p.other);
-    await p.joined();
-    await p.offline();
+    // PR-3b on next: live background work also leaves the foreground room.
+    await p.unjoined();
+    await p.offline(p.other);
     await p.saveTerminal();
     assert.equal((await p.snapshot('background response persisted offline')).visibleFinal, 0);
     p.mode('none');
     await p.connected();
-    await p.joined();
     await p.joined(p.other);
-    await delay(1100);
+    await p.unjoined();
+    await waitFor(
+      async () => (await readState(p.page, p.id)).requested > 0,
+      'background catch-up requested after reconnect',
+    );
     const bg = await p.snapshot('reconnect marks background catch-up');
     assert(bg.local.requested > 0);
     assert.equal(bg.visibleFinal, 0);
@@ -840,16 +847,16 @@ try {
     await p.expectFinal('visible on same connected socket');
     p.rows.result = 'PASS';
   });
-  await scenario('background-joined-quiet', async (p) => {
+  await scenario('background-active-quiet', async (p) => {
     await p.submit();
     await p.waitActive();
     await p.switchTo(p.other);
     await p.joined(p.other);
-    await p.joined();
+    await p.unjoined();
     p.mode('all');
     await p.saveTerminal();
-    await p.joined();
-    assert.equal((await p.snapshot('live work retained target room; no terminal packets received')).visibleFinal, 0);
+    await p.unjoined();
+    assert.equal((await p.snapshot('background work left target room; no terminal packets received')).visibleFinal, 0);
     await p.switchTo(p.id);
     await p.expectFinal('active local state revalidates when revisited');
     p.rows.result = 'PASS';

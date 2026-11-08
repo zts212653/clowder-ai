@@ -38,6 +38,8 @@ node --import tsx packages/web/test/browser/issue1287-quiet-recovery.mjs
 
 夹具拒绝有未提交 tracked 修改的树，并在监听前检查专属端口 12874/6398。输出默认位于 `artifacts/issue1287-browser-<time>`，可用 `ISSUE1287_EVIDENCE` 指定新目录。`results.json`、截图、实例台账及隔离 RDB/AOF 均保留；任何场景失败时进程非零退出。产物只含构造会话，不需要用户历史或私有目录。
 
+当前 next 在 `4020d9c65` 已带入 PR-3b 的“只订阅前台房间”约定。两条后台旅程因此断言退房，在当前前台房间断开同一 Socket，验证重连后产生后台 catch-up、回前台后应用；不再要求后台工作常驻 room。旧名 `background-joined-quiet` 对应当前 `background-active-quiet`。首轮 10 PASS / 2 join-precondition failures 的证据保留，不能把旧契约的超时冒充产品失败或直接算成通过。
+
 ## 确认语义与查询预算
 
 首次 History 页捕获发布前沿作为“开始观察变化”的基线；它不声称已加载整个历史。已有基线时，最新页不能自行确认线程前沿：`afterVisibility` 只恢复其后的已发布记录，每批最多检查 **50 个原始位置**，确认只推进到实际返回并成功应用的可见记录。旧 R 的时间线位置不影响这种恢复。普通向上翻页使用独立的真实页边界，不会被补回的旧 R 跳过中间区间。
