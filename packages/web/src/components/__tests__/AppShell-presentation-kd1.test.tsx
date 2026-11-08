@@ -18,7 +18,17 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => false }));
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 vi.mock('@/stores/sidebarStore', () => ({
   useSidebarStore: () => ({
     isOpen: false,
@@ -30,7 +40,7 @@ vi.mock('@/stores/sidebarStore', () => ({
   initSidebarWidth: () => {},
 }));
 // Stub heavy rail/sidebar children so the test stays focused on AppShell + float host.
-vi.mock('../ActivityBar', () => ({ ActivityBar: () => null }));
+vi.mock('../ActivityBar', () => ({ ActivityBar: () => null, ClapperboardIcon: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3112',

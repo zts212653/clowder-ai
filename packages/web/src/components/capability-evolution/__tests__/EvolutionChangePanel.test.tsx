@@ -58,6 +58,7 @@ describe('F311 Change & Learn permanent surface', () => {
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     apiFetchMock.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -67,6 +68,7 @@ describe('F311 Change & Learn permanent surface', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 

@@ -111,6 +111,9 @@ test('Redis outcome-write outage recovers from History after a fresh store and t
 test('legacy native Queue facts migrate to History before removing only the handed-over target', async () => {
   const f = await fixture(async () => ({ accepted: true }), { inputCompletionReceipt: true });
   await f.append();
+  // Finish the fixture's live drain before replacing its bytes with a pre-upgrade record.
+  await f.processor.requestDrain('thread');
+  await f.processor.reconcileAppendDeliveries('thread');
   const lifecycle = JSON.parse(await f.client.hget(`msg:${f.admission.message.id}`, 'lifecycle'));
   delete lifecycle.dispatchRefs[0].appendDelivery;
   await f.client.hset(`msg:${f.admission.message.id}`, 'lifecycle', JSON.stringify(lifecycle));
@@ -129,13 +132,16 @@ test('legacy native Queue facts migrate to History before removing only the hand
   };
   legacy.delivery.routingHeldTargetIds = ['opus'];
   await f.ledger.enqueue([legacy]);
+  const beforeUpgrade = await f.ledger.get('thread', legacy.id);
+  assert.deepEqual(beforeUpgrade.delivery.appendPendingByTarget, legacy.delivery.appendPendingByTarget);
   const reopened = new RedisMessageStore(f.client, { ttlSeconds: 0 });
   const queue = new InvocationQueue(new RedisQueueLedgerStore(f.client));
   await queue.hydrateFromLedger(reopened);
   assert.deepEqual((await f.ledger.get('thread', legacy.id)).targets, ['codex']);
   assert.equal(
-    (await reopened.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion,
+    (await reopened.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].appendDelivery?.requiresCompletion,
     true,
+    JSON.stringify({ beforeUpgrade, after: await reopened.getById(f.admission.message.id) }),
   );
   assert.deepEqual(await reopened.listUnresolvedAppendThreadIds(), ['thread']);
   const restarted = recoveryProcessor({ queue, messageStore: reopened });

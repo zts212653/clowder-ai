@@ -403,6 +403,8 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /** Server-owned receipt identifying the buffered snapshot actually included in this post. */
+    richBlockPublicationId?: string;
     /** Host-only binding of a durable memory result to this exact rich block. */
     messageSearchAnswer?: import('@cat-cafe/shared').MessageSearchAnswerBinding;
     /** Outbound media owns publication until durable materialization completes. */
@@ -2151,6 +2153,9 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Fresh full hashes in bounded batches, with one entry per requested ID.
+   * Missing is null; transport/incomplete replies reject. Never an admission grant. */
+  getByIds?(ids: readonly string[]): Promise<Map<string, StoredMessage | null>>;
   /**
    * Fresh media/visibility projection for exact publication reads. May omit
    * top-level content, thinking, metadata and toolEvents; never an authority verdict.
@@ -2688,6 +2693,7 @@ export class MessageStore {
     }
     message.visibilitySeq = this.visibilitySeq.get(message.id);
     this.userMentionIndex.observe(message);
+    notifyMessageTimelineChange(this, message);
   }
 
   /**
@@ -3899,6 +3905,17 @@ export class MessageStore {
   commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): CommitLifecyclePreAdmissionFailureResult {
+    const result = this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): CommitLifecyclePreAdmissionFailureResult {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
@@ -4079,6 +4096,7 @@ export class MessageStore {
     }
     if (transition.kind === 'replayed') return { kind: 'replayed', message: structuredClone(message) };
     message.lifecycle = structuredClone(transition.lifecycle);
+    notifyMessageTimelineChange(this, message);
     return { kind: 'applied', message: structuredClone(message) };
   }
 

@@ -47,11 +47,10 @@ interface AlphaRuntime {
   ): Promise<{ status: string; headSha?: string; reason?: string }>;
   alphaBrowserFailureTasks(input: Record<string, unknown>): Promise<FailureDraft[]>;
 }
-interface MainProjection {
-  targetSha: string;
+type MainProjection = {
   databasePath: string;
   legacyLockPath: string;
-}
+} & ({ targetSha: string; discoveryError?: never } | { targetSha?: never; discoveryError: string });
 export interface AlphaBrowserOptions {
   repoRoot: string;
   ownerUserId: string;
@@ -72,28 +71,34 @@ async function loadRuntime(repoRoot: string): Promise<AlphaRuntime> {
   return { runAlphaBrowserRevision: worker.runAlphaBrowserProcess, ...failures } as AlphaRuntime;
 }
 async function inspectMain(repoRoot: string, signal: AbortSignal): Promise<MainProjection> {
-  const advertised = await git(repoRoot, ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], signal);
-  const [targetSha, remoteRef, extra] = advertised.split(/\s+/u);
-  if (!targetSha || !EXACT_OID.test(targetSha) || remoteRef !== 'refs/heads/main' || extra !== undefined) {
-    throw new Error('Alpha discovery requires one exact remote main commit');
-  }
-  // Worktrees share remote-tracking refs. Pin the advertised commit and fetch
-  // only its objects so concurrent callers cannot overwrite each other's refs
-  // or FETCH_HEAD. A failed remote read/transfer never falls back to stale main.
-  await git(
-    repoRoot,
-    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--refmap=', 'origin', targetSha],
-    signal,
-  );
-  if ((await git(repoRoot, ['rev-parse', '--verify', `${targetSha}^{commit}`], signal)) !== targetSha) {
-    throw new Error('Alpha remote main commit identity mismatch');
-  }
   const common = await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal);
-  return {
-    targetSha,
+  const storage = {
     databasePath: join(common, 'cat-cafe-full-gate-resources.sqlite'),
     legacyLockPath: join(common, 'cat-cafe-full-gates.lock'),
   };
+  try {
+    const advertised = await git(repoRoot, ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], signal);
+    const [targetSha, remoteRef, extra] = advertised.split(/\s+/u);
+    if (!targetSha || !EXACT_OID.test(targetSha) || remoteRef !== 'refs/heads/main' || extra !== undefined) {
+      throw new Error('Alpha discovery requires one exact remote main commit');
+    }
+    // Worktrees share remote-tracking refs. Fetch only the advertised objects;
+    // failure supplies no target, never stale main or a partially fetched ref.
+    await git(
+      repoRoot,
+      ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--refmap=', 'origin', targetSha],
+      signal,
+    );
+    if ((await git(repoRoot, ['rev-parse', '--verify', `${targetSha}^{commit}`], signal)) !== targetSha) {
+      throw new Error('Alpha remote main commit identity mismatch');
+    }
+    return { ...storage, targetSha };
+  } catch (error) {
+    signal.throwIfAborted();
+    // Already enrolled work has its own exact identity and settlement contract.
+    // Preserve discovery failure for the scheduler after that work is consumed.
+    return { ...storage, discoveryError: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function alphaTriageTarget(options: AlphaBrowserOptions, ownerCatId: string | null, guardianCatId: string): string {
@@ -113,6 +118,25 @@ function alphaTriageTarget(options: AlphaBrowserOptions, ownerCatId: string | nu
     throw new Error(`Alpha guardian unavailable: ${guardianCatId}`);
   }
   return guardianCatId;
+}
+
+function describeAlphaExecutionFailure(message: string, discoveryError: string | undefined): string {
+  if (discoveryError === undefined) return message;
+  // The scheduler ledger keeps only the first 500 characters. Reserve space for
+  // both causes there, while the full logger still receives both original texts.
+  const oneLine = discoveryError.replace(/\s+/gu, ' ');
+  const summary = oneLine.length <= 160 ? oneLine : `${oneLine.slice(0, 80)}…${oneLine.slice(-79)}`;
+  return `Alpha discovery unavailable: ${summary}; ${message}\nDiscovery details: ${discoveryError}`;
+}
+
+function rethrowWithDiscoveryContext(error: unknown, discoveryError: string | undefined, signal: AbortSignal): never {
+  if (signal.aborted || discoveryError === undefined) throw error;
+  throw new Error(
+    describeAlphaExecutionFailure(error instanceof Error ? error.message : String(error), discoveryError),
+    {
+      cause: error,
+    },
+  );
 }
 
 async function notifyAlphaFailure(
@@ -220,6 +244,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
       executionCarrier: {
         type: 'string',
         required: false,
+        enum: ['fork', 'managed'],
         description: '执行载体：fork（默认）或 managed；在飞 revision 保持原载体',
       },
     },
@@ -249,26 +274,36 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
             if (!threadId || !guardian) throw new Error('Alpha subscription is not admitted');
             const runtime = await (options.loadRuntime?.() ?? loadRuntime(options.repoRoot));
             const main = await (options.inspectMain?.(ctx.signal) ?? inspectMain(options.repoRoot, ctx.signal));
-            const result = await runtime.runAlphaBrowserRevision({
-              repoRoot: options.repoRoot,
-              ...main,
-              baselineSha,
-              subscriptionId: id,
-              ownerPrincipal: `schedule:${options.ownerUserId}:${id}`,
-              originTaskId: id,
-              signal: ctx.signal,
-              executionCarrier,
-              managedControl: createAlphaManagedControl({
+            const result = await runtime
+              .runAlphaBrowserRevision({
                 repoRoot: options.repoRoot,
+                ...main,
+                baselineSha,
                 subscriptionId: id,
-                principal: { userId: options.ownerUserId, threadId, catId: guardian },
-              }),
-              reportFailure: (failure: Record<string, unknown>) =>
-                reportFailures(options, runtime, id, threadId, guardian, ctx, failure),
-            });
+                ownerPrincipal: `schedule:${options.ownerUserId}:${id}`,
+                originTaskId: id,
+                signal: ctx.signal,
+                executionCarrier,
+                managedControl: createAlphaManagedControl({
+                  repoRoot: options.repoRoot,
+                  subscriptionId: id,
+                  principal: { userId: options.ownerUserId, threadId, catId: guardian },
+                }),
+                reportFailure: (failure: Record<string, unknown>) =>
+                  reportFailures(options, runtime, id, threadId, guardian, ctx, failure),
+              })
+              .catch((error: unknown) => rethrowWithDiscoveryContext(error, main.discoveryError, ctx.signal));
             if (!['idle', 'green', 'red'].includes(result.status)) {
               throw new Error(
-                `Alpha verification remains ${result.status} for ${result.headSha ?? 'unknown revision'}; ${result.reason ?? 'recover the existing execution before settlement'}`,
+                describeAlphaExecutionFailure(
+                  `Alpha verification remains ${result.status} for ${result.headSha ?? 'unknown revision'}; ${result.reason ?? 'recover the existing execution before settlement'}`,
+                  main.discoveryError,
+                ),
+              );
+            }
+            if (main.discoveryError !== undefined) {
+              throw new Error(
+                `Alpha discovery unavailable; enrolled revision ${result.headSha ?? 'none'}: ${result.status}. ${main.discoveryError}`,
               );
             }
           },

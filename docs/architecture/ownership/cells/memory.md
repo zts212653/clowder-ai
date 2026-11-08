@@ -22,8 +22,6 @@ code_anchors:
   - packages/api/src/routes/message-search-answer-route.ts
   - packages/mcp-server/src/tools/message-search-answer-tool.ts
   - packages/api/src/domains/memory/MessageSearchService.ts
-  - packages/api/src/domains/memory/message-query-qualifier.ts
-  - packages/api/src/domains/memory/message-query-native.ts
   - packages/api/src/domains/memory/LunaCurationClient.ts
   - packages/api/src/domains/memory/curation/ThreadOverviewRepository.ts
   - packages/api/src/domains/memory/curation/ThreadOverviewBackfill.ts

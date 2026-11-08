@@ -24,7 +24,6 @@ interface WatcherRouteOptions {
   capability(catId: string): WatcherCapability | Promise<WatcherCapability>;
   controlChanged?(threadId?: string): void;
   runtimeReady?(): boolean;
-  rolloutEnabled: boolean;
 }
 const configBody = watcherConfigPatchSchema.extend({ expectedRevision: z.number().int().nonnegative() });
 const controlBody = watcherThreadControlPatchSchema.extend({ expectedRevision: z.number().int().nonnegative() });
@@ -99,7 +98,8 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
     const preferences = await readWatcherPreferences(deps.configStore, deps.labelStore, userId);
     return {
       ...preferences,
-      rolloutEnabled: deps.rolloutEnabled && (deps.runtimeReady?.() ?? true),
+      // The settings switch is the only on/off control; this field only reports whether the watcher runtime is ready.
+      rolloutEnabled: deps.runtimeReady?.() ?? true,
       members: await Promise.all(
         catRegistry.getAllIds().map(async (catId) => {
           const config = catRegistry.tryGet(catId)?.config;
@@ -172,7 +172,8 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       control: parseWatcherThreadControl(row.watcher),
       config: preferences.config,
       ...effectiveWatcherState(preferences.config, row, preferences.quietLabels),
-      rolloutEnabled: deps.rolloutEnabled && (deps.runtimeReady?.() ?? true),
+      // The settings switch is the only on/off control; this field only reports whether the watcher runtime is ready.
+      rolloutEnabled: deps.runtimeReady?.() ?? true,
       reviewing: running.some((record) => record.threadId === row.id && record.executionKind === 'watcher'),
       memberName:
         preferences.config.memberCatId === 'codex61-sol'

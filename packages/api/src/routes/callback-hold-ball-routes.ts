@@ -812,8 +812,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
             ...(wakeWhen.retryOfJobId ? { retryOfJobId: wakeWhen.retryOfJobId } : {}),
           }
         : null;
-    const reuseManagedSubmission = (job: DurableManagedGateJob) => {
-      const current = managedJobs.get(managedPrincipal, job.jobId);
+    const reuseManagedSubmission = async (job: DurableManagedGateJob) => {
+      const current = (await managedJobs.readStatus(managedPrincipal, job.jobId)).status;
       if (!current.admissionMessageId || !deps.dynamicTaskStore.getById(job.originTaskId)) {
         reply.status(409);
         return {

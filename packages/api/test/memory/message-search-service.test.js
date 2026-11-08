@@ -14,7 +14,6 @@ describe('canonical message search projection', () => {
 
   beforeEach(async () => {
     const { MessageSearchService } = await import('../../dist/domains/memory/MessageSearchService.js');
-    const { MessageQueryQualifier } = await import('../../dist/domains/memory/message-query-qualifier.js');
     threads = new Map([
       ['visible', { id: 'visible', title: 'Canonical title', createdBy: 'owner' }],
       ['private', { id: 'private', title: 'Private title', createdBy: 'someone-else' }],
@@ -43,9 +42,11 @@ describe('canonical message search projection', () => {
     }
     service = new MessageSearchService({
       // These tests isolate canonical permission/projection, not semantic inference.
-      qualifier: new MessageQueryQualifier(async (batch) =>
-        JSON.stringify({ requestId: batch.requestId, rows: batch.rows.map((row) => [row.id, 'supported', row.body]) }),
-      ),
+      qualifier: {
+        qualify() {
+          throw new Error('Generative qualification is retired');
+        },
+      },
       evidenceStore: {
         readMessagePassageState: () => indexState,
         searchMessagePassages: async (_query, options) => {
@@ -96,6 +97,24 @@ describe('canonical message search projection', () => {
     assert.deepEqual(hit.highlights, [{ start: 0, end: 5 }]);
     assert.equal(result.meta.hasMore, true);
     assert.equal(result.meta.sourceCoverage, 'unknown');
+  });
+
+  it('human and cat source results expose recognizable prose before a repeated query in a tool report', async () => {
+    const { buildSearchableMessageContent } = await import('../../dist/domains/memory/message-search-content.js');
+    const content = `Mira 是这只新猫给自己选的名字。${'原始故事。'.repeat(80)}\n\n[爪感差: search_evidence 查询 Mira 起名时丢失原文。]`;
+    const message = messages.get('old');
+    message.content = content;
+    candidates = [{ ...candidates[0], content: buildSearchableMessageContent(message) }];
+    for (const viewer of [{ type: 'user' }, principal.viewer]) {
+      const result = await service.search({ ...input, query: 'Mira 起名' }, { ...principal, viewer });
+      const [row] = result.results;
+      assert.equal(row.messageId, 'old');
+      assert.equal(row.snippet.text, content.slice(row.snippet.start, row.snippet.end));
+      assert.ok(row.snippet.text.includes('给自己选的名字'));
+      assert.ok(!row.snippet.text.includes('查询 Mira 起名'));
+      assert.equal(result.meta.sort, 'time');
+      assert.equal(searchOptions.candidateOrder, 'relevance');
+    }
   });
 
   it('projects indexed scheduler notices as system for both human and cat searches, preserving real authors', async () => {

@@ -38,9 +38,9 @@ export async function finalizeWatcherWake(
   )
     throw new Error('watcher_finalization_binding_mismatch');
   const terminal = await owners.executions.transitionTerminal(attempt.invocationId, {
-    status: 'succeeded',
+    status: state.skippedWindows ? 'failed' : 'succeeded',
     endedAt: Date.now(),
-    terminalReason: 'watcher_checkpoint_committed',
+    terminalReason: state.skippedWindows ? 'watcher_context_budget_skipped' : 'watcher_checkpoint_committed',
     providerTeardownAt: attempt.prunedAt,
   });
   if (!terminal.record || terminal.record.status === 'running') throw new Error('watcher_execution_not_finalized');
@@ -54,7 +54,13 @@ export async function finalizeWatcherWake(
   );
   if (settled.outcome !== 'settled' && settled.outcome !== 'replayed')
     throw new Error('watcher_response_not_finalized');
-  return saveWatcherState(owners.sessions, session.id, state, { attempt: undefined, wakeInvocationId: undefined });
+  return saveWatcherState(owners.sessions, session.id, state, {
+    attempt: undefined,
+    wakeInvocationId: undefined,
+    rawWindowTokens: undefined,
+    directoryReads: undefined,
+    skippedWindows: undefined,
+  });
 }
 
 /** No attempt means no new native turn was admitted; a previous window needs positive teardown evidence. */

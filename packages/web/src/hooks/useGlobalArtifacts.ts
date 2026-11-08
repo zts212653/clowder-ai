@@ -10,7 +10,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '../utils/api-client';
 import { apiSessionIdentity } from '../utils/api-session-identity';
 import { usePagedGlobalWorks } from './usePagedGlobalWorks';
-import { useWorksSourceRefresh } from './useThreadArtifacts';
+import { useWorksSourceRefresh, type WorksSourceChange, worksSourceInvalidation } from './useThreadArtifacts';
 
 type WorkLineage = GlobalArtifactsResponse['workLineage'];
 
@@ -59,6 +59,10 @@ interface UseGlobalArtifactsResult {
   loading: boolean;
   error: boolean;
   loadingMore?: boolean;
+  hasMore?: boolean;
+  stale?: boolean;
+  loadMore?: () => void;
+  restart?: () => void;
   refetch: () => void;
 }
 
@@ -79,6 +83,7 @@ export function useGlobalArtifacts(
   );
   const ownerScope = JSON.stringify([ownerKey, identity.ownerUserId, identity.generation]);
   const paged = usePagedGlobalWorks(enabled && worksView, ownerScope, paused);
+  const { scheduleRefresh, invalidate: invalidateAccess } = paged;
   const [resolvedScope, setResolvedScope] = useState<string | null>(null);
   const resolvedScopeRef = useRef<string | null>(null);
   const [artifacts, setArtifacts] = useState<GlobalArtifactDTO[]>([]);
@@ -88,6 +93,7 @@ export function useGlobalArtifacts(
   const [error, setError] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const reading = useRef(false);
+  const sourceRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hostThreadId = useChatStore((state) => state.currentThreadId);
 
   const requireComplete = query !== undefined;
@@ -149,13 +155,45 @@ export function useGlobalArtifacts(
     };
   }, [active, enabled, refetch, worksView]);
 
-  // The paged Works view re-reads the whole owner catalogue, so host-thread changes are coalesced.
-  useWorksSourceRefresh(
-    hostThreadId,
-    active && query !== undefined,
-    worksView ? paged.scheduleRefresh : refetch,
-    false,
+  const onSourceChange = useCallback(
+    (change: WorksSourceChange) => {
+      if (change.reason !== 'material') return;
+      if (worksView) scheduleRefresh();
+      else if (!sourceRefresh.current)
+        sourceRefresh.current = setTimeout(() => {
+          sourceRefresh.current = null;
+          void refetch();
+        }, 0);
+    },
+    [worksView, scheduleRefresh, refetch],
   );
+  useEffect(
+    () => () => {
+      if (sourceRefresh.current) clearTimeout(sourceRefresh.current);
+      sourceRefresh.current = null;
+    },
+    [active, scope],
+  );
+  // Authority invalidation remains subscribed while hidden; ordinary source subscriptions pause.
+  useEffect(() => {
+    if (!enabled || !requireComplete) return;
+    const onAccessChange = (event: Event) => {
+      if (worksSourceInvalidation(event)?.reason !== 'access') return;
+      if (worksView) invalidateAccess();
+      else {
+        abortRef.current?.abort();
+        setArtifacts([]);
+        setResolvedScope(null);
+        resolvedScopeRef.current = null;
+        setComplete(false);
+        setLoading(false);
+        setError(true);
+      }
+    };
+    window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', onAccessChange);
+    return () => window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', onAccessChange);
+  }, [enabled, requireComplete, worksView, invalidateAccess]);
+  useWorksSourceRefresh(hostThreadId, active && query !== undefined, onSourceChange, false);
 
   return worksView
     ? paged

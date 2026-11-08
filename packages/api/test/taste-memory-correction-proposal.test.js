@@ -316,4 +316,20 @@ describe('F321 Taste correction callback', () => {
     });
     assert.equal(stale.statusCode, 409, stale.body);
   });
+
+  it('refuses a blank scene or quote or a multi-line tag and stores trimmed tags', async () => {
+    const base = { quote: '原话', dimension: 'creative-craft', privacy: 'public' };
+    const propose = (fields, id) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/callbacks/propose-taste',
+        payload: { ...base, ...fields, clientRequestId: `taste-input:${id}` },
+      });
+    assert.equal((await propose({ scene: ' \n ', tags: ['ok'] }, 'blank')).statusCode, 400);
+    assert.equal((await propose({ scene: '场景', quote: ' \t ', tags: ['ok'] }, 'blank-quote')).statusCode, 400);
+    assert.equal((await propose({ scene: '场景', tags: ['two\nlines'] }, 'multiline')).statusCode, 400);
+    const created = await propose({ scene: '场景', tags: [' spaced '] }, 'trimmed');
+    assert.equal(created.statusCode, 200, created.body);
+    assert.deepEqual(app.testStore.get(created.json().proposalId).tags, ['spaced']);
+  });
 });

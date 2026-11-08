@@ -89,10 +89,15 @@ export interface MatterEntryView {
 export interface MatterPage {
   matter: MemoryMatter;
   entries: MatterEntryView[];
+  /** An active original changed; the stored interpretation has not been reverified. */
+  summaryStatus?: 'sources_changed';
   nextCursor?: string;
 }
 export interface MatterCatalogItem extends MemoryMatter {
   entryCount: number;
+  /** A currently readable, active, unchanged source originates in this thread; not applicability. */
+  hasThreadSource?: boolean;
+  summaryStatus?: 'sources_changed';
 }
 export interface MatterUnavailableItem {
   matterId: string;

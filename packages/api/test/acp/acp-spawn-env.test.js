@@ -8,6 +8,46 @@ const { prepareAcpProcessEnv, tryPrepareAcpProcessEnv } = await import(
 );
 
 describe('prepareAcpProcessEnv', () => {
+  for (const authType of ['oauth', 'api_key']) {
+    it(`passes literal account envVars through for ${authType} authentication`, () => {
+      const env = prepareAcpProcessEnv({
+        clientId: 'acp',
+        memberEnvironment: { MEMBER_ONLY: 'member-value' },
+        account: {
+          id: 'static-env',
+          authType,
+          ...(authType === 'api_key' ? { apiKey: 'synthetic-key' } : {}),
+          envVars: { STATIC_FLAG: 'account-value' },
+        },
+      });
+      assert.equal(env.STATIC_FLAG, 'account-value', 'static values must reach the child for either auth type');
+      assert.equal(env.MEMBER_ONLY, 'member-value');
+    });
+  }
+
+  it('member overrides cannot redirect selected credentials or defeat an omitted account endpoint', () => {
+    const env = prepareAcpProcessEnv({
+      clientId: 'openai',
+      memberEnvironment: {
+        OPENAI_API_KEY: 'foreign',
+        OPENAI_BASE_URL: 'https://foreign.example.test',
+        HTTP_PROXY: 'http://proxy.example.test',
+      },
+      account: { id: 'selected', authType: 'api_key', apiKey: 'synthetic-selected' },
+    });
+    assert.equal(env.OPENAI_API_KEY, 'synthetic-selected');
+    assert.equal(env.OPENAI_BASE_URL, undefined);
+    assert.equal(env.HTTP_PROXY, 'http://proxy.example.test');
+    assert.throws(
+      () =>
+        prepareAcpProcessEnv({
+          clientId: 'openai',
+          memberEnvironment: { OPENAI_API_KEY: 'foreign' },
+          account: { id: 'selected', authType: 'oauth' },
+        }),
+      /selected OAuth/,
+    );
+  });
   it('fails fast when a generic ACP api_key account has no API key', () => {
     assert.throws(
       () =>

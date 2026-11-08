@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
+import sharp from 'sharp';
 import { scanAndPublishCodexImages } from '../src/domains/cats/services/agents/providers/codex-image-scanner.js';
-import { codexImageOriginEnvelope } from '../src/domains/cats/services/agents/providers/codex-native-image-origin.js';
+import {
+  codexImageOriginEnvelope,
+  codexNativeImageOutputs,
+} from '../src/domains/cats/services/agents/providers/codex-native-image-origin.js';
+import { publishGeneratedImage } from '../src/domains/cats/services/agents/providers/generated-image-publication.js';
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -18,7 +23,9 @@ async function fixture() {
   const codexHome = join(root, 'codex');
   const session = join(codexHome, 'generated_images', sessionId);
   await mkdir(session, { recursive: true });
-  const generated = Buffer.from('native image output');
+  const generated = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#48705b' } })
+    .png()
+    .toBuffer();
   const sourcePath = join(session, 'exec-generated.png');
   await writeFile(sourcePath, generated);
   await writeFile(join(session, 'old-unpublished.png'), 'old native turn');
@@ -74,7 +81,10 @@ test('the accepted native image output binds its producing child and excludes ol
     sessionId: 'native-session',
     turnId: 'native-turn',
     itemId: 'exec-generated',
-    blobDigest: `sha256:${(await import('node:crypto')).createHash('sha256').update('native image output').digest('hex')}`,
+    blobDigest: `sha256:${(await import('node:crypto'))
+      .createHash('sha256')
+      .update(await readFile(f.sourcePath))
+      .digest('hex')}`,
   });
 });
 
@@ -113,6 +123,30 @@ test('native output identity cannot authorize changed file bytes', async () => {
   const f = await fixture();
   await writeFile(f.sourcePath, 'different image');
   assert.deepEqual(await scanAndPublishCodexImages(f.options), []);
+});
+
+test('a changed source between native verification and publication leaves no unproven upload', async () => {
+  const f = await fixture();
+  const [output] = codexNativeImageOutputs(f.origin, 'native-session');
+  assert.ok(output);
+  const changed = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#be6d47' } })
+    .png()
+    .toBuffer();
+  await writeFile(f.sourcePath, changed);
+  await mkdir(f.options.uploadDir);
+  await assert.rejects(
+    publishGeneratedImage({
+      sourcePath: f.sourcePath,
+      mimeType: 'image/png',
+      publicationKey: 'native-verified-before-source-change',
+      provider: 'codex',
+      toolName: 'image_gen',
+      uploadDir: f.options.uploadDir,
+      nativeOrigin: output.origin,
+    }),
+    /do not match their native generation/,
+  );
+  assert.deepEqual(await readdir(f.options.uploadDir), []);
 });
 
 test('duplicate native completion is one publication, while conflicting path and digest cannot publish', async () => {

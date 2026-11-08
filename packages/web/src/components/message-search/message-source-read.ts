@@ -93,9 +93,39 @@ export function sourceSpeakerLabel(
 
 export function messageSourceQuote(
   result: MessageSearchResult,
-  message: ReadSourceMessage,
+  message: ReadSourceMessage | undefined,
   resolve: (speaker: string) => string,
 ) {
+  const selected = result.selection;
+  if (selected) {
+    const publisher = sourceSpeakerLabel(result, resolve);
+    const { context, quotation, part } = selected;
+    const origin = quotation?.origin;
+    const excerpt = `${context.truncatedBefore ? '…' : ''}${context.text}${context.truncatedAfter ? '…' : ''}`;
+    const lines = [`${publisher} 消息的结构化摘录（原句、转引与批注分列）：`];
+    if (selected.headingPath.length) lines.push(`章节：${selected.headingPath.join(' › ')}`);
+    if (quotation) {
+      lines.push(
+        origin
+          ? `引自 ${sourceSpeakerLabel(origin, resolve)} 的消息（${sourceTime(origin.timestamp)}，原消息与引文已核）：`
+          : `${publisher} 消息中的引用材料（未核实原出处作者）：`,
+      );
+      if (origin?.headingPath.length) lines.push(`原消息章节：${origin.headingPath.join(' › ')}`);
+      lines.push(`「${part.kind === 'comment' ? quotation.text + (quotation.truncated ? '…' : '') : excerpt}」`);
+      if (part.kind === 'comment') lines.push(`${publisher} 当条批注：「${excerpt}」`);
+      else if (selected.comment)
+        lines.push(`${publisher} 当条批注：「${selected.comment.text}${selected.comment.truncated ? '…' : ''}」`);
+    } else lines.push(`原句：「${excerpt}」`);
+    // This is a labelled composite, not a verbatim utterance by the outer publisher.
+    // Preserve the real containing message; don't manufacture a user annotation or sender badge.
+    return createQuoteContextAttachment(lines.join('\n\n'), {
+      kind: 'message',
+      threadId: result.threadId,
+      messageId: result.messageId,
+      displayLabel: `${publisher.slice(0, 80)} 消息的结构化摘录 · ${sourceTime(result.timestamp)}`,
+    });
+  }
+  if (!message) throw new Error('来源信息不完整，请去原处查看。');
   if (message.truncated || message.content.length > CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH)
     throw new Error('原文较长，请去原处选择需要引用的段落。');
   if (!message.content.trim()) throw new Error('这条来源没有可引用的文字，请去原处查看。');

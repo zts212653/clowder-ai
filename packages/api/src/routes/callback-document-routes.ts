@@ -70,6 +70,11 @@ export function registerCallbackDocumentRoutes(app: FastifyInstance, deps: Docum
           .status(409)
           .send({ code: 'RICH_BLOCK_INVOCATION_COMPLETE', error: 'Invocation has already completed' });
       }
+      const responseMessageId = deps.invocationTracker?.getLifecycleResponseMessageId(
+        record.threadId,
+        record.catId,
+        record.invocationId,
+      );
       if (addResult === 'added')
         deps.socketManager.broadcastAgentMessage(
           {
@@ -77,6 +82,7 @@ export function registerCallbackDocumentRoutes(app: FastifyInstance, deps: Docum
             catId: record.catId,
             content: JSON.stringify({ type: 'rich_block', block: fileBlock }),
             invocationId: record.invocationId,
+            ...(responseMessageId ? { messageId: responseMessageId } : {}),
             timestamp: Date.now(),
           },
           record.threadId,

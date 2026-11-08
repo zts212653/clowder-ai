@@ -32,12 +32,13 @@ function makeNonGitRoot() {
 }
 
 // next.config.js is loaded without workspace node_modules here, so stub the PWA
-// wrapper the same way test/next-config.test.cjs does.
+// wrapper. The stub's default runtime caching list is empty: this test checks the
+// embedded revision, not service worker caching (test/next-config.test.cjs does).
 function loadConfigRevision(env) {
   const snapshot = process.env.CAT_CAFE_WEB_BUILD_REVISION;
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
-    if (request === '@ducanh2912/next-pwa') return { default: () => (config) => config };
+    if (request === '@ducanh2912/next-pwa') return { default: () => (config) => config, runtimeCaching: [] };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {

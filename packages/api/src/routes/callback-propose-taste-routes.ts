@@ -46,10 +46,29 @@ const TASTE_DIMENSIONS = [
 
 const createTasteSchema = z
   .object({
-    scene: z.string().min(1).max(2000),
-    quote: z.string().min(1).max(2000),
+    // A blank scene or quote makes a vignette the reader rejects, and a tag is placed on one index line.
+    scene: z
+      .string()
+      .min(1)
+      .max(2000)
+      .refine((scene) => scene.trim().length > 0, 'scene must not be blank'),
+    quote: z
+      .string()
+      .min(1)
+      .max(2000)
+      .refine((quote) => quote.trim().length > 0, 'quote must not be blank'),
     takeaway: z.string().trim().min(1).max(500).optional(),
-    tags: z.array(z.string().min(1).max(50)).min(1).max(10),
+    tags: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(50)
+          .refine((tag) => !/[\r\n]/.test(tag), 'a tag must be one line'),
+      )
+      .min(1)
+      .max(10),
     dimension: z.enum(TASTE_DIMENSIONS),
     privacy: z.enum(['public', 'sensitive']),
     sourceMessageId: z.string().min(1).optional(),

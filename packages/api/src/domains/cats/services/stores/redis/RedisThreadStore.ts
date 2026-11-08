@@ -450,6 +450,41 @@ export class RedisThreadStore implements IThreadStore {
     return thread;
   }
 
+  async getMany(
+    ids: readonly string[],
+    options?: StoreReadOptions & { recoverMissing?: false },
+  ): Promise<Map<string, Thread | null>> {
+    const result = new Map<string, Thread | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      throwIfStoreReadAborted(options);
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) {
+        pipeline.hgetall(ThreadKeys.detail(id));
+        pipeline.smembers(ThreadKeys.participants(id));
+      }
+      const replies = await awaitStoreRead(pipeline.exec(), options);
+      throwIfStoreReadAborted(options);
+      // Validate the entire wave before missing/default recovery may write.
+      const snapshots = batch.map((id, i) => ({
+        id,
+        data: readAuthoritativeHash(replies?.[i * 2], 'canonical thread batch'),
+        members: readAuthoritativeMembers(replies?.[i * 2 + 1], 'canonical thread participants'),
+      }));
+      for (const { id, data, members } of snapshots) {
+        throwIfStoreReadAborted(options);
+        if (!data?.id) result.set(id, options?.recoverMissing === false ? null : await this.get(id, options));
+        else {
+          const thread = this.hydrateThread(data);
+          thread.participants = members as CatId[];
+          result.set(id, thread);
+        }
+      }
+    }
+    return result;
+  }
+
   async list(userId: string, options?: StoreReadOptions): Promise<Thread[]> {
     throwIfStoreReadAborted(options);
     const ids = await this.loadUserThreadIds(userId, options);

@@ -12,7 +12,10 @@ import {
   projectHoldOwner,
   resolveHoldAccess,
 } from '../domains/ball-custody/hold-ball-access-policy.js';
-import { resolveManagedCommandJob } from '../domains/ball-custody/managed-command-job-reference.js';
+import {
+  managedCommandJobMatchesTask,
+  resolveManagedCommandJob,
+} from '../domains/ball-custody/managed-command-job-reference.js';
 import { readManagedCommandWakeProjection } from '../domains/ball-custody/managed-command-wake-task-projection.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -27,11 +30,11 @@ import { cancelManagedWakeIfTaskMatches } from './callback-hold-ball-routes.js';
 import {
   findHoldBallTask,
   isCancelableHoldBallTask,
+  isCancelableHoldJobRecord,
   isHoldBallTask,
   isPendingHoldBallTask,
   readHoldLifecycle,
 } from './hold-ball-cancel.js';
-import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 import { formatHoldOwnerName, persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
 import { resolveManagedHoldTriggerUserId } from './managed-hold-trigger-user.js';
 
@@ -175,34 +178,39 @@ function jobAccess(access: HoldAccessDecision, threadId: string): ManagedJobAcce
     : { userId: access.actor.userId, catId: access.actor.id, threadId };
 }
 
-function projectManagedJob(
+async function observeHoldStatus(
   deps: HoldBallCancelRouteDeps,
   task: DynamicTaskDef,
   access: HoldAccessDecision,
   tailBytes?: number,
 ) {
   const jobId = readManagedCommandWakeProjection(task)?.jobId;
-  if (!jobId || !task.deliveryThreadId || access.lifecycleVisibility !== 'full') return undefined;
+  if (!jobId) {
+    // Timer and legacy carriers do not enter the managed-job database in this predicate.
+    return { job: undefined, cancelable: mayCancelHold(task, access) && isCancelableHoldBallTask(task) };
+  }
+  if (!task.deliveryThreadId || access.lifecycleVisibility !== 'full') return { job: undefined, cancelable: false };
   const service = new ManagedJobService(undefined, 4, deps.ownerUserId);
   const principal = jobAccess(access, task.deliveryThreadId);
-  const job = service.get(principal, jobId);
+  const snapshot = await service.readStatus(principal, jobId, { tailBytes });
+  if (!managedCommandJobMatchesTask(task, snapshot.job)) return { job: undefined, cancelable: false };
   return {
-    ...job,
-    ...(tailBytes
-      ? {
-          tail: service.tail(principal, jobId, tailBytes),
-          transitions: service
-            .transitions(principal, jobId)
-            .slice(-25)
-            .map((entry) => ({
+    cancelable: mayCancelHold(task, access) && isCancelableHoldJobRecord(snapshot.status),
+    job: {
+      ...snapshot.status,
+      ...(tailBytes
+        ? {
+            tail: snapshot.tail,
+            transitions: snapshot.transitions?.slice(-25).map((entry) => ({
               revision: entry.revision,
               at: entry.updatedAt,
               state: entry.terminalStatus ?? entry.state,
               epoch: entry.supervisorEpoch,
               fence: entry.supervisorFence,
             })),
-        }
-      : {}),
+          }
+        : {}),
+    },
   };
 }
 
@@ -344,40 +352,60 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
     // Observable hold = pending OR retired-with-running-managed-command.
     // The latter is a disabled carrier whose managed command is still running —
     // still cancelable and must be discoverable without a task ID (#1449 AC).
-    const observableHold =
-      holdTasks.find((t) => isPendingHoldBallTask(t)) ?? holdTasks.find((t) => isCancelableHoldBallTask(t)) ?? null;
-
-    if (!observableHold) {
+    const pendingHold = holdTasks.find((t) => isPendingHoldBallTask(t));
+    const observableCandidates = pendingHold ? [pendingHold] : holdTasks;
+    for (const observableHold of observableCandidates) {
+      // Authorize before inspecting an execution, including retired carriers.
+      const authorization = await authorizeHoldAccess(deps, request, observableHold, reply);
+      if (!authorization) return { error: 'Not authorized to read holds in this thread' };
+      const observation = await observeHoldStatus(deps, observableHold, authorization.access);
+      if (!pendingHold && !observation.cancelable) continue;
+      const lifecycle = readHoldLifecycle(observableHold);
       return {
-        hasActiveHold: false,
-        taskId: null,
+        hasActiveHold: isPendingHoldBallTask(observableHold),
+        taskId: observableHold.id,
         catId,
         threadId,
-        lifecycle: null,
+        cancelable: observation.cancelable,
+        lifecycle: projectLifecycle(lifecycle, authorization.access),
+        job: observation.job,
+        owner: projectHoldOwner(authorization.access.owner, authorization.access.lifecycleVisibility),
+        access: {
+          role: authorization.access.actor.role,
+          lifecycleVisibility: authorization.access.lifecycleVisibility,
+        },
       };
     }
+    return { hasActiveHold: false, taskId: null, catId, threadId, lifecycle: null };
+  });
 
-    // P1 fix: enforce hold-access policy — same gate as GET /:taskId/status
-    const authorization = await authorizeHoldAccess(deps, request, observableHold, reply);
-    if (!authorization) {
-      return { error: 'Not authorized to read holds in this thread' };
+  app.post<{ Params: { taskId: string } }>('/api/callbacks/hold-ball/:taskId/recheck', async (request, reply) => {
+    const task = findHoldBallTask(request.params.taskId, dynamicTaskStore);
+    if (!task) return reply.code(404).send({ error: 'Hold task not found' });
+    const authorization = await authorizeHoldAccess(deps, request, task, reply);
+    if (!authorization) return;
+    if (authorization.access.lifecycleVisibility !== 'full')
+      return reply.code(403).send({ error: 'Only the command principal or operator may recheck its execution' });
+    try {
+      const command = readManagedCommandWakeProjection(task);
+      const jobId = command?.jobId ?? command?.durableJob?.jobId;
+      if (!jobId || !task.deliveryThreadId) return { outcome: 'unknown', taskId: task.id };
+      const service = new ManagedJobService(undefined, 4, deps.ownerUserId);
+      const principal = jobAccess(authorization.access, task.deliveryThreadId);
+      const { job } = await service.readStatus(principal, jobId);
+      if (!managedCommandJobMatchesTask(task, job)) return { outcome: 'unknown', taskId: task.id };
+      // This existing owner observation can prove cleanup/termination. It never calls start or submit.
+      await service.reconcileJob(principal, job.jobId);
+      return {
+        outcome: 'observed',
+        taskId: task.id,
+        job: (await service.readStatus(principal, job.jobId)).status,
+        recovery: dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact,
+      };
+    } catch (err) {
+      log.warn({ err, taskId: task.id }, 'Managed hold recheck could not observe original execution');
+      return reply.code(503).send({ outcome: 'unknown', taskId: task.id });
     }
-
-    const lifecycle = readHoldLifecycle(observableHold);
-    return {
-      hasActiveHold: isPendingHoldBallTask(observableHold),
-      taskId: observableHold.id,
-      catId,
-      threadId,
-      cancelable: mayCancelHold(observableHold, authorization.access) && isCancelableHoldBallTask(observableHold),
-      lifecycle: projectLifecycle(lifecycle, authorization.access),
-      job: projectManagedJob(deps, observableHold, authorization.access),
-      owner: projectHoldOwner(authorization.access.owner, authorization.access.lifecycleVisibility),
-      access: {
-        role: authorization.access.actor.role,
-        lifecycleVisibility: authorization.access.lifecycleVisibility,
-      },
-    };
   });
 
   app.get<{ Params: { taskId: string }; Querystring: { tailBytes?: string } }>(
@@ -407,17 +435,22 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
       const lifecycle = readHoldLifecycle(task);
       const status = lifecycle?.status ?? (task.enabled ? 'active' : 'inactive');
       const catId = task.createdBy?.replace('hold-ball:', '') ?? 'unknown';
+      const observation = await observeHoldStatus(deps, task, authorization.access, tailBytes);
       return {
         taskId,
         status,
-        cancelable: mayCancelHold(task, authorization.access) && isCancelableHoldBallTask(task),
+        cancelable: observation.cancelable,
         catId,
         lifecycle: projectLifecycle(lifecycle, authorization.access),
-        job: projectManagedJob(deps, task, authorization.access, tailBytes),
+        recovery:
+          authorization.access.lifecycleVisibility === 'full'
+            ? dynamicTaskStore.getManagedCommandRecoveryState?.(task.id)?.fact
+            : undefined,
+        job: observation.job,
         owner: projectHoldOwner(authorization.access.owner, authorization.access.lifecycleVisibility),
         access: {
           role: authorization.access.actor.role,
-          canCancel: mayCancelHold(task, authorization.access) && isCancelableHoldBallTask(task),
+          canCancel: observation.cancelable,
           lifecycleVisibility: authorization.access.lifecycleVisibility,
         },
       };

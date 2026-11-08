@@ -10,12 +10,14 @@ function FieldShell({
   required = false,
   tone = 'neutral',
   children,
+  labelHint,
 }: {
   label: string;
   fieldLabel: string;
   required?: boolean;
   tone?: 'neutral' | 'success';
   children: ReactNode;
+  labelHint?: ReactNode;
 }) {
   const displayLabel = useEditorLabel(label);
   const changed = useMemberChanged(fieldLabel);
@@ -29,6 +31,7 @@ function FieldShell({
         {displayLabel}
         <MemberChangeMark label={fieldLabel} />
         {required && <span className="ml-0.5 text-conn-red-text">*</span>}
+        {labelHint && <span className="mt-0.5 block text-xs font-normal leading-4 text-cafe-muted">{labelHint}</span>}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
     </label>
@@ -87,6 +90,7 @@ export function TextField({
   required = false,
   tone = 'neutral',
   ariaDescribedBy,
+  labelHint,
 }: {
   label: string;
   ariaLabel?: string;
@@ -98,6 +102,7 @@ export function TextField({
   required?: boolean;
   tone?: 'neutral' | 'success';
   ariaDescribedBy?: string;
+  labelHint?: ReactNode;
 }) {
   const fieldKey = ariaLabel ?? label;
   const invalid = useMemberFieldError(fieldKey);
@@ -108,7 +113,7 @@ export function TextField({
       ? 'border-transparent bg-[var(--console-runtime-field-bg)] focus:border-[var(--console-runtime-label)] focus:ring-[var(--console-runtime-label)]/30'
       : 'border-transparent bg-[var(--console-field-bg)] focus:ring-[var(--console-input-stroke)]';
   return (
-    <FieldShell label={label} fieldLabel={fieldKey} required={required} tone={tone}>
+    <FieldShell label={label} fieldLabel={fieldKey} required={required} tone={tone} labelHint={labelHint}>
       <input
         aria-label={fieldKey}
         aria-describedby={ariaDescribedBy}
@@ -139,6 +144,8 @@ export function TextAreaField({
   onChange,
   placeholder,
   tone = 'neutral',
+  labelHint,
+  footer,
 }: {
   label: string;
   ariaLabel?: string;
@@ -146,21 +153,26 @@ export function TextAreaField({
   onChange: (value: string) => void;
   placeholder?: string;
   tone?: 'neutral' | 'success';
+  labelHint?: ReactNode;
+  footer?: ReactNode;
 }) {
   const fieldKey = ariaLabel ?? label;
+  const invalid = useMemberFieldError(fieldKey);
   const inputColors =
     tone === 'success'
       ? 'border-transparent bg-[var(--console-runtime-field-bg)] focus:border-[var(--console-runtime-label)] focus:ring-[var(--console-runtime-label)]/30'
       : 'border-transparent bg-[var(--console-field-bg)] focus:ring-[var(--console-input-stroke)]';
   return (
-    <FieldShell label={label} fieldLabel={fieldKey} tone={tone}>
+    <FieldShell label={label} fieldLabel={fieldKey} tone={tone} labelHint={labelHint}>
       <textarea
         aria-label={fieldKey}
+        aria-invalid={invalid || undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={`min-h-[92px] w-full rounded-[10px] border px-3 py-1.5 text-compact leading-5 text-cafe-black outline-none transition focus:ring-1 ${inputColors}`}
+        className={`min-h-[92px] w-full rounded-[10px] border px-3 py-1.5 text-compact leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:ring-1 ${inputColors}`}
         placeholder={placeholder}
       />
+      {footer}
     </FieldShell>
   );
 }

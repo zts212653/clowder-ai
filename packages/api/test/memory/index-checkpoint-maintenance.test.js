@@ -97,35 +97,61 @@ test('small documents share bounded checkpoint batches while retaining separate 
     );
   }
   const builder = new IndexBuilder(store, docs);
-  let observing = false;
-  let transactions = 0;
+  const completedDocuments = db.prepare('SELECT count(*) AS n FROM evidence_docs WHERE source_hash IS NOT NULL');
+  const orphanStamp = db.prepare(
+    'SELECT count(*) AS n FROM evidence_docs d WHERE d.source_hash IS NOT NULL AND NOT EXISTS (SELECT 1 FROM evidence_passages p WHERE p.doc_anchor = d.anchor)',
+  );
+  const violations = [];
+  const transactions = [];
   const maintenance = [];
   const transaction = db.transaction.bind(db);
   t.mock.method(db, 'transaction', (fn) => {
     const tx = transaction(fn);
     return (...args) => {
-      if (observing) transactions++;
-      return tx(...args);
+      // Observe committed document completion, not presentation progress or
+      // nested savepoints inside a document's atomic replacement.
+      if (db.inTransaction) return tx(...args);
+      const before = completedDocuments.get().n;
+      const value = tx(...args);
+      const completed = completedDocuments.get().n - before;
+      const orphans = orphanStamp.get().n;
+      if (orphans) violations.push(orphans);
+      if (completed > 0) transactions.push(completed);
+      return value;
     };
   });
   const events = channel('cat-cafe.entity-mention-checkpoint');
+  let checkpointedDocuments = 0;
   const listener = (event) => {
-    if (observing) maintenance.push(event);
+    const completed = completedDocuments.get().n;
+    if (completed > checkpointedDocuments) {
+      maintenance.push({ ...event, documents: completed - checkpointedDocuments });
+      checkpointedDocuments = completed;
+    }
   };
   events.subscribe(listener);
   t.after(() => events.unsubscribe(listener));
   await builder.rebuild({
     deferThreadIndexing: true,
     deferDocumentEmbedding: true,
-    onProgress: (phase, percent) => {
-      observing = phase === 'indexing' && percent === 40;
-    },
   });
-  assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_docs WHERE source_hash IS NOT NULL').get().n, count);
-  assert.ok(transactions >= count, 'documents must retain independent transactions');
+  assert.equal(completedDocuments.get().n, count);
+  assert.deepEqual(violations, [], 'a completed stamp must never commit without its passages');
+  assert.equal(transactions.length, count, 'documents must retain independent transactions');
+  assert.ok(
+    transactions.every((completed) => completed === 1),
+    'each commit completes one document',
+  );
+  assert.equal(checkpointedDocuments, count, 'maintenance must cover every completed document');
   assert.ok(maintenance.length > 1, 'a corpus must release the writer between bounded groups');
   assert.ok(maintenance.length < count / 2, `small documents must not each checkpoint: ${maintenance.length}`);
   assert.ok(maintenance.every((result) => result.busy === 0 && result.log === result.checkpointed));
+  t.diagnostic(
+    JSON.stringify({
+      documentCommits: transactions.length,
+      checkpointBatches: maintenance.map((event) => event.documents),
+    }),
+  );
 });
 
 for (const automatic of [0, 37]) {

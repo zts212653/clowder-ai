@@ -189,7 +189,9 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
   });
 
   it('GET /api/cats returns cats from runtime catalog even when not in catRegistry', async () => {
-    const projectRoot = createRuntimeCatalogProject(makeCatalog('runtime-cat', '运行时猫'));
+    const catalog = makeCatalog('runtime-cat', '运行时猫');
+    catalog.breeds[0].variants[0].env = { PRIVATE_INPUT: 'synthetic-private-env' };
+    const projectRoot = createRuntimeCatalogProject(catalog);
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const Fastify = (await import('fastify')).default;
@@ -205,6 +207,8 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.ok(runtimeCat, 'runtime-cat should come from runtime catalog');
     assert.equal(runtimeCat.displayName, '运行时猫');
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
+    assert.equal(runtimeCat.env, undefined, 'the public member projection must not publish environment values');
+    assert.ok(!res.body.includes('synthetic-private-env'));
   });
 
   // clowder-ai#1796: an empty defaultModel in the runtime catalog is legal

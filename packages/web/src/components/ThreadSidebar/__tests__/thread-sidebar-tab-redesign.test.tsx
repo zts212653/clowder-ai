@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
@@ -66,6 +67,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     scrollIntoView = vi.fn();
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       value: scrollIntoView,

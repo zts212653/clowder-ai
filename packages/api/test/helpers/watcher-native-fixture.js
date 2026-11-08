@@ -39,45 +39,76 @@ export async function watcherNativeFixture(w, fixtureOptions = {}) {
     }
     const round = /RAW_INCREMENT_(\d+)/u.exec(wire)?.[1] ?? '0';
     const frontier = /本轮 frontier=([^；]+)/u.exec(wire)?.[1];
-    const toolReturns = (body.input ?? []).filter((item) => item.type === 'function_call_output').length;
+    const toolReturns = (body.input ?? []).filter(
+      (item) => item.type === 'function_call_output' || item.type === 'custom_tool_call_output',
+    ).length;
     const plan = state.toolPlan?.[toolReturns];
     const useTool = toolReturns < (state.toolPlan?.length ?? state.tools);
     const sourceMessageId = /sourceMessageId=([^。]+)/u.exec(wire)?.[1];
-    const output = useTool
-      ? [
-          {
-            type: 'function_call',
-            id: `item-${requests.length}`,
-            call_id: `call-${round}-${toolReturns}`,
-            name: plan?.name ?? 'cat_cafe_watcher_nudge',
-            arguments: JSON.stringify(
-              (typeof plan?.args === 'function' ? await plan.args({ body, wire }) : plan?.args) ?? {
-                sentence: `这里有一条具体先例，请回看原话。${state.argumentPadding ?? ''}`,
-                sourceMessageId,
-              },
-            ),
-            status: 'completed',
-          },
-        ]
-      : [
-          {
-            type: 'message',
-            id: `message-${requests.length}`,
-            role: 'assistant',
-            status: 'completed',
-            content: [
+    const toolArgs = useTool
+      ? ((typeof plan?.args === 'function' ? await plan.args({ body, wire }) : plan?.args) ?? {
+          sentence: `这里有一条具体先例，请回看原话。${state.argumentPadding ?? ''}`,
+          sourceMessageId,
+        })
+      : undefined;
+    const toolName = plan?.name ?? 'cat_cafe_watcher_nudge';
+    const output =
+      useTool && state.codeMode
+        ? [
+            {
+              type: 'custom_tool_call',
+              id: `item-${requests.length}`,
+              call_id: `call-${round}-${toolReturns}`,
+              namespace: 'functions',
+              name: 'exec',
+              input: [
+                'text({process:typeof process,require:typeof require,fetch:typeof fetch,shell:typeof tools.exec_command,patch:typeof tools.apply_patch,spawn:typeof tools.spawn_agent});',
+                'text({toolNames:ALL_TOOLS.map(entry=>entry.name).sort()});',
+                state.codeModeProbe ?? '',
+                `const entry=ALL_TOOLS.find(x=>x.name===${JSON.stringify(toolName)}||x.name.endsWith('__'+${JSON.stringify(toolName)}));`,
+                `text(await tools[entry.name](${JSON.stringify(toolArgs)}));`,
+              ].join(''),
+              status: 'completed',
+            },
+          ]
+        : useTool
+          ? [
               {
-                type: 'output_text',
-                text: JSON.stringify({
-                  v: 1,
-                  notes: `saved-note-${round}${state.notePadding ?? ''}`,
-                  consumedThrough: state.invalidCheckpoint ? 'not-the-delivered-window' : frontier,
-                  outcome: state.tools && !state.quiet ? 'nudged' : 'quiet',
-                }),
+                type: 'function_call',
+                id: `item-${requests.length}`,
+                call_id: `call-${round}-${toolReturns}`,
+                name: toolName,
+                arguments: JSON.stringify(toolArgs),
+                status: 'completed',
               },
-            ],
-          },
-        ];
+            ]
+          : [
+              {
+                type: 'message',
+                id: `message-${requests.length}`,
+                role: 'assistant',
+                status: 'completed',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: JSON.stringify({
+                      v: 1,
+                      notes: `saved-note-${round}${state.notePadding ?? ''}`,
+                      consumedThrough: state.invalidCheckpoint ? 'not-the-delivered-window' : frontier,
+                      outcome: state.tools && !state.quiet ? 'nudged' : 'quiet',
+                    }),
+                  },
+                ],
+              },
+            ];
+    if (plan?.nativeCall) {
+      output.splice(0, output.length, {
+        id: `item-${requests.length}`,
+        call_id: `call-${round}-${toolReturns}`,
+        status: 'completed',
+        ...plan.nativeCall,
+      });
+    }
     if (state.reasoningPadding)
       output.unshift({
         type: 'reasoning',
@@ -123,7 +154,7 @@ export async function watcherNativeFixture(w, fixtureOptions = {}) {
   const cleanup = await fixtureOptions.configure?.({ app, root, state });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const apiUrl = app.listeningOrigin;
-  const native = new CodexAgentService({ catId: 'codex', carrierMode: 'app_server' });
+  const native = new CodexAgentService({ catId: 'codex', carrierMode: 'app_server', model: fixtureOptions.model });
   const service = {
     boundedWatcherSessionCapability: () => native.boundedWatcherSessionCapability(),
     async *invoke(prompt, options) {
@@ -141,29 +172,34 @@ export async function watcherNativeFixture(w, fixtureOptions = {}) {
         },
         workingDirectory: root,
         agentCarrierSessionFactory: async (sessionOptions) => {
-          const wire = await createDirectAgentCarrierSession(
-            fixtureOptions.providerId
+          let carrierOptions = fixtureOptions.providerId
+            ? {
+                ...sessionOptions,
+                args: sessionOptions.args.map((arg) =>
+                  arg
+                    .replace(/^model_provider="custom"$/, `model_provider="${fixtureOptions.providerId}"`)
+                    .replace(/^model_providers\.custom\./, `model_providers.${fixtureOptions.providerId}.`),
+                ),
+              }
+            : sessionOptions;
+          // Match an account with code mode enabled; the watcher must still own its host policy.
+          if (state.codeMode) {
+            carrierOptions = {
+              ...carrierOptions,
+              args: [...carrierOptions.args, '--enable', 'code_mode', '--enable', 'code_mode_only'],
+            };
+          }
+          const wire = await createDirectAgentCarrierSession(carrierOptions, {
+            executionOwner: options.auditContext
               ? {
-                  ...sessionOptions,
-                  args: sessionOptions.args.map((arg) =>
-                    arg
-                      .replace(/^model_provider="custom"$/, `model_provider="${fixtureOptions.providerId}"`)
-                      .replace(/^model_providers\.custom\./, `model_providers.${fixtureOptions.providerId}.`),
-                  ),
+                  executionId: options.auditContext.executionId,
+                  invocationId: options.auditContext.invocationId,
+                  threadId: options.auditContext.threadId,
+                  userId: options.auditContext.userId,
+                  catId: options.auditContext.catId,
                 }
-              : sessionOptions,
-            {
-              executionOwner: options.auditContext
-                ? {
-                    executionId: options.auditContext.executionId,
-                    invocationId: options.auditContext.invocationId,
-                    threadId: options.auditContext.threadId,
-                    userId: options.auditContext.userId,
-                    catId: options.auditContext.catId,
-                  }
-                : undefined,
-            },
-          );
+              : undefined,
+          });
           state.nativeSupervisorPid = wire.pid;
           (state.nativeLaunchPids ??= []).push(wire.pid);
           return wire;

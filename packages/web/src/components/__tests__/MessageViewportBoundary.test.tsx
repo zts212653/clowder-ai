@@ -20,6 +20,7 @@ describe('MessageViewportBoundary', () => {
   });
 
   beforeEach(() => {
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -45,6 +46,7 @@ describe('MessageViewportBoundary', () => {
     act(() => root.unmount());
     container.remove();
     delete (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   it('lets Chromium skip layout and paint for offscreen message subtrees', () => {
@@ -71,6 +73,7 @@ describe('MessageViewportBoundary', () => {
     // Classic retains its original paint clip; both shells need a stable formatting context.
     const classNameFor = (presentation: 'classic' | 'v2' | null) => {
       if (presentation) window.localStorage.setItem('cat-cafe:shell-presentation', presentation);
+      else window.localStorage.removeItem('cat-cafe:shell-presentation');
       act(() => {
         root.render(
           <MessageViewportBoundary>
@@ -88,9 +91,9 @@ describe('MessageViewportBoundary', () => {
       );
     });
 
-    it('with no stored presentation it is classic', () => {
+    it('with no stored presentation it uses the v2 paint clip', () => {
       const className = classNameFor(null);
-      expect(className).not.toContain('[overflow-clip-margin:6px]');
+      expect(className).toContain('[overflow-clip-margin:6px]');
       expect(className).toContain('flow-root');
     });
 

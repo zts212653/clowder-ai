@@ -88,7 +88,11 @@ export function buildOpenCodeMcpSync(
       }>) {
         if (!s.enabled) continue;
         if (s.transport === 'streamableHttp') {
-          if (s.url) mcp[s.name] = toOpenCodeRemoteMcpEntry({ url: s.url, headers: s.headers });
+          if (s.url)
+            mcp[s.name] = toOpenCodeRemoteMcpEntry({
+              url: s.url,
+              headers: s.headers ? resolveEnvReferences(s.headers) : undefined,
+            });
           continue;
         }
         if (isManagedCatCafeSplit(s)) {

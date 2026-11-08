@@ -20,6 +20,7 @@ import {
   hydrateThreadWorkspaceState,
   useChatStore,
 } from '@/stores/chatStore';
+import { currentLocalWriteSeq } from '@/stores/local-write-clock';
 import { withoutUnprovenOutputLayout } from '@/stores/message-output-layout';
 import {
   findEarliestMessageByCursor,
@@ -27,8 +28,10 @@ import {
   getMessageTimelineOrderTime,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { currentRecoveryGeneration, isDecidedByRead } from '@/stores/thread-recovery';
 import { apiFetch } from '@/utils/api-client';
 import {
   CHAT_LAYOUT_CHANGED_EVENT,
@@ -64,6 +67,16 @@ import {
   saveThreadMessages as saveMessagesSnapshot,
   saveThreadActiveState,
 } from '@/utils/offline-store';
+import {
+  observeReadingRestore,
+  type ReadingCancelSource,
+  type ReadingDiagnosticContext,
+  type ReadingDiagnosticRequest,
+  type ReadingDiagnosticState,
+  type ReadingInputDiagnostic,
+  readingDiagnosticId,
+  recordReadingCancellation,
+} from '@/utils/reading-restore-diagnostics';
 import {
   captureMessageScrollAnchor,
   captureMessageScrollAnchorForElement,
@@ -508,11 +521,23 @@ function shouldPreferCurrentMessage(current: ChatMessageData, history: ChatMessa
   return false;
 }
 
-function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMessageData): ChatMessageData {
-  const merged = mergeSameIdHydrationFields(history, current);
+function isProcessingResponse(message: ChatMessageData): boolean {
+  return message.lifecycle?.kind === 'response' && message.lifecycle.status === 'processing';
+}
+
+function isCommittedResponse(message: ChatMessageData): boolean {
+  return message.lifecycle?.kind === 'response' && message.lifecycle.status !== 'processing';
+}
+
+function mergeSameIdHydrationMessage(
+  history: ChatMessageData,
+  current: ChatMessageData,
+  currentIsNewer = false,
+): ChatMessageData {
+  const merged = mergeSameIdHydrationFields(history, current, currentIsNewer);
   // A committed response is the server's final truth: its body and lifecycle win outright;
   // fields only this client holds (custody offers, blob URLs) still merge as usual.
-  if (history.lifecycle?.kind === 'response' && history.lifecycle.status !== 'processing') {
+  if (isCommittedResponse(history)) {
     return {
       ...merged,
       content: history.content,
@@ -524,11 +549,37 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
       isStreaming: false,
     };
   }
+  // PR-3a2: and a read taken while it was still processing never takes the terminal back.
+  if (isCommittedResponse(current) && isProcessingResponse(history)) return current;
+  // #6727 R4: the page holds the whole stream up to `streamNextIndex`, and the draft has no stream
+  // position: it neither fills nor extends that body (an empty text or tool list included), whether
+  // or not the page wrote after the read was issued. Only the lifecycle can be the read's.
+  if (isProcessingResponse(history) && ownsStreamedBody(current)) {
+    const lifecycle = currentIsNewer && current.lifecycle ? current.lifecycle : history.lifecycle;
+    return {
+      ...withStreamedBodyOf(merged, current),
+      lifecycle,
+      streamPrefix: 'complete',
+      streamNextIndex: current.streamNextIndex,
+    };
+  }
+  // PR-3a2: what the page wrote after this read was issued is newer than the read; the read only
+  // fills what the page lacks.
+  if (currentIsNewer)
+    return current.lifecycle || !history.lifecycle ? merged : { ...merged, lifecycle: history.lifecycle };
+  if (isProcessingResponse(history) && current.streamPrefix === 'incomplete') {
+    // The page lacks its start: the draft is what it can show until the terminal snapshot.
+    return { ...withStreamedBodyOf(merged, history), lifecycle: history.lifecycle, streamPrefix: 'incomplete' };
+  }
   return history.lifecycle ? { ...merged, lifecycle: history.lifecycle } : merged;
 }
 
-function mergeSameIdHydrationFields(history: ChatMessageData, current: ChatMessageData): ChatMessageData {
-  const preferCurrent = shouldPreferCurrentMessage(current, history);
+function mergeSameIdHydrationFields(
+  history: ChatMessageData,
+  current: ChatMessageData,
+  currentIsNewer = false,
+): ChatMessageData {
+  const preferCurrent = currentIsNewer || shouldPreferCurrentMessage(current, history);
   const preferred = preferCurrent ? current : history;
   const fallback = preferCurrent ? history : current;
   const toolEvents = pickRicherToolEvents(preferred.toolEvents, fallback.toolEvents);
@@ -592,33 +643,124 @@ function mergeSameIdHydrationFields(history: ChatMessageData, current: ChatMessa
   return withoutExtra;
 }
 
+/** What a replace read records when it is issued (PR-3a2): the recovery round and the write count. */
+export interface ReplaceReadIssue {
+  recoveryGeneration: number;
+  localWriteSeq: number;
+}
+
+export function issueReplaceRead(threadId: string): ReplaceReadIssue {
+  return { recoveryGeneration: currentRecoveryGeneration(threadId), localWriteSeq: currentLocalWriteSeq() };
+}
+
+export interface ReplaceReadTiming {
+  /** Recovery round of the thread when the read was issued. */
+  recoveryGeneration?: number;
+  /** Recovery round of the thread when the read landed (defaults to the issuing round). */
+  landedInGeneration?: number;
+  /** `local-write-clock` count when the read was issued. */
+  localWriteSeq?: number;
+}
+
+/**
+ * A pending copy decided by this read: the read's version. The page keeps what the read cannot know —
+ * that it lacks the start of a running reply (so live deltas still do not splice in) and metadata it
+ * wrote after the read was issued. A terminal the page holds is durable, so a read issued in the
+ * deciding round returns it too.
+ */
+function decidedVersion(history: ChatMessageData, current: ChatMessageData, metadataIsNewer: boolean): ChatMessageData {
+  return {
+    ...history,
+    ...(current.streamPrefix === 'incomplete' ? { streamPrefix: 'incomplete' as const } : {}),
+    ...(metadataIsNewer && current.metadata ? { metadata: current.metadata } : {}),
+  };
+}
+
+function withoutPendingMark(message: ChatMessageData): ChatMessageData {
+  if (message.cachedFrom !== 'unsubscribed') return message;
+  const kept = { ...message };
+  delete kept.cachedFrom;
+  delete kept.recoveryGeneration;
+  return kept;
+}
+
 /**
  * Fetched history and local records share one identity: the message id. A record the page
  * returns is merged with its local copy by id; a local record the page does not contain is
- * kept (optimistic sends, live rows, older pages), except IndexedDB copies — the server is
- * authoritative for those. Exported for unit testing.
+ * kept (optimistic sends, live rows, older pages), except copies the server decides: IndexedDB
+ * copies, and copies pending since a recovery round this read was issued in or after (PR-3a2,
+ * contract §3.11.2) — for those the read's version wins (keeping the page's stream-prefix verdict
+ * and a terminal), and a copy it lacks is unloaded (older pages are fetched again on scroll).
+ *
+ * PR-3a2 (#6727 R1/R2) adds the read's timing, per part of a message (`local-write-clock`):
+ * - a copy whose body the page wrote after the read was issued is newer than the read: the read
+ *   fills what it lacks and never takes it back; written after the round began, it is also proof the
+ *   message is alive, which decides a pending copy;
+ * - metadata the page wrote after the read was issued stays, whatever happens to the body; activity
+ *   clocks and streaming flags are bookkeeping and prove nothing;
+ * - a pending copy from a newer round than the read keeps its mark either way;
+ * - a read issued before the round it lands in brings back pending versions: records it adds are
+ *   marked for that round, so the read that decides the round can still unload them.
+ * Exported for unit testing.
  */
 export function mergeReplaceHydrationMessages(
   historyMsgs: ChatMessageData[],
   currentMsgs: ChatMessageData[],
+  options?: ReplaceReadTiming,
 ): ReplaceHydrationMergeResult {
   const historyIndexById = new Map(historyMsgs.map((message, index) => [message.id, index]));
   const mergedMsgs = [...historyMsgs];
+  const matched = new Set<number>();
   let preservedLocalCount = 0;
   let mergedByIdCount = 0;
+  const issued = options?.recoveryGeneration;
+  const landed = options?.landedInGeneration ?? issued;
+  const issuedAt = options?.localWriteSeq;
+  const bodyIsNewer = (message: ChatMessageData) =>
+    issuedAt !== undefined && (message.localBodyWriteSeq ?? 0) > issuedAt;
+  const metadataIsNewer = (message: ChatMessageData) =>
+    issuedAt !== undefined && (message.localMetadataWriteSeq ?? 0) > issuedAt;
+  const keepNewerMetadata = (merged: ChatMessageData, current: ChatMessageData) =>
+    metadataIsNewer(current) && current.metadata ? { ...merged, metadata: current.metadata } : merged;
 
   for (const currentMsg of currentMsgs) {
-    if (currentMsg.cachedFrom === 'idb') continue;
+    const historyIndex = historyIndexById.get(currentMsg.id);
+    if (historyIndex !== undefined) matched.add(historyIndex);
+    if (bodyIsNewer(currentMsg)) {
+      const kept = isDecidedByRead(currentMsg, issued) ? withoutPendingMark(currentMsg) : currentMsg;
+      if (historyIndex === undefined) {
+        mergedMsgs.push(kept);
+        preservedLocalCount++;
+      } else {
+        mergedMsgs[historyIndex] = mergeSameIdHydrationMessage(mergedMsgs[historyIndex]!, kept, true);
+        mergedByIdCount++;
+      }
+      continue;
+    }
+    if (isDecidedByRead(currentMsg, issued)) {
+      if (historyIndex !== undefined) {
+        mergedMsgs[historyIndex] = decidedVersion(mergedMsgs[historyIndex]!, currentMsg, metadataIsNewer(currentMsg));
+      }
+      continue;
+    }
     const msg = currentMsg;
-
-    const historyIndex = historyIndexById.get(msg.id);
     if (historyIndex !== undefined) {
-      mergedMsgs[historyIndex] = mergeSameIdHydrationMessage(mergedMsgs[historyIndex]!, msg);
+      const merged = keepNewerMetadata(mergeSameIdHydrationMessage(mergedMsgs[historyIndex]!, msg), msg);
+      mergedMsgs[historyIndex] =
+        msg.cachedFrom === 'unsubscribed'
+          ? { ...merged, cachedFrom: 'unsubscribed', recoveryGeneration: msg.recoveryGeneration }
+          : merged;
       mergedByIdCount++;
       continue;
     }
     mergedMsgs.push(msg);
     preservedLocalCount++;
+  }
+  if (issued !== undefined && landed !== undefined && issued < landed) {
+    for (let index = 0; index < historyMsgs.length; index++) {
+      if (matched.has(index)) continue;
+      mergedMsgs[index] = { ...mergedMsgs[index]!, cachedFrom: 'unsubscribed', recoveryGeneration: landed };
+    }
   }
 
   return { messages: mergedMsgs.map(withoutUnprovenOutputLayout), stats: { preservedLocalCount, mergedByIdCount } };
@@ -686,9 +828,16 @@ export function useChatHistory(threadId: string) {
   const restoreWritesRef = useRef(new ChatRestoreWriteCheckpoint());
   const readingSettlementRef = useRef<ChatReadingInputFence | null>(null);
   const navigationHighlightRef = useRef<(() => void) | undefined>(undefined);
-  const readingRefreshRef = useRef<{ resolve: (status: ReadingRefreshStatus) => void } | null>(null);
+  const readingOwnerIdRef = useRef<string | undefined>(undefined);
+  readingOwnerIdRef.current ??= readingDiagnosticId();
+  const readingOwnerMountedRef = useRef<string | null>(null);
+  const readingRefreshRef = useRef<{
+    resolve: (status: ReadingRefreshStatus) => void;
+    diagnostic?: ReadingDiagnosticContext;
+  } | null>(null);
   const readingReceiptRef = useRef<{
     snapshot: ChatReadingSnapshot;
+    diagnostic?: ReadingDiagnosticContext;
     resolve: (receipt: ChatReadingRestoreReceipt) => void;
   } | null>(null);
   const navigationReceiptRef = useRef<{
@@ -765,13 +914,37 @@ export function useChatHistory(threadId: string) {
     userScrollUpRef.current = false;
   }, []);
 
+  const readingDiagnosticState = useCallback(
+    (context: ReadingDiagnosticContext): ReadingDiagnosticState => {
+      const restorePending = readingReceiptRef.current?.diagnostic === context;
+      return {
+        readerMounted: readingOwnerMountedRef.current === threadId,
+        refreshPending: readingRefreshRef.current?.diagnostic === context,
+        restorePending,
+        settlementPending: restorePending && readingSettlementRef.current !== null,
+      };
+    },
+    [threadId],
+  );
+
   const cancelPendingRestore = useCallback(
     (
+      cancelSource: ReadingCancelSource,
       preserveUserGesture = false,
       preserveReadingReceipt = false,
       preserveNavigationReceipt = false,
       preserveRestoreWrites = false,
+      input?: ReadingInputDiagnostic,
     ) => {
+      recordReadingCancellation(
+        [
+          readingRefreshRef.current?.diagnostic,
+          preserveReadingReceipt ? undefined : readingReceiptRef.current?.diagnostic,
+        ],
+        readingDiagnosticState,
+        cancelSource,
+        input,
+      );
       readingRefreshRef.current?.resolve('interrupted');
       readingRefreshRef.current = null;
       if (!preserveRestoreWrites) restoreWritesRef.current.invalidate();
@@ -794,7 +967,7 @@ export function useChatHistory(threadId: string) {
       }
       cancelPendingFrame();
     },
-    [cancelPendingFrame, clearUserScrollIntent],
+    [cancelPendingFrame, clearUserScrollIntent, readingDiagnosticState],
   );
 
   const followBottomAnchor = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -817,9 +990,16 @@ export function useChatHistory(threadId: string) {
   }, []);
 
   const markScrollIntent = useCallback(
-    (upward: boolean, pointerHeld = false) => {
+    (upward: boolean, pointerHeld = false, diagnosticInput?: ReadingInputDiagnostic) => {
       readingRestoreRef.current = null;
-      cancelPendingRestore();
+      cancelPendingRestore(
+        diagnosticInput ? 'native_input' : 'rail_input',
+        false,
+        false,
+        false,
+        false,
+        diagnosticInput,
+      );
       // The gesture revokes the old restore, but subsequent layout changes still
       // follow what is visible now. Refresh the existing anchor before a late
       // history response can reuse the canceled position.
@@ -869,7 +1049,7 @@ export function useChatHistory(threadId: string) {
     const el = scrollContainerRef.current;
     if (!el || useChatStore.getState().currentThreadId !== currentThread) return;
 
-    cancelPendingRestore();
+    cancelPendingRestore('jump_latest');
     readingRestoreRef.current = null;
     userScrollUpRef.current = false;
     saveChatScrollState(currentThread, {
@@ -882,7 +1062,7 @@ export function useChatHistory(threadId: string) {
   const scheduleRestore = useCallback(
     (initialSaved: SavedScrollState, options?: { beforePaint: boolean }) => {
       let saved = initialSaved;
-      cancelPendingRestore(false, true, false, true);
+      cancelPendingRestore('restore_schedule', false, true, false, true);
       restoreFrameKindRef.current = 'restore';
       const generation = restoreGenerationRef.current;
       let framesRemaining = MAX_RESTORE_FRAMES;
@@ -894,7 +1074,7 @@ export function useChatHistory(threadId: string) {
         // Stale guard: if thread switched before cleanup cancelled us, no-op.
         if (generation !== restoreGenerationRef.current) return;
         if (threadIdRef.current !== scheduledForThread) {
-          cancelPendingRestore();
+          cancelPendingRestore('restore_thread_change');
           return;
         }
 
@@ -1024,7 +1204,7 @@ export function useChatHistory(threadId: string) {
   }, [threadId]);
 
   const restoreReadingPosition = useCallback(
-    (snapshot: ChatReadingSnapshot): Promise<ChatReadingRestoreReceipt> => {
+    (snapshot: ChatReadingSnapshot, diagnostic?: ReadingDiagnosticContext): Promise<ChatReadingRestoreReceipt> => {
       if (
         snapshot.threadId !== threadIdRef.current ||
         snapshot.threadId !== threadId ||
@@ -1033,7 +1213,7 @@ export function useChatHistory(threadId: string) {
       ) {
         return Promise.resolve({ status: 'unavailable' });
       }
-      cancelPendingRestore();
+      cancelPendingRestore('restore_request');
       const saved = structuredClone(snapshot.position);
       userScrollUpRef.current = saved.anchor === 'offset';
       userScrollIntentRef.current = false;
@@ -1041,7 +1221,7 @@ export function useChatHistory(threadId: string) {
       setReadingRestoreRequest((request) => request + 1);
       saveChatScrollState(threadId, saved);
       return new Promise((resolve) => {
-        readingReceiptRef.current = { snapshot: { threadId, position: saved }, resolve };
+        readingReceiptRef.current = { snapshot: { threadId, position: saved }, resolve, diagnostic };
         scheduleRestore(saved);
       });
     },
@@ -1054,16 +1234,20 @@ export function useChatHistory(threadId: string) {
   }, [captureReadingPosition]);
 
   const restoreCapturedReadingRef = useCallback(
-    (ref: ChatReadingRef, signal?: AbortSignal): Promise<ChatReadingRestoreReceipt> => {
+    (
+      ref: ChatReadingRef,
+      signal?: AbortSignal,
+      diagnostic?: ReadingDiagnosticContext,
+    ): Promise<ChatReadingRestoreReceipt> => {
       if (signal?.aborted) return Promise.resolve({ status: 'interrupted' });
       const snapshot = readChatReadingRef(ref);
       if (!snapshot) return Promise.resolve({ status: 'unavailable' });
-      const receipt = restoreReadingPosition(snapshot);
+      const receipt = restoreReadingPosition(snapshot, diagnostic);
       const owned = readingReceiptRef.current;
       return bindReadingAbort(receipt, signal, () => {
         if (!owned || readingReceiptRef.current !== owned) return;
         readingRestoreRef.current = null;
-        cancelPendingRestore();
+        cancelPendingRestore('restore_signal_abort');
         const el = scrollContainerRef.current;
         if (el && useChatStore.getState().currentThreadId === threadId)
           rememberScrollState(threadId, el, userScrollUpRef.current);
@@ -1092,7 +1276,7 @@ export function useChatHistory(threadId: string) {
       const correct = () => {
         if (generation !== restoreGenerationRef.current) return;
         if (threadIdRef.current !== scheduledForThread) {
-          cancelPendingRestore();
+          cancelPendingRestore('correction_thread_change');
           return;
         }
         restoreFrameRef.current = null;
@@ -1141,7 +1325,7 @@ export function useChatHistory(threadId: string) {
       const pending = navigationReceiptRef.current;
       const preserve =
         preserveMessageReceipt && pending?.threadId === threadIdRef.current && pending.messageId === messageId;
-      cancelPendingRestore(false, false, preserve);
+      cancelPendingRestore('message_navigation', false, false, preserve);
       restoreFrameKindRef.current = 'navigation';
       readingRestoreRef.current = null;
       const generation = restoreGenerationRef.current;
@@ -1156,7 +1340,7 @@ export function useChatHistory(threadId: string) {
       const tick = () => {
         if (generation !== restoreGenerationRef.current) return;
         if (threadIdRef.current !== scheduledForThread) {
-          cancelPendingRestore();
+          cancelPendingRestore('navigation_thread_change');
           return;
         }
         const el = scrollContainerRef.current;
@@ -1174,7 +1358,7 @@ export function useChatHistory(threadId: string) {
           const settle = () => {
             if (generation !== restoreGenerationRef.current) return;
             if (threadIdRef.current !== scheduledForThread) {
-              cancelPendingRestore();
+              cancelPendingRestore('navigation_thread_change');
               return;
             }
             const result = advanceNavigationSettle(
@@ -1242,7 +1426,7 @@ export function useChatHistory(threadId: string) {
         scheduleScrollToMessage(messageId, false, behavior);
         return true;
       }
-      cancelPendingRestore();
+      cancelPendingRestore('inactive_jump');
       return scrollToMessage(messageId, scrollContainerRef.current, behavior);
     },
     [threadId, scheduleScrollToMessage, cancelPendingRestore],
@@ -1259,7 +1443,7 @@ export function useChatHistory(threadId: string) {
         useChatStore.getState().currentThreadId !== threadId
       )
         return Promise.resolve({ status: 'unavailable' });
-      cancelPendingRestore();
+      cancelPendingRestore('navigation_request');
       const receipt = new Promise<ChatMessageNavigationReceipt>((resolve) => {
         const loaded = useChatStore
           .getState()
@@ -1278,7 +1462,7 @@ export function useChatHistory(threadId: string) {
       });
       const owned = navigationReceiptRef.current;
       return bindReadingAbort(receipt, signal, () => {
-        if (owned && navigationReceiptRef.current === owned) cancelPendingRestore();
+        if (owned && navigationReceiptRef.current === owned) cancelPendingRestore('navigation_signal_abort');
       });
     },
     [threadId, cancelPendingRestore, scheduleScrollToMessage],
@@ -1318,7 +1502,7 @@ export function useChatHistory(threadId: string) {
   // Fetch history page from API
   // When replace=true, clears existing messages before setting (used for force-refresh).
   const performFetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean }) => {
+    async (cursor?: string, options?: { replace?: boolean; afterCurrentGet?: boolean }) => {
       if (loadingRef.current) return;
       const controller = abortRef.current;
       if (!controller) return;
@@ -1333,9 +1517,15 @@ export function useChatHistory(threadId: string) {
         const params = new URLSearchParams({ limit: String(limit) });
         if (cursor) params.set('before', cursor);
         params.set('threadId', fetchForThread);
-        const res = await apiFetch(`/api/messages?${params}`, {
-          signal: controller.signal,
-        });
+        // PR-3a2: the recovery round and write count this read is issued at decide what it may change.
+        const issue = issueReplaceRead(fetchForThread);
+        // A catch-up must be a read issued now: joining a same-URL GET already in flight would
+        // reuse a snapshot taken before the room join it is meant to cover (PR-3a, contract 3.2).
+        const res = await apiFetch(
+          `/api/messages?${params}`,
+          { signal: controller.signal },
+          options?.afterCurrentGet ? { afterCurrentGet: true } : undefined,
+        );
         if (!res.ok) return;
         // Stale check: discard if the request was superseded while the response body was in flight.
         if (isStaleThreadRequest(controller, fetchForThread)) return;
@@ -1454,7 +1644,10 @@ export function useChatHistory(threadId: string) {
           const currentState = useChatStore.getState();
           const targetProjection =
             currentState.currentThreadId === fetchForThread ? currentState : currentState.threadStates[fetchForThread];
-          const mergeResult = mergeReplaceHydrationMessages(historyMsgs, targetProjection?.messages ?? []);
+          const mergeResult = mergeReplaceHydrationMessages(historyMsgs, targetProjection?.messages ?? [], {
+            ...issue,
+            landedInGeneration: currentRecoveryGeneration(fetchForThread),
+          });
           const mergedMsgs = mergeResult.messages;
           recordDebugEvent({
             event: 'history_replace',
@@ -1522,7 +1715,7 @@ export function useChatHistory(threadId: string) {
   );
 
   const fetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number }) => {
+    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number; afterCurrentGet?: boolean }) => {
       const freshnessKey = typeof options?.freshnessToken === 'number' ? `:fresh:${options.freshnessToken}` : '';
       const requestKey = `messages:${cursor ?? 'latest'}:${options?.replace ? 'replace' : 'prepend'}${freshnessKey}`;
       while (true) {
@@ -1531,6 +1724,9 @@ export function useChatHistory(threadId: string) {
           consumerId: historyConsumerId,
           requestKey,
           task: () => performFetchHistory(cursor, options),
+          // A read issued after the current one also waits for every surface's running read of
+          // this thread, instead of being turned away by this surface's `loadingRef` (contract 3.2).
+          startWhenIdle: options?.afterCurrentGet === true,
         });
         if (result.status === 'completed') return result.value;
 
@@ -1548,16 +1744,16 @@ export function useChatHistory(threadId: string) {
   // A search admission checks authority; this original reader still refreshes the
   // actual transcript before choosing a DOM target from its cache.
   const refreshReadingHistory = useCallback(
-    async (signal?: AbortSignal): Promise<ReadingRefreshStatus> => {
+    async (signal?: AbortSignal, diagnostic?: ReadingDiagnosticContext): Promise<ReadingRefreshStatus> => {
       if (signal?.aborted) return 'interrupted';
       if (threadIdRef.current !== threadId || useChatStore.getState().currentThreadId !== threadId)
         return 'unavailable';
-      cancelPendingRestore();
+      cancelPendingRestore('refresh_request');
       readingRestoreRef.current = null;
       restoreFrameKindRef.current = 'navigation';
       const generation = restoreGenerationRef.current;
       const receipt = new Promise<ReadingRefreshStatus>((resolve) => {
-        const operation = { resolve };
+        const operation = { resolve, diagnostic };
         readingRefreshRef.current = operation;
         const finish = (refreshed: boolean | undefined) => {
           if (readingRefreshRef.current !== operation) return;
@@ -1575,7 +1771,7 @@ export function useChatHistory(threadId: string) {
       });
       const owned = readingRefreshRef.current;
       return bindReadingAbort(receipt, signal, () => {
-        if (owned && readingRefreshRef.current === owned) cancelPendingRestore();
+        if (owned && readingRefreshRef.current === owned) cancelPendingRestore('refresh_signal_abort');
       });
     },
     [cancelPendingRestore, fetchHistory, threadId],
@@ -1599,15 +1795,22 @@ export function useChatHistory(threadId: string) {
     async (
       ref: ChatReadingRef,
       signal?: AbortSignal,
-      options?: { refresh?: boolean },
+      options?: { refresh?: boolean; diagnostic?: ReadingDiagnosticRequest },
     ): Promise<ChatReadingRestoreReceipt> => {
-      if (options?.refresh) {
-        const status = await refreshReadingHistory(signal);
-        if (status !== 'ready') return { status };
-      }
-      return restoreCapturedReadingRef(ref, signal);
+      const readerId = readingOwnerIdRef.current;
+      const diagnostic =
+        options?.diagnostic && readerId
+          ? { bridgeId: options.diagnostic.bridgeId, operationId: options.diagnostic.operationId, readerId }
+          : undefined;
+      return observeReadingRestore(diagnostic, readingDiagnosticState, async () => {
+        if (options?.refresh) {
+          const status = await refreshReadingHistory(signal, diagnostic);
+          if (status !== 'ready') return { status };
+        }
+        return restoreCapturedReadingRef(ref, signal, diagnostic);
+      });
     },
-    [restoreCapturedReadingRef, refreshReadingHistory],
+    [restoreCapturedReadingRef, refreshReadingHistory, readingDiagnosticState],
   );
 
   const fetchTasks = useCallback(async () => {
@@ -1795,6 +1998,16 @@ export function useChatHistory(threadId: string) {
     const cached = taskCacheByThread.get(threadId);
     setTasks(cached ?? [], cached ? threadId : undefined);
   }, [threadId, setTasks]);
+
+  // This observer precedes bootstrap cleanup. Dependency-only re-registration
+  // leaves it mounted; thread exit/unmount retires it before that same cleanup.
+  // It does not cancel, restart or own any restore.
+  useLayoutEffect(() => {
+    readingOwnerMountedRef.current = threadId;
+    return () => {
+      readingOwnerMountedRef.current = null;
+    };
+  }, [threadId]);
 
   // Admit the incoming history before its initial layout restore. The asynchronous
   // fetch stays nonblocking; outgoing restore cleanup must precede incoming paint.
@@ -1986,7 +2199,7 @@ export function useChatHistory(threadId: string) {
 
     return () => {
       // Reading state is saved continuously while this surface owns the thread.
-      cancelPendingRestore();
+      cancelPendingRestore('bootstrap_cleanup');
       controller.abort();
       unregisterHistoryConsumer();
     };
@@ -2022,12 +2235,13 @@ export function useChatHistory(threadId: string) {
     // on stale catchUpVersion (already-handled trigger) → unnecessary full-history
     // reload + state churn on routine navigation.
     if (catchUpVersion <= consumedCatchUpVersion) return;
-    // Cloud R3 P1 fix (2026-05-02): retry on skipped/failed fetch with exponential
-    // backoff. Without retry, fetchHistory's `loadingRef.current` early-out (when
-    // another fetch is in flight) returns undefined; my `result !== true` guard
-    // correctly skips ack, but no retry was scheduled — pending hangs forever
-    // if no future event triggers another version bump (e.g. dropped tail packet
-    // on quiet thread). 3 retries with 1s/2s/4s backoff cap.
+    // Cloud R3 P1 fix (2026-05-02): retry on a failed fetch with exponential
+    // backoff; without it the pending gap hangs if no future event bumps the
+    // version (e.g. dropped tail packet on quiet thread). 3 retries, 1s/2s/4s.
+    // A read already in flight is not a failure: `afterCurrentGet` makes the
+    // admission start this read only once every surface's running read of the
+    // thread has settled (PR-3a, Astra P1-4: a 9s bootstrap used to spend all
+    // three retries on "busy" and drop the post-join read).
     //
     // Cloud R4 P1 fix (2026-05-02): retry exhaustion does NOT mark consumed.
     // Marking consumed on exhaustion permanently gates the effect on quiet
@@ -2048,7 +2262,11 @@ export function useChatHistory(threadId: string) {
       // advance lastSeq to capturedTarget and keep newer pending for next ack.
       const targetAtStart = useChatStore.getState().pendingCatchUpTargetSeqByThread[threadId];
       try {
-        const result = await fetchHistory(undefined, { replace: true, freshnessToken: catchUpVersion });
+        const result = await fetchHistory(undefined, {
+          replace: true,
+          freshnessToken: catchUpVersion,
+          afterCurrentGet: true,
+        });
         if (cancelled) return;
         if (result === true) {
           // Success: ack catchup target + mark consumed (gates remount re-fire)
@@ -2058,7 +2276,7 @@ export function useChatHistory(threadId: string) {
           }
           return;
         }
-        // Skipped (loadingRef early-out / !res.ok / stale thread / abort) — retry
+        // Failed or discarded (!res.ok / stale thread / abort) — retry
         if (retries < MAX_RETRIES) {
           retries++;
           const backoff = 1000 * 2 ** (retries - 1); // 1s, 2s, 4s
@@ -2329,7 +2547,7 @@ export function useChatHistory(threadId: string) {
           // A completed page did not advance the authoritative cursor. Do not
           // loop, or manufacture an exact return over the newest page.
           readingRestoreRef.current = null;
-          cancelPendingRestore(false, true);
+          cancelPendingRestore('history_no_progress', false, true);
           finishReadingRestore();
           return;
         }
@@ -2337,7 +2555,7 @@ export function useChatHistory(threadId: string) {
         void fetchHistory(cursor).then((fetched) => {
           if (fetched !== false || readingRestoreRef.current !== pending) return;
           readingRestoreRef.current = null;
-          cancelPendingRestore(false, true);
+          cancelPendingRestore('history_failed', false, true);
           finishReadingRestore();
         });
         return;
@@ -2388,7 +2606,7 @@ export function useChatHistory(threadId: string) {
         const recovery = inputAt === undefined ? undefined : restoreWritesRef.current.recoveryPosition(el, inputAt);
         if (recovery && !tryRestoreSavedScrollState(el, recovery)) return;
         if (captureReadingPosition()) {
-          cancelPendingRestore(false, false, false, inputAt !== undefined);
+          cancelPendingRestore('reading_capture', false, false, false, inputAt !== undefined);
           readingRestoreRef.current = null;
           if (inputAt !== undefined) restoreWritesRef.current.consumeInput(inputAt);
         }
@@ -2399,7 +2617,9 @@ export function useChatHistory(threadId: string) {
         const pending = readingRestoreRef.current;
         // Automatic measurement/mounting keeps the saved intent. A widget's
         // user-click viewport hint instead takes the interrupting path below.
-        if (pending && restoreFrameKindRef.current === 'restore') scheduleRestore(pending.saved);
+        // ResizeObserver reports layout right before paint; a pending restore that
+        // waits for RAF would paint the incoming thread at the stale offset once.
+        if (pending && restoreFrameKindRef.current === 'restore') scheduleRestore(pending.saved, { beforePaint });
         else scheduleCurrentAnchorCorrection(beforePaint);
         return;
       }
@@ -2412,7 +2632,7 @@ export function useChatHistory(threadId: string) {
         !restoreWritesRef.current.ownsMeasurement(viewportAnchor.inputOccurredAt)
       )
         return;
-      cancelPendingRestore(false, false, false, viewportAnchor.inputOccurredAt !== undefined);
+      cancelPendingRestore('viewport_anchor', false, false, false, viewportAnchor.inputOccurredAt !== undefined);
       readingRestoreRef.current = null;
 
       if (el.contains(viewportAnchor.element)) {
@@ -2456,20 +2676,21 @@ export function useChatHistory(threadId: string) {
     let touchY: number | null = null;
     let pointerY: number | null = null;
     const handleWheel = (event: WheelEvent) => {
-      markScrollIntent(event.deltaY < 0);
+      markScrollIntent(event.deltaY < 0, false, { inputKind: 'wheel', inputTrusted: event.isTrusted });
     };
     const handleTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const nextY = event.touches[0]?.clientY ?? null;
-      if (touchY !== null && nextY !== null && nextY !== touchY) markScrollIntent(nextY > touchY);
+      if (touchY !== null && nextY !== null && nextY !== touchY)
+        markScrollIntent(nextY > touchY, false, { inputKind: 'touch', inputTrusted: event.isTrusted });
       touchY = nextY;
     };
     const handlePointerDown = (event: PointerEvent) => {
       // Direction is not known until native movement; conservatively suspend
       // bottom follow while held. resolveScrollAnchor still measures direction.
-      markScrollIntent(true, true);
+      markScrollIntent(true, true, { inputKind: 'pointer', inputTrusted: event.isTrusted });
       pointerY = event.clientY;
     };
     const handlePointerMove = (event: PointerEvent) => {
@@ -2480,7 +2701,8 @@ export function useChatHistory(threadId: string) {
         return;
       }
       if (pointerY === null) return;
-      if (event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY, true);
+      if (event.clientY !== pointerY)
+        markScrollIntent(event.clientY < pointerY, true, { inputKind: 'pointer', inputTrusted: event.isTrusted });
       pointerY = event.clientY;
     };
     const finishNativeScroll = () => {
@@ -2584,7 +2806,7 @@ export function useChatHistory(threadId: string) {
         event.key === 'End' ||
         (event.key === ' ' && !event.shiftKey);
       if (upward || downward) {
-        markScrollIntent(upward);
+        markScrollIntent(upward, false, { inputKind: 'key', inputTrusted: event.isTrusted });
         const input = userScrollInputRef.current;
         const targetsChat =
           target instanceof Node &&
@@ -2661,7 +2883,10 @@ export function useChatHistory(threadId: string) {
       if (useChatStore.getState().currentThreadId !== threadIdRef.current) return;
       const messageAnchor = captureMessageScrollAnchorForElement(el, disclosure);
       if (!messageAnchor) return;
-      cancelPendingRestore();
+      cancelPendingRestore('reading_disclosure', false, false, false, false, {
+        inputKind: 'click',
+        inputTrusted: event.isTrusted,
+      });
       saveChatScrollState(threadIdRef.current, { top: el.scrollTop, anchor: 'offset', messageAnchor });
     },
     [cancelPendingRestore],
@@ -2677,7 +2902,7 @@ export function useChatHistory(threadId: string) {
     if (!el || threadIdRef.current !== threadId) return null;
     const ownsReadingState = useChatStore.getState().currentThreadId === threadId;
     if (ownsReadingState) markScrollIntent(false);
-    else cancelPendingRestore();
+    else cancelPendingRestore('rail_input');
     const gesture = Symbol('chat-user-scroll');
     userScrollGestureRef.current = gesture;
     return {
@@ -2692,7 +2917,7 @@ export function useChatHistory(threadId: string) {
           return false;
         }
         const boundedTop = Math.max(0, Math.min(top, Math.max(0, el.scrollHeight - el.clientHeight)));
-        cancelPendingRestore(true);
+        cancelPendingRestore('rail_owner_change', true);
         if (ownsReadingState) {
           userScrollUpRef.current = boundedTop < el.scrollTop;
           userScrollIntentRef.current = true;

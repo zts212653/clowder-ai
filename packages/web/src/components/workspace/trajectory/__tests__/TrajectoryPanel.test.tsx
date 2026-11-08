@@ -155,12 +155,15 @@ describe('F299 trajectory search navigation', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Retained classic contract; newer presentation cases select their mode explicitly.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 

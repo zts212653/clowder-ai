@@ -175,8 +175,15 @@ const BODY_PROJECTORS = new Map<string, BodyProjector>([
   ['rich_block', writeRichBlockEvent],
 ]);
 
-/** Body subtypes write into exactly the message the event names, through the named writer. */
-function projectBodySystemInfo(parsed: Record<string, unknown>, msg: SystemInfoEvent, port: SystemInfoPort): boolean {
+/**
+ * Body subtypes write into exactly the message the event names, through the named writer. Also used
+ * by the stream replay (PR-3a2) to rebuild a response's body without its status side effects.
+ */
+export function projectBodySystemInfo(
+  parsed: Record<string, unknown>,
+  msg: SystemInfoEvent,
+  port: SystemInfoPort,
+): boolean {
   const project = typeof parsed.type === 'string' ? BODY_PROJECTORS.get(parsed.type) : undefined;
   if (!project) return false;
   project(parsed, msg, port);

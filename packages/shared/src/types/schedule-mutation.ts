@@ -34,13 +34,21 @@ export type ScheduleMutation =
       taskId: string;
       expectedFingerprint: string;
       taskSnapshot: ScheduleMutationTaskDefinition;
+    }
+  | {
+      kind: 'update';
+      taskId: string;
+      expectedFingerprint: string;
+      taskSnapshot: ScheduleMutationTaskDefinition;
+      params: Record<string, unknown>;
     };
 
 export type ScheduleMutationProposalStatus = 'pending' | 'applying' | 'approved' | 'rejected';
 
 export type ScheduleMutationEffectCheckpoint =
   | { kind: 'create'; taskId: string; appliedAt: number }
-  | { kind: 'delete'; taskId: string; expectedFingerprint: string; deletedAt: number };
+  | { kind: 'delete'; taskId: string; expectedFingerprint: string; deletedAt: number }
+  | { kind: 'update'; taskId: string; expectedFingerprint: string; resultingFingerprint: string; appliedAt: number };
 
 export interface ScheduleMutationProposal {
   proposalId: string;
@@ -59,7 +67,7 @@ export interface ScheduleMutationProposal {
   rejectionReason?: string;
 }
 
-export type ScheduleMutationAuditAction = 'create' | 'pause' | 'resume' | 'delete';
+export type ScheduleMutationAuditAction = 'create' | 'pause' | 'resume' | 'delete' | 'update';
 
 export interface ScheduleMutationAuditEntry {
   auditId: string;

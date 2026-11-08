@@ -1,28 +1,14 @@
 // @vitest-environment node
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { typographyViolations } from './f190-typography-audit';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 function readSrc(relativePath: string): string {
   return readFileSync(resolve(testDir, '..', relativePath), 'utf8');
-}
-
-function collectSourceFiles(root: string): string[] {
-  const files: string[] = [];
-  for (const entry of readdirSync(root)) {
-    const full = resolve(root, entry);
-    if (full.includes('/__tests__/')) continue;
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      files.push(...collectSourceFiles(full));
-    } else if (/\.(ts|tsx|css)$/.test(entry)) {
-      files.push(full);
-    }
-  }
-  return files;
 }
 
 interface ModalOverlayCandidate {
@@ -471,21 +457,7 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
 describe('F190 typography guard — no hardcoded font sizes in console scope', () => {
   it('src-wide guard: no raw pixel font definitions outside typography tokens', () => {
     const srcRoot = resolve(testDir, '..', '..');
-    /* F056: dev/ tools (OklchTuner) intentionally use dense px sizes */
-    const DEV_EXCLUDE = /[\\/]dev[\\/]/;
-    const violations = collectSourceFiles(srcRoot)
-      .filter((file) => !DEV_EXCLUDE.test(file))
-      .flatMap((file) => {
-        const src = readFileSync(file, 'utf8');
-        const matches = [
-          ...(src.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []),
-          ...(src.match(/fontSize:\s*['"]?\d/g) ?? []),
-          ...(src.match(/fontSize=\{\d/g) ?? []),
-          ...(src.match(/font-size:\s*(?:\d|0\.)/g) ?? []),
-        ];
-        return matches.map((match) => `${file.replace(srcRoot, 'src')}: ${match}`);
-      });
-    expect(violations).toEqual([]);
+    expect(typographyViolations(srcRoot)).toEqual([]);
   });
 });
 
