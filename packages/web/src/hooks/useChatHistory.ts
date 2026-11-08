@@ -102,7 +102,7 @@ import {
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
-import { acknowledgeThreadHistoryWatermark } from './thread-history-watermark';
+import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -154,6 +154,8 @@ export interface ChatUserScrollGesture {
 }
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
+// Sparse publication recovery must not move the ordinary older-page boundary.
+const historyPageCursorByThread = new Map<string, string>();
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 const MAX_RESTORE_FRAMES = 90;
 // Native smooth scroll can exceed 90 frames on high-refresh displays; bound elapsed time instead.
@@ -1516,6 +1518,8 @@ export function useChatHistory(threadId: string) {
         const limit = isExport ? EXPORT_LIMIT : HISTORY_PAGE_SIZE;
         const params = new URLSearchParams({ limit: String(limit) });
         if (cursor) params.set('before', cursor);
+        const appliedWatermark = readThreadHistoryWatermark(fetchForThread);
+        if (!cursor && appliedWatermark !== undefined) params.set('afterVisibility', appliedWatermark ?? '');
         params.set('threadId', fetchForThread);
         // PR-3a2: the recovery round and write count this read is issued at decide what it may change.
         const issue = issueReplaceRead(fetchForThread);
@@ -1668,6 +1672,12 @@ export function useChatHistory(threadId: string) {
           // 响应覆盖而不是合并。
           hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          if (
+            typeof data.historyPageCursor === 'string' &&
+            (cursor || !targetProjection?.messages.length || !historyPageCursorByThread.has(fetchForThread))
+          ) {
+            historyPageCursorByThread.set(fetchForThread, data.historyPageCursor);
+          }
           if (!cursor) acknowledgeThreadHistoryWatermark(fetchForThread, data.historyWatermark);
           return true;
         }
@@ -1685,6 +1695,12 @@ export function useChatHistory(threadId: string) {
         // hasMore propagates older-history pagination state.
         replaceThreadMessages(fetchForThread, union, data.hasMore ?? false);
         restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+        if (
+          typeof data.historyPageCursor === 'string' &&
+          (cursor || !beforePrepend.length || !historyPageCursorByThread.has(fetchForThread))
+        ) {
+          historyPageCursorByThread.set(fetchForThread, data.historyPageCursor);
+        }
         // F164: Snapshot fetched messages to IndexedDB (fire-and-forget)
         const snapshotState = useChatStore.getState();
         if (snapshotState.currentThreadId === fetchForThread) {
@@ -2497,7 +2513,10 @@ export function useChatHistory(threadId: string) {
       })
     ) {
       const oldest = findEarliestMessageByCursor(messages);
-      if (oldest) void fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`);
+      if (oldest)
+        void fetchHistory(
+          historyPageCursorByThread.get(threadId) ?? `${getMessageTimelineCursorTime(oldest)}:${oldest.id}`,
+        );
     }
   }, [
     messages,
@@ -2532,7 +2551,12 @@ export function useChatHistory(threadId: string) {
     const anchor = pending.saved.anchor === 'offset' ? pending.saved.messageAnchor : undefined;
     if (anchor && !resolveChatReadingAnchor(anchor, messages)) {
       const oldest = messages.find((message) => !message.id.startsWith('draft-'));
-      const oldestOrderAt = oldest ? getMessageTimelineOrderTime(oldest) : undefined;
+      const pageCursor = historyPageCursorByThread.get(threadId);
+      const oldestOrderAt = pageCursor
+        ? Number(pageCursor.slice(0, pageCursor.indexOf(':')))
+        : oldest
+          ? getMessageTimelineOrderTime(oldest)
+          : undefined;
       // Match the history owner's (timeline score, id) cursor, including score ties.
       const needsOlder =
         hasMore &&
@@ -2542,7 +2566,7 @@ export function useChatHistory(threadId: string) {
         (oldestOrderAt > anchor.timelineOrderAt ||
           (oldestOrderAt === anchor.timelineOrderAt && oldest.id > anchor.messageId));
       if (needsOlder) {
-        const cursor = `${getMessageTimelineOrderTime(oldest)}:${oldest.id}`;
+        const cursor = pageCursor ?? `${getMessageTimelineOrderTime(oldest)}:${oldest.id}`;
         if (pending.cursor === cursor) {
           // A completed page did not advance the authoritative cursor. Do not
           // loop, or manufacture an exact return over the newest page.
@@ -2868,7 +2892,9 @@ export function useChatHistory(threadId: string) {
       // #80 cloud R8 P2: skip draft rows — their synthetic IDs break cursor semantics
       const oldest = findEarliestMessageByCursor(messages);
       if (oldest) {
-        void fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`);
+        void fetchHistory(
+          historyPageCursorByThread.get(threadId) ?? `${getMessageTimelineCursorTime(oldest)}:${oldest.id}`,
+        );
       }
     }
   }, [hasMore, isLoadingHistory, messages, fetchHistory]);

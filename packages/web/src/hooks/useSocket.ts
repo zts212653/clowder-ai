@@ -263,7 +263,9 @@ function checkForStaleActiveInvocations(): void {
       const starts = Object.values(state.activeInvocations ?? {})
         .map((inv) => inv?.startedAt)
         .filter((n): n is number => typeof n === 'number');
-      if (starts.length > 0 && now - Math.min(...starts) >= STALE_IDLE_THRESHOLD_MS) {
+      // A processing hint can arrive before its /queue read fails. Without a
+      // slot there is no startedAt to age; let the existing queue reconcile retry.
+      if (starts.length === 0 || now - Math.min(...starts) >= STALE_IDLE_THRESHOLD_MS) {
         toProbe.add(currentThreadId);
       }
     } else {

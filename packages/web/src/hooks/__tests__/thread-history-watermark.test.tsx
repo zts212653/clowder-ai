@@ -149,7 +149,7 @@ describe('quiet foreground History reconciliation', () => {
 
   it('acknowledges a successful History page even when its semantic tail is suppressed', async () => {
     fetch.mockImplementation(async (url) => {
-      if (String(url).endsWith('/watermark')) return new Response(JSON.stringify({ watermark: 'position-1' }));
+      if (String(url).includes('/watermark')) return new Response(JSON.stringify({ watermark: 'position-1' }));
       return new Response(
         JSON.stringify({
           messages: [

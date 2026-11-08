@@ -158,6 +158,7 @@ import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
   isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
+  isManagedHoldConnectorMessage,
   isSystemUserMessage,
   isTimelinePublished,
   passesManagedHoldViewerBoundary,
@@ -3115,6 +3116,84 @@ export class RedisMessageStore {
    * Read-state routes select durable owner-read evidence; freshness consumers
    * keep the published timeline frontier.
    */
+  private async readBrowserVisibilityMetadata(ids: string[], viewerUserId: string) {
+    const fields = [
+      'id',
+      'userId',
+      'catId',
+      'from',
+      'threadId',
+      'timestamp',
+      'deletedAt',
+      'deliveryStatus',
+      'origin',
+      'source',
+      'lifecycle',
+      'recall',
+      '_tombstone',
+    ];
+    const pipeline = this.redis.pipeline();
+    ids.forEach((id) => pipeline.hmget(MessageKeys.detail(id), ...fields));
+    const results = await pipeline.exec();
+    if (!results) throw new Error('Browser visibility metadata unavailable');
+    return Promise.all(
+      results.map(async ([error, value]) => {
+        if (error) throw error;
+        if (
+          !Array.isArray(value) ||
+          value.length !== fields.length ||
+          !value.every((field) => field === null || typeof field === 'string')
+        ) {
+          throw new Error('Invalid browser visibility metadata');
+        }
+        const values = value as Array<string | null>;
+        const hash = Object.fromEntries(
+          fields.flatMap((field, index) => (values[index] === null ? [] : [[field, values[index]!]])),
+        );
+        const message = this.hydrateHash(hash);
+        // extra.scheduler affects only owner-bound managed-hold admission.
+        if (message?.userId === viewerUserId && isManagedHoldConnectorMessage(message)) {
+          message.extra = safeParseExtra((await this.redis.hget(MessageKeys.detail(message.id), 'extra')) ?? undefined);
+        }
+        return message;
+      }),
+    );
+  }
+
+  async getVisibilityHead(threadId: string): Promise<number> {
+    await this.ensureVisibilityMigrated(threadId);
+    const head = await this.redis.zrevrange(MessageKeys.threadVisibility(threadId), 0, 0, 'WITHSCORES');
+    return Number(head[1] ?? 0);
+  }
+
+  async getBrowserHistoryChanges(threadId: string, viewerUserId: string, afterSeq: number) {
+    await this.ensureVisibilityMigrated(threadId);
+    // Allocator and legacy migration both assign unique increasing scores.
+    const raw = await this.redis.zrangebyscore(
+      MessageKeys.threadVisibility(threadId),
+      `(${afterSeq}`,
+      '+inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      50,
+    );
+    const ids = raw.filter((_, index) => index % 2 === 0);
+    if (ids.length === 0) return { messages: [], scannedThrough: afterSeq, exhausted: true };
+    const metadata = await this.readBrowserVisibilityMetadata(ids, viewerUserId);
+    const visibleIds = metadata
+      .filter(
+        (message): message is StoredMessage =>
+          message !== null && isBrowserHistoryMessageVisibleToViewer(message, viewerUserId),
+      )
+      .map((message) => message.id);
+    const scores = new Map(ids.map((id, index) => [id, Number(raw[index * 2 + 1])]));
+    const messages = (visibleIds.length ? await this.hydrateMessages(visibleIds) : [])
+      .filter((message) => isBrowserHistoryMessageVisibleToViewer(message, viewerUserId))
+      .map((message) => ({ ...message, visibilitySeq: scores.get(message.id)! }));
+    return { messages, scannedThrough: Number(raw.at(-1)), exhausted: ids.length < 50 };
+  }
+
   async getLatestVisibleCursor(
     threadId: string,
     options?: {
@@ -3124,7 +3203,8 @@ export class RedisMessageStore {
   ): Promise<{ cursor: string; messageId: string } | null> {
     await this.ensureVisibilityMigrated(threadId);
     const visKey = MessageKeys.threadVisibility(threadId);
-    const CHUNK = 20;
+    const browser = options?.evidence === 'browser_timeline';
+    const CHUNK = browser ? 100 : 20;
     const staleIds: string[] = [];
     let offset = 0;
 
@@ -3133,16 +3213,20 @@ export class RedisMessageStore {
       const raw = await this.redis.zrevrange(visKey, offset, offset + CHUNK - 1, 'WITHSCORES');
       if (raw.length === 0) break;
 
+      const browserMessages = browser
+        ? await this.readBrowserVisibilityMetadata(
+            raw.filter((_, index) => index % 2 === 0),
+            options?.viewerUserId ?? '',
+          )
+        : undefined;
+
       // Parse WITHSCORES pairs: [id, score, id, score, ...]
       for (let i = 0; i < raw.length; i += 2) {
         const id = raw[i]!;
         const score = Number(raw[i + 1]);
-        const data = await this.redis.hgetall(MessageKeys.detail(id));
-        if (!data || !data.id) {
-          staleIds.push(id);
-          continue;
-        }
-        const msg = this.hydrateHash(data as Record<string, string>);
+        const msg = browserMessages
+          ? browserMessages[i / 2]
+          : this.hydrateHash(await this.redis.hgetall(MessageKeys.detail(id)));
         if (!msg) {
           staleIds.push(id);
           continue;

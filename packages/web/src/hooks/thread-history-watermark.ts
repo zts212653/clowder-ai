@@ -5,6 +5,10 @@ import { apiFetch } from '@/utils/api-client';
 // This is evidence of an applied History page, never of an observed socket event.
 const appliedWatermarks = new Map<string, string | null>();
 
+export function readThreadHistoryWatermark(threadId: string) {
+  return appliedWatermarks.get(threadId);
+}
+
 export function acknowledgeThreadHistoryWatermark(threadId: string, watermark: unknown): void {
   if (watermark === null || typeof watermark === 'string') appliedWatermarks.set(threadId, watermark);
 }
@@ -18,7 +22,8 @@ export function useThreadHistoryReconciliation(foregroundRoomsKey: string): void
     const probe = () => {
       if (document.visibilityState !== 'visible') return;
       threadIds.forEach((threadId) => {
-        if (!appliedWatermarks.has(threadId)) return;
+        const applied = appliedWatermarks.get(threadId);
+        if (applied === undefined) return;
         const thread = useChatStore.getState().getThreadState(threadId);
         if (
           inFlight.has(threadId) ||
@@ -32,7 +37,8 @@ export function useThreadHistoryReconciliation(foregroundRoomsKey: string): void
         )
           return;
         inFlight.add(threadId);
-        void apiFetch(`/api/threads/${encodeURIComponent(threadId)}/watermark`, { signal: controller.signal })
+        const params = new URLSearchParams({ afterVisibility: applied ?? '' });
+        void apiFetch(`/api/threads/${encodeURIComponent(threadId)}/watermark?${params}`, { signal: controller.signal })
           .then(async (response) => {
             if (!response.ok) return;
             const data = (await response.json()) as { watermark?: unknown };

@@ -174,3 +174,102 @@ test('History captures its watermark before reading the page and older pages do 
   const older = (await f.get(`/api/messages?threadId=thread&before=${Date.now() + 1000}`)).json();
   assert.equal(Object.hasOwn(older, 'historyWatermark'), false);
 });
+
+test('History recovers every late final beyond the latest timeline page before acknowledging it', async (t) => {
+  const f = await fixture(t);
+  const responses = [1, 2].map(
+    (n) =>
+      f.store.appendAndObservePriorFrontier({
+        userId: 'owner',
+        threadId: 'thread',
+        content: '',
+        mentions: [],
+        from: { kind: 'agent', catId: 'opus' },
+        origin: 'stream',
+        timestamp: 1100 + n,
+        lifecycle: {
+          kind: 'response',
+          orderKey: `order-${n}`,
+          invocationId: `child-${n}`,
+          targetId: 'opus',
+          inputEntryIds: ['entry'],
+          inputMessageIds: ['input'],
+          status: 'processing',
+          startedAt: 1100 + n,
+        },
+      }).message,
+  );
+  Array.from({ length: 60 }, (_, n) => f.append(`newer-${n}`));
+  const baseline = (await f.get('/api/messages?threadId=thread&limit=50')).json().historyWatermark;
+  responses.forEach((response, n) =>
+    assert.equal(
+      f.store.commitLifecycleResponseTerminal(response.id, {
+        invocationId: `child-${n + 1}`,
+        status: 'completed',
+        completedAt: Date.now(),
+        content: `late final ${n + 1}`,
+        mentions: [],
+        origin: 'stream',
+      }).kind,
+      'applied',
+    ),
+  );
+  const recovered = (
+    await f.get(`/api/messages?threadId=thread&limit=50&afterVisibility=${encodeURIComponent(baseline)}`)
+  ).json();
+  responses.forEach((response) => assert.ok(recovered.messages.some((message) => message.id === response.id)));
+  assert.equal(recovered.historyWatermark, await f.watermark());
+});
+
+test('hidden-only progress stays private and cannot consume a lost response or a second client', async (t) => {
+  const f = await fixture(t);
+  f.append('baseline');
+  const baseline = (await f.get('/api/messages?threadId=thread')).json().historyWatermark;
+  const probe = `/api/threads/thread/watermark?afterVisibility=${encodeURIComponent(baseline)}`;
+  const before = (await f.get(probe)).body;
+  const hidden = Array.from({ length: 52 }, () =>
+    f.append('private body', {
+      userId: 'other',
+      from: { kind: 'user', userId: 'other' },
+    }),
+  );
+  assert.equal((await f.get(probe)).body, before);
+  assert.equal((await f.get(probe)).body, before);
+  const first = f.append('first visible delta');
+  f.append('private suffix', { userId: 'other', from: { kind: 'user', userId: 'other' } });
+  const second = f.append('second visible delta');
+  const observed = await f.get(probe);
+  hidden.forEach((message) => assert.equal(observed.body.includes(message.id), false));
+  assert.deepEqual(observed.json(), { watermark: await f.watermark() });
+  const url = `/api/messages?threadId=thread&afterVisibility=${encodeURIComponent(baseline)}`;
+  // The first reply can be lost; another surface with the same cursor still needs both records.
+  for (const _ of [1, 2]) {
+    const page = (await f.get(url)).json();
+    [first, second].forEach((message) => assert.ok(page.messages.some((row) => row.id === message.id)));
+    assert.equal(page.historyWatermark, observed.json().watermark);
+  }
+});
+
+test('a quiet hidden range is not scanned again merely because wall time passed', async (t) => {
+  const f = await fixture(t);
+  f.append('baseline');
+  const baseline = (await f.get('/api/messages?threadId=thread')).json().historyWatermark;
+  Array.from({ length: 100 }, () => f.append('hidden', { userId: 'other', from: { kind: 'user', userId: 'other' } }));
+  const probe = `/api/threads/thread/watermark?afterVisibility=${encodeURIComponent(baseline)}`;
+  assert.equal((await f.get(probe)).json().watermark, baseline);
+  assert.equal((await f.get(probe)).json().watermark, baseline);
+  const scan = f.store.getBrowserHistoryChanges.bind(f.store);
+  let scans = 0;
+  f.store.getBrowserHistoryChanges = (...args) => {
+    scans++;
+    return scan(...args);
+  };
+  const realNow = Date.now;
+  t.after(() => {
+    Date.now = realNow;
+  });
+  const later = realNow() + 600_001;
+  Date.now = () => later;
+  assert.equal((await f.get(probe)).json().watermark, baseline);
+  assert.equal(scans, 0);
+});
