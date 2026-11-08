@@ -55,7 +55,7 @@ export function CausalReplyProvider({
 }) {
   const [readingReference, openReference] = useState<CausalReadingReference | null>(null);
   const [verified, setVerified] = useState<ReadonlyMap<string, string>>(new Map());
-  const renderedBoundaryCounts = useRef(new Map<string, number>());
+  const renderedBoundaryKeys = useRef(new Map<string, readonly string[]>());
   const bodies = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -124,10 +124,18 @@ export function CausalReplyProvider({
         (readingId !== message.id && !boundaries.some((cut) => cut.inputMessageId === readingId))
       )
         return message;
-      const count = renderedBoundaryCounts.current.get(message.id) ?? 0;
-      return count >= boundaries.length
+      const keys = boundaries.map((boundary) => causalBoundaryKey(message, boundary));
+      // A restored S already owned a continuation; rebuild through that cut.
+      // A restored R keeps its whole-body reading plane until the reader leaves.
+      const previous =
+        renderedBoundaryKeys.current.get(message.id) ??
+        keys.slice(
+          0,
+          readingId === message.id ? 0 : boundaries.findIndex((cut) => cut.inputMessageId === readingId) + 1,
+        );
+      return previous.length >= keys.length || !previous.every((key, index) => keys[index] === key)
         ? message
-        : { ...message, lifecycle: { ...lifecycle, appendBoundaries: boundaries.slice(0, count) } };
+        : { ...message, lifecycle: { ...lifecycle, appendBoundaries: boundaries.slice(0, previous.length) } };
     });
     const nativeOutputs = new Map<string, ReplyOutputProjection>();
     bodies.forEach(({ message, layout, key }) => {
@@ -157,12 +165,31 @@ export function CausalReplyProvider({
     revealReference,
   ]);
   useLayoutEffect(() => {
-    const counts = new Map<string, number>();
-    projection.continuations.forEach((slices) =>
-      slices.forEach(({ response }) => counts.set(response.id, (counts.get(response.id) ?? 0) + 1)),
+    // Proof verification is asynchronous. Keep the last committed signatures
+    // through that pending render so replacement is not mistaken for a cold R.
+    const keys = new Map(renderedBoundaryKeys.current);
+    const present = new Set(
+      messages
+        .filter((message) => message.lifecycle?.kind === 'response' && message.lifecycle.appendBoundaries?.length)
+        .map((message) => message.id),
     );
-    renderedBoundaryCounts.current = counts;
-  }, [projection]);
+    keys.forEach((_, id) => {
+      if (!present.has(id)) keys.delete(id);
+    });
+    const updated = new Set<string>();
+    projection.continuations.forEach((slices) =>
+      slices.forEach(({ response }) => {
+        if (response.lifecycle?.kind === 'response' && !updated.has(response.id)) {
+          keys.set(
+            response.id,
+            (response.lifecycle.appendBoundaries ?? []).map((boundary) => causalBoundaryKey(response, boundary)),
+          );
+          updated.add(response.id);
+        }
+      }),
+    );
+    renderedBoundaryKeys.current = keys;
+  }, [projection, messages]);
   return <CausalReplyContext.Provider value={projection}>{children}</CausalReplyContext.Provider>;
 }
 

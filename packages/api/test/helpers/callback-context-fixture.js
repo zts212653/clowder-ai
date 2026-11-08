@@ -81,6 +81,7 @@ export async function createCallbackContextFixture(t, options = {}) {
     queueProcessor: processor,
     deliveryCursorStore: cursors,
     taskStore: tasks,
+    ...(options.threadStore ? { threadStore: options.threadStore } : {}),
     ...(gate ? { withLiveCarrierOperation: (query, consume) => gate.runForCarrier(query, consume) } : {}),
     ...options.callbackOptions,
     socketManager: { emitToUser() {}, broadcastToRoom() {}, broadcastAgentMessage() {} },

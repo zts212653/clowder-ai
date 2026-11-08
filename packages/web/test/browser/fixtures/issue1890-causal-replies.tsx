@@ -22,7 +22,8 @@ import { writeShellPresentation } from '@/components/shell/shell-presentation';
 
 primeCoCreatorConfigCache({ name: 'Isolated owner', aliases: [], mentionPatterns: [] });
 const threadId = new URLSearchParams(window.location.search).get('thread') ?? 'issue1890';
-if (new URLSearchParams(window.location.search).has('fresh')) saveChatScrollState(threadId, { top: 0, anchor: 'bottom' });
+if (new URLSearchParams(window.location.search).has('fresh'))
+  saveChatScrollState(threadId, { top: 0, anchor: 'bottom' });
 document.documentElement.setAttribute('data-shell', 'v2');
 useChatStore.setState({ currentThreadId: threadId, currentProjectPath: '/isolated/issue1890' });
 useChatStore.subscribe((state) => {

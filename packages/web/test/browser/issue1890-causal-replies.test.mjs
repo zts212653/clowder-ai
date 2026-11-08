@@ -230,6 +230,11 @@ test('issue1890 causal reading remains consistent live, complete and after refre
     await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
     await page.locator('[data-message-id="S"]').getByRole('button', { name: '看砚砚的回复' }).click();
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-causal-continuation')), 'R');
+    assert.equal((await page.evaluate(() => window.issue1890State())).reading.messageAnchor.messageId, 'S');
+    await page.reload();
+    await page.locator('[data-causal-continuation="R"]').waitFor();
+    assert.match(await page.locator('[data-causal-continuation="R"]').innerText(), /收到鲸鲸审查/);
+    results.push({ stage: 'reload-reading-input', inputId: 'S', continuationRestored: true });
     assert.equal(
       await page
         .locator(
@@ -607,6 +612,24 @@ test('issue1890 causal reading remains consistent live, complete and after refre
       reload: true,
       canonicalRCount: 0,
     });
+    // Opening a short, already-visible disclosure must not start a new scroll
+    // gesture. Refreshing its body also leaves the viewport at its current top.
+    const wholeOnly = response(before + tail, 'completed');
+    delete wholeOnly.lifecycle.appendBoundaries;
+    history = [wholeOnly, settledInput];
+    hasMore = false;
+    references.set('R', wholeOnly);
+    await page.goto(`${origin}?fresh=1`, { waitUntil: 'domcontentloaded' });
+    await source.getByRole('button', { name: '看砚砚的回复' }).click();
+    await reference.getByText(tail, { exact: true }).waitFor();
+    assert.equal((await page.evaluate(() => window.issue1890State())).reading.anchor, 'offset');
+    assert.equal((await page.evaluate(() => window.issue1890State())).reading.messageAnchor.messageId, 'S');
+    assert.equal(await page.locator('[data-chat-container]').evaluate((element) => element.scrollTop), 0);
+    references.set('R', { ...wholeOnly, content: '更新后的完整文字。' });
+    await reference.getByRole('button', { name: '刷新原文', exact: true }).click();
+    await reference.getByText('更新后的完整文字。', { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-chat-container]').evaluate((element) => element.scrollTop), 0);
+    results.push({ stage: 'already-visible-reference', scrollTop: 0, openingReading: 'offset' });
     assert.deepEqual(errors, []);
     if (process.env.ISSUE1890_EVIDENCE_DIR)
       await writeFile(

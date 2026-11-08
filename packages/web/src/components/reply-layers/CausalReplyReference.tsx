@@ -96,12 +96,17 @@ export function CausalReplyReference({
         if (!message) setResult({ status: 'unavailable' });
         else if (message.extra?.recall) setResult({ status: 'recalled' });
         else {
-          const { extra: _extra, isDraft, ...source } = message;
+          const { isDraft, ...source } = message;
           const isStreaming =
             isDraft || (source.lifecycle?.kind === 'response' && source.lifecycle.status === 'processing');
           setResult({
             status: 'ready',
-            message: { ...source, catId: source.catId ?? undefined, isStreaming: Boolean(isStreaming) },
+            message: {
+              ...source,
+              extra: undefined,
+              catId: source.catId ?? undefined,
+              isStreaming: Boolean(isStreaming),
+            },
           });
         }
       })

@@ -106,6 +106,12 @@ describe('causal reply presentation without moving History', () => {
     expect(projection.originals.size).toBe(0);
     expect(projection.continuations.size).toBe(0);
   });
+  it('invalidates precise ranges when their input is recalled', () => {
+    const recalled: ChatMessage = { ...input, extra: { recall: { version: 1, exposure: 'seen', recalledAt: 3000 } } };
+    const projected = projectCausalReplies([response(), recalled], proof);
+    expect(projected.originals.size).toBe(0);
+    expect(projected.continuations.size).toBe(0);
+  });
 
   it('keeps the whole reply when the exact queued native turn did not complete', () => {
     const source: ChatMessage = {

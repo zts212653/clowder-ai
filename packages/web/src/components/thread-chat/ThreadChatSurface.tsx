@@ -178,10 +178,15 @@ export function ThreadChatSurface({
   const revealCausalReference = useCallback(
     (element: HTMLElement) => {
       const viewport = scrollContainerRef.current;
-      const gesture = beginUserScroll();
-      if (!viewport || !gesture) return;
-      gesture.scrollTo(viewport.scrollTop + element.getBoundingClientRect().top - viewport.getBoundingClientRect().top);
-      gesture.end();
+      if (!viewport) return;
+      const area = viewport.getBoundingClientRect(),
+        target = element.getBoundingClientRect();
+      if (target.top < area.top || target.bottom > area.bottom) {
+        const gesture = beginUserScroll();
+        if (!gesture) return;
+        gesture.scrollTo(viewport.scrollTop + target.top - area.top);
+        gesture.end();
+      }
       element.focus({ preventScroll: true });
     },
     [beginUserScroll, scrollContainerRef],

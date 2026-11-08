@@ -48,6 +48,7 @@ export function projectCausalReplies(messages: readonly ChatMessage[], verified:
         return (
           lifecycle.inputMessageIds.includes(boundary.inputMessageId) &&
           source !== undefined &&
+          !source.message.extra?.recall &&
           source.position > responseIndex &&
           ref?.statusMessageId === response.id &&
           outcome !== 'not_accepted' &&

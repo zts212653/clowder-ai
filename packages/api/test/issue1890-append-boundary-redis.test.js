@@ -47,7 +47,14 @@ for (const kind of ['conversation_input', 'message_wake']) {
     const writer = owned.client(keyPrefix);
     const store = new RedisMessageStore(writer);
     const ledger = new RedisQueueLedgerStore(writer);
-    const f = await createCallbackContextFixture(t, { messageStore: store, ledgerStore: ledger });
+    const f = await createCallbackContextFixture(t, {
+      messageStore: store,
+      ledgerStore: ledger,
+      // F35: play mode is the privacy contract; debug mode intentionally exposes whispers to cats.
+      threadStore: {
+        get: async (id) => ({ id, thinkingMode: 'play' }),
+      },
+    });
 
     let content = '  Redis initial body\n\n';
     const prefix = content.trimStart();

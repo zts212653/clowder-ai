@@ -2,11 +2,12 @@
   "results": [
     {
       "stage": "streaming",
-      "order": [
-        "R",
-        "S",
-        "continuation"
-      ]
+      "order": ["R", "S", "continuation"]
+    },
+    {
+      "stage": "reload-reading-input",
+      "inputId": "S",
+      "continuationRestored": true
     },
     {
       "stage": "quote",
@@ -83,6 +84,11 @@
       "anchorReads": 2,
       "reload": true,
       "canonicalRCount": 0
+    },
+    {
+      "stage": "already-visible-reference",
+      "scrollTop": 0,
+      "openingReading": "offset"
     }
   ],
   "errors": []
