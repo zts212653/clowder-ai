@@ -58,6 +58,8 @@ test('issue1890 causal reading remains consistent live, complete and after refre
   let hasMore = false;
   const references = new Map();
   const referenceReads = [];
+  let referenceReadGate;
+  let releaseReferenceRead;
   let canonicalApi;
   const canonicalReads = [];
   const previousCwd = process.cwd();
@@ -151,6 +153,7 @@ test('issue1890 causal reading remains consistent live, complete and after refre
           const anchor = url.searchParams.get('anchorMessageId');
           if (anchor) {
             referenceReads.push({ anchor, limit: url.searchParams.get('limit') });
+            await referenceReadGate;
             body = { messages: references.has(anchor) ? [references.get(anchor)] : [], hasMore: true };
           } else body = { messages: history, hasMore };
         }
@@ -428,10 +431,17 @@ test('issue1890 causal reading remains consistent live, complete and after refre
     await page.reload();
     const source = page.locator('[data-message-id="S"]');
     await source.waitFor();
+    referenceReadGate = new Promise((resolve) => {
+      releaseReferenceRead = resolve;
+    });
     await source.getByRole('button', { name: '看砚砚的回复' }).click();
     const reference = page.locator('[data-causal-read-reference="R"]');
     await reference.getByText('整轮回复 · 完整文字原文', { exact: false }).waitFor();
+    await reference.getByRole('status').filter({ hasText: '正在读取消息' }).waitFor();
+    releaseReferenceRead();
+    await reference.getByText(tail, { exact: true }).waitFor();
     assert.match(await reference.innerText(), /原来的调用链[\s\S]*收到鲸鲸审查/);
+    results.push({ stage: 'reference-loading', readyAfterRelease: true });
     assert.equal(
       await reference
         .locator('[data-testid="message-actions-toolbar"], [data-testid="message-actions-compact-trigger"]')
@@ -637,6 +647,7 @@ test('issue1890 causal reading remains consistent live, complete and after refre
         JSON.stringify({ results, errors }, null, 2),
       );
   } finally {
+    releaseReferenceRead?.();
     await browser.close();
   }
 });

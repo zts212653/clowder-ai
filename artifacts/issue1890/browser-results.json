@@ -60,6 +60,10 @@
       "focused": "S2"
     },
     {
+      "stage": "reference-loading",
+      "readyAfterRelease": true
+    },
+    {
       "stage": "missing-page-reference",
       "anchorReads": 2,
       "canonicalRCount": 0,
