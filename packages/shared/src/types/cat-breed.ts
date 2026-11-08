@@ -139,6 +139,7 @@ export interface CatFeatures {
   readonly sessionStrategy?: {
     readonly strategy: 'handoff' | 'compress' | 'hybrid';
     readonly thresholds?: { readonly warn: number; readonly action: number };
+    /** generative is a historical digest read preference, never a generation switch. */
     readonly handoff?: { readonly preSealMemoryDump: boolean; readonly bootstrapDepth: 'extractive' | 'generative' };
     readonly hybrid?: { readonly maxCompressions: number };
     readonly compress?: { readonly maxCompressions?: number; readonly trackPostCompression: boolean };

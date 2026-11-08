@@ -9,7 +9,7 @@ import {
   readMatterDiscoveryCursor,
 } from './matter-catalog-cursor.js';
 import { type MatterDiscoveryIndex, type MatterDiscoveryRow } from './matter-discovery-index.js';
-import type { MatterActor } from './matter-source.js';
+import { type MatterActor, matterDigest } from './matter-source.js';
 
 export interface MatterDiscoveryCandidate {
   row: MatterDiscoveryRow;
@@ -22,6 +22,12 @@ export interface AdmittedMatterCandidate {
   candidate: MatterDiscoveryCandidate;
 }
 
+/** Invocation-local owner handoff; page bodies are never properties of admitted candidates. */
+export interface MatterDiscoverySource
+  extends KnowledgeDiscoverySource<MatterDiscoveryCandidate, AdmittedMatterCandidate> {
+  admittedPage(candidate: AdmittedMatterCandidate, reader: MatterActor): MatterPage | null;
+}
+
 /** Index selects coordinates; the original project() remains the only page/permission owner. */
 export function bindMatterDiscoverySource(
   index: MatterDiscoveryIndex,
@@ -29,6 +35,13 @@ export function bindMatterDiscoverySource(
   actor: MatterActor,
   options: MatterCatalogContext & { cursor?: string; limit?: number; signal?: AbortSignal },
 ) {
+  const readerScope = (reader: MatterActor) =>
+    matterDigest([
+      reader.userId,
+      reader.viewer.type === 'user' ? 'owner' : `cat:${reader.viewer.catId}`,
+      reader.publicReply === true,
+    ]);
+  const boundReader = readerScope(actor);
   const management = options.management === true && actor.viewer.type === 'user';
   const state = readMatterDiscoveryCursor(actor, options, options.cursor);
   const limit = Math.max(1, Math.min(options.limit ?? 12, 30));
@@ -37,19 +50,24 @@ export function bindMatterDiscoverySource(
     related: preference && state.after?.related !== false,
     offset: 0,
   };
-  const pages = new Map<string, MatterPage | null>();
+  let pages = new Map<string, MatterPage | null>();
+  let admittedPages = new WeakMap<AdmittedMatterCandidate, MatterPage>();
   let activeSignal = options.signal;
   let activeQuery = options.query;
   let progressAfter = initial;
   const admit = async (candidate: MatterDiscoveryCandidate, fresh = false): Promise<AdmittedMatterCandidate | null> => {
+    const signal = activeSignal;
+    const cache = pages;
+    const handoff = admittedPages;
     const { row } = candidate;
     if (!fresh) progressAfter = candidate.progressAfter;
-    activeSignal?.throwIfAborted();
+    signal?.throwIfAborted();
     if (!index.current(actor.userId, row)) return null;
-    if (fresh || !pages.has(row.matterId))
-      pages.set(row.matterId, await project({ ...actor, signal: activeSignal }, row.matterId));
+    if (fresh || !cache.has(row.matterId)) cache.set(row.matterId, await project({ ...actor, signal }, row.matterId));
+    signal?.throwIfAborted();
+    if (cache !== pages) return null;
     if (!index.current(actor.userId, row)) return null;
-    const page = pages.get(row.matterId)!;
+    const page = cache.get(row.matterId)!;
     const key = { related: false, updatedAt: row.updatedAt, matterId: row.matterId };
     if (!page)
       return management && !activeQuery
@@ -68,7 +86,7 @@ export function bindMatterDiscoverySource(
         ),
     );
     if (related !== candidate.related) return null;
-    return {
+    const admitted: AdmittedMatterCandidate = {
       item: {
         ...page.matter,
         entryCount: page.entries.filter((entry) => entry.status === 'active').length,
@@ -78,10 +96,16 @@ export function bindMatterDiscoverySource(
       key: { ...key, related },
       candidate,
     };
+    handoff.set(admitted, page);
+    return admitted;
   };
-  const source: KnowledgeDiscoverySource<MatterDiscoveryCandidate, AdmittedMatterCandidate> = {
+  const source: MatterDiscoverySource = {
     id: 'matters',
     read: async ({ query, cursor, limit: batchLimit, signal }) => {
+      if ((signal ?? options.signal) !== activeSignal) {
+        pages = new Map();
+        admittedPages = new WeakMap();
+      }
       activeSignal = signal ?? options.signal;
       activeQuery = options.query ?? query;
       const progress: MatterCatalogProgress = cursor ? JSON.parse(cursor) : initial;
@@ -112,6 +136,11 @@ export function bindMatterDiscoverySource(
     project: (candidate) => admit(candidate),
     key: ({ key }) => key.matterId,
     revalidate: (row) => admit(row.candidate, true),
+    admittedPage: (row, reader) => {
+      activeSignal?.throwIfAborted();
+      if (!reader || readerScope(reader) !== boundReader) return null;
+      return admittedPages.get(row) ?? null;
+    },
   };
   return { source, state, limit, progressAfter: () => progressAfter };
 }

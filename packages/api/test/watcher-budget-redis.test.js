@@ -30,6 +30,16 @@ test(
         rawWindowTokens: 625,
         skippedWindows: 1,
         wakeInvocationId: 'wake',
+        attempt: {
+          invocationId: 'wake',
+          sourceInvocationId: 'source',
+          sourceSequence: 43,
+          startedAt: 100,
+          phase: 'failed',
+          failure: 'watcher_context_recovery_deadline_exceeded',
+          nativeTurnId: 'turn',
+          window: { frontier: 'original', offset: 0, messageIds: ['original'], tokenBudget: 625 },
+        },
         directoryReads: [
           {
             key: 'args-hash',
@@ -50,8 +60,13 @@ test(
           `
       import { createRedisClient } from '@cat-cafe/shared/utils';
       import { RedisSessionChainStore } from './dist/domains/cats/services/stores/redis/RedisSessionChainStore.js';
+      import { watcherBudgetFailure } from './dist/domains/concierge/watcher/context/watcher-budget-progress.js';
       const client = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: process.env.F335_TEST_NAMESPACE });
-      try { console.log('F335_STATE=' + JSON.stringify((await new RedisSessionChainStore(client).get(process.env.F335_TEST_SESSION)).watcherState)); }
+      try {
+        const state = (await new RedisSessionChainStore(client).get(process.env.F335_TEST_SESSION)).watcherState;
+        if (!watcherBudgetFailure(state.attempt.failure)) throw new Error('recovery classification lost after restart');
+        console.log('F335_STATE=' + JSON.stringify(state));
+      }
       finally { await client.quit(); }
     `,
         ],

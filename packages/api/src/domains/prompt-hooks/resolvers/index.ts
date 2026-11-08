@@ -46,7 +46,6 @@ import {
 } from './turn-resolvers-a.js';
 import {
   D11Resolver,
-  D12Resolver,
   D13Resolver,
   D14Resolver,
   D15Resolver,
@@ -101,7 +100,6 @@ const RESOLVER_MAP: ReadonlyMap<string, HookResolver> = new Map<string, HookReso
   ['D9', new D9Resolver()],
   ['D10', new D10Resolver()],
   ['D11', new D11Resolver()],
-  ['D12', new D12Resolver()],
   ['D13', new D13Resolver()],
   ['D14', new D14Resolver()],
   ['D15', new D15Resolver()],

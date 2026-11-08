@@ -2,14 +2,20 @@ import type { SessionRecord, WatcherSessionState } from '@cat-cafe/shared';
 import type { WatcherCheckpointOwners } from '../watcher-checkpoint.js';
 
 export const MIN_WATCHER_WINDOW_TOKENS = 128;
-export const watcherBudgetFailure = (value: unknown): boolean =>
-  String(value instanceof Error ? value.message : value).includes('watcher_context_budget_exceeded');
+export const WATCHER_RECOVERY_TOOL_BUDGET_EXHAUSTED = 'watcher_context_recovery_tool_budget_exhausted';
+export const WATCHER_RECOVERY_DEADLINE_EXCEEDED = 'watcher_context_recovery_deadline_exceeded';
+const recoveryLimit = (reason: unknown) =>
+  reason === WATCHER_RECOVERY_TOOL_BUDGET_EXHAUSTED || reason === WATCHER_RECOVERY_DEADLINE_EXCEEDED;
+export const watcherBudgetFailure = (value: unknown): boolean => {
+  const reason = String(value instanceof Error ? value.message : value);
+  return reason.includes('watcher_context_budget_exceeded') || recoveryLimit(reason);
+};
 export type WatcherWindow = NonNullable<WatcherSessionState['attempt']>['window'];
 
 export function nextWatcherWindowTokens(state: WatcherSessionState): number {
   const tokens =
     state.attempt?.window?.tokenBudget ?? (state.wakeInvocationId ? state.rawWindowTokens : undefined) ?? 2500;
-  return state.attempt && watcherBudgetFailure(state.attempt.failure)
+  return state.attempt && watcherBudgetFailure(state.attempt.failure) && !recoveryLimit(state.attempt.failure)
     ? Math.max(MIN_WATCHER_WINDOW_TOKENS, Math.floor(tokens / 2))
     : tokens;
 }
@@ -23,7 +29,8 @@ export async function watcherBudgetRecovery(
 ): Promise<Partial<WatcherSessionState>> {
   const attempt = state.attempt!;
   const tokens = nextWindow?.tokenBudget ?? nextWatcherWindowTokens(state);
-  if ((attempt.window?.tokenBudget ?? 2500) > MIN_WATCHER_WINDOW_TOKENS) {
+  const exhaustedRecovery = recoveryLimit(attempt.failure);
+  if (!exhaustedRecovery && (attempt.window?.tokenBudget ?? 2500) > MIN_WATCHER_WINDOW_TOKENS) {
     return {
       rawWindowTokens: tokens,
       attempt: {
@@ -67,18 +74,18 @@ export async function watcherBudgetRecovery(
     },
     {
       type: 'watcher_window_skipped',
-      reason: 'watcher_context_budget_exceeded',
+      reason: exhaustedRecovery ? attempt.failure : 'watcher_context_budget_exceeded',
       sourceInvocationId: attempt.sourceInvocationId,
       messageIds,
       from: { messageId: state.consumedThrough, offset: state.messageOffset ?? 0 },
       through: { messageId: through, offset: 0 },
       skippedRemainderOfMessage: window.offset > 0,
-      tokenBudget: MIN_WATCHER_WINDOW_TOKENS,
+      tokenBudget: window.tokenBudget ?? MIN_WATCHER_WINDOW_TOKENS,
     },
     attempt.invocationId,
   );
   return {
-    rawWindowTokens: MIN_WATCHER_WINDOW_TOKENS,
+    rawWindowTokens: window.tokenBudget ?? MIN_WATCHER_WINDOW_TOKENS,
     skippedWindows: (state.skippedWindows ?? 0) + 1,
     consumedThrough: complete && window.resumeCursor ? window.resumeCursor.messageId : through,
     messageOffset: complete && window.resumeCursor ? window.resumeCursor.offset : 0,

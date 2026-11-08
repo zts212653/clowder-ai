@@ -1,7 +1,7 @@
 import { estimateTokens } from '../../../../utils/token-counter.js';
 
 export const WATCHER_TOOL_RESULT_TOKENS = 800;
-/** Launch reserve only. Every real continuation is independently fenced by watcher-request-boundary. */
+/** Reasoning and the final checkpoint share this output reserve on launch and every continuation. */
 export const WATCHER_TURN_RESERVE_TOKENS = 4096;
 
 export function boundedWatcherResult(value: unknown, callId: string): string {

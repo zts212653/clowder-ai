@@ -102,7 +102,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.deepEqual(msg.from, { kind: 'system', service: 'context-briefing' });
     assert.equal(msg.userId, 'system', 'userId should be system');
     assert.equal(msg.threadId, 'thread-1');
-    assert.ok(msg.content.includes('真相源'), 'content is the navigation summary');
+    assert.ok(msg.content.includes('看到 8 条'), 'content reports actual context coverage');
   });
 
   test('has rich block with card kind', () => {
@@ -111,7 +111,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     const card = msg.extra.rich.blocks[0];
     assert.equal(card.kind, 'card', 'rich block should be a card');
     assert.equal(card.tone, 'info', 'should use info tone');
-    assert.ok(card.title.includes('真相源'), 'card title should be the navigation summary');
+    assert.equal(card.title, '上下文覆盖');
   });
 
   test('card bodyMarkdown includes expanded details when threadMemory provided', () => {
@@ -130,9 +130,8 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.ok(card.fields?.length > 0, 'should have fields');
     // Check key fields exist
     const labels = card.fields.map((f) => f.label);
-    assert.ok(labels.includes('传球'), 'should have baton field');
-    assert.ok(labels.includes('真相源'), 'should have truth source field');
-    assert.ok(labels.includes('下一步'), 'should have next step field');
+    assert.ok(labels.includes('省略原文（需要时读取）'), 'omitted messages retain an optional reading pointer');
+    assert.ok(!labels.includes('传球') && !labels.includes('下一步'), 'missing sources do not invent an action');
   });
 
   test('F296 AC-A1: bodyMarkdown shows a content-free recall pointer, never candidate titles', () => {
@@ -286,38 +285,21 @@ describe('F148 Phase F: Briefing card navigation context (AC-F5)', () => {
     recallPointer: { candidateCount: 0 },
   };
 
-  test('AC-F5: bodyMarkdown includes baton info when provided', () => {
+  test('AC-F5: bodyMarkdown includes exact input provenance when provided', () => {
     const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {
-      baton: {
-        fromMessageId: 'm5',
-        fromSpeaker: 'codex',
-        fromSpeakerDisplay: 'codex',
-        timestamp: 1712004000000,
-        mentionExcerpt: '帮我看看这个 PR',
-        staleHoldWarning: false,
-      },
+      sources: [
+        {
+          fromMessageId: 'm5',
+          fromSpeakerDisplay: 'codex',
+          timestamp: 1712004000000,
+        },
+      ],
     });
     const card = msg.extra.rich.blocks[0];
     assert.ok(card.bodyMarkdown, 'should have bodyMarkdown');
-    assert.ok(card.bodyMarkdown.includes('传球'), 'should have baton section');
+    assert.ok(card.bodyMarkdown.includes('本轮输入来源'), 'should have baton section');
     assert.ok(card.bodyMarkdown.includes('codex'), 'should include speaker');
-    assert.ok(card.bodyMarkdown.includes('帮我看看'), 'should include excerpt');
-  });
-
-  test('AC-F5: bodyMarkdown includes stale hold warning', () => {
-    const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {
-      baton: {
-        fromMessageId: 'm5',
-        fromSpeaker: 'codex',
-        fromSpeakerDisplay: 'codex',
-        timestamp: 1712004000000,
-        mentionExcerpt: '看看',
-        staleHoldWarning: true,
-      },
-    });
-    const card = msg.extra.rich.blocks[0];
-    assert.ok(card.bodyMarkdown.includes('⚠️'), 'should include warning emoji');
-    assert.ok(card.bodyMarkdown.includes('别动'), 'should mention hold');
+    assert.ok(card.bodyMarkdown.includes('messageId=m5'), 'should include excerpt');
   });
 
   test('AC-F5: bodyMarkdown includes active tasks when provided', () => {
@@ -338,7 +320,7 @@ describe('F148 Phase F: Briefing card navigation context (AC-F5)', () => {
     const msg = buildBriefingMessage(baseCoverageMap, 'thread-1', {});
     const card = msg.extra.rich.blocks[0];
     if (card.bodyMarkdown) {
-      assert.ok(!card.bodyMarkdown.includes('传球'), 'no baton section');
+      assert.ok(!card.bodyMarkdown.includes('本轮输入来源'), 'no baton section');
       assert.ok(!card.bodyMarkdown.includes('活跃任务'), 'no tasks section');
     }
   });

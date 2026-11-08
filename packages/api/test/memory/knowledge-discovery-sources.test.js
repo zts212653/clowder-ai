@@ -121,7 +121,9 @@ test('one discovery call admits native document, chat and Matter candidates with
     assert.ok(found.sources[1].items[0].contentRevision);
     assert.equal(found.sources[2].items[0].item.matterId, f.matterId);
     assert.equal(JSON.stringify(found).includes('SECRET'), false);
-    assert.equal(f.retrieval().signal, controller.signal);
+    assert.notEqual(f.retrieval().signal, controller.signal);
+    assert.equal(f.retrieval().signal.aborted, true, 'the completed discovery closes only its owned scope');
+    assert.equal(controller.signal.aborted, false);
     assert.equal(f.retrieval().deadlineAt, deadlineAt);
     assert.equal(f.db.getDb().prepare('SELECT count(*) AS n FROM memory_cue_events').get().n, 0);
   } finally {

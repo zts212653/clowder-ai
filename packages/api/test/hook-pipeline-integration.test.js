@@ -113,17 +113,13 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     const templatesDir = join(root, 'assets', 'prompt-templates');
     registry = new registryMod.HookRegistry(hooksDir, templatesDir);
     const manifests = registry.scan();
-    assert.equal(manifests.length, 45, `Expected 45 hooks, got ${manifests.length}`);
+    assert.equal(manifests.length, 44, `Expected 44 hooks, got ${manifests.length}`);
   });
 
-  it('D12 manifest and fallback template describe recent speech without implying execution', () => {
-    const hook = registry.getHook('D12');
-    assert.ok(hook, 'D12 should be registered');
-    assert.equal(hook.manifest.name, '最近发言者');
-    assert.equal(hook.manifest.template, 'd12-recent-speaker.md');
-    assert.equal(hook.manifest.resolver, 'D12Resolver');
-    assert.equal(hook.manifest.userExplanation, '最近在此 thread 发过言的成员（不表示正在执行）');
-
+  it('retired recent-speaker injection has no hook, resolver or fallback output', () => {
+    assert.equal(registry.getHook('D12'), undefined);
+    assert.equal(resolversMod.RESOLVER_MAP.has('D12'), false);
+    assert.equal(templateMod.renderSegment('D12', {}), null);
     const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, () => null);
     const result = pipeline.executeStage(
       'per-turn',
@@ -134,8 +130,8 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
         ],
       }),
     );
-    const d12Patch = result.patches.find((patch) => patch.hookId === 'D12');
-    assert.equal(d12Patch?.content, '最近发言：缅因猫(codex)');
+    assert.ok(result.patches.every((patch) => patch.hookId !== 'D12'));
+    assert.doesNotMatch(result.patches.map((patch) => patch.content).join('\n'), /最近发言/);
   });
 
   it('session-init stage fires L1-L7 + S1 + S8 + S9 + B1 + C1 (always-fire hooks)', () => {
@@ -179,7 +175,7 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     const result = pipeline.executeStage('per-turn', input);
 
     // 23 per-turn hooks should produce trace events
-    assert.equal(result.events.length, 23, `Expected 23 events, got ${result.events.length}`);
+    assert.equal(result.events.length, 22, `Expected 22 events, got ${result.events.length}`);
 
     const firedIds = result.events.filter((e) => e.status === 'fired').map((e) => e.hookId);
 

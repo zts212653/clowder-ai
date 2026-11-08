@@ -402,15 +402,6 @@ async function* routeParallelPrepared(
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
 
-  // F042 Wave 3: Fetch thread participant activity once (shared across all cats).
-  let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
-  if (deps.invocationDeps.threadStore) {
-    try {
-      activeParticipants = await deps.invocationDeps.threadStore.getParticipantsWithActivity(threadId);
-    } catch {
-      /* best-effort */
-    }
-  }
   // F042: Fetch thread routingPolicy once (shared across all cats).
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
   // F073 P4: SOP stage hint from workflow-sop (告示牌 — info only, cats decide actions)
@@ -761,7 +752,6 @@ async function* routeParallelPrepared(
           mcpAvailable,
           nativeL0Injected: hasNativeL0,
           ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
           ...(voiceMode ? { voiceMode } : {}),
@@ -962,6 +952,9 @@ async function* routeParallelPrepared(
               canonicalFeatureId: sopStageHint?.featureId,
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
+              exactA2ATriggerMessageId: options.a2aTriggerMessageId,
+              invocationInputMessageIds: options.persistedPromptMessageIds,
+              nowMs: Date.now(),
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
               ...(options.resolvePendingWakeMessageIds
                 ? {

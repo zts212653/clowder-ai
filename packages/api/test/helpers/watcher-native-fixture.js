@@ -32,6 +32,7 @@ export async function watcherNativeFixture(w, fixtureOptions = {}) {
     const body = request.body;
     const wire = JSON.stringify(body);
     requests.push({ body, wire });
+    if (await fixtureOptions.respond?.({ request, reply, requests, state })) return;
     state.entered?.();
     if (state.mode === 'hang') {
       await hang;

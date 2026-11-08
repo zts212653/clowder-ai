@@ -10,55 +10,9 @@ const baseInput = {
   threadId: 'thread_test123',
 };
 
-describe('abstractive client endpoint and credential failures', () => {
-  for (const scenario of ['versioned gateway', 'invalid scheme', 'resolver rejection']) {
-    it(scenario, async () => {
-      const { createAbstractiveClient } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
-      const previousFetch = globalThis.fetch;
-      const calls = [];
-      const errors = [];
-      globalThis.fetch = async (url, init) => {
-        calls.push({ url, init });
-        return Response.json({ content: [{ type: 'text', text: '# Fixture\n\nA useful summary.' }] });
-      };
-      try {
-        const client = createAbstractiveClient(
-          async () => {
-            if (scenario === 'resolver rejection') throw new Error('Account identity rejected');
-            return {
-              mode: 'api_key',
-              apiKey: 'FAKE_KEY',
-              baseUrl:
-                scenario === 'invalid scheme' ? 'file:///tmp/fixture' : 'https://gateway.invalid/v1?tenant=a#fragment',
-            };
-          },
-          {
-            info() {},
-            error(message) {
-              errors.push(message);
-            },
-          },
-        );
-        const result = await client(baseInput);
-        if (scenario === 'versioned gateway') {
-          assert.ok(result);
-          assert.equal(calls[0].url, 'https://gateway.invalid/v1/messages?tenant=a#fragment');
-          assert.equal(calls[0].init.redirect, 'error');
-        } else {
-          assert.equal(result, null);
-          assert.equal(calls.length, 0);
-          assert.equal(errors.length, 1);
-        }
-      } finally {
-        globalThis.fetch = previousFetch;
-      }
-    });
-  }
-});
-
 describe('parseNaturalLanguageOutput', () => {
   it('parses title + summary + 2 candidates (explicit + inferred)', async () => {
-    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/abstractive-summary-output.js');
 
     const text = `# Memory Architecture Discussion
 
@@ -80,7 +34,7 @@ Discussed the architecture of the memory system, decided to use YAML as truth so
   });
 
   it('uses first line as fallback when no # title', async () => {
-    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/abstractive-summary-output.js');
 
     const text = `**Redis Isolation Strategy**
 
@@ -93,7 +47,7 @@ Summary of how we handle Redis port isolation in development and production envi
 
   it('caps candidates at MAX_CANDIDATES_PER_SEGMENT', async () => {
     const { parseNaturalLanguageOutput, MAX_CANDIDATES_PER_SEGMENT } = await import(
-      '../../dist/domains/memory/AbstractiveSummaryClient.js'
+      '../../dist/domains/memory/abstractive-summary-output.js'
     );
 
     const text = `# Many Decisions
@@ -112,7 +66,7 @@ Made lots of decisions today.
   });
 
   it('filters implementation noise candidates', async () => {
-    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/abstractive-summary-output.js');
 
     const text = `# Code Changes
 
@@ -135,7 +89,7 @@ Updated several files for the memory system.
   });
 
   it('returns null for empty/whitespace input', async () => {
-    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/abstractive-summary-output.js');
 
     assert.equal(parseNaturalLanguageOutput('', baseInput), null);
     assert.equal(parseNaturalLanguageOutput('   ', baseInput), null);

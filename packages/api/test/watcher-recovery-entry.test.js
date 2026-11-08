@@ -209,64 +209,67 @@ for (const mode of ['disabled', 'switched']) {
   });
 }
 
-test('the complete recovery invocation cannot project teardown for an exact native turn still active', async () => {
-  const f = await admitted();
-  const bound = await f.w.sessions.bindCliSessionIdIfUnbound(f.session.id, 'active-native');
-  await f.w.executions.markProviderStarted(f.auth.invocationId, Date.now());
-  await f.w.sessions.compareAndSetWatcherState(bound.id, 0, {
-    revision: 1,
-    afterSequence: 0,
-    notes: 'unchanged',
-    wakeInvocationId: f.auth.invocationId,
-    attempt: {
-      invocationId: f.auth.invocationId,
-      sourceInvocationId: f.source.invocationId,
-      sourceSequence: f.source.settledSequence,
-      startedAt: Date.now(),
-      phase: 'failed',
-      nativeTurnId: 'still-active',
-      window: { frontier: 'raw', offset: 0, messageIds: ['raw'] },
-    },
-  });
-  const methods = [];
-  const client = {
-    async request(method) {
-      methods.push(method);
-      return { thread: { id: 'active-native', turns: [{ id: 'still-active', status: 'inProgress', items: [] }] } };
-    },
-  };
-  const abort = new AbortController();
-  const service = {
-    boundedWatcherSessionCapability: () => ({ supported: true }),
-    async *invoke(_prompt, options) {
-      try {
-        await options.boundedWatcher.beforeTurn({ threadId: 'active-native', client });
-      } catch (error) {
-        abort.abort(new Error('watcher_supervisor_stopped'));
-        throw error;
-      }
-      throw new Error('active recovery must not admit a model request');
-    },
-  };
-  const { runWatcherInvocation } = await import('../dist/domains/concierge/watcher/watcher-invocation.js');
-  await assert.rejects(
-    runWatcherInvocation(
-      { ...f.owners, maySpeak: async () => false },
-      {
-        session: bound,
-        source: f.source,
-        service,
-        quiet: true,
-        recoveryOnly: true,
-        signal: abort.signal,
+for (const lateAbort of ['watcher_supervisor_stopped', 'watcher_deadline_exceeded']) {
+  test(`the complete recovery invocation cannot project teardown for an exact native turn still active after ${lateAbort}`, async () => {
+    const f = await admitted();
+    const bound = await f.w.sessions.bindCliSessionIdIfUnbound(f.session.id, 'active-native');
+    await f.w.executions.markProviderStarted(f.auth.invocationId, Date.now());
+    await f.w.sessions.compareAndSetWatcherState(bound.id, 0, {
+      revision: 1,
+      afterSequence: 0,
+      notes: 'unchanged',
+      wakeInvocationId: f.auth.invocationId,
+      rawWindowTokens: 1250,
+      attempt: {
+        invocationId: f.auth.invocationId,
+        sourceInvocationId: f.source.invocationId,
+        sourceSequence: f.source.settledSequence,
+        startedAt: Date.now(),
+        phase: 'failed',
+        nativeTurnId: 'still-active',
+        window: { frontier: 'raw', offset: 0, messageIds: ['raw'] },
       },
-    ),
-    /watcher_native_still_active/,
-  );
-  const execution = await f.w.executions.get(f.auth.invocationId);
-  assert.equal(execution.status, 'running');
-  assert.equal(execution.providerTeardownAt, undefined);
-  assert.equal((await f.w.registry.verify(f.auth.invocationId, f.auth.callbackToken)).ok, true);
-  assert.equal((await f.w.sessions.get(bound.id)).watcherState.afterSequence, 0);
-  assert.equal(methods.includes('thread/revert'), false);
-});
+    });
+    const methods = [];
+    const client = {
+      async request(method) {
+        methods.push(method);
+        return { thread: { id: 'active-native', turns: [{ id: 'still-active', status: 'inProgress', items: [] }] } };
+      },
+    };
+    const abort = new AbortController();
+    const service = {
+      boundedWatcherSessionCapability: () => ({ supported: true }),
+      async *invoke(_prompt, options) {
+        try {
+          await options.boundedWatcher.beforeTurn({ threadId: 'active-native', client });
+        } catch (error) {
+          abort.abort(new Error(lateAbort));
+          throw error;
+        }
+        throw new Error('active recovery must not admit a model request');
+      },
+    };
+    const { runWatcherInvocation } = await import('../dist/domains/concierge/watcher/watcher-invocation.js');
+    await assert.rejects(
+      runWatcherInvocation(
+        { ...f.owners, maySpeak: async () => false },
+        {
+          session: bound,
+          source: f.source,
+          service,
+          quiet: true,
+          recoveryOnly: true,
+          signal: abort.signal,
+        },
+      ),
+      /watcher_native_still_active/,
+    );
+    const execution = await f.w.executions.get(f.auth.invocationId);
+    assert.equal(execution.status, 'running');
+    assert.equal(execution.providerTeardownAt, undefined);
+    assert.equal((await f.w.registry.verify(f.auth.invocationId, f.auth.callbackToken)).ok, true);
+    assert.equal((await f.w.sessions.get(bound.id)).watcherState.afterSequence, 0);
+    assert.equal(methods.includes('thread/revert'), false);
+  });
+}

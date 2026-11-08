@@ -1417,7 +1417,6 @@ export {
 } from './profile-update.js';
 export * from './profile-usage.js';
 export type {
-  ActiveParticipantInput,
   AssemblerInput,
   BootcampInput,
   CallableMentionsData,

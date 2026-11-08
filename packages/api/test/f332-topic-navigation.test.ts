@@ -130,18 +130,13 @@ test('a failed Task source leaves the checked range partial while title candidat
   assert.equal(response.json().threads[0].topicMatch.originalContentRead, false);
 });
 
-test('opening navigation uses the current title/question to choose an on-demand topic and then read originals', async () => {
+test('an old title alone never makes the current prompt ask for work discovery', async () => {
   const { formatNavigationHeader } = await import('../src/domains/cats/services/agents/routing/navigation-context.js');
   const text = formatNavigationHeader({
-    baton: null,
     tasks: [],
-    recentWorkDirectory: true,
     threadTitle: '机器人影片的新想法',
   });
-  assert.match(text, /机器人影片的新想法/);
-  assert.match(text, /topic/);
-  assert.match(text, /原问题/);
-  assert.match(text, /原话/);
+  assert.doesNotMatch(text, /机器人影片的新想法|topic|cat_cafe_list_threads/);
 });
 
 test('legacy directory cursors remain valid when no new topic selector is present', async (t) => {
