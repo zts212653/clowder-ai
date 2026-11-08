@@ -95,6 +95,11 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
           : {}),
       };
     }
+    // The response body reaches only the browser; keep the writer's reason where it can be diagnosed.
+    request.log[result.reason === 'write_failed' ? 'error' : 'warn'](
+      { proposalId: resolved.proposal.id, reason: result.reason, detail: result.error },
+      '[F221] Taste approval did not complete',
+    );
     return projectFailedApproval(result, reply);
   });
 

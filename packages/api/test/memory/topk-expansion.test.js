@@ -1,4 +1,4 @@
-// F256 Phase B: TopkExpansionService — expansion hints for default topk search
+// F256 Phase B: KnowledgeAssociations — expansion hints for default topk search
 // TDD Red phase: tests written before implementation.
 //
 // Design: discussion doc §6.4 取舍 A-D + §7.5 graphTraversal=0% constraint.
@@ -48,10 +48,10 @@ function makeItem(overrides) {
 
 // ── Tests ────────────────────────────────────────────────────────────
 
-describe('TopkExpansionService', () => {
+describe('KnowledgeAssociations', () => {
   async function createService(store) {
-    const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-    return new TopkExpansionService(store);
+    const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+    return new KnowledgeAssociations(store);
   }
 
   // ── Shared graph adapter helpers (hoisted for health funnel tests) ──
@@ -67,8 +67,8 @@ describe('TopkExpansionService', () => {
   }
 
   async function createServiceWithGraphTop(store, graphAdapter) {
-    const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-    return new TopkExpansionService(store, graphAdapter);
+    const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+    return new KnowledgeAssociations(store, graphAdapter);
   }
 
   describe('baseline behavior', () => {
@@ -331,8 +331,8 @@ describe('TopkExpansionService', () => {
     }
 
     async function createServiceWithGraph(store, graphAdapter) {
-      const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-      return new TopkExpansionService(store, graphAdapter);
+      const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+      return new KnowledgeAssociations(store, graphAdapter);
     }
 
     it('produces convention-edge hints when adapter is available', async () => {

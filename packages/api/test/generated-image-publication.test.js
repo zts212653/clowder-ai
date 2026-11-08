@@ -1,3 +1,10 @@
+import sharp from 'sharp';
+
+const imageBytes = (seed) =>
+  sharp({ create: { width: 2, height: 2, channels: 3, background: seed.startsWith('second') ? '#be6d47' : '#48705b' } })
+    .png()
+    .toBuffer();
+
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,7 +35,7 @@ describe('publishGeneratedImage', () => {
     );
 
     const sourcePath = join(sourceDir, 'cat.png');
-    await writeFile(sourcePath, Buffer.from('fake-png'));
+    await writeFile(sourcePath, await imageBytes('fake-png'));
 
     const published = await publishGeneratedImage({
       sourcePath,
@@ -51,13 +58,13 @@ describe('publishGeneratedImage', () => {
     assert.equal(published.provenance.prompt, 'silver tabby maine coon cuddle');
   });
 
-  it('returns the same published artifact on repeated publicationKey replay', async () => {
+  it('returns the same published artifact on replay after the temporary source is removed', async () => {
     const { publishGeneratedImage } = await import(
       '../dist/domains/cats/services/agents/providers/generated-image-publication.js'
     );
 
     const sourcePath = join(sourceDir, 'cat.png');
-    await writeFile(sourcePath, Buffer.from('fake-png'));
+    await writeFile(sourcePath, await imageBytes('fake-png'));
 
     const input = {
       sourcePath,
@@ -72,10 +79,12 @@ describe('publishGeneratedImage', () => {
     };
 
     const first = await publishGeneratedImage(input);
+    await rm(sourcePath);
     const second = await publishGeneratedImage(input);
 
     assert.equal(second.urlPath, first.urlPath);
     assert.equal(second.absPath, first.absPath);
+    assert.equal(second.isNew, false);
     assert.equal((await readdir(uploadDir)).length, 1);
   });
 
@@ -85,7 +94,7 @@ describe('publishGeneratedImage', () => {
     );
 
     const sourcePath = join(sourceDir, 'cat.png');
-    await writeFile(sourcePath, Buffer.from('fake-png'));
+    await writeFile(sourcePath, await imageBytes('fake-png'));
 
     const input = {
       sourcePath,
@@ -111,8 +120,8 @@ describe('publishGeneratedImage', () => {
 
     const firstSourcePath = join(sourceDir, 'first.png');
     const secondSourcePath = join(sourceDir, 'second.png');
-    await writeFile(firstSourcePath, Buffer.from('first-png'));
-    await writeFile(secondSourcePath, Buffer.from('second-png'));
+    await writeFile(firstSourcePath, await imageBytes('first-png'));
+    await writeFile(secondSourcePath, await imageBytes('second-png'));
 
     const first = await publishGeneratedImage({
       sourcePath: firstSourcePath,
@@ -143,8 +152,8 @@ describe('publishGeneratedImage', () => {
 
     const firstSourcePath = join(sourceDir, 'first.png');
     const secondSourcePath = join(sourceDir, 'second.png');
-    await writeFile(firstSourcePath, Buffer.from('first-png'));
-    await writeFile(secondSourcePath, Buffer.from('second-png'));
+    await writeFile(firstSourcePath, await imageBytes('first-png'));
+    await writeFile(secondSourcePath, await imageBytes('second-png'));
 
     const first = await publishGeneratedImage({
       sourcePath: firstSourcePath,
@@ -177,7 +186,7 @@ describe('publishGeneratedImage', () => {
     process.env.UPLOAD_DIR = uploadDir;
 
     const sourcePath = join(sourceDir, 'cat.png');
-    await writeFile(sourcePath, Buffer.from('fake-png'));
+    await writeFile(sourcePath, await imageBytes('fake-png'));
 
     const published = await publishGeneratedImage({
       sourcePath,
@@ -197,7 +206,7 @@ describe('publishGeneratedImage', () => {
     );
 
     const sourcePath = join(sourceDir, 'cat.png');
-    await writeFile(sourcePath, Buffer.from('fake-png'));
+    await writeFile(sourcePath, await imageBytes('fake-png'));
 
     const published = await publishGeneratedImage({
       sourcePath,

@@ -1,5 +1,7 @@
 import { CONTEXT_SOURCE_OPPORTUNITY_SCHEMA } from './cue/ContextSourceOpportunityStore.js';
+import { installWorkPreparationSchema } from './cue/preparation/preparation-schema.js';
 import { admitMatterCueFamily } from './matters/matter-cue-schema.js';
+import { MATTER_DISCOVERY_SCHEMA } from './matters/matter-discovery-index.js';
 import { MATTER_MEMORY_SCHEMA } from './matters/matter-schema.js';
 import { addMessageSearchAnswerRecoveryColumn, MESSAGE_SEARCH_ANSWER_SCHEMA } from './message-search-answer-schema.js';
 import { PROFILE_READ_SCHEMA } from './profile/profile-read-schema.js';
@@ -86,7 +88,7 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 78;
+export const CURRENT_SCHEMA_VERSION = 80;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1853,6 +1855,18 @@ export function applyMigrations(db: Database.Database): void {
     db.transaction(() => {
       migrateScheduleParameterUpdates(db);
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(78, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 79) {
+    db.transaction(() => {
+      db.exec(MATTER_DISCOVERY_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(79, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 80) {
+    db.transaction(() => {
+      installWorkPreparationSchema(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(80, new Date().toISOString());
     })();
   }
 }

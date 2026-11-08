@@ -2956,7 +2956,7 @@ export const {
   handleForgetPerson,
   handleForgetPersonMemoryProposal,
 } = personMemoryLifecycleToolset;
-export const { handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
+export const { handlePrepareMemoryContext, handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
 
 // ============ F260 Phase A: Propose Entity ============
 
@@ -4184,8 +4184,8 @@ export const callbackTools = [
     name: 'cat_cafe_create_rich_block',
     description:
       'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
-      'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for custom inline HTML. ' +
-      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
+      'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for a small HTML explanation within the conversation. ' +
+      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". For a commissioned single-file HTML explainer/prototype or a reusable/evolving tool, use cat_cafe_work to save, then publish-reference to attach its fixed-version card to this Chat. Choose by purpose, not size; a tiny reusable tool can be a work. Continue existing works under the same contentRef. A one-off typo fix in a widget need not become a work. Use media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
       'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +

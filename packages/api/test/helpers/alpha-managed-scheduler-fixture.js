@@ -155,7 +155,13 @@ export async function alphaManagedFixture(t, options = {}) {
       command: {
         cwd: '.',
         argv: [process.execPath, ...(name.endsWith('.test.mjs') ? ['--test'] : []), name],
-        env: { NODE_ENV: 'test', CAT_CAFE_DEPLOYMENT_ID: 'test', REDIS_URL: 'redis://127.0.0.1:6398' },
+        // Generated units belong to this private execution tree, not the outer API test-file manifest.
+        env: {
+          NODE_ENV: 'test',
+          NODE_OPTIONS: '',
+          CAT_CAFE_DEPLOYMENT_ID: 'test',
+          REDIS_URL: 'redis://127.0.0.1:6398',
+        },
       },
       preparations: options.preparations ?? [],
     })),

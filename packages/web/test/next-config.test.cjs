@@ -282,6 +282,8 @@ describe('next.config rewrites', () => {
       assert.match(isolation.env.CAT_CAFE_WEB_TEST_DIST_DIR, /^\.next-test-contract-/);
       assert.match(isolation.env.CAT_CAFE_WEB_TEST_TSCONFIG, /^tsconfig\.next-test-contract-.*\.json$/);
       assert.equal(isolation.env.NEXT_PUBLIC_API_URL, 'http://fixture');
+      assert.equal(isolation.env.API_SERVER_PORT, undefined);
+      assert.equal(isolation.env.FRONTEND_PORT, undefined);
       assert.equal(fs.existsSync(isolation.distDirPath), true);
       assert.equal(fs.existsSync(isolation.tsconfigPath), true);
     } finally {
@@ -291,6 +293,67 @@ describe('next.config rewrites', () => {
     assert.equal(fs.existsSync(isolation.distDirPath), false);
     assert.equal(fs.existsSync(isolation.tsconfigPath), false);
   });
+
+  it('binds an explicit test backend after discarding inherited runtime ports', async () => {
+    const { createNextDevTestEnvironment } = await import(pathToFileURL(nextDevTestEnvironmentPath));
+    const isolation = await createNextDevTestEnvironment('contract-backend', {
+      NEXT_PUBLIC_API_URL: 'http://127.0.0.1:59231',
+      API_SERVER_PORT: '59231',
+    });
+    try {
+      assert.equal(isolation.env.API_SERVER_PORT, '59231');
+      assert.equal(isolation.env.FRONTEND_PORT, undefined);
+      await withEnv(isolation.env, async (config) => {
+        assert.deepEqual(
+          (await config.rewrites()).map((rule) => new URL(rule.destination).origin),
+          Array(3).fill('http://localhost:59231'),
+        );
+      });
+    } finally {
+      await isolation.cleanup();
+    }
+  });
+
+  for (const apiUrl of [undefined, '']) {
+    it(`isolates actual rewrites when the fixture backend is ${apiUrl === '' ? 'empty' : 'omitted'}`, async () => {
+      const { createNextDevTestEnvironment } = await import(pathToFileURL(nextDevTestEnvironmentPath));
+      const overrides =
+        apiUrl === undefined ? {} : { NEXT_PUBLIC_API_URL: apiUrl, CAT_CAFE_DEPLOYMENT_ID: 'feature-test' };
+      const isolation = await createNextDevTestEnvironment('contract-no-backend', overrides);
+      let origin;
+      try {
+        const rules = await withEnv(isolation.env, (config) => config.rewrites());
+        assert.ok(
+          rules.every((rule) => new URL(rule.destination).port !== '3002'),
+          JSON.stringify(rules),
+        );
+        assert.ok(
+          Number(isolation.env.API_SERVER_PORT) > 0,
+          'A backend-free fixture must own an explicit isolated target',
+        );
+        origin = `http://localhost:${isolation.env.API_SERVER_PORT}`;
+        assert.notEqual(new URL(origin).port, '3002');
+        assert.equal(new URL(isolation.env.NEXT_PUBLIC_API_URL).port, new URL(origin).port);
+        await withEnv(isolation.env, async (config) => {
+          const rules = await config.rewrites();
+          assert.deepEqual(
+            rules.map((rule) => new URL(rule.destination).origin),
+            Array(3).fill(origin),
+          );
+          for (const rule of rules) {
+            const response = await fetch(rule.destination.replace(':path*', 'missing-fixture'));
+            assert.equal(response.status, 503);
+            assert.deepEqual(await response.json(), { error: 'test_backend_not_configured' });
+          }
+        });
+      } finally {
+        await isolation.cleanup();
+      }
+      await assert.rejects(fetch(`${origin}/api/missing-fixture`), /fetch failed/);
+      assert.equal(fs.existsSync(isolation.distDirPath), false);
+      assert.equal(fs.existsSync(isolation.tsconfigPath), false);
+    });
+  }
 
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));

@@ -277,9 +277,12 @@ export function blockDurableGateSelfRecovery(
   }
 }
 
-export function readDurableGateRecovery(job: DurableManagedGateJob): DurableGateRecoverySnapshot | null {
+export function readDurableGateRecovery(
+  job: DurableManagedGateJob,
+  busyTimeoutMs = 5000,
+): DurableGateRecoverySnapshot | null {
   recoveryConfig(job);
-  const database = openDurableGateRecoveryStore(job);
+  const database = openDurableGateRecoveryStore(job, busyTimeoutMs);
   try {
     const row = durableGateRecoveryRow(database, job.jobId);
     if (!row) return null;

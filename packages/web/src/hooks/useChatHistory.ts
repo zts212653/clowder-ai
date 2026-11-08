@@ -2614,7 +2614,9 @@ export function useChatHistory(threadId: string) {
         const pending = readingRestoreRef.current;
         // Automatic measurement/mounting keeps the saved intent. A widget's
         // user-click viewport hint instead takes the interrupting path below.
-        if (pending && restoreFrameKindRef.current === 'restore') scheduleRestore(pending.saved);
+        // ResizeObserver reports layout right before paint; a pending restore that
+        // waits for RAF would paint the incoming thread at the stale offset once.
+        if (pending && restoreFrameKindRef.current === 'restore') scheduleRestore(pending.saved, { beforePaint });
         else scheduleCurrentAnchorCorrection(beforePaint);
         return;
       }

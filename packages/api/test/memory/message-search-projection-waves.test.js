@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { KnowledgeResolver } from '../../dist/domains/memory/KnowledgeResolver.js';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { collectMessageSearchCandidates } from '../../dist/domains/memory/message-search-candidates.js';
+import {
+  compareCanonicalMessages,
+  MESSAGE_SEARCH_TIME_WINDOW,
+  messageDiscoverySource,
+} from '../../dist/domains/memory/message-discovery-source.js';
+
+const collectMessageSearchCandidates = async (input) =>
+  (
+    await KnowledgeResolver.discover(input.search.query, {
+      sources: [messageDiscoverySource({ ...input, read: async () => ({ candidates: input.candidates }) })],
+      limit: input.search.sort === 'relevance' ? (input.search.limit ?? 20) + 1 : MESSAGE_SEARCH_TIME_WINDOW,
+      check: input.check,
+      ...(input.search.sort === 'relevance' ? {} : { compare: compareCanonicalMessages }),
+    })
+  ).items;
 
 test('relevance projection fits the same I/O budget without removing any canonical admission', async (t) => {
   let now = 1_700_000_000_000;

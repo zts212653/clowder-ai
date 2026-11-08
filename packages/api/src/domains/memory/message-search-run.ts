@@ -1,23 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import type { MessageSearchInput, MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import type { Thread } from '../cats/services/stores/ports/ThreadStore.js';
+import { KnowledgeResolver } from './KnowledgeResolver.js';
 import type { MessageSearchPrincipal } from './MessageSearchService.js';
 import {
   attachDecisionSources,
   boundDecisionSearchResponse,
   type MessageDecisionIndex,
 } from './message-decision-index.js';
+import {
+  type CanonicalSearchCandidate,
+  compareCanonicalMessages,
+  MESSAGE_SEARCH_TIME_WINDOW,
+  messageDiscoverySource,
+} from './message-discovery-source.js';
 import type {
   MessagePassageCandidate,
   MessagePassageSearchExecution,
   MessagePassageSearchOptions,
 } from './message-passage-search-types.js';
 import { messageSearchMeta } from './message-search-budget.js';
-import {
-  type CanonicalSearchCandidate,
-  collectMessageSearchCandidates,
-  MESSAGE_SEARCH_TIME_WINDOW,
-} from './message-search-candidates.js';
 import { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 import { observeMessageSearchExecution } from './message-search-execution.js';
 import {
@@ -66,45 +68,59 @@ export async function runMessageSearch(
       () => checkSearchExecution(context),
     );
     await observe('source-admission', ops.requireSource, () => checkSearchExecution(context));
-    const execution = await observe('retrieval', () =>
-      ops.retrieve(input.query, {
+    let execution: MessagePassageSearchExecution | undefined;
+    const discovery = await observe('canonical-projection', () =>
+      KnowledgeResolver.discover(input.query, {
+        limit: input.sort === 'relevance' ? limit + 1 : MESSAGE_SEARCH_TIME_WINDOW,
+        candidateBudget: 2000,
         signal: context.signal,
         deadlineAt,
-        onReadSnapshot: diagnostics.worker,
-        visibleThreadIds: [...threads.keys()],
-        threadId: input.threadId,
-        sort: input.sort ?? 'time',
-        mode: input.mode ?? 'hybrid',
-        candidateOrder: 'relevance',
-        excludeSource: principal.source,
-        dateFrom: input.dateFrom,
-        dateTo: input.dateTo,
-      }),
-    );
-    const canonical = await observe('canonical-projection', () =>
-      collectMessageSearchCandidates({
-        search: input,
-        candidates: execution.passages,
-        threadIds: new Set(threads.keys()),
-        source: principal.source,
-        project: (candidate) => ops.project(candidate, diagnostics),
-        projectWave: (rows) => ops.projectWave(rows, diagnostics),
-        beforeWave: async (read: () => Promise<Array<CanonicalSearchCandidate | null>>) => {
-          if (Date.now() + projectionWaveMs >= workCutoff) {
-            stoppedEarly = true;
-            return undefined;
-          }
-          const started = Date.now();
-          const work = await readBeforeSearchCutoff(read, workCutoff, context);
-          projectionWaveMs = Math.max(projectionWaveMs, Date.now() - started);
-          if (work.completed) return work.value;
-          stoppedEarly = true;
-          return undefined;
-        },
-        diagnostics,
         check: () => checkSearchExecution(context),
+        ...(input.sort === 'relevance' ? {} : { compare: compareCanonicalMessages }),
+        sources: [
+          messageDiscoverySource({
+            search: input,
+            read: async () => {
+              execution = await observe('retrieval', () =>
+                ops.retrieve(input.query, {
+                  signal: context.signal,
+                  deadlineAt,
+                  onReadSnapshot: diagnostics.worker,
+                  visibleThreadIds: [...threads.keys()],
+                  threadId: input.threadId,
+                  sort: input.sort ?? 'time',
+                  mode: input.mode ?? 'hybrid',
+                  candidateOrder: 'relevance',
+                  excludeSource: principal.source,
+                  dateFrom: input.dateFrom,
+                  dateTo: input.dateTo,
+                }),
+              );
+              return { candidates: execution.passages };
+            },
+            threadIds: new Set(threads.keys()),
+            source: principal.source,
+            project: (candidate) => ops.project(candidate, diagnostics),
+            projectWave: (rows) => ops.projectWave(rows, diagnostics),
+            beforeWave: async (read) => {
+              if (Date.now() + projectionWaveMs >= workCutoff) {
+                stoppedEarly = true;
+                return undefined;
+              }
+              const started = Date.now();
+              const work = await readBeforeSearchCutoff(read, workCutoff, context);
+              projectionWaveMs = Math.max(projectionWaveMs, Date.now() - started);
+              if (work.completed) return work.value;
+              stoppedEarly = true;
+              return undefined;
+            },
+            diagnostics,
+          }),
+        ],
       }),
     );
+    const canonical = discovery.items;
+    if (!execution) throw new Error('Message discovery did not retrieve a source window');
     // Isolate optional mutations: a late ledger read cannot mutate the published rows.
     const labelled = canonical.slice(0, limit + 1).map((row) => ({ ...row.result }));
     const decisionIndex = await observe('decision-sources', async () => {

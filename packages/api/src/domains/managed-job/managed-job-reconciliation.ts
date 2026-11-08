@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import type { ManagedJobHealth } from './managed-job-health.js';
+import type { ManagedJobStatusRequest } from './managed-job-status.js';
 import type { DurableGateInspection, DurableManagedGateJob, ManagedJobAccess } from './managed-job-types.js';
 
 export interface ManagedJobObservation {
@@ -18,9 +19,10 @@ export type ManagedJobReconciliationRequest = {
 } & (
   | { kind: 'all'; legacyJobs: readonly DurableManagedGateJob[] }
   | { kind: 'one'; principal: ManagedJobAccess; jobId: string }
+  | ({ kind: 'status' } & ManagedJobStatusRequest)
 );
 
-/** One existing reconciliation, off the HTTP loop; no scheduling queue or job admission. */
+/** One existing reconciliation or status read, off the HTTP loop; no scheduling queue or job admission. */
 export function reconcileManagedJobsOffLoop<T>(input: ManagedJobReconciliationRequest): Promise<T> {
   return new Promise((resolve, reject) => {
     const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
@@ -33,9 +35,12 @@ export function reconcileManagedJobsOffLoop<T>(input: ManagedJobReconciliationRe
       execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 256 },
     });
-    let result: { ok: true; value: T } | { ok: false; error: { name: string; message: string } } | undefined;
+    let result:
+      | { ok: true; value: T }
+      | { ok: false; error: { name: string; message: string; code?: string } }
+      | undefined;
     let failure: Error | undefined;
-    const budgetMs = input.kind === 'all' ? 10_000 : 120_000;
+    const budgetMs = { all: 10_000, one: 120_000, status: 15_000 }[input.kind];
     const timer = setTimeout(() => {
       failure = new Error(`Managed job reconciliation exceeded ${budgetMs}ms`);
       void worker.terminate();
@@ -54,7 +59,7 @@ export function reconcileManagedJobsOffLoop<T>(input: ManagedJobReconciliationRe
       if (failure) reject(failure);
       else if (!result) reject(new Error(`Managed job reconciliation exited without a result (${code})`));
       else if (result.ok) resolve(result.value);
-      else reject(Object.assign(new Error(result.error.message), { name: result.error.name }));
+      else reject(Object.assign(new Error(result.error.message), result.error));
     });
   });
 }

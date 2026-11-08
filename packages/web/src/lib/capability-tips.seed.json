@@ -3327,6 +3327,25 @@
     "owner": "codex-terra"
   },
   {
+    "id": "feature-f309-gif-svg-originals",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "structureSource": {
+      "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
+      "anchor": "GifFrameControls"
+    },
+    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
+    "action": {
+      "type": "open_source",
+      "label": "查看动图与矢量作品说明",
+      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "capability-co-creation-storytelling",
     "kind": "capability",
     "sourceRef": {
