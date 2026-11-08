@@ -10,7 +10,7 @@ import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-
 import { startWorkspaceNetworkProxy } from './f309-workspace-network-proxy.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 
-const evidence = '/tmp/cat-cafe-evidence/f309-artwork-entry';
+const evidence = path.join(tmpdir(), 'cat-cafe-evidence/f309-artwork-entry');
 
 /** Native chat and file owner; only history/session issuance and the outbound cat send are synthetic. */
 export function registerArtworkEntryJourneys(suite) {

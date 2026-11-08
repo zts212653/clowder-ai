@@ -8,7 +8,8 @@ import { THREAD_ID } from './f309-ordinary-workspace-journey-fixture.mjs';
 import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-workspace-real-owner.mjs';
 import { startWorkspaceNetworkProxy } from './f309-workspace-network-proxy.mjs';
 
-const evidence = process.env.F309_LONG_IMAGE_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f309-studio297-long';
+const evidence =
+  process.env.F309_LONG_IMAGE_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f309-studio297-long');
 const sha = '43bd6445884b1825c75f417e8437334f52776dc8606b950826bd71c2cd93563c';
 // Same bytes as Studio Human035's first image, explicitly supplied for this private viewport test.
 // The original message/upload and parent's owners are never touched; this is a separate authentic F063 file owner.

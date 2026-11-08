@@ -15,12 +15,13 @@
 
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, test } from 'node:test';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
 // `validateProjectPath` canonicalizes via realpath (e.g. /tmp → /private/tmp on macOS),
 // so assert against the resolved real path rather than the literal input.
-const TMP = '/tmp';
+const TMP = tmpdir();
 const TMP_CANON = realpathSync(TMP);
 const BAD_PATH = '/no/such/dir/f128-does-not-exist';
 

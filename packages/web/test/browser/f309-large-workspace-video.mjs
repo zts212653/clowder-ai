@@ -8,7 +8,7 @@ import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-
 import { startWorkspaceNetworkProxy } from './f309-workspace-network-proxy.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 
-const evidence = '/tmp/cat-cafe-evidence/f309-large-video';
+const evidence = path.join(tmpdir(), 'cat-cafe-evidence/f309-large-video');
 
 async function largeVideo(directory) {
   const file = path.join(directory, 'large-master.mp4');

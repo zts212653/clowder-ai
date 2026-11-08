@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import { createF322BControlledFixture } from './f322-b-controlled-fixture.mjs';
 
@@ -120,7 +122,7 @@ export async function runF322BExecutionLocationJourney({
     assert.equal(await bubble.getAttribute('data-message-jump-focus'), 'true');
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
     assert.deepEqual(await composer.evaluate((input) => [input.selectionStart, input.selectionEnd]), [3, 8]);
-    await page.screenshot({ path: `/tmp/f322-b-native-live-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-live-${viewport.width}-${language}.png`) });
     fixture.setExecutions([fixture.managed]);
     await location.filter({ hasText: language === 'zh' ? '在跑' : 'running' }).waitFor({ timeout: 10_000 });
     if (viewport.width === 390)
@@ -147,7 +149,7 @@ export async function runF322BExecutionLocationJourney({
     );
     assert.equal(await detail.getByRole('link').getAttribute('href'), `/thread/${threadId}`);
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
-    await page.screenshot({ path: `/tmp/f322-b-native-command-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-command-${viewport.width}-${language}.png`) });
     await homeRow.locator('.home-execution-stop button').click();
     const confirmation = page.getByRole('dialog', {
       name: language === 'zh' ? '停止小太阳·砚砚的这次执行？' : 'Stop this execution by 小太阳·砚砚?',
@@ -190,7 +192,7 @@ export async function runF322BExecutionLocationJourney({
     );
     fixture.setExecutions([fixture.managed]);
     await homeRow.locator('.home-execution-stop button').click();
-    await page.screenshot({ path: `/tmp/f322-b-native-stop-confirm-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-stop-confirm-${viewport.width}-${language}.png`) });
     await confirm.click();
     await detail
       .getByText(language === 'zh' ? '读不到这次执行的位置' : 'Cannot read the location of this execution', {
@@ -206,10 +208,10 @@ export async function runF322BExecutionLocationJourney({
       fixture.calls.filter((call) => call.startsWith('DELETE ')),
       ['DELETE /api/callbacks/hold-ball/sample-hold-exact'],
     );
-    await page.screenshot({ path: `/tmp/f322-b-native-execution-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-execution-${viewport.width}-${language}.png`) });
     assert.deepEqual(errors, []);
   } catch (error) {
-    await page.screenshot({ path: `/tmp/f322-b-native-failure-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-failure-${viewport.width}-${language}.png`) });
     throw error;
   } finally {
     await context.close();

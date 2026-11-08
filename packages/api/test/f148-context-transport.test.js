@@ -1,7 +1,10 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, describe, it } from 'node:test';
 import { coCreatorDisplay } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../dist/config/hierarchical-context-config.js';
@@ -871,6 +874,15 @@ describe('F148 Phase C: formatAnchors', () => {
 import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
 
 describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
+  let dataDir;
+  const writers = [];
+  before(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'f148-read-ops-'));
+  });
+  after(async () => {
+    await Promise.all(writers.map((writer) => writer.drainPendingWrites()));
+    rmSync(dataDir, { recursive: true, force: true });
+  });
   const session = {
     sessionId: 'sess-d1',
     threadId: 'thread-d1',
@@ -881,7 +893,8 @@ describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
   const sealTs = { createdAt: 1000000, sealedAt: 1060000 };
 
   it('tracks Read tool as read op in filesTouched', () => {
-    const tw = new TranscriptWriter({ dataDir: '/tmp/test-d1' });
+    const tw = new TranscriptWriter({ dataDir });
+    writers.push(tw);
     tw.appendEvent(session, {
       type: 'tool_use',
       toolName: 'Read',
@@ -894,7 +907,8 @@ describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
   });
 
   it('tracks Grep tool as read op', () => {
-    const tw = new TranscriptWriter({ dataDir: '/tmp/test-d1' });
+    const tw = new TranscriptWriter({ dataDir });
+    writers.push(tw);
     tw.appendEvent(session, {
       type: 'tool_use',
       toolName: 'Grep',
@@ -907,7 +921,8 @@ describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
   });
 
   it('tracks Glob tool as read op', () => {
-    const tw = new TranscriptWriter({ dataDir: '/tmp/test-d1' });
+    const tw = new TranscriptWriter({ dataDir });
+    writers.push(tw);
     tw.appendEvent(session, {
       type: 'tool_use',
       toolName: 'Glob',
@@ -920,7 +935,8 @@ describe('Phase D: toolNameToOp read ops (AC-D1)', () => {
   });
 
   it('file with both read and edit shows both ops', () => {
-    const tw = new TranscriptWriter({ dataDir: '/tmp/test-d1' });
+    const tw = new TranscriptWriter({ dataDir });
+    writers.push(tw);
     tw.appendEvent(session, {
       type: 'tool_use',
       toolName: 'Read',

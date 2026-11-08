@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { createScreeningJourney, openPreparedProject } from './f326-screening-journey.harness.mjs';
@@ -11,7 +12,7 @@ test(
   async (t) => {
     const journey = await createScreeningJourney();
     const manifest = JSON.parse(await readFile(process.env.F326_BROWSER_MANIFEST, 'utf8'));
-    const sent = JSON.parse(await readFile('/tmp/f326-b-human-send-receipt.json', 'utf8'));
+    const sent = JSON.parse(await readFile(path.join(tmpdir(), 'f326-b-human-send-receipt.json'), 'utf8'));
     const result = { outcome: 'running', sourceMessageId: sent.userMessageId, assertions: [] };
     let failure;
     t.after(async () => {

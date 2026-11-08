@@ -509,7 +509,7 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
 
   test('durable gate cancel leaves lifecycle and enabled state unchanged when the audited mutation loses CAS', async () => {
     const task = makeHoldTask('hold-ball-durable-cancel-cas', 'thread-durable-cancel-cas', 'codex');
-    const dataRoot = '/tmp/cat-cafe-hold-cancel-route-cas-test';
+    const dataRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-hold-cancel-route-cas-test-'));
     task.params = {
       ...task.params,
       holdLifecycle: {

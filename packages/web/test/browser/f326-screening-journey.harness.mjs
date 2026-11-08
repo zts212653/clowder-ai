@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const provenanceDirectory = '/tmp/f326-b-movie-provenance';
+const provenanceDirectory = path.join(tmpdir(), 'f326-b-movie-provenance');
 const fixturePath = path.join(repository, 'packages/api/test/fixtures/video-project/ep0.json');
 const jsonFile = async (filename) => JSON.parse(await readFile(filename, 'utf8'));
 async function fileDigest(filename) {

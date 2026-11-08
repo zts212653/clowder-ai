@@ -11,7 +11,8 @@ import { verifyTaskRequestChange } from './f309-task-request-change.mjs';
 import { mixedWorks, verifyRepeatedWorksReturn } from './f309-works-return-probe.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 
-const evidence = process.env.F309_TASK_HEADER_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f309-task-publication-header';
+const evidence =
+  process.env.F309_TASK_HEADER_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f309-task-publication-header');
 
 /** Real Next + original publication/Task/review routes. Session/history issuance and the cat callback are controlled. */
 export function registerTaskPublicationHeaderJourneys(suite) {
