@@ -34,9 +34,10 @@ const PROSE_MIGRATIONS: ProseMigration[] = [
 
 const PRODUCER_MIGRATIONS = [
   {
-    path: '../../hooks/agent-messages/background-handler.ts',
+    // PR-3a: the background completion toast moved from the room handler to the lifecycle snapshot.
+    path: '../../hooks/agent-messages/lifecycle-terminal.ts',
     legacy: "preview.slice(0, 80) + (preview.length > 80 ? '...' : '')",
-    recovery: 'message: preview',
+    recovery: 'message: message.content',
   },
   {
     path: '../../stores/chatStore.ts',

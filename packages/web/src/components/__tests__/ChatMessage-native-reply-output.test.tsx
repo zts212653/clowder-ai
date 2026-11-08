@@ -2,12 +2,18 @@ import { createHash } from 'node:crypto';
 import { act } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
+import { sha256Hex } from '@/utils/sha256-hex';
 import {
   installReplyLayersActEnvironment,
   ReplyLayersHarness,
   streamReply,
   uninstallReplyLayersActEnvironment,
 } from './ChatMessage-reply-layers.harness';
+
+vi.mock('@/utils/sha256-hex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/sha256-hex')>();
+  return { sha256Hex: vi.fn(actual.sha256Hex) };
+});
 
 function reply(): ChatMessage {
   const parts = ['查看前文。', '查看后文。', '**真正回答。**', '[Sol/gpt-6.1-sol🐾]'];
@@ -115,6 +121,40 @@ describe('production ChatMessage consumes proven ordinary-native output', () => 
     expect(text.indexOf('Read file')).toBeLessThan(text.indexOf('查看后文'));
     expect(text).not.toContain('真正回答');
     expect(text).not.toContain('[Sol/');
+  });
+  it('paints a stored reply in its verified layout on the first commit, without waiting for an async digest', () => {
+    // A layout that only appears after an asynchronous digest first paints the whole body, then changes the
+    // row's height once mounted; far above the viewport that shift clamps a bottom-anchored chat.
+    vi.stubGlobal('crypto', { subtle: { digest: () => new Promise<ArrayBuffer>(() => {}) } });
+    harness.enableV2();
+    act(() => harness.render(reply()));
+    const body = harness.q('message-bubble');
+    expect(body?.textContent).toContain('真正回答。');
+    expect(body?.textContent).not.toContain('查看前文');
+    expect(harness.q('reply-last-line')?.textContent).toContain('过程 2 段');
+  });
+  it('does not hash a body whose layout cannot apply, such as an incomplete stream or a missing tool', () => {
+    harness.enableV2();
+    const message = reply();
+    const layout = message.extra?.outputLayout;
+    if (!layout) throw new Error('fixture layout');
+    const { v, owner, contentRevision } = layout;
+    const streaming = {
+      ...message,
+      extra: {
+        ...message.extra,
+        outputLayout: { v, owner, contentRevision, status: 'unavailable', reason: 'incomplete' },
+      },
+    } as ChatMessage;
+    vi.mocked(sha256Hex).mockClear();
+    act(() => harness.render(streaming));
+    act(() => harness.render({ ...streaming, content: `${streaming.content} more` }));
+    // An available layout whose ordered tool calls are not on the message cannot project either.
+    act(() => harness.render({ ...message, toolEvents: [] }));
+    expect(sha256Hex).not.toHaveBeenCalled();
+    expect(harness.q('message-bubble')?.textContent).toContain('查看前文');
+    act(() => harness.render(message));
+    expect(sha256Hex).toHaveBeenCalledTimes(1);
   });
   it('preserves the original classic body and unknown/changed v2 body without classifying them', async () => {
     const message = reply();

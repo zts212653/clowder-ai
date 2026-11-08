@@ -1,7 +1,9 @@
 import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
 import { HighlightedMessageSnippet } from './HighlightedMessageSnippet';
 import { MessageResultSpeaker } from './MessageResultSpeaker';
+import { MessageSelectedSource } from './MessageSelectedSource';
 import { MessageSourceContext } from './MessageSourceContext';
+import { readSelectedAnswerRow } from './message-answer-read';
 import { matchingDecisionSources, queryMatchRanges } from './message-query-presentation';
 import { decisionLabel } from './message-source-read';
 import { useMessageSourceActions } from './useMessageSourceActions';
@@ -32,8 +34,13 @@ export function MessageSearchResultRow({
   resolveSpeaker: (speaker: string) => string;
   beforeAction?: (signal: AbortSignal) => Promise<boolean>;
 }) {
-  const action = useMessageSourceActions(result, currentThreadId, resolveSpeaker, beforeAction);
+  const validate =
+    beforeAction ??
+    (result.selection ? (signal: AbortSignal) => readSelectedAnswerRow(response, result, signal) : undefined);
+  const action = useMessageSourceActions(result, currentThreadId, resolveSpeaker, validate);
   const enhanced = journey6 && !readonly;
+  const selected = result.selection;
+  const selectingCat = response.meta.answerSelection && resolveSpeaker(response.meta.answerSelection.catId);
   const sourceDecision =
     queryMatchRanges(result.snippet.text, response.query).length === 0
       ? matchingDecisionSources(result, response.query)[0]
@@ -48,6 +55,10 @@ export function MessageSearchResultRow({
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-cafe-muted">
           <MessageResultSpeaker speaker={result.speaker} label={speaker} />
+          {selected?.part.kind === 'quote' && <span>引用了材料</span>}
+          {selected?.part.kind === 'comment' && (
+            <span className="rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-cafe-secondary">引用批注</span>
+          )}
           {enhanced && conversation}
           <time dateTime={new Date(result.timestamp).toISOString()}>
             {new Intl.DateTimeFormat(undefined, {
@@ -80,9 +91,11 @@ export function MessageSearchResultRow({
             className="flex w-full items-start gap-2 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-500)]"
           >
             <span
-              className={`${sourceDecision ? 'flex' : 'line-clamp-2'} min-w-0 flex-1 break-words text-sm leading-6 text-cafe-secondary`}
+              className={`${selected ? 'block' : sourceDecision ? 'flex' : 'line-clamp-2'} min-w-0 flex-1 break-words text-sm leading-6 text-cafe-secondary`}
             >
-              {sourceDecision ? (
+              {selected ? (
+                <MessageSelectedSource result={result} speaker={speaker} resolveSpeaker={resolveSpeaker} />
+              ) : sourceDecision ? (
                 <>
                   <span className="shrink-0">这是「</span>
                   <span className="truncate" title={sourceDecision.conclusion}>
@@ -100,7 +113,16 @@ export function MessageSearchResultRow({
           </button>
         ) : (
           <p className="break-words text-sm leading-6 text-cafe-secondary">
-            <HighlightedMessageSnippet result={result} />
+            {selected ? (
+              <MessageSelectedSource result={result} speaker={speaker} resolveSpeaker={resolveSpeaker} />
+            ) : (
+              <HighlightedMessageSnippet result={result} />
+            )}
+          </p>
+        )}
+        {selected && selectingCat && (
+          <p className="mt-1.5 break-words text-xs leading-5 text-cafe-muted">
+            {selectingCat} 选用理由：{selected.reason}
           </p>
         )}
       </div>
@@ -125,7 +147,7 @@ export function MessageSearchResultRow({
           <button
             type="button"
             className={searchButtonClass}
-            onClick={() => onNavigate(result, response)}
+            onClick={() => void action.navigate(() => onNavigate(result, response))}
             aria-label={`${enhanced ? '去原处' : '跳过去'}：${speaker} · 第${index + 1}处`}
           >
             {enhanced ? '去原处' : '跳过去 ›'}

@@ -18,6 +18,7 @@ try {
     error: {
       name: error instanceof Error ? error.name : 'Error',
       message: error instanceof Error ? error.message : String(error),
+      ...(error instanceof Error && 'code' in error && typeof error.code === 'string' ? { code: error.code } : {}),
     },
   });
 } finally {

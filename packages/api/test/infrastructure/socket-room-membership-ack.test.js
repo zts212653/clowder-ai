@@ -39,7 +39,9 @@ describe('SocketManager room membership acknowledgement', () => {
       client.emit('join_room', 'thread:room-ack', resolve);
     });
 
-    assert.deepEqual(ack, { ok: true, room: 'thread:room-ack' });
+    // PR-3a2: a thread-room acknowledgement also names the join its stream replay belongs to.
+    assert.deepEqual(ack, { ok: true, room: 'thread:room-ack', joinId: ack.joinId });
+    assert.equal(typeof ack.joinId, 'string');
     assert.ok(socketManager.getIO().sockets.adapter.rooms.get('thread:room-ack')?.has(client.id));
   });
 

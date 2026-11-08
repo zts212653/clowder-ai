@@ -1,3 +1,5 @@
+import type { MessageAnswerSelection, MessageSourceSelection } from './message-search-selection.js';
+
 /** The same message search request/response serves cats, concierge and the human UI. */
 export interface MessageSearchInput {
   query: string;
@@ -47,7 +49,11 @@ export interface MessageSearchResult {
   timelineOrderAt: number;
   snippet: { text: string; start: number; end: number; source: 'body' | 'attachment-text' };
   highlights: Array<{ start: number; end: number }>;
-  match: 'lexical' | 'semantic' | 'hybrid';
+  match: 'lexical' | 'semantic' | 'hybrid' | 'selected';
+  /** Literal terms are evidence of matching text, never of semantic support. Absent on legacy snapshots. */
+  matchEvidence?: { kind: 'literal' | 'lexical' | 'semantic'; terms: string[] };
+  /** Host-verified quotation; the reason remains the authenticated cat's judgment. */
+  selection?: MessageSourceSelection;
   /** Revision evidence, never an authorization token. */
   contentRevision: string;
   publiclyQuotable: boolean;
@@ -74,9 +80,9 @@ export interface MessageSearchResponse {
   meta: {
     scope: 'thread' | 'global';
     threadId?: string;
-    sort: 'time' | 'relevance';
-    requestedMode: 'lexical' | 'semantic' | 'hybrid';
-    effectiveMode: 'lexical' | 'semantic' | 'hybrid';
+    sort: 'time' | 'relevance' | 'selected';
+    requestedMode: 'lexical' | 'semantic' | 'hybrid' | 'selected';
+    effectiveMode: 'lexical' | 'semantic' | 'hybrid' | 'selected';
     degraded: boolean;
     degradeReason?: string;
     partial: boolean;
@@ -85,6 +91,13 @@ export interface MessageSearchResponse {
     semanticCandidatesLimited: boolean;
     sourceCoverage: 'unknown';
     freshness: 'unknown';
+    /** Ordinary sources are not historical qualification verdicts. */
+    resultKind?: 'sources' | 'selected-answer';
+    answerSelection?: MessageAnswerSelection;
+    /** Actual admitted card coordinates for re-reading a selected snapshot after opening Find. */
+    answerBinding?: { messageId: string; blockId: string };
+    /** Time order covers only this admitted relevance window, not all history. */
+    timeWindow?: { limit: number; admitted: number; complete: boolean };
     decisionIndex?: { status: 'ready' | 'unavailable'; revision?: string };
     /** Counts cover canonical rows examined in this request, not the entire history/index. */
     qualification?: {

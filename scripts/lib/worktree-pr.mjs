@@ -1,10 +1,43 @@
 /** Exact PR truth through the repository's canonical gh transport. No branch-name inference. */
 import { execFileSync } from 'node:child_process';
+import { validateOrigin } from './worktree-origin.mjs';
+import { retentionStatus } from './worktree-retention.mjs';
+
+const PR_SOURCE = /^pr:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9]\d*)$/;
 export function parsePrSource(sourceRef) {
-  const match = /^pr:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9]\d*)$/.exec(sourceRef ?? '');
+  const match = PR_SOURCE.exec(sourceRef ?? '');
   if (!match) throw new Error('expected pr:owner/repository#number');
   return { repository: match[1], number: match[2] };
 }
+
+/** PR membership is content evidence. Only worktree-local intent establishes responsibility. */
+export function worktreePrBinding(lifecycle, head) {
+  if (lifecycle?.prSource !== undefined) {
+    return PR_SOURCE.test(lifecycle.prSource)
+      ? { sourceRef: lifecycle.prSource, evidence: 'pr-binding' }
+      : { reason: 'invalid PR binding provenance' };
+  }
+  try {
+    validateOrigin(lifecycle?.origin);
+  } catch {
+    return { reason: 'invalid origin provenance' };
+  }
+  const originSource = lifecycle?.origin?.sourceRef;
+  if (originSource?.startsWith('pr:')) {
+    return PR_SOURCE.test(originSource)
+      ? { sourceRef: originSource, evidence: 'origin-source' }
+      : { reason: 'invalid origin PR provenance' };
+  }
+  const retained = lifecycle?.retention;
+  if (typeof retained?.sourceRef === 'string' && retained.sourceRef.startsWith('pr:')) {
+    if (!PR_SOURCE.test(retained.sourceRef)) return { reason: 'invalid retained PR provenance' };
+    if (retentionStatus(lifecycle) === 'retention-invalid' || retained.head !== head)
+      return { reason: 'stale or invalid retained PR provenance' };
+    return { sourceRef: retained.sourceRef, evidence: 'retained-source' };
+  }
+  return { reason: 'exact commit without worktree PR provenance' };
+}
+
 export function readPrTruth(
   sourceRef,
   run = (args) =>

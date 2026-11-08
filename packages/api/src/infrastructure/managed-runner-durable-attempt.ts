@@ -15,6 +15,7 @@ import {
   durableGateRecoveryReadyPath,
 } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
 import { readUnixProcessSnapshot, sameUnixProcess, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
+import { retainLiveManagedAttemptMembers } from './managed-runner/attempt-members.js';
 
 export interface DurableManagedGateAttempt {
   readonly attemptToken: string;
@@ -118,8 +119,11 @@ export async function cleanupDurableManagedGateAttempt(
   const startedAt = Date.now();
   let forced = false;
   const signals: DurableManagedGateCleanupSignal[] = [];
+  const known = new Map<number, UnixProcessIdentity>();
   while (Date.now() - startedAt <= budgetMs) {
-    const members = await attemptMembers(attemptToken);
+    const discovered = await attemptMembers(attemptToken);
+    if (discovered === null) return { proven: false, signals };
+    const members = await retainLiveManagedAttemptMembers(known, discovered);
     if (members === null) return { proven: false, signals };
     if (members.length === 0) return { proven: true, signals };
     const shouldForce = Date.now() - startedAt >= Math.max(pollMs, Math.floor(budgetMs / 2));
@@ -127,5 +131,6 @@ export async function cleanupDurableManagedGateAttempt(
     signals.push(...signalMembers(members, forced ? 'SIGKILL' : 'SIGTERM'));
     await sleep(pollMs);
   }
-  return { proven: (await attemptMembers(attemptToken))?.length === 0, signals };
+  const final = await attemptMembers(attemptToken);
+  return { proven: final !== null && (await retainLiveManagedAttemptMembers(known, final))?.length === 0, signals };
 }

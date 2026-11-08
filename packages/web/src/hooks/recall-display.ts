@@ -13,6 +13,7 @@ export const RESOLVER_LABELS: Record<RecallResolverFamily, string> = {
   cat_owned_seed: '猫自己的种子',
   thread_overview: '线程概况',
   matter: '事情',
+  message_evidence: '原消息',
 };
 const TYPE_LABELS: Record<string, string> = {
   ...RESOLVER_LABELS,

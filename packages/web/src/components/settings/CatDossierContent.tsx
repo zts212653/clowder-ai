@@ -11,7 +11,7 @@
  * OQ-10: Phase D = staging + read；promotion 留 Phase E。
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { useCoCreatorDisplay } from '@/hooks/useCoCreatorConfig';
 import { type EvidenceSnippet, useDossierEvidence } from '@/hooks/useDossierEvidence';
@@ -252,15 +252,13 @@ function EvidenceSection({
                 <SettingsText variant="xs" tone="default" className="font-medium">
                   {ev.title}
                 </SettingsText>
-                <SettingsBadge
-                  tone={ev.matchRank === 'high' ? 'emerald' : ev.matchRank === 'mid' ? 'amber' : 'slate'}
-                  size="xxs"
-                >
-                  {ev.matchRank}
+                <SettingsBadge tone="slate" size="xxs">
+                  {ev.rank ?? ev.matchRank}
                 </SettingsBadge>
               </div>
               <SettingsText as="p" variant="xs" tone="muted">
-                match:{ev.matchRank} · authority:{ev.authority ?? 'unknown'} · updated:{ev.updatedAt ?? 'unknown'}
+                rank:{ev.rank ?? ev.matchRank} · relevance:{ev.relevance?.state ?? 'unknown'} · authority:
+                {ev.authority ?? 'unknown'} · updated:{ev.updatedAt ?? 'unknown'}
               </SettingsText>
               <ExpandableProse
                 text={ev.snippet}
@@ -299,9 +297,15 @@ function CatProfileCard({
   const { dossier } = cat;
   // Evidence search key: nickname (most natural language hits) → displayName fallback
   const searchKey = cat.nickname || cat.displayName;
+  const anchor = `profile-${cat.catId}`;
+  useEffect(() => {
+    if (window.location.hash === `#${encodeURIComponent(anchor)}`) {
+      document.getElementById(anchor)?.scrollIntoView?.({ block: 'center' });
+    }
+  }, [anchor]);
 
   return (
-    <div className="border-t border-[var(--console-border-soft)] py-3 first:border-t-0">
+    <div id={anchor} className="scroll-mt-6 border-t border-[var(--console-border-soft)] py-3 first:border-t-0">
       {/* Cat header */}
       <div className="flex items-center gap-2.5">
         <SettingsText variant="sm" tone="default" className="font-semibold">
@@ -373,6 +377,11 @@ function DossierDetail({
       {dossier.l0RosterSummary && (
         <SettingsText as="p" variant="xs" tone="muted">
           L0 能力摘要：{dossier.l0RosterSummary}
+        </SettingsText>
+      )}
+      {dossier.l0RoutingNote && (
+        <SettingsText as="p" variant="xs" tone="muted">
+          名册限制：{dossier.l0RoutingNote}
         </SettingsText>
       )}
 

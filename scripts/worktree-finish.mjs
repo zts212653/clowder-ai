@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Explicitly finish one owned checkout: reversible release or bounded named retention. */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireNoDurableConsumers } from './lib/worktree-consumers.mjs';
@@ -203,13 +203,37 @@ function resolveMergedPr(opts) {
   }
 }
 
+/** Resolve a removed checkout through its existing parent; never guess from ledger names. */
+function checkedPath(input) {
+  let current = resolve(input);
+  const missing = [];
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...missing);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      // A dangling link is an existing filesystem object, not a removed checkout.
+      try {
+        lstatSync(current);
+        fail('unresolved symlink in checked worktree path');
+      } catch (statError) {
+        if (statError.code !== 'ENOENT') throw statError;
+      }
+      missing.unshift(basename(current));
+      const parent = dirname(current);
+      if (parent === current) throw error;
+      current = parent;
+    }
+  }
+}
+
 /** No batch deletion, no branch deletion, no --force, no mutation while checking. */
 export function finishWorktree(input) {
   const opts = {
     mode: 'release',
     now: Date.now(),
     ...input,
-    path: safeRealpath(resolve(input.path)),
+    path: input.mode === 'check' ? checkedPath(input.path) : safeRealpath(resolve(input.path)),
     repo: safeRealpath(input.repo),
   };
   for (const key of ['owner', 'sourceRef']) {

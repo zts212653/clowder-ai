@@ -7,6 +7,8 @@ export interface MessagePassageSearchOptions
   extends Pick<SearchOptions, 'mode' | 'threadId' | 'dateFrom' | 'dateTo' | 'signal' | 'deadlineAt'> {
   visibleThreadIds: readonly string[];
   sort?: 'time' | 'relevance';
+  /** Host ordinary-search policy: return a shared relevance queue; omitted preserves legacy ordering. */
+  candidateOrder?: 'relevance';
   candidateLimit?: number;
   /** Private observers, stripped before IPC; never part of public search metadata. */
   onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;

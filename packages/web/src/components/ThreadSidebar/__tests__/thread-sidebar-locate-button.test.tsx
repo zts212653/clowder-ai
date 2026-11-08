@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { SIDEBAR_TAB_STORAGE_KEY } from '../sidebar-tab-state';
@@ -44,6 +45,7 @@ describe('ThreadSidebar locate button (Select Open Session)', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     scrollIntoView = vi.fn();
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       value: scrollIntoView,

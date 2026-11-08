@@ -50,6 +50,7 @@ describe('F311 list and detail read scopes', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     summary = programFixture('instrumenting', 2);
@@ -80,6 +81,7 @@ describe('F311 list and detail read scopes', () => {
       resolveDetail?.(response(detail));
     });
     host.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     vi.useRealTimers();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });

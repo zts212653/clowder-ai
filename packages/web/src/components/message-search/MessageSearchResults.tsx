@@ -93,6 +93,7 @@ export function MessageSearchResults({
           <MessageSearchNotice response={response} />
           <div className="flex items-center justify-between gap-3 border-b border-[var(--console-border-soft)] px-3 py-2 text-xs text-cafe-muted">
             <div className="flex gap-3" role="group" aria-label="结果排序">
+              {response.meta.sort === 'selected' && <span>猫选顺序</span>}
               {(['time', 'relevance'] as const).map((sort) =>
                 onSortChange && !readonly ? (
                   <button

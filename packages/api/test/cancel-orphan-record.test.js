@@ -464,6 +464,10 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
   const { lifecycleResponseIdempotencyKey } = await import(
     '../dist/domains/cats/services/agents/invocation/response-draft-settlement.js'
   );
+  const { responseProducers } = await import(
+    '../dist/domains/cats/services/agents/invocation/response-producer-registry.js'
+  );
+  const { SessionMutex } = await import('../dist/domains/cats/services/agents/invocation/SessionMutex.js');
   const JOB = `Local${String.fromCharCode(92)}ClowderApiJob-cancel-test`;
   const verdict = (observed) => async () => ({ stdout: `${JSON.stringify(observed)}\r\n`, stderr: '' });
   const ROUTES = {
@@ -487,6 +491,8 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       childFinished = false,
       siblingFinished = false,
       noLink = false,
+      producerClaimed = false,
+      childCanceled = false,
     } = {},
   ) {
     const dataDir = mkdtempSync(join(tmpdir(), 'issue1838-cancel-'));
@@ -508,6 +514,15 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       providerLifecycleTracked: true,
     });
     turns.markProviderStarted(execution.invocationId, 2);
+    const claims = responseProducers.openRouteScope();
+    if (producerClaimed) claims.enter(execution.invocationId);
+    t.after(() => claims.leaveAll());
+    if (childCanceled)
+      turns.transitionTerminal(execution.invocationId, {
+        status: 'canceled',
+        endedAt: 3,
+        terminalReason: 'user_cancel',
+      });
     // A turn that finished on its own: terminal, its reply still owed on the KD-21 ledger.
     if (childFinished)
       turns.transitionTerminal(execution.invocationId, { status: 'succeeded', endedAt: 3, providerTeardownAt: 3 });
@@ -596,9 +611,25 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
     tracker.getExecutionId = () => parent;
     tracker.cancelAll = (_thread, _user, reason) => {
       aborts.push(reason);
-      return { catIds: [CAT_ID], executionIds: [parent], executionIdByCatId: { [CAT_ID]: parent } };
+      return tracked
+        ? { catIds: [CAT_ID], executionIds: [parent], executionIdByCatId: { [CAT_ID]: parent } }
+        : { catIds: [], executionIds: [], executionIdByCatId: {} };
     };
+    const liveMutex = new SessionMutex();
+    if (producerClaimed) {
+      const release = await liveMutex.acquire({
+        key: 'native-session',
+        executionId: parent,
+        invocationId: execution.invocationId,
+        threadId: THREAD_ID,
+        catId: CAT_ID,
+        userId: USER_ID,
+        acquiredAt: 1,
+      });
+      t.after(release);
+    }
     const { app, recordStore, queueProcessor } = await buildApp({
+      agentSessionMutex: liveMutex,
       queueProcessor: {
         ...makeQueueProcessor(),
         retireThreadPrestartProcessingGroups: async () => ({ outcome: 'none', retiredCatIds: [] }),
@@ -653,6 +684,8 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
       recordStore,
       queueProcessor,
       turns,
+      liveMutex,
+      releaseProducer: () => claims.leaveAll(),
       aborts,
       response: await messageStore.getById(response.id),
       readResponse: () => messageStore.getById(response.id),
@@ -812,6 +845,85 @@ describe('#1838 cancel route: a dead API s started provider stops only with its 
   // Admission still refuses the role on that child, so every Stop entry must reach it through its
   // exact parent: unknown/present keep it listed, a verified stop ends it and its reply.
   for (const route of ['live', 'cancel', 'force-reset']) {
+    for (const childCanceled of [false, true]) {
+      it(
+        `ended parent: ${route} preserves a claimed ${childCanceled ? 'canceled' : 'running'} legacy turn and its response`,
+        { timeout: 2000 },
+        async (t) => {
+          const {
+            res,
+            child,
+            response,
+            readDraft,
+            liveMutex,
+            queueProcessor,
+            releaseProducer,
+            retry,
+            readResponse,
+            turns,
+          } = await stopAfterApiDied(t, verdict({ state: 'unknown', nativeError: 5, sessionId: 1 }), route, {
+            parentEnded: true,
+            noLink: true,
+            producerClaimed: true,
+            childCanceled,
+          });
+          const abort = new AbortController();
+          const timer = setTimeout(() => abort.abort(), 25);
+          let replacementAcquired = false;
+          try {
+            const release = await liveMutex.acquire(
+              {
+                key: 'native-session',
+                executionId: 'replacement',
+                invocationId: 'replacement-child',
+                threadId: THREAD_ID,
+                catId: CAT_ID,
+                userId: USER_ID,
+                acquiredAt: 5,
+              },
+              abort.signal,
+            );
+            replacementAcquired = true;
+            release();
+          } catch (error) {
+            assert.match(error.message, /SessionMutex acquire aborted/);
+          } finally {
+            clearTimeout(timer);
+          }
+          assert.equal(replacementAcquired, false, 'Stop must not release the live route session mutex');
+          assert.equal(
+            queueProcessor.actions.some((action) => action.op === 'releaseSlot'),
+            false,
+          );
+          assert.equal(res.statusCode, 503, res.body);
+          assert.equal(res.json().code, 'PROVIDER_TEARDOWN_UNCONFIRMED');
+          assert.equal(child.status, childCanceled ? 'canceled' : 'running', 'the live route still owns the turn');
+          assert.equal(response.lifecycle.status, 'processing', 'the live route still owns R');
+          assert.equal(response.content, '', 'Stop does not commit the route draft');
+          assert.equal((await readDraft()).content, 'streamed body', 'the producer retains its draft');
+          if (childCanceled) {
+            releaseProducer();
+            const again = await retry();
+            assert.equal(again.statusCode, 200, again.body);
+            const settled = await readResponse();
+            assert.equal(settled.lifecycle.status, 'canceled');
+            assert.equal(settled.content, 'streamed body');
+            assert.equal(await readDraft(), undefined);
+            assert.deepEqual(await turns.listResponsePending(), []);
+            const release = await liveMutex.acquire({
+              key: 'native-session',
+              executionId: 'after-producer',
+              invocationId: 'after-producer-child',
+              threadId: THREAD_ID,
+              catId: CAT_ID,
+              userId: USER_ID,
+              acquiredAt: 6,
+            });
+            release();
+          }
+        },
+      );
+    }
     // A job still present is positive proof of a live owner: the Stop refuses and keeps the child.
     it(`ended parent: ${route} keeps the child listed while its job is present`, async (t) => {
       const { res, child, recordStore, listed } = await stopAfterApiDied(

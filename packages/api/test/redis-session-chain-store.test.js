@@ -27,6 +27,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     'session-chain:*',
     'session-chain-by-thread:*',
     'session-chain-index:*',
+    'session-recovery:*',
     'session-active:*',
     'session-cli:*',
     'session-by-chainkey:*',
@@ -301,6 +302,11 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     redis.eval = async (script, numberOfKeys, key, ...args) => {
       if (keys.has(key) && typeof script === 'string' && script.includes("redis.call('GET', KEYS[1]) == ARGV[1]")) {
         await redis.set(key, replacement.id);
+      }
+      // Generic status publication now compares both pointers in the owner Lua.
+      if (typeof script === 'string' && script.includes('projectSealing(KEYS[1]') && numberOfKeys === 5) {
+        for (const pointer of args.slice(0, numberOfKeys - 1))
+          if (keys.has(pointer)) await redis.set(pointer, replacement.id);
       }
       return originalEval(script, numberOfKeys, key, ...args);
     };

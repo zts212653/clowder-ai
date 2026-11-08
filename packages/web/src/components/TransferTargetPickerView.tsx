@@ -171,7 +171,7 @@ export function TransferTargetPickerView(props: TransferTargetPickerViewProps) {
       >
         <TransferPickerHeader {...props} />
         <div
-          className="max-h-32 shrink-0 overflow-y-auto border-b border-cafe px-[14px] py-2.5 text-[13px] text-cafe-primary"
+          className="max-h-32 shrink-0 overflow-y-auto border-b border-cafe px-[14px] py-2.5 text-[length:var(--console-font-compact)] text-cafe-primary"
           data-testid="transfer-selection-summary"
         >
           <p>{props.singleItemLabel ? `转发 ${props.singleItemLabel}` : `转发 ${props.itemCount} 条消息`}</p>

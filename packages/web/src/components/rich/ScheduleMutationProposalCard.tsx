@@ -87,7 +87,9 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
                 ? t.resume
                 : proposal.mutation.kind === 'create'
                   ? t.approveCreate
-                  : t.approveDelete}
+                  : proposal.mutation.kind === 'update'
+                    ? t.approveUpdate
+                    : t.approveDelete}
           </button>
         ) : null}
         {proposal.status === 'pending' ? (

@@ -31,12 +31,14 @@ export interface ListenAsset {
 }
 
 export interface GetOrCreateListenAssetOptions {
+  /** Internal document jobs keep one prepared model/endpoint for every sentence. */
+  preparedSynthesis?: PreparedListenSynthesis;
   synthesis?: ListenSynthesisOptions;
   signal?: AbortSignal;
   onChunk?: (event: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>) => void;
 }
 
-interface ResolvedSynthesis {
+export interface PreparedListenSynthesis {
   provider: ITtsProvider;
   request: Omit<TtsSynthesizeRequest, 'text'>;
   fingerprint: string;
@@ -50,13 +52,13 @@ interface InFlightAsset {
 }
 
 function synthesisHash(
-  provider: Pick<ITtsProvider, 'id' | 'model'>,
+  provider: Pick<ITtsProvider, 'id' | 'model' | 'cacheIdentity'>,
   request: TtsSynthesizeRequest,
   variant?: string,
 ): string {
   const parts = [
     provider.id,
-    provider.model,
+    provider.cacheIdentity ?? provider.model,
     request.voice,
     request.langCode ?? 'z',
     String(request.speed ?? 1),
@@ -106,14 +108,14 @@ export class ListenAssetService {
     private readonly cacheDir: string,
   ) {}
 
-  getSynthesisFingerprint(options?: ListenSynthesisOptions): string {
-    return this.resolve(options).fingerprint;
+  async getSynthesisFingerprint(options?: ListenSynthesisOptions): Promise<string> {
+    return (await this.prepareSynthesis(options)).fingerprint;
   }
 
   async getOrCreate(text: string, options: GetOrCreateListenAssetOptions = {}): Promise<ListenAsset> {
     if (this.closing) throw new Error('Listen asset service is closing');
     options.signal?.throwIfAborted();
-    const synthesis = this.resolve(options.synthesis);
+    const synthesis = options.preparedSynthesis ?? (await this.prepareSynthesis(options.synthesis));
     const request = { ...synthesis.request, text };
     const hash = synthesisHash(synthesis.provider, request, LISTEN_AUDIO_CACHE_VERSION);
     const cached = await findCachedAudio(this.cacheDir, hash);
@@ -151,7 +153,7 @@ export class ListenAssetService {
     await Promise.allSettled([...this.pendingPublications]);
   }
 
-  private resolve(options: ListenSynthesisOptions = {}): ResolvedSynthesis {
+  async prepareSynthesis(options: ListenSynthesisOptions = {}): Promise<PreparedListenSynthesis> {
     const catVoice = getCatVoice(options.catId ?? 'opus');
     const request: Omit<TtsSynthesizeRequest, 'text'> = {
       voice: options.voice ?? catVoice.voice,
@@ -163,11 +165,12 @@ export class ListenAssetService {
       ...(catVoice.instruct ? { instruct: catVoice.instruct } : {}),
       ...(catVoice.temperature != null ? { temperature: catVoice.temperature } : {}),
     };
-    const provider = this.registry.getDefault();
+    const selected = this.registry.getDefault();
+    const provider = (await selected.snapshot?.({ cacheDir: this.cacheDir })) ?? selected;
     return { provider, request, fingerprint: fingerprintFor(provider, request) };
   }
 
-  private createFlight(hash: string, synthesis: ResolvedSynthesis, request: TtsSynthesizeRequest): InFlightAsset {
+  private createFlight(hash: string, synthesis: PreparedListenSynthesis, request: TtsSynthesizeRequest): InFlightAsset {
     const controller = new AbortController();
     const flight: InFlightAsset = {
       controller,
@@ -187,7 +190,7 @@ export class ListenAssetService {
 
   private async synthesize(
     hash: string,
-    synthesis: ResolvedSynthesis,
+    synthesis: PreparedListenSynthesis,
     request: TtsSynthesizeRequest,
     flight: InFlightAsset,
   ): Promise<ListenAsset> {
@@ -204,7 +207,7 @@ export class ListenAssetService {
   }
 
   private async requestSynthesis(
-    synthesis: ResolvedSynthesis,
+    synthesis: PreparedListenSynthesis,
     request: TtsSynthesizeRequest,
     flight: InFlightAsset,
   ): Promise<TtsSynthesizeResult> {

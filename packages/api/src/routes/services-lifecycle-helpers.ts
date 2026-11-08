@@ -2,7 +2,12 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { clearEnvironmentCache } from '../domains/services/environment-detector.js';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
-import { MODEL_ENV_VARS, PORT_ENV_VARS } from '../domains/services/service-manifest.js';
+import {
+  getDefaultServiceModel,
+  getServiceManifest,
+  MODEL_ENV_VARS,
+  PORT_ENV_VARS,
+} from '../domains/services/service-manifest.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 
@@ -59,6 +64,10 @@ export function buildLifecycleEnv(
   port?: unknown,
 ): { ok: true; env: NodeJS.ProcessEnv } | { ok: false; error: string } {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
+  if (serviceId === 'mlx-tts' && model == null && !env.TTS_MODEL?.trim()) {
+    const service = getServiceManifest(serviceId);
+    if (service) model = getDefaultServiceModel(service);
+  }
   if (typeof model === 'string' && model.length > 0) {
     if (!isValidModelId(model)) return { ok: false, error: 'Invalid model ID format (expected: org/model-name)' };
     const envKey = MODEL_ENV_VARS[serviceId];

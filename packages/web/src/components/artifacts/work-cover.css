@@ -41,14 +41,14 @@
   height: 100%;
   overflow: hidden;
   color: var(--shell-muted);
-  font-size: 11px;
+  font-size: var(--console-font-label);
   line-height: 16px;
   mask-image: linear-gradient(#000 55%, transparent 88%);
 }
 .work-cover-paper-text > strong {
   display: block;
   color: var(--shell-ink);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -61,11 +61,11 @@
   font-family: var(--font-mono, ui-monospace), monospace;
 }
 .work-cover-paper-text > .work-cover-pr-number {
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 .work-cover-pr-repo {
   display: block;
-  font-size: 11px;
+  font-size: var(--console-font-label);
 }
 .work-cover-bar {
   display: block;
@@ -115,7 +115,7 @@
   border-radius: 6px;
   color: var(--shell-ink);
   background: color-mix(in oklch, var(--shell-paper) 94%, transparent);
-  font-size: 11px;
+  font-size: var(--console-font-label);
   font-weight: 500;
   white-space: nowrap;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -58,6 +58,111 @@ describe('workspace git probe failures', () => {
     const diff = await app.inject({ method: 'GET', url: '/api/workspace/diff?worktreeId=probe-plain' });
     assert.equal(diff.statusCode, 200);
     assert.equal(JSON.parse(diff.payload).isGitRepository, false);
+  });
+
+  test('a committed bare repository keeps its readable commit log', async () => {
+    const repo = join(root, 'bare-source');
+    const bare = join(root, 'bare.git');
+    mkdirSync(repo);
+    initRepo(repo);
+    execFileSync('git', ['clone', '--bare', repo, bare], { stdio: 'ignore' });
+    registerWorktrees([{ id: 'probe-bare', root: bare, branch: '(bare)', head: 'abc123' }]);
+
+    const response = await app.inject({ method: 'GET', url: '/api/workspace/git-log?worktreeId=probe-bare' });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.payload);
+    assert.notEqual(body.isGitRepository, false);
+    assert.equal(body.commits.length, 1);
+    assert.equal(body.commits[0].subject, 'init');
+  });
+
+  test('broken global Git configuration stays an error at all four read endpoints', async () => {
+    const plain = join(root, 'plain-with-broken-config');
+    mkdirSync(plain);
+    const config = join(root, 'broken.gitconfig');
+    writeFileSync(config, '[bad\n');
+    registerWorktrees([{ id: 'probe-broken-config', root: plain, branch: '', head: '' }]);
+    const originalConfig = process.env.GIT_CONFIG_GLOBAL;
+    const originalCwd = process.cwd();
+    process.chdir(plain);
+    process.env.GIT_CONFIG_GLOBAL = config;
+    try {
+      for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/workspace/${endpoint}?worktreeId=probe-broken-config`,
+        });
+        assert.equal(response.statusCode, 503, endpoint);
+        assert.equal(JSON.parse(response.payload).code, 'git_unavailable', endpoint);
+        assert.notEqual(JSON.parse(response.payload).isGitRepository, false, endpoint);
+      }
+    } finally {
+      process.chdir(originalCwd);
+      if (originalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = originalConfig;
+    }
+  });
+
+  test('a registered checkout with a dangling .git link stays an error', async () => {
+    const repo = join(root, 'symlink-checkout');
+    const metadata = join(root, 'git-metadata');
+    mkdirSync(repo);
+    initRepo(repo);
+    renameSync(join(repo, '.git'), metadata);
+    symlinkSync(metadata, join(repo, '.git'), process.platform === 'win32' ? 'junction' : 'dir');
+    registerWorktrees([{ id: 'probe-symlink', root: repo, branch: 'main', head: 'abc123' }]);
+    const valid = await app.inject('/api/workspace/git-status?worktreeId=probe-symlink');
+    assert.equal(valid.statusCode, 200);
+    assert.notEqual(JSON.parse(valid.payload).isGitRepository, false);
+
+    renameSync(metadata, join(root, 'moved-metadata'));
+    for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+      const response = await app.inject(`/api/workspace/${endpoint}?worktreeId=probe-symlink`);
+      assert.equal(response.statusCode, 503, endpoint);
+      assert.equal(JSON.parse(response.payload).code, 'git_unavailable', endpoint);
+    }
+  });
+
+  test('a registered bare repository missing HEAD stays an error', async () => {
+    const bare = join(root, 'missing-head.git');
+    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
+    registerWorktrees([{ id: 'probe-bare-missing-head', root: bare, branch: '(bare)', head: '' }]);
+    unlinkSync(join(bare, 'HEAD'));
+
+    for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+      const response = await app.inject(`/api/workspace/${endpoint}?worktreeId=probe-bare-missing-head`);
+      assert.equal(response.statusCode, 503, endpoint);
+      assert.equal(JSON.parse(response.payload).code, 'git_unavailable', endpoint);
+    }
+  });
+
+  test('surviving Git storage still identifies a bare root missing HEAD and config', async () => {
+    const bare = join(root, 'missing-head-and-config.git');
+    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
+    registerWorktrees([{ id: 'probe-bare-storage', root: bare, branch: '(bare)', head: '' }]);
+    unlinkSync(join(bare, 'HEAD'));
+    unlinkSync(join(bare, 'config'));
+
+    for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+      const response = await app.inject(`/api/workspace/${endpoint}?worktreeId=probe-bare-storage`);
+      assert.equal(response.statusCode, 503, endpoint);
+      assert.equal(JSON.parse(response.payload).code, 'git_unavailable', endpoint);
+    }
+  });
+
+  test('ordinary folders with partial marker names still get the normal empty state', async () => {
+    const plain = join(root, 'ordinary-marker-names');
+    mkdirSync(plain);
+    mkdirSync(join(plain, 'objects'));
+    mkdirSync(join(plain, 'refs'));
+    writeFileSync(join(plain, 'config'), '[application]\n bare = true\n');
+    registerWorktrees([{ id: 'probe-ordinary-markers', root: plain, branch: '', head: '' }]);
+
+    for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+      const response = await app.inject(`/api/workspace/${endpoint}?worktreeId=probe-ordinary-markers`);
+      assert.equal(response.statusCode, 200, endpoint);
+      assert.equal(JSON.parse(response.payload).isGitRepository, false, endpoint);
+    }
   });
 
   test('linked worktree .git file stays a normal repo', async () => {

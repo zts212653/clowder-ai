@@ -14,6 +14,8 @@ import {
   storeState,
 } from './chat-container-test-helpers';
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
+
 describe.each(['classic', 'v2'] as const)('ChatContainer governance refetch (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;

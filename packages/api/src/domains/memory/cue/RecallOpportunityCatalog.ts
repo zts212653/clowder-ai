@@ -16,6 +16,7 @@ import {
   recentEventAvailableOpportunityV1Schema,
   subjectSeenOpportunityV1Schema,
   threadOpenedOpportunityV1Schema,
+  workPreparationOpportunityV1Schema,
 } from '@cat-cafe/shared';
 import type { z } from 'zod';
 
@@ -69,6 +70,20 @@ const contextEntries: readonly RecallOpportunityCatalogEntry[] = (
 
 const entries: readonly RecallOpportunityCatalogEntry[] = Object.freeze([
   ...contextEntries,
+  Object.freeze({
+    kind: 'work_preparation',
+    producer: 'explicit_preparation',
+    consumer: 'agent_route',
+    payloadSchema: workPreparationOpportunityV1Schema.shape.payload,
+    scopeBinding: 'server_exact',
+    resolverFamilies: Object.freeze(['project_knowledge', 'message_evidence', 'matter', 'taste'] as const),
+    maxCues: 2,
+    maxPromptTokens: 900,
+    expiresAfterMs: 5 * 60_000,
+    dedupeKey(opportunity: RecallOpportunityV1): string {
+      return opportunity.kind === 'work_preparation' ? opportunity.opportunityId : 'invalid';
+    },
+  }),
   Object.freeze({
     kind: 'subject_seen',
     producer: 'entity_nudge',
