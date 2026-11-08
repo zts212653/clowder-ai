@@ -36,7 +36,7 @@ export interface RecallPreviewItem {
   updatedAt?: string;
 }
 
-export const EXPANSION_HEALTH_SOURCE_REVISION = 'f256-health-v2' as const;
+export const EXPANSION_HEALTH_SOURCE_REVISION = 'f332-discovery-v1' as const;
 export const EXPANSION_HEALTH_GATE_REASONS = [
   'eligible',
   'opt_out',

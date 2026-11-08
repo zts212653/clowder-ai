@@ -1,18 +1,16 @@
-import type { CatBreed, CatCafeConfig, CatConfig, CatVariant } from '@cat-cafe/shared';
+import {
+  type CatBreed,
+  type CatCafeConfig,
+  type CatConfig,
+  type CatVariant,
+  hasAuthoredMemberIdentityValue,
+} from '@cat-cafe/shared';
 
 // Provenance travels with this parsed snapshot; it is never another persisted catalog or a disk reread.
 const authoredCatalogs = new WeakMap<CatCafeConfig, CatCafeConfig | null>();
 export function captureMemberIdentitySources(config: CatCafeConfig, authored: CatCafeConfig | null) {
   authoredCatalogs.set(config, authored);
   return config;
-}
-
-function hasAuthoredIdentityValue(field: string, value: unknown): boolean {
-  // Empty routing inputs mean dossier fallback, even when a saved caution is null.
-  // Other identity fields retain their existing explicit-clear semantics.
-  return field === 'caution' || field === 'teamStrengths'
-    ? typeof value === 'string' && value.trim().length > 0
-    : value !== undefined;
 }
 
 export function projectMemberIdentitySources(config: CatCafeConfig, breed: CatBreed, variant: CatVariant) {
@@ -39,10 +37,10 @@ export function projectMemberIdentitySources(config: CatCafeConfig, breed: CatBr
           : (field as keyof CatVariant);
       let source = 'template';
       if (variant[key] !== undefined) {
-        if (hasAuthoredIdentityValue(field, ownVariant?.[key])) source = 'variant';
+        if (hasAuthoredMemberIdentityValue(field, ownVariant?.[key])) source = 'variant';
       } else if (field === 'personality') {
         if (defaultVariant?.personality !== undefined) source = 'default_variant';
-      } else if (hasAuthoredIdentityValue(field, ownBreed?.[field as keyof CatBreed])) {
+      } else if (hasAuthoredMemberIdentityValue(field, ownBreed?.[field as keyof CatBreed])) {
         source = 'breed';
       }
       return [field, source];

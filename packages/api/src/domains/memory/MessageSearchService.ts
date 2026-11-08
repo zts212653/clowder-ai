@@ -22,9 +22,10 @@ import {
 import type { IEvidenceStore } from './interfaces.js';
 import { runMessageAnswerSelection } from './message-answer-selection-run.js';
 import { GitMessageDecisionIndex, type MessageDecisionIndex } from './message-decision-index.js';
+import type { CanonicalSearchCandidate } from './message-discovery-source.js';
+import { messageDiscoverySource } from './message-discovery-source.js';
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
 import { readMessageSearchAnswerSnapshot } from './message-search-answer-snapshot.js';
-import type { CanonicalSearchCandidate } from './message-search-candidates.js';
 import { type CanonicalWaveSources, readCanonicalSearchWave } from './message-search-canonical-wave.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import type { MessageSearchDiagnostics } from './message-search-diagnostics.js';
@@ -355,6 +356,60 @@ export class MessageSearchService {
   }
 
   /** Ordinary recall returns current readable sources without inference. */
+  discoverySource(
+    input: MessageSearchInput,
+    principal: MessageSearchPrincipal,
+    context: MessageSearchExecutionContext = {},
+  ) {
+    if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
+    if (!input.query.trim() || input.query.length > 2000) throw new Error('Invalid message search query');
+    const threadIds = new Set<string>();
+    let lifetime = context;
+    const source = messageDiscoverySource({
+      search: input,
+      threadIds,
+      source: principal.source,
+      read: async (request) => {
+        lifetime = {
+          ...context,
+          signal: request.signal ?? context.signal,
+          deadlineAt: Math.min(request.deadlineAt ?? Infinity, context.deadlineAt ?? Infinity, Date.now() + 15_000),
+        };
+        checkSearchExecution(lifetime);
+        const threads = await this.readableThreads(input, principal, lifetime);
+        for (const id of threads.keys()) threadIds.add(id);
+        await this.requireSource(input, principal);
+        const reader = this.deps.evidenceStore.searchMessagePassages;
+        if (!reader || !this.deps.evidenceStore.readMessagePassageState)
+          throw new Error('Message passage retrieval unavailable');
+        const result = await reader.call(this.deps.evidenceStore, input.query, {
+          signal: lifetime.signal,
+          deadlineAt: lifetime.deadlineAt,
+          visibleThreadIds: [...threadIds],
+          threadId: input.threadId,
+          excludeSource: principal.source,
+          mode: input.mode ?? 'hybrid',
+          sort: 'relevance',
+          candidateOrder: 'relevance',
+          candidateLimit: Math.min(2000, request.limit),
+          dateFrom: input.dateFrom,
+          dateTo: input.dateTo,
+        });
+        return { candidates: result.passages, truncated: result.meta.truncated };
+      },
+      project: (candidate) => this.project(candidate, principal, input.query),
+    });
+    return {
+      ...source,
+      revalidate: async (row: CanonicalSearchCandidate) => {
+        checkSearchExecution(lifetime);
+        await this.requireSource(input, principal);
+        const current = await this.project(row.candidate, principal, input.query);
+        return current?.contentRevision === row.contentRevision ? current : null;
+      },
+    };
+  }
+
   async search(
     input: MessageSearchInput,
     principal: MessageSearchPrincipal,

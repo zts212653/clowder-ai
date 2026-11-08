@@ -12,55 +12,21 @@
 
 import type { ExpansionHintTargetRef } from '@cat-cafe/shared';
 import type { ConventionGraphAdapter } from './CoverageSearchService.js';
-import type { ExpansionProvenance, ExpansionSourceType } from './coverage-search-types.js';
+import type { ExpansionSourceType } from './coverage-search-types.js';
 import type { EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
+import { checkDiscoveryLifetime } from './knowledge-discovery.js';
 import { normalizeRecallText, relevanceEvidence } from './relevance-evidence.js';
 
-// ── Output types ─────────────────────────────────────────────────────
+export type { ExpansionFunnel, ExpansionHint } from './knowledge-association-types.js';
 
-export interface ExpansionHint {
-  anchor: string;
-  title: string;
-  kind: string;
-  sourcePath?: string;
-  targetRef: ExpansionHintTargetRef;
-  provenance: ExpansionProvenance;
-}
-
-export interface TopkExpansionOptions {
-  /** Max number of top results to expand (default 3) */
-  maxHitsToExpand?: number;
-  /** Max hints per expansion type (default 3) */
-  maxHintsPerType?: number;
-}
-
-// ── F256 health funnel: per-stage telemetry ─────────────────────────
-
-export interface ExpansionSourceFunnel {
-  probed: number;
-  added: number;
-  deduped: number;
-}
-
-export interface ExpansionConventionEdgeFunnel {
-  attempted: boolean;
-  added: number;
-  deduped: number;
-  staleSkipped: number;
-}
-
-export interface ExpansionFunnel {
-  attempted: boolean;
-  keyword: ExpansionSourceFunnel;
-  sourceThread: ExpansionSourceFunnel;
-  conventionEdge: ExpansionConventionEdgeFunnel;
-  presented: number;
-}
-
-export interface ExpandWithMetaResult {
-  hints: ExpansionHint[];
-  funnel: ExpansionFunnel;
-}
+import type {
+  ExpandWithMetaResult,
+  ExpansionConventionEdgeFunnel,
+  ExpansionFunnel,
+  ExpansionHint,
+  ExpansionSourceFunnel,
+  TopkExpansionOptions,
+} from './knowledge-association-types.js';
 
 // Scanner-generated keywords (section headings, wikilinks, frontmatter topics)
 // have no upper bound. Cap internal searchWithMeta calls to avoid amplifying
@@ -86,11 +52,15 @@ const SECTION_LABELS = new Set([
 
 // ── Service ──────────────────────────────────────────────────────────
 
-export class TopkExpansionService {
+export class KnowledgeAssociations {
   private readonly store: Pick<IEvidenceStore, 'searchWithMeta'>;
   private readonly conventionGraph: ConventionGraphAdapter | null;
 
-  constructor(store: Pick<IEvidenceStore, 'searchWithMeta'>, conventionGraph?: ConventionGraphAdapter | null) {
+  constructor(
+    store: Pick<IEvidenceStore, 'searchWithMeta'>,
+    conventionGraph?: ConventionGraphAdapter | null,
+    private readonly lifetime: Pick<SearchOptions, 'signal' | 'deadlineAt'> = {},
+  ) {
     this.store = store;
     this.conventionGraph = conventionGraph ?? null;
   }
@@ -143,6 +113,7 @@ export class TopkExpansionService {
     // ── Convention-edge expansion (Phase C: F242 extractor + l0-prompt-builder) ──
     await this.expandViaConventionEdges(hitsToExpand, seen, hints, maxPerType, funnel.conventionEdge);
 
+    checkDiscoveryLifetime(this.lifetime);
     funnel.presented = hints.length;
 
     return { hints, funnel };
@@ -173,6 +144,7 @@ export class TopkExpansionService {
     let added = 0;
     let probed = 0;
     for (const term of expandTerms) {
+      checkDiscoveryLifetime(this.lifetime);
       if (added >= maxPerType || probed >= MAX_TERMS_PER_TYPE) break;
       probed++;
       const result = await this.store.searchWithMeta!(term, {
@@ -223,6 +195,7 @@ export class TopkExpansionService {
 
     let added = 0;
     for (const item of hits) {
+      checkDiscoveryLifetime(this.lifetime);
       if (added >= maxPerType) break;
 
       const consumers = await this.conventionGraph.queryConsumers(item.anchor);
@@ -293,6 +266,7 @@ export class TopkExpansionService {
     let added = 0;
     let probed = 0;
     for (const ref of threadRefs) {
+      checkDiscoveryLifetime(this.lifetime);
       if (added >= maxPerType || probed >= MAX_TERMS_PER_TYPE) break;
       probed++;
       const targetAnchor = ref.startsWith('thread_') ? 'thread-' + ref : ref;

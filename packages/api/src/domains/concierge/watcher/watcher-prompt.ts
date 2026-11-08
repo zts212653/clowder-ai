@@ -25,6 +25,7 @@ export interface WatcherRawWindow {
   offset: number;
   complete: boolean;
   messageIds: string[];
+  blockedMessageId?: string;
   resumeCursor?: { messageId: string; offset: number };
 }
 
@@ -87,6 +88,7 @@ export async function watcherRawWindow(
   let frontier = state.consumedThrough ?? '';
   let offset = state.messageOffset ?? 0;
   let complete = true;
+  let blockedMessageId: string | undefined;
   for (const message of rows.slice(0, 40)) {
     if ((message.timelineOrderAt ?? message.timestamp) > throughAt) break;
     if (
@@ -110,6 +112,7 @@ export async function watcherRawWindow(
     if (end > begin && end < content.length && /[\uD800-\uDBFF]/u.test(content[end - 1]!)) end--;
     if (end === begin && content.length > begin) {
       complete = false;
+      blockedMessageId = message.id;
       break;
     }
     parts.push(`${prefix}${content.slice(begin, end)}\n</original>`);
@@ -126,5 +129,13 @@ export async function watcherRawWindow(
   const lookahead = rows[40];
   if (!throughMessageId && lookahead && (lookahead.timelineOrderAt ?? lookahead.timestamp) <= throughAt)
     complete = false;
-  return { body: parts.join(''), frontier, offset, complete, messageIds, ...(resumeCursor ? { resumeCursor } : {}) };
+  return {
+    body: parts.join(''),
+    frontier,
+    offset,
+    complete,
+    messageIds,
+    ...(blockedMessageId ? { blockedMessageId } : {}),
+    ...(resumeCursor ? { resumeCursor } : {}),
+  };
 }

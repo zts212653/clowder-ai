@@ -8,8 +8,8 @@ import {
   getTimelineOrderTime,
   isSystemUserMessage,
 } from '../cats/services/stores/visibility.js';
+import type { CanonicalSearchCandidate } from './message-discovery-source.js';
 import type { MessagePassageCandidate, MessagePassageIndexState } from './message-passage-search-types.js';
-import type { CanonicalSearchCandidate } from './message-search-candidates.js';
 import { buildSearchableMessageContent } from './message-search-content.js';
 import { messageSearchMatchEvidence } from './message-search-match-evidence.js';
 import { projectMessageSearchHighlights, projectMessageSearchSnippet } from './message-search-snippet.js';

@@ -48,7 +48,8 @@ export async function createNativeArtworkFixture(kind, evidence, sourceKind = 'w
   const locator = { worktreeId: root.id, path: relative };
   const workspace =
     sourceKind === 'workspace' ? await owner.workspaceSource.describeMedia({ principal: owner.human, locator }) : null;
-  const mime = workspace?.mime ?? (kind === 'jpg' ? 'image/jpeg' : 'image/webp');
+  const mime =
+    workspace?.mime ?? { jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' }[kind];
   const url = workspace
     ? `/api/workspace/file/raw?${new URLSearchParams(locator)}`
     : `/uploads/${path.basename(absolute)}`;

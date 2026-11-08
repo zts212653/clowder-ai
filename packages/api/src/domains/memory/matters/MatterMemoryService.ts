@@ -12,13 +12,9 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { MemoryCueEpisodeStore } from '../cue/MemoryCueEpisodeStore.js';
 import { MatterMemoryStore, type StoredMatter } from './MatterMemoryStore.js';
-import {
-  compareMatterCatalogKeys,
-  type MatterCatalogContext,
-  type MatterCatalogKey,
-  matterCatalogCursor,
-  readMatterCatalogCursor,
-} from './matter-catalog-cursor.js';
+import type { MatterCatalogContext } from './matter-catalog-cursor.js';
+import { MatterDiscoveryIndex } from './matter-discovery-index.js';
+import { bindMatterDiscoverySource, discoverMatterCatalog } from './matter-discovery-source.js';
 import {
   captureMatterSource,
   findMatterSourceSelection,
@@ -58,8 +54,10 @@ function actorKey(actor: MatterActor): string {
 /** Owner UI, callback tools and opening directories share this current permission projection. */
 export class MatterMemoryService {
   readonly store: MatterMemoryStore;
+  private readonly discoveryIndex: MatterDiscoveryIndex;
   constructor(private readonly deps: MatterMemoryDeps) {
     this.store = new MatterMemoryStore(deps.db);
+    this.discoveryIndex = new MatterDiscoveryIndex(deps.db);
   }
 
   selectSource(actor: MatterActor, input: { threadId: string; messageId: string; quote: string }) {
@@ -88,53 +86,16 @@ export class MatterMemoryService {
     };
   }
 
+  discoverySource(actor: MatterActor, options: MatterCatalogContext & { signal?: AbortSignal } = {}) {
+    return bindMatterDiscoverySource(this.discoveryIndex, (reader, id) => this.project(reader, id), actor, options)
+      .source;
+  }
+
   async catalog(
     actor: MatterActor,
     options: MatterCatalogContext & { cursor?: string; limit?: number; signal?: AbortSignal } = {},
   ): Promise<MatterCatalog> {
-    const management = options.management === true && actor.viewer.type === 'user';
-    const after = readMatterCatalogCursor(actor, options, options.cursor);
-    const limit = Math.max(1, Math.min(options.limit ?? 12, 30));
-    const candidates: Array<{ item: MatterCatalog['items'][number]; key: MatterCatalogKey }> = [];
-    const query = options.query?.toLocaleLowerCase();
-    for (const matter of this.store.list(actor.userId, management)) {
-      options.signal?.throwIfAborted();
-      const page = await this.project({ ...actor, signal: options.signal }, matter.matterId);
-      if (!page) {
-        if (!management || query) continue;
-        candidates.push({
-          item: { matterId: matter.matterId, revision: matter.revision, status: matter.status, unavailable: true },
-          key: { related: false, updatedAt: matter.updatedAt, matterId: matter.matterId },
-        });
-      } else {
-        if (query && !`${page.matter.title}\n${page.matter.description}`.toLocaleLowerCase().includes(query)) continue;
-        const related = Boolean(
-          options.threadId &&
-            page.entries.some(
-              (entry) =>
-                entry.status === 'active' &&
-                entry.sourceStatus === 'current' &&
-                entry.source.threadId === options.threadId,
-            ),
-        );
-        candidates.push({
-          item: {
-            ...page.matter,
-            entryCount: page.entries.filter((entry) => entry.status === 'active').length,
-            ...(options.threadId ? { hasThreadSource: related } : {}),
-            ...(page.summaryStatus ? { summaryStatus: page.summaryStatus } : {}),
-          },
-          key: { related, updatedAt: page.matter.updatedAt, matterId: page.matter.matterId },
-        });
-      }
-    }
-    const visible = candidates
-      .sort((a, b) => compareMatterCatalogKeys(a.key, b.key))
-      .filter((candidate) => !after || compareMatterCatalogKeys(candidate.key, after) > 0);
-    return {
-      items: visible.slice(0, limit).map(({ item }) => item),
-      ...(visible.length > limit ? { nextCursor: matterCatalogCursor(actor, options, visible[limit - 1]!.key) } : {}),
-    };
+    return discoverMatterCatalog(this.discoveryIndex, (reader, id) => this.project(reader, id), actor, options);
   }
 
   async read(

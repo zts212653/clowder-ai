@@ -27,6 +27,7 @@ function projectSource(f, { external = false } = {}) {
   };
   const item = {
     anchor: 'doc:lesson',
+    matchReason: 'semantic',
     kind: 'doc',
     status: 'active',
     sourcePath: 'lesson.md',
@@ -39,18 +40,12 @@ function projectSource(f, { external = false } = {}) {
       [
         id,
         {
+          searchWithMeta: async () => ({ items: [item], meta: { degraded: false, effectiveMode: 'hybrid' } }),
           getByAnchor: async () => item,
           getIndexedSourceRevision: async () => ({ sourceHash: item.sourceHash, vectorSourceHash: item.sourceHash }),
         },
       ],
     ]),
-    resolver: {
-      resolve: async () => ({
-        meta: { degraded: false, effectiveMode: 'hybrid' },
-        collectionGroups: [{ collectionId: id, status: 'ok' }],
-        results: [item],
-      }),
-    },
     homeProjectPath: f.primary,
     homeDocsRoot: join(f.primary, 'docs'),
     publishedSource: f.publishedSource,

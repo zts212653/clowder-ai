@@ -4151,7 +4151,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const tmpHome = makeTempDir('.tmp-f172-');
     const imgDir = join(tmpHome, '.codex', 'generated_images', sessionId);
     mkdirSync(imgDir, { recursive: true });
-    writeFileSync(join(imgDir, 'ig_test.png'), Buffer.from('fake-png'));
+    const image = await (await import('sharp'))
+      .default({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+      .png()
+      .toBuffer();
+    writeFileSync(join(imgDir, 'ig_test.png'), image);
 
     const uploadDir = makeTempDir('.tmp-f172-uploads-');
 

@@ -11,6 +11,7 @@ import type { CodexAppServerNativeRpcClient } from '../../cats/services/agents/p
 import type { TranscriptWriter } from '../../cats/services/session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import type { ITurnExecutionStore } from '../../cats/services/stores/ports/TurnExecutionStore.js';
+import { type WatcherWindow, watcherBudgetFailure, watcherBudgetRecovery } from './context/watcher-budget-progress.js';
 
 export interface WatcherCheckpointOwners {
   sessions: ISessionChainStore;
@@ -132,8 +133,20 @@ export async function recoverWatcherAttempt(
   state: WatcherSessionState,
   client: CodexAppServerNativeRpcClient,
   allowRetry = true,
+  retryWindow?: WatcherWindow,
 ): Promise<WatcherSessionState> {
   if (!state.attempt || !session.cliSessionId) throw new Error('watcher_recovery_binding_missing');
+  if (watcherBudgetFailure(state.attempt.failure)) {
+    const execution = await owners.executions.get(state.attempt.invocationId);
+    if (
+      execution?.executionKind !== 'watcher' ||
+      execution.userId !== session.userId ||
+      execution.threadId !== session.threadId ||
+      execution.catId !== session.catId ||
+      execution.causal?.watcherSourceInvocationId !== state.attempt.sourceInvocationId
+    )
+      throw new Error('watcher_budget_recovery_binding_mismatch');
+  }
   if (state.attempt.phase === 'finalize_pending') return state;
   if (state.attempt.phase === 'prune_pending') return finishWatcherPrune(owners, session, state, client);
   let attempt = state.attempt;
@@ -201,6 +214,13 @@ export async function recoverWatcherAttempt(
   );
   if (turn)
     await client.request('thread/revert', { threadId: session.cliSessionId, beforeTurnId: attempt.nativeTurnId });
+  if (allowRetry && watcherBudgetFailure(attempt.failure))
+    return saveWatcherState(
+      owners.sessions,
+      session.id,
+      state,
+      await watcherBudgetRecovery(owners, session, state, retryWindow),
+    );
   if (!allowRetry || (attempt.retries ?? 0) >= 1) {
     await owners.executions.transitionTerminal(attempt.invocationId, {
       status: 'failed',

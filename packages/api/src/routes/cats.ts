@@ -38,6 +38,7 @@ import {
   resolveCodexSpeed,
   supportsActiveInvocationGuidance,
 } from '@cat-cafe/shared';
+import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -102,6 +103,7 @@ import {
 import type { InvocationCapacitySnapshot } from '../domains/cats/services/agents/invocation/invocation-capacity-snapshot.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const colorSchema = z.object({
@@ -791,6 +793,7 @@ async function toCatResponse(
       const identityProtection = projectBuiltinCloudIdentityProtection(
         builtinCloudIdentityCandidate({ cat: persistedIdentityCat, accountRef: effectiveAccountRef, acp: acpConfig }),
       );
+      const identityProfile = loadDossierProfiles(findMonorepoRoot()).get(cat.id);
       return {
         id: cat.id,
         name: cat.name,
@@ -850,6 +853,14 @@ async function toCatResponse(
         })(),
         roleDescription: cat.roleDescription,
         personality: cat.personality,
+        identitySources: cat.identitySources,
+        identityProfile: identityProfile
+          ? {
+              entityId: identityProfile.entityId,
+              l0RosterSummary: identityProfile.l0RosterSummary,
+              l0RoutingNote: identityProfile.l0RoutingNote,
+            }
+          : null,
         teamStrengths: cat.teamStrengths,
         caution: cat.caution,
         strengths: cat.strengths,

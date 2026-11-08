@@ -1024,6 +1024,7 @@ export {
   subjectSeenOpportunityV1Schema,
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
+  workPreparationOpportunityV1Schema,
 } from './memory-cue.js';
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';

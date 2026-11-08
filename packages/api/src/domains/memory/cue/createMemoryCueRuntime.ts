@@ -5,6 +5,7 @@ import type { TasteRepository } from '../../taste/services/TasteRepository.js';
 import type { EntityRegistryStore } from '../EntityRegistry.js';
 import type { IEventMemoryStore } from '../EventMemoryStore.js';
 import type { IEvidenceStore } from '../interfaces.js';
+import type { MessageSearchService } from '../MessageSearchService.js';
 import type { MatterMemoryService } from '../matters/MatterMemoryService.js';
 import type { PersonMemoryRecallService } from '../people/PersonMemoryRecallService.js';
 import { recordNativeProfileOpening } from '../profile/native-profile-opening.js';
@@ -17,6 +18,10 @@ import { MemoryCueInvocationPromptService } from './MemoryCueInvocationPromptSer
 import { MemoryCuePlaneService } from './MemoryCuePlaneService.js';
 import { MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';
 import type { MemoryCueSourceReader } from './MemoryCueSourceReader.js';
+import { OwnerPreparationSources } from './preparation/OwnerPreparationSources.js';
+import type { WorkPreparationAuthority } from './preparation/WorkPreparationAuthority.js';
+import type { WorkPreparationOpportunityStore } from './preparation/WorkPreparationOpportunityStore.js';
+import { WorkPreparationService } from './preparation/WorkPreparationService.js';
 import { projectInvocationCues } from './project-invocation-cues.js';
 import { CatOwnedSeedCueResolver } from './resolvers/CatOwnedSeedCueResolver.js';
 import { DecisionCueResolver } from './resolvers/DecisionCueResolver.js';
@@ -40,6 +45,7 @@ import { CanonicalTasteMemoryCueSource } from './sources/TasteMemoryCueSource.js
 import type { ThreadOverviewMemoryCueSource } from './sources/ThreadOverviewMemoryCueSource.js';
 
 export interface MemoryCueRuntime {
+  preparation?: WorkPreparationService;
   promptService: MemoryCueInvocationPromptService;
   contextSourceAdmission?: ContextSourceAdmission;
   sourceReader: MemoryCueSourceReader;
@@ -50,6 +56,11 @@ export interface MemoryCueRuntime {
 
 /** Composition root for the source-backed read-only canonical lanes. */
 export function createMemoryCueRuntime(input: {
+  workPreparation?: {
+    authority: WorkPreparationAuthority;
+    store: WorkPreparationOpportunityStore;
+    messages: MessageSearchService;
+  };
   matterMemoryService?: MatterMemoryService;
   threadOverviewSource?: ThreadOverviewMemoryCueSource;
   contextProjectDiscovery?: ConstructorParameters<typeof ContextProjectCueSource>[0];
@@ -126,7 +137,22 @@ export function createMemoryCueRuntime(input: {
           store: input.contextSourceOpportunityStore,
         })
       : undefined;
+  const preparation = input.workPreparation
+    ? new WorkPreparationService({
+        authority: input.workPreparation.authority,
+        store: input.workPreparation.store,
+        episodes: input.episodeStore,
+        handles: input.handles,
+        sources: new OwnerPreparationSources({
+          project: contextProjectSource,
+          messages: input.workPreparation.messages,
+          matters: input.matterMemoryService,
+          taste: tasteSource,
+        }),
+      })
+    : undefined;
   const runtime: MemoryCueRuntime = {
+    ...(preparation ? { preparation } : {}),
     ...(contextSourceAdmission ? { contextSourceAdmission } : {}),
     promptService: new MemoryCueInvocationPromptService({
       plane,
@@ -149,6 +175,10 @@ export function createMemoryCueRuntime(input: {
     ...(input.threadOverviewSource ? { threadOverviewOpportunitySource: input.threadOverviewSource } : {}),
     sourceReader: {
       async read(request) {
+        if (request.opportunityId?.startsWith('preparation-'))
+          return preparation
+            ? preparation.read(request)
+            : { status: 'not_available', invalidationReason: 'scope_revoked' };
         if (request.family === 'matter') {
           const cue = projectInvocationCues(
             input.episodeStore.listByInvocation(

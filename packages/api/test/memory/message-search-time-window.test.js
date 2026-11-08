@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { collectMessageSearchCandidates } from '../../dist/domains/memory/message-search-candidates.js';
+import { KnowledgeResolver } from '../../dist/domains/memory/KnowledgeResolver.js';
+import {
+  compareCanonicalMessages,
+  MESSAGE_SEARCH_TIME_WINDOW,
+  messageDiscoverySource,
+} from '../../dist/domains/memory/message-discovery-source.js';
+
+const collectMessageSearchCandidates = async (input) =>
+  (
+    await KnowledgeResolver.discover(input.search.query, {
+      sources: [messageDiscoverySource({ ...input, read: async () => ({ candidates: input.candidates }) })],
+      limit: input.search.sort === 'relevance' ? (input.search.limit ?? 20) + 1 : MESSAGE_SEARCH_TIME_WINDOW,
+      check: input.check,
+      ...(input.search.sort === 'relevance' ? {} : { compare: compareCanonicalMessages }),
+    })
+  ).items;
 
 // ROOT accepted K=32 against the isolated coverage/loss study. This guards the
 // new contract, not equality with the former age-truncated 2,000-candidate pool.

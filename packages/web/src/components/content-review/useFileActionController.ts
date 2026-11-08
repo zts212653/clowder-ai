@@ -23,6 +23,7 @@ export function useFileActionController({
   mime,
   src: providedSrc,
   mediaType,
+  pixelRegion,
   root,
   contextRef,
   target,
@@ -105,7 +106,7 @@ export function useFileActionController({
         const element = root?.current?.querySelector('img,video') ?? (!isVideo ? new Image() : null);
         if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement) || !src)
           throw new Error('media_unavailable');
-        await copyArtworkPixels(element, src);
+        await copyArtworkPixels(element, src, pixelRegion);
       },
       isVideo ? 'copiedFrame' : 'copiedImage',
     );

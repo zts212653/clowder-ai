@@ -131,6 +131,24 @@ test('an explicitly empty personality remains authoritative', async () => {
   assert.match(buildTeammateRoster('observer', root), /fixture-roster-canary/);
 });
 
+test('editor drafts use the same field-level decisions as the next persisted prompt', () => {
+  const { root, config } = prepare({ roleDescription: 'own role', caution: null });
+  const dossier = loadDossierProfiles(root).get('fable-5');
+  const draft = resolveMemberIdentity(config, dossier, { caution: 'draft limitation' });
+  assert.equal(draft.routingNote, 'draft limitation');
+  assert.equal(draft.rosterFields.caution.replacedValue, 'fixture-route-canary');
+  assert.equal(draft.sources.fields.roleDescription, config.identitySources.roleDescription);
+  assert.equal(draft.rosterDescription, 'fixture-roster-canary');
+  const cleared = resolveMemberIdentity(
+    { ...config, caution: 'saved limitation', identitySources: { ...config.identitySources, caution: 'variant' } },
+    dossier,
+    { caution: '' },
+  );
+  assert.equal(cleared.routingNote, 'fixture-route-canary');
+  assert.equal(cleared.rosterFields.caution.configuredValue, '');
+  assert.equal(cleared.rosterFields.caution.replacedValue, undefined);
+});
+
 for (const [label, teamStrengths, withoutDossier] of [
   ['empty', '', 'authored role'],
   ['whitespace', ' \t ', 'authored role'],

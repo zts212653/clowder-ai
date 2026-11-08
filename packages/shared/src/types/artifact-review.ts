@@ -14,6 +14,8 @@ export type {
 } from './artifact-review-media.js';
 export {
   artifactReviewAnchorSchema,
+  artifactReviewMediaEvidenceSchema,
+  gifAtlasLayout,
   immutableMediaSchema,
   reviewedMediaAssetSchema,
   reviewedMediaTypeSchema,
