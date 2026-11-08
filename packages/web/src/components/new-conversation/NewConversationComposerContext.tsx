@@ -124,6 +124,8 @@ function ProjectControl({
                 activeProjectPath={projectPath}
                 onCancel={() => setBrowsing(false)}
                 onSelectCurrent={select}
+                onNavigationStart={onProjectRestricted}
+                onVirtualLocationChange={onProjectRestricted}
                 onProjectRestricted={onProjectRestricted}
                 selectCurrentLabel={copy.useFolder}
                 copy={copy.directoryBrowser}
