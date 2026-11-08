@@ -5,6 +5,7 @@ import { createManagedWorkBindingConflict } from '../ports/TaskManagedWorkBindin
 import { assertGenericTaskSubjectNamespaceAllowed } from '../ports/TaskStoreContract.js';
 import { assertSubjectUpdateOwnership, createSubjectOwnershipConflict } from '../ports/TaskSubjectOwnership.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { TASK_DEPLOYMENT_RECOVERY_LUA } from './deployment-recovery-lua.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 
 const MAX_MANAGED_PR_UPSERT_RETRIES = 5;
@@ -13,7 +14,7 @@ const MAX_MANAGED_PR_UPSERT_RETRIES = 5;
  * Atomically validate subject ownership + bind-once identity before mutating the live PR anchor.
  * A conflict returns before HSET/ZADD/SET, so the losing registration has zero public/private effect.
  */
-const ATOMIC_MANAGED_PR_UPSERT_LUA = `
+const ATOMIC_MANAGED_PR_UPSERT_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 -- F275_ATOMIC_MANAGED_PR_UPSERT
 local expectedId = ARGV[1]
 local targetId = ARGV[2]
@@ -47,8 +48,9 @@ end
 local existingBinding = redis.call('GET', KEYS[5])
 if existingBinding and existingBinding ~= ARGV[6] then return -1 end
 
+recoveryPreflight(KEYS[2], targetId)
 if isCreate then redis.call('SET', KEYS[1], targetId) end
-redis.call('HSET', KEYS[2], unpack(ARGV, 8, #ARGV))
+writeTaskRecovery(KEYS[2], {unpack(ARGV, 8, #ARGV)})
 if KEYS[6] ~= KEYS[3] then redis.call('ZREM', KEYS[6], targetId) end
 redis.call('ZADD', KEYS[3], ARGV[7], targetId)
 redis.call('ZADD', KEYS[4], ARGV[7], targetId)

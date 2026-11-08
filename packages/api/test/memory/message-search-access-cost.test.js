@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
 
-test('global message search reads the durable visibility index once per admission and return phase', async () => {
+test('global message search reads the durable visibility index once per visibility, canonical and final admission phase', async () => {
   const threads = Array.from({ length: 16 }, (_, i) => ({ id: `system-${i}`, createdBy: 'system', title: 'Shared' }));
   const visible = [...threads];
   let lists = 0;
@@ -47,7 +47,11 @@ test('global message search reads the durable visibility index once per admissio
     { userId: 'owner', viewer: { type: 'cat', catId: 'codex61-sol' } },
   );
   assert.equal(retrievalLists, 1, 'initial index must not be re-enumerated for every shared thread');
-  assert.equal(lists, 2, 'return must use one new durable visibility snapshot');
+  assert.equal(
+    lists,
+    3,
+    'initial visibility, post-retrieval canonical admission and mandatory final admission each need one fresh snapshot',
+  );
   assert.equal(result.results.length, 15);
   assert.ok(!result.results.some((r) => r.threadId === 'system-15'), 'revoked grants must not be published');
 });

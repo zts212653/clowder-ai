@@ -8,6 +8,8 @@ const extensions: Readonly<Record<string, string>> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/svg+xml': 'svg',
   'video/mp4': 'mp4',
 };
 
@@ -50,7 +52,7 @@ export function mediaExportFilename(title: string, mime: string): string {
     .replace(/^[. ]+|[. ]+$/g, '');
   name = Array.from(name).slice(0, 100).join('');
   while (Buffer.byteLength(name) > 180) name = Array.from(name).slice(0, -1).join('');
-  name = name.replace(/\.(?:mp4|png|jpe?g|webp)$/i, '') || '作品';
+  name = name.replace(/\.(?:mp4|png|jpe?g|webp|gif|svg)$/i, '') || '作品';
   return `${name}.${extension}`;
 }
 

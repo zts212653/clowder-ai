@@ -442,9 +442,7 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     sourceMessageId: null,
   });
   const initial = [companion('first.txt'), companion('second.txt'), chosen];
-  const image = publication
-    ? await readFile(new URL('../../../../assets/avatars/antig-opus.png', import.meta.url))
-    : null;
+  const image = publication ? await readFile(new URL('../../public/avatars/antig-opus.png', import.meta.url)) : null;
   let returning = false;
   const requests = [];
   const context = await browser.newContext({ viewport: { width, height: 900 } });

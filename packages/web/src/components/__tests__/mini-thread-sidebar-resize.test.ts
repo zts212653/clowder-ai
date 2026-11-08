@@ -19,12 +19,7 @@ vi.mock('@/stores/chatStore', () => ({
       { id: 't2', title: 'Thread 2', participants: ['codex'] },
     ],
     splitPaneThreadIds: ['t1'],
-    getThreadState: () => ({ catStatuses: {}, unreadCount: 0 }),
   }),
-}));
-
-vi.mock('@/components/ThreadCatStatus', () => ({
-  getCatStatusType: () => 'idle',
 }));
 
 vi.mock('@/components/CatAvatar', () => ({

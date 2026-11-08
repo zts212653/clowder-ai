@@ -26,8 +26,8 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
       matterMemoryService: {
-        async catalog(actor) {
-          reads.push(actor);
+        async catalog(actor, options) {
+          reads.push({ actor, options });
           return {
             items: [
               { matterId: 'matter-actual', title: `Current matter v${version}`, revision: version, entryCount: 2 },
@@ -87,7 +87,8 @@ for (const mode of ['cold', 'hot', 'rebuilt']) {
     assert.match(prompts[1].prompt, /Current matter v2/);
     assert.doesNotMatch(prompts[1].prompt, /Current matter v1/);
     assert.match(prompts[1].prompt, /cat_cafe_read_memory_matter/);
-    assert.ok(reads.every((actor) => actor.userId === 'owner' && actor.viewer.catId === 'opus'));
+    assert.ok(reads.every(({ actor }) => actor.userId === 'owner' && actor.viewer.catId === 'opus'));
+    assert.ok(reads.every(({ options }) => options.threadId === params.threadId));
     if (mode === 'hot') assert.equal(prompts[0].sessionId, 'existing-native');
     if (mode === 'rebuilt') assert.match(prompts[0].prompt, /rebuilt user context/);
   });

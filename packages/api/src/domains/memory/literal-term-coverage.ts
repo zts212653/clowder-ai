@@ -89,3 +89,20 @@ export function literalTermCoverage(words: string[]): (content: string) => numbe
     return ends.reduce((count, state) => count + seen[state], 0);
   };
 }
+
+/** Explain which distinct words matched, using the same linear substring semantics.
+ * Coverage/ranking callers above retain their allocation-free count path. */
+export function matchedLiteralTerms(words: string[]): (content: string) => string[] {
+  const unique = [...new Set(words.filter(Boolean))];
+  if (unique.length <= 4) return (content) => unique.filter((word) => content.includes(word));
+  const { states, ends } = buildTrie(unique);
+  const order = linkFailures(states);
+  const firstUnits = [...states[0].edges.keys()].map(
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+  const starts = new RegExp(`[${firstUnits.join('')}]`, 'g');
+  return (content) => {
+    const seen = markMatches(states, order, starts, content);
+    return unique.filter((_word, index) => seen[ends[index]]);
+  };
+}

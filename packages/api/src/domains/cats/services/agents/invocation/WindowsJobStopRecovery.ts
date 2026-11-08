@@ -1,15 +1,15 @@
 /**
- * #1838: turn "this Windows API job is gone" into exact provider teardown proof for the executions
- * it owned, so the existing TurnExecution owner can settle them.
+ * #1838: turn verified absence of every linked Windows job and launch controller into exact
+ * provider teardown proof, so the existing TurnExecution owner can settle the execution.
  *
  * Two steps, around the existing startup reconciler:
  *   1. `recordVerifiedWindowsJobTeardowns` (before it): for a job that verifiably closed, write
  *      `recordProviderTeardown` on each linked execution whose ledger identity matches the link.
- *      That is the only write here. The reconciler then interrupts those executions through the
- *      normal path, which also settles callback auth, the response and the parent invocation.
- *   2. `clearSettledWindowsJobEvidence` (after it): remove a link once its execution is no longer
- *      running, and the job record once nothing it covered still runs. Until then the evidence is
- *      kept, so an interrupted pass is retried from the same proof.
+ *      A child already terminal still needs its independent physical proof. The reconciler then
+ *      settles running executions through the normal callback auth, response and parent path.
+ *   2. `clearSettledWindowsJobEvidence` (after it): remove an exact link only after its execution
+ *      ended and any started provider's teardown is durable. Keep the job record while any covered
+ *      link needs it, so an interrupted pass retries the same proof.
  *
  * Present, other-session and unknown jobs release nothing; their executions stay protected and are
  * reported by exact invocation id.
@@ -33,11 +33,7 @@ import {
   type WindowsJobStopVerdict,
   windowsControllerKey,
 } from '../../../../../utils/windows-job-owner.js';
-import {
-  hasUnconfirmedProviderTeardown,
-  type ITurnExecutionStore,
-  type TurnExecutionRecord,
-} from '../../stores/ports/TurnExecutionStore.js';
+import type { ITurnExecutionStore, TurnExecutionRecord } from '../../stores/ports/TurnExecutionStore.js';
 
 export interface WindowsJobStopResolution {
   /** Jobs that verifiably closed, with every execution linked to them. */
@@ -132,6 +128,11 @@ export interface WindowsJobTeardownPass {
   liveOwnersComplete: boolean;
 }
 
+// Physical teardown remains independent of the Host terminal and of older tracking flags.
+function needsProviderStopProof(record: TurnExecutionRecord): boolean {
+  return record.providerStartedAt !== undefined && record.providerTeardownAt === undefined;
+}
+
 export async function recordVerifiedWindowsJobTeardowns(options: {
   store: Pick<ITurnExecutionStore, 'get' | 'recordProviderTeardown'>;
   dataDir?: string;
@@ -166,13 +167,13 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
     // One unreachable record must not stop the others or fail the whole startup recovery.
     try {
       const record = await options.store.get(execution.invocationId);
-      if (!record || record.status !== 'running') continue;
+      if (!record) continue;
       if (!matchesLinkedExecution(record, execution)) {
         pass.preserved.push({ invocationId: execution.invocationId, reason: 'link_identity_mismatch' });
         continue;
       }
       // Started-but-unconfirmed is the only state that needs the proof; the rest settle normally.
-      if (!hasUnconfirmedProviderTeardown(record)) continue;
+      if (!needsProviderStopProof(record)) continue;
       // One closed job says nothing about a writer in another (a retry can rebuild the provider in a
       // new host): every job this execution ran in must be among the verifiably closed ones.
       // Read only now, after the controller check: a host its API linked meanwhile is counted too.
@@ -189,6 +190,11 @@ export async function recordVerifiedWindowsJobTeardowns(options: {
         continue;
       }
       await options.store.recordProviderTeardown(execution.invocationId, verifiedAt);
+      const committed = await options.store.get(execution.invocationId);
+      if (!committed || !matchesLinkedExecution(committed, execution) || committed.providerTeardownAt === undefined) {
+        pass.preserved.push({ invocationId: execution.invocationId, reason: 'teardown_not_committed' });
+        continue;
+      }
       pass.released.push(execution.invocationId);
     } catch (error) {
       pass.preserved.push({ invocationId: execution.invocationId, reason: `teardown_write_failed:${String(error)}` });
@@ -252,7 +258,7 @@ export async function findWindowsLiveOwner(options: {
  * the execution keeps its occupancy and the caller reports the exact reason. Nothing is killed here.
  */
 export async function stopWithWindowsJobProof(options: {
-  store: Pick<ITurnExecutionStore, 'transitionTerminal'>;
+  store: Pick<ITurnExecutionStore, 'get' | 'recordProviderTeardown' | 'transitionTerminal'>;
   record: TurnExecutionRecord;
   dataDir?: string;
   execute?: WindowsJobQueryExecute;
@@ -276,7 +282,17 @@ export async function stopWithWindowsJobProof(options: {
   if (links.length < linkedJobs.length) return { stopped: false, reason: 'link_unreadable' };
   if (links.some((link) => !matchesLinkedExecution(record, link.execution)))
     return { stopped: false, reason: 'link_identity_mismatch' };
+  const current = await options.store.get(record.invocationId);
+  if (!current || links.some((link) => !matchesLinkedExecution(current, link.execution)))
+    return { stopped: false, reason: 'link_identity_mismatch' };
   const verifiedAt = Math.max(...closed.map((job) => job.verifiedAt));
+  // transitionTerminal intentionally preserves an earlier ending. Commit the independent physical
+  // fact first, so a concurrent terminal cannot discard it before the last durable link is removed.
+  await options.store.recordProviderTeardown(record.invocationId, verifiedAt);
+  const committed = await options.store.get(record.invocationId);
+  if (!committed || links.some((link) => !matchesLinkedExecution(committed, link.execution)))
+    return { stopped: false, reason: 'link_identity_mismatch' };
+  if (committed.providerTeardownAt === undefined) return { stopped: false, reason: 'teardown_not_committed' };
   const result = await options.store.transitionTerminal(record.invocationId, {
     status: 'canceled',
     endedAt: verifiedAt,
@@ -299,7 +315,12 @@ export async function clearSettledWindowsJobEvidence(options: {
     let retained = invalidLinkPaths.length;
     for (const link of links) {
       const record = await options.store.get(link.execution.invocationId);
-      if (record?.status === 'running') {
+      if (
+        record &&
+        (record.status === 'running' ||
+          needsProviderStopProof(record) ||
+          !matchesLinkedExecution(record, link.execution))
+      ) {
         retained += 1;
         continue;
       }

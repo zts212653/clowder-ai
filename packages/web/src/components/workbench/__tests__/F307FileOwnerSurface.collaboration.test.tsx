@@ -2,6 +2,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { withHubSocket } from '@/test-utils/fake-hub-socket';
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { createFileSurface } from '../real-surface-adapters';
 
@@ -11,7 +12,6 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3102',
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
-vi.mock('socket.io-client', () => ({ io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn() }) }));
 vi.mock('@/hooks/useFileEditing', () => ({
   useFileEditing: () => ({
     editMode: false,
@@ -120,7 +120,7 @@ describe('F307 File owner collaboration entry', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container));
   });
 
   afterEach(() => {

@@ -20,6 +20,15 @@ import type { GitPublisher, PublishOnIsolatedWorktreeOpts } from './types.js';
 
 const exec = promisify(execFile);
 
+/**
+ * Directories checked out in sparse-checkout mode for isolated publish worktrees.
+ * Must be a superset of all paths that:
+ *   1. Stage callbacks write into (ALLOWED_PATH_PREFIXES / CAPABILITY_EVOLUTION_MEASUREMENT_PREFIXES)
+ *   2. Evidence contract scripts read from (docs/harness-feedback/ for loadEvalHubSummary)
+ *   3. Measurement bundle checker reads from (docs/harness-feedback/registry/)
+ */
+export const SPARSE_CHECKOUT_DIRS = ['docs/harness-feedback', 'generated'];
+
 const ALLOWED_PATH_PREFIXES = [
   'docs/harness-feedback/verdicts/',
   'docs/harness-feedback/bundles/',
@@ -127,13 +136,37 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
           branchExistedBefore = false;
         }
 
-        // 2. Create isolated worktree on a new branch from origin/main
-        //    Atomic: fails if branch already exists (race protection)
+        // 2. Create isolated worktree on a new branch from origin/main.
+        //    --no-checkout: skip the full 102k-file checkout that times out under
+        //    disk pressure (Nov-7 eval:a2a, two consecutive 60s timeouts at 54-69%
+        //    of 102,111 files). Branch creation is still atomic (fails if exists).
         await exec(
           'git',
-          ['-C', deps.repoRoot, 'worktree', 'add', '-b', opts.branchName, worktreePath, opts.sourceBase],
-          { timeout: 60_000 },
+          [
+            '-C',
+            deps.repoRoot,
+            'worktree',
+            'add',
+            '--no-checkout',
+            '-b',
+            opts.branchName,
+            worktreePath,
+            opts.sourceBase,
+          ],
+          { timeout: 30_000 },
         );
+
+        // Sparse checkout: only populate the directories the publisher and its
+        // contract runners actually need (~1.8k files vs 102k full). The git INDEX
+        // still tracks every file from sourceBase, so commits include the full tree.
+        // Cone mode is required for --no-checkout worktrees (non-cone silently skips).
+        // Two-step: (1) set the cone patterns, then (2) explicit checkout to
+        // materialize files — `sparse-checkout set` on a --no-checkout worktree
+        // writes the patterns but does NOT populate the working tree.
+        await exec('git', ['-C', worktreePath, 'sparse-checkout', 'set', '--cone', ...SPARSE_CHECKOUT_DIRS], {
+          timeout: 60_000,
+        });
+        await exec('git', ['-C', worktreePath, 'checkout'], { timeout: 60_000 });
 
         // 3. Run caller's stage callback (generator writes verdict artifacts)
         const { paths, commitMessage, prTitle, prBody, labels, statusChecks, afterPublish } =

@@ -45,9 +45,11 @@ for (const intent of ['topk', 'coverage']) {
 }
 test('topk expansion subqueries inherit the same cancellation and deadline', async () => {
   const calls = [];
+  const queries = [];
   const store = {
-    searchWithMeta: async (_query, options) => {
+    searchWithMeta: async (query, options) => {
       calls.push(options);
+      queries.push(query);
       return {
         items:
           calls.length === 1
@@ -69,9 +71,13 @@ test('topk expansion subqueries inherit the same cancellation and deadline', asy
   const app = Fastify();
   await app.register(evidenceRoutes, { evidenceStore: store });
   try {
-    const response = await app.inject('/api/evidence/search?q=fixture&scope=docs');
+    // The keyword must be supported by the query to exercise expansion.
+    const response = await app.inject('/api/evidence/search?q=fixture+probe&scope=docs');
     assert.equal(response.statusCode, 200);
     assert.ok(calls.length > 1);
+    assert.deepEqual(queries.slice(0, 2), ['fixture probe', 'probe']);
+    assert.ok(calls[0]?.signal instanceof AbortSignal);
+    assert.ok(Number.isFinite(calls[0]?.deadlineAt));
     assert.equal(calls[1]?.signal, calls[0]?.signal);
     assert.equal(calls[1]?.deadlineAt, calls[0]?.deadlineAt);
   } finally {

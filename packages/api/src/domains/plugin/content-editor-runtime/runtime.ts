@@ -1,6 +1,7 @@
 import type { ContentEditorProviderContribution } from '@clowder-ai/plugin-contract';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { startFailureRecord } from '../diagnostics/plugin-start-failure.js';
 import { type StaticSurfaceServer, startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
@@ -10,6 +11,12 @@ import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { staticEditorContributions } from './admission.js';
+import {
+  type EditorFailureObservation,
+  EditorHeartbeatDiagnostics,
+  type EditorRuntimeFailureReport,
+  logEditorRuntimeFailure,
+} from './failure-diagnostics.js';
 
 interface Options {
   readonly inventory: PluginInventoryStore;
@@ -19,6 +26,7 @@ interface Options {
   readonly parentOrigin: string;
   readonly now?: () => number;
   readonly onRevoke?: (installationInstanceId: string) => Promise<void>;
+  readonly onFailure?: (report: EditorRuntimeFailureReport) => void;
 }
 
 export interface PluginContentEditorHandle {
@@ -45,6 +53,7 @@ interface ActivePackage {
   timer?: ReturnType<typeof setTimeout>;
   closing?: Promise<void>;
   ready: boolean;
+  failure?: EditorRuntimeFailureReport;
 }
 
 /** Trusted Host adapter for the admitted static transport class. It imports no
@@ -188,30 +197,48 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
   }
 
   private scheduleHeartbeat(id: string, run: ActivePackage): void {
-    run.timer = setTimeout(
-      () => {
-        void (async () => {
-          if (this.active.get(id) !== run) return;
-          await run.package.verifyIntegrity();
-          await run.connection.renewRuntimeLease();
-          if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
-        })()
-          .catch(() => this.fail(id, run))
-          .catch(() => undefined);
-      },
-      Math.max(1, Math.floor(this.options.broker.activeRuntimeLeaseTtlMs / 3)),
-    );
+    const intervalMs = Math.max(1, Math.floor(this.options.broker.activeRuntimeLeaseTtlMs / 3));
+    const dueAt = (this.options.now ?? Date.now)() + intervalMs;
+    run.timer = setTimeout(() => {
+      const diagnostics = new EditorHeartbeatDiagnostics((this.options.now ?? Date.now)() - dueAt);
+      void (async () => {
+        if (this.active.get(id) !== run) return;
+        await diagnostics.measure('package-verification', () => run.package.verifyIntegrity());
+        await diagnostics.measure('lease-renew', () => run.connection.renewRuntimeLease());
+        if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
+      })()
+        .catch((error) => this.fail(id, run, diagnostics.failure(error)))
+        .catch(() => undefined);
+    }, intervalMs);
     run.timer.unref();
   }
 
-  private async fail(id: string, run: ActivePackage): Promise<void> {
-    if (this.active.get(id) !== run) return;
+  private async fail(
+    id: string,
+    run: ActivePackage,
+    observation: EditorFailureObservation = { phase: 'surface' },
+  ): Promise<void> {
+    if (this.active.get(id) !== run || run.closing) return;
     const pending = this.starting.get(id);
     if (pending) {
       pending.controller.abort();
       await pending.promise.catch(() => undefined);
     }
-    if (this.active.has(id) && this.active.get(id) !== run) return;
+    if (this.active.get(id) !== run || run.closing) return;
+    const failure = run.failure ?? {
+      ...observation,
+      pluginInstanceId: id,
+      lifecycleRevision: run.lifecycleRevision,
+      occurredAt: (this.options.now ?? Date.now)(),
+    };
+    if (!run.failure) {
+      run.failure = failure;
+      try {
+        (this.options.onFailure ?? logEditorRuntimeFailure)(failure);
+      } catch {
+        // A diagnostic observer must never prevent authority revocation or durable failure.
+      }
+    }
     await this.close(id, 'static_editor_runtime_failed');
     await this.options.inventory.transaction(async (tx) => {
       const current = await tx.instances.get(id);
@@ -221,7 +248,12 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
         current.activationState === 'enabled' &&
         !this.active.has(id)
       ) {
-        await tx.instances.put({ ...current, runtimeState: 'crashed', updatedAt: (this.options.now ?? Date.now)() });
+        await tx.instances.put({
+          ...current,
+          runtimeState: 'crashed',
+          updatedAt: (this.options.now ?? Date.now)(),
+          lastRuntimeError: startFailureRecord(failure.occurredAt).record,
+        });
       }
     });
   }

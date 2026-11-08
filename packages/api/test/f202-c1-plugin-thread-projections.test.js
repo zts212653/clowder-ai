@@ -54,9 +54,15 @@ test('every thread summary carries the Host navigation link, never request-suppl
   ];
   for (const summary of summaries) {
     assert.equal(summary.deepLinkUrl, `https://cafe.example.test/thread/${encodeURIComponent(summary.id)}`);
+    assert.equal(summary.createdBy, 'owner', 'mailbox binding must use the actual thread owner');
   }
   const foreign = await f.threadStore.create('foreign', 'Secret');
   assert.equal((await f.host.get(foreign.id)).id, foreign.id);
+  assert.equal(
+    (await f.host.get(foreign.id)).createdBy,
+    'foreign',
+    'readable does not mean owned by this plugin owner',
+  );
   const stored = await f.threadStore.get(created.id);
   stored.deletedAt = 1;
   assert.equal(await f.host.get(created.id), null);

@@ -5,27 +5,35 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { MessageSearchAnswerPublicationStore } from '../../dist/domains/memory/MessageSearchAnswerPublicationStore.js';
-import { fixture, human, post, producer, response } from '../helpers/message-search-answer-fixture.js';
+import {
+  claimHistoricalOperation,
+  fixture,
+  human,
+  post,
+  producer,
+  response,
+  seedHistoricalAnswer,
+} from '../helpers/message-search-answer-fixture.js';
 
-test('one claimed operation searches once, stores one bounded publicReply snapshot, and retries read it', async () => {
+test('one claimed selected operation stores one bounded publicReply snapshot and retries read it without retrieval', async () => {
   const f = fixture();
   try {
     const results = await Promise.all([f.service.prepare(f.request), f.service.prepare(f.request)]);
     const prepared = results.find((r) => r.status === 'prepared');
     assert.ok(prepared);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
     assert.equal(prepared.response.results.length, 3);
     assert.ok(!JSON.stringify(prepared).includes('PRIVATE'));
     assert.ok(JSON.stringify(prepared).length <= 24000);
     assert.equal(f.db.prepare('SELECT count(*) n FROM message_search_answer_publications').get().n, 1);
     assert.equal((await f.service.prepare(f.request)).publicationRef, prepared.publicationRef);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     await assert.rejects(
       () => f.service.prepare({ ...f.request, input: { query: 'changed', mode: 'lexical' } }),
       /ANSWER_OPERATION_CONFLICT/,
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -56,7 +64,7 @@ test('prepared is not published; an actual explicit message binds once, and norm
       'ordinary rich patches retain the Host-owned ref',
     );
     assert.equal((await f.service.prepare(f.request)).status, 'published');
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(await f.service.preparePost(p.selection, 'owner', producer, 'origin', 'different-message'), null);
   } finally {
     f.db.close();
@@ -92,38 +100,27 @@ test('lost binding response recovers the same message and card after service rec
       .publishPost({ publicationRef: prepared.publicationRef }, msg.id, producer, 'owner');
     assert.equal(recovered.id, msg.id);
     assert.equal(recovered.extra.rich.blocks.length, 1);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
 });
-test('a pending search remains honestly pending after interruption and never automatically starts again', async () => {
+test('an interrupted historical operation remains pending and never automatically starts again', async () => {
   const f = fixture();
   try {
-    let enter, finish;
-    const entered = new Promise((r) => {
-      enter = r;
-    });
-    const gate = new Promise((r) => {
-      finish = r;
-    });
-    const actual = f.search.search.bind(f.search);
-    f.search.search = async (...args) => {
-      enter();
-      await gate;
-      return actual(...args);
-    };
-    const first = f.service.prepare(f.request);
-    await entered;
-    assert.equal((await f.recreate().prepare(f.request)).status, 'pending');
+    await claimHistoricalOperation(f);
+    const legacy = { ...f.request, selections: undefined };
+    assert.equal((await f.service.prepare(legacy)).status, 'pending');
+    assert.equal((await f.recreate().prepare(legacy)).status, 'pending');
     assert.equal(f.searches(), 0);
-    finish();
-    await first;
-    assert.equal(f.searches(), 1);
+    assert.equal(f.calls(), 0);
+    const saved = await seedHistoricalAnswer(f);
+    assert.equal((await f.recreate().prepare(legacy)).publicationRef, saved.publicationRef);
   } finally {
     f.db.close();
   }
 });
+
 test('only an actually completed normal R attaches, and boot recovery uses that same original response', async () => {
   for (const status of ['processing', 'failed', 'canceled', 'interrupted', 'completed']) {
     const f = fixture();
@@ -137,7 +134,7 @@ test('only an actually completed normal R attaches, and boot recovery uses that 
         await f.recreate().publishResponse(stored, producer.id);
         assert.equal(f.messages.getById(msg.id).extra.rich.blocks.length, 1);
       }
-      assert.equal(f.searches(), 1);
+      assert.equal(f.searches(), 0);
       assert.equal(f.calls(), 0);
     } finally {
       f.db.close();
@@ -208,7 +205,7 @@ test('withdrawal and revisions suppress saved bodies, and updated ledgers cannot
       status: 'unavailable',
       publicationRef: prepared.publicationRef,
     });
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -222,7 +219,7 @@ test('an unrelated Git commit cannot invalidate an unchanged exact decided-table
     const read = await f.service.read(p.message.id, p.published.extra.messageSearchAnswer.blockId, human);
     assert.equal(read.decisionUpdated, false);
     assert.deepEqual(read.response.results[0].decisionSources, prepared.response.results[0].decisionSources);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -248,7 +245,7 @@ test('explicit forwarding re-admits the same snapshot and new destination, witho
       (await f.service.read(forwarded.message.id, forwarded.published.extra.messageSearchAnswer.blockId, human)).status,
       'unavailable',
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -292,7 +289,7 @@ test('a corrupted or missing result is unavailable on retry and cannot be silent
       status: 'unavailable',
       publicationRef: prepared.publicationRef,
     });
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -302,7 +299,7 @@ test('a corrupted or missing result is unavailable on retry and cannot be silent
 test('a forwarded card rechecks its original bound message after asynchronous source admission', async () => {
   const f = fixture();
   try {
-    const prepared = await f.service.prepare(f.request),
+    const prepared = await seedHistoricalAnswer(f),
       original = await post(f, prepared);
     const source = { messageId: original.message.id, blockId: original.published.extra.messageSearchAnswer.blockId };
     const forwarded = await post(f, prepared, { threadId: 'forward', selection: { source } });
@@ -316,26 +313,19 @@ test('a forwarded card rechecks its original bound message after asynchronous so
       await f.service.read(forwarded.message.id, forwarded.published.extra.messageSearchAnswer.blockId, human),
       { status: 'unavailable' },
     );
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
 });
 
-test('a canceled one-time preparation stays failed on retry without another retrieval', async () => {
+test('a saved failed operation stays failed on retry without starting work', async () => {
   const f = fixture();
   try {
-    const controller = new AbortController();
-    const search = f.search.search.bind(f.search);
-    f.search.search = async (...args) => {
-      const result = await search(...args);
-      controller.abort();
-      return result;
-    };
-    await assert.rejects(() => f.service.prepare(f.request, { signal: controller.signal }), { name: 'AbortError' });
-    const retry = await f.recreate().prepare(f.request);
-    assert.equal(retry.status, 'failed');
-    assert.equal(f.searches(), 1);
+    const claimed = await claimHistoricalOperation(f);
+    await f.store.fail(claimed.record.publication_ref);
+    assert.equal((await f.recreate().prepare({ ...f.request, selections: undefined })).status, 'failed');
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();
@@ -353,7 +343,7 @@ test('producer identity depends on named fields, not JavaScript object property 
     const published = await f.service.publishResponse(actual, producer.id);
     assert.equal(published.extra?.messageSearchAnswer?.publicationRef, prepared.publicationRef);
     assert.equal((await f.service.prepare(f.request)).publicationRef, prepared.publicationRef);
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
   } finally {
     f.db.close();
   }
@@ -370,13 +360,14 @@ test('cancellation during final destination admission cannot leave a prepared re
     const release = new Promise((resolve) => {
       finish = resolve;
     });
-    // Pause the real thread store only after the single search has settled.
+    // Pause only the final destination check; source snapshot ports remain synchronous.
     const threads = f.threadStore;
     const get = threads.get.bind(threads);
-    threads.get = async (id) => {
-      if (id === 'origin' && f.searches()) {
+    let destinationReads = 0;
+    threads.get = (id) => {
+      if (id === 'origin' && ++destinationReads === 2) {
         enter();
-        await release;
+        return release.then(() => get(id));
       }
       return get(id);
     };
@@ -386,7 +377,7 @@ test('cancellation during final destination admission cannot leave a prepared re
     finish();
     await assert.rejects(() => first, { name: 'AbortError' });
     assert.equal((await f.service.prepare(f.request)).status, 'failed');
-    assert.equal(f.searches(), 1);
+    assert.equal(f.searches(), 0);
     assert.equal(f.calls(), 0);
   } finally {
     f.db.close();

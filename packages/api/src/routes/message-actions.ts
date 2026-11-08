@@ -81,6 +81,8 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
         return { error: '删除失败', code: 'DELETE_FAILED' };
       }
 
+      // PR-3a2: a page joining the thread later must not get this message back from a stream replay.
+      opts.socketManager.closeResponseStream(id);
       opts.socketManager.broadcastToRoom(`thread:${deleted.threadId}`, 'message_hard_deleted', {
         messageId: id,
         threadId: deleted.threadId,
@@ -103,6 +105,7 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
     }
 
+    opts.socketManager.closeResponseStream(id);
     opts.socketManager.broadcastToRoom(`thread:${deleted.threadId}`, 'message_deleted', {
       messageId: id,
       threadId: deleted.threadId,

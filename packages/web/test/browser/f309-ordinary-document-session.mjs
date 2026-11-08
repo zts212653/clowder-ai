@@ -61,7 +61,7 @@ export async function openDocumentSession(
     return fulfillFixtureApi(route, createReviewState(), []);
   });
   if (owner.nativeMediaRoutes)
-    await context.route('**/uploads/*', async (route) => {
+    await context.route('**/uploads/**', async (route) => {
       const url = new URL(route.request().url());
       const response = await route.fetch({ url: `${owner.api}${url.pathname}` });
       return route.fulfill({ response });

@@ -36,6 +36,83 @@ const items: ThreadArtifactDTO[] = [
 let host: HTMLDivElement;
 let root: Root;
 const open = vi.fn();
+
+it('expands loaded cards before offering a global server continuation', async () => {
+  const loaded = Array.from({ length: 50 }, (_, index) => ({
+    ...items[0],
+    name: `Loaded-${index}.md`,
+    url: `/uploads/loaded-${index}.md`,
+    sourceMessageId: `loaded-${index}`,
+    threadId: 'T',
+  }));
+  data.fetch.mockResolvedValue(
+    Response.json({ artifacts: loaded, view: 'works', workLineage: 'resolved', complete: false, nextCursor: 'more' }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  const button = (label: string) => [...host.querySelectorAll('button')].find((item) => item.textContent === label);
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(24);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(48);
+  expect(button('Read more works')).toBeUndefined();
+  await act(async () => button('Expand more loaded works')?.click());
+  expect(host.querySelectorAll('[data-work-anchor]')).toHaveLength(50);
+  expect(button('Expand more loaded works')).toBeUndefined();
+  expect(button('Read more works')).toBeDefined();
+  expect(data.fetch.mock.calls.filter(([url]) => String(url).includes('/api/artifacts'))).toHaveLength(1);
+});
+
+it('keeps a zero-match selected filter and continuation in a partial global catalogue', async () => {
+  data.fetch.mockResolvedValue(
+    Response.json({
+      artifacts: [{ ...items[0], threadId: 'T', threadTitle: 'Thread' }],
+      view: 'works',
+      workLineage: 'resolved',
+      complete: false,
+      nextCursor: 'more',
+    }),
+  );
+  await act(async () =>
+    root.render(
+      <ThreadWorksPanelV2
+        threadId="default"
+        initialView={{
+          scope: 'global',
+          filter: 'image',
+          query: '',
+          catFilter: null,
+          grouping: 'time',
+          collapsed: [],
+        }}
+      />,
+    ),
+  );
+  const select = host.querySelector<HTMLSelectElement>('select');
+  expect(select?.value).toBe('image');
+  expect(select?.querySelector('option[value="image"]')?.textContent).toContain('0');
+  expect(host.textContent).toContain('1 works loaded');
+  expect(host.textContent).toContain('0 matches in loaded works');
+  expect(host.textContent).toContain('Read more works');
+  expect(host.textContent).not.toContain('No works match');
+  expect(data.fetch).toHaveBeenCalledTimes(1);
+});
+
+it('keeps lineage-unavailable rows and a retry after the last global page', async () => {
+  data.fetch.mockResolvedValue(
+    Response.json({
+      artifacts: [{ ...items[0], threadId: 'T', threadTitle: 'Thread' }],
+      view: 'works',
+      workLineage: 'unavailable',
+      complete: true,
+    }),
+  );
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId="default" />));
+  expect(host.textContent).toContain('Delivered.md');
+  expect(host.textContent).toContain('1 works loaded');
+  expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(true);
+  expect(host.textContent).not.toContain('Newest first');
+});
+
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

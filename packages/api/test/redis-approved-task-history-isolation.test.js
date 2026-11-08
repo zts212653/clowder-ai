@@ -4,6 +4,7 @@ import './helpers/setup-cat-registry.js';
 import { canonicalizeActionTerminalPredicate } from '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import { ActionSuccessorKeys } from '../dist/domains/ball-custody/action-successor-keys.js';
 import { parseActionSuccessorLease } from '../dist/domains/ball-custody/action-successor-redis-codecs.js';
+import { RedisProposalStore } from '../dist/domains/cats/services/stores/redis/RedisProposalStore.js';
 import { approvedTaskFixture, OWNER, TARGET, USER } from './helpers/approved-task-contract-fixture.js';
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
@@ -72,6 +73,30 @@ describe(
       });
     }
 
+    test('recovery-classified legacy history preserves approval continuation, durable replay and the original bytes', async (t) => {
+      const f = await approvedTaskFixture(t, { legacy: false });
+      const historical = await seedLegacyCompletion(f);
+      await f.leases.initializeRecovery(true);
+      const classified = await f.redis.get(historical.key);
+      assert.equal(JSON.parse(classified)._invalidRaw, historical.raw);
+      const response = await f.continueTask();
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().outcome, 'continued');
+      const receipt = response.json().receipt;
+      assert.deepEqual((await f.continueTask()).json().receipt, receipt);
+      const reopened = await new RedisProposalStore(f.redis).continueApprovedTask({
+        ...f.input,
+        actor: { userId: USER, catId: OWNER, threadId: f.source.id },
+      });
+      assert.equal(reopened.outcome, 'replayed');
+      assert.deepEqual(reopened.receipt, receipt);
+      assert.equal(await f.redis.ttl(`proposal:${f.proposalId}`), -1);
+      assert.equal((await f.implement()).statusCode, 200);
+      assert.equal((await f.implement()).statusCode, 200);
+      assert.equal((await f.queue.listAllDurable(f.childId)).length, 1);
+      assert.equal(await f.redis.get(historical.key), classified);
+    });
+
     for (const sameTask of [false, true]) {
       test(`unrelated ${sameTask ? 'tenant' : 'Task'} provenance is not required to continue this approval`, async (t) => {
         const f = await approvedTaskFixture(t);
@@ -102,6 +127,7 @@ describe(
       test(`matching implementation remains disqualifying via ${via} even when completion cannot be decoded`, async (t) => {
         const f = await approvedTaskFixture(t);
         await seedLegacyCompletion(f, { subjectRef: `subject:task:${f.task.id}`, ...fields(f) });
+        await f.leases.initializeRecovery(true);
         const before = await f.redis.hgetall(`proposal:${f.proposalId}`);
         const response = await f.continueTask();
         assert.equal(response.statusCode, 409, response.body);
@@ -117,14 +143,22 @@ describe(
       const invalid = JSON.parse(raw);
       delete invalid.tenantScope;
       await f.redis.set(key, JSON.stringify(invalid));
+      await f.leases.initializeRecovery(true);
       const response = await f.continueTask();
       assert.equal(response.statusCode, 503, response.body);
-      assert.equal(response.json().reason, 'unavailable');
+      assert.deepEqual(response.json(), { outcome: 'rejected', reason: 'unavailable' });
+      const internal = await f.proposals.continueApprovedTask({
+        ...f.input,
+        actor: { userId: USER, catId: OWNER, threadId: f.source.id },
+      });
+      assert.equal(internal.diagnostic.stage, 'identity');
+      assert.match(internal.diagnostic.keyDigest, /^[a-f0-9]{16}$/);
       assert.equal(await f.redis.hget(`proposal:${f.proposalId}`, 'taskContractContinuation'), null);
     });
     test('history changing to a matching implementation at commit still invalidates the receipt CAS', async (t) => {
       const f = await approvedTaskFixture(t);
       const historical = await seedLegacyCompletion(f, { subjectRef: `subject:task:${f.task.id}` });
+      await f.leases.initializeRecovery(true);
       const duplicate = f.redis.duplicate.bind(f.redis);
       let raced = false;
       f.redis.duplicate = (...args) => {

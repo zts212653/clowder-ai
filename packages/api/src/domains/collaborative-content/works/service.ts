@@ -3,6 +3,7 @@ import {
   type CommitWork,
   commitWorkSchema,
   type ImmutableMedia,
+  type ReviewedMediaType,
   type WorkCommand,
   type WorkReference,
   type WorkWorkspaceSource,
@@ -38,7 +39,7 @@ import type { WorkVersionStore } from './version-store.js';
 export type { WorkAuthorizationInput, WorkPrincipal } from './types.js';
 
 export interface OpenWorkSource extends ContentStream {
-  readonly mediaType: 'video/mp4' | 'text/html';
+  readonly mediaType: ReviewedMediaType | 'text/html';
   /** F063 probes the same frozen snapshot used by this stream; review admission must require this clock. */
   readonly media?: ImmutableMedia;
   readonly publication: ContentSourcePublicationV1;
@@ -145,7 +146,7 @@ export class LivingWorkService {
       ? openHtmlWorkSource(command.source)
       : await this.deps.source.open({ source: command.source, principal, threadId: workScope.threadId });
     try {
-      if ((current && current.mediaType !== opened.mediaType) || (response && opened.mediaType !== 'video/mp4'))
+      if ((current && current.mediaType !== opened.mediaType) || (response && opened.mediaType === 'text/html'))
         throw new MediaOwnerError('invalid_media');
       if (command.action === 'submit' && current?.blobDigest === opened.blobDigest)
         throw new MediaOwnerError('publication_changed');
