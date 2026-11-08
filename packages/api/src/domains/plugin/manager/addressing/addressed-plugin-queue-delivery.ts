@@ -21,8 +21,12 @@ export class AddressedPluginQueueDelivery {
   handles(id: string): Promise<boolean> {
     return this.options.targets.isInstanceId(id);
   }
-  async deliver(entry: QueueEntry, targetId: string): Promise<StoredMessage> {
-    const { messageStore, queue, manager } = this.options;
+  async deliver(
+    entry: QueueEntry,
+    targetId: string,
+    onProgress?: (message: StoredMessage) => void,
+  ): Promise<StoredMessage> {
+    const { messageStore, queue } = this.options;
     const source = entry.payload.messageId ? await messageStore.getById(entry.payload.messageId) : null;
     if (
       !source ||
@@ -44,52 +48,14 @@ export class AddressedPluginQueueDelivery {
     const deliveryId = `ad_${createHash('sha256').update(targetId).update('\0').update(source.id).digest('hex')}`;
     const receiptKey = `plugin-addressed:${deliveryId}`;
     let status = await messageStore.getByIdempotencyKey('system', source.threadId, receiptKey);
+    const fresh = !status;
     if (!status) {
-      const envelope = projectEnvelope(source);
-      if (!envelope) throw new Error('Plugin delivery envelope is unavailable');
-      const media = envelope.payload.elements.flatMap((element) =>
-        element.kind === 'media_ref' && element.payload.reference.startsWith('hmr_')
-          ? [
-              {
-                instanceId: targetId,
-                scope: { kind: 'delivery' as const, deliveryId },
-                elementId: element.elementId,
-                hmrId: element.payload.reference,
-              },
-            ]
-          : [],
-      );
-      if (media.length && !this.options.entitlements) throw new Error('Media entitlement service is unavailable');
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let accepted = false;
-      try {
-        if (media.length) await this.options.entitlements!.grantMany(media);
-        await Promise.race([
-          manager.deliverAddressed(targetId, {
-            kind: 'message',
-            reason: 'addressed',
-            deliveryId,
-            threadId: source.threadId,
-            envelope,
-          }),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Plugin delivery timed out')), this.options.timeoutMs ?? 30_000);
-          }),
-        ]);
-        accepted = true;
-      } catch {
-        // A timeout does not prove rejection. End this delivery attempt honestly;
-        // do not spin the ordinary queue or claim an external reply completed.
-      } finally {
-        if (timer) clearTimeout(timer);
-        await this.options.entitlements?.revoke({ scope: { kind: 'delivery', deliveryId } }, 'action_returned');
-      }
       status = await messageStore.append({
         userId: 'system',
         threadId: source.threadId,
         from: { kind: 'system', service: 'plugin_delivery' },
-        content: accepted ? '插件已接收消息。' : '插件未确认接收，请检查插件状态后重新发送。',
-        extra: { pluginAddressedReceipt: { targetId, inputMessageId: source.id, accepted } },
+        content: '插件投递与接收状态。',
+        extra: { pluginAddressedReceipt: { targetId, inputMessageId: source.id, accepted: false, phase: 'sending' } },
         mentions: [],
         timestamp: Date.now(),
         idempotencyKey: receiptKey,
@@ -113,11 +79,75 @@ export class AddressedPluginQueueDelivery {
       if (dispatched.kind !== 'applied' && dispatched.kind !== 'replayed')
         throw new Error('Plugin acceptance history conflict');
     } else if (existing.statusMessageId !== status.id) throw new Error('Plugin acceptance identity conflict');
+    onProgress?.(status);
+    const dispatchedSource = await messageStore.getById(source.id);
+    if (dispatchedSource) onProgress?.(dispatchedSource);
+    if (fresh) {
+      const accepted = await this.requestDelivery(source, targetId, deliveryId);
+      status = await messageStore.updateExtra(status.id, {
+        pluginAddressedReceipt: {
+          targetId,
+          inputMessageId: source.id,
+          accepted,
+          phase: accepted ? 'accepted' : 'unconfirmed',
+        },
+      });
+      if (!status) throw new Error('Plugin receipt is unavailable');
+    } else if (status.extra?.pluginAddressedReceipt?.phase === 'sending') {
+      // The previous process may have exposed the message. A restart cannot prove
+      // rejection, and must not replay an unfinished delivery as a fresh request.
+      status = await messageStore.updateExtra(status.id, {
+        pluginAddressedReceipt: { targetId, inputMessageId: source.id, accepted: false, phase: 'unconfirmed' },
+      });
+      if (!status) throw new Error('Plugin receipt is unavailable');
+    }
     const settled = await messageStore.advanceLifecycleInputDispatch(source.id, { ...identity, phase: 'settled' });
     if (settled.kind !== 'applied' && settled.kind !== 'replayed')
       throw new Error('Plugin acceptance settlement conflict');
     const retired = await queue.retireClaimedLifecycleTarget(source.threadId, entry.id, targetId);
     if (retired.outcome !== 'retired') throw new Error('Plugin acceptance queue retirement conflict');
     return status;
+  }
+  private async requestDelivery(source: StoredMessage, targetId: string, deliveryId: string): Promise<boolean> {
+    const envelope = projectEnvelope(source);
+    if (!envelope) throw new Error('Plugin delivery envelope is unavailable');
+    const media = envelope.payload.elements.flatMap((element) =>
+      element.kind === 'media_ref' && element.payload.reference.startsWith('hmr_')
+        ? [
+            {
+              instanceId: targetId,
+              scope: { kind: 'delivery' as const, deliveryId },
+              elementId: element.elementId,
+              hmrId: element.payload.reference,
+            },
+          ]
+        : [],
+    );
+    if (media.length && !this.options.entitlements) throw new Error('Media entitlement service is unavailable');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let accepted = false;
+    try {
+      if (media.length) await this.options.entitlements!.grantMany(media);
+      await Promise.race([
+        this.options.manager.deliverAddressed(targetId, {
+          kind: 'message',
+          reason: 'addressed',
+          deliveryId,
+          threadId: source.threadId,
+          envelope,
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Plugin delivery timed out')), this.options.timeoutMs ?? 30_000);
+        }),
+      ]);
+      accepted = true;
+    } catch {
+      // A timeout does not prove rejection. End this delivery attempt honestly;
+      // do not spin the ordinary queue or claim an external reply completed.
+    } finally {
+      if (timer) clearTimeout(timer);
+      await this.options.entitlements?.revoke({ scope: { kind: 'delivery', deliveryId } }, 'action_returned');
+    }
+    return accepted;
   }
 }

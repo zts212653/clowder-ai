@@ -4625,7 +4625,9 @@ export class QueueProcessor {
         for (const source of entries) {
           for (const target of pluginTargets) {
             if (source.targets.includes(target)) {
-              const receipt = await this.addressedDelivery!.deliver(source, target);
+              const receipt = await this.addressedDelivery!.deliver(source, target, (message) => {
+                this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), message);
+              });
               this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), receipt);
               if (source.payload.messageId) {
                 const settledSource = await messageStore.getById(source.payload.messageId);

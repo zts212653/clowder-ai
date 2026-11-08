@@ -62,11 +62,14 @@ import { MessageBundleCard } from './MessageBundleCard';
 import { MessageDispatchAvatars } from './MessageDispatchAvatars';
 import { MetadataBadge } from './MetadataBadge';
 import { buildMessageDisclosureKey, buildRichHtmlDisclosureKey } from './message-disclosure-state';
+import { isLinkedDeliveryFailureCarrier, pluginDeliveryReceipt } from './message-dispatch-projection';
 import { isConnectorSystemNotice } from './message-render-visibility';
 import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
 import { isLastOfOwnRun } from './own-message-run';
+import { PluginReplyPending } from './PluginReplyPending';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
+import { ReplyPlaceholder } from './ReplyPlaceholder';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
 import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
@@ -165,6 +168,7 @@ interface ChatMessageProps {
   compact?: boolean;
   threadId?: string;
   timelineMessages?: readonly ChatMessageType[];
+  pluginDeliveryLiveSince?: number;
   activeRuns?: readonly LifecycleActiveRun[];
   queue?: readonly import('@/stores/chat-types').QueueEntry[];
   getCatById: (id: string) => CatData | undefined;
@@ -194,7 +198,8 @@ interface ChatMessageProps {
 
 function needsTimelineProjection(message: ChatMessageType): boolean {
   return Boolean(
-    hasCloudBindingRecoveryMetadata(message) ||
+    pluginDeliveryReceipt(message) ||
+      hasCloudBindingRecoveryMetadata(message) ||
       cloudReceiptOf(message) ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
@@ -214,6 +219,7 @@ function ChatMessageContent({
   compact = false,
   threadId,
   timelineMessages,
+  pluginDeliveryLiveSince,
   activeRuns,
   queue,
   getCatById,
@@ -493,6 +499,8 @@ function ChatMessageContent({
   }
 
   if (isSystem) {
+    if (pluginDeliveryReceipt(message) && isLinkedDeliveryFailureCarrier(message, threadMessages))
+      return <PluginReplyPending message={message} messages={threadMessages} liveSince={pluginDeliveryLiveSince} />;
     if (shellPresentation === 'v2' && isLinkedCloudBindingRecoveryNotice(message, threadMessages))
       return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
     const contentModificationReceipt = contentModificationReceiptOf(message.extra);
@@ -820,11 +828,16 @@ function ChatMessageContent({
     const notice = emptyResponseNotice;
     if (notice?.tone === 'processing') {
       return (
-        <div data-message-id={message.id} data-testid="response-lifecycle-tip" className="mb-4 flex items-start gap-2">
-          {catData && (shellPresentation !== 'v2' || compact) ? (
-            <SenderAvatar sender={sender} presentation="message" streaming />
-          ) : null}
-          <div className="min-w-0 flex-1 pt-1">
+        <ReplyPlaceholder
+          messageId={message.id}
+          targetId={message.catId}
+          state="processing"
+          avatar={
+            catData && (shellPresentation !== 'v2' || compact) ? (
+              <SenderAvatar sender={sender} presentation="message" />
+            ) : undefined
+          }
+          heading={
             <div className="flex items-center gap-2 text-xs">
               {catData && shellPresentation === 'v2' && !compact ? (
                 <CatNameplate
@@ -840,24 +853,25 @@ function ChatMessageContent({
               )}
               <span className="text-cafe-muted">{formatTime(assistantPresentationTime)}</span>
             </div>
-            {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? (
-              <div className="mt-2 text-cafe-muted">
-                <CodexStartupRecoveryStatus message={message} />
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-cafe-muted">已接下，还没有输出</p>
-            )}
-            {showCapabilityTip && capabilityTipContexts ? (
-              <CapabilityTipStrip
-                surface="pending_bubble"
-                contexts={capabilityTipContexts}
-                audience="cvo"
-                enabled
-                firstDelayMs={0}
-              />
-            ) : null}
-          </div>
-        </div>
+          }
+        >
+          {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? (
+            <div className="mt-2 text-cafe-muted">
+              <CodexStartupRecoveryStatus message={message} />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-cafe-muted">已接下，还没有输出</p>
+          )}
+          {showCapabilityTip && capabilityTipContexts ? (
+            <CapabilityTipStrip
+              surface="pending_bubble"
+              contexts={capabilityTipContexts}
+              audience="cvo"
+              enabled
+              firstDelayMs={0}
+            />
+          ) : null}
+        </ReplyPlaceholder>
       );
     }
     return null;

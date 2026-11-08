@@ -211,7 +211,12 @@ export interface ChatMessage {
   extra?: {
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     /** Host receipt: input acceptance only, never a model response. */
-    pluginAddressedReceipt?: { inputMessageId: string; targetId: string; accepted: boolean };
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     runtimeInteractionCard?: {
       version: 1;
       interactionId: string;

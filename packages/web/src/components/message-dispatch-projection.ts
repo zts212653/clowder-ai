@@ -32,7 +32,7 @@ function deliveredProjection(ref: LifecycleDispatchRef): MessageDispatchAvatarPr
 
 function linkedProjection(
   ref: LifecycleDispatchRef,
-  phase: 'processing' | 'settled',
+  phase: 'delivered' | 'processing' | 'settled',
   linkedAt: number,
 ): MessageDispatchAvatarProjection {
   return {
@@ -86,13 +86,18 @@ function projectDispatchRef(
 export function pluginDeliveryReceipt(message: ChatMessage | undefined) {
   if (message?.from?.kind !== 'system' || message.from.service !== 'plugin_delivery') return undefined;
   const receipt = message.extra?.pluginAddressedReceipt as
-    | { targetId?: unknown; inputMessageId?: unknown; accepted?: unknown }
+    | { targetId?: unknown; inputMessageId?: unknown; accepted?: unknown; phase?: unknown }
     | undefined;
   return receipt &&
     typeof receipt.targetId === 'string' &&
     typeof receipt.inputMessageId === 'string' &&
     typeof receipt.accepted === 'boolean'
-    ? (receipt as { targetId: string; inputMessageId: string; accepted: boolean })
+    ? (receipt as {
+        targetId: string;
+        inputMessageId: string;
+        accepted: boolean;
+        phase?: 'sending' | 'accepted' | 'unconfirmed';
+      })
     : undefined;
 }
 
@@ -113,8 +118,8 @@ export function projectMessageDispatchAvatars(
     if (targetCounts.get(ref.targetId) !== 1) return [];
     const statusMessage = exactMessageById(timelineMessages, ref.statusMessageId);
     const receipt = pluginDeliveryReceipt(statusMessage);
-    if (receipt?.inputMessageId === message.id && receipt.targetId === ref.targetId && ref.phase === 'settled')
-      return [linkedProjection(ref, 'settled', statusMessage!.timestamp)];
+    if (receipt?.inputMessageId === message.id && receipt.targetId === ref.targetId)
+      return [linkedProjection(ref, ref.phase === 'settled' ? 'settled' : 'delivered', statusMessage!.timestamp)];
     const statusLifecycle = statusMessage?.lifecycle;
     if (!statusLifecycle) return [deliveredProjection(ref)];
     const linked = projectDispatchRef(message.id, refs, ref, statusLifecycle, activeRuns);
@@ -131,7 +136,7 @@ export function isLinkedDeliveryFailureCarrier(
   if (receipt)
     return (
       exactMessageById(timelineMessages, receipt.inputMessageId)?.lifecycle?.dispatchRefs?.some(
-        (ref) => ref.targetId === receipt.targetId && ref.statusMessageId === message.id && ref.phase === 'settled',
+        (ref) => ref.targetId === receipt.targetId && ref.statusMessageId === message.id,
       ) ?? false
     );
   const lifecycle = message.lifecycle;

@@ -565,6 +565,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
         targetId: pluginReceipt.targetId,
         inputMessageId: pluginReceipt.inputMessageId,
         accepted: pluginReceipt.accepted,
+        ...(pluginReceipt.phase === 'sending' ||
+        pluginReceipt.phase === 'accepted' ||
+        pluginReceipt.phase === 'unconfirmed'
+          ? { phase: pluginReceipt.phase }
+          : {}),
       };
       hasField = true;
     }

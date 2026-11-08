@@ -14,6 +14,7 @@ import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt } from './cloud-dispatch-receipt';
 import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
 import { PluginTargetIcon } from './PluginTargetIcon';
+import { pluginReplyFor } from './plugin-reply-state';
 import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudReply } from './useCloudReply';
@@ -60,6 +61,7 @@ export function MessageDispatchRecipient({
   const logical = useCloudReply(cloud?.identity, threadId, timelineMessages, { readDotEvent: shell === 'v2' });
   const linkedMessage = timelineMessages.find((candidate) => candidate.id === projection.statusMessageId);
   const pluginReceipt = pluginDeliveryReceipt(linkedMessage);
+  const pluginReply = pluginReceipt ? pluginReplyFor(message.id, projection.targetId, timelineMessages) : undefined;
   const pluginTarget = knownTargets.find((candidate) => candidate.id === projection.targetId);
   const pluginRecipient = pluginTarget !== undefined || pluginReceipt !== undefined;
   const label = pluginTarget?.alias ?? (pluginRecipient ? '插件' : getCatLabel(projection.targetId));
@@ -89,50 +91,59 @@ export function MessageDispatchRecipient({
   const running = response ? response.status === 'processing' : ref?.phase !== 'settled';
   const receipt = dispatchReceiptDisplay(ref, running, message.lifecycle);
   const audit = cloud ? cloudDispatchAudit(cloud, logical.state === 'source_replied') : undefined;
-  const title = pluginReceipt
-    ? pluginReceipt.accepted
-      ? '插件确认收到了这条消息；如果它回复，会作为新消息出现'
-      : '插件没有确认收到，请检查插件状态后重新发送'
-    : [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
+  const title = pluginReply
+    ? '插件的回复已到达'
+    : pluginReceipt?.phase === 'sending'
+      ? '正在向插件投递，尚未确认接收'
+      : pluginReceipt
+        ? pluginReceipt.accepted
+          ? '插件确认收到了这条消息；如果它回复，会作为新消息出现'
+          : '插件没有确认收到，请检查插件状态后重新发送'
+        : [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
   const awaitingCloudReply =
     cloud && linkedMessage && !hasAssistantBody(linkedMessage) && response?.status === 'completed';
   const replyMessageId =
-    logical.state !== 'unverified'
+    pluginReply?.id ??
+    (logical.state !== 'unverified'
       ? logical.replyMessageId
       : awaitingCloudReply
         ? undefined
-        : projection.statusMessageId;
+        : projection.statusMessageId);
   const failedDelivery = linked?.kind === 'delivery_failure';
   const notSent =
     cloud?.receipt?.status === 'failed' &&
     cloud.receipt.transport === 'none' &&
     cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
-  const progress = pluginReceipt
-    ? pluginReceipt.accepted
-      ? '已接收'
-      : '未确认接收 · 请检查插件后重新发送'
-    : logical.state === 'replied'
-      ? '收到，已回复'
-      : logical.state === 'source_replied'
-        ? '这条消息已有回信'
-        : notSent
-          ? '尚未发送'
-          : awaitingCloudReply
-            ? '收到，回复状态待核对'
-            : uncertain
-              ? checking
-                ? `正在核对 ${label} 收到没…`
-                : '已送出，没确认收到'
-              : failedDelivery
-                ? '没送到'
-                : appended
-                  ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
-                  : processing
-                    ? '收到，正在回…'
-                    : outcome
-                      ? `收到，${outcome}`
-                      : '收到，回复状态待核对';
+  const progress = pluginReply
+    ? '已回复'
+    : pluginReceipt?.phase === 'sending'
+      ? '正在投递…'
+      : pluginReceipt
+        ? pluginReceipt.accepted
+          ? '已接收'
+          : '未确认接收 · 请检查插件后重新发送'
+        : logical.state === 'replied'
+          ? '收到，已回复'
+          : logical.state === 'source_replied'
+            ? '这条消息已有回信'
+            : notSent
+              ? '尚未发送'
+              : awaitingCloudReply
+                ? '收到，回复状态待核对'
+                : uncertain
+                  ? checking
+                    ? `正在核对 ${label} 收到没…`
+                    : '已送出，没确认收到'
+                  : failedDelivery
+                    ? '没送到'
+                    : appended
+                      ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
+                      : processing
+                        ? '收到，正在回…'
+                        : outcome
+                          ? `收到，${outcome}`
+                          : '收到，回复状态待核对';
   const late = projection.dispatchedAt !== undefined && projection.dispatchedAt - message.timestamp > 60_000;
   return (
     <li
@@ -160,7 +171,7 @@ export function MessageDispatchRecipient({
       {retryEntry && retryAction?.kind === 'repeat_target' ? (
         <QueueTargetRetryButton entry={retryEntry} action={retryAction} label="重新发送" />
       ) : null}
-      {!checking && replyMessageId && (response || logical.state !== 'unverified') ? (
+      {!checking && replyMessageId && (pluginReply || response || logical.state !== 'unverified') ? (
         <button
           type="button"
           aria-label={`看${label}的回复`}
