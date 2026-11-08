@@ -28,6 +28,7 @@ test(
     t.after(async () => {
       if (page && !page.isClosed()) {
         await page.screenshot({ path: path.join(evidence, 'final.png'), fullPage: true });
+        await writeFile(path.join(evidence, 'final.html'), await page.content());
         await writeFile(
           path.join(evidence, 'proof.json'),
           JSON.stringify({ errors, responses, effects: await source.effects() }, null, 2),
@@ -98,13 +99,13 @@ test(
     assert.equal(await inbox.getByTestId('schedule-reject').isEnabled(), true);
     assert.equal((await host.innerText()).match(/任务已变化/g).length, 1);
     assert.equal(await host.getByTestId('mailbox-approval-reread').count(), 0);
+    await host.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(evidence, 'inbox-conflict.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
+    await host.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(evidence, 'inbox-conflict-mobile.png'), fullPage: true });
     await inbox.getByTestId('schedule-reject').click();
-    await page.waitForFunction(() =>
-      document.querySelector('[data-testid="mailbox-approval-result"]')?.textContent?.includes('已拒绝'),
-    );
+    await page.getByTestId('mailbox-retained-result').filter({ hasText: '已拒绝' }).waitFor();
     assert.equal(source.store.getById(original.proposalId).status, 'rejected');
     assert.equal(source.tasks.getById(original.task.id).enabled, false);
     const fresh = await source.reproposeDeletion();
