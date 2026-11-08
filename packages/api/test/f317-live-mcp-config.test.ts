@@ -120,7 +120,14 @@ test('explicit meeting admission without household reads exposes exactly the fiv
   }
 });
 
-test('household search paths resolve at the repository while source and private files stay denied', async () => {
+test('household search paths resolve at the repository while source and private files stay denied', async (t) => {
+  const projectRoot = resolve('../..');
+  const previousConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+  process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
+  t.after(() => {
+    if (previousConfigRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+    else process.env.CAT_CAFE_CONFIG_ROOT = previousConfigRoot;
+  });
   const credentials = await LiveNativeCredentials.create({
     userId: 'owner',
     threadId: 'home',
@@ -144,6 +151,7 @@ test('household search paths resolve at the repository while source and private 
     const memory = (config.mcp_servers as Record<string, { cwd?: string; env: Record<string, string> }>)[
       'cat-cafe-memory'
     ];
+    assert.equal(memory.cwd, projectRoot);
     const source = pathToFileURL(resolve('../mcp-server/dist/tools/file-tools.js')).href;
     const values = JSON.parse(
       execFileSync(
