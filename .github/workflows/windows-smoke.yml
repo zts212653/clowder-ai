@@ -34,6 +34,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Windows temporary roots and test cleanup (#1912)
+        run: node --test packages/api/test/windows-temp-lifecycle.test.mjs packages/api/test/isolated-template-root.test.js
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
       - name: Git marketplace pnpm isolation and diagnostic sanitization

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -166,7 +167,7 @@ export function registerArtworkEntryJourneys(suite) {
     { timeout: 180_000 },
     async () => {
       await mkdir(evidence, { recursive: true });
-      const data = await mkdtemp('/tmp/f309-artwork-entry-data-');
+      const data = await mkdtemp(path.join(tmpdir(), 'f309-artwork-entry-data-'));
       const owner = await startRealWorkspaceOwner(data);
       let networkProxy;
       const mediaDir = await mkdtemp(path.join(owner.root, 'f309-artwork-entry-'));

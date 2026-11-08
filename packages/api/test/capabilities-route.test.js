@@ -980,8 +980,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
 
     const mainDir = await makeTmpDir('dir-symlink-main');
-    const projectDir = join('/tmp', `cap-route-test-dir-symlink-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-dir-symlink-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
 
@@ -1044,8 +1044,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-mount-rules-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-mount-rules-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-mount-rules-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-mount-rules-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const customClaudeRoot = join(projectDir, '.project-claude', 'skills');
     const prevHome = process.env.HOME;
@@ -1105,8 +1105,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-mountpaths-health-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-mountpaths-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-mountpaths-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-mountpaths-health-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
     const sourceSkillNames = [];
@@ -1184,7 +1184,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const rawProjectDir = join('/tmp', `cap-route-test-plugin-source-${Date.now()}`);
+    const rawProjectDir = join(tmpdir(), `cap-route-test-plugin-source-${Date.now()}`);
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const pluginId = 'test-project-local-source-plugin';
@@ -1248,8 +1248,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-mountpaths-stale-enabled-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-mountpaths-stale-enabled-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-mountpaths-stale-enabled-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-mountpaths-stale-enabled-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
     const sourceSkillNames = [];
@@ -1315,8 +1315,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-custom-health-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-custom-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-custom-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-custom-health-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const customSkillsDir = join('custom-client', 'skills');
     const customSkillsDirPath = join(projectDir, customSkillsDir);
@@ -1400,8 +1400,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-disabled-skill-health-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-disabled-skill-health-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-disabled-skill-health-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-disabled-skill-health-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const claudeSkillsDir = join(projectDir, '.claude', 'skills');
     const prevHome = process.env.HOME;
@@ -1479,8 +1479,8 @@ describe('GET /api/capabilities (Fastify)', () => {
   it('does not downgrade cat-cafe source when codex project scan fails', async () => {
     const Fastify = (await import('fastify')).default;
 
-    const projectDir = join('/tmp', `cap-route-test-source-guard-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-source-guard-home-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-source-guard-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-source-guard-home-${Date.now()}`);
     const codexSkillsDir = join(projectDir, '.codex', 'skills');
     const prevHome = process.env.HOME;
 
@@ -1601,7 +1601,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.ready();
 
     // Create a temp directory under /tmp (must be within allowed roots)
-    const projectDir = join('/tmp', `cap-route-test-multi-project-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-multi-project-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
 
     const res = await app.inject({
@@ -1768,8 +1768,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    const projectDir = join('/tmp', `cap-route-test-antigravity-home-${Date.now()}`);
-    const homeDir = join('/tmp', `cap-route-test-antigravity-home-root-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-antigravity-home-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-antigravity-home-root-${Date.now()}`);
     const prevHome = process.env.HOME;
     await mkdir(join(projectDir, '.gemini', 'antigravity'), { recursive: true });
     await mkdir(join(homeDir, '.gemini', 'antigravity'), { recursive: true });
@@ -1824,7 +1824,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
     const { resolveMainRepoPath } = await import('../dist/utils/skill-mount.js');
 
-    const projectDir = join('/tmp', `cap-route-test-stale-cat-cafe-path-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-stale-cat-cafe-path-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     await writeCapabilitiesConfig(projectDir, {
       version: 1,
@@ -2249,7 +2249,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-route-test-probe-connected-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-probe-connected-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     const probeCode = inlineProbeServerCode(process.cwd());
 
@@ -2299,7 +2299,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-route-test-probe-override-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-probe-override-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     const probeCode = inlineProbeServerCode(process.cwd());
 
@@ -2350,7 +2350,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-route-test-probe-env-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-probe-env-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     const probeCode = inlineProbeServerCode(process.cwd());
 
@@ -2400,7 +2400,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-route-test-probe-off-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-probe-off-${Date.now()}`);
     await mkdir(projectDir, { recursive: true });
     await writeCapabilitiesConfig(projectDir, {
       version: 1,
@@ -2446,7 +2446,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-route-test-project-override-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-route-test-project-override-${Date.now()}`);
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     await mkdir(projectDir, { recursive: true });
@@ -2511,7 +2511,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.register(capabilitiesRoutes);
     await app.ready();
 
-    const projectDir = join('/tmp', `cap-kimi-project-meta-${Date.now()}`);
+    const projectDir = join(tmpdir(), `cap-kimi-project-meta-${Date.now()}`);
     const kimiSkillsDir = join(projectDir, '.kimi-code', 'skills');
     await mkdir(join(kimiSkillsDir, 'test-skill'), { recursive: true });
 

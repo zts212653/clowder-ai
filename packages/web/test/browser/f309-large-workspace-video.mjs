@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { copyFile, mkdir, mkdtemp, open, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { THREAD_ID } from './f309-ordinary-workspace-journey-fixture.mjs';
@@ -37,7 +38,7 @@ export function registerLargeWorkspaceVideoJourney(suite) {
     { timeout: 180_000 },
     async () => {
       await mkdir(evidence, { recursive: true });
-      const data = await mkdtemp('/tmp/f309-large-video-data-');
+      const data = await mkdtemp(path.join(tmpdir(), 'f309-large-video-data-'));
       const owner = await startRealWorkspaceOwner(data);
       const media = await mkdtemp(path.join(owner.root, 'f309-large-video-'));
       const context = await suite().browser.newContext({ viewport: { width: 1440, height: 900 } });

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { testTempRoot } from '../../../scripts/lib/test-temp-root.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
@@ -104,12 +105,13 @@ function parseArgs(argv) {
 
 function configureSandbox(env) {
   const realHome = env.CAT_CAFE_TEST_REAL_HOME ?? env.HOME ?? env.USERPROFILE ?? homedir();
-  const testHome = realpathSync(mkdtempSync(join(tmpdir(), 'cat-cafe-test-home-')));
+  const testHome = realpathSync(mkdtempSync(join(testTempRoot(), 'cat-cafe-test-home-')));
 
   env.HOME = testHome;
   if (isWindows) env.USERPROFILE = testHome;
   env.CAT_CAFE_TEST_SANDBOX = '1';
   env.CAT_CAFE_TEST_REAL_HOME = realHome;
+  env.CAT_CAFE_TEST_TEMPLATE_ROOT = join(testHome, 'templates');
   env.NODE_ENV = 'test';
 
   for (const key of CLEARED_ENV_KEYS) delete env[key];

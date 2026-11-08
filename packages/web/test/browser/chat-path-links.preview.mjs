@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { renameSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createChatPathFixture } from './chat-path-links.fixture.mjs';
@@ -31,9 +32,10 @@ const child = spawn(
   ],
   { cwd: web, env: environment.env, stdio: 'inherit' },
 );
-await mkdir('/tmp/f322-chat-path-links', { recursive: true });
+const evidenceRoot = path.join(tmpdir(), 'f322-chat-path-links');
+await mkdir(evidenceRoot, { recursive: true });
 await writeFile(
-  '/tmp/f322-chat-path-links/preview.json',
+  path.join(evidenceRoot, 'preview.json'),
   JSON.stringify({
     port,
     apiPort: fixture.apiPort,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -31,7 +32,8 @@ export async function createScreeningJourney() {
   );
   const webOrigin = isolatedOrigin(process.env.F326_BROWSER_WEB_URL ?? 'http://127.0.0.1:3161', 3161);
   const apiOrigin = isolatedOrigin(process.env.F326_BROWSER_API_URL ?? 'http://127.0.0.1:3162', 3162);
-  const evidence = process.env.F326_BROWSER_EVIDENCE_DIR ?? (await mkdtemp('/tmp/f326-browser-journey-'));
+  const evidence =
+    process.env.F326_BROWSER_EVIDENCE_DIR ?? (await mkdtemp(path.join(tmpdir(), 'f326-browser-journey-')));
   await mkdir(evidence, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, locale: 'en-US' });

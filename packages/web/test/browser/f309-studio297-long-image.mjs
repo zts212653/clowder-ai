@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { THREAD_ID } from './f309-ordinary-workspace-journey-fixture.mjs';
@@ -21,7 +22,7 @@ export function registerStudio297LongImageJourneys(suite) {
       { timeout: 90_000 },
       async () => {
         await mkdir(evidence, { recursive: true });
-        const data = await mkdtemp('/tmp/f309-long-owner-');
+        const data = await mkdtemp(path.join(tmpdir(), 'f309-long-owner-'));
         const owner = await startRealWorkspaceOwner(data);
         const dir = await mkdtemp(path.join(owner.root, 'f309-long-private-'));
         const context = await suite().browser.newContext({ viewport: presentation.viewport });
