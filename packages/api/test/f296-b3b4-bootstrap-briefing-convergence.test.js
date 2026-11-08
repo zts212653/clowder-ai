@@ -425,6 +425,8 @@ describe('F296 B3b-4: real routes publish the final generation projection', () =
       const briefings = storedBriefings(deps.messageStore);
       assert.equal(briefings.length, 1, 'replacement must persist only the final-generation card');
       const card = briefings[0].extra.rich.blocks[0];
+      assert.equal(card.meta.receiverCatId, 'opus', `${routeName} must record its actual routed receiver`);
+      assert.match(card.meta.coverageSummary, /近期消息 \d+ 条 · 历史略过 \d+ 条/);
       assert.doesNotMatch(card.bodyMarkdown ?? '', /POISON-RECENCY-ARTIFACT/);
       const projection = card.meta?.contextSurfaceProjection;
       assert.equal(projection.reason, 'resume_failed');
