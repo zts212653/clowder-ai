@@ -16,7 +16,7 @@
     },
     "contexts": ["concierge_open"],
     "audience": ["cvo"],
-    "body": "回复开头出现「参考了…」时，点开查看原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
+    "body": "回复开头出现「参考了…」时，点开先看猫的归纳和支撑原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
     "action": {
       "type": "open_source",
       "label": "查看参考消息的用法",
@@ -1499,15 +1499,15 @@
     "kind": "feature",
     "sourceRef": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+      "anchor": "User Journey"
     },
     "structureSource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Cat-proxy create and permanent-delete mutations"
+      "anchor": "Creating and deleting schedules"
     },
     "bodySource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Pause/resume remains direct"
+      "anchor": "Pause and resume remain direct actions after identity verification"
     },
     "contexts": ["thinking", "waiting_external", "feature_dev"],
     "audience": ["cvo", "developer", "maintainer"],
@@ -1517,10 +1517,38 @@
       "label": "查看 F139 审批边界",
       "sourceRef": {
         "path": "docs/features/F139-unified-schedule-abstraction.md",
-        "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+        "anchor": "User Journey"
       }
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f139-schedule-parameter-update",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "bodySource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "contexts": ["thinking", "waiting_external", "feature_dev"],
+    "audience": ["cvo", "developer", "maintainer"],
+    "body": "想改已有周期任务的提醒内容或订阅参数？让猫提交参数修改，核对改前、改后的值再批准；原任务身份和进度会保留，正在执行的那一轮继续用原设置。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 F139 审批边界",
+      "sourceRef": {
+        "path": "docs/features/F139-unified-schedule-abstraction.md",
+        "anchor": "User Journey"
+      }
+    },
+    "owner": "codex-astra"
   },
   {
     "id": "feature-f246-approval-hub",
@@ -3297,6 +3325,25 @@
       }
     },
     "owner": "codex-terra"
+  },
+  {
+    "id": "feature-f309-gif-svg-originals",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "structureSource": {
+      "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
+      "anchor": "GifFrameControls"
+    },
+    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
+    "action": {
+      "type": "open_source",
+      "label": "查看动图与矢量作品说明",
+      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+    },
+    "owner": "codex61-sol"
   },
   {
     "id": "capability-co-creation-storytelling",

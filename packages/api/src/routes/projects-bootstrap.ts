@@ -45,7 +45,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
   );
 
   app.post<{ Body: { projectPath?: string } }>('/api/projects/bootstrap', async (request, reply) => {
-    const userId = resolveDirectLocalAuthorizationUserId(request);
+    const userId = resolveDirectLocalAuthorizationUserId(request, { requireOwnerSession: true });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required' };

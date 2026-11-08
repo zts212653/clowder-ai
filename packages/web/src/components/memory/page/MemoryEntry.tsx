@@ -2,6 +2,7 @@
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { MemoryHub } from '../MemoryHub';
 import { MemoryPagePreview, type MemoryPageTab } from './MemoryPagePreview';
+import type { SearchType } from './memory-search-types';
 import type { ProfileSourceTarget } from './profile-source-target';
 
 /** The existing shell preference owns presentation; the classic feed remains its original entry. */
@@ -10,6 +11,8 @@ export function MemoryEntry({
   from,
   profileSource,
   initialQuery,
+  initialType,
+  initialDepth,
   findSessionId,
   matterId,
 }: {
@@ -17,6 +20,8 @@ export function MemoryEntry({
   from: string | null;
   profileSource?: ProfileSourceTarget;
   initialQuery?: string;
+  initialType?: SearchType;
+  initialDepth?: 'summary' | 'raw';
   findSessionId?: string | null;
   matterId?: string;
 }) {
@@ -29,6 +34,8 @@ export function MemoryEntry({
       from={from}
       profileSource={profileSource}
       initialQuery={initialQuery}
+      initialType={initialType}
+      initialDepth={initialDepth}
       findSessionId={findSessionId}
       matterId={matterId}
     />

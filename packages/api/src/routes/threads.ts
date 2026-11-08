@@ -1529,6 +1529,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     try {
       const thread = await threadStore.get(id);
+      const userId = resolveUserId(request, {});
 
       // F095 Phase G + F192 livefix: Protect system threads from casual deletion.
       // Covers both IM Hub (connectorHubState) and eval domain (systemKind) threads.
@@ -1552,11 +1553,19 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         return { error: 'Cannot delete this thread' };
       }
 
+      const ownerUserId = thread && !SYSTEM_USER_IDS.has(thread.createdBy) ? thread.createdBy : userId;
+      if (ownerUserId) {
+        opts.socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+          ownerUserId,
+          threadId: id,
+          reason: 'access_revoked',
+        });
+      }
+
       // B-4: Cascade delete guide session to prevent stale sessions on deleted threads
       void opts.guideSessionStore?.delete(id).catch(() => {});
 
       // I-2: Audit thread deletion for traceability (best-effort, don't block response)
-      const userId = resolveUserId(request, {});
       void getEventAuditLog()
         .append({
           threadId: id,

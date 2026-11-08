@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { WorkspaceReviewMediaElement } from '@/components/workbench/content-review/WorkspaceReviewMediaElement';
+import { ArtworkActionsVisibility } from '../ArtworkChrome';
 import { ArtworkVideoPlayback } from '../ArtworkVideoPlayback';
 import { VideoArtworkControls } from '../VideoArtworkControls';
 
@@ -162,6 +163,14 @@ it('keeps circle disabled until an actually presented paused frame is ready and 
     onAnnotationActive: vi.fn(),
     children: null,
   };
+  await act(async () =>
+    root.render(
+      <ArtworkActionsVisibility visible={false}>
+        <VideoArtworkControls {...props} frameReady />
+      </ArtworkActionsVisibility>,
+    ),
+  );
+  expect([...container.querySelectorAll('button')].some((b) => b.textContent === '圈这一帧')).toBe(false);
   await act(async () => root.render(<VideoArtworkControls {...props} frameReady={false} />));
   const buttons = () => [...container.querySelectorAll('button')];
   expect(buttons().find((b) => b.textContent === '圈这一帧')?.disabled).toBe(true);

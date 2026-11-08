@@ -5,7 +5,7 @@ import { commandName } from './native-effect-shell-tokenizer.mjs';
 import { classifyNativeTarget } from './native-effect-target-classifier.mjs';
 
 // Exact reviewed repository wrapper, not a name-based exemption for runtime code.
-const GH_WRAPPER_SHA256 = '112c1a192943829274eb82d8017da317ccb1fc671d79841311e9af64753cbb7c';
+const GH_WRAPPER_SHA256 = '9ad0a60faa0a433f7af63e73ee71d3dff39ecfae23ebcda9882dccfbf4ac5d47';
 const ordinary = (path) => classifyNativeTarget(path, undefined, 'unknown').kind === 'ordinary';
 const literal = (value) => typeof value === 'string' && !/[$`*?[\]{}\n\r]/.test(value);
 

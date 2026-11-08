@@ -1,5 +1,10 @@
-import { isChatCommitCandidate, isChatPathCandidate, parseLegacyChatPathReference } from '@cat-cafe/shared';
-import type { Link, PhrasingContent, Root, RootContent } from 'mdast';
+import {
+  isChatCommitCandidate,
+  isChatPathCandidate,
+  parseLegacyChatPathReference,
+  projectMarkdownReadableText,
+} from '@cat-cafe/shared';
+import type { Link, LinkReference, PhrasingContent, Root, RootContent } from 'mdast';
 import { attachReferenceAffixes } from './chat-reference-affixes';
 
 const token =
@@ -21,7 +26,9 @@ function link(value: string, format: 'text' | 'code' | 'link', children?: Phrasi
     type: 'link',
     url: value,
     children: children ?? [{ type: 'text', value }],
-    data: { hProperties: { 'data-chat-reference': value, 'data-chat-format': format } },
+    data: {
+      hProperties: { 'data-chat-reference': value, 'data-chat-format': format, 'data-chat-source-text': value },
+    },
   };
 }
 function splitText(value: string): PhrasingContent[] {
@@ -40,14 +47,21 @@ function splitText(value: string): PhrasingContent[] {
 }
 
 type Node = Root | RootContent | PhrasingContent;
-function markReference(node: Link) {
+function markReference(node: Link, source: string | undefined, original: Link | LinkReference = node) {
   if (!candidate(node.url)) return;
+  const start = original.children[0]?.position?.start.offset,
+    end = original.children.at(-1)?.position?.end.offset;
   node.data = {
     ...node.data,
     hProperties: {
       ...node.data?.hProperties,
       'data-chat-reference': localLinkReference(node.url),
       'data-chat-format': 'link',
+      // Project the label's source, so reference-style links and entities retain their spelling.
+      'data-chat-source-text':
+        source === undefined || start === undefined || end === undefined
+          ? undefined
+          : projectMarkdownReadableText(source.slice(start, end)),
     },
   };
 }
@@ -74,10 +88,10 @@ function markStandaloneGroup(node: Node, children: Array<RootContent | PhrasingC
   for (const child of meaningful)
     child.data = { ...child.data, hProperties: { ...child.data?.hProperties, 'data-chat-layout': 'card' } };
 }
-function visit(node: Node, definitions: Map<string, string>): void {
+function visit(node: Node, definitions: Map<string, string>, source: string | undefined): void {
   if (node.type === 'code' || node.type === 'image' || node.type === 'linkReference') return;
   if (node.type === 'link') {
-    markReference(node);
+    markReference(node, source);
     return;
   }
   if (!('children' in node)) return;
@@ -91,11 +105,11 @@ function visit(node: Node, definitions: Map<string, string>): void {
       const href = definitions.get(child.identifier);
       if (!href || !candidate(href)) return [child];
       const resolved = link(href, 'link', child.children);
-      markReference(resolved);
+      markReference(resolved, source, child);
       return [resolved];
     }
     if (child.type === 'text') return splitText(child.value);
-    visit(child, definitions);
+    visit(child, definitions, source);
     return [child];
   });
   // Historical messages can select a registered worktree; no current producer emits these tags.
@@ -106,6 +120,8 @@ function visit(node: Node, definitions: Map<string, string>): void {
     const hint = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/.exec(suffix.value);
     if (!hint || !path.data?.hProperties?.['data-chat-reference']) continue;
     path.data.hProperties['data-chat-reference'] += ` [wt:${hint[1]}]`;
+    if (typeof path.data.hProperties['data-chat-source-text'] === 'string')
+      path.data.hProperties['data-chat-source-text'] += hint[0];
     suffix.value = suffix.value.slice(hint[0].length);
   }
   children.splice(0, children.length, ...attachReferenceAffixes(transformed));
@@ -113,13 +129,13 @@ function visit(node: Node, definitions: Map<string, string>): void {
 }
 /** Parse only Markdown prose. Fenced/indented code, images and existing-link children remain literal. */
 export function remarkChatReferences() {
-  return (tree: Root) => {
+  return (tree: Root, file: { value: unknown }) => {
     const definitions = new Map<string, string>();
     function collect(node: Node) {
       if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
       if ('children' in node) for (const child of node.children) collect(child);
     }
     collect(tree);
-    visit(tree, definitions);
+    visit(tree, definitions, typeof file.value === 'string' ? file.value : undefined);
   };
 }

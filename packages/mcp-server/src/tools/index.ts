@@ -227,6 +227,7 @@ export {
 export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
+  prepareMemoryContextInputSchema,
   recordMemoryCueOutcomeInputSchema,
 } from './memory-cue-tools.js';
 export {

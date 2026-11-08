@@ -67,7 +67,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
 .you-settings-page > h1 {
   margin: 0 0 20px;
   color: var(--shell-ink);
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
   font-weight: 600;
 }
 .you-settings-card {
@@ -88,12 +88,12 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
 .you-settings-card-heading h2 {
   margin: 0;
   color: var(--shell-ink);
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   font-weight: 600;
 }
 .you-settings-card-heading > span {
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .you-profile-avatar-row {
   display: flex;
@@ -114,7 +114,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border-radius: 50%;
   background: var(--color-cocreator-primary);
   color: var(--shell-paper);
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
 }
 .you-settings-button {
   min-height: 32px;
@@ -122,7 +122,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border-radius: 8px;
   padding: 4px 12px;
   color: var(--shell-ink);
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .you-settings-button:disabled {
   opacity: 0.5;
@@ -139,7 +139,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   gap: 16px;
   border-top: 1px solid var(--shell-hairline);
   padding-block: 12px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .you-profile-field > :first-child {
   padding-top: 7px;
@@ -158,7 +158,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
 .you-profile-field p {
   margin: 6px 0 0;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 .you-profile-field input[type="color"] {
   width: 24px;
@@ -177,7 +177,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   min-width: 0;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   text-align: center;
 }
 .chat-background-tile:disabled {
@@ -213,7 +213,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   justify-content: center;
   border-style: dashed;
   color: var(--shell-muted);
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
 }
 .chat-background-control {
   display: flex;
@@ -222,7 +222,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   margin-top: 16px;
   border-top: 1px solid var(--shell-hairline);
   padding-top: 12px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .you-settings-page .chat-background-control > :first-child {
   width: 120px;
@@ -251,7 +251,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border-top: 1px solid var(--shell-hairline);
   padding-top: 12px;
   color: var(--shell-muted);
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   line-height: 1.6;
 }
 .thread-settings-popover {
@@ -277,7 +277,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 .thread-background-menu-row + .thread-background-menu-row {
   border-top: 1px solid var(--shell-hairline);

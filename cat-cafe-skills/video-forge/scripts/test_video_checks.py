@@ -20,6 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 TTS_CHECK = HERE / "tts-check.py"
 TIMELINE_CHECK = HERE / "timeline-check.py"
+CAPTION_FIT_CHECK = HERE / "caption-fit-check.py"
 
 
 def tiny_wav() -> bytes:
@@ -364,6 +365,68 @@ class TimelineCheckTest(unittest.TestCase):
                 self.assertNotEqual(r.returncode, 0)
                 self.assertNotIn("没有问题", r.stdout)
         self.assertEqual(self.run_check(data, "--gap", "0").returncode, 0, "--gap 0 is a valid choice")
+
+
+class CaptionFitCheckTest(unittest.TestCase):
+    """用 Pillow 自带字体（只有拉丁字形），宽度在测试里现量，不写死像素。"""
+
+    @staticmethod
+    def width(s, size=42):
+        from PIL import ImageFont
+        return ImageFont.load_default(size=size).getlength(s)
+
+    def run_check(self, srt, *extra):
+        with tempfile.NamedTemporaryFile("w", suffix=".srt", delete=False, encoding="utf-8") as f:
+            f.write(srt)
+        return subprocess.run([sys.executable, str(CAPTION_FIT_CHECK), f.name, "--font", "default",
+                               "--size", "42", *extra], capture_output=True, text=True, timeout=30)
+
+    @staticmethod
+    def srt(*lines):
+        return "\n".join(f"{i}\n00:00:0{i},000 --> 00:00:0{i},900\n{t}\n" for i, t in enumerate(lines, 1))
+
+    def test_flags_only_the_line_that_does_not_fit(self):
+        short, long = "short line", "a much much longer caption line"
+        limit = (self.width(short) + self.width(long)) / 2
+        r = self.run_check(self.srt(short, long), "--max-px", str(limit))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("第 2 条", r.stdout)
+        self.assertNotIn("第 1 条", r.stdout)
+
+    def test_everything_fits(self):
+        r = self.run_check(self.srt("ok", "fine"), "--max-px", "2000")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("都放得下", r.stdout)
+
+    def test_letter_spacing_counts(self):
+        text = "spacing matters"
+        limit = self.width(text) + 5
+        self.assertEqual(self.run_check(self.srt(text), "--max-px", str(limit)).returncode, 0)
+        self.assertEqual(self.run_check(self.srt(text), "--max-px", str(limit), "--spacing", "1").returncode, 1)
+
+    def test_strip_speaker_measures_the_spoken_text_only(self):
+        line = "Shuo: hi there"
+        limit = (self.width("hi there") + self.width(line)) / 2
+        self.assertEqual(self.run_check(self.srt(line), "--max-px", str(limit)).returncode, 1)
+        self.assertEqual(self.run_check(self.srt(line), "--max-px", str(limit), "--strip-speaker").returncode, 0)
+
+    def test_every_line_of_a_multiline_cue_is_measured(self):
+        short, long = "one", "a much much longer second line"
+        limit = (self.width(short) + self.width(long)) / 2
+        r = self.run_check(self.srt(f"{short}\n{long}"), "--max-px", str(limit))
+        self.assertEqual(r.returncode, 1, r.stdout)
+
+    def test_empty_or_unreadable_file_is_not_a_pass(self):
+        self.assertEqual(self.run_check("", "--max-px", "500").returncode, 1)
+        r = subprocess.run([sys.executable, str(CAPTION_FIT_CHECK), "/nonexistent.srt", "--font", "default",
+                            "--size", "42", "--max-px", "500"], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+
+    def test_bad_arguments_are_rejected(self):
+        for extra in (["--max-px", "0"], ["--max-px", "nan"], ["--max-px", "500", "--size", "-1"],
+                      ["--max-px", "500", "--spacing", "inf"]):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.run_check(self.srt("x"), *extra).returncode, 2)
 
 
 if __name__ == "__main__":

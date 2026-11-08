@@ -6,12 +6,18 @@ import { AgentPaneList } from '../AgentPaneList';
 
 const apiFetchMock = vi.fn();
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...args) }));
+// Cat registry discovery is global; F307 visibility gates only the pane owner's reads.
+// Isolate that unrelated reader so both real presentations exercise useAgentPanes.
+vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
 
 function paneResponse(invocationId: string, paneId: string, status: 'running' | 'done' | 'crashed') {
   return Response.json([{ invocationId, paneId, status, startedAt: 1 }]);
 }
 
-describe('AgentPaneList retained-surface visibility', () => {
+describe.each([
+  { presentation: 'classic', running: 'Running', done: 'Done' },
+  { presentation: 'default v2', running: '运行中', done: '已完成' },
+])('AgentPaneList retained-surface visibility ($presentation)', ({ presentation, running, done }) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -27,12 +33,15 @@ describe('AgentPaneList retained-surface visibility', () => {
     );
     container = document.createElement('div');
     document.body.appendChild(container);
+    if (presentation === 'classic') window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
+    else window.localStorage.removeItem('cat-cafe:shell-presentation');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
     vi.useRealTimers();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
@@ -48,13 +57,15 @@ describe('AgentPaneList retained-surface visibility', () => {
     });
   }
 
-  it('does zero hidden GETs, catches up on return, and preserves the rendered pane', async () => {
+  it('does zero hidden pane GETs, catches up on return, and preserves the rendered pane', async () => {
     await render(false);
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(apiFetchMock).not.toHaveBeenCalled();
 
     await render(true);
     expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/terminal/agent-panes?worktreeId=worktree-a');
+    if (presentation === 'default v2') expect(container.textContent).toContain('猫的终端');
     const pane = container.querySelector('button');
     expect(pane?.textContent).toContain('invocati');
 
@@ -93,12 +104,12 @@ describe('AgentPaneList retained-surface visibility', () => {
     await render(true);
     await act(async () => resolveAfterReturn(paneResponse('bbbbbbbb-current', 'pane-b', 'running')));
     expect(container.textContent).toContain('bbbbbbbb');
-    expect(container.textContent).toContain('Running');
+    expect(container.textContent).toContain(running);
 
     await act(async () => resolveBeforeHide(paneResponse('aaaaaaaa-stale', 'pane-a', 'done')));
     expect(container.textContent).toContain('bbbbbbbb');
     expect(container.textContent).not.toContain('aaaaaaaa');
-    expect(container.textContent).not.toContain('Done');
+    expect(container.textContent).not.toContain(done);
   });
 
   it('clears the previous worktree and rejects its late response', async () => {
@@ -124,6 +135,7 @@ describe('AgentPaneList retained-surface visibility', () => {
     await act(async () => vi.advanceTimersByTimeAsync(5000));
 
     await render(true, 'worktree-b');
+    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/terminal/agent-panes?worktreeId=worktree-b');
     expect(container.textContent).not.toContain('aaaaaaaa');
     await act(async () => resolveWorktreeB(paneResponse('bbbbbbbb-current', 'pane-b', 'running')));
     expect(container.textContent).toContain('bbbbbbbb');

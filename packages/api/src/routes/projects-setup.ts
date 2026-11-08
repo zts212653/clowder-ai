@@ -139,7 +139,7 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
     throw new Error(`Unable to resolve persistent ${deploymentDefaults.brand.name} root for project setup`);
 
   app.post('/api/projects/setup', async (request, reply) => {
-    const userId = resolveDirectLocalAuthorizationUserId(request);
+    const userId = resolveDirectLocalAuthorizationUserId(request, { requireOwnerSession: true });
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };

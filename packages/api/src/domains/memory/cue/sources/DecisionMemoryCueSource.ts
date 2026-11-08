@@ -2,7 +2,11 @@ import type { MemoryCueDocumentWindowRequest } from '@cat-cafe/shared';
 import type { EvidenceItem, IEvidenceStore } from '../../interfaces.js';
 import type { MemoryCueEpisodeStore } from '../MemoryCueEpisodeStore.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
-import { canonicalProjectDocumentWindow, readCanonicalProjectDocument } from './canonical-project-document.js';
+import {
+  canonicalProjectDocumentWindow,
+  type PublishedProjectCueSource,
+  readCanonicalProjectDocument,
+} from './canonical-project-document.js';
 
 const DECISION_ANCHOR = /^ADR-\d{3}$/;
 const DECISION_PATH = /^decisions\/[^/]+\.md$/;
@@ -34,6 +38,7 @@ export class DecisionMemoryCueSource {
   constructor(
     private readonly deps: {
       projectDocsRoot: string;
+      publishedSource?: PublishedProjectCueSource;
       evidenceStore: Pick<IEvidenceStore, 'getByAnchor'>;
       episodeStore: Pick<MemoryCueEpisodeStore, 'hasTerminalConsumptionForSource'>;
     },
@@ -44,7 +49,11 @@ export class DecisionMemoryCueSource {
     const item = await this.deps.evidenceStore.getByAnchor(input.decisionAnchor);
     if (!isDecisionIndexItem(item, input.decisionAnchor)) return null;
     if (item.supersededBy) return null;
-    const document = await readCanonicalProjectDocument(this.deps.projectDocsRoot, item.sourcePath);
+    const document = await readCanonicalProjectDocument(
+      this.deps.projectDocsRoot,
+      item.sourcePath,
+      await this.deps.publishedSource?.snapshot(),
+    );
     if (!document) return null;
     if (!isAcceptedDecision(document.content)) return null;
     if (
@@ -86,7 +95,11 @@ export class DecisionMemoryCueSource {
     if (!isDecisionIndexItem(item, input.anchor)) {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
-    const document = await readCanonicalProjectDocument(this.deps.projectDocsRoot, item.sourcePath);
+    const document = await readCanonicalProjectDocument(
+      this.deps.projectDocsRoot,
+      item.sourcePath,
+      await this.deps.publishedSource?.snapshot(),
+    );
     if (!document) return { status: 'not_available', invalidationReason: 'source_forgotten' };
     if (document.revision !== input.expectedRevision) {
       return { status: 'not_available', invalidationReason: 'source_corrected' };

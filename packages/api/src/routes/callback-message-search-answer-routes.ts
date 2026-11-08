@@ -1,3 +1,4 @@
+import { selectedMessageSourcesSchema } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -18,6 +19,7 @@ const bodySchema = z
     operationId: z.string().min(1).max(200),
     destinationThreadId: z.string().min(1).max(256).optional(),
     replyTo: z.string().min(1).max(256).optional(),
+    selections: selectedMessageSourcesSchema.optional(),
   })
   .and(messageSearchQuerySchema)
   .refine((value) => value.resultUnit === 'message', { message: 'Answer publication requires message search' });
@@ -67,6 +69,7 @@ export function registerCallbackMessageSearchAnswerRoutes(
             input: toMessageSearchInput(parsed.data),
             targetThreadId: scope.threadId,
             ...(cloud ? { acceptedUseRef: sourceId } : {}),
+            ...(parsed.data.selections ? { selections: parsed.data.selections } : {}),
             producer: {
               kind: principal.kind,
               id: principal.kind === 'invocation' ? principal.invocationId : principal.agentKeyId,

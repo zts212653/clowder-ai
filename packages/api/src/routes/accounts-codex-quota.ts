@@ -4,11 +4,12 @@ import { renewCodexQuotaLogin } from '../config/codex-quota-renewal.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
 import { QuotaCredentialChanged, queryAccountQuota } from './accounts-quota-query.js';
+import { fetchCodexQuota } from './codex-quota-fetch.js';
 
 /** Explicit per-account queries; coalesce automatic renewal checks across clients. */
 export function registerCodexQuotaRoutes(
   app: FastifyInstance,
-  fetcher: typeof fetch = globalThis.fetch,
+  fetcher: typeof fetch = fetchCodexQuota,
   renewer: typeof renewCodexQuotaLogin = renewCodexQuotaLogin,
 ): void {
   const automatic = new Map<string, ReturnType<typeof queryAccountQuota>>();

@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { macProcessEnvironmentCommand } from '../../packages/api/runtime/process-observation/ps-environment-snapshot.mjs';
+import { createGateCommandClock } from './gate-command-clock.mjs';
 import { normalizedGateEnvironment } from './gate-environment.mjs';
 import { proveLinuxExecutionExited, readLinuxExitIdentity } from './gate-linux-process-exit.mjs';
 
@@ -294,6 +295,8 @@ export async function runGateCommandWithCleanup({
   onStdout = null,
   onSpawn = null,
   pollMs = 50,
+  readSleepEvidence,
+  wallDeadlineAt = Infinity,
 }) {
   const child = spawn(command[0], command.slice(1), {
     cwd,
@@ -311,7 +314,10 @@ export async function runGateCommandWithCleanup({
     stderrTail = appendTail(stderrTail, chunk);
     onStderr?.(chunk);
   });
-  const executionStartedAt = now();
+  const clock = createGateCommandClock({ now, readSleepEvidence });
+  const activeNow = clock.now;
+  const executionStartedAt = activeNow();
+  const sleepAtStart = clock.sleepDurationMs();
   let settled = false;
   let childResult;
   let commandClosed = false;
@@ -336,7 +342,7 @@ export async function runGateCommandWithCleanup({
   try {
     onSpawn?.(child.pid);
     while (!settled) {
-      if (now() - executionStartedAt >= executionBudgetMs) {
+      if (Date.now() >= wallDeadlineAt || activeNow() - executionStartedAt >= executionBudgetMs) {
         timedOut = true;
         break;
       }
@@ -349,14 +355,15 @@ export async function runGateCommandWithCleanup({
   } catch (error) {
     supervisionError = supervisionErrorMessage(error);
   }
-  const executionEndedAt = now();
+  const executionEndedAt = activeNow();
+  const executionSleepDurationMs = clock.sleepDurationMs() - sleepAtStart;
   if (!settled) signalProcessGroup(child, 'SIGTERM');
   const cleanupProof = await cleanupGateJobProcesses({
     cleanupBudgetMs,
     isCommandClosed: () => commandClosed,
     jobToken,
     killGraceMs,
-    now,
+    now: activeNow,
     pollMs,
     settleGraceMs: settled && !timedOut && !cancelled && supervisionError === null ? cleanupSettleGraceMs : 0,
   });
@@ -366,7 +373,8 @@ export async function runGateCommandWithCleanup({
     child.stdout.destroy();
     child.stderr.destroy();
   }
-  const completedAt = now();
+  const completedAt = activeNow();
+  const cleanupSleepDurationMs = clock.sleepDurationMs() - sleepAtStart - executionSleepDurationMs;
   return {
     exitCode: supervisionError !== null ? 1 : (childResult?.code ?? null),
     signal: childResult?.signal ?? null,
@@ -375,7 +383,9 @@ export async function runGateCommandWithCleanup({
     cancelled,
     executionDurationMs: executionEndedAt - executionStartedAt,
     cleanupDurationMs: cleanupProof.cleanupDurationMs,
-    totalDurationMs: completedAt - executionStartedAt,
+    totalDurationMs: completedAt - executionStartedAt + clock.sleepDurationMs() - sleepAtStart,
+    ...(executionSleepDurationMs > 0 ? { executionSleepDurationMs } : {}),
+    ...(cleanupSleepDurationMs > 0 ? { cleanupSleepDurationMs } : {}),
     cleanupProof,
     stdoutTail: stdoutTail.toString('utf8'),
     stderrTail: stderrTail.toString('utf8'),

@@ -18,8 +18,10 @@ export function useAnchoredMenu(
     if (!trigger || !panel) return;
     // Same native top-layer primitive as FileActionMenu; optional only for DOM-only test environments.
     panel.showPopover?.();
+    let placedRect = trigger.getBoundingClientRect();
     const place = () => {
       const rect = trigger.getBoundingClientRect();
+      placedRect = rect;
       if (rect.top >= window.innerHeight || rect.bottom < 0 || rect.left >= window.innerWidth || rect.right < 0) {
         close.current();
         return;
@@ -52,7 +54,11 @@ export function useAnchoredMenu(
       if (panel.contains(document.activeElement)) trigger.focus({ preventScroll: true });
     };
     const scroll = (event: Event) => {
-      if (event.target instanceof Node && event.target.contains(trigger)) dismiss();
+      if (!(event.target instanceof Node) || !event.target.contains(trigger)) return;
+      const rect = trigger.getBoundingClientRect();
+      // Live list remeasurement can compensate scrollTop while the trigger stays
+      // in place. Dismiss only when scrolling actually moves the menu's anchor.
+      if (rect.top !== placedRect.top || rect.left !== placedRect.left) dismiss();
     };
     const observer = new ResizeObserver(place);
     observer.observe(trigger.closest('[data-testid="sidebar-thread-list"]') ?? trigger);

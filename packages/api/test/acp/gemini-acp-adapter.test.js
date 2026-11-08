@@ -247,6 +247,7 @@ describe('GeminiAcpAdapter', () => {
           name: 'cat-cafe-collab',
           command: process.execPath,
           args: [nativeEntrypointPath(new URL('../../../mcp-server/dist/collab.js', import.meta.url))],
+          env: [],
         },
       ],
     });

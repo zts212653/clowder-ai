@@ -20,7 +20,7 @@ test('the production watcher report hooks preserve Error messages and stacks thr
     ts.forEachChild(node, walk);
   };
   walk(source);
-  assert.equal(callbacks.length, 5, 'exercise startup, invocation, receipt and both finalization hooks');
+  assert.equal(callbacks.length, 3, 'exercise the always-on startup, invocation and receipt hooks');
   for (const callback of callbacks) {
     const rows = [];
     const log = pino({ level: 'warn' }, { write: (line) => rows.push(JSON.parse(line)) });
@@ -38,46 +38,20 @@ test('the production watcher report hooks preserve Error messages and stacks thr
   }
 });
 
-test('the actual rollout-off recovery callback never invokes a provider for an unresolved native attempt', async () => {
+test('production always constructs the supervisor; no hidden environment switch gates the watcher', async () => {
   const text = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(text, /CAT_CAFE_WATCHER_ENABLED/);
   const source = ts.createSourceFile('index.ts', text, ts.ScriptTarget.Latest, true);
-  let callback;
-  const walk = (node) => {
-    if (ts.isCallExpression(node) && node.expression.getText(source) === 'reconcileWatcherRecovery')
-      callback = node.arguments[0].properties
-        .find((p) => p.name?.getText(source) === 'recoverNative')
-        .initializer.getText(source);
-    ts.forEachChild(node, walk);
+  let constructed = 0;
+  let guardedByIf = false;
+  const walk = (node, insideIf) => {
+    if (ts.isNewExpression(node) && node.expression.getText(source) === 'WatcherSupervisor') {
+      constructed++;
+      guardedByIf ||= insideIf;
+    }
+    ts.forEachChild(node, (child) => walk(child, insideIf || ts.isIfStatement(node)));
   };
-  walk(source);
-  let launches = 0,
-    idle = 0;
-  const recover = vm.runInNewContext(
-    ts.transpileModule(`const handler=${callback};handler;`, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022 },
-    }).outputText,
-    {
-      registry: {},
-      turnExecutionStore: {},
-      sessionChainStore: {},
-      finishIdleWatcherWake: async () => {
-        idle++;
-      },
-      router: { getStrategyDeps: () => ({ services: { codex: {} } }) },
-      runWatcherInvocation: async () => {
-        launches++;
-      },
-      threadStore: {},
-      messageStore: {},
-      transcriptWriter: {},
-      PORT: 3102,
-      watcherMaySpeak: () => false,
-    },
-  );
-  await recover({ catId: 'codex', watcherState: { attempt: { phase: 'failed' } } }, {});
-  assert.equal(launches, 0);
-  assert.equal(idle, 0, 'unproved native state remains pending');
-  await recover({ catId: 'codex', watcherState: {} }, {});
-  assert.equal(launches, 0);
-  assert.equal(idle, 1, 'only the existing idle proof can perform owner-only settlement');
+  walk(source, false);
+  assert.equal(constructed, 1);
+  assert.equal(guardedByIf, false, 'the settings switch is the only on/off control');
 });

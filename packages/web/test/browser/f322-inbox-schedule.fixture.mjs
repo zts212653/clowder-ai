@@ -13,6 +13,7 @@ import {
   ScheduleMutationProposalStore,
 } from '../../../api/dist/infrastructure/scheduler/ScheduleMutationProposalStore.js';
 import { TaskRunnerV2 } from '../../../api/dist/infrastructure/scheduler/TaskRunnerV2.js';
+import { createAlphaBrowserTemplate } from '../../../api/dist/infrastructure/scheduler/templates/alpha-browser.js';
 import { reminderTemplate } from '../../../api/dist/infrastructure/scheduler/templates/reminder.js';
 import { buildScheduleMutationCardBlock } from '../../../api/dist/routes/schedule-mutation-card-block.js';
 import { scheduleProposalDecisionRoutes } from '../../../api/dist/routes/schedule-proposal-decision-routes.js';
@@ -41,8 +42,14 @@ export async function createInboxScheduleFixture(language) {
       };
       try {
         const template = { ...reminderTemplate, label: language === 'en' ? 'Reminder' : '定时提醒' };
+        const alphaTemplate = createAlphaBrowserTemplate({
+          repoRoot: directory,
+          ownerUserId: owner,
+          tasks: {},
+          resolveCat: (id) => id,
+        });
         const ingress = new ApprovalIngress({ messageStore: messages, socketManager });
-        for (const action of ['reject', 'create', 'delete', 'recover']) {
+        for (const action of ['reject', 'create', 'delete', 'recover', 'update']) {
           const label = language === 'en' ? `Evidence reminder ${action}` : `证据提醒 ${action}`;
           const thread = threads.create(owner, label, 'default');
           const destination = threads.create(
@@ -60,29 +67,36 @@ export async function createInboxScheduleFixture(language) {
           });
           const task = {
             id: `private-schedule-${action}`,
-            templateId: 'reminder',
-            trigger: { type: 'once', fireAt: Date.now() + 3600000 },
-            params: {
-              message:
-                (language === 'en' ? 'Check the original evidence.' : '核对原始证据。') +
-                '\nOriginal bounded reminder.\n'.repeat(45),
-              triggerUserId: owner,
-              targetCatId: 'codex61-sol',
-            },
+            templateId: action === 'update' ? 'alpha-browser' : 'reminder',
+            trigger:
+              action === 'update'
+                ? { type: 'cron', expression: '*/5 * * * *' }
+                : { type: 'once', fireAt: Date.now() + 3600000 },
+            params:
+              action === 'update'
+                ? { baselineSha: 'a'.repeat(40), guardianCatId: 'codex61-sol', executionCarrier: 'fork' }
+                : {
+                    message:
+                      (language === 'en' ? 'Check the original evidence.' : '核对原始证据。') +
+                      '\nOriginal bounded reminder.\n'.repeat(45),
+                    triggerUserId: owner,
+                    targetCatId: 'codex61-sol',
+                  },
             display: {
               label,
               category: 'thread',
               description:
-                language === 'en' ? 'Verify the original record before interpreting it.' : '解释之前核对原记录。',
+                (language === 'en' ? 'Verify the original record before interpreting it.' : '解释之前核对原记录。') +
+                (action === 'update' ? '\nAlpha subscription retains its existing revision history.\n'.repeat(45) : ''),
             },
             deliveryThreadId: destination.id,
             enabled: true,
             createdBy: 'codex61-sol',
             createdAt: new Date().toISOString(),
           };
-          if (action === 'delete') {
+          if (action === 'delete' || action === 'update') {
             tasks.insert(task);
-            const spec = template.createSpec(task.id, {
+            const spec = (action === 'update' ? alphaTemplate : template).createSpec(task.id, {
               trigger: task.trigger,
               params: task.params,
               deliveryThreadId: task.deliveryThreadId,
@@ -95,14 +109,22 @@ export async function createInboxScheduleFixture(language) {
             ownerUserId: owner,
             requesterCatId: 'codex61-sol',
             mutation:
-              action === 'delete'
+              action === 'update'
                 ? {
-                    kind: 'delete',
+                    kind: 'update',
                     taskId: task.id,
                     expectedFingerprint: fingerprintDynamicTaskDef(task),
                     taskSnapshot: task,
+                    params: { ...task.params, executionCarrier: 'managed' },
                   }
-                : { kind: 'create', task, relativeOnceDelayMs: 60000 },
+                : action === 'delete'
+                  ? {
+                      kind: 'delete',
+                      taskId: task.id,
+                      expectedFingerprint: fingerprintDynamicTaskDef(task),
+                      taskSnapshot: task,
+                    }
+                  : { kind: 'create', task, relativeOnceDelayMs: 60000 },
             status: 'pending',
             publication: { state: 'staged', stagedAt: origin.timestamp },
             createdAt: origin.timestamp,
@@ -142,7 +164,7 @@ export async function createInboxScheduleFixture(language) {
               failNextRegistration = false;
               return null;
             }
-            return id === 'reminder' ? template : null;
+            return id === 'reminder' ? template : id === 'alpha-browser' ? alphaTemplate : null;
           },
         };
         await app.register(scheduleProposalDecisionRoutes, {
@@ -154,7 +176,11 @@ export async function createInboxScheduleFixture(language) {
           notifyLifecycle: (n) => notifications.push(n),
         });
         app.get('/api/schedule/templates', async () => ({
-          templates: [{ templateId: template.templateId, label: template.label, paramSchema: template.paramSchema }],
+          templates: [template, alphaTemplate].map(({ templateId, label, paramSchema }) => ({
+            templateId,
+            label,
+            paramSchema,
+          })),
         }));
         return {
           adapters: [new F139ApprovalAdapter(store)],

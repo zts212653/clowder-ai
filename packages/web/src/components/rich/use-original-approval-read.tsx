@@ -10,7 +10,7 @@ import { type SettledResultItem } from '../shell/mailbox/settled-results-source'
 export function useOriginalApprovalRead<T>(
   producer: string,
   proposalId: string | null,
-  binding: { threadId?: string; messageId?: string; block?: unknown },
+  binding: { threadId?: string; messageId?: string; block?: unknown; sourceVersion?: string },
   load: (signal: AbortSignal, fresh?: boolean) => Promise<T>,
   expectedOwner?: string,
   enabled = true,

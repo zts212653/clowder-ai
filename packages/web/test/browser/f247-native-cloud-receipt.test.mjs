@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
 import { realSurfaceApiResponse } from './f307-real-surface-fixtures.mjs';
 import { startNativeHost } from './f322-native-reply-next.mjs';
-import { cloudReceiptTurn, cloudThreadId, cloudUnboundTurn } from './fixtures/f247-cloud-receipt-messages.ts';
+
+const require = createRequire(import.meta.url);
+const { cloudReceiptTurn, cloudThreadId, cloudUnboundTurn } = require('./fixtures/f247-cloud-receipt-messages.ts');
 
 // One actual Next/ChatContainer journey protects duplicate surfaces, canonical navigation
 // and narrow-screen layout that SSR cannot prove. All API responses are synthetic.
@@ -49,15 +52,29 @@ after(async () => {
     );
 });
 
-async function visit(width, target, unbound = false) {
+async function visit(width, target, unbound = false, pendingStatus) {
   const at = Date.now();
   const context = await browser.newContext({ viewport: { width, height: 1050 } });
   const requests = [],
     errors = [];
-  const name = `${target}-${width}${unbound ? '-unbound' : ''}`;
+  const name = `${target}-${width}${unbound ? '-unbound' : ''}${pendingStatus ? `-${pendingStatus}` : ''}`;
+  let pending = Boolean(pendingStatus);
   let historyReads = 0;
   const messages = unbound ? cloudUnboundTurn() : cloudReceiptTurn(target);
   const answer = messages.find((m) => m.id === 'reply81');
+  if (answer && target === 'gpt-pro') {
+    answer.content =
+      '咪呀！研究正文\uE200genui\uE202{"citation":{"ref":"turn2view0"}}\uE201\n\n| 论文 | 判断 |\n| --- | --- |\n| 示例 | 可读结论\uE200genui\uE202{"citation":{"refs":["turn3view0","turn3view1"]}}\uE201 |\n\n[论文原文](https://example.org/paper)';
+  }
+  if (pendingStatus)
+    for (const message of messages) {
+      const receipt =
+        message.source?.meta?.cloudBridgeOutboundReceipt ?? message.extra?.systemInfo?.payload?.outboundReceipt;
+      if (receipt) {
+        receipt.status = pendingStatus;
+        if (pendingStatus === 'sent') receipt.hostMessageId = 'synthetic-stable-host-message';
+      }
+    }
   try {
     await context.addInitScript(() => {
       localStorage.setItem('cat-cafe:shell-presentation', 'v2');
@@ -78,7 +95,7 @@ async function visit(width, target, unbound = false) {
         response = {
           body: {
             messages:
-              !unbound && target === 'gpt-pro' && historyReads === 1
+              pending || (!unbound && target === 'gpt-pro' && historyReads === 1)
                 ? messages.filter((m) => m.id !== 'reply81')
                 : messages,
             hasMore: false,
@@ -86,9 +103,10 @@ async function visit(width, target, unbound = false) {
         };
       } else if (url.pathname.endsWith('/cloud-return')) {
         response = {
-          body: answer
-            ? { status: 'matched', replyMessageId: answer.id, proof: answer.extra.cloudBridgeReturn }
-            : { status: 'unverified' },
+          body:
+            answer && !pending
+              ? { status: 'matched', replyMessageId: answer.id, proof: answer.extra.cloudBridgeReturn }
+              : { status: 'unverified' },
         };
       } else if (url.pathname.includes('/chatgpt-dot/delivery/')) {
         response = {
@@ -148,6 +166,15 @@ async function visit(width, target, unbound = false) {
     await page.locator('[data-testid="message-dispatch-avatars"]').first().waitFor();
     if (await page.getByTestId('sidebar-collapse').isVisible()) await page.getByTestId('sidebar-collapse').click();
     const native = page.locator(`[data-dispatch-target="${target}"]`).first();
+    if (pendingStatus) {
+      await native.getByText(pendingStatus === 'sent' ? '已送达，等待回复' : '投递待确认', { exact: true }).waitFor();
+      assert.equal(await native.getByRole('button').count(), 0);
+      assert.equal(await page.getByText('云端猫投递', { exact: true }).count(), 0);
+      assert.equal(await page.getByText('已完成，没有返回可显示内容。', { exact: true }).count(), 0);
+      if (out) await page.screenshot({ path: path.join(out, `${name}-waiting.png`), fullPage: true });
+      pending = false;
+      await page.reload({ waitUntil: 'networkidle' });
+    }
     if (unbound) {
       const card = page.getByTestId('cloud-binding-recovery-card');
       await card.getByText('选择 ChatGPT 会话', { exact: true }).waitFor();
@@ -163,6 +190,17 @@ async function visit(width, target, unbound = false) {
       assert.match(await native.innerText(), target === 'gpt-pro' ? /缅因猫Pro/ : /砚砚·dot/);
       await button.click();
       await page.locator('[data-message-id="reply81"]').filter({ hasText: '咪呀' }).first().waitFor();
+      if (target === 'gpt-pro') {
+        const reply = page.locator('[data-message-id="reply81"]').first();
+        assert(!(await reply.innerText()).includes('genui'));
+        assert(!(await reply.innerText()).includes('turn2view0'));
+        assert.equal(await reply.locator('[data-provider-citation-disclosure]').count(), 1);
+        assert.equal(
+          await reply.locator('a[href="https://example.org/paper"]').getAttribute('href'),
+          'https://example.org/paper',
+        );
+        assert.equal(await reply.locator('table').count(), 1);
+      }
       assert(historyReads >= 2, '看回复 must use the canonical history refresh');
       assert.equal(await page.getByText('已完成，没有返回可显示内容。', { exact: true }).count(), 0);
       assert.equal(await page.getByText('云端猫投递', { exact: true }).count(), 0);
@@ -184,13 +222,18 @@ async function visit(width, target, unbound = false) {
     assert(!requests.some((r) => r.path === '/api/messages' && r.method !== 'GET'), 'no cloud send/retry');
     measurements.push({
       name,
+      pendingStatus,
       historyReads,
       elapsedMs: Date.now() - at,
       pageErrors: errors,
       writes: requests.filter((r) => r.method !== 'GET'),
     });
   } catch (error) {
-    if (out) await context.pages()[0]?.screenshot({ path: path.join(out, `${name}-failure.png`), fullPage: true });
+    if (out && context.pages()[0]) {
+      const page = context.pages()[0];
+      await page.screenshot({ path: path.join(out, `${name}-failure.png`), fullPage: true });
+      await writeFile(path.join(out, `${name}-failure-dom.txt`), await page.locator('body').innerText());
+    }
     throw error;
   } finally {
     await context.close();
@@ -199,10 +242,11 @@ async function visit(width, target, unbound = false) {
 
 test(
   'Pro and dot share the native receipt; canonical refresh and unbound controls survive on desktop/mobile',
-  { timeout: 300000 },
+  { timeout: 600000 },
   async () => {
     for (const width of [1440, 390]) {
       for (const target of ['gpt-pro', 'gpt-dot']) await visit(width, target);
+      for (const status of ['unknown', 'sent']) await visit(width, 'gpt-pro', false, status);
     }
     await visit(390, 'gpt-pro', true);
   },

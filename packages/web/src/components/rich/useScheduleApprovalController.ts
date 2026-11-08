@@ -37,10 +37,15 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     cardMessageId = ref?.messageId ?? messageId;
   const liveBinding = useRef({ readItem, block, proposalId, threadId, cardMessageId });
   liveBinding.current = { readItem, block, proposalId, threadId, cardMessageId };
+  // A checkpointed write can move the card to another group before its writer
+  // refreshes. The new host lifecycle must not reuse the pre-write source read.
+  const sourceVersion = readItem
+    ? JSON.stringify([readItem.resolution, readItem.materialization.state, readItem.decisionMode])
+    : undefined;
   const original = useOriginalApprovalRead(
     'F139',
     proposalId,
-    { threadId, messageId: cardMessageId, block },
+    { threadId, messageId: cardMessageId, block, sourceVersion },
     async (_signal, fresh) =>
       proposalId && threadId && cardMessageId
         ? readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, readItem, fresh)

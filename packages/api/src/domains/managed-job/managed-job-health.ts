@@ -1,12 +1,10 @@
 import { existsSync, statSync } from 'node:fs';
-import { metrics, trace } from '@opentelemetry/api';
+import { metrics } from '@opentelemetry/api';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { STATUS } from '../../infrastructure/telemetry/genai-semconv.js';
 import type { DurableGateInspection, DurableManagedGateJob } from './managed-job-types.js';
 
 const log = createModuleLogger('managed-job/health');
-const processStartedAt = Date.now() - process.uptime() * 1000;
-const seen = new Map<string, { signature: string; adopted: boolean }>();
 const states = [
   'unknown',
   'queued',
@@ -23,7 +21,7 @@ type RecordValue = Record<string, unknown>;
 const record = (v: unknown): RecordValue => (v && typeof v === 'object' && !Array.isArray(v) ? (v as RecordValue) : {});
 const number = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-/** This census describes persisted job evidence; it never claims to enumerate every OS process. */
+/** Explicit history readers can summarize their evidence; periodic recovery supplies only its current batch. */
 export function summarizeManagedJobHealth(
   history: readonly RecordValue[],
   inspection: DurableGateInspection['state'],
@@ -73,9 +71,9 @@ export function summarizeManagedJobHealth(
 
 export type ManagedJobHealth = ReturnType<typeof summarizeManagedJobHealth>;
 let census: Record<string, number> = {};
-let instruments: { adoption: ReturnType<ReturnType<typeof metrics.getMeter>['createHistogram']> } | undefined;
+let instrumentsReady = false;
 function telemetry() {
-  if (!instruments) {
+  if (!instrumentsReady) {
     const meter = metrics.getMeter('cat-cafe-api', '0.1.0');
     for (const [key, name, unit] of [
       ['unresolved', 'unresolved_execution', '{job}'],
@@ -86,15 +84,14 @@ function telemetry() {
       ['runtimeMs', 'max_runtime_duration', 'ms'],
     ]) {
       meter
-        .createObservableGauge(`cat_cafe.managed_job.${name}`, { unit })
+        .createObservableGauge(`cat_cafe.managed_job.recovery_batch.${name}`, { unit })
         .addCallback((result) => result.observe(census[key] ?? 0));
     }
-    meter.createObservableGauge('cat_cafe.managed_job.census').addCallback((result) => {
+    meter.createObservableGauge('cat_cafe.managed_job.recovery_batch').addCallback((result) => {
       for (const state of states) result.observe(census[state] ?? 0, { [STATUS]: state });
     });
-    instruments = { adoption: meter.createHistogram('cat_cafe.managed_job.restart_adoption_latency', { unit: 'ms' }) };
+    instrumentsReady = true;
   }
-  return instruments;
 }
 
 export function collectManagedJobHealth(
@@ -112,73 +109,12 @@ export function collectManagedJobHealth(
   return health;
 }
 
-/** The API owns observation deduplication even when I/O ran in a short-lived worker. */
-export function observeManagedJobHealthSnapshot(
-  job: DurableManagedGateJob,
-  inspection: DurableGateInspection,
-  health: ManagedJobHealth,
-  latest: RecordValue,
-  now: number,
-): ManagedJobHealth {
-  const revision = number(latest.revision) || number(latest.updatedAt);
-  const previous = seen.get(job.jobId);
-  const signature = `${revision}:${inspection.state}`;
-  if (previous?.signature !== signature) {
-    const adoptionLatencyMs =
-      !previous?.adopted && number(latest.createdAt) < processStartedAt && inspection.state === 'adopted'
-        ? Math.max(0, now - processStartedAt)
-        : undefined;
-    if (adoptionLatencyMs !== undefined) telemetry().adoption.record(adoptionLatencyMs);
-    const fields = {
-      jobId: job.jobId,
-      originTaskId: job.originTaskId,
-      originInvocationId: job.definition?.originInvocationId,
-      revision,
-      inspection: inspection.state,
-      observation: previous === undefined ? 'snapshot' : 'change',
-      adoptionLatencyMs,
-      ...health,
-    };
-    if (health.unresolvedExecution || health.duplicateAttempts > 0 || health.userMessageCancellation)
-      log.warn(fields, 'Managed job evidence needs attention');
-    else log.info(fields, 'Managed job evidence observed');
-    const span = trace.getTracer('cat-cafe-managed-job').startSpan('cat_cafe.managed_job.observe', {
-      attributes: {
-        'job.id': job.jobId,
-        'job.origin_task_id': job.originTaskId,
-        'job.revision': revision,
-        'job.state': health.state,
-        ...(health.queueDurationMs === null ? {} : { 'job.queue_ms': health.queueDurationMs }),
-        'job.runtime_ms': health.runtimeDurationMs,
-        'job.log_bytes': health.logBytes,
-        'job.unresolved_execution': health.unresolvedExecution,
-        'job.duplicate_attempts': health.duplicateAttempts,
-        ...(adoptionLatencyMs === undefined ? {} : { 'job.restart_adoption_ms': adoptionLatencyMs }),
-      },
-    });
-    span.end();
-    if (seen.size >= 4096) seen.delete(seen.keys().next().value!);
-    seen.set(job.jobId, { signature, adopted: previous?.adopted === true || inspection.state === 'adopted' });
-  }
-  return health;
+/** Only a successful persisted observation CAS emits a state-change event. No bounded process-local cache. */
+export function observeManagedJobTransition(job: DurableManagedGateJob, revision: number, inspection: string): void {
+  log.info({ jobId: job.jobId, revision, inspection }, 'Managed job state changed');
 }
 
-export function observeManagedJobHealth(
-  job: DurableManagedGateJob,
-  inspection: DurableGateInspection,
-  history: readonly RecordValue[],
-  now: number,
-): ManagedJobHealth {
-  return observeManagedJobHealthSnapshot(
-    job,
-    inspection,
-    collectManagedJobHealth(job, inspection, history, now),
-    history.at(-1) ?? {},
-    now,
-  );
-}
-
-export function publishManagedJobCensus(health: readonly ManagedJobHealth[]): void {
+export function publishManagedJobRecoveryBatch(health: readonly ManagedJobHealth[]): void {
   telemetry();
   census = {};
   for (const sample of health) {
