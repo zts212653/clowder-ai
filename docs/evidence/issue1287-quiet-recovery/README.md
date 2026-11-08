@@ -52,6 +52,8 @@ Redis 断言使用 500 条其他 owner 的 4 KiB 消息：基线建好后的不�
 
 周期探测仅覆盖可见、空闲的前台集合。积压分批在后续 tick 继续；没有新发布时不补读。新分配 seq 的变化是本轮保证范围；不分配 seq 的删除、restore、recall 等继续由原事件和显式 History 读取处理。后台实时缓存从未建立 History 基线、同页 owner/session 生命周期、真实 provider 与发行包仍不作为本轮已验收承诺。
 
+这个预算也限制发现速度：可见回复之前有 K 个尚未扫描的隐藏位置时，需要 `ceil((K + 1) / 50)` 次探测，按 30 秒节奏计算，再加既有补读延迟；前台持续可见、空闲、请求成功且缓存未被淘汰是该计算的前提。固定 route 测试验证 500 hidden 后一条 visible 在前 10 次仍保持原水位，第 11 次发现并经 History 返回，约为 330 秒加补读延迟，不承诺所有积压均在 32 秒内恢复。已经扫描的稳定隐藏尾部不重复付此成本。
+
 实现继续复用 History 映射、ID 合并、重试与现有 Queue liveness；没有改身份、终态写链、Socket ACK 或新增持久化索引。架构归属仍是既有 History/MessageStore 与前台恢复入口，ownership map 无变化。
 
 本轮提交前：API 反例与真实 Redis 13/13，Web 定向 159/159，标准隔离入口的 API 消息路由回归 414 pass / 4 skip，API/Web 类型检查及 Biome/diff 检查通过。4 skip 包含默认未运行的 Redis contract；它们已在上述独立 Redis 单独执行。Windows 无法运行的 6 个既有 Unix-socket Queue 用例未包含在该定向命令内。原 12 场景浏览器旅程将在冻结提交后复跑，结果与 exact HEAD 回填 PR 审查包，不将提交前状态当作本轮浏览器结果。

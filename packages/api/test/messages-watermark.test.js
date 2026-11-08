@@ -273,3 +273,20 @@ test('a quiet hidden range is not scanned again merely because wall time passed'
   assert.equal((await f.get(probe)).json().watermark, baseline);
   assert.equal(scans, 0);
 });
+
+test('a visible publication behind 500 unscanned hidden records is discovered on the eleventh probe', async (t) => {
+  const f = await fixture(t);
+  f.append('baseline');
+  const baseline = (await f.get('/api/messages?threadId=thread')).json().historyWatermark;
+  Array.from({ length: 500 }, () => f.append('hidden', { userId: 'other', from: { kind: 'user', userId: 'other' } }));
+  const visible = f.append('visible after backlog');
+  const probe = `/api/threads/thread/watermark?afterVisibility=${encodeURIComponent(baseline)}`;
+  for (const _ of Array.from({ length: 10 })) {
+    assert.equal((await f.get(probe)).json().watermark, baseline);
+  }
+  const discovered = (await f.get(probe)).json().watermark;
+  assert.notEqual(discovered, baseline);
+  const page = (await f.get(`/api/messages?threadId=thread&afterVisibility=${encodeURIComponent(baseline)}`)).json();
+  assert.ok(page.messages.some((message) => message.id === visible.id));
+  assert.equal(page.historyWatermark, discovered);
+});
