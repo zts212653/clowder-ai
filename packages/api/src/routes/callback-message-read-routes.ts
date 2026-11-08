@@ -27,6 +27,7 @@ import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event
 import { recordAnchorFullDrill } from './anchor-telemetry.js';
 import { truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
+import { projectCallbackLifecycleCorrelation } from './callback-lifecycle-correlation.js';
 import { projectCallbackMessageBody } from './callback-message-body.js';
 import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
@@ -202,6 +203,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
           ...(isFullDrill && m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
           ...(imagePaths.length > 0 ? { imagePaths } : {}),
           ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          ...(isFullDrill ? projectCallbackLifecycleCorrelation(m, principal.catId) : {}),
           ...(m.replyTo ? { replyTo: m.replyTo } : {}),
           speaker: getMessageSpeakerName(m),
           from: messageFrom(m),

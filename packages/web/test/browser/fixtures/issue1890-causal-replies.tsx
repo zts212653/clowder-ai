@@ -6,6 +6,8 @@ import { ThreadChatSurface } from '@/components/thread-chat/ThreadChatSurface';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { readChatScrollState, saveChatScrollState } from '@/utils/chat-scroll-memory';
+import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
 import '@/app/console-tokens.css';
@@ -19,19 +21,24 @@ import '@/app/console-controls.css';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 
 primeCoCreatorConfigCache({ name: 'Isolated owner', aliases: [], mentionPatterns: [] });
+const threadId = new URLSearchParams(window.location.search).get('thread') ?? 'issue1890';
+if (new URLSearchParams(window.location.search).has('fresh')) saveChatScrollState(threadId, { top: 0, anchor: 'bottom' });
 document.documentElement.setAttribute('data-shell', 'v2');
-useChatStore.setState({ currentThreadId: 'issue1890', currentProjectPath: '/isolated/issue1890' });
+useChatStore.setState({ currentThreadId: threadId, currentProjectPath: '/isolated/issue1890' });
 useChatStore.subscribe((state) => {
   if (state.pendingChatInsert) Object.assign(window, { issue1890LastInsert: state.pendingChatInsert });
 });
 Object.assign(window, {
-  issue1890Hydrate: (messages: ChatMessage[]) => useChatStore.getState().hydrateThread('issue1890', messages, false),
+  issue1890Focus: focusLineageMessage,
+  issue1890Hydrate: (messages: ChatMessage[]) => useChatStore.getState().hydrateThread(threadId, messages, false),
   issue1890Shell: (shell: 'v2' | 'classic') => {
     writeShellPresentation(shell);
     document.documentElement.setAttribute('data-shell', shell);
   },
   issue1890State: () => ({
-    messages: useChatStore.getState().getThreadState('issue1890').messages,
+    messages: useChatStore.getState().getThreadState(threadId).messages,
+    hasMore: useChatStore.getState().getThreadState(threadId).hasMore,
+    reading: readChatScrollState(threadId),
     pending: useChatStore.getState().pendingChatInsert,
   }),
 });
@@ -42,8 +49,8 @@ if (root)
     <ThemeProvider>
       <CatHueInjector />
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <ThreadChatRuntimeProvider routeThreadId="issue1890">
-          <ThreadChatSurface threadId="issue1890" density="full" />
+        <ThreadChatRuntimeProvider routeThreadId={threadId}>
+          <ThreadChatSurface threadId={threadId} density="full" />
         </ThreadChatRuntimeProvider>
       </div>
     </ThemeProvider>,

@@ -1,15 +1,38 @@
 'use client';
 
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useProcessTalkPreference } from '@/hooks/useProcessTalkPreference';
 import type { ChatMessage } from '@/stores/chat-types';
+import { readChatScrollState } from '@/utils/chat-scroll-memory';
 import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import { causalBoundaryKey, projectCausalReplies } from './causal-reply-projection';
 import { projectReplyOutput, type ReplyOutputProjection } from './reply-output';
 
+export interface CausalReadingReference {
+  anchorMessageId: string;
+  targetMessageId: string;
+  targetCatId?: string;
+  kind: 'reply' | 'input';
+}
+
 const CausalReplyContext = createContext<
   | (ReturnType<typeof projectCausalReplies> & {
       nativeOutputs: ReadonlyMap<string, ReplyOutputProjection>;
+      loadedMessageIds: ReadonlySet<string>;
+      readingReference: CausalReadingReference | null;
+      openReference: (reference: CausalReadingReference | null) => void;
+      socketConnected?: boolean | null;
+      catStatuses: Readonly<Record<string, string>>;
+      revealReference?: (element: HTMLElement) => void;
     })
   | null
 >(null);
@@ -19,12 +42,20 @@ export function CausalReplyProvider({
   messages,
   threadId,
   children,
+  socketConnected,
+  catStatuses = {},
+  revealReference,
 }: {
   messages: readonly ChatMessage[];
   threadId: string;
   children: ReactNode;
+  socketConnected?: boolean | null;
+  catStatuses?: Readonly<Record<string, string>>;
+  revealReference?: (element: HTMLElement) => void;
 }) {
+  const [readingReference, openReference] = useState<CausalReadingReference | null>(null);
   const [verified, setVerified] = useState<ReadonlyMap<string, string>>(new Map());
+  const renderedBoundaryCounts = useRef(new Map<string, number>());
   const bodies = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -78,14 +109,60 @@ export function CausalReplyProvider({
     };
   }, [proofKey]);
   const projection = useMemo(() => {
+    const reading = readChatScrollState(threadId);
+    const readingId = reading?.anchor === 'offset' ? reading.messageAnchor?.messageId : undefined;
+    // New cuts may move text out of the paragraph the existing History owner is
+    // restoring. Keep that response's committed ranges while they are being read;
+    // whole-message reading remains available without relocating the text.
+    const presentationMessages = messages.map((message) => {
+      const lifecycle = message.lifecycle;
+      if (lifecycle?.kind !== 'response') return message;
+      const boundaries = lifecycle.appendBoundaries;
+      if (
+        !readingId ||
+        !boundaries?.length ||
+        (readingId !== message.id && !boundaries.some((cut) => cut.inputMessageId === readingId))
+      )
+        return message;
+      const count = renderedBoundaryCounts.current.get(message.id) ?? 0;
+      return count >= boundaries.length
+        ? message
+        : { ...message, lifecycle: { ...lifecycle, appendBoundaries: boundaries.slice(0, count) } };
+    });
     const nativeOutputs = new Map<string, ReplyOutputProjection>();
     bodies.forEach(({ message, layout, key }) => {
       if (verified.get(key) !== message.content) return;
       const output = projectReplyOutput(message, threadId, layout.contentRevision.sha256, preference.mode);
       if (output) nativeOutputs.set(message.id, output);
     });
-    return { ...projectCausalReplies(messages, verified), nativeOutputs };
-  }, [bodies, messages, verified, threadId, preference.mode]);
+    return {
+      ...projectCausalReplies(presentationMessages, verified),
+      nativeOutputs,
+      loadedMessageIds: new Set(messages.map((message) => message.id)),
+      readingReference,
+      openReference,
+      socketConnected,
+      catStatuses,
+      revealReference,
+    };
+  }, [
+    bodies,
+    messages,
+    verified,
+    threadId,
+    preference.mode,
+    readingReference,
+    socketConnected,
+    catStatuses,
+    revealReference,
+  ]);
+  useLayoutEffect(() => {
+    const counts = new Map<string, number>();
+    projection.continuations.forEach((slices) =>
+      slices.forEach(({ response }) => counts.set(response.id, (counts.get(response.id) ?? 0) + 1)),
+    );
+    renderedBoundaryCounts.current = counts;
+  }, [projection]);
   return <CausalReplyContext.Provider value={projection}>{children}</CausalReplyContext.Provider>;
 }
 

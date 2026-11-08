@@ -1100,7 +1100,7 @@ function ChatMessageContent({
   ) : null;
 
   const assistantBody =
-    message.lifecycle?.kind === 'response' && message.lifecycle.appendBoundaries?.length ? (
+    message.lifecycle?.kind === 'response' ? (
       <CausalReplyOriginal response={message} layered={isLayeredReply}>
         {ordinaryAssistantBody}
       </CausalReplyOriginal>

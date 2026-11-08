@@ -175,6 +175,17 @@ export function ThreadChatSurface({
     [jumpToMessage, navigateToMessage],
   );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
+  const revealCausalReference = useCallback(
+    (element: HTMLElement) => {
+      const viewport = scrollContainerRef.current;
+      const gesture = beginUserScroll();
+      if (!viewport || !gesture) return;
+      gesture.scrollTo(viewport.scrollTop + element.getBoundingClientRect().top - viewport.getBoundingClientRect().top);
+      gesture.end();
+      element.focus({ preventScroll: true });
+    },
+    [beginUserScroll, scrollContainerRef],
+  );
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
   const { getCatById } = useCatData();
@@ -506,7 +517,13 @@ export function ThreadChatSurface({
           conversationView={conversationViewController}
           enabled={composerPresentation === 'v2'}
         >
-          <CausalReplyProvider threadId={threadId} messages={selection.selectionMode ? [] : visibleMessages}>
+          <CausalReplyProvider
+            threadId={threadId}
+            messages={selection.selectionMode ? [] : visibleMessages}
+            socketConnected={socketConnected}
+            catStatuses={catStatuses}
+            revealReference={revealCausalReference}
+          >
             {surface}
           </CausalReplyProvider>
         </CatProfileCardScope>

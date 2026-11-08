@@ -2,22 +2,20 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { createCatId, isLifecycleStoredMessageMetadata, MAX_LIFECYCLE_APPEND_BOUNDARIES } from '@cat-cafe/shared';
-import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.js';
-import { prepareLifecycleWakeCoverage } from '../src/domains/cats/services/stores/lifecycle-wake-coverage.js';
+import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
+import { prepareLifecycleWakeCoverage } from '../dist/domains/cats/services/stores/lifecycle-wake-coverage.js';
 import {
   boundaryFromLiveBody,
   computeAppendBoundary,
   prepareLifecycleAppendAdmission,
   prepareLifecycleResponseTerminalMessage,
-  type StoredMessage,
-} from '../src/domains/cats/services/stores/ports/MessageStore.js';
+} from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 
 const codex = createCatId('codex');
 const dsh = createCatId('dsh');
-const hash = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
-const boundary = (contentOffset: number, prefixSha256: string) => ({ contentOffset, prefixSha256 });
-
-function response(overrides: Partial<StoredMessage> = {}): StoredMessage {
+const hash = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
+const boundary = (contentOffset, prefixSha256) => ({ contentOffset, prefixSha256 });
+function response(overrides = {}) {
   return {
     id: 'response-1',
     userId: 'operator',
@@ -41,8 +39,7 @@ function response(overrides: Partial<StoredMessage> = {}): StoredMessage {
     ...overrides,
   };
 }
-
-function input(id: string, overrides: Partial<StoredMessage> = {}): StoredMessage {
+function input(id, overrides = {}) {
   return {
     id,
     userId: 'operator',
@@ -56,11 +53,9 @@ function input(id: string, overrides: Partial<StoredMessage> = {}): StoredMessag
     ...overrides,
   };
 }
-
-function appendedResponse(lifecycle: StoredMessage['lifecycle']): StoredMessage {
+function appendedResponse(lifecycle) {
   return response({ lifecycle });
 }
-
 test('computeAppendBoundary trims leading whitespace and hashes the normalized live prefix', () => {
   const body = '\n\n  first paragraph\nsecond paragraph';
   assert.deepEqual(computeAppendBoundary(body), {
@@ -69,15 +64,13 @@ test('computeAppendBoundary trims leading whitespace and hashes the normalized l
   });
   assert.deepEqual(computeAppendBoundary('   '), { contentOffset: 0, prefixSha256: hash('') });
 });
-
 test('boundaryFromLiveBody reads the exact getter and never guesses a cut', () => {
-  assert.equal(boundaryFromLiveBody(undefined), undefined);
+  assert.equal(boundaryFromLiveBody(void 0), void 0);
   assert.deepEqual(
     boundaryFromLiveBody(() => '  live body'),
     computeAppendBoundary('  live body'),
   );
 });
-
 test('adoption stores one public input boundary in trimStart coordinates', () => {
   const prepared = prepareLifecycleAppendAdmission([input('input-2'), response()], {
     threadId: 'thread-1',
@@ -93,7 +86,6 @@ test('adoption stores one public input boundary in trimStart coordinates', () =>
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
   const next = prepared.lifecycles[1];
@@ -102,7 +94,6 @@ test('adoption stores one public input boundary in trimStart coordinates', () =>
     { inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) },
   ]);
 });
-
 test('replay preserves the first boundary and never overwrites it with a later cursor', () => {
   const first = prepareLifecycleAppendAdmission([input('input-2'), response()], {
     threadId: 'thread-1',
@@ -120,7 +111,6 @@ test('replay preserves the first boundary and never overwrites it with a later c
   });
   assert.equal(first.kind, 'prepared');
   if (first.kind !== 'prepared') return;
-
   const replayed = prepareLifecycleAppendAdmission(
     [input('input-2', { lifecycle: first.lifecycles[0] }), appendedResponse(first.lifecycles[1])],
     {
@@ -138,7 +128,6 @@ test('replay preserves the first boundary and never overwrites it with a later c
       ],
     },
   );
-
   assert.equal(replayed.kind, 'prepared');
   if (replayed.kind !== 'prepared') return;
   assert.equal(replayed.replayed, true);
@@ -146,7 +135,6 @@ test('replay preserves the first boundary and never overwrites it with a later c
     { inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) },
   ]);
 });
-
 test('whisper input never leaks a public boundary', () => {
   const prepared = prepareLifecycleAppendAdmission([input('input-whisper', { visibility: 'whisper' }), response()], {
     threadId: 'thread-1',
@@ -162,20 +150,17 @@ test('whisper input never leaks a public boundary', () => {
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
-  assert.equal(prepared.lifecycles[1]?.appendBoundaries, undefined);
+  assert.equal(prepared.lifecycles[1]?.appendBoundaries, void 0);
 });
-
 test('one cumulative body keeps distinct cuts for successive public inputs', () => {
   const current = appendedResponse({
     ...response().lifecycle,
     inputEntryIds: ['entry-1', 'entry-2'],
     inputMessageIds: ['input-1', 'input-2'],
     appendBoundaries: [{ inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) }],
-  } as NonNullable<StoredMessage['lifecycle']>);
-
+  });
   const prepared = prepareLifecycleAppendAdmission([input('input-3'), current], {
     threadId: 'thread-1',
     entryId: 'entry-3',
@@ -190,7 +175,6 @@ test('one cumulative body keeps distinct cuts for successive public inputs', () 
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
   assert.deepEqual(prepared.lifecycles[1]?.appendBoundaries, [
@@ -198,7 +182,6 @@ test('one cumulative body keeps distinct cuts for successive public inputs', () 
     { inputMessageId: 'input-3', contentOffset: 10, prefixSha256: 'b'.repeat(64) },
   ]);
 });
-
 test('a public admission without a trusted cut clears older partial cuts', () => {
   const withOlderCut = response({
     lifecycle: {
@@ -206,7 +189,7 @@ test('a public admission without a trusted cut clears older partial cuts', () =>
       inputEntryIds: ['entry-1', 'entry-2'],
       inputMessageIds: ['input-1', 'input-2'],
       appendBoundaries: [{ inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) }],
-    } as NonNullable<StoredMessage['lifecycle']>,
+    },
   });
   const prepared = prepareLifecycleAppendAdmission([input('input-3'), withOlderCut], {
     threadId: 'thread-1',
@@ -221,12 +204,10 @@ test('a public admission without a trusted cut clears older partial cuts', () =>
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
-  assert.equal(prepared.lifecycles[1]?.appendBoundaries, undefined);
+  assert.equal(prepared.lifecycles[1]?.appendBoundaries, void 0);
 });
-
 test('a cap overflow clears cuts instead of blocking the admission', () => {
   const atCap = Array.from({ length: MAX_LIFECYCLE_APPEND_BOUNDARIES }, (_, index) => ({
     inputMessageId: `old-${index}`,
@@ -237,7 +218,7 @@ test('a cap overflow clears cuts instead of blocking the admission', () => {
     lifecycle: {
       ...response().lifecycle,
       appendBoundaries: atCap,
-    } as NonNullable<StoredMessage['lifecycle']>,
+    },
   });
   const prepared = prepareLifecycleAppendAdmission([input('input-new'), withFullProof], {
     threadId: 'thread-1',
@@ -253,12 +234,10 @@ test('a cap overflow clears cuts instead of blocking the admission', () => {
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
-  assert.equal(prepared.lifecycles[1]?.appendBoundaries, undefined);
+  assert.equal(prepared.lifecycles[1]?.appendBoundaries, void 0);
 });
-
 test('admission order is preserved for equal offsets', () => {
   const prepared = prepareLifecycleAppendAdmission([input('input-z'), input('input-a'), response()], {
     threadId: 'thread-1',
@@ -274,7 +253,6 @@ test('admission order is preserved for equal offsets', () => {
       },
     ],
   });
-
   assert.equal(prepared.kind, 'prepared');
   if (prepared.kind !== 'prepared') return;
   assert.deepEqual(
@@ -282,7 +260,6 @@ test('admission order is preserved for equal offsets', () => {
     ['input-z', 'input-a'],
   );
 });
-
 test('projected wake coverage carries the admission boundary', () => {
   const source = input('input-2', { deliveryStatus: 'delivered' });
   const entry = {
@@ -299,7 +276,7 @@ test('projected wake coverage carries the admission boundary', () => {
     delivery: {},
   };
   const receiver = response();
-  const prepared = prepareLifecycleWakeCoverage([source], receiver, [entry] as never, {
+  const prepared = prepareLifecycleWakeCoverage([source], receiver, [entry], {
     threadId: 'thread-1',
     userId: 'operator',
     targetId: 'codex',
@@ -309,14 +286,12 @@ test('projected wake coverage carries the admission boundary', () => {
     at: 2,
     appendBoundary: boundary(5, 'a'.repeat(64)),
   });
-
   assert.equal(prepared.kind, 'prepared', JSON.stringify(prepared));
   if (prepared.kind !== 'prepared') return;
   assert.deepEqual(prepared.messages[1]?.lifecycle?.appendBoundaries, [
     { inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) },
   ]);
 });
-
 test('invalid boundary input fails closed', () => {
   const prepared = prepareLifecycleAppendAdmission([input('input-2'), response()], {
     threadId: 'thread-1',
@@ -334,7 +309,6 @@ test('invalid boundary input fails closed', () => {
   });
   assert.equal(prepared.kind, 'conflict');
 });
-
 test('legacy response metadata without appendBoundaries still validates', () => {
   const legacy = response().lifecycle;
   assert.equal(isLifecycleStoredMessageMetadata(legacy), true);
@@ -363,13 +337,12 @@ test('legacy response metadata without appendBoundaries still validates', () => 
     false,
   );
 });
-
 test('terminal settlement preserves the admission cuts', () => {
   const withBoundaries = response({
     lifecycle: {
       ...response().lifecycle,
       appendBoundaries: [{ inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) }],
-    } as NonNullable<StoredMessage['lifecycle']>,
+    },
   });
   const terminal = prepareLifecycleResponseTerminalMessage(withBoundaries, {
     invocationId: 'inv-1',
@@ -383,7 +356,6 @@ test('terminal settlement preserves the admission cuts', () => {
     { inputMessageId: 'input-2', contentOffset: 5, prefixSha256: 'a'.repeat(64) },
   ]);
 });
-
 test('InvocationTracker cursor is exact-run, replaceable, and cleared on terminal', () => {
   const tracker = new InvocationTracker();
   tracker.start('thread-1', 'codex', 'operator', ['codex'], 'exec-1');
@@ -403,22 +375,19 @@ test('InvocationTracker cursor is exact-run, replaceable, and cleared on termina
     ),
     true,
   );
-
   const exact = { invocationId: 'inv-1', responseMessageId: 'response-1' };
   const first = tracker.bindLifecycleOutputCursor('thread-1', 'codex', exact, () => 'first');
   assert.ok(first);
   assert.equal(tracker.getLifecycleOutputCursor('thread-1', 'codex', exact)?.(), 'first');
   assert.equal(
     tracker.getLifecycleOutputCursor('thread-1', 'codex', { invocationId: 'inv-1', responseMessageId: 'other' }),
-    undefined,
+    void 0,
   );
-
   const second = tracker.bindLifecycleOutputCursor('thread-1', 'codex', exact, () => 'second');
   assert.ok(second);
   first?.();
   assert.equal(tracker.getLifecycleOutputCursor('thread-1', 'codex', exact)?.(), 'second');
-
   tracker.complete('thread-1', 'codex');
-  assert.equal(tracker.getLifecycleOutputCursor('thread-1', 'codex', exact), undefined);
+  assert.equal(tracker.getLifecycleOutputCursor('thread-1', 'codex', exact), void 0);
   second?.();
 });

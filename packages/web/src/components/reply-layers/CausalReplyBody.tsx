@@ -10,6 +10,7 @@ import { MessageActions } from '../MessageActions';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { useMessageNavigation } from '../thread-chat/MessageNavigationContext';
 import { causalContinuationId, focusCausalContinuation, useCausalReplies } from './CausalReplyContext';
+import { CausalReplyReference } from './CausalReplyReference';
 import type { CausalReplySlice } from './causal-reply-projection';
 import { NativeReplyText } from './NativeReplyText';
 import { ReplyOutputBody } from './ReplyOutputBody';
@@ -84,8 +85,36 @@ export function CausalReplyOriginal({
   children: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const original = useCausalReplies()?.originals.get(response.id);
-  if (!original) return children;
+  const presentation = useCausalReplies();
+  const original = presentation?.originals.get(response.id);
+  const missingInputIds =
+    response.lifecycle?.kind === 'response' && presentation?.loadedMessageIds.has(response.id)
+      ? response.lifecycle.inputMessageIds.filter((id) => !presentation.loadedMessageIds.has(id))
+      : [];
+  const related = missingInputIds.length ? (
+    <details className="mt-2 text-sm text-cafe-muted" data-quote-exclude>
+      <summary>未加载的关联消息 · {missingInputIds.length} 条</summary>
+      {missingInputIds.map((id, index) => (
+        <button
+          key={id}
+          type="button"
+          className="mr-3 hover:underline"
+          onClick={() =>
+            presentation?.openReference({ anchorMessageId: response.id, targetMessageId: id, kind: 'input' })
+          }
+        >
+          读取关联消息 {index + 1}
+        </button>
+      ))}
+    </details>
+  ) : null;
+  if (!original)
+    return (
+      <>
+        {children}
+        {related}
+      </>
+    );
   const { end, inputMessageId } = original;
   return (
     <div data-causal-original={response.id}>
@@ -105,6 +134,9 @@ export function CausalReplyOriginal({
         查看接续正文 ↓
       </a>
       <div className="mt-2">
+        <p className="text-xs text-cafe-muted" data-quote-exclude>
+          此处消息操作作用于整轮回复。
+        </p>
         <button
           type="button"
           className="text-sm text-cafe-secondary hover:underline"
@@ -132,6 +164,7 @@ export function CausalReplyOriginal({
           </div>
         ) : null}
       </div>
+      {related}
     </div>
   );
 }
@@ -164,14 +197,14 @@ function Continuation({
       data-causal-next-input={start === end ? slice.nextInputMessageId : undefined}
       tabIndex={-1}
     >
-      <MessageActions message={response} threadId={threadId} forwardingDisabled={forwardingDisabled}>
+      <MessageActions message={response} threadId={threadId} forwardingDisabled={forwardingDisabled} selectionOnly>
         {response.catId ? (
           <CatNameplate catId={response.catId} name={cat ? formatCatName(cat) : response.catId} />
         ) : null}
         <div className="mb-2 text-xs text-cafe-muted" data-quote-exclude>
-          同一轮 · 接续上文
+          同一轮的部分正文
           <button type="button" className="ml-2 hover:underline" onClick={() => navigate(response.id)}>
-            查看原执行
+            查看整轮回复与操作
           </button>
         </div>
         <div className="pl-4" style={{ borderLeft: `3px solid ${catColorVar(response.catId, 'primary')}` }}>
@@ -214,9 +247,25 @@ export function CausalReplyContinuations({
   compact?: boolean;
 }) {
   const projection = useCausalReplies();
+  const reading =
+    projection?.readingReference?.anchorMessageId === inputMessageId ? projection.readingReference : undefined;
   return (
-    projection?.continuations
-      .get(inputMessageId)
-      ?.map((slice) => <Continuation key={slice.response.id} slice={slice} {...props} />) ?? null
+    <>
+      {projection?.continuations
+        .get(inputMessageId)
+        ?.filter((slice) => slice.response.id !== reading?.targetMessageId)
+        .map((slice) => <Continuation key={slice.response.id} slice={slice} {...props} />) ?? null}
+      {reading && projection ? (
+        <CausalReplyReference
+          key={`${reading.anchorMessageId}:${reading.targetMessageId}`}
+          reference={reading}
+          {...props}
+          socketConnected={projection.socketConnected}
+          targetStatus={reading.targetCatId ? projection.catStatuses[reading.targetCatId] : undefined}
+          onReveal={projection.revealReference}
+          onClose={() => projection.openReference(null)}
+        />
+      ) : null}
+    </>
   );
 }

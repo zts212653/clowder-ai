@@ -81,7 +81,7 @@ export function MessageDispatchRecipient({
       ? logical.replyMessageId
       : awaitingCloudReply
         ? undefined
-        : projection.statusMessageId;
+        : (projection.statusMessageId ?? ref?.statusMessageId);
   const failedDelivery = linked?.kind === 'delivery_failure';
   const notSent =
     cloud?.receipt?.status === 'failed' &&
@@ -154,10 +154,11 @@ export function MessageDispatchRecipient({
           repeatKind={notAccepted ? 'not_accepted' : incomplete ? 'incomplete' : 'unknown'}
         />
       ) : null}
-      {!checking && replyMessageId && (response || logical.state !== 'unverified') ? (
+      {replyMessageId && (causalReplies || response || logical.state !== 'unverified') ? (
         <button
           type="button"
           aria-label={`看${label}的回复`}
+          data-reading-disclosure
           className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
           onClick={() => {
             if (!replyMessageId) return;
@@ -166,6 +167,15 @@ export function MessageDispatchRecipient({
               focusCausalContinuation(message.id, replyMessageId)
             )
               return;
+            if (causalReplies && threadId) {
+              causalReplies.openReference({
+                anchorMessageId: message.id,
+                targetMessageId: replyMessageId,
+                targetCatId: projection.targetId,
+                kind: 'reply',
+              });
+              return;
+            }
             if (logical.state !== 'unverified') navigateToMessage(replyMessageId, { loadIfNeeded: true });
             else navigateToMessage(replyMessageId);
           }}

@@ -23,8 +23,8 @@ export async function createCallbackContextFixture(t, options = {}) {
   const auth = options.live ? await registry.create(userId, catId, threadId, parent.invocationId) : parent;
   const gate = options.live ? new LiveCarrierOperationGate() : undefined;
   const tasks = new TaskStore();
-  const queue = new InvocationQueue();
-  const messages = new MessageStore();
+  const queue = new InvocationQueue(options.ledgerStore);
+  const messages = options.messageStore ?? new MessageStore();
   const executions = new InMemoryTurnExecutionStore();
   const tracker = new InvocationTracker();
   const cursors = new DeliveryCursorStore();
@@ -39,7 +39,7 @@ export async function createCallbackContextFixture(t, options = {}) {
     startedAt: Date.now(),
   });
   tracker.start(threadId, catId, userId, [catId], parent.invocationId);
-  const response = appendTestLifecycleResponseSource(messages, {
+  const response = await appendTestLifecycleResponseSource(messages, {
     userId,
     threadId,
     catId,
