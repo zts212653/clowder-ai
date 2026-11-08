@@ -382,6 +382,23 @@
         "matchedFileCount": 1,
         "matchedFilesHash": "e4dfe4fe9b658304a322453f3faf8e4a6c61c054ebcf3abdc0daa351cd4bbb49"
       }
+    },
+    {
+      "id": "f332-private-w2-source-replay",
+      "match": "^test/memory/matter-memory-w2-pilot\\.test\\.js$",
+      "category": "source_only",
+      "reason": "This exact offline W2 pilot replays private author-observed messages and unpublished draft evidence from docs/evidence/2026-11-07-f332-w2-pilot. Those source-local research inputs are deliberately excluded from public export. Keep the home replay unchanged; portable Matter owner, ACL/revision/withdrawal, discovery and preparation contracts remain selected. This records an observed missing private fixture, not a product behavior failure exemption.",
+      "owner": "@codex-astra",
+      "introducedBy": "Public CI 42439220261 at 99c1356f1266990c6f59179d428f9825aec2c917",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-08",
+        "sourceHead": "7981fda3ce702892ab21eb39038b75aaa0cb1968",
+        "publicHead": "99c1356f1266990c6f59179d428f9825aec2c917",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "15e33bedfb5cb7afaa190c7b296ed2b99496bf0af2263805f91452dcf2abe071"
+      }
     }
   ]
 }

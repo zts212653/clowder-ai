@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import { fork } from 'node:child_process';
-import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, get } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,7 +10,7 @@ import {
 } from '../dist/domains/managed-job/durable-managed-gate-job-store.js';
 import { ManagedJobService } from '../dist/domains/managed-job/ManagedJobService.js';
 import { createAlphaManagedControl } from '../dist/infrastructure/scheduler/templates/alpha-managed-control.js';
-import { alphaManagedFixture, until } from './helpers/alpha-managed-scheduler-fixture.js';
+import { healthRequest, holdLock } from './helpers/managed-job-contention-fixture.js';
 
 const principal = { userId: 'owner', threadId: 'alpha-thread', catId: 'codex-astra' };
 const consumer = {
@@ -60,52 +57,6 @@ async function fixture(t) {
       assert.deepEqual(service.transitions(principal, job.jobId), transitions);
       assert.equal(service.list().length, 1, 'contention cannot admit another command');
     },
-  };
-}
-
-async function holdLock(t, root, durationMs) {
-  const child = fork(
-    new URL('./helpers/managed-job-lock-holder.mjs', import.meta.url),
-    [join(root, 'managed-jobs/supervisor.sqlite'), String(durationMs)],
-    { execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
-  );
-  let stderr = '';
-  child.stderr.on('data', (chunk) => {
-    stderr = `${stderr}${chunk}`.slice(-2000);
-  });
-  const closed = once(child, 'close');
-  t.after(async () => {
-    if (child.exitCode === null && child.signalCode === null) child.kill();
-    await closed;
-  });
-  await Promise.race([
-    once(child, 'message', { signal: AbortSignal.timeout(5000) }),
-    closed.then(([code, signal]) => {
-      throw new Error(`lock holder exited before ready: ${code}/${signal}: ${stderr}`);
-    }),
-  ]);
-  return {
-    closed,
-    async release() {
-      if (child.exitCode === null && child.signalCode === null) child.kill();
-      await closed;
-    },
-  };
-}
-
-async function healthRequest(t) {
-  const server = createServer((_req, res) => res.end('ready'));
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const started = performance.now();
-  return {
-    response: new Promise((resolve, reject) => {
-      get(`http://127.0.0.1:${server.address().port}`, (res) => {
-        res.resume();
-        res.once('end', () => resolve(performance.now() - started));
-      }).once('error', reject);
-    }),
   };
 }
 
@@ -261,47 +212,3 @@ test('an unreadable stored record remains an error, not missing or successful', 
   }
   f.unchanged();
 });
-
-test(
-  'the real Alpha scheduler stays attached to one running attempt across lock contention',
-  { timeout: 40000 },
-  async (t) => {
-    let marker;
-    const f = await alphaManagedFixture(t, {
-      sources(parent) {
-        marker = join(parent, 'actual-execution.log');
-        return {
-          'sample.mjs': `import {appendFileSync} from 'node:fs';
-          appendFileSync(${JSON.stringify(marker)}, 'once\\n');
-          setTimeout(() => {}, 9000);`,
-        };
-      },
-    });
-    const controller = new AbortController();
-    const watchdog = setTimeout(() => controller.abort(new Error('status contention journey deadline')), 30000);
-    const completed = f.run(controller.signal);
-    // Keep the producer rejection observed while the test watches the live attempt.
-    void completed.catch(() => undefined);
-    try {
-      await until(() => existsSync(marker), 'one real verification command started');
-      const before = f.service.get(f.principal, f.managed.jobId);
-      const { closed } = await holdLock(t, f.dataRoot, 6000);
-      const { response } = await healthRequest(t);
-      assert.ok((await response) < 250, 'the scheduler status read cannot monopolize HTTP');
-      await closed;
-      await completed;
-      const after = (await f.service.readStatus(f.principal, f.managed.jobId)).status;
-      assert.equal(after.state, 'succeeded');
-      assert.equal(after.attemptToken, before.attemptToken);
-      assert.deepEqual(after.ownerIdentity, before.ownerIdentity);
-      assert.equal(after.cleanupProven, true);
-      assert.equal(readFileSync(marker, 'utf8'), 'once\n');
-      assert.equal(f.service.list().length, 1);
-      assert.equal(f.tasks.size, 0);
-    } finally {
-      clearTimeout(watchdog);
-      controller.abort();
-      await completed.catch(() => undefined);
-    }
-  },
-);

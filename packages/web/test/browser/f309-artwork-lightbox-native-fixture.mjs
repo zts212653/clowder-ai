@@ -117,7 +117,7 @@ export async function createNativeArtworkFixture(kind, evidence, sourceKind = 'w
     assert.ok(round?.ledgerRevision);
     const name = `native-candidate-${Date.now()}.${kind}`;
     const output = path.join(dataDir, name);
-    if (kind === 'png') await copyFile(path.join(owner.root, 'assets/avatars/codex.png'), output);
+    if (kind === 'png') await copyFile(path.join(owner.root, 'packages/web/public/avatars/codex.png'), output);
     else if (kind === 'mp4')
       execFileSync('ffmpeg', ['-v', 'error', '-i', absolute, '-t', '1', '-an', '-c:v', 'copy', output], {
         timeout: 15_000,

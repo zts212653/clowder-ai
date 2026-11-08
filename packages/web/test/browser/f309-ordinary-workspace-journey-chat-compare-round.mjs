@@ -26,7 +26,7 @@ const TASK_ID = 'task-round';
 
 const ORIGINAL_BYTES = IMAGE_FIXTURE.bytes;
 // A different, real PNG, so the two rounds can be told apart by eye in the evidence.
-const CANDIDATE_BYTES = readFileSync(path.resolve(WEB_ROOT, '../../assets/avatars/codex.png'));
+const CANDIDATE_BYTES = readFileSync(path.resolve(WEB_ROOT, 'public/avatars/codex.png'));
 const dimensions = (bytes) => ({ kind: 'image', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
 const roundAsset = (number, bytes) => ({
   contentRef: CONTENT,
