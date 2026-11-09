@@ -1207,6 +1207,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
         m.extra?.pluginAddressedReceipt ||
+        m.extra?.targetResponse ||
+        m.extra?.targetResponseResult ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1236,6 +1238,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
                 ...(m.extra?.pluginAddressedReceipt ? { pluginAddressedReceipt: m.extra.pluginAddressedReceipt } : {}),
+                ...(m.extra?.targetResponse ? { targetResponse: m.extra.targetResponse } : {}),
+                ...(m.extra?.targetResponseResult ? { targetResponseResult: m.extra.targetResponseResult } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),

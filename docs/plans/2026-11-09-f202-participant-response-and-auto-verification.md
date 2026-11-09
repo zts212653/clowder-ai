@@ -276,3 +276,16 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - Host当前CI另复现回复引用用例的router替身缺少resolveAdmissionTargets：两条whisper回复500。仅补受控成员替身接口，保留同收件人引用和扩大收件人不能引用的断言，原RED→12/12 GREEN；同型检索另外三处是队列层私语测试，不走该HTTP入口，未机械扩改。生产member-only私语校验不动。
 - 两条云端意见已回复并逐字回读。前一插件4aa的完整CI已绿，不替代新提交结果。本轮仍无运行配置/实例改动、安装、重启、合并或发布。
 - 最终Host API隔离完整编译、Biome/diff通过，精确alpha.48随包/闭包/显示及空缓存离线安装19/19（`/tmp/f202-alpha48-host-acceptance.log`）。等待新HEAD的远端CI/云端复审，不将4aa CI绿与5dcb云端无finding挪用于当前提交。
+
+### 2026-11-09：R8 五项边界——投递身份、历史恢复与临时入口发布
+
+本轮汇总Host两项与插件三项后，按同一流程重核“输入身份→副作用→持久化→历史API→页面”。普通事件的delivery幂等身份不是addressed目标结算身份；临时入口在创建、发布、结束之间也必须有一致的归属。
+
+- subscription回流仍按原deliveryId生成幂等event，但只为reason=addressed保存目标结算deliveryId；Host不补假carrier、不放宽resolveTargetResponse。重投递规范化既有误分类记录。完整ask→家猫回流→read→reply测试保留replyTo与wake，显式投递仍completed。精确alpha.48与49归档加载真实运行时接真实Host校验函数：旧包RED（response does not belong to this delivery），新包通过；伪造订阅结算仍拒绝。证据packaged-followup-receipt.json、/tmp/f202-r8-packaged-{red2,green}.log，不冒充完整Work服务联调。
+- 历史白名单同时补targetResponse/targetResponseResult的存在条件与字段投影。旧编译路由8种状态RED，修后HTTP历史56/56。浏览器使用实际Fastify messagesRoutes返回数据，接实际Socket.IO/useSocket/Zustand/ThreadChatSurface；旧路由等待态刷新RED，新路由等待、正文接替、空失败/完成/取消/中断及来源标记刷新通过。历史7读、0轮询、0pageerror；browser-history-receipt.json、history-*.png，未用直接Store转储绕过历史白名单。
+- 临时启动在异步候选操作前保留controller epoch；调用及binary准备后replace前核原candidateId/token/有效期与owner fence。旧ticket不能替换新runner。新建lease发布失败仅清理本generation，复用正式runner不清理；真实controller及Settings交错覆盖两类结果。
+- 轮换过期补偿改为cancelPending(candidateId)，不能清理后来候选；显式取消同样绑定候选，主人明确reset仍保留整体重建语义。旧CAS提交后暂停返回、推进时钟并生成长期B的反例RED，修后B及撤销历史逐字不变。
+- end通知不再依赖generation已在endpoint入库：结束事实保存在external记录，CAS合并保持单调，revoke/reset不丢失；setTemporaryLease同一CAS拒绝已结束generation。首次发布CAS前退出、冲突重试、重启与reset后的迟到发布均拒绝，不能恢复死URL。新字段为插件内部可选状态，不扩Host/SDK契约。
+- 插件 `6f595400aabaa2ef60bda5461c4f7d3062529cac`：完整干净Dot246/246，增强重投递断言的干净journey16/16，类型与构建通过。alpha.49 SHA256 `6bc8a58ba1a6c3bd46f534e5f913c129e2a1d84a65adcec3ee3eb5a8865987f6`；89自有产物一致；压缩22,377,470/展开61,815,458字节，32/64MiB预算不变。
+- 五条意见均在原GitHub载体回复并逐字回读；新HEAD仍待CI/云端复审。本轮无运行实例操作、安装、重启、合并或发布。原contract/SDK未改，不重复不受影响的全套。
+- 最终Host API隔离完整编译、Biome/diff通过；精确alpha.49归档/闭包/显示/空缓存离线安装19项与历史56项共75/75，最终历史夹具重跑56/56；SendService及adversarial23/23。证据/tmp/f202-alpha49-host-acceptance.log、/tmp/f202-r8-host-send-regression.log，实际页面与冻结包边界证据如上。
