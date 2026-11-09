@@ -335,3 +335,13 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - fallback审视：本轮只有真实就绪信号与原代际守卫，没有新增catch/重试/多层fallback。尚未覆盖新的完整Host套件或实机soak，未安装、重启、合并或发布。
 
 - 最终受影响carrier/module/生产订阅/发布/投递检查84/84（/tmp/f202-r11-regression.log）；Biome无错误，7条警告未作无关重构；diff通过。
+
+
+### R12：Linux冻结包检查卡住，先补可定位的有界诊断
+
+当前Host1b8f0c8268的CI 42682674057：16项成功、distributable-5在30分钟job期限被取消，Public汇总因缺分片证明失败；插件4e2dc4e5两项CI仍成功。不能把取消说成业务断言已失败，也不能把其他通过项冒充全绿。
+
+- 精确计划artifact public-test-plan-378c8d4f5c2cb010c6f1f701b792f3f138b92762-attempt-1已下载到ignored acceptance/f202-ci-r12-plan。该lane日志最后完成f202-c1-publishing-message-store，下一文件是f202-dot-delivery-archive；之后25分钟无输出。阶段尚未定位到preflight/npm/模块或PNG处理中的哪一个，不宣称已知根因。
+- 本机按相同Node资源guard运行精确冻结包检查1/1通过；另从精确归档隔离提取并移开自身Darwin native后端，强制WASM成功编码PNG、读取metadata并正常退出。Docker CLI存在但无daemon，因此没有伪称本机Linux namespace复现。没有启动容器服务或访问运行实例。
+- 只改该冻结包测试：预检、空缓存npm离线安装、模块与PNG消费者各有即时阶段日志；安装与消费者各60秒硬期限，测试150秒期限，失败保留子进程错误与内部阶段。仍严格校验原归档SHA、空缓存/offline、真实安装模块和PNG输出；无跳过、重试变绿、放宽网络或生产预算。
+- 本机加阶段日志的原检查再次1/1通过（/tmp/f202-r12-stage-green.log），尚不能据此声明Linux卡住已修复。目标CI必须回读新日志再决定修复。证据/tmp/f202-r12-ci-distributable5.log、/tmp/f202-r12-ci-public-gate.log、/tmp/f202-r12-offline-guard-repro.log、/tmp/f202-r12-wasm-repro.log。产品代码和alpha.51包未变，沿用1b8f0c8268/4e2dc4e5的云端无重大问题回执；未合并或发布。
