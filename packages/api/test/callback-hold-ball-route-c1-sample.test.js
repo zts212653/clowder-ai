@@ -38,7 +38,7 @@ const VALID_WAIT_SOURCE_REF = {
   kind: 'github_issue',
   value: 'test/c1-sample',
   expectedSignal: 'test completion',
-  slaUntilMs: 3_600_000,
+  slaUntilMs: Date.now() + 3_600_000,
 };
 
 describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06-12 build verdict)', () => {
