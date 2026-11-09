@@ -139,3 +139,17 @@ alpha.37 最终包 SHA256 `11037b27a9598ea62b8e1907505b8c9f59a0a518d1f09bbdb5056
 修复仅在插件内捕获 runtime 构造时的 activation async context，并在该上下文创建后台计时器；状态查询、主人重试的同步授权仍按原上下文检查。后台任务仍逐步检查 installation/attempt/token/candidate/binding/event，停用与取消仍终止任务；未放宽 Host caller fence，也未引入新的 Host 后台权限接口。首次订阅与主人重试均覆盖请求结束后继续执行，并复用同一事件。
 
 RED/GREEN：`sol-auto-worker-repro.test.mjs`（本目录 acceptance/f202-target-response），旧包日志 `/tmp/f202-alpha38-worker-old.log`，修复日志 `/tmp/f202-alpha38-worker-new.log`；插件回归新增 activation/request 生命周期检查，完整204/204通过（`/tmp/f202-alpha38-suite.log`）。显式构建与类型检查通过。alpha.38 SHA256 `14b4d67f12c21350dcb2307d93ede8b74b4c00198303fd4b788ac58a1a43fd7d`，89个运行/资源/声明/文档文件匹配，精确准入与空缓存离线安装1/1。插件提交 `9385ebb6b955fb1d5e616ba0a73fd58bf3a1713b`，Host 仅随包与记录。独立复审待返回；尚未更新运行插件、重启或更改配置/凭据。最初通知未触发成功读取的云端原因，以及修复加载后的真实 Work 往返，仍待实机确认；不能将隔离回归当作已恢复。
+
+## alpha.39 首轮 GitHub 审查修复
+
+提交 PR 来源为本线程 operator 消息 `0001794224103181-000003-ede85be7`。Host 为 [clowder-ai#1923](https://github.com/zts212653/clowder-ai/pull/1923)（next），插件为 [clowder-ai-plugins#209](https://github.com/zts212653/clowder-ai-plugins/pull/209)（main）。目标分支前进造成的冲突仍待处理，本轮不合并或发布。
+
+云端三条 finding 均已独立验证：
+
+- [P1 收件箱升级](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4512415437)：新增严格 delivery.reason 使保留的 Superagent inbox 无法读取。只在持久 inbox 解码中为缺少 reason 的旧 message 补 subscription；不改全局 contract，也不接受没有 reason 的新入站。覆盖 pending/routed/failed/done，实际 coordinator inspect、主人 retry 和后续路由，并验证写回规范记录。
+- [P2 快速回复](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4512415447)：同线程/配对/目标成员的 ask reservation 尚未保存 messageId 时，不能把回复确认成不相关。现在抛可重放错误；Host SubscriptionDelivery 的持久游标只在全页接受后推进，保存 ask 回执并再次注册订阅后可重放。重放沿已有稳定 deliveryId 去重，无新增插件缓冲表、轮询或等待锁。
+- [P2 重复取消](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4512415459)：没有 pending 时返回当前状态，重复及 CAS 交错取消不再清掉恢复后的有效 endpoint，也不触发入口停止。
+
+同型检查：本 PR 中以新 delivery contract 解码持久原始 delivery 的入口只有 Superagent inbox；其读队列、检查、重试均共用该 schema。Dot 其他按 generation 保留 current 的到期路径已有 no-op，显式撤销仍有意清除授权。本轮三种失败分别属于存量解码、未完成关联的确认、幂等终态；未放松身份与撤销边界。
+
+RED 日志 `/tmp/f202-pr209-inbox-red.log`（旧记录4/4失败）、`/tmp/f202-pr209-dot-red.log`（快速回复被错误确认、重复取消清掉endpoint）。修复后 Superagent20/20及类型检查/构建、Dot205/205及显式构建通过；fallback检查相对9385ebb6没有模式增长。插件提交 `dacc5bf92dc0ef7c82761bbd8de30e744601fb1c`。alpha.39精确包SHA256 `2070781d7ef590712874e651462e2c96a416cef69d1c952bb74cca9131589836`，89文件匹配，归档准入/空缓存离线安装1/1。Host仅更新配套包与本记录，未操作运行实例。修复证据沿原GitHub线程回复并重触发cloud review，不召回已完成本地reviewer续签；新HEAD的远端审查尚待返回。
