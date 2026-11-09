@@ -228,3 +228,18 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 最终插件 HEAD `0c3b8457dcce0bd25330fe74707b1c17f99acd39`；干净冻结安装 Dot 222/222、89个自有发布文件逐字节一致。alpha.44 SHA256 `a39d8168901fd47091a15266571f12dcc82693f5d0cd73ae8d87043e1931ef99`，压缩22,375,382字节，展开61,803,004字节。当前树仅保留这一新增Dot版本；旧签名/native重构和通用共享授权产品仍在本次范围之外。完整API隔离编译通过，精确Host最终包预检/空缓存离线安装/入口与PNG实测通过，随包构建、闭包与显示检查19/19通过。归档检查由TS转为公共JS测试，并接入Windows smoke；远端当前HEAD CI仍是后续真相。
 
 日志：`/tmp/f202-alpha44-*`、`/tmp/f202-superagent-pnpm-green.log`、`/tmp/f202-superagent-npm-final.log`、`/tmp/f202-capabilities-fixture-green-query.log`、`/tmp/f202-official-contract-range-green.log`、`/tmp/f202-manager-guidance-green.log`、`/tmp/f202-host-production-page-green.log`。本轮隔离证据不替代新的Work/soak；外部finding修复后回云端，不继承旧HEAD的本地批准。
+
+
+## 第四轮云端反馈与剩余 CI（alpha.45）
+
+本轮先汇总两份 PR 当前精确 HEAD 的全部失败，再按“撤销后的调用不得借用新授权”与“清理候选必须恢复正式状态”复查同类边界，未恢复已撤出的业务层。
+
+- PR209 discussion_r4514952825 已复现：普通回复在 serial 队列等待，候选同 attempt 转正后，旧 token 仍可能借用新 current 发布文字和 completed。RPC 现在将原凭据传入所有外部操作，read 在读取后重核，reply/image/ask 在出队后及发布前重核原凭据。三个合法输入的排队回归均拒绝旧调用，换新凭据可正常发布；保留既有配对、实例、事件与 proof fence。
+- PR209 discussion_r4514952836 已复现：正式 A 退订清空 B 候选后仍广告 B 的失效 URL。现在同一次 external CAS 恢复 pending.previousEndpoint；正式凭据仍保留、候选仍由 store 同步记入撤销摘要，旧 proof 不转正。
+- 两条原问题在旧精确 HEAD 0c3b8457 的隔离源码上 RED，修复后 candidate-binding 18/18、干净完整 Dot 226/226、类型及构建通过。相同英文文档检查1/1通过；未声称完整 package inventory 本地通过（其他未构建插件没有 dist），当前 CI 曾在这一项只报告 Dot 英文标签。
+- Host 5ba67573 的 lane6 暴露合并残留的 gpt-dot 创建/修改/删除特判，已删除；恢复通用别名冲突检查。测试按上游当前保存契约提供 expectedRevision，成员CRUD71/71、插件寻址15/15通过，Pro固定身份保护保持。
+- lane1 新上游测试仍引用已删除的 DotConnectionRuntime。改用显式历史 builtin carrier 夹具，仍验证恢复意图、缺失归档拒绝和异常声明拒绝；不复活 Host Dot 业务，也不把夹具说成真实 Dot readiness。原三项3/3通过。
+
+插件 HEAD `29ead50d3d576faa2db9bf3823229512ccbac428`；alpha.45 SHA256 `7e301c48d84fa7e2062f79e46e6e67c54d9a20c253e1ea3753370799e7950b5b`，89个自有文件一致，压缩22,375,510字节、展开61,804,886字节，原归档预算不变。完整API隔离编译通过。Host上一精确提交的Windows冻结入口实测已通过（/tmp/f202-windows-5ba.log），构建与Web生产旅程也已远端通过；这些是上一HEAD的事实，不能直接宣称新HEAD CI全绿。
+
+本轮证据 `/tmp/f202-r4-*`、`/tmp/f202-alpha45-*`。代码与随包需回云端新HEAD复审；不继承5ba67573的无finding回执，不合并/发布/修改运行实例。

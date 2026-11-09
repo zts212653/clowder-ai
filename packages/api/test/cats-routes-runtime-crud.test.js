@@ -4832,12 +4832,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-dot',
       headers,
-      body: JSON.stringify({ mentionPatterns: ['@legacy-dot'] }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-dot', headers),
+        mentionPatterns: ['@legacy-dot'],
+      }),
     });
     assert.equal(renamed.statusCode, 200, renamed.body);
     assert.deepEqual(JSON.parse(renamed.body).cat.mentionPatterns, ['@legacy-dot']);
 
-    const removed = await app.inject({ method: 'DELETE', url: '/api/cats/gpt-dot', headers });
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: '/api/cats/gpt-dot',
+      headers,
+      body: JSON.stringify({ expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-dot', headers) }),
+    });
     assert.equal(removed.statusCode, 200, removed.body);
     await app.close();
   });

@@ -1065,14 +1065,6 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const body = parsed.data;
 
       const createViolationFields = builtinCloudIdentityCreateViolationFields(body);
-      if (
-        body.catId === 'gpt-dot' ||
-        body.mentionPatterns?.some((pattern) => pattern.trim().toLowerCase().replace(/^@/, '') === 'dot')
-      ) {
-        return reply
-          .code(409)
-          .send({ code: 'BUILTIN_CLOUD_HANDLE_RESERVED', error: '请在 ChatGPT 云端插件中接入这只独立云端成员。' });
-      }
       if (createViolationFields.length > 0) {
         reply.status(409);
         return {
@@ -1407,14 +1399,6 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         });
       }
       const restoringBuiltinCloudIdentity = body.restoreBuiltinCloudIdentity === true;
-      if (request.params.id === 'gpt-dot') {
-        const fields = [...BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS, 'mentionPatterns', 'restoreBuiltinCloudIdentity'];
-        if (fields.some((field) => Object.hasOwn(body, field)))
-          return reply.code(409).send({
-            code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
-            error: 'dot 的身份与连接在插件集成中管理。',
-          });
-      }
       const patchViolationFields = isBuiltinGptProIdentity(request.params.id)
         ? builtinCloudIdentityPatchViolationFields(body)
         : [];
@@ -1862,7 +1846,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
     }
-    if (isBuiltinGptProIdentity(request.params.id) || request.params.id === 'gpt-dot') {
+    if (isBuiltinGptProIdentity(request.params.id)) {
       reply.status(409);
       return {
         code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
