@@ -684,42 +684,60 @@ test('#883: subscription deny-list survives accountEnv merge (proxy token in acc
   );
 });
 
-test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', async () => {
-  const prevApiKey = process.env.ANTHROPIC_API_KEY;
-  const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;
-  process.env.ANTHROPIC_API_KEY = 'sk-inherited';
-  process.env.ANTHROPIC_BASE_URL = 'https://inherited.example.com';
+for (const explicitAccountEnv of [false, true])
+  test(`api_key profile owns destination/auth while explicit account env stays authoritative (${explicitAccountEnv})`, async () => {
+    const prevApiKey = process.env.ANTHROPIC_API_KEY;
+    const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;
+    const prevAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = 'sk-inherited';
+    process.env.ANTHROPIC_BASE_URL = 'https://inherited.example.com';
+    process.env.ANTHROPIC_AUTH_TOKEN = 'fixture-ambient';
 
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = createClaudeAgentService({ spawnFn });
 
-  try {
-    const promise = collect(
-      service.invoke('hello', {
-        callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3004',
-          CAT_CAFE_INVOCATION_ID: 'inv-2',
-          CAT_CAFE_CALLBACK_TOKEN: 'token-2',
-          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
-          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-sponsor',
-          CAT_CAFE_ANTHROPIC_BASE_URL: 'https://sponsor.example.com',
-        },
-      }),
-    );
-    await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
-    await promise;
+    try {
+      const promise = collect(
+        service.invoke('hello', {
+          ...(explicitAccountEnv
+            ? {
+                accountEnv: {
+                  ANTHROPIC_BASE_URL: 'https://selected-gateway.invalid',
+                  ANTHROPIC_AUTH_TOKEN: 'fixture-selected',
+                },
+              }
+            : {}),
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://localhost:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-2',
+            CAT_CAFE_CALLBACK_TOKEN: 'token-2',
+            CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+            CAT_CAFE_ANTHROPIC_API_KEY: 'sk-sponsor',
+            ANTHROPIC_BASE_URL: 'https://upstream-template.invalid/v1',
+            CAT_CAFE_ANTHROPIC_BASE_URL: 'https://sponsor.example.com',
+          },
+        }),
+      );
+      await emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+      await promise;
 
-    const spawnOpts = spawnFn.mock.calls[0].arguments[2];
-    assert.equal(spawnOpts.env.ANTHROPIC_API_KEY, 'sk-sponsor');
-    assert.equal(spawnOpts.env.ANTHROPIC_BASE_URL, 'https://sponsor.example.com');
-  } finally {
-    if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = prevApiKey;
-    if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
-    else process.env.ANTHROPIC_BASE_URL = prevBaseUrl;
-  }
-});
+      const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+      assert.equal(spawnOpts.env.ANTHROPIC_API_KEY, 'sk-sponsor');
+      assert.equal(
+        spawnOpts.env.ANTHROPIC_BASE_URL,
+        explicitAccountEnv ? 'https://selected-gateway.invalid' : 'https://sponsor.example.com',
+      );
+      assert.equal(spawnOpts.env.ANTHROPIC_AUTH_TOKEN, explicitAccountEnv ? 'fixture-selected' : undefined);
+    } finally {
+      if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prevApiKey;
+      if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = prevBaseUrl;
+      if (prevAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+      else process.env.ANTHROPIC_AUTH_TOKEN = prevAuthToken;
+    }
+  });
 
 test('pickGitBashPathFromWhere accepts nonstandard bash.exe locations returned by where', () => {
   const whereOutput = [

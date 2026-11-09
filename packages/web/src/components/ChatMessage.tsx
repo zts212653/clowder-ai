@@ -5,6 +5,7 @@ import {
   companionIdentitySnapshotV1Schema,
   isCrossThreadProvenance,
   type LifecycleActiveRun,
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2,
 } from '@cat-cafe/shared';
 import { type CSSProperties, memo, type ReactNode } from 'react';
 import { WorkCardMessageContext } from '@/components/artifacts/work-card-message-context';
@@ -43,7 +44,7 @@ import {
   isLinkedCloudBindingRecoveryNotice,
   projectCloudBindingRecovery,
 } from './cloud-binding-recovery';
-import { cloudCarrierDispatch, cloudReceiptOf } from './cloud-dispatch-receipt';
+import { cloudCarrierDispatch, cloudReceiptOf, hasNativeCloudDeliveryReceipt } from './cloud-dispatch-receipt';
 import { CompanionMessageAvatar, CompanionMessageIdentity } from './concierge/CompanionMessageIdentity';
 import { ContentModificationReceiptCard } from './content-review/ContentModificationReceiptCard';
 import { ContentModificationSourceMessage } from './content-review/ContentModificationSourceMessage';
@@ -62,6 +63,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { MessageDispatchAvatars } from './MessageDispatchAvatars';
 import { MetadataBadge } from './MetadataBadge';
+import { ProviderCitationContext } from './markdown-provider-citations';
 import { buildMessageDisclosureKey, buildRichHtmlDisclosureKey } from './message-disclosure-state';
 import { isConnectorSystemNotice } from './message-render-visibility';
 import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
@@ -477,7 +479,7 @@ function ChatMessageContent({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
-  if (cloudCarrier && cloudReply.state !== 'unverified')
+  if (cloudCarrier && (cloudReply.state !== 'unverified' || hasNativeCloudDeliveryReceipt(cloudCarrier)))
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
   if (isSummary && message.summary) {
     return (
@@ -512,8 +514,14 @@ function ChatMessageContent({
       case 'briefing':
         return (
           <div data-message-id={message.id} className="flex justify-center mb-3">
-            <div className="max-w-[85%] w-full opacity-80">
-              <BriefingCard block={surface.block} messageId={message.id} />
+            <div
+              className={`max-w-[85%] w-full ${message.extra?.systemKind === 'context_briefing' ? '' : 'opacity-80'}`}
+            >
+              <BriefingCard
+                block={surface.block}
+                messageId={message.id}
+                contextBriefing={message.extra?.systemKind === 'context_briefing'}
+              />
             </div>
           </div>
         );
@@ -647,10 +655,11 @@ function ChatMessageContent({
     // The human colour's light step. With no colour configured the role is the shared cocoa (shell-v2.css bakes its hue and
     // chroma, and CoCreatorHueInjector replaces them when the config has one), so there is no separate neutral fallback.
     const humanFill = 'var(--color-cocreator-surface)';
+    // The action plane measures this zero-size slot; keep it before the human block, outside its text.
     const humanHeader = (
       <div
         data-testid="human-message-header"
-        className={`relative flex w-full justify-end items-center gap-2${humanHasMarks ? ' mb-1' : ''}`}
+        className={`relative flex w-full justify-end items-center gap-2 [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-1/2${humanHasMarks ? ' mb-1' : ''}`}
       >
         <MessageActionSlot />
         {isWhisper && (
@@ -1041,7 +1050,19 @@ function ChatMessageContent({
     <ReplyOutputBody output={nativeReplyOutput} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
   ) : isStreamOrigin ? (
     cliStdoutContent?.trim() ? (
-      <CollapsibleMarkdown content={cliStdoutContent} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
+      <div
+        data-context-quote-source={cachedR21SpeechStdout ? 'cli_output' : undefined}
+        data-context-quote-segment-id={cachedR21SpeechStdout ? 'stdout' : undefined}
+        data-context-quote-projection-version={
+          cachedR21SpeechStdout ? MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 : undefined
+        }
+      >
+        <CollapsibleMarkdown
+          content={cliStdoutContent}
+          className={REPLY_BODY_CLASS}
+          disclosureKey={bodyDisclosureKey}
+        />
+      </div>
     ) : null
   ) : hasBlocks ? (
     <ContentBlocks
@@ -1276,10 +1297,21 @@ function ChatMessageContent({
 }
 
 export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
+  const shell = useShellPresentation();
   const queue = useChatStore((state) => {
     const threadId = props.threadId ?? state.currentThreadId;
     return threadId === state.currentThreadId ? state.queue : state.threadStates[threadId]?.queue;
   });
   if (isHiddenChatRow(props.message)) return null;
-  return <ChatMessageContent {...props} queue={queue} />;
+  const providerCitations =
+    shell === 'v2' &&
+    props.message.type === 'assistant' &&
+    props.message.from?.kind === 'agent' &&
+    props.message.from.catId === props.message.catId &&
+    (props.message.catId === 'gpt-pro' || props.message.catId === 'gpt-dot');
+  return (
+    <ProviderCitationContext.Provider value={providerCitations}>
+      <ChatMessageContent {...props} queue={queue} />
+    </ProviderCitationContext.Provider>
+  );
 });

@@ -127,6 +127,7 @@ describe('F311 Evolution Program Workbench surface', () => {
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     apiFetchMock.mockReset();
     assetFetchMock.mockReset();
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
@@ -138,6 +139,7 @@ describe('F311 Evolution Program Workbench surface', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem('cat-cafe:shell-presentation');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 

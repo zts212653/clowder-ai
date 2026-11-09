@@ -1,10 +1,11 @@
 import type { ReactNode, RefObject } from 'react';
-import type { FileActionSource } from './file-action-client';
+import type { ArtworkPixelRegion, FileActionSource } from './file-action-client';
 import type { useArtworkViewport } from './useArtworkViewport';
 
 export type FileActionsProps = {
   src?: string | null;
   mediaType?: 'image' | 'video';
+  pixelRegion?: ArtworkPixelRegion;
   source: FileActionSource;
   filename: string;
   mime?: string;

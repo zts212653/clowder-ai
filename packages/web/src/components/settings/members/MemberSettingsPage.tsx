@@ -69,7 +69,11 @@ export function MemberSettingsPage({
         ? dshMember({
             clientId: form.clientId,
             agentProvider: form.acpAgentProvider,
-            acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs) },
+            acp: {
+              command: form.acpCommand,
+              startupArgs: splitCommandArgs(form.acpStartupArgs),
+              transport: form.acpTransport,
+            },
           })
           ? 'DSH'
           : 'ACP'
@@ -241,6 +245,7 @@ export function MemberSettingsPage({
                 ) : null
               ) : (
                 <MemberAdditionalFields
+                  cat={baseline}
                   section={section}
                   visualAssets={draft.baseline?.visualAssets}
                   onAvatarCommitted={editor.avatarCommitted}

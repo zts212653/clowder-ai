@@ -22,6 +22,7 @@ import type { BallCustodyFencedAppendResult, IBallCustodyEventLog } from './Ball
 import type { BallCustodyProjector } from './BallCustodyProjector.js';
 
 export interface IBallCustodyIngest {
+  recordConfirmed?(event: BallCustodyEvent): Promise<boolean>;
   record(event: BallCustodyEvent): Promise<void>;
 }
 
@@ -57,6 +58,19 @@ export class BallCustodyIngest implements IBallCustodyFencedIngest {
 
   record(event: BallCustodyEvent): Promise<void> {
     return this.enqueue(event.subjectKey, () => this.doRecord(event));
+  }
+
+  recordConfirmed(event: BallCustodyEvent): Promise<boolean> {
+    return this.enqueue(event.subjectKey, async () => {
+      if (!this.eventLog.appendExact) return false;
+      const knownIntent = await this.projector.prepareConfirmed(event);
+      const result = await this.eventLog.appendExact(event);
+      // A historical duplicate without a native intent/receipt has unknown projection status.
+      // Explicit projection rebuild can confirm it; guessing would replay an already-applied wake.
+      if (!result.confirmed || (!result.appended && !knownIntent)) return false;
+      await this.projector.applyConfirmed(event);
+      return true;
+    });
   }
 
   recordFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedRecordResult> {

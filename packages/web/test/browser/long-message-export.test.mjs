@@ -6,7 +6,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
+import { CLIENT_DIAGNOSTIC_REQUEST_HEADERS } from '@cat-cafe/shared';
 import { chromium } from 'playwright';
 import sharp from 'sharp';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
@@ -160,7 +160,7 @@ test(
       response.setHeader('Access-Control-Allow-Credentials', 'true');
       response.setHeader(
         'Access-Control-Allow-Headers',
-        `X-Cat-Cafe-User, Content-Type,${CLIENT_REQUEST_DIAGNOSTIC_HEADER}`,
+        `X-Cat-Cafe-User, Content-Type,${CLIENT_DIAGNOSTIC_REQUEST_HEADERS.join(',')}`,
       );
       response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       response.setHeader('Content-Type', 'application/json');

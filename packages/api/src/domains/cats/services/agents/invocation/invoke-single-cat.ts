@@ -100,6 +100,7 @@ import { ToolSpanTracker } from '../../../../../infrastructure/telemetry/tool-sp
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { withEnvironmentReferenceOverrides } from '../../../../../utils/env-references.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { readProcessActivity } from '../../../../../utils/process-activity-registry.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
@@ -1548,60 +1549,62 @@ export async function prepareInvocationExecutionBinding(
     catConfig?.mcpSupport !== false &&
     input.toolExecutionPolicy?.mode !== 'read_only';
   let isPluginMcpCurrent = () => true;
-  const mcpSources = await captureInvocationMcpSources(async () =>
-    captureOptions || captureOpenCodeMcp || captureSharedMcp
-      ? await preflightRace(
-          Promise.resolve().then(async () => {
-            const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
-            isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
-            input.signal?.throwIfAborted();
-            return withInvocationPluginMcpView(
-              async () => {
-                const providerOptions = captureOptions
-                  ? await captureOptions({
-                      signal: input.signal,
-                      workingDirectory: workspace.workingDirectory,
-                      toolExecutionPolicy: input.toolExecutionPolicy,
-                      accountEnv: binding.accountEnv,
-                      accountRef: binding.resolvedAccount?.id,
-                      mcpSupport: binding.catConfig?.mcpSupport !== false,
-                      liveCompanion: input.liveCompanion,
-                    })
-                  : undefined;
-                input.signal?.throwIfAborted();
-                const openCodeMcpConfig = captureOpenCodeMcp
-                  ? await captureOpenCodeMcpConfig(
-                      binding.projectRoot,
-                      input.catId,
-                      captureOpenCodeMcp,
-                      workspace.workingDirectory,
-                    )
-                  : undefined;
-                input.signal?.throwIfAborted();
-                const sharedMcpContext = captureSharedMcp
-                  ? await prepareSharedMcpLaunch({
-                      catId: input.catId,
-                      apiUrl: deps.apiUrl,
-                      workingDirectory: workspace.workingDirectory,
-                      transport: mcpTransport,
-                    })
-                  : undefined;
-                return {
-                  ...(providerOptions ? { providerOptions } : {}),
-                  ...(openCodeMcpConfig ? { openCodeMcpConfig } : {}),
-                  sharedMcpLaunch: { transport: mcpTransport, context: sharedMcpContext },
-                };
-              },
-              view,
-              input.ownerAuthProvenance === 'strict' && exposureProject
-                ? { kind: 'member', projectRoot: exposureProject, memberCatId: input.catId }
-                : undefined,
-            );
-          }),
-          'service.captureInvocationOptions:execution-binding',
-          input.signal,
-        )
-      : { sharedMcpLaunch: { transport: mcpTransport } },
+  const mcpSources = await captureInvocationMcpSources(() =>
+    withEnvironmentReferenceOverrides(binding.accountEnv ?? {}, async () =>
+      captureOptions || captureOpenCodeMcp || captureSharedMcp
+        ? await preflightRace(
+            Promise.resolve().then(async () => {
+              const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
+              isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
+              input.signal?.throwIfAborted();
+              return withInvocationPluginMcpView(
+                async () => {
+                  const providerOptions = captureOptions
+                    ? await captureOptions({
+                        signal: input.signal,
+                        workingDirectory: workspace.workingDirectory,
+                        toolExecutionPolicy: input.toolExecutionPolicy,
+                        accountEnv: binding.accountEnv,
+                        accountRef: binding.resolvedAccount?.id,
+                        mcpSupport: binding.catConfig?.mcpSupport !== false,
+                        liveCompanion: input.liveCompanion,
+                      })
+                    : undefined;
+                  input.signal?.throwIfAborted();
+                  const openCodeMcpConfig = captureOpenCodeMcp
+                    ? await captureOpenCodeMcpConfig(
+                        binding.projectRoot,
+                        input.catId,
+                        captureOpenCodeMcp,
+                        workspace.workingDirectory,
+                      )
+                    : undefined;
+                  input.signal?.throwIfAborted();
+                  const sharedMcpContext = captureSharedMcp
+                    ? await prepareSharedMcpLaunch({
+                        catId: input.catId,
+                        apiUrl: deps.apiUrl,
+                        workingDirectory: workspace.workingDirectory,
+                        transport: mcpTransport,
+                      })
+                    : undefined;
+                  return {
+                    ...(providerOptions ? { providerOptions } : {}),
+                    ...(openCodeMcpConfig ? { openCodeMcpConfig } : {}),
+                    sharedMcpLaunch: { transport: mcpTransport, context: sharedMcpContext },
+                  };
+                },
+                view,
+                input.ownerAuthProvenance === 'strict' && exposureProject
+                  ? { kind: 'member', projectRoot: exposureProject, memberCatId: input.catId }
+                  : undefined,
+              );
+            }),
+            'service.captureInvocationOptions:execution-binding',
+            input.signal,
+          )
+        : { sharedMcpLaunch: { transport: mcpTransport } },
+    ),
   );
   const captured = mcpSources.value;
   input.signal?.throwIfAborted();
@@ -1988,7 +1991,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
     if (deps.matterMemoryService && params.ownerAuthProvenance === 'strict') {
-      invocationPromptAdditions.push(await matterOpeningDirectory(deps.matterMemoryService, userId, catId));
+      invocationPromptAdditions.push(await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId));
     }
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {
       try {
@@ -5316,7 +5319,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             const digestInput = captureExecutionDigest(
               capturedMissionPack,
               {
-                summary: '', // Populated by HandoffDigestGenerator in future enhancement
+                summary: '', // Visible invocation metadata is populated by the running member.
                 filesChanged: [],
                 blocked: false,
                 hadError: hadStreamError,

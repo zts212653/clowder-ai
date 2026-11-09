@@ -25,9 +25,13 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, type CliEffortPreset, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
-import { summarizeMcpInjection } from '../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  resolveBinaryRoot,
+  summarizeMcpInjection,
+} from '../../../../../config/capabilities/capability-orchestrator.js';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { PROVIDER_BASE_URLS } from '../../../../../config/provider-endpoint.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
@@ -291,16 +295,17 @@ export function buildClaudeEnvOverrides(
   const mode = callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY];
   if (mode === 'api_key') {
     const apiKey = callbackEnv?.[ANTHROPIC_PROFILE_API_KEY]?.trim();
-    const baseUrl = callbackEnv?.[ANTHROPIC_PROFILE_BASE_URL]?.trim();
+    const baseUrl =
+      callbackEnv?.[ANTHROPIC_PROFILE_BASE_URL]?.trim() ||
+      env.ANTHROPIC_BASE_URL?.trim() ||
+      PROVIDER_BASE_URLS.anthropic;
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-    if (baseUrl) {
-      // Claude CLI internally appends /v1 to the base URL.
-      // If the user configured it with /v1 already, strip it to prevent
-      // double /v1/v1 and to avoid the CLI's model validation against
-      // the /v1/models endpoint (which many proxies don't support).
-      const cleanUrl = baseUrl.replace(/\/v1\/?$/, '');
-      env.ANTHROPIC_BASE_URL = cleanUrl;
-    }
+    // Resolved account templates are explicit; only absent tokens clear ambient
+    // auth. Profile/proxy routing stays authoritative, then account templates,
+    // then the official endpoint. Literal accountEnv still applies last.
+    if (!env.ANTHROPIC_AUTH_TOKEN?.trim()) env.ANTHROPIC_AUTH_TOKEN = null;
+    // Claude CLI appends /v1. Preserve configured gateways without doubling it.
+    env.ANTHROPIC_BASE_URL = baseUrl.replace(/\/v1\/?$/, '');
 
     // Third-party Anthropic-compatible APIs (e.g. BigModel, MaaS) may expose
     // non-Anthropic model names such as glm-5. Claude CLI accepts those via
@@ -362,6 +367,11 @@ export function resolveDefaultClaudeMcpServerPath(cwd = process.cwd()): string |
     resolve(cwd, 'packages/mcp-server/dist/index.js'),
     resolve(cwd, '../../packages/mcp-server/dist/index.js'),
   ];
+
+  // Desktop declares its shipped binaries separately from the writable project.
+  if (process.env.CAT_CAFE_RUNTIME_ROOT?.trim()) {
+    candidates.push(resolve(resolveBinaryRoot(cwd), 'packages/mcp-server/dist/index.js'));
+  }
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;

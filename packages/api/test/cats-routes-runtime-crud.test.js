@@ -185,6 +185,46 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     console.log('Retained isolated catalog fixtures:', JSON.stringify(tempDirs));
   });
 
+  it('returns compiler identity inputs on reads and saves without persisting those projections', async () => {
+    const projectRoot = createProjectRoot();
+    const previousCwd = process.cwd();
+    process.chdir(projectRoot);
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    mkdirSync(join(projectRoot, 'docs/team'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, 'docs/team/cat-dossier.md'),
+      '# Fixture\n```yaml\n# structured-profile: cat:opus\nentityId: "cat:opus"\nl0RosterSummary: "profile contribution"\nl0RoutingNote: "profile limitation"\n```\n',
+    );
+    const app = (await import('fastify')).default();
+    await app.register((await import('../dist/routes/cats.js')).catsRoutes);
+    const headers = { 'x-cat-cafe-user': 'default-user' };
+    try {
+      const listed = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      assert.equal(listed.statusCode, 200, listed.payload);
+      let cat = listed.json().cats.find((entry) => entry.id === 'opus');
+      assert.equal(cat.identitySources.roleDescription, 'breed');
+      assert.equal(cat.identityProfile.l0RosterSummary, 'profile contribution');
+      assert.equal(cat.identityProfile.l0RoutingNote, 'profile limitation');
+      for (const caution of ['own limitation', null]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: '/api/cats/opus',
+          headers,
+          payload: { caution, expectedRevision: cat.configurationRevision },
+        });
+        assert.equal(response.statusCode, 200, response.payload);
+        cat = response.json().cat;
+        assert.equal(cat.identitySources.caution, caution ? 'variant' : 'template');
+        assert.equal(cat.identityProfile.l0RoutingNote, 'profile limitation');
+      }
+      const persisted = readFileSync(join(projectRoot, '.cat-cafe/cat-catalog.json'), 'utf8');
+      assert.doesNotMatch(persisted, /identitySources|identityProfile|profile limitation/);
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+    }
+  });
+
   it('persists a member banner through POST, GET and PATCH removal without changing its avatar', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

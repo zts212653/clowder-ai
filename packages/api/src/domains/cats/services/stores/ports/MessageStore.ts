@@ -80,6 +80,7 @@ import { notifyMessageTimelineChange } from '../notify-message-timeline-change.j
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
   isTimelinePublished as isTimelinePublishedFn,
@@ -402,6 +403,8 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /** Server-owned receipt identifying the buffered snapshot actually included in this post. */
+    richBlockPublicationId?: string;
     /** Host-only binding of a durable memory result to this exact rich block. */
     messageSearchAnswer?: import('@cat-cafe/shared').MessageSearchAnswerBinding;
     /** Outbound media owns publication until durable materialization completes. */
@@ -2150,6 +2153,9 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Fresh full hashes in bounded batches, with one entry per requested ID.
+   * Missing is null; transport/incomplete replies reject. Never an admission grant. */
+  getByIds?(ids: readonly string[]): Promise<Map<string, StoredMessage | null>>;
   /**
    * Fresh media/visibility projection for exact publication reads. May omit
    * top-level content, thinking, metadata and toolEvents; never an authority verdict.
@@ -2380,11 +2386,21 @@ export interface IMessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       /** Bind human read-state evidence to viewer-scoped managed-hold publication. */
       readonly viewerUserId?: string;
     },
   ): { cursor: string; messageId: string } | null | Promise<{ cursor: string; messageId: string } | null>;
+  /** Internal publication scan position; never exposed as another owner's browser cursor. */
+  getVisibilityHead(threadId: string): number | Promise<number>;
+  /** Read at most 50 raw publication positions, including hidden rows. */
+  getBrowserHistoryChanges(
+    threadId: string,
+    viewerUserId: string,
+    afterSeq: number,
+  ):
+    | { messages: StoredMessage[]; scannedThrough: number; exhausted: boolean }
+    | Promise<{ messages: StoredMessage[]; scannedThrough: number; exhausted: boolean }>;
   /**
    * #1200 §8.7: Canonicalize a raw message ID to a v2 cursor token.
    *
@@ -2687,6 +2703,7 @@ export class MessageStore {
     }
     message.visibilitySeq = this.visibilitySeq.get(message.id);
     this.userMentionIndex.observe(message);
+    notifyMessageTimelineChange(this, message);
   }
 
   /**
@@ -3530,38 +3547,60 @@ export class MessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): { cursor: string; messageId: string } | null {
     // Collect messages from the shared visibility order, then apply the
     // consumer-selected evidence strength.
-    const visible: Array<{ id: string; seq: number }> = [];
+    let latest: { id: string; seq: number } | undefined;
     for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
       const eligible =
-        options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublishedFn(msg);
+        options?.evidence === 'browser_timeline'
+          ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
+          : options?.evidence === 'durable_owner_read'
+            ? isDurableOwnerReadEvidence(msg)
+            : isTimelinePublishedFn(msg);
       if (!eligible) continue;
       if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
       // #1200 codex P1: skip tombstones — same contract as Redis impl.
       // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
       if (msg.deletedAt) continue;
-      visible.push({ id: msg.id, seq });
+      if (!latest || seq > latest.seq || (seq === latest.seq && msg.id > latest.id)) latest = { id: msg.id, seq };
     }
-    if (visible.length === 0) return null;
-
-    // Sort descending by (seq, id) — we want the latest
-    visible.sort((a, b) => {
-      if (a.seq !== b.seq) return b.seq - a.seq;
-      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-    });
-
-    const latest = visible[0]!;
+    if (!latest) return null;
     return {
       cursor: cursorFor({ id: latest.id, visibilitySeq: latest.seq }),
       messageId: latest.id,
+    };
+  }
+
+  getVisibilityHead(threadId: string): number {
+    return this.messages.reduce(
+      (head, message) =>
+        message.threadId === threadId ? Math.max(head, this.visibilitySeq.get(message.id) ?? 0) : head,
+      0,
+    );
+  }
+
+  getBrowserHistoryChanges(threadId: string, viewerUserId: string, afterSeq: number) {
+    const byId = new Map(this.messages.map((message) => [message.id, message]));
+    const candidates: StoredMessage[] = [];
+    // Positions enter this Map only at monotonic allocation, already in scan order.
+    for (const [id, seq] of this.visibilitySeq) {
+      if (seq <= afterSeq) continue;
+      const message = byId.get(id);
+      if (!message || message.threadId !== threadId) continue;
+      candidates.push({ ...message, visibilitySeq: seq });
+      if (candidates.length === 50) break;
+    }
+    return {
+      messages: candidates.filter((message) => isBrowserHistoryMessageVisibleToViewer(message, viewerUserId)),
+      scannedThrough: candidates.at(-1)?.visibilitySeq ?? afterSeq,
+      exhausted: candidates.length < 50,
     };
   }
 
@@ -3894,6 +3933,17 @@ export class MessageStore {
   commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): CommitLifecyclePreAdmissionFailureResult {
+    const result = this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): CommitLifecyclePreAdmissionFailureResult {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
@@ -4074,6 +4124,7 @@ export class MessageStore {
     }
     if (transition.kind === 'replayed') return { kind: 'replayed', message: structuredClone(message) };
     message.lifecycle = structuredClone(transition.lifecycle);
+    notifyMessageTimelineChange(this, message);
     return { kind: 'applied', message: structuredClone(message) };
   }
 

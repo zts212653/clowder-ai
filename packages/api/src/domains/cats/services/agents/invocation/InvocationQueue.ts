@@ -36,6 +36,7 @@ import {
   type ActionSuccessorFence,
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import { isTaskHandoffSource } from '../../../../ball-custody/task-handoff-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import type { LifecycleAppendRecoveryInput } from '../../stores/lifecycle-append-recovery.js';
 import { type LifecycleWakeCoverageInput, ordinaryWakeCoverageEligible } from '../../stores/lifecycle-wake-coverage.js';
@@ -260,6 +261,19 @@ function isOrdinaryBodyReadEntry(entry: Pick<QueueEntry, 'sourceCategory' | 'exe
     !entry.execution.actionSuccessorFence &&
     !entry.execution.waitContinuationCarrier &&
     !entry.execution.executionScope
+  );
+}
+
+/** Public message target selection and continue do not acquire a domain carrier's work. */
+export function isQueueMessageSelectionEligible(entry: QueueEntry): boolean {
+  return (
+    !isSystemPinnedQueueEntry(entry) &&
+    (entry.kind === 'conversation_input' ||
+      (entry.kind === 'message_wake' &&
+        entry.sourceCategory === 'a2a' &&
+        isOrdinaryBodyReadEntry(entry) &&
+        !entry.execution.cloudDispatchProvenance &&
+        !entry.execution.requiresExactCloudDispatchProvenance))
   );
 }
 
@@ -1400,7 +1414,7 @@ export class InvocationQueue {
   }
 
   /**
-   * Bind one public conversation input to the selected member and persist
+   * Bind one ordinary public message to the selected member and persist
    * the operator's non-interrupting delivery choice. This is the Queue-panel
    * counterpart of composer admission: the same row either appends to the
    * exact current run or remains ordinary next work without canceling it.
@@ -1414,7 +1428,7 @@ export class InvocationQueue {
     at = Date.now(),
   ): Promise<QueueEntry | null> {
     const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || entry.kind !== 'conversation_input' || isSystemPinnedQueueEntry(entry)) {
+    if (!entry || entry.status !== 'queued' || !isQueueMessageSelectionEligible(entry)) {
       return null;
     }
     const assignsTargetlessConversation = entry.targets.length === 0;
@@ -1747,6 +1761,7 @@ export class InvocationQueue {
         source &&
         source.userId === userId &&
         source.threadId === threadId &&
+        !isTaskHandoffSource(source) &&
         source.visibility !== 'whisper' &&
         isTimelinePublished(source) &&
         !source.recall &&

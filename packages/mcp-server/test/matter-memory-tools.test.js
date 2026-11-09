@@ -57,3 +57,17 @@ test('matter tools carry source selections and exact retries through the shared 
     false,
   );
 });
+
+test('canonical matter descriptions distinguish contextual interpretation, exact speech and a real read', async () => {
+  const { matterMemoryTools } = await import('../dist/tools/matter-memory-tools.js');
+  const read = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_read_memory_matter');
+  const write = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_write_memory_matter');
+  assert.match(read.description, /description.*contextual interpretation/i);
+  assert.match(read.description, /raw quotes/i);
+  assert.match(read.description, /changed.*interpretation.*unverified/i);
+  assert.match(read.description, /Directory.*do not count/i);
+  assert.match(write.description, /description.*background.*scope/i);
+  assert.match(write.description, /sources.*exact original/i);
+  assert.match(write.description, /optional.*simple facts/i);
+  assert.match(write.description, /current.*instruction.*precedence/i);
+});

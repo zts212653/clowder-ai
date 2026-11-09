@@ -11,6 +11,14 @@ import type { CodexAppServerNativeRpcClient } from '../../cats/services/agents/p
 import type { TranscriptWriter } from '../../cats/services/session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import type { ITurnExecutionStore } from '../../cats/services/stores/ports/TurnExecutionStore.js';
+import {
+  WATCHER_RECOVERY_DEADLINE_EXCEEDED,
+  WATCHER_RECOVERY_TOOL_BUDGET_EXHAUSTED,
+  type WatcherWindow,
+  watcherBudgetFailure,
+  watcherBudgetRecovery,
+} from './context/watcher-budget-progress.js';
+import type { WatcherInvocationOwners, WatcherRunState } from './watcher-invocation-contract.js';
 
 export interface WatcherCheckpointOwners {
   sessions: ISessionChainStore;
@@ -27,6 +35,101 @@ export async function saveWatcherState(
   const saved = await sessions.compareAndSetWatcherState(id, current.revision, next);
   if (!saved) throw new Error('watcher_session_changed');
   return saved;
+}
+
+/** Preserve the original bounded failure cause even when native interruption has no error payload. */
+export async function failWatcherAttempt(
+  owners: WatcherInvocationOwners,
+  run: WatcherRunState,
+  invocationId: string,
+  error: unknown,
+  abort: AbortSignal,
+): Promise<unknown> {
+  const diagnosticReason = (value: unknown) => (value instanceof Error ? value.message : String(value)).slice(0, 500);
+  let cause = error;
+  let origin = 'provider';
+  let boundaryCause: unknown;
+  try {
+    run.boundary?.assertHealthy();
+  } catch (boundaryError) {
+    boundaryCause = boundaryError;
+    cause = boundaryError;
+    origin = 'request_boundary';
+  }
+  if (error instanceof Error && error.message === 'watcher_native_still_active') {
+    // A late control/deadline signal is no proof that this prior native turn stopped.
+    cause = error;
+    origin = 'native_proof';
+  } else if (abort.aborted) {
+    cause = abort.reason;
+    origin = 'local_abort';
+    try {
+      // Neither time nor tickets can be restored by shrinking again after this wake's proven budget recovery.
+      if (
+        cause instanceof Error &&
+        run.state.wakeInvocationId === invocationId &&
+        run.state.rawWindowTokens !== undefined
+      ) {
+        if (cause.message === 'watcher_deadline_exceeded') cause = new Error(WATCHER_RECOVERY_DEADLINE_EXCEEDED);
+        else if (
+          cause.message === 'watcher_repeated_tool_budget_denial' &&
+          (await owners.registry.watcherToolCallCount(invocationId)) >= 6
+        )
+          cause = new Error(WATCHER_RECOVERY_TOOL_BUDGET_EXHAUSTED);
+      }
+    } catch {
+      // An unavailable counter cannot prove exhaustion or replace the original local cause.
+    }
+    if (
+      abort.reason instanceof Error &&
+      ['watcher_deadline_exceeded', 'watcher_repeated_tool_budget_denial'].includes(abort.reason.message) &&
+      !watcherBudgetFailure(cause) &&
+      watcherBudgetFailure(boundaryCause)
+    ) {
+      // A real first budget refusal is not a transport symptom of cancellation.
+      cause = boundaryCause;
+      origin = 'request_boundary';
+    }
+  }
+  const { session } = run;
+  const failure = diagnosticReason(cause);
+  await owners.transcript
+    .appendDurableEvent(
+      {
+        sessionId: session.id,
+        threadId: session.threadId,
+        catId: session.catId,
+        seq: session.seq,
+        cliSessionId: session.cliSessionId,
+      },
+      {
+        type: 'watcher_attempt_failure',
+        reason: failure,
+        origin,
+        ...(boundaryCause !== undefined ? { boundaryReason: diagnosticReason(boundaryCause) } : {}),
+        ...(abort.aborted ? { abortReason: diagnosticReason(abort.reason) } : {}),
+      },
+      invocationId,
+    )
+    .catch(() => undefined);
+  try {
+    const state = parseWatcherSessionState((await owners.sessions.get(session.id))?.watcherState);
+    if (state.attempt?.invocationId === invocationId && ['running', 'failed'].includes(state.attempt.phase))
+      await saveWatcherState(owners.sessions, session.id, state, {
+        attempt: {
+          ...state.attempt,
+          phase: 'failed',
+          // A failed probe has not consumed the pending recovery decision. Diagnostics remain above.
+          failure:
+            watcherBudgetFailure(state.attempt.failure) && !watcherBudgetFailure(failure)
+              ? state.attempt.failure
+              : failure,
+        },
+      });
+  } catch {
+    // Failure-state persistence is best effort; the caller must still receive the original failure.
+  }
+  return cause;
 }
 
 export async function nativeWatcherTurn(client: CodexAppServerNativeRpcClient, nativeThreadId: string, turnId: string) {
@@ -132,8 +235,20 @@ export async function recoverWatcherAttempt(
   state: WatcherSessionState,
   client: CodexAppServerNativeRpcClient,
   allowRetry = true,
+  retryWindow?: WatcherWindow,
 ): Promise<WatcherSessionState> {
   if (!state.attempt || !session.cliSessionId) throw new Error('watcher_recovery_binding_missing');
+  if (watcherBudgetFailure(state.attempt.failure)) {
+    const execution = await owners.executions.get(state.attempt.invocationId);
+    if (
+      execution?.executionKind !== 'watcher' ||
+      execution.userId !== session.userId ||
+      execution.threadId !== session.threadId ||
+      execution.catId !== session.catId ||
+      execution.causal?.watcherSourceInvocationId !== state.attempt.sourceInvocationId
+    )
+      throw new Error('watcher_budget_recovery_binding_mismatch');
+  }
   if (state.attempt.phase === 'finalize_pending') return state;
   if (state.attempt.phase === 'prune_pending') return finishWatcherPrune(owners, session, state, client);
   let attempt = state.attempt;
@@ -201,6 +316,13 @@ export async function recoverWatcherAttempt(
   );
   if (turn)
     await client.request('thread/revert', { threadId: session.cliSessionId, beforeTurnId: attempt.nativeTurnId });
+  if (allowRetry && watcherBudgetFailure(attempt.failure))
+    return saveWatcherState(
+      owners.sessions,
+      session.id,
+      state,
+      await watcherBudgetRecovery(owners, session, state, retryWindow),
+    );
   if (!allowRetry || (attempt.retries ?? 0) >= 1) {
     await owners.executions.transitionTerminal(attempt.invocationId, {
       status: 'failed',

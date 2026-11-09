@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
 import {
   type CompanionDeliveryAcceptance,
   companionDeliveryMatches,
@@ -155,7 +156,9 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
+  isManagedHoldConnectorMessage,
   isSystemUserMessage,
   isTimelinePublished,
   passesManagedHoldViewerBoundary,
@@ -185,6 +188,7 @@ import {
   serializeExtra,
 } from './redis-message-parsers.js';
 import { parseRedisNumber } from './redis-number.js';
+import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { readRecentMentionIds } from './redis-recent-mentions.js';
 import { readThreadReplyProjection } from './redis-thread-reply-projection.js';
 import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
@@ -1327,6 +1331,7 @@ function parseUserMentionHandlingMetadata(raw: string): UserMentionHandlingMetad
 }
 
 export class RedisMessageStore {
+  private readonly redisAdmissionIdentity: RedisClient;
   async getLastUserMentionHandling(userId: string) {
     const result = (await this.redis.eval(
       READ_LAST_USER_MENTION_HANDLING_LUA,
@@ -1566,6 +1571,8 @@ export class RedisMessageStore {
       readDiagnostics?: MessageReadObserver;
     },
   ) {
+    this.redisAdmissionIdentity = redis;
+    redis = recoveryRedis(redis);
     this.redis = redis;
     this.readDiagnostics = options?.readDiagnostics;
     this.onAppend = options?.onAppend;
@@ -1606,7 +1613,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     const messageId = input.reservedId ?? generateSortableId(input.timestamp);
@@ -1671,7 +1678,7 @@ export class RedisMessageStore {
     entries: readonly QueueLedgerEntry[],
     ledgerStore: QueueLedgerStore,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     assertPrivateNoticeQueueAdmission(entries);
@@ -1710,7 +1717,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('Queue admission requires at least one row');
@@ -1778,7 +1785,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerLifecycleAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
@@ -1875,6 +1882,7 @@ export class RedisMessageStore {
       if (persisted.some((entry) => entry === null)) {
         throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
       }
+      notifyMessageTimelineChange(this, message);
       return {
         kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
         message,
@@ -2111,6 +2119,20 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getByIds(ids: readonly string[]): Promise<Map<string, StoredMessage | null>> {
+    const result = new Map<string, StoredMessage | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) pipeline.hgetall(MessageKeys.detail(id));
+      const replies = await pipeline.exec();
+      const hashes = batch.map((_id, i) => readAuthoritativeHash(replies?.[i], 'canonical message batch'));
+      batch.forEach((id, i) => result.set(id, hashes[i] ? this.hydrateHash(hashes[i]) : null));
+    }
+    return result;
   }
 
   async getArtifactById(id: string): Promise<StoredMessage | null> {
@@ -3094,16 +3116,95 @@ export class RedisMessageStore {
    * Read-state routes select durable owner-read evidence; freshness consumers
    * keep the published timeline frontier.
    */
+  private async readBrowserVisibilityMetadata(ids: string[], viewerUserId: string) {
+    const fields = [
+      'id',
+      'userId',
+      'catId',
+      'from',
+      'threadId',
+      'timestamp',
+      'deletedAt',
+      'deliveryStatus',
+      'origin',
+      'source',
+      'lifecycle',
+      'recall',
+      '_tombstone',
+    ];
+    const pipeline = this.redis.pipeline();
+    ids.forEach((id) => pipeline.hmget(MessageKeys.detail(id), ...fields));
+    const results = await pipeline.exec();
+    if (!results) throw new Error('Browser visibility metadata unavailable');
+    return Promise.all(
+      results.map(async ([error, value]) => {
+        if (error) throw error;
+        if (
+          !Array.isArray(value) ||
+          value.length !== fields.length ||
+          !value.every((field) => field === null || typeof field === 'string')
+        ) {
+          throw new Error('Invalid browser visibility metadata');
+        }
+        const values = value as Array<string | null>;
+        const hash = Object.fromEntries(
+          fields.flatMap((field, index) => (values[index] === null ? [] : [[field, values[index]!]])),
+        );
+        const message = this.hydrateHash(hash);
+        // extra.scheduler affects only owner-bound managed-hold admission.
+        if (message?.userId === viewerUserId && isManagedHoldConnectorMessage(message)) {
+          message.extra = safeParseExtra((await this.redis.hget(MessageKeys.detail(message.id), 'extra')) ?? undefined);
+        }
+        return message;
+      }),
+    );
+  }
+
+  async getVisibilityHead(threadId: string): Promise<number> {
+    await this.ensureVisibilityMigrated(threadId);
+    const head = await this.redis.zrevrange(MessageKeys.threadVisibility(threadId), 0, 0, 'WITHSCORES');
+    return Number(head[1] ?? 0);
+  }
+
+  async getBrowserHistoryChanges(threadId: string, viewerUserId: string, afterSeq: number) {
+    await this.ensureVisibilityMigrated(threadId);
+    // Allocator and legacy migration both assign unique increasing scores.
+    const raw = await this.redis.zrangebyscore(
+      MessageKeys.threadVisibility(threadId),
+      `(${afterSeq}`,
+      '+inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      50,
+    );
+    const ids = raw.filter((_, index) => index % 2 === 0);
+    if (ids.length === 0) return { messages: [], scannedThrough: afterSeq, exhausted: true };
+    const metadata = await this.readBrowserVisibilityMetadata(ids, viewerUserId);
+    const visibleIds = metadata
+      .filter(
+        (message): message is StoredMessage =>
+          message !== null && isBrowserHistoryMessageVisibleToViewer(message, viewerUserId),
+      )
+      .map((message) => message.id);
+    const scores = new Map(ids.map((id, index) => [id, Number(raw[index * 2 + 1])]));
+    const messages = (visibleIds.length ? await this.hydrateMessages(visibleIds) : [])
+      .filter((message) => isBrowserHistoryMessageVisibleToViewer(message, viewerUserId))
+      .map((message) => ({ ...message, visibilitySeq: scores.get(message.id)! }));
+    return { messages, scannedThrough: Number(raw.at(-1)), exhausted: ids.length < 50 };
+  }
+
   async getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): Promise<{ cursor: string; messageId: string } | null> {
     await this.ensureVisibilityMigrated(threadId);
     const visKey = MessageKeys.threadVisibility(threadId);
-    const CHUNK = 20;
+    const browser = options?.evidence === 'browser_timeline';
+    const CHUNK = browser ? 100 : 20;
     const staleIds: string[] = [];
     let offset = 0;
 
@@ -3112,22 +3213,30 @@ export class RedisMessageStore {
       const raw = await this.redis.zrevrange(visKey, offset, offset + CHUNK - 1, 'WITHSCORES');
       if (raw.length === 0) break;
 
+      const browserMessages = browser
+        ? await this.readBrowserVisibilityMetadata(
+            raw.filter((_, index) => index % 2 === 0),
+            options?.viewerUserId ?? '',
+          )
+        : undefined;
+
       // Parse WITHSCORES pairs: [id, score, id, score, ...]
       for (let i = 0; i < raw.length; i += 2) {
         const id = raw[i]!;
         const score = Number(raw[i + 1]);
-        const data = await this.redis.hgetall(MessageKeys.detail(id));
-        if (!data || !data.id) {
-          staleIds.push(id);
-          continue;
-        }
-        const msg = this.hydrateHash(data as Record<string, string>);
+        const msg = browserMessages
+          ? browserMessages[i / 2]
+          : this.hydrateHash(await this.redis.hgetall(MessageKeys.detail(id)));
         if (!msg) {
           staleIds.push(id);
           continue;
         }
         const eligible =
-          options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublished(msg);
+          options?.evidence === 'browser_timeline'
+            ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
+            : options?.evidence === 'durable_owner_read'
+              ? isDurableOwnerReadEvidence(msg)
+              : isTimelinePublished(msg);
         if (!eligible) continue;
         if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
         if (msg.deletedAt) continue;
@@ -3841,7 +3950,9 @@ export class RedisMessageStore {
     id: string,
     patch: LifecycleResponseTerminalPatch,
   ): Promise<CommitLifecycleResponseTerminalResult> {
-    return this.commitLifecycleResponseTerminalInternal(id, patch);
+    const result = await this.commitLifecycleResponseTerminalInternal(id, patch);
+    if (result.kind === 'applied' || result.kind === 'replayed') notifyMessageTimelineChange(this, result.message);
+    return result;
   }
 
   private async commitLifecycleResponseTerminalInternal(
@@ -3891,6 +4002,17 @@ export class RedisMessageStore {
   }
 
   async commitLifecyclePreAdmissionFailure(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const result = await this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private async commitLifecyclePreAdmissionFailureInternal(
     input: LifecyclePreAdmissionFailureInput,
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
@@ -3961,7 +4083,8 @@ export class RedisMessageStore {
     }
     if (
       input.claim &&
-      (!(input.claim.ledger instanceof RedisQueueLedgerStore) || !input.claim.ledger.usesRedisClient(this.redis))
+      (!(input.claim.ledger instanceof RedisQueueLedgerStore) ||
+        !input.claim.ledger.usesRedisClient(this.redisAdmissionIdentity))
     )
       throw new Error('pre-admission failure requires the matching Redis Queue ledger');
     const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
@@ -4109,7 +4232,10 @@ export class RedisMessageStore {
     const locked = await this.withLifecycleDispatchLock(id, () =>
       this.advanceLifecycleInputDispatchUnlocked(id, patch),
     );
-    if (locked !== null) return locked;
+    if (locked !== null) {
+      if (locked.kind === 'applied' || locked.kind === 'replayed') notifyMessageTimelineChange(this, locked.message);
+      return locked;
+    }
     const message = await this.getById(id);
     if (!message) return { kind: 'not_found' };
     return { kind: 'conflict', reason: 'contended', message };

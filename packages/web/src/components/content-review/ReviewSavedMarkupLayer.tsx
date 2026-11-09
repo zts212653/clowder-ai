@@ -12,10 +12,12 @@ export function ReviewSavedMarkupLayer({
   marks,
   media,
   frame,
+  imageFrame,
 }: {
   marks: readonly SavedMarkup[];
   media: ImmutableMedia;
   frame: ReviewMarkupFrame | null;
+  imageFrame?: { frameIndex: number; timestampMs: number };
 }) {
   return (
     <svg
@@ -28,6 +30,7 @@ export function ReviewSavedMarkupLayer({
         .filter(
           (mark) =>
             mark.state === 'active' &&
+            (!mark.drawing.animationFrame || mark.drawing.animationFrame.frameIndex === imageFrame?.frameIndex) &&
             (!mark.drawing.frame ||
               (frame && mark.drawing.frame.streamId === frame.streamId && mark.drawing.frame.tick === frame.tick)),
         )

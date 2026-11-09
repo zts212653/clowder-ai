@@ -16,9 +16,10 @@ import { SqliteEvidenceStore } from '../../src/domains/memory/SqliteEvidenceStor
 import type { createSummaryCompactionTaskSpec } from '../../src/domains/memory/SummaryCompactionTaskSpec.js';
 import { registerLunaCuration } from '../../src/luna-curation-setup.js';
 import { memoryCurationRoutes } from '../../src/routes/memory-curation.js';
+import { adaptMessageStore } from '../helpers/message-from-fixtures.js';
 
 test('reader skips 300 historical bodies without spending the 200-message input window', async () => {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const append = (content: string, timestamp: number) =>
     messages.append({ threadId: 'home', userId: 'owner', catId: null, mentions: [], content, timestamp });
   for (let i = 1; i <= 300; i++) append('HISTORICAL_SECRET', i);
@@ -30,7 +31,7 @@ test('reader skips 300 historical bodies without spending the 200-message input 
 });
 
 test('a missing watermark never rescans already processed post-enable history', async () => {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   messages.append({
     threadId: 'home',
     userId: 'owner',
@@ -43,7 +44,7 @@ test('a missing watermark never rescans already processed post-enable history', 
 });
 
 test('live reader returns a bounded accounting page and the next page reaches owner material', async () => {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   for (let i = 0; i < 201; i++)
     messages.append({ threadId: 'home', userId: 'scheduler', catId: null, content: 'system log', timestamp: i });
   const fresh = messages.append({
@@ -68,7 +69,7 @@ test('off remains inert; enabled native helper persists sources, FTS recall, own
   const evidence = new SqliteEvidenceStore(':memory:');
   await evidence.initialize();
   const db = evidence.getDb();
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const threads = new ThreadStore();
   const thread = threads.create('owner', '这次共创');
   const registry = new AgentRegistry();
@@ -265,7 +266,7 @@ test('an unavailable operations thread cannot turn on the preference while telli
       ownerUserId: 'owner',
       db: evidence.getDb(),
       threadStore: threads,
-      messageStore: new MessageStore(),
+      messageStore: adaptMessageStore(new MessageStore()),
       modelLabel: () => 'Luna',
     });
     const response = await app.inject({

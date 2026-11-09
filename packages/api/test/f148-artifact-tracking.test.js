@@ -145,7 +145,6 @@ describe('extractRecentArtifacts', () => {
 describe('formatNavigationHeader with artifacts', () => {
   it('includes artifacts section when present', () => {
     const header = formatNavigationHeader({
-      baton: null,
       tasks: [],
       artifacts: [
         { type: 'pr', ref: 'zts212653/clowder-ai#1292', label: 'PR #1292', updatedBy: 'opus' },
@@ -158,13 +157,13 @@ describe('formatNavigationHeader with artifacts', () => {
   });
 
   it('omits artifacts section when empty', () => {
-    const header = formatNavigationHeader({ baton: null, tasks: [], artifacts: [] });
+    const header = formatNavigationHeader({ tasks: [], artifacts: [] });
     assert.ok(!header.includes('产物'), 'should not include artifacts section when empty');
     assert.ok(header.includes('[导航]'), 'should still have navigation wrapper');
   });
 
   it('omits artifacts section when undefined', () => {
-    const header = formatNavigationHeader({ baton: null, tasks: [] });
+    const header = formatNavigationHeader({ tasks: [] });
     assert.ok(!header.includes('产物'));
   });
 });

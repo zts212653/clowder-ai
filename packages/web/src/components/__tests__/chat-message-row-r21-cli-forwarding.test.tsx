@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -62,7 +63,7 @@ function transferPickerItems(root: ParentNode): unknown[] {
   return JSON.parse(probe.dataset.items) as unknown[];
 }
 
-describe('ChatMessageRow R21 cached stdout forwarding', () => {
+describe('ChatMessageRow R21 cached stdout forwarding in either shell', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -72,16 +73,21 @@ describe('ChatMessageRow R21 cached stdout forwarding', () => {
   });
 
   beforeEach(() => {
+    // CLI quote projection v2 is independent of the shell presentation.
+    writeShellPresentation('classic');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     useChatStore.setState({ currentThreadId: 'source-thread' });
     useChatStore.getState().setUiThinkingExpandedByDefault(false);
+    // V2 action ownership requires a visibly mounted message; jsdom has no layout.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(68, 80, 720, 200));
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 
@@ -90,7 +96,8 @@ describe('ChatMessageRow R21 cached stdout forwarding', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('carries the browser-visible cached speech through the real CLI v2 selection path', () => {
+  it.each(['classic', 'v2'] as const)('carries cached speech through CLI quote projection v2 in %s', (shell) => {
+    writeShellPresentation(shell);
     const rawMessage: ChatMessageData = {
       id: 'cached-r21-stream-only',
       type: 'assistant',
@@ -132,13 +139,21 @@ describe('ChatMessageRow R21 cached stdout forwarding', () => {
       );
     });
 
-    const cliToggle = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
-      button.textContent?.includes('CLI Output'),
-    );
-    if (!cliToggle) throw new Error('real CLI disclosure toggle missing');
-    act(() => cliToggle.click());
+    if (shell === 'classic') {
+      const cliToggle = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+        button.textContent?.includes('CLI Output'),
+      );
+      if (!cliToggle) throw new Error('real CLI disclosure toggle missing');
+      act(() => cliToggle.click());
+    } else {
+      expect(container.textContent).not.toContain('CLI Output');
+    }
 
-    const textNode = exactTextNode(container, '[data-context-quote-segment-id="stdout"]', 'CACHED_R21_SPEECH');
+    const textNode = exactTextNode(
+      container,
+      shell === 'classic' ? '[data-context-quote-segment-id="stdout"]' : '[data-testid="message-bubble"]',
+      'CACHED_R21_SPEECH',
+    );
     act(() => selectNodeText(textNode));
     act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="message-selection-add-to-chat"]')?.click());
     act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="context-annotation-forward"]')?.click());

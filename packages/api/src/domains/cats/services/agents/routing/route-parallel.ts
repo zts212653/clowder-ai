@@ -104,6 +104,7 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { type RouteResponseProducers, responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
@@ -198,9 +199,23 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   try {
-    yield* routeParallelPrepared(deps, targetCats, message, userId, threadId, options, invocationServices);
+    yield* routeParallelPrepared(
+      deps,
+      targetCats,
+      message,
+      userId,
+      threadId,
+      options,
+      invocationServices,
+      routeResponseProducers,
+    );
   } finally {
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
   }
 }
@@ -213,6 +228,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
     contentBlocks,
@@ -386,15 +402,6 @@ async function* routeParallelPrepared(
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
 
-  // F042 Wave 3: Fetch thread participant activity once (shared across all cats).
-  let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
-  if (deps.invocationDeps.threadStore) {
-    try {
-      activeParticipants = await deps.invocationDeps.threadStore.getParticipantsWithActivity(threadId);
-    } catch {
-      /* best-effort */
-    }
-  }
   // F042: Fetch thread routingPolicy once (shared across all cats).
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
   // F073 P4: SOP stage hint from workflow-sop (告示牌 — info only, cats decide actions)
@@ -745,7 +752,6 @@ async function* routeParallelPrepared(
           mcpAvailable,
           nativeL0Injected: hasNativeL0,
           ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
           ...(voiceMode ? { voiceMode } : {}),
@@ -946,6 +952,9 @@ async function* routeParallelPrepared(
               canonicalFeatureId: sopStageHint?.featureId,
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
+              exactA2ATriggerMessageId: options.a2aTriggerMessageId,
+              invocationInputMessageIds: options.persistedPromptMessageIds,
+              nowMs: Date.now(),
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
               ...(options.resolvePendingWakeMessageIds
                 ? {
@@ -997,6 +1006,8 @@ async function* routeParallelPrepared(
               : undefined;
             pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
               ...inc.briefingContext,
+              receiverCatId: catId,
+              receiverDisplayName: catConfig?.displayName,
               ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
             });
           } else {
@@ -1197,7 +1208,12 @@ async function* routeParallelPrepared(
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -1787,7 +1803,7 @@ async function* routeParallelPrepared(
       // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
       // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
       // parentInvocationId for live bubble identity. Persist formal messages with
       // the same id; otherwise IDB/live bubbles use parent id while hydration uses
@@ -2692,6 +2708,8 @@ async function* routeParallelPrepared(
           },
         ).catch((err) => log.warn({ err, invocationId: ownInvId }, 'Child response settlement retained for recovery'));
       }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvId) routeResponseProducers.leave(ownInvId);
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
       // counts this member failed (not cancelled) and releases its slot. The done names the

@@ -1,8 +1,21 @@
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
+import { matchesTaskProbeSource, taskProbeSource } from '../cats/services/stores/ports/TaskProbeSource.js';
+
+export { createBallProbeRecoveryNotification } from './ball-probe-recovery-notification.js';
+
 import type { BallCustodyProjection, TaskItem } from '@cat-cafe/shared';
+import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IBallCustodyIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
 import { buildTaskIdleLongEvent, buildWakeSentEvent } from './ball-custody-events.js';
+import { BallProbeRecoveryCensusPending, BallProbeRecoveryConflict } from './ball-probe-recovery-backend.js';
+import type {
+  BallRecoveryCandidate,
+  BallRecoveryNotice,
+  BallRecoveryOutcome,
+  BallRecoveryOwner,
+} from './ball-probe-recovery-state.js';
 
 export interface BallCustodyProbeResult {
   readonly satisfied: boolean;
@@ -31,11 +44,12 @@ export type BallCustodyWakeAdmissionReceipt =
 
 export interface BallCustodyProbeSchedulerOptions {
   readonly projectionStore: IBallCustodyProjectionStore;
-  readonly taskStore: Pick<ITaskStore, 'get' | 'update'>;
+  readonly taskStore: Pick<ITaskStore, 'get' | 'completeProbeIfCurrent'>;
   readonly ballCustody: IBallCustodyIngest;
   readonly probeEvaluator: BallCustodyProbeEvaluator;
   readonly wakeSender: BallCustodyWakeSender;
   readonly now?: () => number;
+  readonly notifyRecovery?: (notice: BallRecoveryNotice) => Promise<'delivered' | 'owner_unavailable'>;
   readonly wakeCooldownMs?: number;
   readonly idleLongMs?: number;
   readonly logger?: {
@@ -46,6 +60,7 @@ export interface BallCustodyProbeSchedulerOptions {
 }
 
 export interface BallCustodyProbeTickResult {
+  initializing?: boolean;
   checked: number;
   completed: number;
   woken: number;
@@ -55,29 +70,22 @@ export interface BallCustodyProbeTickResult {
   failed: number;
 }
 
-const DEFAULT_WAKE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_IDLE_LONG_MS = 30 * 24 * 60 * 60 * 1000;
 const IDLE_LONG_STATES = new Set(['active', 'blocked', 'parked', 'void']);
 
-function taskIdFromSubject(subjectKey: string): string | null {
-  const prefix = 'ball:task:';
-  if (!subjectKey.startsWith(prefix)) return null;
-  const taskId = subjectKey.slice(prefix.length);
-  return taskId.length > 0 ? taskId : null;
+interface ProbeContext {
+  candidate: BallRecoveryCandidate;
+  owner?: BallRecoveryOwner;
 }
 
 export class BallCustodyProbeScheduler {
   private readonly now: () => number;
-  private readonly wakeCooldownMs: number;
   private readonly idleLongMs: number;
-  private readonly deliveredWakeAtByEpisode = new Map<string, number>();
-
   constructor(private readonly opts: BallCustodyProbeSchedulerOptions) {
+    this.opts = recoveryGuarded(opts);
     this.now = opts.now ?? Date.now;
-    this.wakeCooldownMs = opts.wakeCooldownMs ?? DEFAULT_WAKE_COOLDOWN_MS;
     this.idleLongMs = opts.idleLongMs ?? DEFAULT_IDLE_LONG_MS;
   }
-
   async tick(): Promise<BallCustodyProbeTickResult> {
     const result: BallCustodyProbeTickResult = {
       checked: 0,
@@ -88,152 +96,153 @@ export class BallCustodyProbeScheduler {
       skipped: 0,
       failed: 0,
     };
-
-    const subjectKeys = await this.opts.projectionStore.listSubjectKeys();
-    for (const subjectKey of subjectKeys) {
-      await this.processSubject(subjectKey, result);
+    try {
+      await this.tickReady(result, this.now());
+    } catch (error) {
+      if (!(error instanceof BallProbeRecoveryCensusPending)) throw error;
+      result.initializing = true;
     }
     return result;
   }
 
-  private async processSubject(subjectKey: string, result: BallCustodyProbeTickResult): Promise<void> {
-    const taskId = taskIdFromSubject(subjectKey);
-    if (!taskId) {
-      result.skipped++;
-      return;
-    }
-
-    const projection = await this.opts.projectionStore.get(subjectKey);
-    if (!projection) {
-      result.skipped++;
-      return;
-    }
-
-    const at = this.now();
-    if (this.shouldMarkIdleLong(projection, at)) {
-      try {
-        await this.opts.ballCustody.record(buildTaskIdleLongEvent({ taskId, at }));
-        result.idleMarked++;
-      } catch (err) {
+  private async tickReady(result: BallCustodyProbeTickResult, now: number): Promise<void> {
+    const contexts = new Map<BallRecoveryCandidate, ProbeContext>();
+    await runDueBatch({
+      limit: 200,
+      budgetMs: 5_000,
+      selectDue: async () => {
+        const idle = await this.opts.projectionStore.listIdleRecoveryCandidates(100, now - this.idleLongMs, now);
+        const probe = await this.opts.projectionStore.listProbeRecoveryCandidates(100, now);
+        const bySubject = new Map(idle.map((candidate) => [candidate.subjectKey, candidate]));
+        for (const candidate of probe)
+          if (!bySubject.has(candidate.subjectKey)) bySubject.set(candidate.subjectKey, candidate);
+        return [...bySubject.values()];
+      },
+      process: async (candidate) => {
+        const context: ProbeContext = { candidate };
+        contexts.set(candidate, context);
+        const outcome = await this.processSubject(context, result, now);
+        await this.opts.projectionStore.finishRecovery(context.candidate, outcome, now, context.owner);
+      },
+      onItemError: async (candidate, err) => {
+        if (err instanceof BallProbeRecoveryConflict) {
+          result.skipped++;
+          return;
+        }
         result.failed++;
-        this.opts.logger?.warn?.({ err, taskId }, 'F233 PR4: idle-long event record failed');
-      }
-      return;
-    }
-
-    if (projection.state !== 'blocked') {
-      result.skipped++;
-      return;
-    }
-
-    await this.processBlockedTask({ taskId, projection, at, result });
+        const context = contexts.get(candidate) ?? { candidate };
+        await this.opts.projectionStore.finishRecovery(context.candidate, 'retryable_error', now, context.owner);
+        this.opts.logger?.warn?.({ err, subjectKey: candidate.subjectKey }, 'ball-custody recovery item failed');
+      },
+    });
+    await runDueBatch({
+      limit: 100,
+      budgetMs: 5_000,
+      selectDue: (limit) => this.opts.projectionStore.listWakeAudits(limit, now),
+      process: async ({ subjectKey, audit }) => {
+        if (!(await this.opts.ballCustody.recordConfirmed?.(structuredClone(audit.event))))
+          throw new Error('wake_event_exact_confirmation_unavailable');
+        await this.opts.projectionStore.finishWakeAudit(subjectKey, audit, true, now);
+      },
+      onItemError: async ({ subjectKey, audit }, err) => {
+        result.failed++;
+        await this.opts.projectionStore.finishWakeAudit(subjectKey, audit, false, now);
+        this.opts.logger?.warn?.({ err, subjectKey, eventId: audit.key }, 'ball-custody exact wake audit deferred');
+      },
+    });
+    await runDueBatch({
+      limit: 100,
+      budgetMs: 5_000,
+      selectDue: (limit) => this.opts.projectionStore.listRecoveryNotices(limit, now),
+      process: async ({ subjectKey, notice }) => {
+        if (!this.opts.notifyRecovery) throw new Error('ball_recovery_notification_unavailable');
+        const disposition = await this.opts.notifyRecovery(notice);
+        await this.opts.projectionStore.finishRecoveryNotice(subjectKey, notice, disposition, now);
+      },
+      onItemError: async ({ subjectKey, notice }, err) => {
+        await this.opts.projectionStore.finishRecoveryNotice(subjectKey, notice, 'failed', now);
+        this.opts.logger?.warn?.({ err, subjectKey }, 'ball-custody recovery notice deferred');
+      },
+    });
   }
 
-  private async processBlockedTask(input: {
-    taskId: string;
-    projection: BallCustodyProjection;
-    at: number;
-    result: BallCustodyProbeTickResult;
-  }): Promise<void> {
-    const { taskId, projection, at, result } = input;
+  private async processSubject(
+    context: ProbeContext,
+    result: BallCustodyProbeTickResult,
+    at: number,
+  ): Promise<BallRecoveryOutcome> {
+    const { candidate } = context;
+    const taskId = candidate.subjectKey.startsWith('ball:task:') ? candidate.subjectKey.slice('ball:task:'.length) : '';
+    const projection = await this.opts.projectionStore.get(candidate.subjectKey);
+    if (!taskId || !projection || projection.subjectKey !== candidate.subjectKey) {
+      result.skipped++;
+      return 'permanent_error';
+    }
     const task = await this.opts.taskStore.get(taskId);
-    if (!task || task.status !== 'blocked' || !task.probe) {
+    if (task && task.id !== taskId) {
       result.skipped++;
-      return;
+      return 'permanent_error';
     }
-
-    // The live task record is the source of truth for PATCH updates; projection is replay state.
-    const resolveMode = task.resolveMode;
-    if (resolveMode !== 'bounces_back' && resolveMode !== 'completes') {
+    if (task?.userId && task.threadId) context.owner = { taskId, userId: task.userId, threadId: task.threadId };
+    if (candidate.lane === 'idle') {
+      if (!this.shouldMarkIdleLong(projection, at)) return 'stale';
+      const claimed = await this.opts.projectionStore.claimIdleIntent(candidate, at);
+      if (!claimed || claimed.intentAt === undefined) return 'stale';
+      context.candidate = claimed;
+      if (!(await this.opts.ballCustody.recordConfirmed?.(buildTaskIdleLongEvent({ taskId, at: claimed.intentAt }))))
+        throw new Error('idle_event_exact_confirmation_unavailable');
+      result.idleMarked++;
+      return 'settled';
+    }
+    if (projection.state !== 'blocked') return 'stale';
+    // Idle-long is an independent, higher-priority duty. Its retry/park cannot start a business probe.
+    if (this.shouldMarkIdleLong(projection, at)) return 'waiting';
+    if (!task) {
       result.skipped++;
-      return;
+      return 'permanent_error';
     }
-
-    result.checked++;
-    let probe: BallCustodyProbeResult;
-    try {
-      probe = await this.opts.probeEvaluator.evaluate({ task, projection });
-    } catch (err) {
-      result.failed++;
-      this.opts.logger?.warn?.({ err, taskId }, 'F233 PR4: probe evaluation failed');
-      return;
+    if (task.status !== 'blocked') {
+      result.skipped++;
+      return 'settled';
     }
-    if (!probe.satisfied) return;
-
-    if (resolveMode === 'completes') {
-      await this.opts.taskStore.update(task.id, { status: 'done' });
-      result.completed++;
-      return;
+    if (!task.probe || (task.resolveMode !== 'bounces_back' && task.resolveMode !== 'completes')) {
+      result.skipped++;
+      return 'waiting';
     }
-
-    const blockedSinceAt = projection.blockedSinceAt ?? projection.lastStateChangeAt;
-    const lastWakeAt = this.effectiveLastWakeAt(task.id, blockedSinceAt, projection.lastWakeAt, at);
-    if (lastWakeAt !== null && at - lastWakeAt < this.wakeCooldownMs) {
+    if (typeof projection.lastWakeAt === 'number') {
       result.cooldownSkipped++;
-      return;
+      return 'settled';
     }
-
-    try {
-      const admission = await this.opts.wakeSender.send({ task, projection, at });
-      if (admission.kind !== 'admitted') {
-        result.failed++;
-        this.opts.logger?.warn?.(
-          { taskId, messageId: admission.messageId, reason: admission.reason },
-          'F298: wake persisted but runtime admission was rejected; exact item remains retryable',
-        );
-        return;
-      }
-      this.rememberDeliveredWake(task.id, blockedSinceAt, at);
-      result.woken++;
-    } catch (err) {
-      result.failed++;
-      this.opts.logger?.warn?.({ err, taskId }, 'F233 PR4: wake delivery failed');
-      return;
+    const source = taskProbeSource(task);
+    result.checked++;
+    const probe = await this.opts.probeEvaluator.evaluate({ task, projection });
+    if (!probe.satisfied) return 'waiting';
+    if (task.resolveMode === 'completes') {
+      if (!(await this.opts.taskStore.completeProbeIfCurrent(task.id, source))) return 'stale';
+      result.completed++;
+      return 'settled';
     }
-
-    try {
-      await this.opts.ballCustody.record(
-        buildWakeSentEvent({
-          taskId: task.id,
-          threadId: task.threadId,
-          ownerCatId: task.ownerCatId,
-          blockedSinceAt,
-          at,
-        }),
-      );
-    } catch (err) {
-      result.failed++;
-      this.opts.logger?.warn?.({ err, taskId }, 'F233 PR4: wake event record failed after delivery');
+    const current = await this.opts.taskStore.get(task.id);
+    if (!current || !matchesTaskProbeSource(current, source)) return 'stale';
+    const admission = await this.opts.wakeSender.send({ task: current, projection, at });
+    if (admission.kind !== 'admitted') {
+      if (admission.reason === 'queue_full') return 'waiting';
+      throw new Error(`ball_wake_admission_${admission.reason}`);
     }
+    result.woken++;
+    const event = buildWakeSentEvent({
+      taskId: current.id,
+      threadId: current.threadId,
+      ownerCatId: current.ownerCatId,
+      blockedSinceAt: projection.blockedSinceAt ?? projection.lastStateChangeAt,
+      at,
+    });
+    if (!(await this.opts.projectionStore.recordWakeReceipt(candidate, { messageId: admission.messageId, event })))
+      return 'stale';
+    return 'settled';
   }
 
   private shouldMarkIdleLong(projection: BallCustodyProjection, at: number): boolean {
-    if (!IDLE_LONG_STATES.has(projection.state)) return false;
-    return at - projection.lastEventAt >= this.idleLongMs;
-  }
-
-  private wakeEpisodeKey(taskId: string, blockedSinceAt: number): string {
-    return `${taskId}:${blockedSinceAt}`;
-  }
-
-  private effectiveLastWakeAt(
-    taskId: string,
-    blockedSinceAt: number,
-    projectionLastWakeAt: number | null,
-    at: number,
-  ): number | null {
-    const key = this.wakeEpisodeKey(taskId, blockedSinceAt);
-    const deliveredWakeAt = this.deliveredWakeAtByEpisode.get(key);
-    if (deliveredWakeAt != null && at - deliveredWakeAt >= this.wakeCooldownMs) {
-      this.deliveredWakeAtByEpisode.delete(key);
-    }
-    const activeDeliveredWakeAt = this.deliveredWakeAtByEpisode.get(key) ?? null;
-    if (projectionLastWakeAt == null) return activeDeliveredWakeAt;
-    if (activeDeliveredWakeAt == null) return projectionLastWakeAt;
-    return Math.max(projectionLastWakeAt, activeDeliveredWakeAt);
-  }
-
-  private rememberDeliveredWake(taskId: string, blockedSinceAt: number, at: number): void {
-    this.deliveredWakeAtByEpisode.set(this.wakeEpisodeKey(taskId, blockedSinceAt), at);
+    return IDLE_LONG_STATES.has(projection.state) && at - projection.lastEventAt >= this.idleLongMs;
   }
 }

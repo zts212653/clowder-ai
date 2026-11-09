@@ -97,6 +97,11 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
               {matter.description && (
                 <div className="rounded-lg bg-cafe-surface-sunken p-4">
                   <p className="mb-2 text-xs text-cafe-muted">猫的说明</p>
+                  {read.data?.summaryStatus === 'sources_changed' && (
+                    <p role="status" className="mb-2 text-sm text-cafe-muted">
+                      来源已更正，猫的归纳尚未复核。请核对原话后更新说明。
+                    </p>
+                  )}
                   <p className="whitespace-pre-wrap text-sm">{matter.description}</p>
                 </div>
               )}

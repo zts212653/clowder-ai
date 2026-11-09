@@ -2,17 +2,6 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
   {
-    name: 'CAT_CAFE_WATCHER_ENABLED',
-    defaultValue: '0',
-    description: 'F335 守望运行时启用。完成集成验收并获准后设为 1；用户开关另行持久化。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-    runtimeEditable: false,
-    restartRequired: true,
-    allowedValues: ['0', '1'],
-  },
-  {
     name: 'CAT_CAFE_CPU_CAPTURE_ONCE',
     defaultValue: '0',
     description:

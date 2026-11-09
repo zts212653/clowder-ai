@@ -10,12 +10,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
-import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
 import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
 
-export { isGitWorkTree, probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
+export { isGitWorkTree, probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
 
 // ── Parsers (exported for unit testing) ─────────────────────────────
 
@@ -234,7 +234,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitWorkTree(root);
+      const probe = await probeGitRepository(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
@@ -272,7 +272,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitWorkTree(root);
+      const probe = await probeGitRepository(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
@@ -348,7 +348,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitWorkTree(root);
+      const probe = await probeGitRepository(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };

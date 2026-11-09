@@ -11,7 +11,7 @@ export { isScheduleMutationProposalCardBlock } from './read-schedule-approval';
 
 /** The original F139 card and writer, shared by Chat, Hub and Inbox. Original owner re-reads supply content and results. */
 export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
-  const { t, language, proposal, checking, busy, error, unknown, blocked, decide, reread, retained } =
+  const { t, language, proposal, checking, busy, error, unknown, blocked, drifted, decide, reread, retained } =
     useScheduleApprovalController(props);
   const host = useApprovalHost();
   if (retained) return <RetainedApprovalCardResult item={retained} reread={reread} />;
@@ -64,7 +64,7 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
       </header>
       <ScheduleApprovalContent proposal={proposal} />
       {proposal.status === 'applying' ? <output className="block">{t.applying}</output> : null}
-      {error ? (
+      {error && !(drifted && host.presentation === 'mailbox') ? (
         <p role="alert" className="text-conn-red-text">
           {error}
         </p>
@@ -74,7 +74,7 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
           <button
             type="button"
             data-testid="schedule-approve"
-            disabled={blocked}
+            disabled={blocked || drifted}
             className="shell-focusable rounded-md px-3 py-1.5 disabled:opacity-50"
             style={{ background: 'var(--shell-primary)', color: 'var(--shell-primary-on)' }}
             onClick={() => {
@@ -87,7 +87,9 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
                 ? t.resume
                 : proposal.mutation.kind === 'create'
                   ? t.approveCreate
-                  : t.approveDelete}
+                  : proposal.mutation.kind === 'update'
+                    ? t.approveUpdate
+                    : t.approveDelete}
           </button>
         ) : null}
         {proposal.status === 'pending' ? (
@@ -103,7 +105,7 @@ export function ScheduleMutationProposalCard(props: ScheduleApprovalProps) {
             {t.reject}
           </button>
         ) : null}
-        {error || unknown || (settled && !effect) ? (
+        {!drifted && (error || unknown || (settled && !effect)) ? (
           <button type="button" className="shell-focusable rounded px-2 py-1 text-xs" onClick={reread}>
             {t.reread}
           </button>

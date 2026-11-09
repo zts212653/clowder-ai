@@ -2,6 +2,12 @@ import { defineShellCopy } from '../shell-copy';
 
 export const approvalReconcileCopy = defineShellCopy({
   zh: {
+    scheduleDrift:
+      '任务已变化，当前请求不能执行。请驳回旧提案，并在原对话让发起猫核对当前任务后重新发起。新提案仍需你单独批准。',
+    scheduleDeleteDrift:
+      '任务已变化，当前删除请求不能执行。请驳回旧提案，并在原对话让发起猫核对当前任务后重新发起删除；如需暂停，应先暂停再提案。新提案仍需你单独批准。',
+    scheduleUpdateDrift:
+      '任务已变化，当前修改请求不能执行。请驳回旧提案，并在原对话让发起猫核对当前任务后重新发起修改。新提案仍需你单独批准。',
     resolutions: { accepted: '已同意', rejected: '已拒绝', closed_without_decision: '已结束，没有做决定' },
     closedReasons: { expired: '已过期', withdrawn: '已撤回' },
     opened: '对话已开',
@@ -19,6 +25,7 @@ export const approvalReconcileCopy = defineShellCopy({
       'memory-corrected': '原记忆已更正',
       'schedule-created': '定时任务已创建并注册',
       'schedule-deleted': '定时任务已永久删除',
+      'schedule-updated': '定时任务参数已更新',
       'repair-started': '修复工作已发起',
     },
     you: '你',
@@ -47,6 +54,12 @@ export const approvalReconcileCopy = defineShellCopy({
     open: '打开',
   },
   en: {
+    scheduleDrift:
+      'The task changed, so this request cannot run. Reject the old proposal, then ask the requesting cat to check the current task and re-request it in the original conversation. The new proposal needs your separate approval.',
+    scheduleDeleteDrift:
+      'The task changed, so this delete request cannot run. Reject the old proposal, then ask the requesting cat to check the current task and request deletion again in the original conversation. If pausing is needed, pause before requesting deletion. The new proposal needs your separate approval.',
+    scheduleUpdateDrift:
+      'The task changed, so this update request cannot run. Reject the old proposal, then ask the requesting cat to check the current task and request the update again in the original conversation. The new proposal needs your separate approval.',
     resolutions: { accepted: 'Approved', rejected: 'Declined', closed_without_decision: 'Closed without a decision' },
     closedReasons: { expired: 'Expired', withdrawn: 'Withdrawn' },
     opened: 'conversation created',
@@ -64,6 +77,7 @@ export const approvalReconcileCopy = defineShellCopy({
       'memory-corrected': 'Original memory corrected',
       'schedule-created': 'Scheduled task created and registered',
       'schedule-deleted': 'Scheduled task permanently deleted',
+      'schedule-updated': 'Scheduled task parameters updated',
       'repair-started': 'Repair work started',
     },
     you: 'You',

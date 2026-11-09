@@ -74,6 +74,8 @@ export interface CatVariant {
   /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
   readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
+  /** Member-only environment declarations. Account adapters retain final credential authority. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
   /** null explicitly clears a template profile in a runtime catalog overlay. */
@@ -137,6 +139,7 @@ export interface CatFeatures {
   readonly sessionStrategy?: {
     readonly strategy: 'handoff' | 'compress' | 'hybrid';
     readonly thresholds?: { readonly warn: number; readonly action: number };
+    /** generative is a historical digest read preference, never a generation switch. */
     readonly handoff?: { readonly preSealMemoryDump: boolean; readonly bootstrapDepth: 'extractive' | 'generative' };
     readonly hybrid?: { readonly maxCompressions: number };
     readonly compress?: { readonly maxCompressions?: number; readonly trackPostCompression: boolean };

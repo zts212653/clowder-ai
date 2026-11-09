@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
 import { contextSourcePayloadV1Schema } from './memory-cue-context.js';
 
-export const RECALL_OPPORTUNITY_CATALOG_VERSION = 8 as const;
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 9 as const;
 
 /** A selector within an already authenticated, revision-pinned canonical document. */
 export const memoryCueDocumentWindowRequestSchema = z
@@ -39,6 +39,7 @@ export const RECALL_RESOLVER_FAMILIES = [
   'cat_owned_seed',
   'thread_overview',
   'matter',
+  'message_evidence',
 ] as const;
 
 export const MEMORY_CUE_INVALIDATORS = [
@@ -50,6 +51,7 @@ export const MEMORY_CUE_INVALIDATORS = [
 ] as const;
 
 export const RECALL_OPPORTUNITY_V1_PAIRS = Object.freeze([
+  Object.freeze({ kind: 'work_preparation' as const, producer: 'explicit_preparation' as const }),
   Object.freeze({ kind: 'subject_seen' as const, producer: 'entity_nudge' as const }),
   Object.freeze({ kind: 'delivery_decision' as const, producer: 'github_ci' as const }),
   Object.freeze({
@@ -312,7 +314,25 @@ export const authorizedTaskSourcesOpportunityV1Schema = z
 export type FreshContextSourcesOpportunityV1 = z.infer<typeof freshContextSourcesOpportunityV1Schema>;
 export type AuthorizedTaskSourcesOpportunityV1 = z.infer<typeof authorizedTaskSourcesOpportunityV1Schema>;
 
+/** The query is an explicit material request, never a source fact or execution grant. */
+export const workPreparationOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('work_preparation'),
+    producer: z.literal('explicit_preparation'),
+    payload: z
+      .object({
+        activity: z.enum(['html', 'video']),
+        query: z.string().trim().min(1).max(500),
+        contextEpoch: z.number().int().positive(),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
+  workPreparationOpportunityV1Schema,
   subjectSeenOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
   judgmentSurfaceEnteredOpportunityV1Schema,
@@ -419,6 +439,7 @@ const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
   cat_owned_seed: 'owned_seed' as const,
   thread_overview: 'thread_overview' as const,
   matter: 'matter' as const,
+  message_evidence: 'evidence' as const,
 });
 
 export function memoryCueDrillFamilyForResolver(

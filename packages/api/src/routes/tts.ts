@@ -22,6 +22,7 @@ import {
   ListenAssetService,
   type ListenSynthesisOptions,
 } from '../domains/cats/services/tts/ListenAssetService.js';
+import { ttsUnavailableResponse } from '../domains/cats/services/tts/TtsCacheIdentityError.js';
 import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -42,13 +43,13 @@ const synthesizeSchema = z.object({
 const AUDIO_FILENAME_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
 
 function synthesisHash(
-  provider: Pick<ITtsProvider, 'id' | 'model'>,
+  provider: Pick<ITtsProvider, 'id' | 'model' | 'cacheIdentity'>,
   request: TtsSynthesizeRequest,
   variant?: string,
 ): string {
   const parts = [
     provider.id,
-    provider.model,
+    provider.cacheIdentity ?? provider.model,
     request.voice,
     request.langCode ?? 'z',
     String(request.speed ?? 1),
@@ -193,9 +194,9 @@ async function handleListenStream(
   try {
     // Resolve before sending SSE headers so an unavailable provider remains a
     // regular API failure instead of a late stream error.
-    options.assets.getSynthesisFingerprint(synthesis);
-  } catch {
-    await reply.status(503).send({ error: 'No TTS provider available' });
+    await options.assets.getSynthesisFingerprint(synthesis);
+  } catch (error) {
+    await reply.status(503).send(ttsUnavailableResponse(error));
     return;
   }
 
@@ -300,9 +301,10 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     let provider: ITtsProvider;
     try {
       provider = ttsRegistry.getDefault();
-    } catch {
+      provider = (await provider.snapshot?.({ cacheDir })) ?? provider;
+    } catch (error) {
       reply.status(503);
-      return { error: 'No TTS provider available' };
+      return ttsUnavailableResponse(error);
     }
 
     const synthRequest: TtsSynthesizeRequest = {
@@ -431,9 +433,10 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     let provider: ITtsProvider;
     try {
       provider = ttsRegistry.getDefault();
-    } catch {
+      provider = (await provider.snapshot?.({ cacheDir })) ?? provider;
+    } catch (error) {
       reply.status(503);
-      return { error: 'No TTS provider available' };
+      return ttsUnavailableResponse(error);
     }
 
     const catVoice = getCatVoice(catId ?? 'opus');

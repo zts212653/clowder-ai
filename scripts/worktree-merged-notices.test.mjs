@@ -6,9 +6,15 @@ const origin = { threadId: 'thread_original', userId: 'owner', sourceRef: 'invoc
 const head = 'a'.repeat(40);
 const mergedAt = 'b'.repeat(40);
 const sourceRef = 'pr:fixture/repo#42';
-const row = { path: '/fixture/raw-review', owner: 'kimi', head, retentionStatus: null, lifecycle: { origin } };
+const row = {
+  path: '/fixture/raw-review',
+  owner: 'kimi',
+  head,
+  retentionStatus: null,
+  lifecycle: { origin, prSource: sourceRef },
+};
 const truth = { sourceRef, state: 'MERGED', head: 'c'.repeat(40), mergedAt, commits: [head, 'c'.repeat(40)] };
-test('raw intermediate review is found by exact commit association and notified in its recorded thread', () => {
+test('bound intermediate review is found by exact commits and notified in its recorded thread', () => {
   const deps = {
     now: 0,
     findSources: (h) => {
@@ -22,6 +28,13 @@ test('raw intermediate review is found by exact commit association and notified 
   assert.equal(a.notices[0].threadId, origin.threadId);
   assert.equal(a.notices[0].kind, 'merged-unfinished');
   assert.deepEqual(a, mergedWorktreeNotices('/fixture', [row], deps));
+  const generation = (createdAt) =>
+    mergedWorktreeNotices('/fixture', [{ ...row, lifecycle: { ...row.lifecycle, createdAt } }], deps).notices[0].key;
+  assert.notEqual(
+    generation('2026-11-03T00:00:00Z'),
+    generation('2026-11-04T00:00:00Z'),
+    'reusing the same path, head and source still creates a distinct notice identity',
+  );
   assert.equal(
     mergedWorktreeNotices('/fixture', [row], { ...deps, findSources: () => [sourceRef, sourceRef] }).notices.length,
     1,

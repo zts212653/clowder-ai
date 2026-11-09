@@ -68,6 +68,34 @@ async function click(label: string) {
   await act(async () => button(label).click());
 }
 
+it('marks a current-page interpretation unverified after source change and clears the notice on a verified refresh', async () => {
+  let revised = false;
+  request.mockImplementation((_path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      revised = true;
+      return Promise.resolve(response({ outcome: 'applied', matter: { ...matter('matter-a'), revision: 2 } }));
+    }
+    return Promise.resolve(
+      response({
+        ...detail('matter-a', 'Original source'),
+        matter: {
+          ...matter('matter-a', revised ? 2 : 1),
+          description: revised ? 'Rechecked interpretation' : 'Old interpretation',
+        },
+        ...(revised ? {} : { summaryStatus: 'sources_changed' }),
+      }),
+    );
+  });
+  await act(async () => root.render(<MemoryMatterDetail matterId="matter-a" />));
+  expect(host.textContent).toContain('来源已更正，猫的归纳尚未复核');
+  await click('编辑说明');
+  await act(async () =>
+    host.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  );
+  expect(host.textContent).toContain('Rechecked interpretation');
+  expect(host.textContent).not.toContain('归纳尚未复核');
+});
+
 for (const outcome of ['late_success', 'late_error'] as const) {
   for (const change of ['query', 'mutation_refresh'] as const) {
     it(`catalog discards ${outcome} after ${change} without replacing the current cursor`, async () => {

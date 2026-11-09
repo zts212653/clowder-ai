@@ -108,7 +108,10 @@ for (const grade of ['unknown', 'compatibility_fallback']) {
     assert.equal((await ready(h)).kind, 'notified');
     const [row] = h.connector.admitted(h.auth.threadId, h.auth.userId);
     assert.equal(row.execution.ownerAuthProvenance, grade);
-    await assert.rejects(workDecision(h, row, 'read'), { code: 'access_denied' });
+    // Reading uses the current identity and thread access; readiness must not
+    // upgrade this invocation to the strict authority required for writing.
+    await workDecision(h, row, 'read');
+    await assert.rejects(workDecision(h, row, 'write'), { code: 'access_denied' });
   });
 }
 

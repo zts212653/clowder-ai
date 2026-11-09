@@ -16,7 +16,7 @@
     },
     "contexts": ["concierge_open"],
     "audience": ["cvo"],
-    "body": "回复开头出现「参考了…」时，点开查看原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
+    "body": "回复开头出现「参考了…」时，点开先看猫的归纳和支撑原话，用「出处」回到原消息。决定变了，先在对话中写下新决定，再从「查看全部」进入事情页更换来源；旧回复会标明参考资料已更正。",
     "action": {
       "type": "open_source",
       "label": "查看参考消息的用法",
@@ -1499,15 +1499,15 @@
     "kind": "feature",
     "sourceRef": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+      "anchor": "User Journey"
     },
     "structureSource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Cat-proxy create and permanent-delete mutations"
+      "anchor": "Creating and deleting schedules"
     },
     "bodySource": {
       "path": "docs/features/F139-unified-schedule-abstraction.md",
-      "anchor": "Pause/resume remains direct"
+      "anchor": "Pause and resume remain direct actions after identity verification"
     },
     "contexts": ["thinking", "waiting_external", "feature_dev"],
     "audience": ["cvo", "developer", "maintainer"],
@@ -1517,10 +1517,38 @@
       "label": "查看 F139 审批边界",
       "sourceRef": {
         "path": "docs/features/F139-unified-schedule-abstraction.md",
-        "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+        "anchor": "User Journey"
       }
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f139-schedule-parameter-update",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "bodySource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Updating recurring task parameters"
+    },
+    "contexts": ["thinking", "waiting_external", "feature_dev"],
+    "audience": ["cvo", "developer", "maintainer"],
+    "body": "想改已有周期任务的提醒内容或订阅参数？让猫提交参数修改，核对改前、改后的值再批准；原任务身份和进度会保留，正在执行的那一轮继续用原设置。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 F139 审批边界",
+      "sourceRef": {
+        "path": "docs/features/F139-unified-schedule-abstraction.md",
+        "anchor": "User Journey"
+      }
+    },
+    "owner": "codex-astra"
   },
   {
     "id": "feature-f246-approval-hub",
@@ -3299,6 +3327,25 @@
     "owner": "codex-terra"
   },
   {
+    "id": "feature-f309-gif-svg-originals",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "structureSource": {
+      "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
+      "anchor": "GifFrameControls"
+    },
+    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
+    "action": {
+      "type": "open_source",
+      "label": "查看动图与矢量作品说明",
+      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "capability-co-creation-storytelling",
     "kind": "capability",
     "sourceRef": {
@@ -3420,6 +3467,31 @@
       "type": "open_concierge_draft",
       "label": "查看索引与召回设置",
       "draftPrompt": "请打开 /settings?s=ops&ops=memory，带我查看索引、嵌入服务和召回模式，说明哪些状态已读到、哪些需要重读。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "capability-openai-platform-shared-account",
+    "kind": "capability",
+    "structureSource": {
+      "path": "packages/web/src/components/UnifiedAuthModal.tsx",
+      "anchor": "UnifiedAuthModal"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/AccountConnectionFields.tsx",
+      "anchor": "isPlatformKey"
+    },
+    "sourceRef": {
+      "path": "docs/guides/platform-api-requests.md",
+      "anchor": "配置与复用平台账号"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "想让能力共用平台密钥？到「猫猫团队 → 账户与登录」添加 Anthropic API、OpenAI Platform 或 Google API 账号，只填名称和密钥即可。模型由使用方选择，已有 Claude/Codex/Gemini 登录绑定保持原样。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "配置共用平台 API Key 账号",
+      "draftPrompt": "请带我到猫猫团队的账户与登录页，选择 Anthropic API、OpenAI Platform 或 Google API 添加平台账号；密钥由我自己填写，模型由使用方选择，并保留现有 Claude/Codex/Gemini 登录绑定。"
     },
     "owner": "codex61-sol"
   },

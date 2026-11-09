@@ -130,7 +130,7 @@ function WorldMark({ name }: { readonly name: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-[var(--shell-hairline-strong)] bg-[var(--shell-paper)] text-[11px] font-semibold text-[var(--shell-ink)]"
+      className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-[var(--shell-hairline-strong)] bg-[var(--shell-paper)] text-[length:var(--console-font-label)] font-semibold text-[var(--shell-ink)]"
     >
       {Array.from(name.trim())[0]?.toLocaleUpperCase() ?? '?'}
     </span>

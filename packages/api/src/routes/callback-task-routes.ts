@@ -211,8 +211,11 @@ export function registerCallbackTaskRoutes(
   registerCallbackDevelopmentWorkRoutes(app, deps);
   const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore, {
     artifactReader: new F232PreparedArtifactReader({ messages: messageStore }),
-    onChanged: (ownerUserId) =>
-      socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    onChanged: (ownerUserId, reason) =>
+      socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', {
+        ownerUserId,
+        ...(reason ? { reason } : {}),
+      }),
   });
 
   app.post(
@@ -464,7 +467,7 @@ export function registerCallbackTaskRoutes(
       }
       try {
         await assertCurrent();
-        const task = await entrustedWorkLifecycle.update(parsed.data);
+        const task = await entrustedWorkLifecycle.update(parsed.data, existing);
         socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
         return {
           status: 'updated',

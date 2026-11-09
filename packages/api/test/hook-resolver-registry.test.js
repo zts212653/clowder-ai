@@ -13,8 +13,8 @@ describe('ResolverRegistry', () => {
     registry = await import('../dist/domains/prompt-hooks/resolvers/index.js');
   });
 
-  it('has exactly 45 resolvers registered', () => {
-    assert.equal(registry.RESOLVER_COUNT, 45);
+  it('has exactly 44 resolvers registered', () => {
+    assert.equal(registry.RESOLVER_COUNT, 44);
   });
 
   it('covers all L-series (L1-L7)', () => {
@@ -29,10 +29,12 @@ describe('ResolverRegistry', () => {
     }
   });
 
-  it('covers active D-series (D1-D19 and D21)', () => {
-    for (const i of [...Array.from({ length: 19 }, (_, index) => index + 1), 21]) {
+  it('covers active D-series (D1-D11, D13-D19 and D21)', () => {
+    for (const i of [...Array.from({ length: 19 }, (_, index) => index + 1).filter((id) => id !== 12), 21]) {
       assert.ok(registry.getResolver(`D${i}`), `Missing resolver for D${i}`);
     }
+    assert.equal(registry.getResolver('D12'), undefined, 'Activity-summary resolver stays retired');
+    assert.equal(registry.getResolver('D20'), undefined, 'Signal-article resolver stays retired');
   });
 
   it('covers B1, C1, R1, R2, N1', () => {
@@ -48,7 +50,7 @@ describe('ResolverRegistry', () => {
 
   it('all resolvers implement resolve()', () => {
     const ids = registry.getRegisteredResolverIds();
-    assert.equal(ids.length, 45);
+    assert.equal(ids.length, 44);
     for (const id of ids) {
       const resolver = registry.getResolver(id);
       assert.equal(typeof resolver.resolve, 'function', `${id} resolver missing resolve()`);

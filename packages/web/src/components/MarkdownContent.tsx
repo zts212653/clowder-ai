@@ -14,12 +14,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type Components, defaultUrlTransform } from 'react-markdown';
+import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import remarkParse from 'remark-parse';
-import { unified } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { hexToRgba } from '@/lib/color-utils';
@@ -32,102 +28,39 @@ import {
   isCanonicalOnlyMentionAlias,
 } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
+import { chatMarkdownPlugins, prepareChatMarkdown, transformChatMarkdownUrl } from './chat-markdown';
+
+export { normalizeMathDelimiters, transformChatMarkdownUrl } from './chat-markdown';
+
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
 import { ChatReference } from './chat-references/ChatReference';
 import { ChatReferenceGroup } from './chat-references/ChatReferenceGroup';
 import { useChatReferenceThread } from './chat-references/ChatReferenceScope';
-import { remarkChatReferences } from './chat-references/remark-chat-references';
 import { ChatReferenceDemand, useChatReferenceDemand } from './chat-references/useChatReferenceDemand';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
+import { ProviderCitationContext, projectProviderCitations } from './markdown-provider-citations';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
-
-const BARE_MARKDOWN_LINE_HREF_RE = /^[^/:\\?#]+\.mdx?:\d+$/i;
-const WINDOWS_ABSOLUTE_PATH_HREF_RE = /^[a-z]:[\\/].*$/i;
-const WINDOWS_UNC_PATH_HREF_RE = /^\\\\[^\\]+\\[^\\]+/;
-
-/** Preserve safe file-like forms that react-markdown mistakes for custom URI schemes. */
-export function transformChatMarkdownUrl(url: string): string {
-  const transformed = defaultUrlTransform(url);
-  if (transformed) return transformed;
-  if (
-    BARE_MARKDOWN_LINE_HREF_RE.test(url) ||
-    WINDOWS_ABSOLUTE_PATH_HREF_RE.test(url) ||
-    WINDOWS_UNC_PATH_HREF_RE.test(url)
-  ) {
-    return url;
-  }
-  return transformed;
-}
-
-/* ── LaTeX delimiter normalization ─────────────────────────── */
-
-/**
- * Parse with the real Markdown parser so code fences (``` and ~~~), indented
- * code blocks, and code spans (any backtick run length) are located by their
- * AST positions instead of a hand-rolled regex. Delimiter rewriting must never
- * touch these ranges.
- */
-const mdRangeParser = unified().use(remarkParse).use(remarkGfm);
-
-type OffsetRange = [start: number, end: number];
-
-function collectLiteralRanges(md: string): OffsetRange[] {
-  const ranges: OffsetRange[] = [];
-  const walk = (node: {
-    type: string;
-    position?: { start: { offset?: number }; end: { offset?: number } };
-    children?: unknown[];
-  }) => {
-    if (node.type === 'code' || node.type === 'inlineCode') {
-      const start = node.position?.start.offset;
-      const end = node.position?.end.offset;
-      if (start != null && end != null) ranges.push([start, end]);
-      return;
-    }
-    for (const child of node.children ?? []) walk(child as typeof node);
-  };
-  walk(mdRangeParser.parse(md) as Parameters<typeof walk>[0]);
-  return ranges;
-}
-
-/** Matches \[...\] (group 1) or \(...\) (group 2). */
-const BACKSLASH_MATH_RE = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)/g;
-
-/**
- * remark-math only parses $/$$ delimiters; LLMs frequently emit \[...\] and
- * \(...\) instead. Rewrite those to $$...$$ (inline $$ renders as inline math
- * when singleDollarTextMath is off) outside code ranges so KaTeX can render
- * them.
- */
-export function normalizeMathDelimiters(md: string): string {
-  BACKSLASH_MATH_RE.lastIndex = 0;
-  if (!BACKSLASH_MATH_RE.test(md)) return md;
-  BACKSLASH_MATH_RE.lastIndex = 0;
-
-  const ranges = collectLiteralRanges(md);
-  let out = '';
-  let last = 0;
-  for (const m of md.matchAll(BACKSLASH_MATH_RE)) {
-    const start = m.index;
-    const end = start + m[0].length;
-    if (ranges.some(([s, e]) => start < e && end > s)) continue;
-    out += md.slice(last, start);
-    out += `$${'$'}${m[1] ?? m[2]}$${'$'}`;
-    last = end;
-  }
-  return out + md.slice(last);
-}
 
 /* ── @mention highlighting ─────────────────────────────────── */
 
 const InsideMarkdownLinkContext = createContext(false);
 
-function Mention({ catId, text, style }: { catId: string; text: string; style: CSSProperties }) {
+function Mention({
+  catId,
+  text,
+  sourceText,
+  style,
+}: {
+  catId: string;
+  text: string;
+  sourceText: string;
+  style: CSSProperties;
+}) {
   const insideLink = useContext(InsideMarkdownLinkContext);
   if (insideLink) {
     return (
-      <span className="font-semibold" style={style}>
+      <span data-quote-source-text={sourceText} className="font-semibold" style={style}>
         {text}
       </span>
     );
@@ -135,6 +68,7 @@ function Mention({ catId, text, style }: { catId: string; text: string; style: C
   return (
     <button
       type="button"
+      data-quote-source-text={sourceText}
       className="cursor-pointer font-semibold"
       onClick={() => useChatStore.getState().openTeamSubject({ type: 'cat', id: catId })}
       aria-label={`在猫猫团队中查看 ${catId}`}
@@ -168,7 +102,7 @@ function highlightMentions(text: string): ReactNode[] {
       padding: '1px 5px',
     };
     const displayText = isCanonicalOnlyMentionAlias(alias) ? `@${labelMap[catId] ?? catId}` : m[0];
-    parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} style={style} />);
+    parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} sourceText={m[0]} style={style} />);
     lastIdx = re.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
@@ -359,6 +293,11 @@ function buildMdComponents(
         {referenceThreadId && typeof node?.properties?.['data-chat-reference'] === 'string' ? (
           <ChatReference
             reference={node.properties['data-chat-reference']}
+            sourceText={
+              typeof node.properties['data-chat-source-text'] === 'string'
+                ? node.properties['data-chat-source-text']
+                : undefined
+            }
             format={String(node.properties['data-chat-format'] ?? 'link')}
             layout={String(node.properties['data-chat-layout'] ?? 'inline')}
             threadId={referenceThreadId}
@@ -428,6 +367,8 @@ const mdComponents = buildMdComponents();
 /* ── Exported component ────────────────────────────────────── */
 interface Props {
   content: string;
+  /** Cloud-assistant display only; ordinary/user Markdown remains literal. */
+  providerCitations?: boolean;
   referenceThreadId?: string;
   className?: string;
   /** Skip slash-command prefix detection (e.g. for rich block bodyMarkdown) */
@@ -478,6 +419,7 @@ export function resolveRelativePath(base: string, relative: string): string {
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
+  providerCitations,
   referenceThreadId: sourceThreadId,
   className,
   disableCommandPrefix,
@@ -493,8 +435,15 @@ export const MarkdownContent = memo(function MarkdownContent({
   const referenceThreadId = basePath == null ? (sourceThreadId ?? currentThreadId) : undefined;
   const referenceAnchor = useRef<HTMLDivElement>(null);
   const referenceDemand = useChatReferenceDemand(referenceAnchor, !!referenceThreadId);
-  const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
-  const md = normalizeMathDelimiters(cmdMatch ? content.slice(cmdMatch[1].length) : content);
+  const inheritedCitations = useContext(ProviderCitationContext);
+  const citationDisplay = useMemo(
+    () =>
+      (providerCitations ?? inheritedCitations)
+        ? projectProviderCitations(content)
+        : { markdown: content, unresolved: 0 },
+    [content, inheritedCitations, providerCitations],
+  );
+  const { cmdMatch, md } = prepareChatMarkdown(citationDisplay.markdown, disableCommandPrefix);
 
   const listen = useMemo(
     () =>
@@ -534,8 +483,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
         <MarkdownSurface
           remarkPlugins={[
-            ...(referenceThreadId ? [remarkChatReferences] : []),
-            [remarkMath, { singleDollarTextMath: false }],
+            ...chatMarkdownPlugins(!!referenceThreadId),
             ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
           ]}
           rehypePlugins={[rehypeKatex]}
@@ -544,6 +492,11 @@ export const MarkdownContent = memo(function MarkdownContent({
         >
           {md}
         </MarkdownSurface>
+        {citationDisplay.unresolved > 0 && (
+          <p className="mt-2 text-xs text-cafe-secondary" data-provider-citation-disclosure>
+            部分引用未附来源链接；正文中的原有链接仍可查看。
+          </p>
+        )}
       </div>
     </ChatReferenceDemand.Provider>
   );

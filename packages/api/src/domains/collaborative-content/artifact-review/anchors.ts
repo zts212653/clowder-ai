@@ -5,6 +5,24 @@ export function assertMediaAnchor(raw: ArtifactReviewAnchor, media: ImmutableMed
   const parsed = artifactReviewAnchorSchema.safeParse(raw);
   if (!parsed.success) throw new ArtifactReviewError('invalid_anchor');
   const anchor = parsed.data;
+  if (anchor.kind !== 'video-range') {
+    if (media.kind !== 'image') throw new ArtifactReviewError('invalid_anchor');
+    const clock = media.animation;
+    if (clock && clock.frameCount > 1) {
+      if (
+        anchor.frameIndex === undefined ||
+        anchor.frameIndex >= clock.frameCount ||
+        (anchor.endFrameIndex !== undefined && anchor.endFrameIndex >= clock.frameCount) ||
+        anchor.timestampMs !== clock.frameDelaysMs.slice(0, anchor.frameIndex).reduce((sum, delay) => sum + delay, 0)
+      )
+        throw new ArtifactReviewError('invalid_anchor');
+    } else if (
+      anchor.frameIndex !== undefined ||
+      anchor.timestampMs !== undefined ||
+      anchor.endFrameIndex !== undefined
+    )
+      throw new ArtifactReviewError('invalid_anchor');
+  }
   if (anchor.kind === 'image-point') {
     if (media.kind !== 'image') throw new ArtifactReviewError('invalid_anchor');
     assertPoint(anchor, media);

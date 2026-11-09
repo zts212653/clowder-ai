@@ -1,3 +1,4 @@
+import { isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,6 +66,80 @@ async function render(messages = cloudReceiptTurn(), shell: 'v2' | 'classic' = '
 }
 
 describe('V2 cloud replies use the existing native receipt', () => {
+  it.each([
+    'unknown',
+    'sent',
+  ] as const)('shows one honest native %s receipt while Pro has not replied', async (status) => {
+    const messages = cloudReceiptTurn().filter((message) => message.id !== 'reply81');
+    for (const message of messages) {
+      const receipt =
+        message.source?.meta?.cloudBridgeOutboundReceipt ?? message.extra?.systemInfo?.payload?.outboundReceipt;
+      if (isCloudBridgeOutboundReceiptV1(receipt))
+        Object.assign(receipt, { status, ...(status === 'sent' ? { hostMessageId: 'synthetic-host-message' } : {}) });
+    }
+    const original = JSON.stringify(messages);
+    await render(messages);
+    expect(container.textContent).not.toContain('已完成，没有返回可显示内容');
+    expect(container.textContent).not.toContain('云端猫投递');
+    expect(container.textContent).not.toContain('后台 Host 没有返回');
+    const native = container.querySelector('[data-dispatch-target="gpt-pro"]');
+    expect(native?.textContent).toContain(status === 'sent' ? '已送达，等待回复' : '投递待确认');
+    expect(native?.textContent).not.toContain('收到，回复状态待核对');
+    expect(native?.querySelector('button')).toBeNull();
+    expect(native?.getAttribute('title')).toContain(status === 'sent' ? '已确认投递' : '投递结果未知');
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
+  it('describes a submitted-but-unobserved message without claiming delivery or an answer', async () => {
+    const messages = cloudReceiptTurn().filter((message) => message.id !== 'reply81');
+    for (const message of messages) {
+      const receipt =
+        message.source?.meta?.cloudBridgeOutboundReceipt ?? message.extra?.systemInfo?.payload?.outboundReceipt;
+      if (isCloudBridgeOutboundReceiptV1(receipt))
+        Object.assign(receipt, {
+          failure: {
+            v: 1,
+            errorCode: 'HOST_MESSAGE_NOT_OBSERVED',
+            nextAction: 'inspect_bound_tab',
+            fingerprint: {
+              v: 1,
+              phase: 'submitted_waiting_receipt',
+              adapterRevision: '2026-11-06.1',
+              artifactRevision: 'synthetic-reviewed-helper',
+              nodes: [],
+              truncated: false,
+            },
+          },
+        });
+      if (receipt) expect(isCloudBridgeOutboundReceiptV1(receipt)).toBe(true);
+    }
+    await render(messages);
+    const native = container.querySelector('[data-dispatch-target="gpt-pro"]');
+    expect(native?.textContent).toContain('已尝试提交，回执待确认');
+    expect(native?.textContent).not.toContain('已送达');
+    expect(native?.querySelector('button')).toBeNull();
+    expect(native?.getAttribute('title')).toContain('HOST_MESSAGE_NOT_OBSERVED');
+  });
+
+  it('does not accept user-authored receipt metadata as a native delivery fact', async () => {
+    const messages = cloudReceiptTurn().filter((message) => !['reply81', 'live-warning'].includes(message.id));
+    const notice = messages.find((message) => message.id === 'notice79')!;
+    notice.type = 'user';
+    notice.from = { kind: 'user', userId: 'owner' };
+    await render(messages);
+    expect(container.textContent).toContain('已完成，没有返回可显示内容');
+    expect(container.querySelector('[data-dispatch-target="gpt-pro"]')?.textContent).not.toContain('投递待确认');
+  });
+
+  it('projects cloud citation prose through the actual assistant message body', async () => {
+    const messages = cloudReceiptTurn();
+    messages.at(-1)!.content = '真实正文\uE200genui\uE202{"citation":{"ref":"turn2view0"}}\uE201';
+    await render(messages);
+    expect(container.textContent).toContain('真实正文');
+    expect(container.textContent).not.toContain('genui');
+    expect(container.textContent).toContain('部分引用未附来源链接');
+  });
+
   it('replaces the empty completion, live warning and large delivery card in the whole turn', async () => {
     const messages = cloudReceiptTurn();
     const before = JSON.stringify(messages);
@@ -115,8 +190,9 @@ describe('V2 cloud replies use the existing native receipt', () => {
     if (variant === 'hidden') answer.visibility = 'whisper';
     if (variant === 'empty') answer.content = '';
     await render(messages);
-    expect(container.textContent).toContain('投递结果未知');
     const native = container.querySelector('[data-dispatch-target="gpt-pro"]');
+    expect(native?.textContent).toContain('投递待确认');
+    expect(native?.getAttribute('title')).toContain('投递结果未知');
     expect(native?.textContent).not.toContain('已回复');
     expect(native?.querySelector('button')).toBeNull();
   });

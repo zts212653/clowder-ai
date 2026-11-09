@@ -780,9 +780,8 @@ describe('SystemPromptBuilder', () => {
       // Find the Sonnet row
       const sonnetRow = rosterSection.split('\n').find((line) => line.includes('Sonnet'));
       assert.ok(sonnetRow, 'Should have a Sonnet row');
-      // Sonnet has caution: null in config → should show "—", NOT "额度消耗大"
+      // null still masks the breed caution; Sonnet's own dossier may supply its routing note.
       assert.ok(!sonnetRow.includes('额度消耗大'), 'Sonnet should not inherit Opus cost caution');
-      assert.ok(sonnetRow.includes('—'), 'Sonnet caution should be "—"');
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -1367,73 +1366,22 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('## 你当前的 Reviewers'), 'Reviewer choice belongs to risk routing and dossier');
   });
 
-  // --- F042 Wave 3: Active participant hint tests ---
-
-  test('buildInvocationContext injects most-recently-active participant', async () => {
+  test('invocation builder never describes historical participant activity as recent speech', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
       mode: 'serial',
-      chainIndex: 2,
+      chainIndex: 1,
       chainTotal: 2,
       teammates: ['opus'],
       mcpAvailable: false,
-      activeParticipants: [
-        { catId: 'opus', lastMessageAt: 2000, messageCount: 5 },
-        { catId: 'codex', lastMessageAt: 1000, messageCount: 3 },
-      ],
+      // Legacy callers may still carry this obsolete field; it has no prompt consumer.
+      activeParticipants: [{ catId: 'opus', lastMessageAt: Date.now() - 3 * 86400000, messageCount: 1 }],
     });
-    assert.match(ctx, /最近发言：布偶猫\(opus\)\n|最近发言：布偶猫\(opus\)$/, 'Should inject displayName(id) format');
-    assert.ok(!ctx.includes('最近发言：缅因猫(codex)'), 'Self (codex) should not appear as most recent speaker');
+    assert.doesNotMatch(ctx, /最近发言/);
   });
 
-  test('buildInvocationContext skips self in activity list', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'serial',
-      chainIndex: 1,
-      chainTotal: 2,
-      teammates: ['codex'],
-      mcpAvailable: false,
-      activeParticipants: [
-        { catId: 'opus', lastMessageAt: 3000, messageCount: 8 },
-        { catId: 'codex', lastMessageAt: 2000, messageCount: 4 },
-      ],
-    });
-    // opus is self and most-recent, should be skipped; codex is next
-    assert.match(ctx, /最近发言：缅因猫\(codex\)\n|最近发言：缅因猫\(codex\)$/, 'Should inject displayName(id) format');
-  });
-
-  test('buildInvocationContext omits hint when activeParticipants absent', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'independent',
-      teammates: [],
-      mcpAvailable: false,
-    });
-    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no activeParticipants');
-  });
-
-  test('buildInvocationContext omits hint when only self has activity', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'serial',
-      chainIndex: 1,
-      chainTotal: 2,
-      teammates: ['codex'],
-      mcpAvailable: false,
-      activeParticipants: [
-        { catId: 'opus', lastMessageAt: 1000, messageCount: 1 },
-        { catId: 'codex', lastMessageAt: 0, messageCount: 0 },
-      ],
-    });
-    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no non-self participant has activity');
-  });
-
-  test('buildSystemPrompt size with activeParticipants stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
+  test('buildSystemPrompt size with all runtime identity sections stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
     await withFreshRuntimeRegistry(async () => {
       const build = await getBuilder();
       const prompt = build({

@@ -16,8 +16,24 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/ActivityBar', () => ({
   ActivityBar: () => <nav data-testid="activity-bar" />,
 }));
-vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => {
+  // AppShell mounts the hook through WorkspaceNavigateHost; the host forwards to the mocked hook.
+  const useWorkspaceNavigate = vi.fn();
+  return {
+    useWorkspaceNavigate,
+    WorkspaceNavigateHost: ({ threadId, ...options }: { threadId: string | null }) => {
+      useWorkspaceNavigate(threadId, options);
+      return null;
+    },
+  };
+});
 vi.mock('@/services/playbackRuntime', () => ({ getPlaybackManager: vi.fn(), destroyPlaybackRuntime: vi.fn() }));
+// The chromeless page connection, without the network: the tests only ask whether AppShell mounts it.
+vi.mock('@/components/thread-chat/StandaloneHubSocketProvider', () => ({
+  StandaloneHubSocketProvider: ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="standalone-page-connection">{children}</div>
+  ),
+}));
 
 import { AppShell } from '@/components/AppShell';
 import { loadExportThreadTitle, selectMessagesForExport } from '@/components/message-export-selection';
@@ -26,6 +42,7 @@ import {
   useShellPresentation,
   writeShellPresentation,
 } from '@/components/shell/shell-presentation';
+import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 
 function PresentationProbe() {
   return <output data-testid="presentation">{useShellPresentation()}</output>;
@@ -97,6 +114,38 @@ describe('AppShell export mode', () => {
     expect(document.documentElement.dataset.shell).toBe('v2');
     expect(container.querySelector('[data-testid="activity-bar"]')).toBeNull();
     expect(readShellPresentation()).toBe('classic');
+  });
+
+  function navigationWasEnabled() {
+    return vi
+      .mocked(useWorkspaceNavigate)
+      .mock.calls.some(([, options]) => (options as { enabled?: boolean } | undefined)?.enabled === true);
+  }
+
+  it.each([
+    '/story-export',
+    '/story',
+    '/showcase',
+  ])('keeps an exported %s page off workspace navigation and the page connection', (pathname) => {
+    vi.mocked(useWorkspaceNavigate).mockClear();
+    navState.pathname = pathname;
+    navState.search = 'export=true';
+    window.history.replaceState(null, '', `${pathname}?export=true`);
+    renderShell();
+
+    expect(container.querySelector('[data-testid="content"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="standalone-page-connection"]')).toBeNull();
+    expect(navigationWasEnabled()).toBe(false);
+  });
+
+  it('still queues workspace navigation on a chromeless page outside export (#3276)', () => {
+    vi.mocked(useWorkspaceNavigate).mockClear();
+    navState.pathname = '/story';
+    window.history.replaceState(null, '', '/story');
+    renderShell();
+
+    expect(container.querySelector('[data-testid="standalone-page-connection"] [data-testid="content"]')).toBeTruthy();
+    expect(navigationWasEnabled()).toBe(true);
   });
 });
 

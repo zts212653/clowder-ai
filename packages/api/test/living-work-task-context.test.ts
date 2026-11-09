@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { test } from 'node:test';
+import { type TestContext, test } from 'node:test';
 import { promisify } from 'node:util';
 import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
@@ -17,7 +17,10 @@ import { registerLivingWorkRoutes } from '../src/routes/living-work-routes.js';
 import { createReviewFixture, reviewHuman } from './helpers/artifact-review-fixture.js';
 import { screeningFixture } from './helpers/video-project-screening.js';
 
-test('common submission carries the original Task context but only its current exact Human grant authorizes a director', async (t) => {
+async function verifyEntrustedContinuation(
+  t: TestContext,
+  provenance: 'strict' | 'unknown' | 'compatibility_fallback',
+) {
   const film = await screeningFixture();
   t.after(film.cleanup);
   const store = new ArtifactReviewStore(`${film.root}/work-review.sqlite`);
@@ -43,12 +46,13 @@ test('common submission carries the original Task context but only its current e
     undefined,
     undefined,
     undefined,
-    'strict',
+    provenance,
   );
+  const sourcePort = createWorkWorkspaceSource(film.workspace);
   const service = new LivingWorkService({
     owner: f.owner,
     versions: store.works,
-    source: createWorkWorkspaceSource(film.workspace),
+    source: sourcePort,
     authorize: createWorkAuthorizer({
       ownerUserId: 'operator',
       access,
@@ -157,6 +161,46 @@ test('common submission carries the original Task context but only its current e
   store.requests.release(request.requestId, lease.token);
   assert.equal((await call(submit)).statusCode, 403, 'Even a real grant must be explicitly selected');
   assert.equal((await call(read, 'task-cover')).statusCode, 200);
+  if (provenance !== 'strict') {
+    const create = {
+      action: 'create',
+      operationId: 'unrelated-new-work',
+      title: 'No creation grant',
+      changeSummary: 'Must be refused',
+      source: revised.source,
+    };
+    assert.equal(
+      (await call(create, 'task-cover')).statusCode,
+      403,
+      'An exact modification grant cannot authorize unrelated first production',
+    );
+  }
+  const originalTask = structuredClone(f.task.current);
+  for (const mutation of [
+    { ownerCatId: createCatId('codex-sol') },
+    { status: 'done' as const },
+    { threadId: 'unrelated-thread' },
+  ]) {
+    f.task.current = { ...originalTask, ...mutation };
+    assert.notEqual((await call(submit, 'task-cover')).statusCode, 200);
+    assert.equal((await f.owner.describe(created.reference.contentRef)).currentOwnerRevision, 1);
+  }
+  f.task.current = originalTask;
+  const originalOpen = sourcePort.open.bind(sourcePort);
+  const revokedDuringSourceRead = t.mock.method(sourcePort, 'open', async (input) => {
+    const opened = await originalOpen(input);
+    return {
+      ...opened,
+      revalidate: async () => {
+        await opened.revalidate();
+        f.messages.set(message.id, { ...message, deletedAt: 10002 });
+      },
+    };
+  });
+  assert.equal((await call({ ...submit, operationId: 'revoked-at-effect' }, 'task-cover')).statusCode, 403);
+  assert.equal((await f.owner.describe(created.reference.contentRef)).currentOwnerRevision, 1);
+  revokedDuringSourceRead.mock.restore();
+  f.messages.set(message.id, message);
   const response = await call(submit, 'task-cover');
   assert.equal(response.statusCode, 200, response.body);
   const saved = JSON.parse(response.json().json);
@@ -174,4 +218,8 @@ test('common submission carries the original Task context but only its current e
     'A receipt replay never bypasses revoked Human source custody',
   );
   assert.equal((await f.owner.describe(created.reference.contentRef)).currentOwnerRevision, 2);
-});
+}
+
+for (const provenance of ['strict', 'unknown', 'compatibility_fallback'] as const)
+  test(`${provenance}: original Task context requires its current exact Human grant to authorize a director`, (t) =>
+    verifyEntrustedContinuation(t, provenance));

@@ -58,6 +58,8 @@ it('publishes a useful first batch while a later request waits; retry preserves 
   await act(async () => root.render(<Probe />));
   expect(result.artifacts.map((item) => item.name)).toEqual(['one']);
   expect(result.loading).toBe(false);
+  expect(result.loadingMore).toBe(false);
+  await act(async () => result.loadMore?.());
   expect(result.loadingMore).toBe(true);
   expect(result.complete).toBe(false);
   expect(fetch.mock.calls[1][0]).toBe('/api/artifacts?view=works&read=pages&cursor=page-two');
@@ -95,6 +97,7 @@ it('removes partial lineage across every loaded row and rejects a repeated conti
     .mockResolvedValueOnce(page([artifact('two')], 'three', 'unavailable'))
     .mockResolvedValueOnce(page([], 'three'));
   await act(async () => root.render(<Probe />));
+  await act(async () => result.loadMore?.());
   expect(result.error).toBe(true);
   expect(result.complete).toBe(false);
   expect(result.workLineage).toBe('unavailable');
@@ -119,7 +122,7 @@ it('keeps unlocated images distinct even when their URLs match', async () => {
   expect(result.artifacts).toHaveLength(2);
 });
 
-it('keeps the complete catalogue while a same-scope refresh drains its replacement pages', async () => {
+it('keeps the complete catalogue until a fresh first page replaces it', async () => {
   fetch.mockResolvedValueOnce(page([artifact('old')]));
   await act(async () => root.render(<Probe />));
   let resolve: (response: Response) => void = () => {};
@@ -136,7 +139,7 @@ it('keeps the complete catalogue while a same-scope refresh drains its replaceme
   expect(result.artifacts.map((item) => item.name)).toEqual(['replacement']);
 });
 
-it('does not resurrect a withdrawn catalogue when retrying a failed refresh', async () => {
+it('retains the committed catalogue while retrying a temporary refresh failure', async () => {
   fetch.mockResolvedValueOnce(page([artifact('old')]));
   await act(async () => root.render(<Probe />));
   fetch.mockResolvedValueOnce(new Response('', { status: 503 }));
@@ -144,6 +147,7 @@ it('does not resurrect a withdrawn catalogue when retrying a failed refresh', as
   expect(result.error).toBe(true);
   fetch.mockImplementationOnce(() => new Promise<Response>(() => {}));
   await act(async () => result.refetch());
-  expect(result.complete).toBe(false);
-  expect(result.loading).toBe(true);
+  expect(result.complete).toBe(true);
+  expect(result.artifacts.map((item) => item.name)).toEqual(['old']);
+  expect(result.loadingMore).toBe(true);
 });

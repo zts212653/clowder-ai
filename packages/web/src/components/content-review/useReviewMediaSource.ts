@@ -4,7 +4,8 @@ import { apiFetch } from '@/utils/api-client';
 
 /** A WebP display projection keeps its exact authorized source path; source/download reads remain byte exact. */
 export function reviewMediaDisplayPath(path: string, mediaType?: string): string {
-  return mediaType === 'image/webp' ? `${path}${path.includes('?') ? '&' : '?'}display=oriented` : path;
+  const display = mediaType === 'image/webp' ? 'oriented' : mediaType === 'image/gif' ? 'gif-frames' : null;
+  return display ? `${path}${path.includes('?') ? '&' : '?'}display=${display}` : path;
 }
 
 export function useReviewMediaSource(reviewId: string, round: number, onUnavailable: () => void, mediaType?: string) {
@@ -30,7 +31,7 @@ export function useReviewMediaSource(reviewId: string, round: number, onUnavaila
         if (abort.signal.aborted) return;
         const original = URL.createObjectURL(blob);
         objectUrls.push(original);
-        if (mediaType !== 'image/webp') {
+        if (mediaType !== 'image/webp' && mediaType !== 'image/gif') {
           setDownloadSrc(original);
           setSrc(original);
           return;
