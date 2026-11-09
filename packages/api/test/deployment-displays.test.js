@@ -35,14 +35,7 @@ test('actual API display consumers use the selected synthetic deployment brand',
   assert.equal(output.dotServerInfo.name, `${brand.displayName} dot`);
   assert.equal(output.dotServerInfo.version, '0.1.0');
   if (process.platform !== 'win32') assert.equal(output.guardRepository, 'synthetic-owner/runtime-repo');
-  for (const value of [
-    output.summary,
-    output.routing,
-    output.manifest,
-    output.email.subject,
-    output.email.text,
-    output.inApp,
-  ]) {
+  for (const value of [output.routing, output.manifest, output.email.subject, output.email.text, output.inApp]) {
     assert.ok(value.includes(brand.displayName), value);
   }
   assert.ok(output.quest.includes(`Hello ${brand.name}`));

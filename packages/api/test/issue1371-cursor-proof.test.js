@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { legacyBatonHasSucceededReply } from '../dist/domains/cats/services/agents/routing/delivery-boundary-recovery.js';
 import { cursorFor } from '../dist/domains/cats/services/stores/cursor.js';
 import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { safeParseExtra, serializeExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
@@ -47,29 +46,6 @@ test('#1371: parsed proof is strict, additive and survives independent metadata'
   }
 });
 
-test('#1371: many legacy output records require at most one exact child lookup', async () => {
-  const { store, source, reply } = await proofFixture();
-  const messages = await store.getByThreadAfter('thread-proof', undefined, undefined, 'user-1');
-  const legacy = {
-    ...messages.find((m) => m.id === reply.id),
-    extra: { stream: reply.extra.stream, causal: reply.extra.causal },
-  };
-  let reads = 0;
-  const matched = await legacyBatonHasSucceededReply({
-    messages: [messages[0], ...Array(1000).fill(legacy)],
-    sourceMessageId: source.id,
-    target: { userId: 'user-1', threadId: 'thread-proof', catId: 'opus' },
-    turnExecutionStore: {
-      get: async () => {
-        reads++;
-        throw new Error('unavailable');
-      },
-    },
-  });
-  assert.equal(matched, false);
-  assert.equal(reads, 1);
-});
-
 test('#1371: two cold readers recover the canonical prefix once and preserve later sibling work', async () => {
   const { store, boundary } = await proofFixture();
   const later = await store.append({
@@ -85,7 +61,8 @@ test('#1371: two cold readers recover the canonical prefix once and preserve lat
   assert.equal(await cursors.getCursor('user-1', 'opus', 'thread-proof'), boundary);
   assert.equal(await cursors.getCursor('user-1', 'codex', 'thread-proof'), undefined);
   for (const context of contexts) {
-    assert.ok(context.navigationHeader.includes('new independent work'));
+    assert.ok(context.contextText.includes('new independent work'));
+    assert.doesNotMatch(context.navigationHeader, /传球|本轮输入来源/);
     assert.ok(!context.contextText.includes('source already answered'));
   }
   const newer = cursorFor((await store.getByThreadAfter('thread-proof', boundary)).find((m) => m.id === later.id));
@@ -109,6 +86,9 @@ for (const [name, mutate] of [
     const cursors = new DeliveryCursorStore();
     const context = await coldContext(store, cursors);
     assert.equal(await cursors.getCursor('user-1', 'opus', 'thread-proof'), undefined);
-    assert.ok(context.navigationHeader.includes('source already answered'));
+    assert.ok(
+      context.contextText.includes('source already answered'),
+      'invalid proof must not consume the source body',
+    );
   });
 }

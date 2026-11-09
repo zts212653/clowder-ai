@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
+import { openSourcePlace } from '@/components/shell/mailbox/open-exact-place';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 import { useChatStore } from '@/stores/chatStore';
@@ -109,7 +109,7 @@ export function useTeleport(): void {
     if (initialSource) {
       // The newly activated browser need not have been connected to the socket.
       // Reuse the same history recovery and rich-card reveal as the 待办 panel.
-      openExactPlace(initialSource, window.location.pathname);
+      openSourcePlace(initialSource, window.location.pathname);
       window.history.replaceState(window.history.state, '', window.location.pathname);
     }
     const handler = (data: TeleportEvent) => {
@@ -123,7 +123,7 @@ export function useTeleport(): void {
         pushThreadRoute: (tid) => pushThreadRouteWithHistory(tid, window),
         scrollToMessage: scrollToMessageWithRetry,
         openSourceAction: (actionRef) => {
-          openExactPlace(actionRef, window.location.pathname);
+          openSourcePlace(actionRef, window.location.pathname);
           return true;
         },
       });

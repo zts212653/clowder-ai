@@ -121,6 +121,53 @@ describe('ChatMessage ContextBriefing projection', () => {
     expect(container.textContent).not.toContain('恢复 typed 卡');
   });
 
+  it('shows all current inputs without inventing a handoff or exposing raw coordinates while collapsed', () => {
+    act(() =>
+      root.render(
+        React.createElement(BriefingCard, {
+          block: {
+            kind: 'card',
+            v: 1,
+            id: 'current-inputs',
+            title: '上下文覆盖',
+            fields: [{ label: '本轮输入来源', value: 'messageId=input-one\nmessageId=input-two' }],
+            meta: {
+              kind: 'context_briefing',
+              receiverDisplayName: '墨墨',
+              coverageSummary: '近期消息 5 条 · 历史略过 42 条',
+              contextDisplay: {
+                threadId: 'thread-demo',
+                inputs: [
+                  { fromMessageId: 'input-one', from: 'co-creator', time: '08:01' },
+                  {
+                    fromMessageId: 'input-two',
+                    from: '砚砚',
+                    time: '08:02',
+                    sourceThreadId: 'original-thread',
+                    sourceMessageId: 'original-message',
+                  },
+                ],
+                sources: [],
+                coverage: '看到 5 条 · 省略 42 条',
+                detailsMarkdown: '保留完整依据',
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(container.textContent).toContain('来自co-creator、砚砚的 2 条输入');
+    expect(container.textContent).toContain('给 墨墨');
+    expect(container.textContent).not.toContain('input-one');
+    expect(container.textContent).not.toContain('交接来源未记录');
+    act(() => container.querySelector('button')?.click());
+    expect(container.textContent).toContain('input-one');
+    expect(container.textContent).toContain('input-two');
+    expect(container.textContent).toContain('original-thread#original-message');
+    expect(container.textContent).toContain('保留完整依据');
+    expect(container.textContent).not.toContain('未记录交接来源');
+  });
+
   it('shows the actual handoff and warning, with all details reachable through one disclosure', () => {
     act(() =>
       root.render(

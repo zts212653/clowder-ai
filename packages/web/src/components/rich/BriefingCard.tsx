@@ -15,6 +15,17 @@ const displayMetadata = z.object({
     .object({
       threadId: z.string(),
       handoff: z.object({ from: z.string(), time: z.string(), excerpt: z.string(), warning: z.boolean() }).optional(),
+      inputs: z
+        .array(
+          z.object({
+            fromMessageId: z.string(),
+            from: z.string(),
+            time: z.string(),
+            sourceThreadId: z.string().optional(),
+            sourceMessageId: z.string().optional(),
+          }),
+        )
+        .optional(),
       sources: z.array(z.object({ type: z.string(), label: z.string(), ref: z.string() })),
       coverage: z.string(),
       detailsMarkdown: z.string(),
@@ -83,21 +94,32 @@ export function BriefingCard({
   const receiver = metadata.receiverDisplayName || metadata.receiverCatId;
   const display = metadata.contextDisplay;
   const handoff = display?.handoff;
+  const inputs = display?.inputs;
+  const inputSummary = inputs?.length
+    ? `来自${[...new Set(inputs.map((input) => input.from))].join('、')}的 ${inputs.length} 条输入`
+    : '';
   const source = display?.sources[0];
   const oldSource = fields.find((field) => field.label === '真相源')?.value;
   const excerpt = handoff?.excerpt.trim() ?? '';
   const sentence = excerpt.match(/^[^\n。！？]+[。！？]?/u)?.[0] ?? '';
   const readableExcerpt = sentence && !/(?:cat_cafe_|thread_owned_|threadId\s*[=:])/u.test(sentence);
   const sourceSummary = display ? source?.label : oldSource && !oldSource.startsWith('未定位') ? oldSource : '';
-  const summary = readableExcerpt
-    ? `${sentence.slice(0, 120)}${sentence.length > 120 ? '…' : ''}`
-    : sourceSummary
-      ? `依据：${sourceSummary}`
-      : '未记录可用摘要；真相源尚未关联。';
+  const summary = inputSummary
+    ? `${inputSummary}${sourceSummary ? `；依据：${sourceSummary}` : ''}`
+    : readableExcerpt
+      ? `${sentence.slice(0, 120)}${sentence.length > 120 ? '…' : ''}`
+      : sourceSummary
+        ? `依据：${sourceSummary}`
+        : '未记录可用摘要；真相源尚未关联。';
   const coverage = display ? display.coverage : metadata.coverageSummary;
   const warning = handoff?.warning || fields.some((field) => field.label === '传球' && field.value.includes('⚠'));
   const navigation = fields.filter((field) => field.label === '传球' || field.label === '真相源');
-  const diagnostics = fields.filter((field) => field.label !== '传球' && field.label !== '真相源');
+  const diagnostics = fields.filter(
+    (field) =>
+      field.label !== '传球' &&
+      field.label !== '真相源' &&
+      !(inputs !== undefined && (field.label === '本轮输入来源' || field.label === '工作材料')),
+  );
 
   return (
     <div
@@ -129,7 +151,16 @@ export function BriefingCard({
         {expanded && excerpt ? excerpt : summary}
       </p>
       <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-cafe-secondary">
-        {handoff ? (
+        {inputs !== undefined ? (
+          <span>
+            {inputs.length
+              ? inputs
+                  .map((input) => input.time)
+                  .filter((time, index, times) => times.indexOf(time) === index)
+                  .join(' · ')
+              : '本轮输入来源未记录'}
+          </span>
+        ) : handoff ? (
           <span>
             {handoff.from} · {handoff.time} 交接
           </span>
@@ -145,21 +176,47 @@ export function BriefingCard({
       </p>
       {expanded && (
         <div id={detailsId} className="mt-3 border-t border-cafe-border pt-3 text-xs">
-          <section aria-label="交接与依据" className="min-w-0">
-            <h3 className="mb-2 text-[11px] font-medium text-cafe-secondary">交接与依据</h3>
+          <section aria-label={inputs !== undefined ? '输入与依据' : '交接与依据'} className="min-w-0">
+            <h3 className="mb-2 text-[11px] font-medium text-cafe-secondary">
+              {inputs !== undefined ? '输入与依据' : '交接与依据'}
+            </h3>
             <dl className="space-y-2">
               {display ? (
                 <>
-                  <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
-                    <dt className="text-cafe-secondary">交接</dt>
-                    <dd>
-                      {handoff ? `${handoff.from} → ${receiver || '接收猫未记录'} · ${handoff.time}` : '未记录交接来源'}
-                    </dd>
-                  </div>
+                  {inputs !== undefined ? (
+                    inputs.map((input) => (
+                      <div key={input.fromMessageId} className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
+                        <dt className="text-cafe-secondary">输入</dt>
+                        <dd className="min-w-0">
+                          <span>
+                            {input.from} · {input.time}
+                          </span>
+                          <span className="mt-0.5 block font-mono text-cafe-secondary">{input.fromMessageId}</span>
+                          {input.sourceThreadId && (
+                            <span className="block font-mono text-cafe-secondary">
+                              {input.sourceThreadId}
+                              {input.sourceMessageId ? `#${input.sourceMessageId}` : ''}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
+                      <dt className="text-cafe-secondary">交接</dt>
+                      <dd>
+                        {handoff
+                          ? `${handoff.from} → ${receiver || '接收猫未记录'} · ${handoff.time}`
+                          : '未记录交接来源'}
+                      </dd>
+                    </div>
+                  )}
                   {display.sources.length > 0 ? (
                     display.sources.map((item, index) => (
                       <div key={index} className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
-                        <dt className="text-cafe-secondary">{index === 0 ? '真相源' : '依据'}</dt>
+                        <dt className="text-cafe-secondary">
+                          {index === 0 ? (inputs !== undefined ? '工作材料' : '真相源') : '依据'}
+                        </dt>
                         <dd className="min-w-0">
                           <span>{item.label}</span>
                           <span className="ml-1 text-cafe-secondary">[{item.type}]</span>
@@ -169,7 +226,7 @@ export function BriefingCard({
                     ))
                   ) : (
                     <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
-                      <dt className="text-cafe-secondary">真相源</dt>
+                      <dt className="text-cafe-secondary">{inputs !== undefined ? '工作材料' : '真相源'}</dt>
                       <dd>尚未关联到明确依据</dd>
                     </div>
                   )}

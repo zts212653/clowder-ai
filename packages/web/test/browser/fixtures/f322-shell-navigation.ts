@@ -1,13 +1,16 @@
 import { useMemo, useSyncExternalStore } from 'react';
+import { CHAT_THREAD_ROUTE_EVENT } from '../../../src/components/ThreadSidebar/thread-navigation';
 
 // Test boundary for Next's router. Production shell navigation computes every target;
 // this adapter only applies that URL to browser history and publishes route changes.
 const EVENT = 'f322-fixture-route';
 function subscribe(listener: () => void): () => void {
   window.addEventListener(EVENT, listener);
+  window.addEventListener(CHAT_THREAD_ROUTE_EVENT, listener);
   window.addEventListener('popstate', listener);
   return () => {
     window.removeEventListener(EVENT, listener);
+    window.removeEventListener(CHAT_THREAD_ROUTE_EVENT, listener);
     window.removeEventListener('popstate', listener);
   };
 }

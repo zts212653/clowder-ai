@@ -3471,6 +3471,31 @@
     "owner": "codex61-sol"
   },
   {
+    "id": "capability-openai-platform-shared-account",
+    "kind": "capability",
+    "structureSource": {
+      "path": "packages/web/src/components/UnifiedAuthModal.tsx",
+      "anchor": "UnifiedAuthModal"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/AccountConnectionFields.tsx",
+      "anchor": "isPlatformKey"
+    },
+    "sourceRef": {
+      "path": "docs/guides/platform-api-requests.md",
+      "anchor": "配置与复用平台账号"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "想让能力共用平台密钥？到「猫猫团队 → 账户与登录」添加 Anthropic API、OpenAI Platform 或 Google API 账号，只填名称和密钥即可。模型由使用方选择，已有 Claude/Codex/Gemini 登录绑定保持原样。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "配置共用平台 API Key 账号",
+      "draftPrompt": "请带我到猫猫团队的账户与登录页，选择 Anthropic API、OpenAI Platform 或 Google API 添加平台账号；密钥由我自己填写，模型由使用方选择，并保留现有 Claude/Codex/Gemini 登录绑定。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "capability-codex-account-notes-and-switching",
     "kind": "capability",
     "sourceRef": {

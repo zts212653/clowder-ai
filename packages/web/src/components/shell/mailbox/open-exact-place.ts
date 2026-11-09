@@ -1,4 +1,8 @@
-import { getThreadIdFromPathname, pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import {
+  getThreadHref,
+  getThreadIdFromPathname,
+  pushThreadRouteWithHistory,
+} from '@/components/ThreadSidebar/thread-navigation';
 import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { rememberWorkspaceForeground } from '@/components/workbench/workspace-presentation-lock';
@@ -18,9 +22,12 @@ const isChatRoute = (pathname: string) => pathname === '/' || pathname.startsWit
  * pending-action chain. Every other case is already routed by the function itself (pushing again would only repeat the
  * same navigation), and inside the right conversation it is only a scroll.
  */
-export function openExactPlace(actionRef: string, pathname: string): void {
+export function openExactPlace(actionRef: string, pathname: string, pushRoute: (href: string) => void): void {
   const review = reviewSurfaceFromPreparedRef(actionRef);
   if (review) {
+    const threadId = review.resultTargetRef?.key;
+    // Restore the destination before selecting its review; the arriving ChatContainer then sees the same thread.
+    if (threadId) useChatStore.getState().setCurrentThread(threadId);
     useChatStore.getState().setWorkspaceMode('dev');
     useF307ExperienceWorkbenchStore.getState().dispatch({
       type: 'open-surface',
@@ -29,8 +36,16 @@ export function openExactPlace(actionRef: string, pathname: string): void {
     });
     // Explicit navigation also leaves Home when the tab is already active or its host has not mounted yet.
     rememberWorkspaceForeground();
+    const hostedThreadId = isChatRoute(pathname) ? getThreadIdFromPathname(pathname) : null;
+    // Next navigation preserves the selected in-memory panel when entering chat from a global page.
+    if (threadId && hostedThreadId !== threadId) pushRoute(getThreadHref(threadId));
     return;
   }
+  openSourcePlace(actionRef, pathname);
+}
+
+/** Message/record sources use their existing navigation owner, without a Next router dependency. */
+export function openSourcePlace(actionRef: string, pathname: string): void {
   const target = resolveEntrustedWorkActionTarget(actionRef);
   const rememberedThreadId = useChatStore.getState().currentThreadId;
   navigateToEntrustedWorkAction(actionRef);

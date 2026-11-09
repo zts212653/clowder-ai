@@ -11,8 +11,11 @@ export const useMemberModelCatalogs = create<{
   catalogs: Record<string, MemberCatalog>;
   // Successful discovery survives remounts; prepared evidence belongs only to the active draft.
   runtimes: readonly RuntimeChoice[];
+  // Issued tickets are separate from accepted facts: failures/cancellation publish nothing.
+  runtimeRevision: number;
+  runtimeConfirmedRevision: number;
   preparedRuntime?: RuntimeChoice;
-}>(() => ({ catalogs: {}, runtimes: [], preparedRuntime: undefined }));
+}>(() => ({ catalogs: {}, runtimes: [], runtimeRevision: 0, runtimeConfirmedRevision: 0, preparedRuntime: undefined }));
 
 export function memberModelCatalogKey(
   cat: Pick<CatData, 'id' | 'clientId' | 'acp' | 'agentProvider' | 'accountRef' | 'cliConfigArgs'>,

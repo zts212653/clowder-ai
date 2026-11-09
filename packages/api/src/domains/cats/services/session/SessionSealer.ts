@@ -21,9 +21,8 @@ import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
 import { extractDecisionSignals } from './extractDecisionSignals.js';
-import { generateHandoffDigest } from './HandoffDigestGenerator.js';
 import { getHomeSessionPosition } from './session-scope.js';
-import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
+import { formatEventsChat } from './TranscriptFormatter.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js';
 
@@ -36,16 +35,6 @@ export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
 export interface SealFinalizeResult {
   sealed: boolean;
   clean: boolean;
-}
-
-/**
- * F065 Phase C: Handoff digest configuration.
- * Injectable functions for testability and per-thread resolution.
- */
-export interface HandoffConfig {
-  getBootstrapDepth: (catId: string) => 'extractive' | 'generative';
-  resolveProfile: (threadId: string, catId: string) => Promise<{ apiKey: string; baseUrl: string } | null>;
-  fetchFn?: typeof fetch;
 }
 
 export interface SessionSealerOptions {
@@ -88,7 +77,6 @@ export interface ISessionSealer {
  * Uses ISessionChainStore for all state mutations.
  * Optionally uses TranscriptWriter for Phase C transcript flush.
  * F065 Phase B: Optionally updates ThreadMemory on seal.
- * F065 Phase C: Optionally generates handoff digest via Haiku.
  */
 /**
  * Post-seal hook signature.
@@ -112,7 +100,6 @@ export class SessionSealer implements ISessionSealer {
     private readonly transcriptWriter?: TranscriptWriter,
     private readonly threadStore?: IThreadStore,
     private readonly transcriptReader?: TranscriptReader,
-    private readonly handoffConfig?: HandoffConfig,
     private readonly summaryStore?: ISummaryStore,
     private readonly options: SessionSealerOptions = {},
   ) {
@@ -464,52 +451,6 @@ export class SessionSealer implements ISessionSealer {
       } catch {
         clean = false;
         // best-effort: thread memory update failure doesn't prevent sealing
-      }
-    }
-
-    // F065 Phase C: Generate handoff digest (best-effort, after ThreadMemory)
-    if (this.handoffConfig && this.transcriptReader) {
-      try {
-        const depth = this.handoffConfig.getBootstrapDepth(record.catId);
-        if (depth === 'generative') {
-          const profile = await this.handoffConfig.resolveProfile(record.threadId, record.catId);
-          if (profile?.apiKey) {
-            const allEvents = await this.transcriptReader.readAllEvents(record.id, record.threadId, record.catId);
-            if (allEvents.length > 0) {
-              const handoffSummaries = formatEventsHandoff(allEvents);
-              const chatMessages = formatEventsChat(allEvents);
-              const extractive = await this.transcriptReader.readDigest(record.id, record.threadId, record.catId);
-
-              const result = await generateHandoffDigest({
-                handoffSummaries,
-                extractiveDigest: extractive ?? {},
-                recentMessages: chatMessages.slice(-8),
-                apiKey: profile.apiKey,
-                baseUrl: profile.baseUrl,
-                ...(this.handoffConfig.fetchFn ? { fetchFn: this.handoffConfig.fetchFn } : {}),
-              });
-
-              if (!result) {
-                clean = false;
-              } else {
-                const sessionDir = this.transcriptReader.getSessionDir(record.threadId, record.catId, record.id);
-                const { TranscriptWriter: TW } = await import('./TranscriptWriter.js');
-                await TW.writeHandoffDigest(
-                  sessionDir,
-                  {
-                    v: result.v,
-                    model: result.model,
-                    generatedAt: result.generatedAt,
-                  },
-                  result.body,
-                );
-              }
-            }
-          }
-        }
-      } catch {
-        clean = false;
-        // best-effort: handoff digest failure doesn't prevent sealing
       }
     }
 

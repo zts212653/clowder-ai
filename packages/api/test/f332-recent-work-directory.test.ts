@@ -118,11 +118,10 @@ test('large task histories and response payloads stop at the declared budget and
   assert.equal(partial.json().threads[0].recentTasks.order, 'updatedAt_desc_within_read');
 });
 
-test('opening navigation offers a one-hop directory without preloading another conversation', async () => {
+test('opening navigation does not preload work or direct ordinary turns to a work directory', async () => {
   const { formatNavigationHeader } = await import('../src/domains/cats/services/agents/routing/navigation-context.js');
-  const text = formatNavigationHeader({ baton: null, tasks: [], recentWorkDirectory: true });
-  assert.match(text, /cat_cafe_list_threads\(\{ includeWork: true/);
-  assert.doesNotMatch(text, /SECRET WORK|work 0/);
+  const text = formatNavigationHeader({ tasks: [] });
+  assert.doesNotMatch(text, /cat_cafe_list_threads|SECRET WORK|work 0/);
 });
 
 test('runtime unavailability remains unknown while titles and tasks survive', async (t) => {

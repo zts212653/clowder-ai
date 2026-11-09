@@ -76,7 +76,9 @@ describe('canonical message search projection', () => {
     const context = { signal: controller.signal, deadlineAt: Date.now() + 5000 };
     const result = await service.search(input, principal, context);
     assert.equal(result.results.length, 3);
-    assert.equal(searchOptions.signal, controller.signal);
+    assert.notEqual(searchOptions.signal, controller.signal);
+    assert.equal(searchOptions.signal.aborted, true, 'the discovery owns and closes its read lifetime');
+    assert.equal(controller.signal.aborted, false, 'local cleanup must not cancel the caller');
     assert.equal(searchOptions.deadlineAt, context.deadlineAt);
     controller.abort(new DOMException('client left', 'AbortError'));
     await assert.rejects(service.search(input, principal, context), { name: 'AbortError' });
