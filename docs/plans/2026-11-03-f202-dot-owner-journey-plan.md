@@ -407,3 +407,6 @@ git diff --check
 8. 正常用户是否能在 Dot 页面独立完成 endpoint → ChatGPT discovery → pairing/subscription → roundtrip，且 Host 没有 Dot/cloud 专属逻辑。
 
 复审通过前不实施、不发布新 alpha、不恢复临时公网入口，也不要求主人执行命令或重启。
+
+
+> 2026-11-09 范围收敛：本文 W1/native 文件刷新和通用共享授权建设已被最终迁移方案取代；现行范围见 `2026-11-09-f202-participant-response-and-auto-verification.md` 的 alpha.41 节。历史论证保留，不代表当前发布要求。

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * The producer-stated cancelability contract, as the rendered card applies it.
  *
@@ -43,7 +44,11 @@ describe('ConnectorBubble hold cancelability contract', () => {
   });
 
   /** One hold-ball card. `cancelable` omitted = written before this contract. */
-  function holdCard(id: string, offsetMs: number, cancelable?: boolean): ChatMessage {
+  function holdCard(
+    id: string,
+    offsetMs: number,
+    cancelable?: boolean,
+  ): ChatMessage & { source: NonNullable<ChatMessage['source']> } {
     return {
       id,
       type: 'connector',
@@ -55,7 +60,7 @@ describe('ConnectorBubble hold cancelability contract', () => {
         icon: 'hold-ball',
         meta: { taskId: 'hold-ball-contract', ...(cancelable === undefined ? {} : { cancelable }) },
       },
-    } as ChatMessage;
+    };
   }
 
   /** Renders one card of the hold against the whole timeline, isolated. */
@@ -64,7 +69,7 @@ describe('ConnectorBubble hold cancelability contract', () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => {
-      root.render(React.createElement(ConnectorBubble, { message, timelineMessages }));
+      root.render(React.createElement(ConnectorBubble, { message, timelineMessages, threadId: 'thread' }));
     });
     await act(async () => {
       await Promise.resolve();
@@ -114,5 +119,68 @@ describe('ConnectorBubble hold cancelability contract', () => {
     // Fail-open is correct here and only here: nothing local says the hold ended,
     // so a 500 must not silently strip a live hold's only cancel entry.
     expect(text).toContain('取消持球');
+  });
+
+  it.each([
+    { withJob: false, declaration: 'unchanged' },
+    { withJob: true, declaration: 'unchanged' },
+    { withJob: false, declaration: undefined },
+    { withJob: true, declaration: undefined },
+  ])('keeps a recovery notice informational with %j', async ({ withJob, declaration }) => {
+    const waiting = holdCard('m1', 0, true);
+    const notice = holdCard('m2', 1_000);
+    notice.content = '自动恢复已暂停，原执行仍保留';
+    notice.source.meta = {
+      ...notice.source.meta,
+      phase: 'status',
+      recoveryDisposition: true,
+      ...(declaration === undefined ? {} : { cancelable: declaration }),
+      ...(withJob ? { jobId: 'original-job' } : {}),
+    };
+    if (withJob)
+      waiting.source.meta = {
+        ...waiting.source.meta,
+        jobId: 'original-job',
+        managedJobCard: true,
+        catId: 'codex61-sol',
+      };
+    mockApiFetch.mockClear();
+    const noticeText = await renderCard(notice, [waiting, notice]);
+    expect(noticeText).toContain(notice.content);
+    expect(noticeText).not.toContain('已结束');
+    expect(noticeText).not.toContain('取消持球');
+    expect(noticeText).not.toContain('取消并反馈');
+    expect(mockApiFetch.mock.calls.some(([url]) => String(url).includes('/hold-ball/'))).toBe(false);
+    if (!withJob) {
+      const waitingText = await renderCard(waiting, [waiting, notice]);
+      expect(waitingText).toContain('取消持球');
+      expect(waitingText).not.toContain('已结束');
+    } else {
+      mockApiFetch.mockImplementation(async () =>
+        Response.json({
+          taskId: 'hold-ball-contract',
+          cancelable: true,
+          job: {
+            jobId: 'original-job',
+            originTaskId: 'hold-ball-contract',
+            state: 'running',
+            command: 'original command',
+            createdAt: BASE_TS,
+          },
+        }),
+      );
+      const waitingText = await renderCard(waiting, [waiting, notice]);
+      expect(waitingText).toContain('停止任务');
+      expect(waitingText).toContain('original command');
+    }
+  });
+
+  it('does not invent a terminal or cancel action when only the recovery notice is loaded', async () => {
+    const notice = holdCard('only-notice', 0);
+    notice.source.meta = { ...notice.source.meta, cancelable: 'unchanged' };
+    const text = await renderCard(notice, [notice]);
+    expect(text).toContain(notice.content);
+    expect(text).not.toContain('取消持球');
+    expect(text).not.toContain('已结束');
   });
 });

@@ -1,4 +1,4 @@
-import { finishNamedMessage } from '@/hooks/named-message-writer';
+import { finishNamedMessage, writeCliDiagnostics } from '@/hooks/named-message-writer';
 import { useChatStore } from '@/stores/chatStore';
 import type { ActiveContext, ActiveStoreActions, OpenThreadRows } from './active-context';
 import {
@@ -14,7 +14,7 @@ import {
   findTerminalActiveInvocationSlot,
   isStaleTerminalEvent,
 } from './invocation-slots';
-import { namedTarget } from './named-target';
+import { isLateForCommittedResponse, namedTarget } from './named-target';
 import type { AgentMsg } from './types';
 
 /**
@@ -172,6 +172,8 @@ export function handleActiveError(msg: AgentMsg, threadId: string, ctx: ActiveCo
   // The failure belongs to the response the error names: it stops streaming there and the response
   // renders its own failed notice from its terminal snapshot — no second row expresses the result.
   const target = namedTarget(msg, threadId);
+  if (target && msg.metadata?.cliDiagnostics && !isLateForCommittedResponse(msg, threadId, useChatStore.getState()))
+    writeCliDiagnostics(target, msg.metadata.cliDiagnostics);
   if (target && !recoverable) finishNamedMessage(target);
   if (!stale && !recoverable) markCatFailed(msg, actions);
   if (!stale && !target) upsertUnansweredErrorRow(msg, timeoutDiag, ctx.rows);

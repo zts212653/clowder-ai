@@ -5,7 +5,7 @@ import { resolveCatCafeDataRoot } from '../../../../../../utils/cli-process-owne
 import { PiAcpSession } from './pi-acp-session.js';
 import { encodePiAcpRecord, PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from './pi-bridge-contract.js';
 import { piErrorExcerpt } from './pi-rpc-diagnostics.js';
-import { type PiRecord, record } from './pi-rpc-process.js';
+import { PiDiagnosticError, type PiRecord, record } from './pi-rpc-process.js';
 import { type PiSessionSlot, type PiSessionStorage, PiSessionStore, piDigest } from './pi-session-store.js';
 
 /** A small ACP adapter around an already installed Pi. It never installs a package or logs credentials. */
@@ -87,6 +87,9 @@ export class PiAcpBridge {
           error: {
             code: request.method === 'session/load' ? PI_SESSION_BINDING_ERROR : -32603,
             message: error instanceof Error ? piErrorExcerpt(error.message, 1500) : 'Pi bridge request failed',
+            ...(error instanceof PiDiagnosticError && error.diagnostics
+              ? { data: { diagnostics: piErrorExcerpt(error.diagnostics) } }
+              : {}),
           },
         });
     }

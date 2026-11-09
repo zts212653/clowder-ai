@@ -31,8 +31,6 @@ export const PLUGIN_HOST_ENTRIES = {
   projectOutputs: 'project-outputs',
   quarantines: 'quarantines.json',
   externalAccess: 'external-access.json',
-  capabilityKeyring: 'capability-keyring.json',
-  nativeCredentials: 'native-credentials',
   sharedExtension: 'shared-extension.json',
   dotConnection: 'dot-connection.json',
   dotDispatches: 'dot-dispatches',

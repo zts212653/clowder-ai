@@ -10,21 +10,9 @@ import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { codeToolsCopy } from './code-tools.shell-copy';
 import { DiffViewer, parseUnifiedDiff } from './DiffViewer';
 import { FileIcon } from './FileIcons';
+import { getStatusInfo } from './git-file-status';
 import { PullRequestChangesEmpty, PullRequestChangesStatus } from './PullRequestChangesStatus';
 import { useChangesDiff } from './useChangesDiff';
-
-const statusLabels: Record<string, { label: string; color: string }> = {
-  M: { label: 'M', color: 'text-amber-400' },
-  A: { label: 'A', color: 'text-green-400' },
-  D: { label: 'D', color: 'text-conn-red-text' },
-  R: { label: 'R', color: 'text-blue-400' },
-  '?': { label: 'U', color: 'text-cafe-muted' },
-  '??': { label: 'U', color: 'text-cafe-muted' },
-};
-
-function getStatusInfo(status: string) {
-  return statusLabels[status] ?? { label: status, color: 'text-cafe-muted' };
-}
 
 interface ChangesPanelV2Props {
   worktreeId: string | null;
@@ -162,7 +150,13 @@ export function ChangesPanelV2({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : copy.noChanges}
+            {data.isGitRepository === false ? (
+              copy.notGitRepository
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              copy.noChanges
+            )}
           </div>
         )}
       </div>

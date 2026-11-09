@@ -4,6 +4,7 @@ import {
   type CliEffortPreset,
   getCatCarrierOptions,
   getCliEffortOptionsForProvider,
+  resolveMemberIdentity,
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
@@ -371,6 +372,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
   const nameForCreate = createDraft?.templateName ?? '';
   const catId = cat?.id ?? (nameForCreate ? autoSlug(nameForCreate) : '');
   const mentionPatterns = cat?.mentionPatterns ?? [];
+  const identity = cat ? resolveMemberIdentity(cat, cat.identityProfile ?? undefined) : undefined;
   return {
     catId,
     name: cat?.name ?? cat?.displayName ?? createDraft?.templateName ?? '',
@@ -384,8 +386,8 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     mentionPatterns: joinTags(mentionPatterns),
     roleDescription: cat?.roleDescription ?? createDraft?.templateRoleDescription ?? '',
     personality: cat?.personality ?? createDraft?.templatePersonality ?? '',
-    teamStrengths: cat?.teamStrengths ?? createDraft?.templateTeamStrengths ?? '',
-    caution: cat?.caution ?? '',
+    teamStrengths: identity?.rosterFields.teamStrengths.configuredValue ?? createDraft?.templateTeamStrengths ?? '',
+    caution: identity?.rosterFields.caution.configuredValue ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
     configurationSource:

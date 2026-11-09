@@ -336,7 +336,7 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
     });
     assert.equal(status.statusCode, 200, status.body);
     assert.equal(status.json().render, 'rows');
-    assert.deepEqual(status.json().data.rows, []);
+    assert.deepEqual(status.json().data.rows, [{ key: 'waiting-connection', label: '待连接', detail: '' }]);
     assert.equal(JSON.stringify(status.json()).includes(secret), false, 'the owner journey never returns a Host token');
     assert.deepEqual(
       (await storage.get(dot.pluginId, 'dot/connection/v1'))?.value,

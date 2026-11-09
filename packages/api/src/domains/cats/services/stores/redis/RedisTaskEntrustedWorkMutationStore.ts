@@ -17,11 +17,12 @@ import type {
   UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { TASK_DEPLOYMENT_RECOVERY_LUA } from './deployment-recovery-lua.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 
 const MAX_CONDITIONAL_TASK_UPDATE_RETRIES = 5;
 
-const ATTACH_ARTIFACT_EVIDENCE_LUA = `
+const ATTACH_ARTIFACT_EVIDENCE_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 -- TASK_ATTACH_ARTIFACT_EVIDENCE: compare the entire observed Task hash, not just refs.
 local fields = cjson.decode(ARGV[1])
 local count = 0
@@ -30,11 +31,11 @@ for field, value in pairs(fields) do
   if redis.call('HGET', KEYS[1], field) ~= value then return 0 end
 end
 if redis.call('HLEN', KEYS[1]) ~= count then return 0 end
-redis.call('HSET', KEYS[1], 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3])
+writeTaskRecovery(KEYS[1], {'entrustedWork', ARGV[2], 'updatedAt', ARGV[3]})
 return 1
 `;
 
-const CLOSE_ENTRUSTED_WORK_LUA = `
+const CLOSE_ENTRUSTED_WORK_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 -- F310_CLOSE_ENTRUSTED_WORK
 if ARGV[7] ~= '' and redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[7] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'entrustedWork')
@@ -47,13 +48,13 @@ end
 if (redis.call('HGET', KEYS[1], 'deploymentWait') or '') ~= ARGV[5] then
   return 0
 end
-redis.call('HSET', KEYS[1], 'status', 'done', 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3])
-if ARGV[6] ~= '' then redis.call('HSET', KEYS[1], 'deploymentWait', ARGV[6]) end
+writeTaskRecovery(KEYS[1], {'status', 'done', 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3]})
+if ARGV[6] ~= '' then writeTaskRecovery(KEYS[1], {'deploymentWait', ARGV[6]}) end
 if #KEYS > 1 and redis.call('GET', KEYS[2]) == ARGV[4] then redis.call('DEL', KEYS[2]) end
 return 1
 `;
 
-const UPDATE_ENTRUSTED_WORK_LUA = `
+const UPDATE_ENTRUSTED_WORK_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 -- F310_UPDATE_ENTRUSTED_WORK
 if ARGV[5] ~= '' and redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[5] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'entrustedWork')
@@ -63,7 +64,7 @@ end
 if current ~= ARGV[1] then
   return 0
 end
-redis.call('HSET', KEYS[1], 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3], 'status', ARGV[4])
+writeTaskRecovery(KEYS[1], {'entrustedWork', ARGV[2], 'updatedAt', ARGV[3], 'status', ARGV[4]})
 return 1
 `;
 

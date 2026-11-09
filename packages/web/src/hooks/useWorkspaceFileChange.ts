@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { API_URL } from '@/utils/api-client';
+import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 
 interface WorkspaceFileChangeOptions {
   enabled?: boolean;
@@ -12,6 +12,8 @@ interface WorkspaceFileChangeOptions {
 }
 
 interface WorkspaceFileChangedEvent {
+  /** Echoes the watchId this subscription sent; a change for another watch is ignored. */
+  watchId?: string;
   worktreeId: string;
   path: string;
   sha256: string;
@@ -29,6 +31,7 @@ export function useWorkspaceFileChange({
   currentSha,
   onReload,
 }: WorkspaceFileChangeOptions) {
+  const hub = useHubSocket();
   const [pendingExternalSha, setPendingExternalSha] = useState<string | null>(null);
   const pendingExternalShaRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
@@ -66,46 +69,29 @@ export function useWorkspaceFileChange({
 
   useEffect(() => {
     if (!enabled || !worktreeId || !path) return;
-    let active = true;
-    let cleanup: (() => void) | null = null;
+    // The server keys watches by (socket, watchId), so this subscription releases only its own watch.
+    const watchId = crypto.randomUUID();
+    const watch = () => hub.emit('workspace:watch-file', { watchId, worktreeId, path, sha256: currentShaRef.current });
 
-    void import('socket.io-client').then(({ io }) => {
-      if (!active) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
-        transports: ['websocket'],
-        forceNew: true,
-      });
-
-      socket.on('connect', () => {
-        socket.emit('workspace:watch-file', {
-          worktreeId,
-          path,
-          sha256: currentShaRef.current,
-        });
-      });
-
-      socket.on('workspace:file-changed', (event: WorkspaceFileChangedEvent) => {
-        if (event.worktreeId !== worktreeId || event.path !== path || event.sha256 === currentShaRef.current) return;
-        if (dirtyRef.current) {
-          pendingExternalShaRef.current = event.sha256;
-          setPendingExternalSha(event.sha256);
-          return;
-        }
-        void onReloadRef.current(path);
-      });
-
-      cleanup = () => {
-        socket.emit('workspace:unwatch-file');
-        socket.disconnect();
-      };
+    const releaseChanges = hub.on('workspace:file-changed', (event: WorkspaceFileChangedEvent) => {
+      if (event.watchId !== watchId) return;
+      if (event.worktreeId !== worktreeId || event.path !== path || event.sha256 === currentShaRef.current) return;
+      if (dirtyRef.current) {
+        pendingExternalShaRef.current = event.sha256;
+        setPendingExternalSha(event.sha256);
+        return;
+      }
+      void onReloadRef.current(path);
     });
+    // A watch belongs to one server connection: it is sent now and again on every reconnect.
+    const releaseConnection = hub.onConnected(watch);
 
     return () => {
-      active = false;
-      cleanup?.();
+      releaseConnection();
+      releaseChanges();
+      hub.emit('workspace:unwatch-file', { watchId });
     };
-  }, [enabled, path, worktreeId]);
+  }, [enabled, hub, path, worktreeId]);
 
   return {
     pendingExternalSha,

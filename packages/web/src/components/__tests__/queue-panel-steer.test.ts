@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F047: QueuePanel steer UI
  * - QueuePanel renders only durable pending entries
@@ -1018,7 +1019,7 @@ describe('QueuePanel steer (F047)', () => {
     const opus = container.querySelector<HTMLButtonElement>('[data-testid="steer-target-opus"]');
     const codex = container.querySelector<HTMLButtonElement>('[data-testid="steer-target-codex"]');
     expect(opus?.disabled).toBe(true);
-    expect(opus?.textContent).toContain('已投递');
+    expect(opus?.textContent).toContain('已交接 · 在原消息下方查看进度');
     expect(codex?.disabled).toBe(false);
     expect(codex?.getAttribute('aria-pressed')).toBe('true');
   });

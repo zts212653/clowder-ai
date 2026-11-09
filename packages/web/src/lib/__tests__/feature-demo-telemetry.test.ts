@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordCapabilityTipEvent } from '../capabilityTipEvents';
 import { recordFeatureDemoStage, recordThreadProposalDemoUse } from '../feature-demo-telemetry';

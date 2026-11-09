@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { Writable } from 'node:stream';
 import { test } from 'node:test';
 import { type McpContribution, validateManifest } from '@clowder-ai/plugin-contract';
@@ -77,7 +76,7 @@ test('native route authenticates separately, captures optional source, and refus
   const validation = validateManifest(authority.packageRecord.manifest);
   assert.equal(validation.valid, true, JSON.stringify(validation.errors));
   const actions = new NativePluginActions(async () => authority as never);
-  await actions.activate(authority as never, 0, async (_method, input) => {
+  actions.activate(authority as never, 0, async (_method, input) => {
     writes++;
     const context = currentPluginCallContext('plugin-instance')!;
     return {
@@ -108,16 +107,13 @@ test('native route authenticates separately, captures optional source, and refus
     },
     threadStore: { get: async () => ({ deletedAt: deleted ? 1 : undefined }) },
   });
-  const credentialFile = actions.environment('plugin-instance', 'example').CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE;
-  assert.ok(credentialFile);
-  const actionToken = (JSON.parse(await readFile(credentialFile, 'utf8')) as { token: string }).token;
   const request = {
     method: 'POST' as const,
     url: '/api/plugin-runtime/action',
     headers: {
       'x-invocation-id': 'inv',
       'x-callback-token': 'secret',
-      'x-clowder-plugin-action-token': actionToken,
+      'x-clowder-plugin-action-token': actions.environment('plugin-instance', 'example').CLOWDER_PLUGIN_ACTION_TOKEN!,
     },
     payload: { method: 'example.run', input: { catId: 'spoof' } },
   };

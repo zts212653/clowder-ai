@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, isDshLauncher } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
 import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
+import { resolveDshSetupLaunch } from './dsh-setup-launch.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
 import { discoverDshRuntime } from './native-dsh-discovery.js';
 import { dshLauncherProfileState } from './native-dsh-profile.js';
@@ -20,6 +21,15 @@ function metadata(path: string, toml = false): Record<string, unknown> {
     return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
+  }
+}
+/** Display evidence only: reuse setup's existing package/argument/profile checks without launching. */
+function supportsDshSetup(command: string, args: string[], cwd: string): boolean {
+  try {
+    resolveDshSetupLaunch(command, args, cwd);
+    return true;
+  } catch {
+    return false;
   }
 }
 /** Startup descriptors containing credentials or service URLs stay in the existing editor. */
@@ -72,18 +82,25 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
     const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
     const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot);
+    const dshSetupSupported =
+      installed &&
+      config.transport !== 'httpstream' &&
+      supportsDshSetup(config.command, config.startupArgs, projectRoot);
     const selectable = safeNativeStartup(config.command, config.startupArgs) && profileState !== 'acp_profile_invalid';
     return [
       {
         id: `acp:${cat.id}`,
         label: agy
           ? 'AGY 官方 ACP'
-          : /dsh|deepseek/i.test([config.command, ...config.startupArgs].join(' '))
+          : dshSetupSupported ||
+              isDshLauncher(config.command, config.startupArgs) ||
+              (profileState !== undefined && profileState !== 'custom_startup')
             ? 'DSH'
             : cat.displayName,
         clientId: agy ? 'google' : 'acp',
         ...(agy ? { agyCarrier: 'acp' as const } : {}),
         installed,
+        ...(dshSetupSupported ? { dshSetupSupported: true } : {}),
         ...(profileState && profileState !== 'custom_startup'
           ? { discoveryStatus: installed ? profileState : 'not_installed' }
           : {}),

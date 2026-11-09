@@ -1,12 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { OperationActionResult, PluginManifest } from '@clowder-ai/plugin-contract';
 import { z } from 'zod';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { ExecutablePluginPackageRecord, PluginInstanceRecord } from '../host-inventory/types.js';
 
-const PROPOSAL_TTL_MS = 5 * 60_000;
 const MAX_SURFACE_BYTES = 512 * 1024;
 const MAX_TOOLS = 32;
 const MAX_EVENTS = 16;
@@ -50,17 +48,6 @@ const rpcEnvelope = z
   })
   .passthrough();
 
-export interface SharedOwnerContext {
-  readonly userId: string;
-  readonly sessionBindingId?: string;
-  readonly operationKey: string;
-  readonly actionId: string;
-  readonly requestId: string;
-  readonly confirmed?: boolean;
-  assertWriteCurrent?(): void;
-  assertCurrent(): void | Promise<void>;
-}
-
 export interface SharedConnectionView {
   readonly deployment:
     | { readonly state: 'configured'; readonly endpoint: string; readonly principal: string }
@@ -71,25 +58,6 @@ export interface SharedConnectionView {
     readonly revision: number;
     readonly scope: { readonly tools: number; readonly events: number };
   };
-}
-
-export interface SharedProposalView {
-  readonly proposalRef: string;
-  readonly expiresAt: number;
-  readonly presentation: SharedConfirmationRow;
-  readonly connection: SharedConnectionView;
-}
-
-export interface SharedConfirmationRow {
-  readonly key: string;
-  readonly label: string;
-  readonly detail: string;
-  readonly actions: readonly {
-    readonly action: string;
-    readonly label: string;
-    readonly confirm: string;
-    readonly input: { readonly proposalRef: string };
-  }[];
 }
 
 interface SharedSurface {
@@ -112,31 +80,11 @@ interface SharedBindingRecord {
   readonly updatedAt: number;
 }
 
-interface SharedProposalRecord {
-  readonly proposalRef: string;
-  readonly ownerUserId: string;
-  readonly principal: { readonly kind: 'cloud-cat'; readonly logicalId: string };
-  readonly sessionBindingId: string;
-  readonly operationKey: string;
-  readonly confirmationActionId: string;
-  readonly instanceId: string;
-  readonly lineage: string;
-  readonly packageDigest: string;
-  readonly runtimeGeneration: number;
-  readonly surface: SharedSurface;
-  readonly expectedSlotRevision: number;
-  readonly issuedAt: number;
-  readonly expiresAt: number;
-  readonly state: 'pending' | 'committed' | 'cancelled';
-  readonly producerRequestId: string;
-  readonly canonicalPresentation: SharedConfirmationRow;
-  readonly presentationReady: boolean;
-}
-
 interface SharedExtensionState {
   readonly schemaVersion: 1;
   readonly bindings: readonly SharedBindingRecord[];
-  readonly proposals: readonly SharedProposalRecord[];
+  /** Retain opaque pre-release records on disk; they grant no authority. */
+  readonly proposals: readonly unknown[];
 }
 
 const EMPTY_STATE: SharedExtensionState = { schemaVersion: 1, bindings: [], proposals: [] };
@@ -145,23 +93,6 @@ const surfaceRecord = z
   .object({
     tools: z.array(toolDescriptor).max(MAX_TOOLS),
     events: z.array(eventDescriptor).max(MAX_EVENTS),
-  })
-  .strict();
-const confirmationRowRecord = z
-  .object({
-    key: z.string(),
-    label: z.string(),
-    detail: z.string(),
-    actions: z.array(
-      z
-        .object({
-          action: z.string(),
-          label: z.string(),
-          confirm: z.string(),
-          input: z.object({ proposalRef: z.string() }).strict(),
-        })
-        .strict(),
-    ),
   })
   .strict();
 const bindingRecord = z
@@ -179,30 +110,8 @@ const bindingRecord = z
     updatedAt: z.number().finite(),
   })
   .strict();
-const proposalRecord = z
-  .object({
-    proposalRef: z.string().min(1),
-    ownerUserId: z.string().min(1),
-    principal: principalRecord,
-    sessionBindingId: z.string().min(1),
-    operationKey: z.string().min(1),
-    confirmationActionId: z.string().min(1),
-    instanceId: z.string().min(1),
-    lineage: z.string().min(1),
-    packageDigest: z.string().min(1),
-    runtimeGeneration: z.number().int().nonnegative(),
-    surface: surfaceRecord.extend({ digest: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
-    expectedSlotRevision: z.number().int().nonnegative(),
-    issuedAt: z.number().finite(),
-    expiresAt: z.number().finite(),
-    state: z.enum(['pending', 'committed', 'cancelled']),
-    producerRequestId: z.string().min(1),
-    canonicalPresentation: confirmationRowRecord,
-    presentationReady: z.boolean(),
-  })
-  .strict();
 const persistedState = z
-  .object({ schemaVersion: z.literal(1), bindings: z.array(bindingRecord), proposals: z.array(proposalRecord) })
+  .object({ schemaVersion: z.literal(1), bindings: z.array(bindingRecord), proposals: z.array(z.unknown()) })
   .strict();
 
 export interface PluginSharedExtensionStore {
@@ -358,15 +267,6 @@ function recordKey(record: Pick<SharedBindingRecord, 'ownerUserId' | 'principal'
   return bindingKey(record.ownerUserId, record.principal.logicalId);
 }
 
-function pruneProposals(state: SharedExtensionState, now: number): readonly SharedProposalRecord[] {
-  const activeAuthorizations = new Set(
-    state.bindings.filter((binding) => binding.state === 'active').map((binding) => binding.authorizedBy),
-  );
-  return state.proposals.filter(
-    (proposal) => proposal.expiresAt > now || activeAuthorizations.has(proposal.proposalRef),
-  );
-}
-
 function lineage(record: ExecutablePluginPackageRecord): string {
   const provenance = record.provenance;
   if (!provenance) return `digest:${record.packageDigest}`;
@@ -375,32 +275,8 @@ function lineage(record: ExecutablePluginPackageRecord): string {
   return `${provenance.kind}:${provenance.packageName ?? ''}:${record.packageDigest}`;
 }
 
-type OperationField = Extract<NonNullable<PluginManifest['configuration']>[number], { readonly kind: 'operation' }>;
-
-function operation(manifest: PluginManifest, key: string): OperationField | undefined {
-  return manifest.configuration?.find(
-    (field): field is OperationField => field.kind === 'operation' && field.key === key,
-  );
-}
-
-function exact(left: unknown, right: unknown): boolean {
-  return canonical(left) === canonical(right);
-}
-
-function surfaceSummary(surface: SharedSurface): string {
-  const tools = surface.tools.length === 0 ? '无' : surface.tools.map((item) => item.name).join('、');
-  const events = surface.events.length === 0 ? '无' : surface.events.map((item) => item.name).join('、');
-  return `工具（${surface.tools.length}）：${tools}；事件（${surface.events.length}）：${events}`;
-}
-
-function assertOwnerWriteCurrent(owner: SharedOwnerContext): void {
-  if (owner.assertWriteCurrent) owner.assertWriteCurrent();
-  else void owner.assertCurrent();
-}
-
 export class PluginSharedExtensionService {
   private readonly now: () => number;
-  private readonly generateRef: () => string;
 
   constructor(
     private readonly options: {
@@ -426,11 +302,9 @@ export class PluginSharedExtensionService {
       readonly publicEndpoint: () => string | undefined;
       readonly handle: (instanceId: string, request: Readonly<Record<string, unknown>>) => Promise<unknown>;
       readonly now?: () => number;
-      readonly generateRef?: () => string;
     },
   ) {
     this.now = options.now ?? Date.now;
-    this.generateRef = options.generateRef ?? (() => `shared_${randomUUID().replaceAll('-', '')}`);
   }
 
   private async availablePrincipal(ownerUserId: string) {
@@ -447,16 +321,6 @@ export class PluginSharedExtensionService {
     )
       ? { kind: 'cloud-cat' as const, logicalId: SHARED_CAT_ID }
       : undefined;
-  }
-
-  private async principal(ownerUserId: string) {
-    const principal = await this.availablePrincipal(ownerUserId);
-    if (!principal) fail(409, 'shared_principal_unavailable');
-    return principal;
-  }
-
-  private requireOwner(owner: SharedOwnerContext): asserts owner is SharedOwnerContext & { sessionBindingId: string } {
-    if (!owner.userId || !owner.sessionBindingId) fail(403, 'shared_owner_session_required');
   }
 
   private async installationBasis(instanceId: string, expectedPackageDigest?: string, expectedRevision?: number) {
@@ -583,331 +447,6 @@ export class PluginSharedExtensionService {
     };
   }
 
-  private currentBinding(
-    binding: SharedBindingRecord | undefined,
-    instanceId: string,
-    currentLineage: string,
-    currentPackageDigest: string,
-  ): { readonly binding?: SharedBindingRecord; readonly occupied: boolean } {
-    if (!binding) return { occupied: false };
-    if (binding.state === 'revoked') {
-      return binding.instanceId === instanceId ? { binding, occupied: false } : { occupied: false };
-    }
-    if (binding.instanceId !== instanceId) return { occupied: true };
-    if (binding.lineage !== currentLineage || binding.packageDigest !== currentPackageDigest) {
-      return { binding: { ...binding, state: 'needs-confirmation' }, occupied: false };
-    }
-    return { binding, occupied: false };
-  }
-
-  async status(instanceId: string, owner: SharedOwnerContext): Promise<SharedConnectionView> {
-    this.requireOwner(owner);
-    await owner.assertCurrent();
-    const principal = await this.availablePrincipal(owner.userId);
-    if (!principal) return this.view(undefined, undefined, { principalAvailable: false });
-    const [state, basis] = await Promise.all([this.options.store.snapshot(), this.installationBasis(instanceId)]);
-    const binding = state.bindings.find(
-      (candidate) => recordKey(candidate) === bindingKey(owner.userId, principal.logicalId),
-    );
-    const current = this.currentBinding(binding, instanceId, basis.lineage, basis.packageRecord.packageDigest);
-    return this.view(current.binding, undefined, { occupied: current.occupied });
-  }
-
-  async prepare(
-    instanceId: string,
-    expectedPackage: ExecutablePluginPackageRecord,
-    owner: SharedOwnerContext,
-    input: { readonly confirmationActionId: string },
-  ): Promise<SharedProposalView> {
-    this.requireOwner(owner);
-    await owner.assertCurrent();
-    const principal = await this.availablePrincipal(owner.userId);
-    if (!principal) {
-      const connection = this.view(undefined, undefined, { principalAvailable: false });
-      return {
-        proposalRef: '',
-        expiresAt: this.now(),
-        presentation: {
-          key: 'shared-principal-unavailable',
-          label: '当前实例还没有可用的猫咖云端连接',
-          detail: '登录 ChatGPT 不会自动建立连接。请先恢复原共享 /mcp 入口，再回来准备；当前不会生成配对或订阅说明。',
-          actions: [],
-        },
-        connection,
-      };
-    }
-    if (!this.options.publicEndpoint()) {
-      return {
-        proposalRef: '',
-        expiresAt: this.now(),
-        presentation: {
-          key: 'shared-endpoint-unavailable',
-          label: '当前实例还没有可用的猫咖云端入口',
-          detail: '请由本实例主人恢复共享 /mcp 的公开 HTTPS 入口；当前不会发现插件能力、生成授权候选或创建配对。',
-          actions: [],
-        },
-        connection: this.view(undefined),
-      };
-    }
-    const basis = await this.basis(instanceId, expectedPackage.packageDigest);
-    const runtimeGeneration = basis.instance.lifecycleRevision;
-    const declared = operation(basis.packageRecord.manifest, owner.operationKey);
-    const confirmation = declared?.actions.find(
-      (candidate) =>
-        candidate.id === input.confirmationActionId &&
-        candidate.render === 'row' &&
-        typeof candidate.confirm === 'string',
-    );
-    if (!declared || !confirmation) fail(400, 'shared_confirmation_action_invalid');
-    const surface = await this.surface(basis.instance);
-    const currentPrincipal = await this.availablePrincipal(owner.userId);
-    if (!currentPrincipal || currentPrincipal.logicalId !== principal.logicalId) {
-      return {
-        proposalRef: '',
-        expiresAt: this.now(),
-        presentation: {
-          key: 'shared-principal-unavailable',
-          label: '当前实例还没有可用的猫咖云端连接',
-          detail: '登录 ChatGPT 不会自动建立连接。请先恢复原共享 /mcp 入口，再回来准备；当前不会生成配对或订阅说明。',
-          actions: [],
-        },
-        connection: this.view(undefined, undefined, { principalAvailable: false }),
-      };
-    }
-    if (!this.options.publicEndpoint()) {
-      return {
-        proposalRef: '',
-        expiresAt: this.now(),
-        presentation: {
-          key: 'shared-endpoint-unavailable',
-          label: '当前实例还没有可用的猫咖云端入口',
-          detail: '请由本实例主人恢复共享 /mcp 的公开 HTTPS 入口；当前不会发现插件能力、生成授权候选或创建配对。',
-          actions: [],
-        },
-        connection: this.view(undefined),
-      };
-    }
-    await this.basis(instanceId, basis.packageRecord.packageDigest, runtimeGeneration);
-    await owner.assertCurrent();
-    const now = this.now();
-    const current = await this.options.store.snapshot();
-    const slot = current.bindings.find(
-      (candidate) => recordKey(candidate) === bindingKey(owner.userId, principal.logicalId),
-    );
-    const projected = this.currentBinding(slot, instanceId, basis.lineage, basis.packageRecord.packageDigest);
-    const occupied = slot?.state === 'revoked' ? undefined : slot;
-    if (occupied && occupied.instanceId !== instanceId) fail(409, 'shared_slot_occupied');
-    if (
-      occupied?.state === 'active' &&
-      occupied.instanceId === instanceId &&
-      occupied.packageDigest === basis.packageRecord.packageDigest &&
-      occupied.approvedSurfaceDigest === surface.digest
-    ) {
-      return {
-        proposalRef: '',
-        expiresAt: now,
-        presentation: {
-          key: 'already-bound',
-          label: '已连接到现有猫咖云端连接',
-          detail: `已批准 ${surfaceSummary(surface)}。`,
-          actions: [],
-        },
-        connection: this.view(projected.binding, surface, { occupied: projected.occupied }),
-      };
-    }
-    const proposalRef = this.generateRef();
-    const canonicalPresentation: SharedConfirmationRow = {
-      key: proposalRef,
-      label: '连接到现有猫咖云端连接',
-      detail: `将公开此安装的 ${surfaceSummary(surface)}；插件不能读取猫咖连接凭据。`,
-      actions: [
-        {
-          action: input.confirmationActionId,
-          label: confirmation.label,
-          confirm: `确认把当前安装的 ${surfaceSummary(surface)}，连接到现有猫咖云端连接？`,
-          input: { proposalRef },
-        },
-      ],
-    };
-    const proposal: SharedProposalRecord = {
-      proposalRef,
-      ownerUserId: owner.userId,
-      principal,
-      sessionBindingId: owner.sessionBindingId,
-      operationKey: owner.operationKey,
-      confirmationActionId: input.confirmationActionId,
-      instanceId,
-      lineage: basis.lineage,
-      packageDigest: basis.packageRecord.packageDigest,
-      runtimeGeneration,
-      surface,
-      expectedSlotRevision: slot?.revision ?? 0,
-      issuedAt: now,
-      expiresAt: now + PROPOSAL_TTL_MS,
-      state: 'pending',
-      producerRequestId: owner.requestId,
-      canonicalPresentation,
-      presentationReady: false,
-    };
-    await this.options.store.update((state) => {
-      assertOwnerWriteCurrent(owner);
-      if (!this.options.publicEndpoint()) fail(409, 'shared_endpoint_unavailable');
-      return { state: { ...state, proposals: [...pruneProposals(state, now), proposal] }, result: undefined };
-    });
-    await owner.assertCurrent();
-    return {
-      proposalRef,
-      expiresAt: proposal.expiresAt,
-      presentation: canonicalPresentation,
-      connection: this.view(projected.binding, surface, { occupied: projected.occupied }),
-    };
-  }
-
-  async validatePresentation(input: {
-    readonly instanceId: string;
-    readonly owner: SharedOwnerContext;
-    readonly result: OperationActionResult;
-  }): Promise<void> {
-    this.requireOwner(input.owner);
-    await input.owner.assertCurrent();
-    await this.options.store.update((state) => {
-      assertOwnerWriteCurrent(input.owner);
-      const scoped = state.proposals.filter(
-        (proposal) =>
-          proposal.instanceId === input.instanceId &&
-          proposal.ownerUserId === input.owner.userId &&
-          proposal.sessionBindingId === input.owner.sessionBindingId &&
-          proposal.operationKey === input.owner.operationKey,
-      );
-      const candidates = scoped.filter(
-        (proposal) => proposal.state === 'pending' && proposal.producerRequestId === input.owner.requestId,
-      );
-      const rowsData =
-        input.result.render === 'rows' &&
-        input.result.data &&
-        typeof input.result.data === 'object' &&
-        Array.isArray((input.result.data as { rows?: unknown }).rows)
-          ? (input.result.data as { rows: unknown[]; validUntil?: unknown })
-          : undefined;
-      const rows = rowsData?.rows ?? [];
-      const actions = rows.flatMap((row) => {
-        if (!row || typeof row !== 'object' || !Array.isArray((row as { actions?: unknown }).actions)) return [];
-        return (row as { actions: unknown[] }).actions.filter(
-          (action): action is { action?: unknown; input?: { proposalRef?: unknown } } =>
-            Boolean(action) && typeof action === 'object',
-        );
-      });
-      const scopedActionIds = new Set(scoped.map((proposal) => proposal.confirmationActionId));
-      const referencesSharedConfirmation = actions.some(
-        (action) =>
-          (typeof action.action === 'string' && scopedActionIds.has(action.action)) ||
-          typeof action.input?.proposalRef === 'string',
-      );
-      if (candidates.length === 0) {
-        if (referencesSharedConfirmation) fail(502, 'invalid_shared_confirmation_presentation');
-        return { state, result: undefined };
-      }
-      if (
-        !referencesSharedConfirmation ||
-        candidates.length !== rows.length ||
-        candidates.some((proposal) => rowsData?.validUntil !== proposal.expiresAt) ||
-        candidates.some((proposal) => !rows.some((row) => exact(row, proposal.canonicalPresentation)))
-      ) {
-        fail(502, 'invalid_shared_confirmation_presentation');
-      }
-      return {
-        state: {
-          ...state,
-          proposals: state.proposals.map((proposal) =>
-            candidates.some((candidate) => candidate.proposalRef === proposal.proposalRef)
-              ? { ...proposal, presentationReady: true }
-              : proposal,
-          ),
-        },
-        result: undefined,
-      };
-    });
-    await input.owner.assertCurrent();
-  }
-
-  async bind(
-    instanceId: string,
-    expectedPackage: ExecutablePluginPackageRecord,
-    owner: SharedOwnerContext,
-    proposalRef: string,
-  ): Promise<SharedConnectionView> {
-    this.requireOwner(owner);
-    if (!owner.confirmed) fail(403, 'shared_owner_confirmation_required');
-    await owner.assertCurrent();
-    const principal = await this.principal(owner.userId);
-    if (!this.options.publicEndpoint()) fail(409, 'shared_endpoint_unavailable');
-    const basis = await this.basis(instanceId, expectedPackage.packageDigest);
-    const runtimeGeneration = basis.instance.lifecycleRevision;
-    const surface = await this.surface(basis.instance);
-    await this.basis(instanceId, basis.packageRecord.packageDigest, runtimeGeneration);
-    const now = this.now();
-    const result = await this.options.store.update((state) => {
-      assertOwnerWriteCurrent(owner);
-      if (!this.options.publicEndpoint()) fail(409, 'shared_endpoint_unavailable');
-      const proposal = state.proposals.find((candidate) => candidate.proposalRef === proposalRef);
-      if (!proposal) fail(409, 'shared_proposal_missing');
-      const matches =
-        proposal.ownerUserId === owner.userId &&
-        proposal.principal.logicalId === principal.logicalId &&
-        proposal.sessionBindingId === owner.sessionBindingId &&
-        proposal.operationKey === owner.operationKey &&
-        proposal.confirmationActionId === owner.actionId &&
-        proposal.instanceId === instanceId &&
-        proposal.lineage === basis.lineage &&
-        proposal.packageDigest === basis.packageRecord.packageDigest &&
-        proposal.runtimeGeneration === runtimeGeneration &&
-        proposal.surface.digest === surface.digest;
-      const key = bindingKey(owner.userId, principal.logicalId);
-      const existing = state.bindings.find((candidate) => recordKey(candidate) === key);
-      if (
-        matches &&
-        proposal.presentationReady &&
-        proposal.state === 'committed' &&
-        existing?.state === 'active' &&
-        existing.authorizedBy === proposalRef &&
-        existing.instanceId === instanceId &&
-        existing.packageDigest === basis.packageRecord.packageDigest &&
-        existing.approvedSurfaceDigest === surface.digest
-      ) {
-        return { state, result: this.view(existing, surface) };
-      }
-      if (!matches || !proposal.presentationReady || proposal.expiresAt <= now || proposal.state !== 'pending') {
-        fail(409, 'shared_proposal_stale');
-      }
-      if ((existing?.revision ?? 0) !== proposal.expectedSlotRevision) fail(409, 'shared_slot_contended');
-      const binding: SharedBindingRecord = {
-        ownerUserId: owner.userId,
-        principal,
-        instanceId,
-        lineage: basis.lineage,
-        packageDigest: basis.packageRecord.packageDigest,
-        approvedSurfaceDigest: surface.digest,
-        surface: { tools: surface.tools, events: surface.events },
-        revision: (existing?.revision ?? 0) + 1,
-        state: 'active',
-        authorizedBy: proposalRef,
-        updatedAt: now,
-      };
-      return {
-        state: {
-          ...state,
-          bindings: [...state.bindings.filter((candidate) => recordKey(candidate) !== key), binding],
-          proposals: state.proposals.map((candidate) =>
-            candidate.proposalRef === proposalRef ? { ...candidate, state: 'committed' } : candidate,
-          ),
-        },
-        result: this.view(binding, surface),
-      };
-    });
-    await owner.assertCurrent();
-    return result;
-  }
-
   /** Preserve the pre-plugin shared /mcp behavior after the owner-fenced legacy import.
    * This is not exposed to packages: the migration coordinator supplies the verified
    * owner and exact package digest. A same-lineage reinstall is adopted only when the
@@ -920,6 +459,7 @@ export class PluginSharedExtensionService {
   }): Promise<SharedConnectionView | null> {
     if (!(await this.availablePrincipal(input.ownerUserId))) return null;
     const basis = await this.basis(input.instanceId);
+    if (basis.packageRecord.pluginId !== 'official.chatgpt-dot') fail(403, 'legacy_dot_installation_required');
     if (basis.packageRecord.packageDigest !== input.expectedPackageDigest) fail(409, 'shared_installation_changed');
     const runtimeGeneration = basis.instance.lifecycleRevision;
     const surface = await this.surface(basis.instance);
@@ -990,33 +530,6 @@ export class PluginSharedExtensionService {
         result: this.view(binding, surface),
       };
     });
-  }
-
-  async unbind(instanceId: string, owner: SharedOwnerContext, expectedRevision: number): Promise<SharedConnectionView> {
-    this.requireOwner(owner);
-    if (!owner.confirmed) fail(403, 'shared_owner_confirmation_required');
-    await owner.assertCurrent();
-    const principal = await this.principal(owner.userId);
-    const result = await this.options.store.update((state) => {
-      assertOwnerWriteCurrent(owner);
-      const key = bindingKey(owner.userId, principal.logicalId);
-      const existing = state.bindings.find((candidate) => recordKey(candidate) === key);
-      if (!existing || existing.instanceId !== instanceId || existing.revision !== expectedRevision) {
-        fail(409, 'shared_slot_changed');
-      }
-      const revoked: SharedBindingRecord = {
-        ...existing,
-        revision: existing.revision + 1,
-        state: 'revoked',
-        updatedAt: this.now(),
-      };
-      return {
-        state: { ...state, bindings: [...state.bindings.filter((candidate) => recordKey(candidate) !== key), revoked] },
-        result: this.view(revoked),
-      };
-    });
-    await owner.assertCurrent();
-    return result;
   }
 
   async handle(secret: string, rpc: Readonly<Record<string, unknown>>): Promise<unknown> {

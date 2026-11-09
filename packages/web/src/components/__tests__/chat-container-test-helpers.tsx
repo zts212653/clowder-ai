@@ -251,7 +251,10 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
+  QueuePanel: () => null,
+}));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));

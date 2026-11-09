@@ -12,6 +12,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: ({ content }: { content: string }) => React.createElement('p', null, content),
@@ -71,7 +73,7 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-describe('ProposalCard — projectPath ownership', () => {
+describe('Classic ProposalCard — projectPath ownership', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -85,6 +87,8 @@ describe('ProposalCard — projectPath ownership', () => {
   });
 
   beforeEach(() => {
+    writeShellPresentation('classic');
+    observeApiSessionOwner('owner-1');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -100,6 +104,7 @@ describe('ProposalCard — projectPath ownership', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   async function render(block: RichCardBlock) {

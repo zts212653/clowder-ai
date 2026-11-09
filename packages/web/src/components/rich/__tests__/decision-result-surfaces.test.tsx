@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { CardBlock } from '../CardBlock';
 import { HandoffProposalCard } from '../HandoffProposalCard';
 import { RuntimeInteractionCard } from '../RuntimeInteractionCard';
@@ -21,6 +22,7 @@ import { coordinate, ok, scheduleBlock, scheduleProposal } from './schedule-appr
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 let container: HTMLDivElement, root: Root;
 beforeEach(() => {
+  observeApiSessionOwner(owner.userId);
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellPresentation('v2');
@@ -44,7 +46,7 @@ describe('one decided-row presentation in original approval surfaces', () => {
     'rejected',
     'expired',
   ] as const)('collapses a canonical %s handoff and recovers its original details', async (status) => {
-    vi.mocked(apiFetch).mockResolvedValue(ok({ proposal: { status } }));
+    vi.mocked(apiFetch).mockResolvedValue(ok({ proposal: { proposalId: 'p1', status } }));
     await act(async () =>
       root.render(
         <HandoffProposalCard
@@ -75,6 +77,7 @@ describe('one decided-row presentation in original approval surfaces', () => {
   });
 
   it('collapses a registered schedule while retaining the exact original task on disclosure', async () => {
+    observeApiSessionOwner('owner-1');
     const proposal = scheduleProposal('approved');
     vi.mocked(apiFetch).mockImplementation(async (path) =>
       String(path) === '/api/session' ? ok({ userId: 'owner-1' }) : ok({ proposal }),

@@ -5,6 +5,15 @@ import Fastify from 'fastify';
 import { evidenceRoutes } from '../../dist/routes/evidence.js';
 import { executeMessageSearch } from '../../dist/routes/message-search-handler.js';
 
+const expansionSeed = {
+  anchor: 'F001',
+  title: 'Fixture',
+  kind: 'feature',
+  status: 'active',
+  updatedAt: '2026-01-01',
+  keywords: ['probe'],
+};
+
 for (const intent of ['topk', 'coverage']) {
   test(`${intent} HTTP disconnect reaches running SQLite search and carries a finite deadline`, async (t) => {
     let entered;
@@ -43,25 +52,19 @@ for (const intent of ['topk', 'coverage']) {
     assert.equal((await app.inject('/health')).statusCode, 200);
   });
 }
-test('topk expansion subqueries inherit the same cancellation and deadline', async () => {
+test('topk expansion subqueries own independent lifetimes under the same deadline', async () => {
   const calls = [];
+  const queries = [];
   const store = {
-    searchWithMeta: async (_query, options) => {
-      calls.push(options);
+    searchWithMeta: async (query, options) => {
+      calls.push({
+        ...options,
+        abortedAtEntry: options.signal?.aborted,
+        primaryAbortedAtEntry: calls[0]?.signal?.aborted,
+      });
+      queries.push(query);
       return {
-        items:
-          calls.length === 1
-            ? [
-                {
-                  anchor: 'F001',
-                  title: 'Fixture',
-                  kind: 'feature',
-                  status: 'active',
-                  updatedAt: '2026-01-01',
-                  keywords: ['probe'],
-                },
-              ]
-            : [],
+        items: calls.length === 1 ? [expansionSeed] : [],
         meta: { degraded: false },
       };
     },
@@ -69,15 +72,107 @@ test('topk expansion subqueries inherit the same cancellation and deadline', asy
   const app = Fastify();
   await app.register(evidenceRoutes, { evidenceStore: store });
   try {
-    const response = await app.inject('/api/evidence/search?q=fixture&scope=docs');
+    // The keyword must be supported by the query to exercise expansion.
+    const response = await app.inject('/api/evidence/search?q=fixture+probe&scope=docs');
     assert.equal(response.statusCode, 200);
     assert.ok(calls.length > 1);
-    assert.equal(calls[1]?.signal, calls[0]?.signal);
+    assert.deepEqual(queries.slice(0, 2), ['fixture probe', 'probe']);
+    assert.deepEqual(
+      response.json().results.map((item) => item.anchor),
+      ['F001'],
+    );
+    assert.ok(calls[0]?.signal instanceof AbortSignal);
+    assert.ok(calls[1]?.signal instanceof AbortSignal);
+    assert.ok(Number.isFinite(calls[0]?.deadlineAt));
+    assert.notEqual(calls[1]?.signal, calls[0]?.signal);
+    assert.equal(calls[0].abortedAtEntry, false);
+    assert.equal(calls[1].primaryAbortedAtEntry, true, 'the primary discovery has already settled');
+    assert.equal(calls[1].abortedAtEntry, false, 'primary cleanup must not cancel the expansion read');
     assert.equal(calls[1]?.deadlineAt, calls[0]?.deadlineAt);
+    assert.ok(
+      calls.every((call) => call.signal.aborted),
+      'all completed discovery scopes must be canceled',
+    );
   } finally {
     await app.close();
   }
 });
+
+test(
+  'topk HTTP disconnect cancels an in-flight expansion without leaving a read or later probe',
+  { timeout: 5000 },
+  async (t) => {
+    const entered = Promise.withResolvers();
+    const settled = Promise.withResolvers();
+    const calls = [];
+    let activeReads = 0;
+    let abortReason;
+    let releaseExpansion;
+    const store = {
+      searchWithMeta: async (query, options) => {
+        calls.push({ query, ...options });
+        if (calls.length === 1)
+          return { items: [{ ...expansionSeed, keywords: ['probe', 'later'] }], meta: { degraded: false } };
+        activeReads++;
+        try {
+          return await new Promise((resolve, reject) => {
+            releaseExpansion = () => resolve({ items: [], meta: { degraded: false } });
+            options.signal.addEventListener(
+              'abort',
+              () => {
+                abortReason = options.signal.reason;
+                reject(abortReason);
+              },
+              { once: true },
+            );
+            entered.resolve();
+          });
+        } finally {
+          activeReads--;
+          settled.resolve();
+        }
+      },
+    };
+    const controller = new AbortController();
+    const app = Fastify();
+    t.after(async () => {
+      controller.abort();
+      releaseExpansion?.();
+      await app.close();
+    });
+    await app.register(evidenceRoutes, { evidenceStore: store });
+    app.get('/health', async () => ({ ok: true }));
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    assert.ok(address && typeof address !== 'string');
+    const request = fetch(`http://127.0.0.1:${address.port}/api/evidence/search?q=fixture+probe+later&scope=docs`, {
+      signal: controller.signal,
+    }).catch((error) => error);
+    await entered.promise;
+    assert.deepEqual(
+      calls.map((call) => call.query),
+      ['fixture probe later', 'probe'],
+    );
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(calls[1].signal.aborted, false);
+    assert.notEqual(calls[1].signal, calls[0].signal);
+    assert.equal(calls[1].deadlineAt, calls[0].deadlineAt);
+    assert.ok(Number.isFinite(calls[1].deadlineAt) && calls[1].deadlineAt <= Date.now() + 15_000);
+    assert.equal(activeReads, 1, 'disconnect must occur while expansion is actually in flight');
+    controller.abort();
+    assert.equal((await request).name, 'AbortError');
+    await settled.promise;
+    assert.equal(abortReason?.name, 'AbortError', 'the read must stop on disconnect, not the later deadline');
+    assert.equal(calls[1].signal.aborted, true);
+    assert.equal(activeReads, 0);
+    assert.equal((await app.inject('/health')).statusCode, 200);
+    assert.deepEqual(
+      calls.map((call) => call.query),
+      ['fixture probe later', 'probe'],
+      'no later expansion probe may start',
+    );
+  },
+);
 
 test('message-unit HTTP disconnect reaches the service execution lifetime', async (t) => {
   let entered;

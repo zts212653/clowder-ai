@@ -231,6 +231,12 @@ export async function prepareCodexNativeLaunch(
       ]),
       '--config',
       'features.code_mode_host=true',
+      // V2 native delegation can be model-enabled independently of legacy multi_agent.
+      // Keep the code-mode host dispatcher, but expose no native child-agent tools.
+      '--config',
+      'agents.enabled=false',
+      '--config',
+      'features.multi_agent_v2={enabled=false,disable_native_tools=true}',
       '--config',
       'features.skip_host_skill_discovery=true',
     ];
@@ -279,7 +285,7 @@ function snapshotServer(server: NativeMcpServer): NativeMcpServer {
     server.workingDirectory.includes('\0') ||
     !Array.isArray(server.args) ||
     !server.args.every((arg) => typeof arg === 'string' && !arg.includes('\0')) ||
-    (!server.env?.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE && !server.env?.CLOWDER_PLUGIN_ACTION_TOKEN) ||
+    !server.env?.CLOWDER_PLUGIN_ACTION_TOKEN ||
     !Object.entries(server.env).every(
       ([key, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof value === 'string' && !value.includes('\0'),
     )

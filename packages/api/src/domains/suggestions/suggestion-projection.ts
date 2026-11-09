@@ -45,6 +45,7 @@ export function toSuggestionView(record: SuggestionRecord): SuggestionView {
     label: record.label,
     state: record.state,
     ...(record.receipt ? { receipt: record.receipt } : {}),
+    ...(record.watcherSupplement ? { watcherSupplement: record.watcherSupplement } : {}),
     undo: record.undo,
     receiptOnly: record.receiptOnly,
     revision: record.revision,

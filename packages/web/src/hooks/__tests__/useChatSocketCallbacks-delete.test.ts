@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F109 Phase A — Socket callback wiring tests:
  * - onMessageDeleted must use removeThreadMessage (thread-scoped), not removeMessage (flat-only)

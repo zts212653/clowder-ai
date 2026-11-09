@@ -68,6 +68,11 @@ test('real silent saves and a new version survive the 512 raw-message window wit
   const app = await realApp(t, f, messages);
   const headers = { 'x-cat-cafe-user': 'owner' };
   const counter = f.countReads();
+  for await (const _head of f.owner.retainedThreadMediaHeads('owner', 'owned')) {
+    /* complete legacy migration */
+  }
+  t.diagnostic(JSON.stringify({ coldMigrationAndWarmup: counter.stats() }));
+  counter.reset();
   let response = await app.inject({ url: '/api/artifacts?view=recent-works&limit=12', headers });
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().artifacts.length, 12);
@@ -124,8 +129,8 @@ test('recent owner discovery skips denied scopes and does not reinterpret unavai
       .sort(),
     ['Film visible', 'guide.pdf'],
   );
-  f.owner.retainedMediaHeads = async function* () {
-    throw new Error('unavailable canonical directory');
+  f.owner.retainedThreadMediaHeads = async function* () {
+    throw new Error('unavailable canonical thread catalogue');
   };
   response = await app.inject({ url: '/api/artifacts?view=recent-works&limit=12', headers });
   assert.equal(response.statusCode, 200, response.body);
@@ -208,11 +213,12 @@ test('canonical Work saves invalidate the owner projection after create and revi
 test('recent selection participates in the original final manifest validation, including canonical commit time', async (t) => {
   const f = await workCatalogueFixture(t);
   await f.service.commit(f.command('fixed-version'), caller());
-  const original = f.owner.retainedMediaHeads.bind(f.owner);
+  const original = f.owner.retainedThreadMediaHeads.bind(f.owner);
   let walks = 0;
-  f.owner.retainedMediaHeads = async function* (owner) {
+  f.owner.retainedThreadMediaHeads = async function* (owner, threadId) {
     const final = ++walks === 2;
-    for await (const head of original(owner)) yield final ? { ...head, committedAt: '2026-10-23T00:00:00.000Z' } : head;
+    for await (const head of original(owner, threadId))
+      yield final ? { ...head, committedAt: '2026-10-23T00:00:00.000Z' } : head;
   };
   const catalogue = new WorkCatalogue(f.service);
   await assert.rejects(

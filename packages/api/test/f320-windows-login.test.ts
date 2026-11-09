@@ -127,7 +127,7 @@ test('Windows terminal worker runs login and status through the same CMD shim in
     );
     const worker = fileURLToPath(new URL('../src/config/codex-login-terminal-worker.ts', import.meta.url));
     const child = spawn(process.execPath, ['--import', 'tsx', worker, request], {
-      env: { ...process.env, OPENAI_API_KEY: 'fixture-key-must-not-reach-login' },
+      env: { ...process.env, OPENAI_API_KEY: 'fixture-key' },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });

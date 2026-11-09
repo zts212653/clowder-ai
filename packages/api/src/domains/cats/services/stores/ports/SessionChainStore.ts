@@ -30,11 +30,13 @@ export function upsertCapacityPinRecoveryNote(provenance: string, note: string):
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
-import { isHomeSession } from '../../session/session-scope.js';
+import { parseWatcherSessionState, type WatcherSessionState } from '@cat-cafe/shared';
+import { isHomeSession, watcherSessionChainKey } from '../../session/session-scope.js';
 import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 export interface CreateSessionInput {
+  sessionPurpose?: 'watcher';
   scopedInvocation?: SessionRecord['scopedInvocation'];
   cliSessionId?: string;
   workingDirectory?: string;
@@ -58,6 +60,13 @@ export interface CreateSessionInput {
 
 /** Scoped nodes cannot enter any ordinary create/reuse path or change their source identity. */
 export function assertScopedSessionCreation(input: CreateSessionInput): void {
+  if (input.sessionPurpose !== undefined && input.sessionPurpose !== 'watcher')
+    throw new Error('invalid_session_purpose');
+  if (
+    input.sessionPurpose === 'watcher' &&
+    (input.scopedInvocation || input.chainKey !== watcherSessionChainKey(input.userId, input.catId, input.threadId))
+  )
+    throw new Error('watcher_session_chain_required');
   const scope = input.scopedInvocation;
   if (!scope) return;
   if (input.reuseExistingActive || input.reuseExistingCliSession || input.chainKey || input.cliSessionId)
@@ -135,6 +144,13 @@ export type CliSessionBinding = Pick<SessionRecord, 'id' | 'cliSessionId' | 'thr
 };
 
 export interface ISessionChainStore {
+  /** Same-owner index, maintained with the watcher CAS until the last recovery pointer clears. */
+  listPendingWatcherSessions(userId: string): SessionRecord[] | Promise<SessionRecord[]>;
+  compareAndSetWatcherState(
+    id: string,
+    expectedRevision: number,
+    next: WatcherSessionState,
+  ): WatcherSessionState | null | Promise<WatcherSessionState | null>;
   /** Create SessionRecord (seq auto-increments, status=active) */
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
   /** Atomically return the existing active record or create one logical unbound node. */
@@ -145,6 +161,11 @@ export interface ISessionChainStore {
     expectedCliSessionId: string | undefined,
     boundary: NonNullable<SessionRecord['hostExecutionBoundary']>,
   ): SessionRecord | null | Promise<SessionRecord | null>;
+  /**
+   * Read-only, atomic: `id` is still the active, unscoped owner record for its user/cat/thread and
+   * carries exactly this provider runtime ID (`undefined` = unbound). Writes nothing.
+   */
+  isActiveOwnerSession(id: string, expectedCliSessionId: string | undefined): boolean | Promise<boolean>;
   /** Bind a provider runtime ID to an existing logical node without creating a new node. */
   bindCliSessionId(id: string, cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** CAS bind used by provider forks: succeeds only while the logical target remains unbound. */
@@ -212,7 +233,19 @@ export interface ISessionChainStore {
    */
   shrinkCapacityPin(id: string, candidate: SessionCapacityPin): SessionRecord | null | Promise<SessionRecord | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
-  listSealingSessions(): string[] | Promise<string[]>;
+  listSealingSessions(limit?: number, before?: number): string[] | Promise<string[]>;
+  /** Select source versions before a potentially failing full-record read. */
+  listSealingRecoveryCandidates(
+    limit?: number,
+    before?: number,
+  ): { id: string; expectedAt: number }[] | Promise<{ id: string; expectedAt: number }[]>;
+  recordSealingRecoveryFailure(id: string, expectedAt: number): void | Promise<void>;
+  getSealingRecoveryFacts(
+    id: string,
+  ):
+    | { failures: number; disposition?: string; reasonCode?: string }
+    | null
+    | Promise<{ failures: number; disposition?: string; reasonCode?: string } | null>;
 }
 
 const MAX_RECORDS = 1000;
@@ -222,10 +255,37 @@ const MAX_RECORDS = 1000;
  * Single-threaded Node.js → synchronous Map operations.
  */
 export class SessionChainStore implements ISessionChainStore {
+  listPendingWatcherSessions(userId: string): SessionRecord[] {
+    return [...this.records.values()]
+      .filter((record) => {
+        if (record.userId !== userId || record.sessionPurpose !== 'watcher') return false;
+        const state = parseWatcherSessionState(record.watcherState);
+        return Boolean(state.attempt || state.wakeInvocationId);
+      })
+      .map((record) => structuredClone(record));
+  }
+  compareAndSetWatcherState(
+    id: string,
+    expectedRevision: number,
+    next: WatcherSessionState,
+  ): WatcherSessionState | null {
+    const record = this.records.get(id);
+    if (!record || record.sessionPurpose !== 'watcher') return null;
+    const current = parseWatcherSessionState(record.watcherState);
+    if (current.revision !== expectedRevision) return null;
+    const validated = parseWatcherSessionState(next);
+    if (validated.revision !== expectedRevision + 1 || validated.afterSequence < current.afterSequence)
+      throw new Error('invalid watcher session transition');
+    record.watcherState = validated;
+    record.updatedAt = Date.now();
+    return parseWatcherSessionState(validated);
+  }
   private records = new Map<string, SessionRecord>();
   /** catId:threadId → session IDs ordered by seq */
   private chains = new Map<string, string[]>();
   /** catId:threadId → active session ID */
+  private sealingIndex = new Set<string>();
+  private sealingRecoveryFailures = new Map<string, number>();
   private activeIndex = new Map<string, string>();
   /** userId:catId:threadId → active session ID (#1329 ownership boundary). */
   private ownerActiveIndex = new Map<string, string>();
@@ -246,7 +306,10 @@ export class SessionChainStore implements ISessionChainStore {
   create(input: CreateSessionInput): SessionRecord {
     assertScopedSessionCreation(input);
     if (input.reuseExistingActive) {
-      const active = this.getActive(input.catId, input.threadId, input.userId);
+      const active =
+        input.sessionPurpose === 'watcher'
+          ? this.getByChainKey(input.chainKey!)
+          : this.getActive(input.catId, input.threadId, input.userId);
       if (active) return active;
     }
 
@@ -256,6 +319,7 @@ export class SessionChainStore implements ISessionChainStore {
         const existing = this.records.get(existingId);
         if (existing) {
           if (existing.scopedInvocation) throw new Error('scoped_session_not_resumable');
+          if (existing.sessionPurpose !== input.sessionPurpose) throw new Error('session_purpose_mismatch');
           return existing;
         }
         this.cliIndex.delete(input.cliSessionId);
@@ -269,12 +333,14 @@ export class SessionChainStore implements ISessionChainStore {
     // thread may contain records for multiple users in the same physical map.
     const chain = this.chains.get(key) ?? [];
     const seq = chain.reduce((count, recordId) => {
-      return this.records.get(recordId)?.userId === input.userId ? count + 1 : count;
+      const existing = this.records.get(recordId);
+      return existing?.userId === input.userId && existing.sessionPurpose === input.sessionPurpose ? count + 1 : count;
     }, 0);
 
     const id = randomUUID();
     const record: SessionRecord = {
       id,
+      ...(input.sessionPurpose ? { sessionPurpose: input.sessionPurpose } : {}),
       ...(input.scopedInvocation ? { scopedInvocation: Object.freeze({ ...input.scopedInvocation }) } : {}),
       ...(input.cliSessionId ? { cliSessionId: input.cliSessionId } : {}),
       ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
@@ -294,7 +360,7 @@ export class SessionChainStore implements ISessionChainStore {
     this.records.set(id, record);
     chain.push(id);
     this.chains.set(key, chain);
-    if (!input.scopedInvocation) {
+    if (isHomeSession(record)) {
       this.activeIndex.set(key, id);
       this.ownerActiveIndex.set(this.ownerCatThreadKey(input.userId, input.catId, input.threadId), id);
     }
@@ -318,6 +384,11 @@ export class SessionChainStore implements ISessionChainStore {
   }
 
   getOrCreateActive(input: CreateSessionInput): SessionRecord {
+    assertScopedSessionCreation(input);
+    if (input.sessionPurpose === 'watcher') {
+      const current = this.getByChainKey(input.chainKey!);
+      return current?.status === 'active' ? current : this.create(input);
+    }
     if (input.scopedInvocation) throw new Error('scoped_session_not_resumable');
     const active = this.getActive(input.catId, input.threadId, input.userId);
     if (active) return active;
@@ -349,6 +420,15 @@ export class SessionChainStore implements ISessionChainStore {
     this.cliIndex.set(cliSessionId, id);
     record.updatedAt = Date.now();
     return record;
+  }
+
+  isActiveOwnerSession(id: string, expectedCliSessionId: string | undefined): boolean {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active' || record.scopedInvocation) return false;
+    // Compare the owner pointer directly: getActive() repairs a missing pointer and could reclaim a
+    // displaced owner, which neither matches Redis nor stays read-only.
+    const ownerKey = this.ownerCatThreadKey(record.userId, record.catId, record.threadId);
+    return this.ownerActiveIndex.get(ownerKey) === id && (record.cliSessionId ?? '') === (expectedCliSessionId ?? '');
   }
 
   bindHostExecutionBoundary(
@@ -449,6 +529,8 @@ export class SessionChainStore implements ISessionChainStore {
     }
 
     record.status = 'sealing';
+    this.sealingIndex.add(id);
+    this.sealingRecoveryFailures.delete(id);
     record.sealReason = reason;
     record.updatedAt = Date.now();
     const key = this.catThreadKey(record.catId, record.threadId);
@@ -461,7 +543,8 @@ export class SessionChainStore implements ISessionChainStore {
   restoreActiveSession(input: RestoreActiveSessionInput): RestoreActiveSessionResult {
     const target = this.records.get(input.targetSessionId);
     if (!target) return { status: 'target_missing' };
-    if (target.scopedInvocation) return { status: 'target_not_restorable', targetStatus: target.status };
+    if (target.scopedInvocation || target.sessionPurpose === 'watcher')
+      return { status: 'target_not_restorable', targetStatus: target.status };
 
     const key = this.catThreadKey(target.catId, target.threadId);
     const ownerKey = this.ownerCatThreadKey(target.userId, target.catId, target.threadId);
@@ -489,12 +572,16 @@ export class SessionChainStore implements ISessionChainStore {
         return { status: 'active_changed', activeSessionId };
       }
       displaced.status = 'sealing';
+      this.sealingIndex.add(displaced.id);
+      this.sealingRecoveryFailures.delete(displaced.id);
       displaced.sealReason = input.displacedSealReason;
       displaced.updatedAt = Date.now();
       displacedSessionId = displaced.id;
     }
 
     target.status = 'active';
+    this.sealingIndex.delete(target.id);
+    this.sealingRecoveryFailures.delete(target.id);
     delete target.sealReason;
     delete target.sealedAt;
     target.updatedAt = Date.now();
@@ -563,7 +650,7 @@ export class SessionChainStore implements ISessionChainStore {
   }
 
   update(id: string, patch: SessionRecordPatch): SessionRecord | null {
-    if ('scopedInvocation' in patch) throw new Error('scoped_session_identity_immutable');
+    if ('scopedInvocation' in patch || 'sessionPurpose' in patch) throw new Error('scoped_session_identity_immutable');
     const record = this.records.get(id);
     if (!record) return null;
     if (record.scopedInvocation && patch.cliSessionId !== undefined)
@@ -579,9 +666,12 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.workingDirectory !== undefined) record.workingDirectory = patch.workingDirectory;
     if (patch.workspaceFingerprint !== undefined) record.workspaceFingerprint = patch.workspaceFingerprint;
     if (patch.status !== undefined) {
+      if (record.status !== patch.status) this.sealingRecoveryFailures.delete(id);
       record.status = patch.status;
+      if (patch.status === 'sealing' && (this.sealingRecoveryFailures.get(id) ?? 0) < 5) this.sealingIndex.add(id);
+      else this.sealingIndex.delete(id);
       const key = this.catThreadKey(record.catId, record.threadId);
-      if (patch.status === 'active' && !record.scopedInvocation) {
+      if (patch.status === 'active' && isHomeSession(record)) {
         this.activeIndex.set(key, id);
         this.ownerActiveIndex.set(this.ownerCatThreadKey(record.userId, record.catId, record.threadId), id);
       } else {
@@ -701,12 +791,38 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
-  listSealingSessions(): string[] {
+  listSealingSessions(limit = 100, before = Number.POSITIVE_INFINITY): string[] {
     const ids: string[] = [];
-    for (const [id, record] of this.records) {
-      if (record.status === 'sealing') ids.push(id);
+    for (const id of this.sealingIndex) {
+      const record = this.records.get(id);
+      if (record?.status === 'sealing' && record.updatedAt <= before) ids.push(id);
+      if (ids.length >= limit) break;
     }
     return ids;
+  }
+
+  recordSealingRecoveryFailure(id: string, expectedAt: number): void {
+    const record = this.records.get(id);
+    if (record?.status !== 'sealing' || record.updatedAt !== expectedAt) return;
+    const failures = (this.sealingRecoveryFailures.get(id) ?? 0) + 1;
+    this.sealingRecoveryFailures.set(id, failures);
+    if (failures >= 5) this.sealingIndex.delete(id);
+  }
+
+  listSealingRecoveryCandidates(limit = 100, before = Number.POSITIVE_INFINITY): { id: string; expectedAt: number }[] {
+    return this.listSealingSessions(limit, before).flatMap((id) => {
+      const record = this.records.get(id);
+      return record ? [{ id, expectedAt: record.updatedAt }] : [];
+    });
+  }
+
+  getSealingRecoveryFacts(id: string): { failures: number; disposition?: string; reasonCode?: string } | null {
+    if (!this.records.has(id)) return null;
+    const failures = this.sealingRecoveryFailures.get(id) ?? 0;
+    return {
+      failures,
+      ...(failures >= 5 ? { disposition: 'needs_attention', reasonCode: 'sealing_recovery_failed' } : {}),
+    };
   }
 
   /**
@@ -718,7 +834,11 @@ export class SessionChainStore implements ISessionChainStore {
     // The legacy cat/thread pointer names only the most recently created
     // owner. On the shared default thread, every owner-scoped pointer is an
     // equally live session and must participate in the eviction guard.
-    const currentActiveIds = new Set([...this.activeIndex.values(), ...this.ownerActiveIndex.values()]);
+    const currentActiveIds = new Set([
+      ...this.activeIndex.values(),
+      ...this.ownerActiveIndex.values(),
+      ...this.chainKeyIndex.values(),
+    ]);
 
     // First pass: sealed records (safest to evict)
     let victim: string | null = null;
@@ -781,6 +901,8 @@ export class SessionChainStore implements ISessionChainStore {
       if (chain.length === 0) this.chains.delete(key);
     }
 
+    this.sealingIndex.delete(id);
+    this.sealingRecoveryFailures.delete(id);
     this.records.delete(id);
   }
 

@@ -8,6 +8,8 @@ import { materializeAgyNativeAgentFile } from '../../dist/domains/cats/services/
 import { CAT_CAFE_GITHUB_ROUTING_INSTRUCTIONS } from '../../dist/domains/cats/services/agents/providers/codex-app-approval-routing.js';
 import { buildKimiL0AgentFileContent } from '../../dist/domains/cats/services/agents/providers/kimi-l0-agent-file.js';
 import { QUEST_TASKS } from '../../dist/domains/cats/services/first-run-quest/quest-blocks.js';
+import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { buildAbstractiveSummaryPrompt } from '../../dist/domains/memory/abstractive-summary-prompt.js';
 import { LEGACY_BUNDLED_MANIFESTS } from '../../dist/domains/plugin/legacy-bundled-manifests.js';
 import { DEFAULT_SIGNAL_NOTIFICATIONS } from '../../dist/domains/signals/config/notifications-loader.js';
@@ -54,7 +56,6 @@ process.stdout.write(
     brand: deploymentDefaults.brand,
     repository: ENV_VARS.find((entry) => entry.name === 'CAT_CAFE_REPO_FULL_NAME').defaultValue,
     guardRepository: withVerdictGhGuardEnv({}).CAT_CAFE_VERDICT_REPO_FULL_NAME,
-    summary: buildAbstractiveSummaryPrompt(),
     quest: QUEST_TASKS.map((task) => task.label),
     routing: CAT_CAFE_GITHUB_ROUTING_INSTRUCTIONS,
     manifest: LEGACY_BUNDLED_MANIFESTS[0].description,

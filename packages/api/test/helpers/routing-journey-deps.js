@@ -33,6 +33,10 @@ export function routingJourneyDeps(preflight, observer, provider) {
       getMentionsFor: () => [],
       getBefore: () => [],
       getById: async (id) => messages.find((message) => message.id === id) ?? null,
+      getByIdempotencyKey: async (userId, threadId, key) =>
+        messages.find(
+          (message) => message.userId === userId && message.threadId === threadId && message.idempotencyKey === key,
+        ) ?? null,
       getByThread: (threadId) => messages.filter((message) => message.threadId === threadId),
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],

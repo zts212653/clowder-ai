@@ -77,8 +77,20 @@ export interface ActiveExecutionRouteDeps {
     candidate: LiveExecutionCandidate;
     request: FastifyRequest;
   }) =>
-    | { cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }
-    | Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }>;
+    | {
+        cancelled: boolean;
+        reconciled?: boolean;
+        controlPlaneUnavailable?: boolean;
+        error?: string;
+        code?: string;
+      }
+    | Promise<{
+        cancelled: boolean;
+        reconciled?: boolean;
+        controlPlaneUnavailable?: boolean;
+        error?: string;
+        code?: string;
+      }>;
   /**
    * Reconcile an exact execution that disappeared between projection and Stop.
    * This runs only after the process-owner snapshot is complete and no newer
@@ -592,8 +604,8 @@ export function registerActiveExecutionRoutes(app: FastifyInstance, deps: Active
       if (result.controlPlaneUnavailable) {
         reply.status(503);
         return {
-          error: '执行控制面暂时不可用，请重试',
-          code: 'EXECUTION_CONTROL_UNAVAILABLE',
+          error: result.error ?? '执行控制面暂时不可用，请重试',
+          code: result.code ?? 'EXECUTION_CONTROL_UNAVAILABLE',
         };
       }
       return {

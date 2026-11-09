@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

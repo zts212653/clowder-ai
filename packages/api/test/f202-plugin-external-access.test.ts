@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { FilePluginCapabilityKeyring } from '../src/domains/plugin/capability-token/plugin-capability-token.js';
 import {
   FilePluginExternalAccessStore,
   MemoryPluginExternalAccessStore,
@@ -43,151 +42,34 @@ test('production preserves the converged generic external request route without 
   assert.equal(registeredPath, compositionPath);
 });
 
-test('one installation keeps one token across Host store recreation; rotate and uninstall revoke it', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'plugin-external-access-'));
-  const path = join(root, 'access.json');
+test('an imported legacy token survives store recreation and can be revoked without minting a replacement', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-legacy-access-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const generated = ['token-one', 'token-two'];
-  const a = new FilePluginExternalAccessStore(path, { generateToken: () => generated.shift()! });
-
-  assert.deepEqual(await a.ensure('instance-a'), { instanceId: 'instance-a', token: 'token-one' });
-  assert.deepEqual(await a.ensure('instance-a'), { instanceId: 'instance-a', token: 'token-one' });
-  const b = new FilePluginExternalAccessStore(path, { generateToken: () => generated.shift()! });
-  assert.deepEqual(await b.ensure('instance-a'), { instanceId: 'instance-a', token: 'token-one' });
-  assert.equal(await b.resolve('token-one'), 'instance-a');
-  assert.deepEqual(await b.rotate('instance-a'), { instanceId: 'instance-a', token: 'token-two' });
-  assert.equal(await b.resolve('token-one'), undefined);
-  assert.equal(await b.resolve('token-two'), 'instance-a');
-  await b.revoke('instance-a');
-  assert.equal(await b.resolve('token-two'), undefined);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
-  assert.doesNotMatch(await readFile(path, 'utf8'), /pluginId|method|allowed/i);
+  const path = join(root, 'access.json');
+  const first = new FilePluginExternalAccessStore(path);
+  await first.adopt('instance-a', 'old-token');
+  const second = new FilePluginExternalAccessStore(path);
+  assert.deepEqual(await second.find('instance-a'), { instanceId: 'instance-a', token: 'old-token' });
+  await second.revoke('instance-a');
+  assert.equal(await first.resolve('old-token'), undefined);
+  assert.equal(await first.find('instance-a'), undefined);
+  assert.equal('ensure' in first, false);
+  assert.equal('rotate' in first, false);
 });
 
 test('a verified legacy installation adopts its existing credential as the same fixed-port token', async () => {
-  const store = new MemoryPluginExternalAccessStore({ generateToken: () => 'generated-token' });
+  const store = new MemoryPluginExternalAccessStore();
   await store.adopt('instance-a', 'a'.repeat(64));
-  assert.deepEqual(await store.ensure('instance-a'), { instanceId: 'instance-a', token: 'a'.repeat(64) });
+  assert.deepEqual(await store.adopt('instance-a', 'a'.repeat(64)), {
+    instanceId: 'instance-a',
+    token: 'a'.repeat(64),
+  });
   assert.equal(await store.resolve('a'.repeat(64)), 'instance-a');
   await assert.rejects(() => store.adopt('instance-b', 'a'.repeat(64)), /already belongs/);
 });
 
-test('the authenticated plugin issues and inspects only its declared external capability', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'plugin-signed-external-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  let now = 1_800_000_000_000;
-  const tokens = new FilePluginCapabilityKeyring({
-    path: join(root, 'capability-keyring.json'),
-    now: () => now,
-  });
-  let current = instance();
-  const manifest = {
-    pluginId: 'fixture.plugin',
-    version: '1.0.0',
-    contractVersion: '0.3.1-candidate.1',
-    name: 'Signed external fixture',
-    contributions: [{ type: 'external-request', id: 'fixture-mcp' }],
-    features: [
-      {
-        id: 'main',
-        name: 'Main',
-        resources: [],
-        contributions: [{ type: 'external-request', id: 'fixture-mcp' }],
-      },
-    ],
-  };
-  const snapshot = async () => ({
-    schemaVersion: 1 as const,
-    packages: [{ pluginId: 'fixture.plugin', packageDigest: current.packageDigest, manifest }],
-    grants: [],
-    instances: [current],
-  });
-  const seen: unknown[] = [];
-  const service = new PluginExternalAccessService({
-    endpoint: '/api/plugin-runtime/handle',
-    upstreamLoopbackOrigin: 'http://127.0.0.1:5182',
-    store: new MemoryPluginExternalAccessStore(),
-    tokens,
-    now: () => now,
-    inventory: { snapshot: snapshot as never },
-    handler: {
-      async handle(pluginInstanceId, request, credential) {
-        seen.push({ pluginInstanceId, request, credential });
-        return { status: 200, body: { ok: true } };
-      },
-    },
-  });
-
-  const issued = await service.issueExternal('instance-a', {
-    capabilityId: 'fixture-mcp',
-    ttlSeconds: 3_600,
-  });
-  assert.deepEqual(issued.forwarding, {
-    upstreamLoopbackOrigin: 'http://127.0.0.1:5182',
-    relativePath: '/api/plugin-runtime/handle',
-    method: 'POST',
-  });
-  const initialStatus = await service.inspectExternal('instance-a', {
-    token: issued.token,
-    capabilityId: 'fixture-mcp',
-  });
-  assert.equal(initialStatus.usable, true);
-  assert.equal(initialStatus.remainingSeconds, 3_600);
-  assert.equal(initialStatus.refreshRecommended, true);
-  now += 1_800_000;
-  assert.equal(
-    (
-      await service.inspectExternal('instance-a', {
-        token: issued.token,
-        capabilityId: 'fixture-mcp',
-      })
-    ).remainingSeconds,
-    1_800,
-  );
-  assert.equal(
-    (
-      await service.inspectExternal('instance-other', {
-        token: issued.token,
-        capabilityId: 'fixture-mcp',
-      })
-    ).usable,
-    false,
-  );
-  await assert.rejects(
-    service.issueExternal('instance-a', { capabilityId: 'undeclared', ttlSeconds: 60 }),
-    /not declared/,
-  );
-
-  await service.handle(issued.token, { method: 'POST', headers: {}, body: { jsonrpc: '2.0' } });
-  assert.deepEqual(seen, [
-    {
-      pluginInstanceId: 'instance-a',
-      request: { method: 'POST', headers: {}, body: { jsonrpc: '2.0' } },
-      credential: {
-        sub: 'instance-a',
-        cap: 'fixture-mcp',
-        jti: issued.tokenId,
-        iat: issued.issuedAt,
-        exp: issued.expiresAt,
-      },
-    },
-  ]);
-
-  current = instance({ activationState: 'disabled', runtimeState: 'stopped' });
-  await assert.rejects(service.handle(issued.token, { method: 'POST', headers: {}, body: {} }), /not enabled/);
-  assert.equal(
-    (
-      await service.inspectExternal('instance-a', {
-        token: issued.token,
-        capabilityId: 'fixture-mcp',
-      })
-    ).usable,
-    false,
-  );
-});
-
 test('ordinary module projection does not mint a new legacy raw credential', async () => {
-  const store = new MemoryPluginExternalAccessStore({ generateToken: () => 'must-not-be-minted' });
+  const store = new MemoryPluginExternalAccessStore();
   const service = new PluginExternalAccessService({
     endpoint: '/api/plugin-runtime/handle',
     store,
@@ -203,7 +85,7 @@ test('ordinary module projection does not mint a new legacy raw credential', asy
 });
 
 test('the token selects exactly one current enabled instance before the fixed handler is entered', async () => {
-  const store = new MemoryPluginExternalAccessStore({ generateToken: () => 'instance-token' });
+  const store = new MemoryPluginExternalAccessStore();
   let current = instance();
   const seen: unknown[] = [];
   const service = new PluginExternalAccessService({
@@ -217,7 +99,8 @@ test('the token selects exactly one current enabled instance before the fixed ha
       },
     },
   });
-  const access = await service.access('instance-a');
+  await service.adopt('instance-a', 'instance-token');
+  const access = await service.legacyAccess('instance-a');
   assert.deepEqual(access, { endpoint: '/api/plugin-runtime/handle', token: 'instance-token' });
   const body = { jsonrpc: '2.0', method: 'tools/list', pluginId: 'forged', contributionId: 'forged' };
   assert.deepEqual(await service.handle('instance-token', { method: 'POST', headers: {}, body }), {
@@ -233,7 +116,7 @@ test('the token selects exactly one current enabled instance before the fixed ha
   assert.equal(seen.length, 1, 'Host refusals must not enter package code');
 });
 
-test('the public route accepts the signed token by bearer or exact URL query and exposes no selector', async (t) => {
+test('the public route accepts the legacy token by bearer or exact URL query and exposes no selector', async (t) => {
   const app = Fastify();
   t.after(() => app.close());
   const seen: unknown[] = [];
@@ -313,7 +196,7 @@ test('the public route accepts the signed token by bearer or exact URL query and
   assert.equal(seen.length, 2);
 });
 
-test('the production runtime owns one durable access identity and revokes it only on uninstall', async (t) => {
+test('the production runtime preserves imported legacy access until uninstall without minting new credentials', async (t) => {
   const projectRoot = await mkdtemp(join(tmpdir(), 'plugin-external-runtime-'));
   t.after(() => rm(projectRoot, { recursive: true, force: true }));
   const create = () =>
@@ -338,19 +221,28 @@ test('the production runtime owns one durable access identity and revokes it onl
     effectiveGrants: [],
   });
   const instanceId = admitted.pluginInstanceId;
-  const initial = await first.externalAccess.access(instanceId);
+  await first.externalAccess.adopt(instanceId, 'imported-token');
+  const initial = await first.externalAccess.legacyAccess(instanceId);
   assert.equal(initial.endpoint, 'https://host.example/api/plugin-runtime/handle');
 
   await first.supervisor.stop(instanceId, 'owner_disabled');
-  assert.deepEqual(await first.externalAccess.access(instanceId), initial, 'disable keeps the installation identity');
+  assert.deepEqual(
+    await first.externalAccess.legacyAccess(instanceId),
+    initial,
+    'disable keeps the installation identity',
+  );
   const restarted = create();
   assert.deepEqual(
-    await restarted.externalAccess.access(instanceId),
+    await restarted.externalAccess.legacyAccess(instanceId),
     initial,
     'restart keeps the installation identity',
   );
 
   await restarted.supervisor.stop(instanceId, 'owner_uninstalled');
-  const replacement = await restarted.externalAccess.access(instanceId);
-  assert.notEqual(replacement.token, initial.token, 'uninstall revokes the old identity');
+  const replacement = await restarted.externalAccess.legacyAccess(instanceId);
+  assert.deepEqual(
+    replacement,
+    { endpoint: '', token: '' },
+    'uninstall revokes the imported identity without minting one',
+  );
 });

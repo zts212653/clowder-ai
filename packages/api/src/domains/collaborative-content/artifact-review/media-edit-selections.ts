@@ -33,7 +33,16 @@ export function mediaEditAnnotations(
   const anchor =
     action.anchor ??
     (media.kind === 'image'
-      ? { kind: 'image-region' as const, x: 0, y: 0, width: media.width, height: media.height }
+      ? {
+          kind: 'image-region' as const,
+          x: 0,
+          y: 0,
+          width: media.width,
+          height: media.height,
+          ...(media.animation && media.animation.frameCount > 1
+            ? { frameIndex: 0, timestampMs: 0, endFrameIndex: media.animation.frameCount - 1 }
+            : {}),
+        }
       : {
           kind: 'video-range' as const,
           streamId: media.streamId,

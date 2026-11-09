@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { registerOriginalReviewNavigation } from './f309-original-place.journey.mjs';
 import { runChatRealPageJourney } from './f322-chat-real-page.mjs';
 import { runGroupPeekJourney } from './f322-group-peek.journey.mjs';
 import { runPianoJourneys } from './f322-piano.journey.mjs';
@@ -14,6 +15,7 @@ import { registerMentionCutoverJourney } from './f322-user-mention-cutover.journ
 import { registerUserMentionJourney } from './f322-user-mention-todo.journey.mjs';
 import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 import { registerWorkspaceMenuTests } from './f322-workspace-menu.journey.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.
 // Only Next routing and domain content renderers are test boundaries. Every request is
@@ -182,6 +184,7 @@ async function openProof({
   viewport = { width: 1440, height: 900 },
   participantCount = 2,
   retainedApproval = false,
+  reviewNavigation = false,
   // Called once per unified read, with the 1-based attempt number; returns { status?, body, raw? } (may be async: a slow read).
   unified = () => ({ body: unifiedRead() }),
   // Offered every other /api request first; returns { status?, body, raw?, abort? } to answer it, or null to fall through.
@@ -196,14 +199,15 @@ async function openProof({
     unexpected = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(
-    ({ pins, shell, language, participantCount, retainedApproval }) => {
-      localStorage.setItem('cat-cafe:shell-presentation', shell);
+    ({ pins, shell, language, participantCount, retainedApproval, reviewNavigation }) => {
+      if (shell !== null) localStorage.setItem('cat-cafe:shell-presentation', shell);
       localStorage.setItem('cat-cafe:shell-language', language);
       localStorage.setItem('cat-cafe:pinned-settings-sections', JSON.stringify(pins));
       window.__F322_PARTICIPANT_COUNT__ = participantCount;
       window.__F322_RETAINED_APPROVAL__ = retainedApproval;
+      window.__F309_REVIEW_NAVIGATION__ = reviewNavigation;
     },
-    { pins, shell, language, participantCount, retainedApproval },
+    { pins, shell, language, participantCount, retainedApproval, reviewNavigation },
   );
   await page.route('**/*', async (handler) => {
     const request = handler.request(),
@@ -247,6 +251,8 @@ async function openProof({
           body: custom.raw ?? JSON.stringify(custom.body),
         });
       }
+      const watcher = disabledWatcherRead(request, url, ['thread-return', 'thread-other', 'thread-created']);
+      if (watcher) return handler.fulfill(watcher);
       // Non-mention scenarios have no handling receipt. Real-owner journeys override
       // this exact GET via `api`; every other unknown endpoint still fails closeProof.
       if (request.method() === 'GET' && url.pathname === '/api/config/ignored-items') {
@@ -284,6 +290,8 @@ async function openProof({
       }
       const bodies = {
         '/api/session': session,
+        '/api/plugin-ui': { entries: [] },
+        '/api/config/process-talk': { ownerUserId: session.userId, mode: 'whole' },
         '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
         '/api/config/chat-background': { threads: {} },
         '/api/config/ignored-items': { ownerUserId: session.userId, revision: 0, entries: [] },
@@ -334,7 +342,15 @@ async function openProof({
     });
   });
   await page.goto(origin + route, { waitUntil: 'networkidle' });
-  if (shell === 'v2') await page.getByRole('button', { name: ready, exact: true }).waitFor();
+  if (shell === 'v2') {
+    try {
+      await page.getByRole('button', { name: ready, exact: true }).waitFor();
+    } catch (cause) {
+      const body = (await page.locator('body').innerText()).slice(0, 3500);
+      await page.close();
+      throw new Error(JSON.stringify({ ready, errors, unexpected, body }), { cause });
+    }
+  }
   return { page, errors, requests, unexpected };
 }
 async function closeProof(proof) {
@@ -342,6 +358,7 @@ async function closeProof(proof) {
   assert.deepEqual(proof.errors, []);
   assert.deepEqual(proof.unexpected, []);
 }
+registerOriginalReviewNavigation({ openProof, closeProof, unifiedRead });
 async function pointAt(page, locator) {
   const box = await locator.boundingBox();
   assert.ok(box);
@@ -1095,6 +1112,38 @@ test('settings sections remain pinnable and saved Workspace team/eval pins keep 
       'team',
       'the pin must open the same Workspace team owner',
     );
+  } finally {
+    await closeProof(proof);
+  }
+});
+
+test('new visits default to v2 and retain either interface after reload', async () => {
+  const proof = await openProof({ shell: null, route: '/settings?s=theme&from=thread-return' });
+  const { page } = proof;
+  const evidenceDir = process.env.F322_SHELL_DEFAULT_EVIDENCE_DIR;
+  try {
+    await page.getByTestId('shell-presentation-v2').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-v2').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 1);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), null);
+    if (evidenceDir) {
+      mkdirSync(evidenceDir, { recursive: true });
+      await page.screenshot({ path: path.join(evidenceDir, 'default-v2.png'), fullPage: true });
+    }
+    await page.getByTestId('shell-presentation-classic').click();
+    await page.waitForFunction(() => document.documentElement.dataset.shell === undefined);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('shell-presentation-classic').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-classic').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 0);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), 'classic');
+    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, 'remembered-v1.png'), fullPage: true });
+    await page.getByTestId('shell-presentation-v2').click();
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('shell-presentation-v2').waitFor();
+    assert.equal(await page.getByTestId('shell-presentation-v2').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('world-rail').count(), 1);
+    assert.equal(await page.evaluate(() => localStorage.getItem('cat-cafe:shell-presentation')), 'v2');
   } finally {
     await closeProof(proof);
   }

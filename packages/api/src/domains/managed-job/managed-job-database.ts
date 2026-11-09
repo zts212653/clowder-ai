@@ -3,34 +3,41 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
+import { migrateManagedJobRecoverySchema } from './managed-job-recovery-schema.js';
 
-const stores = new AsyncLocalStorage<Map<string, Database.Database>>();
+const stores = new AsyncLocalStorage<{
+  connections: Map<string, Database.Database>;
+  busyTimeoutMs: number;
+}>();
 
 /** Reconciliation owns these connections only until this operation settles. */
-export async function withSupervisorStores<T>(action: () => Promise<T>): Promise<T> {
+export async function withSupervisorStores<T>(action: () => Promise<T>, busyTimeoutMs = 5000): Promise<T> {
   if (stores.getStore()) return action();
   const scope = new Map<string, Database.Database>();
   try {
-    return await stores.run(scope, action);
+    return await stores.run({ connections: scope, busyTimeoutMs }, action);
   } finally {
     for (const database of scope.values()) database.close();
   }
 }
 
 export function closeSupervisorStore(database: Database.Database): void {
-  if (![...(stores.getStore()?.values() ?? [])].includes(database)) database.close();
+  if (![...(stores.getStore()?.connections.values() ?? [])].includes(database)) database.close();
 }
 
-export function openSupervisorStore(job: DurableManagedGateJob): Database.Database {
+export function isManagedJobStoreBusy(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'SQLITE_BUSY';
+}
+
+export function openSupervisorStore(job: Pick<DurableManagedGateJob, 'recordPath'>): Database.Database {
   const directory = dirname(job.recordPath);
   const file = join(directory, 'supervisor.sqlite');
-  const existing = stores.getStore()?.get(file);
+  const existing = stores.getStore()?.connections.get(file);
   if (existing) return existing;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const database = new Database(file);
+  const database = new Database(file, { timeout: stores.getStore()?.busyTimeoutMs ?? 5000 });
   try {
     chmodSync(join(directory, 'supervisor.sqlite'), 0o600);
-    database.pragma('busy_timeout = 5000');
     database.exec(`
     CREATE TABLE IF NOT EXISTS durable_gate_supervisors (
       job_id TEXT PRIMARY KEY,
@@ -91,7 +98,8 @@ export function openSupervisorStore(job: DurableManagedGateJob): Database.Databa
       json_extract(record_json, '$.descriptor.definition.principal.catId'), state
     );
   `);
-    stores.getStore()?.set(file, database);
+    migrateManagedJobRecoverySchema(database);
+    stores.getStore()?.connections.set(file, database);
     return database;
   } catch (error) {
     database.close();

@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { type SidebarSnapshotRow, useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import {
@@ -105,6 +106,7 @@ describe('ThreadSidebar current working row visibility', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     window.sessionStorage.clear();
     Object.defineProperty(globalThis, 'CSS', {
       value: { escape: (value: string) => value },

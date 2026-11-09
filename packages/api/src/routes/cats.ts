@@ -39,6 +39,7 @@ import {
   resolveCodexSpeed,
   supportsActiveInvocationGuidance,
 } from '@cat-cafe/shared';
+import { loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -83,6 +84,7 @@ import {
   updateMemberWithRevision,
 } from '../config/member-config-revision.js';
 import { createOwnedRuntimeCat, MemberCreateConflict, memberCreationReceipt } from '../config/member-create-receipt.js';
+import { memberEnvironmentSchema } from '../config/member-environment.js';
 import { inferOpenCodeProviderFromModelName } from '../config/opencode-model.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
@@ -102,6 +104,7 @@ import {
 import type { InvocationCapacitySnapshot } from '../domains/cats/services/agents/invocation/invocation-capacity-snapshot.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const colorSchema = z.object({
@@ -245,6 +248,7 @@ const baseCatSchema = z.object({
   executionApproval: z.enum(['auto', 'ask_user']).optional(),
   carrier: catCarrierSchema.optional(),
   voiceConfig: voiceConfigSchema.optional(),
+  env: memberEnvironmentSchema.optional(),
 });
 
 /** Strip trailing slashes from model names — prevents "MiniMax-M2.7/" artifacts.
@@ -328,6 +332,7 @@ const updateCatSchema = z.object({
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
   provider: z.string().min(1).nullable().optional(),
+  env: memberEnvironmentSchema.nullable().optional(),
   /** Explicit recovery for a historically drifted built-in cloud identity. */
   restoreBuiltinCloudIdentity: z.literal(true).optional(),
   voiceConfig: voiceConfigSchema.nullable().optional(),
@@ -789,6 +794,7 @@ async function toCatResponse(
       const identityProtection = projectBuiltinCloudIdentityProtection(
         builtinCloudIdentityCandidate({ cat: persistedIdentityCat, accountRef: effectiveAccountRef, acp: acpConfig }),
       );
+      const identityProfile = loadDossierProfiles(findMonorepoRoot()).get(cat.id);
       return {
         id: cat.id,
         name: cat.name,
@@ -848,6 +854,14 @@ async function toCatResponse(
         })(),
         roleDescription: cat.roleDescription,
         personality: cat.personality,
+        identitySources: cat.identitySources,
+        identityProfile: identityProfile
+          ? {
+              entityId: identityProfile.entityId,
+              l0RosterSummary: identityProfile.l0RosterSummary,
+              l0RoutingNote: identityProfile.l0RoutingNote,
+            }
+          : null,
         teamStrengths: cat.teamStrengths,
         caution: cat.caution,
         strengths: cat.strengths,
@@ -1188,6 +1202,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         if (body.clientId === 'antigravity') {
           await createRuntimeCatSerialized({
             catId: body.catId,
+            ...(body.env ? { env: body.env } : {}),
             configurationSource: body.configurationSource,
             breedId: body.breedId,
             name: body.name,
@@ -1220,6 +1235,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           // F161: Generic ACP client — no CLI config, ACP section is the transport.
           await createRuntimeCatSerialized({
             catId: body.catId,
+            ...(body.env ? { env: body.env } : {}),
             configurationSource: body.configurationSource,
             breedId: body.breedId,
             name: body.name,
@@ -1292,6 +1308,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             ...(body.banner ? { banner: body.banner } : {}),
             color: body.color,
             mentionPatterns: body.mentionPatterns,
+            ...(body.env ? { env: body.env } : {}),
             ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
             contextWindow: body.contextWindow,
             roleDescription: body.roleDescription,
@@ -1719,6 +1736,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           ...(body.banner !== undefined ? { banner: body.banner } : {}),
           ...(body.color !== undefined ? { color: body.color } : {}),
           ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
+          ...(body.env !== undefined ? { env: body.env } : {}),
           ...(body.configurationSource !== undefined ? { configurationSource: body.configurationSource } : {}),
           ...(body.agentProvider !== undefined ? { agentProvider: body.agentProvider } : {}),
           ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),

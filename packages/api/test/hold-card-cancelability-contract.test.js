@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Every hold-ball card states whether its hold can still be canceled.
+ * Every hold-ball card states its cancellation fact, or explicitly leaves it unchanged.
  *
  * The web card used to re-derive this from `source.meta.phase`, and that copy
  * was wrong: four producers announce a terminal under `phase:'status'` — launch
@@ -25,7 +25,7 @@ const API_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
  * @typedef {object} ProducerExpectation
  * @property {string} file    Source file, relative to packages/api/src.
  * @property {string} path    Which card this producer emits.
- * @property {boolean} cancelable  What that card must state.
+ * @property {boolean | 'unchanged'} cancelable  What that card must state.
  * @property {number} count  How many such statements the file must contain.
  */
 
@@ -40,9 +40,21 @@ const EXPECTED_PRODUCERS = [
     count: 1,
   },
   {
-    file: 'domains/ball-custody/ManagedCommandWakeRecoverySweep.ts',
+    file: 'domains/ball-custody/managed-command-admission-recovery.ts',
     path: 'startup sweep admission fact',
     cancelable: false,
+    count: 1,
+  },
+  {
+    file: 'domains/ball-custody/managed-command-production-recovery.ts',
+    path: 'job recovery disposition notice (does not terminate execution)',
+    cancelable: 'unchanged',
+    count: 1,
+  },
+  {
+    file: 'domains/ball-custody/managed-command-wait-notification.ts',
+    path: 'wait recovery disposition notice (does not terminate execution)',
+    cancelable: 'unchanged',
     count: 1,
   },
   {
@@ -57,7 +69,12 @@ const EXPECTED_PRODUCERS = [
     cancelable: false,
     count: 1,
   },
-  { file: 'infrastructure/scheduler/TaskRunnerV2.ts', path: 'missed wake window', cancelable: false, count: 1 },
+  {
+    file: 'infrastructure/scheduler/TaskRunnerV2.ts',
+    path: 'missed wake window + pre-execution expiry/invalid window',
+    cancelable: false,
+    count: 2,
+  },
   {
     file: 'infrastructure/scheduler/templates/reminder.ts',
     path: 'wake receipt + wake-admission failure',
@@ -93,7 +110,8 @@ function holdBallCardEmitters() {
 
 function countStatements(file, cancelable) {
   const text = readFileSync(join(API_SRC, file), 'utf8');
-  return (text.match(new RegExp(`cancelable: ${cancelable}\\b`, 'g')) ?? []).length;
+  const value = cancelable === 'unchanged' ? "'unchanged'" : String(cancelable);
+  return (text.match(new RegExp(`cancelable: ${value}(?=[,}\\s])`, 'g')) ?? []).length;
 }
 
 test('no hold-ball card emitter is unknown to this contract', () => {
@@ -120,7 +138,7 @@ test('the four exceptional terminals stay stated as terminal despite their "stat
   const exceptional = [
     ['routes/callback-hold-ball-routes.ts', 'launch cancellation'],
     ['domains/ball-custody/ManagedCommandWakeRecoveryEngine.ts', 'spawn/runner loss'],
-    ['infrastructure/scheduler/TaskRunnerV2.ts', 'missed wake window'],
+    ['infrastructure/scheduler/TaskRunnerV2.ts', 'missed/pre-execution wake window'],
     ['infrastructure/scheduler/templates/reminder.ts', 'wake-admission failure'],
   ];
   for (const [file, label] of exceptional) {

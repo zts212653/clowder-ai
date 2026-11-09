@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "2026-10-27: Task738 replaces ordinary lease calling instructions with exact Task assignment and existing execution control; no new end-user operation or authority."
+tips_exempt: "2026-11-04: maintainer handoff now keeps merged community PR intake with its execution thread; this clarifies existing internal responsibility and adds no end-user operation or authority."
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -56,7 +56,7 @@ action: {
 - 仍受治理的 lease fallback：只在 server 已记录前手 `failed/canceled/unavailable` 后，用返回的 `leaseId + expectedGeneration` 做 `replace`。caller 自称“它不行了”不算证明。
 - `mode=parallel`：只用于独立多猫评审、`#ideate` 或明确 operator fan-out，并写 `parallelIntent`；holder 集合一次冻结，不在重复调用中偷偷加猫。
 - failure domain 只用于选择顺序：默认选一个与前手独立的 provider/quota domain；它不是 identity，也不是强制拒绝条件。
-- 外部 subject 已 merged/closed 等终态：停止交接；晚到响应由 generation/terminal fence 抑制。
+- 外部 subject 已 merged/closed 等终态：停止该外部 subject 的 review/lease 交接；晚到响应由 generation/terminal fence 抑制。这不终结下游交付。社区 PR merged 后按 `opensource-ops` B3 核 intake，由该 PR 的执行线程接到回家；独立 review-only 子任务把未完回流和原责任坐标交给具名执行者，路由只安排、协调和验收。明确回家状态、owner 与下一步，不把订阅终态报成整单完成，不把施工甩回路由或复活原 PR 订阅来等吸收。
 - local cat review 的初审与复审直接用 ordinary A2A；不要尝试 `review/reviewer` lease、复入字段、generation 或 replacement。新 HEAD 需要判断时发一条新的普通 review 请求；旧 verdict 只作历史证据。
 
 安全等待是合法动作。找不到有证据的 fallback，不等于必须立刻再喊一只猫。

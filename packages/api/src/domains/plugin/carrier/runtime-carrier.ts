@@ -22,7 +22,7 @@ import {
   restoreDeclaredSkillPolicy,
 } from '../declared/declared-static-resources.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
-import { NativePluginActions, type NativePluginActionsOptions } from '../declared/native-plugin-actions.js';
+import { NativePluginActions } from '../declared/native-plugin-actions.js';
 import type { SharedMcpFactory } from '../declared/shared-mcp-factory.js';
 import { type PluginRuntimeLifecyclePort, removesPluginOwnedResources } from '../external-plugin-lifecycle-types.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
@@ -107,9 +107,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
     private readonly projectOutputs?: PluginProjectOutputs,
-    nativeActions?: NativePluginActionsOptions,
   ) {
-    this.nativeActions = new NativePluginActions((id) => this.#admission(id), nativeActions);
+    this.nativeActions = new NativePluginActions((id) => this.#admission(id));
     this.#nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
     this.#runtimeContributions = new DeclaredRuntimeContributions(
       runtimeContributions ?? {

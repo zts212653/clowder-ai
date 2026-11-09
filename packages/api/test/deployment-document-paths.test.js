@@ -28,7 +28,7 @@ for (const activeProfile of ['home', 'opensource']) {
       },
     };
     const roadmapPath = config.profiles[activeProfile].roadmapPath;
-    for (const directory of ['api', 'shared', 'node_modules/@cat-cafe/shared', 'docs/features', 'docs/team']) {
+    for (const directory of ['api', 'utils', 'shared', 'node_modules/@cat-cafe/shared', 'docs/features', 'docs/team']) {
       mkdirSync(join(root, directory), { recursive: true });
     }
     writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
@@ -47,6 +47,8 @@ for (const activeProfile of ['home', 'opensource']) {
     for (const file of ['git-doc-reader.js', 'backlog-doc-import.js', 'feat-index-doc-import.js']) {
       cpSync(join(apiRoot, 'dist/routes', file), join(root, 'api', file));
     }
+    // The readers resolve the workspace root with the shared helper, which ships beside them in dist.
+    cpSync(join(apiRoot, 'dist/utils/monorepo-root.js'), join(root, 'utils/monorepo-root.js'));
     const table = [
       '| ID | 名称 | Status | Owner | Link |',
       '|----|------|--------|-------|------|',

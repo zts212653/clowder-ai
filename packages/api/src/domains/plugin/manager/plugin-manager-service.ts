@@ -114,10 +114,18 @@ export type PluginManagerServiceErrorCode =
   | 'AUDIT_UNAVAILABLE'
   | 'INVALID_CONFIGURATION';
 
+export interface PluginManagerSafeDiagnostic {
+  readonly packageManager: string;
+  readonly phase: 'install' | 'build';
+  readonly exitCode: number | null;
+  readonly stderrExcerpt: string;
+}
+
 export class PluginManagerServiceError extends Error {
   constructor(
     readonly code: PluginManagerServiceErrorCode,
     message: string,
+    readonly diagnostic?: PluginManagerSafeDiagnostic,
   ) {
     super(message);
     this.name = 'PluginManagerServiceError';

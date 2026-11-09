@@ -13,8 +13,8 @@
 
 import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import type { MountRules } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
@@ -33,7 +33,12 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
-import { buildSkillMountTargets, createSkillSymlink, type MountTarget } from '../utils/skill-mount.js';
+import {
+  buildProjectSkillMountDirs,
+  buildSkillMountTargets,
+  createSkillSymlink,
+  symlinkTargetFor,
+} from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
@@ -234,16 +239,13 @@ async function reconcilePluginMounts(
 
   const enabledTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
 
-  // Collect project-local provider dirs only (skip HOME fallback — plugin skills are project-scoped)
-  const projectDirs = (targets: MountTarget[]) =>
-    targets.flatMap((t) => (t.kind === 'standard' ? t.candidates.slice(0, 1) : t.candidates));
-  const allDirs = new Set<string>();
-  for (const id of STANDARD_MOUNT_POINT_IDS) allDirs.add(join(projectRoot, mountRules.mountPoints[id].path));
-  for (const d of projectDirs(enabledTargets)) allDirs.add(d);
-  if (previousRules) {
-    for (const id of STANDARD_MOUNT_POINT_IDS) allDirs.add(join(projectRoot, previousRules.mountPoints[id].path));
-    for (const d of projectDirs(buildSkillMountTargets(projectRoot, homedir(), previousRules))) allDirs.add(d);
-  }
+  // Project-local provider dirs only (skip HOME fallback — plugin skills are project-scoped); disabled
+  // standard mount points and the previous rules' dirs are visited so stale links get removed.
+  const allStandard = { includeDisabledStandardMountPoints: true };
+  const allDirs = new Set([
+    ...buildProjectSkillMountDirs(projectRoot, homedir(), mountRules, allStandard),
+    ...(previousRules ? buildProjectSkillMountDirs(projectRoot, homedir(), previousRules, allStandard) : []),
+  ]);
 
   for (const ps of pluginSkills) {
     const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
@@ -261,11 +263,7 @@ async function reconcilePluginMounts(
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') continue;
         }
         await mkdir(dir, { recursive: true });
-        const rel =
-          process.platform === 'win32'
-            ? join(ps.skillsSource, ps.skillName)
-            : relative(dirname(linkPath), join(ps.skillsSource, ps.skillName));
-        await createSkillSymlink(rel, linkPath);
+        await createSkillSymlink(symlinkTargetFor(linkPath, join(ps.skillsSource, ps.skillName)), linkPath);
       } else if (!shouldMount && status === 'managed') {
         // Guard: skip symlinked provider dirs (mirror the mount branch above)
         try {

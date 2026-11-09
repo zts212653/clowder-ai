@@ -8,6 +8,7 @@ import {
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
@@ -54,7 +55,6 @@ import {
   type ResolvedConfigurationField,
   resolveManifestConfiguration,
 } from '../../manifest-configuration-projection.js';
-import type { PluginSharedExtensionService } from '../../shared-extension/plugin-shared-extension.js';
 import type { BundledPluginRuntime } from './bundled-runtime-carrier.js';
 import { snapshotModuleAuthority } from './module-authority-snapshot.js';
 import { createModuleHostInvocation, exposesModuleAction, projectOwnerHttpContext } from './module-host-invocation.js';
@@ -62,7 +62,6 @@ import {
   assertModuleSettingsDeclaration,
   createModuleSettingsHost,
   invokeModuleSettings,
-  type ModulePluginCapabilityPort,
   type ModulePluginSettingsFactory,
   type ModulePluginSettingsHost,
   type PluginSettingsInvocation,
@@ -91,7 +90,6 @@ export type ModulePluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
 export interface ModulePluginHostShape {
   /** Installation identity for attribution; Host operations retain their own identity and lifecycle checks. */
   readonly pluginInstanceId: string;
-  readonly capability?: ModulePluginCapabilityPort;
   readonly config: { get(key: string): Promise<unknown> };
   readonly secrets: { get(key: string): Promise<string | undefined> };
   readonly storage: PluginStorageHost;
@@ -135,7 +133,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 
 export interface ModulePluginRuntimeOptions {
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;
@@ -172,17 +170,7 @@ export interface ModulePluginRuntimeOptions {
   readonly externalAccess?: (
     pluginInstanceId: string,
   ) => Promise<{ readonly endpoint: string; readonly token: string }>;
-  readonly capabilityAccess?: {
-    issueExternal(
-      instanceId: string,
-      input: Parameters<ModulePluginCapabilityPort['issueExternal']>[0],
-    ): ReturnType<ModulePluginCapabilityPort['issueExternal']>;
-    inspectExternal(
-      instanceId: string,
-      input: Parameters<ModulePluginCapabilityPort['inspectExternal']>[0],
-    ): ReturnType<ModulePluginCapabilityPort['inspectExternal']>;
-  };
-  readonly sharedExtension?: PluginSharedExtensionService;
+
   /** Parent of module data directories (`<projectRoot>/.cat-cafe/plugin-host`); none without it. */
   readonly dataDirectoryParent?: string;
   readonly log: ModulePluginHostShape['log'];
@@ -415,7 +403,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       const host: ModulePluginHostShape = {
         ...neutral,
         pluginInstanceId,
-        ...(settingsHost.capability ? { capability: settingsHost.capability } : {}),
         config: settingsHost.config,
         secrets: settingsHost.secrets,
         storage: settingsHost.storage,
@@ -724,8 +711,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
             : { dataDirectoryParent: this.options.dataDirectoryParent }),
           ...(this.options.storage ? { storage: this.options.storage } : {}),
           ...(this.options.externalAccess ? { externalAccess: this.options.externalAccess } : {}),
-          ...(this.options.capabilityAccess ? { capabilityAccess: this.options.capabilityAccess } : {}),
-          ...(this.options.sharedExtension ? { sharedExtension: this.options.sharedExtension } : {}),
           log: this.options.log,
         },
       );
@@ -740,8 +725,6 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         : { dataDirectoryParent: this.options.dataDirectoryParent }),
       ...(this.options.storage ? { storage: this.options.storage } : {}),
       ...(this.options.externalAccess ? { externalAccess: this.options.externalAccess } : {}),
-      ...(this.options.capabilityAccess ? { capabilityAccess: this.options.capabilityAccess } : {}),
-      ...(this.options.sharedExtension ? { sharedExtension: this.options.sharedExtension } : {}),
       log: this.options.log,
     });
   };

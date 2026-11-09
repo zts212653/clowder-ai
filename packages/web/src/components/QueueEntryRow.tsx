@@ -153,7 +153,6 @@ function QueueEntryRow({
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
   const rowToneClass = isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
-  const hasRepeat = entry.recoveryActions?.some((action) => action.kind === 'repeat_target');
 
   const targetIds = [...new Set([...entry.targetCats, ...Object.keys(deliveryLabels)])];
   const coCreator = useCoCreatorConfig();
@@ -186,7 +185,7 @@ function QueueEntryRow({
         {index + 1}
       </span>
 
-      <div className={`flex-1 min-w-0 ${hasRepeat ? 'basis-[calc(100%-4rem)]' : ''}`}>
+      <div className="flex-1 min-w-0">
         <LongFormReader
           title={`排队消息 · ${sourceLabel}`}
           summary={summary}
@@ -254,7 +253,7 @@ function QueueEntryRow({
         </div>
       </div>
 
-      <div className={`flex items-center gap-1 mt-1 ${hasRepeat ? 'ml-12 min-w-0 flex-wrap' : 'shrink-0'}`}>
+      <div className="flex items-center gap-1 mt-1 shrink-0">
         <QueueEntryActions entry={entry} onSteer={onSteer} />
         {canRecallEdit && (
           <button

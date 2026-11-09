@@ -15,6 +15,7 @@ import type { AgentKeyRegistry } from '../cats/services/agents/agent-key/AgentKe
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { EntrustedWorkChangeReason } from '../growing/EntrustedWorkLifecycleService.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { MessagingLedger } from '../messaging/ledger.js';
 import {
@@ -45,7 +46,6 @@ import {
 } from './builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { ModulePluginRuntime } from './builtin-runtime/carriers/module-plugin-runtime.js';
 import { StaticPluginRuntime } from './builtin-runtime/carriers/static-plugin-runtime.js';
-import { FilePluginCapabilityKeyring } from './capability-token/plugin-capability-token.js';
 import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
@@ -90,7 +90,10 @@ import { connectorPermissionsProjection } from './manager/connector-settings.js'
 import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
 import { LocalPluginPackageAdmission } from './manager/local-package-admission.js';
 import { GitMarketplaceCatalog } from './manager/marketplace/git-marketplace-catalog.js';
-import { prepareMarketplaceDirectory } from './manager/marketplace/git-marketplace-preparation.js';
+import {
+  MarketplacePreparationError,
+  prepareMarketplaceDirectory,
+} from './manager/marketplace/git-marketplace-preparation.js';
 import type { GitMarketplaceRepository } from './manager/marketplace/git-marketplace-repository.js';
 import type { GitMarketplaceSources } from './manager/marketplace/git-marketplace-sources.js';
 import type {
@@ -218,7 +221,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly threadStore?: IThreadStore;
   readonly threadBindingStore?: IConnectorThreadBindingStore;
   readonly threadOwnerUserId?: string;
-  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem) => void;
+  readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly threadProjections?: import('./host-surface/plugin-thread-projections.js').PluginThreadProjectionDeps;
   readonly threadDeepLinkUrl?: (threadId: string) => string;
   readonly desktopExecutor?: DesktopWindowExecutor;
@@ -339,24 +342,16 @@ export function createDormantPluginRuntimeComposition(
   const externalAccessStore = new FilePluginExternalAccessStore(
     resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.externalAccess),
   );
-  const capabilityTokens = new FilePluginCapabilityKeyring({
-    path: resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.capabilityKeyring),
-    ...(options.now === undefined ? {} : { now: options.now }),
-  });
   const externalAccess = new PluginExternalAccessService({
     endpoint: options.externalRequestEndpoint ?? '/api/plugin-runtime/handle',
     upstreamLoopbackOrigin: options.externalRequestLoopbackOrigin,
     store: externalAccessStore,
-    tokens: capabilityTokens,
     ...(options.now === undefined ? {} : { now: options.now }),
     inventory: inventoryStore,
     handler: {
-      handle: (instanceId, request, credential) => {
+      handle: (instanceId, request) => {
         if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
-        return deliveryTarget.current.handle(instanceId, {
-          ...request,
-          ...(credential ? { credential } : {}),
-        });
+        return deliveryTarget.current.handle(instanceId, request);
       },
     },
   });
@@ -594,11 +589,6 @@ export function createDormantPluginRuntimeComposition(
     materializer: builtinPackages,
     configuration,
     externalAccess: (pluginInstanceId) => externalAccess.legacyAccess(pluginInstanceId),
-    capabilityAccess: {
-      issueExternal: (pluginInstanceId, input) => externalAccess.issueExternal(pluginInstanceId, input),
-      inspectExternal: (pluginInstanceId, input) => externalAccess.inspectExternal(pluginInstanceId, input),
-    },
-    ...(sharedExtension ? { sharedExtension } : {}),
     media: mediaRead,
     dataDirectoryParent: pluginDataDirectoryParent(resolve(options.projectRoot)),
     ...(privateStorage === undefined ? {} : { storage: privateStorage }),
@@ -691,11 +681,6 @@ export function createDormantPluginRuntimeComposition(
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),
     }),
-    {
-      tokens: capabilityTokens,
-      credentialRoot: resolve(dirname(paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.nativeCredentials),
-      ...(options.now === undefined ? {} : { now: options.now }),
-    },
   );
   deliveryTarget.current = supervisor;
   supervisor.register(
@@ -1123,6 +1108,7 @@ export function createPluginManagerRuntimeComposition(
             throw new PluginManagerServiceError(
               'INSTALL_UNAVAILABLE',
               error instanceof Error ? error.message : 'Repository installation failed',
+              error instanceof MarketplacePreparationError ? error.diagnostic : undefined,
             );
           }
         }

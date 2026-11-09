@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TreeCallbacks } from '@/components/workspace/WorkspaceTree';
 import { useChatStore } from '@/stores/chatStore';
+import { withHubSocket } from '@/test-utils/fake-hub-socket';
 import { F307FileOwnerSurface } from '../F307FileOwnerSurface';
 import { F307FilesOwnerSurface } from '../F307FilesOwnerSurface';
 import {
@@ -23,9 +24,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/utils/api-client', () => ({ API_URL: 'http://localhost:3102', apiFetch: mocks.apiFetch }));
-vi.mock('socket.io-client', () => ({
-  io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn() }),
-}));
 vi.mock('@/hooks/useFileManagement', () => ({ useFileManagement: mocks.useFileManagement }));
 vi.mock('@/hooks/useFileEditing', () => ({
   useFileEditing: () => ({
@@ -165,7 +163,7 @@ describe('F307 Files owner surface', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
-    root = createRoot(container);
+    root = withHubSocket(createRoot(container));
   });
 
   afterEach(() => {

@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto';
 import { cp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { parse } from 'yaml';
 
 import { bundledBuildFixture as fixture } from './helpers/bundled-plugin-build-fixture.js';
 
-const frozenSha256 = '2d9723ce805140575c40db6d94a0ccd8a15bc8a3364ad0cbbc4e7fd4aee71e98';
+const frozenSha256 = '9cd0fc515489a495ccb391a46ff56e8deca7644b172e5cfa1b07ad5d1e42c35d';
 
 function archiveManifest(archive, prebuilt = false) {
   const tar = gunzipSync(archive);
@@ -68,10 +68,21 @@ for (const fromSource of [false, true]) {
 
 test('frozen build runs the production archive preflight on the exact release bytes', async (t) => {
   const f = await fixture(t, undefined, false, { prebuilt: true });
-  const unsafeAlpha9 = await readFile(
-    new URL('../src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.9/package.tgz', import.meta.url),
-  );
-  await f.replacePrebuiltArchive(unsafeAlpha9);
+  // Preserve the unsafe-member regression without shipping an obsolete 18 MB release.
+  const header = Buffer.alloc(512);
+  header.write('package/../escape');
+  header.write('0000644\0', 100);
+  header.write('0000000\0', 108);
+  header.write('0000000\0', 116);
+  header.write('00000000001\0', 124);
+  header.write('00000000000\0', 136);
+  header.fill(32, 148, 156);
+  header.write('0', 156);
+  header.write('ustar\0', 257);
+  header.write('00', 263);
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148);
+  await f.replacePrebuiltArchive(gzipSync(Buffer.concat([header, Buffer.alloc(512), Buffer.alloc(1024)])));
   const built = f.build();
   assert.notEqual(built.status, 0, 'a hash-matched release must still pass production archive admission');
   assert.match(built.stderr, /unsafe member path/);
@@ -123,7 +134,7 @@ for (const description of ['Fixture team: home', 'Fixture team: public']) {
     );
     assert.deepEqual(
       await readdir(dirname(f.assets)),
-      ['assets', 'manifest.json'],
+      ['assets', 'dist', 'manifest.json'],
       'build must not write into the source tree',
     );
     const checked = f.build('--check');

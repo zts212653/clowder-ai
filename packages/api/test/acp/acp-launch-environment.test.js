@@ -38,6 +38,7 @@ for (const transport of ['stdio', 'httpstream'])
       configurationSource: 'native_tool',
       accountRef: undefined,
       mcpSupport: false,
+      env: { ROLE_AGENT_LAUNCH_MARKER: '${ROLE_AGENT_LAUNCH_MARKER}' },
     };
     const create = async () => {
       const service = await createAcpServiceForConfig({

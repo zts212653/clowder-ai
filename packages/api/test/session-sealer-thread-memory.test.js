@@ -231,14 +231,7 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       { id: 'sum1', threadId: 't1', conclusions: ['选择了分层传输'], openQuestions: ['阈值待定'], createdAt: 1000 },
     ]);
 
-    const sealer = new SessionSealer(
-      chainStore,
-      writer,
-      threadStore,
-      reader,
-      undefined, // handoffConfig
-      summaryStore,
-    );
+    const sealer = new SessionSealer(chainStore, writer, threadStore, reader, summaryStore);
 
     const thread = threadStore.create('user1', 'decision thread');
     const session = chainStore.create({
@@ -270,7 +263,6 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       writer,
       threadStore,
       reader,
-      undefined, // handoffConfig
       undefined, // summaryStore — not available
     );
 
@@ -305,7 +297,7 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       { id: 'sum1', threadId: 't1', conclusions: [], openQuestions: ['阈值待定', 'burst gap 怎么算'], createdAt: 1000 },
     ]);
 
-    const sealer = new SessionSealer(chainStore, writer, threadStore, reader, undefined, summaryStore);
+    const sealer = new SessionSealer(chainStore, writer, threadStore, reader, summaryStore);
 
     const thread = threadStore.create('user1', 'openq-only');
     const session = chainStore.create({
@@ -332,14 +324,7 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
     };
     const writer = createMockTranscriptWriter(brokenReader);
 
-    const sealer = new SessionSealer(
-      chainStore,
-      writer,
-      threadStore,
-      brokenReader,
-      undefined,
-      createMockSummaryStore(),
-    );
+    const sealer = new SessionSealer(chainStore, writer, threadStore, brokenReader, createMockSummaryStore());
 
     const thread = threadStore.create('user1', 'broken-events');
     const session = chainStore.create({

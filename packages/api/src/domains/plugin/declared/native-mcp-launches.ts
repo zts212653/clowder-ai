@@ -106,12 +106,8 @@ export class NativeMcpLaunches {
     const launches = activation.launches.filter((item) => item.contributionId === contributionId);
     const server = launches[0]?.server;
     if (declarations?.length !== 1 || launches.length !== 1 || !server) throw unavailable();
-    const credentialFile = server.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE;
-    if (
-      !credentialFile ||
-      this.actions.environment(pluginInstanceId, contributionId).CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE !==
-        credentialFile
-    )
+    const token = server.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+    if (!token || this.actions.environment(pluginInstanceId, contributionId).CLOWDER_PLUGIN_ACTION_TOKEN !== token)
       throw unavailable();
     return server;
   }

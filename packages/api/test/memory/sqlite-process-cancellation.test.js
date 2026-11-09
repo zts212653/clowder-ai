@@ -94,6 +94,7 @@ test('a canceled message reader retains its own bounded pre-return native witnes
     store.searchMessagePassages(words.join(' '), {
       mode: 'lexical',
       sort: 'relevance',
+      candidateOrder: 'relevance',
       visibleThreadIds: ['fixture'],
       signal: controller.signal,
       // A fail-safe, never the evidence that native SQL has actually begun.

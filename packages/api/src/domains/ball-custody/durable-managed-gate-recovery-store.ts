@@ -22,11 +22,11 @@ export interface DurableGateRecoveryRow {
   updated_at: number;
 }
 
-export function openDurableGateRecoveryStore(job: DurableManagedGateJob): Database.Database {
+export function openDurableGateRecoveryStore(job: DurableManagedGateJob, busyTimeoutMs = 5000): Database.Database {
   mkdirSync(dirname(job.recordPath), { recursive: true });
-  const database = new Database(join(dirname(job.recordPath), 'recovery.sqlite'));
-  database.pragma('busy_timeout = 5000');
-  database.exec(`
+  const database = new Database(join(dirname(job.recordPath), 'recovery.sqlite'), { timeout: busyTimeoutMs });
+  try {
+    database.exec(`
     CREATE TABLE IF NOT EXISTS durable_gate_recovery_jobs (
       job_id TEXT PRIMARY KEY, protocol_version INTEGER NOT NULL, state TEXT NOT NULL,
       pause_epoch INTEGER NOT NULL, owner_pid INTEGER NOT NULL, owner_ppid INTEGER NOT NULL,
@@ -39,19 +39,23 @@ export function openDurableGateRecoveryStore(job: DurableManagedGateJob): Databa
       kind TEXT NOT NULL, observed_at INTEGER NOT NULL, payload_json TEXT
     );
   `);
-  const hasBlockReason = () =>
-    database
-      .prepare('PRAGMA table_info(durable_gate_recovery_jobs)')
-      .all()
-      .some((column) => (column as { name?: string }).name === 'block_reason');
-  if (!hasBlockReason()) {
-    try {
-      database.exec('ALTER TABLE durable_gate_recovery_jobs ADD COLUMN block_reason TEXT');
-    } catch (error) {
-      if (!hasBlockReason()) throw error;
+    const hasBlockReason = () =>
+      database
+        .prepare('PRAGMA table_info(durable_gate_recovery_jobs)')
+        .all()
+        .some((column) => (column as { name?: string }).name === 'block_reason');
+    if (!hasBlockReason()) {
+      try {
+        database.exec('ALTER TABLE durable_gate_recovery_jobs ADD COLUMN block_reason TEXT');
+      } catch (error) {
+        if (!hasBlockReason()) throw error;
+      }
     }
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
   }
-  return database;
 }
 
 export function durableGateRecoveryTransaction<T>(database: Database.Database, action: () => T): T {

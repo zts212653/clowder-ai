@@ -1024,6 +1024,7 @@ export {
   subjectSeenOpportunityV1Schema,
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
+  workPreparationOpportunityV1Schema,
 } from './memory-cue.js';
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
@@ -1095,7 +1096,9 @@ export type {
   TimelineMessageKind,
 } from './message-lifecycle.js';
 export {
+  getLifecycleAppendOutcome,
   hasExactLifecycleProcessingDispatch,
+  isAppendRepeatSource,
   isLifecycleAppendFailure,
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
@@ -1415,7 +1418,6 @@ export {
 } from './profile-update.js';
 export * from './profile-usage.js';
 export type {
-  ActiveParticipantInput,
   AssemblerInput,
   BootcampInput,
   CallableMentionsData,
@@ -1635,7 +1637,7 @@ export type {
   UpdateSliceInput,
 } from './slice.js';
 // Socket.IO room membership convergence contract shared by API and Web.
-export type { RoomJoinAck } from './socket-room.js';
+export type { ResponseStreamReplay, RoomJoinAck } from './socket-room.js';
 // SOP definition generated truth source (#748)
 export {
   DEVELOPMENT_SOP_DEFINITION,
@@ -1691,6 +1693,7 @@ export type {
 } from './study.js';
 // F335 交付二：回话下面那一排（一键提议 + 原地回执）
 export * from './suggestion.js';
+export * from './suggestion-desk.js';
 // Summary types (拍立得照片墙)
 export type {
   CreateSummaryInput,
@@ -1788,6 +1791,7 @@ export type {
   TurnExecutionTerminalStatus,
   TurnOutputFence,
   TurnOutputFenceVerdict,
+  TurnResponseSettlement,
 } from './turn-execution.js';
 export * from './unified-attention.js';
 export * from './unified-attention-decision.js';
@@ -1817,6 +1821,7 @@ export {
   waitTerminationEventSchema,
   waitTerminationReasonSchema,
 } from './wait-termination.js';
+export * from './watcher.js';
 export type {
   CheckStatus,
   ResumeCapsule,

@@ -23,276 +23,138 @@ function makeCoverage(overrides = {}) {
   };
 }
 
-describe('F148 briefing card — navigation-first collapsed view', () => {
-  describe('summary (collapsed title)', () => {
-    it('shows baton + truth source + next step when all available', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        baton: {
-          fromMessageId: 'm1',
-          fromSpeaker: 'user',
-          fromSpeakerDisplay: 'co-creator',
-          timestamp: Date.now(),
-          mentionExcerpt: '帮我看看 F148',
-          staleHoldWarning: false,
+describe('briefing card — actual inputs and optional missing-material reads', () => {
+  it('adds a receiver and display projection while preserving every input, memory and task', () => {
+    const source = {
+      fromMessageId: 'input-one',
+      fromSpeakerDisplay: '砚砚',
+      timestamp: 1000,
+      sourceThreadId: 'original-thread',
+      sourceMessageId: 'original-message',
+    };
+    const options = {
+      receiverCatId: 'kimi',
+      receiverDisplayName: '墨墨',
+      sources: [source],
+      threadMemorySummary: '已提供的线程记忆',
+      anchorSummaries: ['已提供的锚点'],
+      activeTasks: [{ id: 't', title: '保留活跃任务', status: 'doing', ownerCatId: 'codex61-sol' }],
+      rankedSources: [
+        {
+          type: 'feature-doc',
+          label: '菜单说明',
+          ref: 'docs/menu.md',
+          provenance: 'canonical',
+          directiveEligible: true,
         },
-        rankedSources: [
-          {
-            type: 'feature-doc',
-            ref: 'docs/features/F148-*.md',
-            label: 'F148 spec',
-            provenance: 'canonical',
-            directiveEligible: true,
-          },
-        ],
-      });
-      const card = result.extra.rich.blocks[0];
-      // Title should contain navigation info, not coverage counts
-      assert.ok(card.title.includes('co-creator'), `title should mention baton source, got: ${card.title}`);
-      assert.ok(card.title.includes('F148 spec'), `title should mention truth source, got: ${card.title}`);
-    });
-
-    it('shows 未定位 when no ranked sources', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        baton: {
-          fromMessageId: 'm1',
-          fromSpeaker: 'user',
-          fromSpeakerDisplay: 'co-creator',
-          timestamp: Date.now(),
-          mentionExcerpt: '看看这个',
-          staleHoldWarning: false,
+        { type: 'pr', label: '候选不能变依据', ref: '#999', provenance: 'recency' },
+      ],
+    };
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo', options).extra.rich.blocks[0];
+    const display = card.meta.contextDisplay;
+    assert.equal(card.meta.receiverCatId, 'kimi');
+    assert.equal(card.meta.receiverDisplayName, '墨墨');
+    assert.equal(card.meta.coverageSummary, '近期消息 5 条 · 历史略过 42 条');
+    assert.deepEqual(
+      display.inputs.map(({ time, ...input }) => input),
+      [
+        {
+          fromMessageId: source.fromMessageId,
+          from: source.fromSpeakerDisplay,
+          sourceThreadId: source.sourceThreadId,
+          sourceMessageId: source.sourceMessageId,
         },
-        rankedSources: [],
-      });
-      const card = result.extra.rich.blocks[0];
-      assert.ok(card.title.includes('未定位'), `title should say 未定位 when no sources, got: ${card.title}`);
-    });
-
-    it('shows 未定位 when rankedSources is undefined', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {});
-      const card = result.extra.rich.blocks[0];
-      assert.ok(card.title.includes('未定位'), `title should say 未定位, got: ${card.title}`);
-    });
+      ],
+    );
+    assert.ok(display.inputs[0].time);
+    assert.equal(display.handoff, undefined, 'route provenance cannot become a handoff claim');
+    assert.deepEqual(display.sources, [{ type: 'feature-doc', label: '菜单说明', ref: 'docs/menu.md' }]);
+    assert.match(display.coverage, /看到 5 条.*省略 42 条.*记忆 3 sessions/);
+    assert.match(display.detailsMarkdown, /已提供的线程记忆/);
+    assert.match(display.detailsMarkdown, /已提供的锚点/);
+    assert.match(display.detailsMarkdown, /保留活跃任务/);
+    assert.doesNotMatch(display.detailsMarkdown, /input-one|菜单说明|候选不能变依据/);
+    assert.match(card.bodyMarkdown, /input-one/);
+    assert.match(card.bodyMarkdown, /菜单说明/);
   });
 
-  describe('fields (visible in collapsed state)', () => {
-    it('has 3 navigation fields: 传球/真相源/下一步', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        baton: {
-          fromMessageId: 'm1',
-          fromSpeaker: 'user',
-          fromSpeakerDisplay: 'co-creator',
-          timestamp: Date.now(),
-          mentionExcerpt: '看看 F148',
-          staleHoldWarning: false,
-        },
-        rankedSources: [
-          {
-            type: 'feature-doc',
-            ref: 'docs/features/F148-*.md',
-            label: 'F148 spec',
-            provenance: 'canonical',
-            directiveEligible: true,
-          },
-        ],
-      });
-      const card = result.extra.rich.blocks[0];
-      const labels = card.fields.map((f) => f.label);
-      assert.deepEqual(labels, ['传球', '真相源', '下一步']);
-    });
+  it('does not invent sender, receiver or handoff excerpt when route provenance is missing', () => {
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo').extra.rich.blocks[0];
+    assert.equal(card.meta.receiverCatId, undefined);
+    assert.equal(card.meta.receiverDisplayName, undefined);
+    assert.deepEqual(card.meta.contextDisplay.inputs, []);
+    assert.equal(card.meta.contextDisplay.handoff, undefined);
+  });
 
-    it('传球 field shows sender → 你', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        baton: {
-          fromMessageId: 'm1',
-          fromSpeaker: 'user',
+  it('complete context without sources has no invented handoff or next action', () => {
+    const coverage = makeCoverage({
+      omitted: { count: 0, timeRange: { from: 0, to: 0 }, participants: [] },
+      searchSuggestions: [],
+      recallPointer: { candidateCount: 0 },
+    });
+    const result = buildBriefingMessage(coverage, 'thread-1');
+    const card = result.extra.rich.blocks[0];
+    assert.doesNotMatch(
+      JSON.stringify(card),
+      /直接 @|传球|未定位|下一步|cat_cafe_get_thread_context|cat_cafe_search_evidence/,
+    );
+    assert.equal(result.origin, 'briefing');
+    assert.deepEqual(result.from, { kind: 'system', service: 'context-briefing' });
+  });
+
+  it('shows every exact input and its cross-thread coordinates without a handoff claim', () => {
+    const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
+      sources: [
+        { fromMessageId: 'm1', fromSpeakerDisplay: 'co-creator', timestamp: 1000 },
+        {
+          fromMessageId: 'm2',
           fromSpeakerDisplay: '砚砚',
-          timestamp: Date.now(),
-          mentionExcerpt: '',
-          staleHoldWarning: false,
+          timestamp: 2000,
+          sourceThreadId: 'original-thread',
+          sourceMessageId: 'original-message',
         },
-      });
-      const card = result.extra.rich.blocks[0];
-      const batonField = card.fields.find((f) => f.label === '传球');
-      assert.ok(batonField.value.includes('砚砚'), `baton field should include sender name, got: ${batonField.value}`);
-      assert.ok(batonField.value.includes('→'), `baton field should have arrow, got: ${batonField.value}`);
+      ],
+      activeTasks: [{ id: 't1', title: 'Existing work', status: 'doing', ownerCatId: 'opus' }],
     });
-
-    it('传球 field shows 直接 @ when no baton', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {});
-      const card = result.extra.rich.blocks[0];
-      const batonField = card.fields.find((f) => f.label === '传球');
-      assert.equal(batonField.value, '直接 @');
-    });
-
-    it('真相源 field shows top source label', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        rankedSources: [
-          {
-            type: 'feature-doc',
-            ref: 'docs/features/F148-*.md',
-            label: 'F148 spec',
-            provenance: 'canonical',
-            directiveEligible: true,
-          },
-          { type: 'pr', ref: '#1303', label: 'PR #1303', provenance: 'recency' },
-        ],
-      });
-      const card = result.extra.rich.blocks[0];
-      const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, 'F148 spec — docs/features/F148-*.md');
-    });
-
-    it('F296 AC-A3: regex provenance fails closed instead of becoming a truth source', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'regex' },
-        ],
-      });
-      const card = result.extra.rich.blocks[0];
-      const sourceField = card.fields.find((f) => f.label === '真相源');
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(sourceField.value, '未定位（threadId=thread-1）');
-      assert.ok(
-        !nextField.value.includes('F148 spec'),
-        `regex source must not drive next step, got: ${nextField.value}`,
-      );
-    });
-
-    it('真相源 field shows 未定位 when empty', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', { rankedSources: [] });
-      const card = result.extra.rich.blocks[0];
-      const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, '未定位（threadId=thread-1）');
-    });
-
-    it('下一步 field includes both label and ref for actionable pointer', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        rankedSources: [
-          {
-            type: 'feature-doc',
-            ref: 'docs/features/F148-*.md',
-            label: 'F148 spec',
-            provenance: 'canonical',
-            directiveEligible: true,
-          },
-        ],
-      });
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.ok(nextField.value.includes('F148 spec'), `next step should include label, got: ${nextField.value}`);
-      assert.ok(
-        nextField.value.includes('docs/features/F148-*.md'),
-        `next step should include ref for actionable pointer, got: ${nextField.value}`,
-      );
-    });
-
-    it('下一步 field renders a structured semantic search when a real query is available', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        rankedSources: [],
-      });
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(
-        nextField.value,
-        'cat_cafe_search_evidence({ query: "F148", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
-      );
-      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
-    });
-
-    it('下一步 field uses a structured thread lookup when no semantic query is available', () => {
-      const result = buildBriefingMessage(
-        makeCoverage({ searchSuggestions: [], semanticSearchTerms: [] }),
-        'thread-1',
-        { rankedSources: [] },
-      );
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
-      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
-      assert.ok(!nextField.value.includes('cat_cafe_search_evidence'), nextField.value);
-    });
-
-    it('下一步 field never treats the thread identifier as a semantic query', () => {
-      const result = buildBriefingMessage(
-        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['thread-1'] }),
-        'thread-1',
-        { rankedSources: [] },
-      );
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
-      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
-    });
-
-    it('下一步 field escapes semantic queries while retaining the structured thread filter', () => {
-      const result = buildBriefingMessage(
-        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['My "Redis" notes'] }),
-        'thread-1',
-        { rankedSources: [] },
-      );
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(
-        nextField.value,
-        'cat_cafe_search_evidence({ query: "My \\"Redis\\" notes", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
-      );
-    });
-
-    it('下一步 field sanitizes search suggestion (no backticks/newlines)', () => {
-      const dirty = 'search_evidence(`F148`)\nwith newline\\backslash';
-      const result = buildBriefingMessage(
-        makeCoverage({ searchSuggestions: [dirty], semanticSearchTerms: ['F148\nwith newline'] }),
-        'thread-1',
-        { rankedSources: [] },
-      );
-      const card = result.extra.rich.blocks[0];
-      const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
-      assert.ok(!nextField.value.includes('`'), `should not contain backticks, got: ${nextField.value}`);
-      assert.ok(!nextField.value.includes('\n'), `should not contain newlines, got: ${nextField.value}`);
-      assert.ok(!nextField.value.includes('\\'), `should not contain backslashes, got: ${nextField.value}`);
-    });
+    const card = result.extra.rich.blocks[0];
+    const field = card.fields.find((field) => field.label === '本轮输入来源');
+    assert.match(field.value, /messageId=m1/);
+    assert.match(field.value, /messageId=m2/);
+    assert.match(field.value, /original-thread#original-message/);
+    assert.match(card.bodyMarkdown, /Existing work/);
+    assert.doesNotMatch(card.bodyMarkdown, /传球|以传球为准/);
   });
 
-  describe('backward compatibility', () => {
-    it('still produces bodyMarkdown with full details', () => {
+  it('keeps validated work materials while omitting regex guesses', () => {
+    const source = {
+      type: 'feature-doc',
+      ref: 'docs/features/F148.md',
+      label: 'F148 spec',
+      provenance: 'canonical',
+      directiveEligible: true,
+    };
+    for (const provenance of ['canonical', 'regex']) {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
-        baton: {
-          fromMessageId: 'm1',
-          fromSpeaker: 'user',
-          fromSpeakerDisplay: 'co-creator',
-          timestamp: Date.now(),
-          mentionExcerpt: '看看 F148',
-          staleHoldWarning: false,
-        },
-        activeTasks: [{ id: 't1', title: 'Fix bug', status: 'in-progress', ownerCatId: 'opus' }],
-        rankedSources: [
-          {
-            type: 'feature-doc',
-            ref: 'docs/features/F148-*.md',
-            label: 'F148 spec',
-            provenance: 'canonical',
-            directiveEligible: true,
-          },
-        ],
+        rankedSources: [{ ...source, provenance, directiveEligible: provenance === 'canonical' }],
       });
-      const card = result.extra.rich.blocks[0];
-      assert.ok(card.bodyMarkdown, 'should have bodyMarkdown');
-      assert.ok(card.bodyMarkdown.includes('参与者'), 'bodyMarkdown should still include participants');
-      assert.ok(card.bodyMarkdown.includes('传球'), 'bodyMarkdown should include baton');
-      assert.ok(card.bodyMarkdown.includes('活跃任务'), 'bodyMarkdown should include tasks');
-      assert.ok(card.bodyMarkdown.includes('真相源'), 'bodyMarkdown should include ranked sources');
-    });
-
-    it('message envelope structure unchanged', () => {
-      const result = buildBriefingMessage(makeCoverage(), 'thread-1', {});
-      assert.equal(result.origin, 'briefing');
-      assert.equal(result.userId, 'system');
-      assert.deepEqual(result.from, { kind: 'system', service: 'context-briefing' });
-      assert.ok(result.extra.rich.v === 1);
-      assert.ok(Array.isArray(result.extra.rich.blocks));
-    });
+      const material = result.extra.rich.blocks[0].fields.find((field) => field.label === '工作材料');
+      if (provenance === 'canonical') assert.equal(material.value, 'F148 spec — docs/features/F148.md');
+      else assert.equal(material, undefined);
+    }
   });
+
+  for (const [terms, expected] of [
+    [[], 'cat_cafe_get_thread_context({ threadId: "thread-1" })'],
+    [['thread-1'], 'cat_cafe_get_thread_context({ threadId: "thread-1" })'],
+    [['F148'], 'cat_cafe_search_evidence({ query: "F148", threadId: "thread-1", scope: "threads", mode: "hybrid" })'],
+    [['invalid\nquery'], 'cat_cafe_get_thread_context({ threadId: "thread-1" })'],
+  ]) {
+    it(`omitted messages retain a structured optional drill for ${JSON.stringify(terms)}`, () => {
+      const result = buildBriefingMessage(makeCoverage({ semanticSearchTerms: terms }), 'thread-1');
+      const field = result.extra.rich.blocks[0].fields.find((field) => field.label === '省略原文（需要时读取）');
+      assert.equal(field.value, expected);
+    });
+  }
 
   it('renders a drill pointer beside every thread-memory decision, and drops lifecycle-less open questions', () => {
     const coverage = makeCoverage({
@@ -317,13 +179,9 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
     assert.ok(!body.includes('待决问题'), body);
   });
 
-  describe('formatContextBriefing (pure function)', () => {
-    it('summary includes navigation info not just coverage', () => {
-      const { summary } = formatContextBriefing(makeCoverage());
-      // Old format was "看到 X 条 · 省略 Y 条 · ..."
-      // New format should still be usable but can include coverage
-      assert.ok(typeof summary === 'string');
-      assert.ok(summary.length > 0);
-    });
+  it('coverage summary reports actual counts', () => {
+    const { summary } = formatContextBriefing(makeCoverage());
+    assert.match(summary, /看到 5 条/);
+    assert.match(summary, /省略 42 条/);
   });
 });

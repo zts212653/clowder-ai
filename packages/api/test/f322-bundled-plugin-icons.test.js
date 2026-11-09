@@ -48,7 +48,7 @@ for (const pluginId of ['official.chatgpt-dot']) {
     assert.ok(manifest);
     assert.ok(entry);
     assert.equal(typeof manifest.icon, 'object', 'the canonical bundled manifest must declare its packaged icon');
-    assert.equal(manifest.version, '0.2.0-alpha.19', 'the catalog selects the frozen Dot owner-journey release');
+    assert.equal(manifest.version, entry.version, 'the catalog and manifest select the same frozen release');
     const root = await mkdtemp(join(tmpdir(), 'f322-bundled-icons-'));
     roots.push(root);
     const store = new MemoryPluginInventoryStore();

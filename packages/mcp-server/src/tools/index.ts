@@ -227,6 +227,7 @@ export {
 export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
+  prepareMemoryContextInputSchema,
   recordMemoryCueOutcomeInputSchema,
 } from './memory-cue-tools.js';
 export {
@@ -366,6 +367,8 @@ export {
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
 export {
+  bringToDeskInputShape,
+  handleBringToDesk,
   handleOfferSuggestion,
   handlePostActionReceipt,
   handleSuggestionFacts,

@@ -42,23 +42,25 @@ for (const operation of ['withdraw', 'clear', 'message-withdraw']) {
     if (operation === 'message-withdraw') {
       assert.equal(
         (await f.queue.claimMessageEntriesForWithdrawal('thread', 'owner', f.admission.message.id)).outcome,
-        'processing',
+        'not_found',
       );
     } else if (operation === 'withdraw') {
       const response = await request('DELETE', `queue/${f.admission.entry.id}`);
-      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.statusCode, operation === 'withdraw' ? 404 : 200, response.body);
     } else {
       const response = await request('DELETE', 'queue');
-      assert.equal(response.statusCode, 409, response.body);
-      assert.equal(response.json().code, 'QUEUE_WITHDRAWAL_FAILED');
+      assert.equal(response.statusCode, operation === 'withdraw' ? 404 : 200, response.body);
       assert.equal(response.json().cleared.length, 0);
-      assert.equal(response.json().queue[0].id, f.admission.entry.id);
+      assert.deepEqual(response.json().queue, []);
     }
-    assert.ok(await f.queue.getDurableEntry('thread', f.admission.entry.id));
+    assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null);
     await f.input().onInputCompleted(false);
-    assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 0);
-    assert.equal((await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs.length, 0);
-    assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
+    assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 1);
+    assert.equal((await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs.length, 1);
+    assert.equal(
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
+    );
   });
 }
 
@@ -68,7 +70,7 @@ test('GET Queue hides Append once its original input is already in flight', asyn
   const request = await http(t, f);
   const response = await request('GET', 'queue');
   assert.equal(response.statusCode, 200, response.body);
-  assert.equal(response.json().queue[0].lifecycleActions?.append, undefined);
+  assert.deepEqual(response.json().queue, []);
 });
 
 for (const operation of ['entry', 'message']) {
@@ -82,11 +84,14 @@ for (const operation of ['entry', 'message']) {
     else
       assert.equal(
         (await stale.claimMessageEntriesForWithdrawal('thread', 'owner', f.admission.message.id)).outcome,
-        'processing',
+        'not_found',
       );
-    assert.equal((await f.ledger.get('thread', f.admission.entry.id)).status, 'queued');
+    assert.equal(await f.ledger.get('thread', f.admission.entry.id), null);
     await f.input().onInputCompleted(false);
-    assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
+    assert.equal(
+      (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+      'incomplete',
+    );
   });
 }
 
@@ -103,8 +108,10 @@ for (const operation of ['hydrate', 'reconcile']) {
     if (operation === 'hydrate') await new InvocationQueue(f.ledger).hydrateFromLedger(f.messageStore);
     else await f.queue.reconcileClaimedLifecycleTargets('thread', [f.admission.entry.id], f.messageStore);
     const row = await f.ledger.get('thread', f.admission.entry.id);
-    assert.ok(row.targets.includes('opus'), 'reading must not retire an unfinished internal turn');
-    assert.equal(row.delivery.appendPendingByTarget.opus.requiresCompletion, true);
+    assert.deepEqual(row.targets, ['codex']);
+    const source = await f.messageStore.getById(f.admission.message.id);
+    assert.equal(source.lifecycle.dispatchRefs[0].appendDelivery.requiresCompletion, true);
+    assert.equal(source.lifecycle.dispatchRefs[0].inputRead.status, 'read');
   });
 }
 
@@ -117,21 +124,28 @@ for (const completed of [true, false]) {
     await f.input().onInputCompleted(completed);
     const events = socket.emitToUser.mock.calls.filter((call) => call.arguments[1] === 'queue_updated');
     assert.ok(events.length > 0, 'completion must refresh the visible Queue without another user action');
-    assert.equal(events.at(-1).arguments[2].queue.length, completed ? 0 : 1);
+    assert.equal(events.at(-1).arguments[2].queue.length, 0);
   });
 }
 
-test('restart recovery broadcasts the original read input as uncertain', async () => {
+test('restart recovery publishes the exact incomplete input through its History update', async () => {
   const f = await fixture();
   await f.append();
   await f.input().onInputRead();
   const restarted = recoveryProcessor({ queue: f.queue, messageStore: f.messageStore });
   await restarted.reconcileAppendDeliveries('thread');
-  const events = restarted.deps.socketManager.emitToUser.mock.calls.filter(
-    (call) => call.arguments[1] === 'queue_updated',
-  );
+  const socket = restarted.deps.socketManager;
+  const events = [...socket.emitToUser.mock.calls, ...socket.broadcastToRoom.mock.calls];
   assert.ok(
-    events.some((call) => call.arguments[2].queue[0]?.appendFailures?.length || call.arguments[2].queue.length === 1),
+    events.some(
+      (call) =>
+        JSON.stringify(call.arguments).includes(f.admission.message.id) &&
+        JSON.stringify(call.arguments).includes('incomplete'),
+    ),
   );
-  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+  assert.equal(
+    (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+    'incomplete',
+  );
+  assert.deepEqual(f.queue.list('thread', 'owner'), []);
 });

@@ -55,7 +55,7 @@ export function NativeFailureDiagnostics({ message }: { message: ChatMessage }) 
   if (
     message.isStreaming ||
     !failed ||
-    !['google', 'openai'].includes(message.metadata?.provider ?? '') ||
+    !['google', 'openai', 'pi'].includes((message.metadata?.provider ?? '').toLowerCase()) ||
     !diagnostics
   )
     return null;

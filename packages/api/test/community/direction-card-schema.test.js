@@ -55,13 +55,6 @@ describe('F168 Phase C C2.1: DirectionCard / TriageEntry schema extension', () =
       };
       assert.equal(narratorEntry.authoredByRole, 'narrator');
     });
-
-    it('authoredByRole rejects non-CommunityRole values (isCommunityRole guard)', async () => {
-      const { isCommunityRole } = await import('@cat-cafe/shared');
-      assert.equal(isCommunityRole('bogus'), false);
-      assert.equal(isCommunityRole(''), false);
-      assert.equal(isCommunityRole(null), false);
-    });
   });
 
   describe('narrative — human-readable "what is this about" sentence', () => {

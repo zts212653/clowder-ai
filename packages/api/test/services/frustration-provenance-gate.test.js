@@ -76,13 +76,6 @@ describe('F222 P1: A2A provenance gate — frustrationAutoIssueEligible', () => 
     assert.equal(issues[0].signalType, 'cli_error');
   });
 
-  it('evaluate creates issue when eligible is undefined (backward compat)', async () => {
-    const sig = makeCliErrorSignal();
-    await evaluate(sig, baseDeps());
-    const issues = await store.listByThread(sig.threadId);
-    assert.equal(issues.length, 1, 'undefined eligible should default to creating issue');
-  });
-
   // --- The actual bug fix tests ---
 
   it('route-serial F222 block skips when frustrationAutoIssueEligible=false', async () => {

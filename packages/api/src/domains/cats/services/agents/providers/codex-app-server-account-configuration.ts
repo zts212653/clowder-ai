@@ -5,12 +5,32 @@ type Request = (method: string, params: Record<string, unknown>) => Promise<unkn
 type Expected = Parameters<typeof validateCodexNativeAccount>[1];
 // A protocol observation input, not a resource/admission owner. The connection retains its launch snapshot.
 const expectedByWire = new WeakMap<AgentCarrierSession, Expected>();
+const transportByWire = new WeakMap<AgentCarrierSession, Readonly<Record<string, string>>>();
+const PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'NO_PROXY',
+  'no_proxy',
+];
+export function codexTransportEnvironment(wire: AgentCarrierSession): Readonly<Record<string, string>> {
+  return transportByWire.get(wire) ?? {};
+}
 
 export function bindCodexAccountConfiguration(
   wire: AgentCarrierSession,
   options: AgentCarrierSessionOptions,
 ): AgentCarrierSession {
   const env = options.env;
+  transportByWire.set(
+    wire,
+    Object.freeze(
+      Object.fromEntries(PROXY_ENV_KEYS.flatMap((key) => (typeof env?.[key] === 'string' ? [[key, env[key]!]] : []))),
+    ),
+  );
   if (env?.CODEX_AUTH_MODE) {
     expectedByWire.set(
       wire,

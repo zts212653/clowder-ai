@@ -12,6 +12,7 @@ import type Database from 'better-sqlite3';
 import type { ApprovalPublicationStore } from '../../domains/approval-hub/ports/ApprovalPublicationStore.js';
 import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../utils/settled-history-page.js';
 import { assertSettledHistoryPageOptions } from '../../utils/settled-history-page.js';
+import { ScheduleMutationProposalStoreError } from './mutations/schedule-mutation-errors.js';
 import {
   type AuditRow,
   deleteDynamicTaskWithAudit,
@@ -21,30 +22,22 @@ import {
   insertDynamicTaskWithAudit,
   insertScheduleMutationAudit,
   type ProposalRow,
+  type ScheduleMutationEffectResult,
   setDynamicTaskEnabledWithAudit,
   toAudit,
   toProposal,
   updateDynamicTaskParamsAndEnabledWithAudit,
-} from './schedule-mutation-storage.js';
+} from './mutations/schedule-mutation-storage.js';
+import {
+  applyScheduleParameterUpdate,
+  updateScheduleParametersWithAudit,
+} from './mutations/schedule-parameter-update-effects.js';
 
-export { fingerprintDynamicTaskDef } from './schedule-mutation-storage.js';
-
-export type ScheduleMutationProposalStoreErrorCode =
-  | 'SCHEDULE_PROPOSAL_NOT_FOUND'
-  | 'SCHEDULE_PROPOSAL_STATE'
-  | 'SCHEDULE_TASK_CONFLICT'
-  | 'SCHEDULE_TASK_DRIFT';
-
-export class ScheduleMutationProposalStoreError extends Error {
-  constructor(
-    readonly code: ScheduleMutationProposalStoreErrorCode,
-    readonly statusCode: 404 | 409,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ScheduleMutationProposalStoreError';
-  }
-}
+export {
+  ScheduleMutationProposalStoreError,
+  type ScheduleMutationProposalStoreErrorCode,
+} from './mutations/schedule-mutation-errors.js';
+export { fingerprintDynamicTaskDef } from './mutations/schedule-mutation-storage.js';
 
 type CreateScheduleMutation = Extract<ScheduleMutationProposal['mutation'], { kind: 'create' }>;
 
@@ -246,18 +239,23 @@ export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
     return result.changes === 1 ? this.getById(proposalId) : null;
   }
 
-  applyCreateEffect(proposalId: string, appliedAt: number): { applied: boolean; task: ScheduleMutationTaskDefinition } {
+  applyCreateEffect(proposalId: string, appliedAt: number): ScheduleMutationEffectResult {
     const result = this.db.transaction(() => {
       const proposal = this.requireApplying(proposalId, 'create');
       const mutation = proposal.mutation.kind === 'create' ? proposal.mutation : unreachableMutation();
-      if (proposal.effectCheckpoint) {
-        const persistedTask = getDynamicTask(this.db, mutation.task.id);
-        if (!persistedTask) {
+      const checkpoint = proposal.effectCheckpoint;
+      if (checkpoint) {
+        if (checkpoint.kind !== 'create') {
           throw new ScheduleMutationProposalStoreError(
             'SCHEDULE_PROPOSAL_STATE',
             409,
-            `Dynamic task ${mutation.task.id} is missing after its create checkpoint`,
+            'Create checkpoint kind mismatch',
           );
+        }
+        const persistedTask = getDynamicTask(this.db, mutation.task.id);
+        const createdTask = materializeCreateTask(mutation, checkpoint.appliedAt);
+        if (!persistedTask || fingerprintDynamicTaskDef(persistedTask) !== fingerprintDynamicTaskDef(createdTask)) {
+          return { outcome: 'superseded' as const };
         }
         return { outcome: 'ok' as const, applied: false, task: persistedTask };
       }
@@ -279,14 +277,23 @@ export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
         `Dynamic task ${result.taskId} conflicts with the approved create payload`,
       );
     }
+    if (result.outcome === 'superseded') return { applied: false, superseded: true };
     return { applied: result.applied, task: result.task };
   }
 
-  applyDeleteEffect(proposalId: string, deletedAt: number): { applied: boolean; task: ScheduleMutationTaskDefinition } {
+  applyDeleteEffect(proposalId: string, deletedAt: number): ScheduleMutationEffectResult {
     const result = this.db.transaction(() => {
       const proposal = this.requireApplying(proposalId, 'delete');
       const mutation = proposal.mutation.kind === 'delete' ? proposal.mutation : unreachableMutation();
       if (proposal.effectCheckpoint) {
+        if (proposal.effectCheckpoint.kind !== 'delete') {
+          throw new ScheduleMutationProposalStoreError(
+            'SCHEDULE_PROPOSAL_STATE',
+            409,
+            'Delete checkpoint kind mismatch',
+          );
+        }
+        if (getDynamicTask(this.db, mutation.taskId)) return { outcome: 'superseded' as const };
         return { outcome: 'ok' as const, applied: false, task: mutation.taskSnapshot };
       }
       const current = getDynamicTask(this.db, mutation.taskId);
@@ -310,11 +317,25 @@ export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
         `Dynamic task ${result.taskId} no longer matches the delete proposal`,
       );
     }
+    if (result.outcome === 'superseded') return { applied: false, superseded: true };
     return { applied: result.applied, task: result.task };
   }
 
   insertTaskWithAudit(task: ScheduleMutationTaskDefinition, audit: ScheduleMutationAuditEntry): void {
     insertDynamicTaskWithAudit(this.db, task, audit);
+  }
+
+  applyUpdateEffect(proposalId: string, appliedAt: number): ScheduleMutationEffectResult {
+    return applyScheduleParameterUpdate(this.db, proposalId, appliedAt);
+  }
+
+  updateTaskParamsWithAudit(
+    taskId: string,
+    expectedFingerprint: string,
+    params: Record<string, unknown>,
+    audit: ScheduleMutationAuditEntry,
+  ): ScheduleMutationTaskDefinition {
+    return updateScheduleParametersWithAudit(this.db, taskId, expectedFingerprint, params, audit);
   }
 
   deleteTaskWithAudit(taskId: string, audit: ScheduleMutationAuditEntry): boolean {

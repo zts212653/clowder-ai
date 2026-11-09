@@ -240,6 +240,7 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
           }),
         ...(run.bridge ? { request: (input: unknown) => run.bridge!.request(input) } : {}),
         ...(run.bridge?.appAssist ? { appAssist: run.bridge.appAssist } : {}),
+        ...(run.bridge?.desk ? { desk: run.bridge.desk } : {}),
         ...(run.bridge?.observeVoice
           ? {
               onVoiceObservation: async (observation) => {

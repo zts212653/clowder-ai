@@ -13,6 +13,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { createModuleActionClient } from '@clowder-ai/plugin-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -34,7 +35,6 @@ import {
 } from '../dist/domains/plugin/index.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
-import { readPluginNativeToken } from './helpers/plugin-native-credential.js';
 
 const roots = [];
 const runtimes = new Set();
@@ -57,17 +57,6 @@ function fakeTaskRunner() {
       return true;
     },
   };
-}
-
-async function withConfigRoot(root, operation) {
-  const previous = process.env.CAT_CAFE_CONFIG_ROOT;
-  process.env.CAT_CAFE_CONFIG_ROOT = root;
-  try {
-    return await operation();
-  } finally {
-    if (previous === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
-    else process.env.CAT_CAFE_CONFIG_ROOT = previous;
-  }
 }
 
 function createRuntime(projectRoot, mcpConfigIO, binaryProjectRoot = projectRoot) {
@@ -181,7 +170,7 @@ async function writeFixturePackage(nativeAction = false, mcpTools = false) {
     mcpTools
       ? `import { createInterface } from 'node:readline';
 import { createModuleActionClient } from ${JSON.stringify(import.meta.resolve('@clowder-ai/plugin-sdk'))};
-if (!process.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE) process.exit(2);
+if (!process.env.CLOWDER_PLUGIN_ACTION_TOKEN) process.exit(2);
 const actions = createModuleActionClient();
 createInterface({ input: process.stdin }).on('line', async line => {
   const request = JSON.parse(line);
@@ -318,37 +307,36 @@ test('variant changes refresh existing project MCP providers while preserving me
   assert.ok(initial?.mcpServer, 'activation must reach an existing project automatically');
   assert.equal(Object.hasOwn(initial.mcpServer.env ?? {}, 'FEISHU_TOKEN'), false);
   assert.equal(
-    initial.mcpServer.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
+    initial.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN,
     runtime.supervisor.nativeActions.environmentReferences(installed.pluginInstanceId, 'feishu-mcp')
-      .CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
+      .CLOWDER_PLUGIN_ACTION_TOKEN,
     'registration must persist only an environment reference',
   );
-  let previousActionToken = await readPluginNativeToken(
-    runtime.supervisor.nativeActions.environment(installed.pluginInstanceId, 'feishu-mcp'),
-  );
-  const allowedCat = 'codex';
-  const blockedCat = 'claude';
+  const initialActionToken = runtime.supervisor.nativeActions.environment(
+    installed.pluginInstanceId,
+    'feishu-mcp',
+  ).CLOWDER_PLUGIN_ACTION_TOKEN;
+  assert.ok(initialActionToken);
+  const allCats = [...catRegistry.getAllIds()];
+  const allowedCat = allCats.find((catId) => catId !== 'codex');
+  assert.ok(allowedCat);
   await writeCapabilitiesConfig(consumer, {
     version: 2,
-    capabilities: [{ ...initial, blockedCats: [blockedCat] }],
+    capabilities: [{ ...initial, blockedCats: ['codex'] }],
   });
   await writeCapabilitiesConfig(blockedProject, {
     version: 2,
-    capabilities: [{ ...initial, blockedCats: [allowedCat] }],
+    capabilities: [{ ...initial, blockedCats: allCats }],
   });
   const inject = async (workingDirectory, catId) =>
-    withConfigRoot(
-      projectRoot,
-      async () =>
-        (
-          await resolveProviderMcpConfig({
-            callbackEnv: { CAT_CAFE_CAT_ID: catId },
-            workingDirectory,
-            mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
-            provider: 'codex',
-          })
-        )[name],
-    );
+    (
+      await resolveProviderMcpConfig({
+        callbackEnv: { CAT_CAFE_CAT_ID: catId },
+        workingDirectory,
+        mcpServerPath: join(projectRoot, 'packages/mcp-server/dist/index.js'),
+        provider: 'codex',
+      })
+    )[name];
   try {
     // Configuring an enabled plugin refreshes its runtime in place.
     // Both branch transitions must update the existing project descriptor.
@@ -369,7 +357,7 @@ test('variant changes refresh existing project MCP providers while preserving me
       assert.equal(Object.hasOwn(upstream.env, 'FEISHU_TOKEN'), mode === 'webhook');
       if (mode === 'webhook') assert.equal(upstream.env.FEISHU_TOKEN, 'fixture-variant-secret');
       assert.equal(launchEnv.FEISHU_TOKEN, upstream.env.FEISHU_TOKEN);
-      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE);
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       const native = await runtime.supervisor.resolveNativeMcpLaunch({
         mode: 'plugin_native',
         pluginInstanceId: installed.pluginInstanceId,
@@ -378,16 +366,12 @@ test('variant changes refresh existing project MCP providers while preserving me
       assert.equal(Object.hasOwn(native.env, 'FEISHU_TOKEN'), mode === 'webhook');
       assert.equal(upstream.command, native.command);
       assert.deepEqual(upstream.args, [...native.args]);
-      assert.equal(
-        upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
-        native.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE,
-      );
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, native.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, native.env.CLOWDER_PLUGIN_ACTION_PATH);
-      const currentActionToken = await readPluginNativeToken(native.env);
-      assert.equal(currentActionToken, previousActionToken, 'an in-place config refresh must retain its activation');
+      assert.ok(native.env.CLOWDER_PLUGIN_ACTION_TOKEN === initialActionToken, 'live refresh must not rotate tokens');
       assert.deepEqual(
         await runtime.supervisor.nativeActions.call(
-          currentActionToken,
+          initialActionToken,
           'native.run',
           { mode },
           {
@@ -400,10 +384,9 @@ test('variant changes refresh existing project MCP providers while preserving me
         ),
         { mode },
       );
-      previousActionToken = currentActionToken;
-      assert.deepEqual((await entryAt(consumer)).blockedCats, [blockedCat]);
-      assert.deepEqual((await entryAt(blockedProject)).blockedCats, [allowedCat]);
-      assert.equal(await inject(consumer, blockedCat), undefined);
+      assert.deepEqual((await entryAt(consumer)).blockedCats, ['codex']);
+      assert.deepEqual((await entryAt(blockedProject)).blockedCats, allCats);
+      assert.equal(await inject(consumer, 'codex'), undefined);
       assert.equal(await inject(blockedProject, allowedCat), undefined);
     }
     const fields = (await composition.manager.get(installed.pluginId)).plugin.configFields;
@@ -447,22 +430,19 @@ for (const configOnWorkspace of [false, true])
         pluginInstanceId: f.installed.pluginInstanceId,
         contributionId: 'feishu-mcp',
       });
-      assert.ok(live?.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE);
-      assert.match(f.capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, /^\$\{[A-Z0-9_]+\}$/);
-      const servers = await withConfigRoot(workspaceRoot, () =>
-        resolveProviderMcpConfig({
-          workingDirectory: consumer,
-          mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
-          callbackEnv: { CAT_CAFE_CAT_ID: 'codex' },
-        }),
-      );
+      assert.ok(live?.env.CLOWDER_PLUGIN_ACTION_TOKEN);
+      assert.match(f.capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN, /^\$\{[A-Z0-9_]+\}$/);
+      const servers = await resolveProviderMcpConfig({
+        workingDirectory: consumer,
+        mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
+        callbackEnv: { CAT_CAFE_CAT_ID: catRegistry.getAllIds()[0] },
+      });
       const server = servers[id.replaceAll(':', '__')];
       assert.ok(server, 'real composition must provide the live plugin despite distinct runtime/workspace roots');
       const { upstream, launchEnv } = directMcpContract(server);
-      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, live.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, live.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, live.env.CLOWDER_PLUGIN_ACTION_PATH);
-      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE);
-      assert.ok(await readPluginNativeToken(live.env));
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(upstream.command, live.command);
       assert.deepEqual(upstream.args, [...live.args]);
       assert.deepEqual(server.args, [...live.args]);
@@ -504,13 +484,11 @@ test('package API cwd without runtime override reaches MCP tools/list through pr
     );
     ownedRuntime = f.runtime;
     await writeCapabilitiesConfig(consumer, { version: 2, capabilities: [f.capability] });
-    const servers = await withConfigRoot(workspaceRoot, () =>
-      resolveProviderMcpConfig({
-        workingDirectory: consumer,
-        mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
-        callbackEnv: { CAT_CAFE_CAT_ID: 'codex' },
-      }),
-    );
+    const servers = await resolveProviderMcpConfig({
+      workingDirectory: consumer,
+      mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
+      callbackEnv: { CAT_CAFE_CAT_ID: catRegistry.getAllIds()[0] },
+    });
     const server = servers[f.capability.id.replaceAll(':', '__')];
     assert.ok(server, 'an enabled plugin must remain discoverable from the normal packages/api startup cwd');
     client = new Client({ name: 'api-cwd-acceptance', version: '1' });
@@ -545,13 +523,11 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       { runtime: host, workspace: host, mcpTools: true },
     );
     const before = await f.runtime.inventoryStore.snapshot();
-    const originalReference = f.capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE;
-    const previousFile = process.env[originalReference.slice(2, -1)];
-    const previousToken = await readPluginNativeToken({ CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE: previousFile });
+    const originalReference = f.capability.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
+    const previousToken = process.env[originalReference.slice(2, -1)];
     await f.runtime.shutdown();
     delete process.env[originalReference.slice(2, -1)];
     const existing = structuredClone(f.capability);
-    delete existing.mcpServer.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE;
     delete existing.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN;
     delete existing.mcpServer.env.CLOWDER_PLUGIN_ACTION_PATH;
     if (legacy === 'persisted-old-token') {
@@ -570,12 +546,9 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       await restarted.lifecycle.drainRestartRecovery();
       assert.equal(recovery.resumeRequested, 1);
       const registered = (await readCapabilitiesConfig(host)).capabilities.find((e) => e.id === existing.id);
-      assert.equal(registered.mcpServer.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, originalReference);
-      assert.equal(registered.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN, undefined);
-      const credentialFile = process.env[originalReference.slice(2, -1)];
-      assert.ok(credentialFile);
-      assert.notEqual(credentialFile, previousFile);
-      const token = await readPluginNativeToken({ CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE: credentialFile });
+      assert.equal(registered.mcpServer.env.CLOWDER_PLUGIN_ACTION_TOKEN, originalReference);
+      const token = process.env[originalReference.slice(2, -1)];
+      assert.ok(token);
       assert.notEqual(token, previousToken);
       const after = await restarted.inventoryStore.snapshot();
       assert.equal(after.instances[0].pluginInstanceId, before.instances[0].pluginInstanceId);
@@ -583,7 +556,7 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
       assert.equal(after.instances[0].activationState, 'enabled');
       const invocation = {
         userId: 'owner',
-        catId: 'codex',
+        catId: catRegistry.getAllIds()[0],
         threadId: 'fixture-thread',
         invocationId: 'fixture-invocation',
         callbackToken: 'fixture-callback',
@@ -601,27 +574,25 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
         },
       });
       const apiUrl = await app.listen({ host: '127.0.0.1', port: 0 });
-      const servers = await withConfigRoot(host, () =>
-        resolveProviderMcpConfig({
-          workingDirectory: consumer,
-          mcpServerPath: join(host, 'packages/mcp-server/dist/index.js'),
-          callbackEnv: {
-            CAT_CAFE_API_URL: apiUrl,
-            CAT_CAFE_CAT_ID: invocation.catId,
-            CAT_CAFE_INVOCATION_ID: invocation.invocationId,
-            CAT_CAFE_CALLBACK_TOKEN: invocation.callbackToken,
-          },
-        }),
-      );
+      const servers = await resolveProviderMcpConfig({
+        workingDirectory: consumer,
+        mcpServerPath: join(host, 'packages/mcp-server/dist/index.js'),
+        callbackEnv: {
+          CAT_CAFE_API_URL: apiUrl,
+          CAT_CAFE_CAT_ID: invocation.catId,
+          CAT_CAFE_INVOCATION_ID: invocation.invocationId,
+          CAT_CAFE_CALLBACK_TOKEN: invocation.callbackToken,
+        },
+      });
       const server = servers[existing.id.replaceAll(':', '__')];
       assert.ok(server);
       const { upstream, launchEnv } = directMcpContract(server);
-      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, credentialFile);
+      assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
       assert.equal(upstream.env.CLOWDER_PLUGIN_ACTION_PATH, '/api/plugin-runtime/action');
       assert.equal(upstream.env.FEISHU_TOKEN, ' preserved legacy secret ');
       assert.equal(upstream.command, existing.mcpServer.command);
       assert.deepEqual(upstream.args, existing.mcpServer.args);
-      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE, upstream.env.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE);
+      assert.equal(launchEnv.CLOWDER_PLUGIN_ACTION_TOKEN, upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN);
       assert.equal(launchEnv.FEISHU_TOKEN, upstream.env.FEISHU_TOKEN);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, 'unregistered legacy project needs no rewrite');
       client = new Client({ name: 'existing-install-upgrade', version: '1' });
@@ -637,11 +608,7 @@ for (const legacy of ['missing-env-mapping', 'persisted-old-token']) {
         { value: 'recovered' },
       );
       const staleClient = createModuleActionClient({
-        env: {
-          ...upstream.env,
-          CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE: undefined,
-          CLOWDER_PLUGIN_ACTION_TOKEN: previousToken,
-        },
+        env: { ...upstream.env, CLOWDER_PLUGIN_ACTION_TOKEN: previousToken },
       });
       await assert.rejects(staleClient.invoke('native.run', {}), /HTTP 401/);
       assert.equal(await readFile(projectFile, 'utf8'), projectBytes, 'SDK action must not rewrite the project');

@@ -23,10 +23,7 @@ import { assertExecutablePackage } from '../host-inventory/stored-manifest.js';
 import type { ExecutablePluginPackageRecord, PluginInstanceRecord } from '../host-inventory/types.js';
 import type { PersonalChromeSetup } from '../manager/chrome-setup/personal-chrome-setup.js';
 import { isChromeSetupRequest } from '../manager/chrome-setup/personal-chrome-setup-policy.js';
-import {
-  PluginSharedExtensionError,
-  type PluginSharedExtensionService,
-} from '../shared-extension/plugin-shared-extension.js';
+import { PluginSharedExtensionError } from '../shared-extension/plugin-shared-extension.js';
 import { type OperationState, transitionOperationState } from './operation-state-machine.js';
 import { expiredOperation, type PluginOperationCommitFence } from './plugin-operation-fence.js';
 
@@ -62,7 +59,6 @@ export interface InstalledPluginOperationsOptions {
   readonly personalChromeSetup?: PersonalChromeSetup;
   readonly timeoutMs?: number;
   readonly now?: () => number;
-  readonly sharedExtension?: PluginSharedExtensionService;
 }
 
 export interface InstalledPluginOperationResult {
@@ -384,20 +380,6 @@ export class InstalledPluginOperations {
     await assertCurrent();
     const result = rowsChecked(declaredOperation, operationResult(rawResult));
     if (!result) return response(502, { error: 'Plugin operation returned an invalid response' });
-
-    if (request && this.options.sharedExtension) {
-      try {
-        await this.options.sharedExtension.validatePresentation({
-          instanceId: active.instance.pluginInstanceId,
-          owner: request,
-          result,
-        });
-      } catch (error) {
-        if (error instanceof PluginSharedExtensionError) return response(error.statusCode, { error: error.code });
-        throw error;
-      }
-      await assertCurrent();
-    }
 
     await assertCurrent();
     const transition = transitionOperationState({

@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-const api = resolve(import.meta.dirname, '../..');
+const api = process.env.CAT_CAFE_TEST_API_BUILD_ROOT ?? resolve(import.meta.dirname, '../..');
 
 export async function copyBundledBuildDependencies(root, fromSource = false) {
   const mode = fromSource ? 'src' : 'dist';
@@ -85,13 +85,31 @@ export async function bundledBuildFixture(t, description, fromSource = false, { 
   } else {
     // Exercise the generic source builder without repacking or changing the frozen
     // production archive. Only this temporary copy disables the prebuilt definition.
-    const scriptPath = join(root, 'scripts/copy-bundled-plugin-packages.mjs');
+    const scriptPath = join(
+      root,
+      fromSource ? 'src' : 'dist',
+      'domains/plugin',
+      `bundled-plugin-definitions.${fromSource ? 'ts' : 'js'}`,
+    );
     const script = await readFile(scriptPath, 'utf8');
-    const prebuiltDefinition = /^ {4}prebuilt: \{ sha256: '[a-f0-9]{64}' \},\n/gm;
+    const prebuiltDefinition = /\s*prebuilt: \{ sha256: '[a-f0-9]{64}' \},\n/gm;
     assert.equal([...script.matchAll(prebuiltDefinition)].length, 1);
-    await writeFile(scriptPath, script.replace(prebuiltDefinition, ''));
+    await writeFile(
+      scriptPath,
+      script.replace(
+        prebuiltDefinition,
+        `
+    files: ${JSON.stringify(['assets/chatgpt-cloud.svg', manifest.runtime.entrypoint])},
+`,
+      ),
+    );
     await mkdir(assets);
     await writeFile(join(assets, 'chatgpt-cloud.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
+    if (manifest.runtime?.entrypoint) {
+      const entrypoint = join(sourcePackage, manifest.runtime.entrypoint);
+      await mkdir(dirname(entrypoint), { recursive: true });
+      await writeFile(entrypoint, 'export const fixture = true;\n');
+    }
   }
   return {
     root,
@@ -104,7 +122,12 @@ export async function bundledBuildFixture(t, description, fromSource = false, { 
     replacePrebuiltArchive: async (bytes) => {
       assert.equal(prebuilt, true, 'only a prebuilt fixture has a frozen archive');
       await writeFile(join(sourcePackage, 'package.tgz'), bytes);
-      const scriptPath = join(root, 'scripts/copy-bundled-plugin-packages.mjs');
+      const scriptPath = join(
+        root,
+        fromSource ? 'src' : 'dist',
+        'domains/plugin',
+        `bundled-plugin-definitions.${fromSource ? 'ts' : 'js'}`,
+      );
       const script = await readFile(scriptPath, 'utf8');
       const expectedSha = /prebuilt: \{ sha256: '[a-f0-9]{64}' \}/g;
       assert.equal([...script.matchAll(expectedSha)].length, 1);

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F294 regression: cold history hydration must preserve a durable Message
  * Bundle carrier so ChatMessage can render MessageBundleCard after reload.

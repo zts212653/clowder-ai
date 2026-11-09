@@ -10,7 +10,6 @@ import {
 import { NativePluginActions } from '../dist/domains/plugin/declared/native-plugin-actions.js';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { pluginNativeActionRoutes } from '../dist/routes/plugin-native-action-routes.js';
-import { readPluginNativeToken } from './helpers/plugin-native-credential.js';
 
 const policy = () => ({
   mode: 'plugin_native',
@@ -66,7 +65,7 @@ async function fixture(t, options = {}) {
     return admission(id);
   });
   for (const id of ['instance', 'foreign']) {
-    await actions.activate(admission(id), 0, async () => {
+    actions.activate(admission(id), 0, async () => {
       entered++;
       await options.inHandler?.(record);
       return 'private result';
@@ -85,14 +84,14 @@ async function fixture(t, options = {}) {
     expire: () => {
       current = false;
     },
-    request: async (instanceId = 'instance', contributionId = 'native', method = 'native.read', input = {}) =>
+    request: (instanceId = 'instance', contributionId = 'native', method = 'native.read', input = {}) =>
       app.inject({
         method: 'POST',
         url: '/api/plugin-runtime/action',
         headers: {
           'x-invocation-id': 'inv',
           'x-callback-token': 'secret',
-          'x-clowder-plugin-action-token': await readPluginNativeToken(actions.environment(instanceId, contributionId)),
+          'x-clowder-plugin-action-token': actions.environment(instanceId, contributionId).CLOWDER_PLUGIN_ACTION_TOKEN,
         },
         payload: { method, input },
       }),
@@ -206,10 +205,10 @@ test('an invocation expiring during native admission cannot enter the package ha
     current = false;
     return admission();
   });
-  await actions.activate(admission(), 0, async () => {
+  actions.activate(admission(), 0, async () => {
     entered++;
   });
-  const token = await readPluginNativeToken(actions.environment('instance', 'native'));
+  const token = actions.environment('instance', 'native').CLOWDER_PLUGIN_ACTION_TOKEN;
   await assert.rejects(
     actions.call(
       token,

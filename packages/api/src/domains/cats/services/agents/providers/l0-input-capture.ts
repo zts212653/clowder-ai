@@ -28,7 +28,8 @@ export function captureInvocationL0Input(
   ),
 ) {
   const projection = input.projection ?? 'owner';
-  if (!resolveL0Projections().includes(projection)) throw new Error(`Unsupported L0 projection: ${projection}`);
+  if (!['owner', 'public', 'scoped-member'].includes(projection) || !resolveL0Projections().includes(projection))
+    throw new Error(`Unsupported L0 projection: ${projection}`);
   const script = resolveL0CompilerScriptPath();
   if (!script) throw new Error('Frozen L0 compiler installation is unavailable');
   const installRoot = resolve(dirname(script), '..');

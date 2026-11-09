@@ -25,7 +25,7 @@ for (const sharedDependencies of [false, true]) {
     fs.mkdirSync(path.join(api, 'dist/utils'), { recursive: true });
     fs.copyFileSync(path.join(sourceApi, 'package.json'), path.join(api, 'package.json'));
     // Use the production reader and its actual package assets, not a reader mock.
-    for (const name of ['cli-process-ownership', 'cli-process-environment']) {
+    for (const name of ['cli-process-ownership', 'cli-process-environment', 'cli-execution-stop-evidence']) {
       const source = path.join(sourceApi, `src/utils/${name}.ts`);
       const compiled = ts.transpileModule(fs.readFileSync(source, 'utf8'), {
         fileName: source,

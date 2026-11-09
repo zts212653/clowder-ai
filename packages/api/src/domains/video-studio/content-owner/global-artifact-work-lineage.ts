@@ -35,7 +35,7 @@ interface PreparedLookup {
   identity: Awaited<ReturnType<MessagePublicationLandingDeps['sources']['messageIdentity']>>;
 }
 
-/** F309-owned read projection: exact message identity + one complete owner catalogue scan + fresh authorization. */
+/** F309-owned read projection: exact message identity, indexed source candidates and fresh authorization. */
 export class GlobalArtifactWorkLineageResolver implements GlobalArtifactWorkLineageResolverPort {
   constructor(private readonly deps: GlobalArtifactWorkLineageDeps & { media: MessagePublicationLandingMedia }) {}
 

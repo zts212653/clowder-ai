@@ -1,6 +1,7 @@
 import { executedInvocations, executionChainInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
+import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import { copyNamespaceStability, shellTextPreservesCopyNamespace } from './native-effect-copy-namespace.mjs';
 import { contextualGitMutationCandidates } from './native-effect-git-context.mjs';
 import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
@@ -157,6 +158,8 @@ function nestedSubstitutionDecisions(innerCommands, directory, source, depth, in
 /** Original-source roles precede env/path expansion; evidence stays on its execution chain. */
 function codeInputBoundary(raw, parts, contexts, cwd, source) {
   const root = executedInvocations(withoutInterpreterSource(raw), { cwd });
+  if (codexAuthenticationEffect(root.pipelines.flat()) === 'auth_mutation')
+    return decideNativeEffect({ effect: 'auth_mutation', target: classifyTarget(raw, cwd, 'auth_mutation'), source });
   const original = protectedBranchBoundary(root, cwd, source);
   if (original) return original;
   for (let index = 0; index < parts.length; index++) {

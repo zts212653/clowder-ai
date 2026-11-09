@@ -2,6 +2,8 @@ import type {
   MessageSearchAnswerAttachmentRequest,
   MessageSearchAnswerView,
   MessageSearchInput,
+  MessageSearchResponse,
+  SelectedMessageSource,
 } from '@cat-cafe/shared';
 import {
   matchesMessageSearchAnswer,
@@ -24,6 +26,7 @@ import {
   readMessageSearchAnswer,
 } from './message-search-answer-admission.js';
 import { boundMessageSearchResponse } from './message-search-budget.js';
+import { MessageSelectionError } from './message-selected-quote.js';
 
 export interface PrepareMessageSearchAnswer {
   operationId: string;
@@ -32,6 +35,7 @@ export interface PrepareMessageSearchAnswer {
   producer: AnswerProducer;
   targetThreadId: string;
   acceptedUseRef?: string;
+  selections?: SelectedMessageSource[];
 }
 type Execution = {
   signal?: AbortSignal;
@@ -69,7 +73,25 @@ export class MessageSearchAnswerPublicationService {
       input: input.input,
       targetThreadId: input.targetThreadId,
       acceptedUseRef: input.acceptedUseRef,
+      ...(input.selections ? { selections: input.selections } : {}),
     });
+    const existing = this.store.forOperation(principal.userId, input.producer, input.operationId);
+    if (existing && existing.request_digest !== requestDigest) throw new Error('ANSWER_OPERATION_CONFLICT');
+    if (!existing && !input.selections)
+      throw new MessageSelectionError('Select source quotations before preparing a new answer');
+    // A mistyped/ambiguous quote has not yet produced a card. Let the cat correct
+    // its input before claiming the one durable operation for this invocation.
+    let selected: MessageSearchResponse | undefined;
+    if (!existing && input.selections) {
+      await execution.authorizeAcceptedUse?.();
+      selected = await this.search.selectAnswer(
+        input.input.query,
+        input.selections,
+        input.producer.catId,
+        principal,
+        execution,
+      );
+    }
     const claimed = await this.store.claim({
       ownerUserId: principal.userId,
       producer: input.producer,
@@ -81,13 +103,12 @@ export class MessageSearchAnswerPublicationService {
     if (claimed.record.request_digest !== requestDigest) throw new Error('ANSWER_OPERATION_CONFLICT');
     if (claimed.created) {
       try {
-        await execution.authorizeAcceptedUse?.();
-        const searched = await this.search.search(input.input, principal, execution);
+        if (!selected) throw new MessageSelectionError('Select source quotations before preparing a new answer');
         execution.signal?.throwIfAborted();
         await assertAnswerDestination(this.threads, principal.userId, input.targetThreadId);
         execution.signal?.throwIfAborted();
         // Reserve the fixed receipt envelope inside the original 24k transport budget.
-        await this.store.complete(ref, boundMessageSearchResponse(searched, 23000));
+        await this.store.complete(ref, boundMessageSearchResponse(selected, 23000));
       } catch (error) {
         await this.store.fail(ref);
         throw error;
@@ -103,7 +124,7 @@ export class MessageSearchAnswerPublicationService {
     const message = actual.bound_message_id ? await this.messages.getById(actual.bound_message_id) : null;
     const published =
       !!message && !!answerBinding(actual) && matchesMessageSearchAnswer(message, answerBinding(actual)!);
-    const view = await this.search.readAnswerSnapshot(saved, principal, execution.signal);
+    const view = await this.search.readAnswerSnapshot(saved, principal, execution.signal, execution.deadlineAt);
     if (saved.results.length && !view.response.results.length) return { status: 'unavailable', publicationRef: ref };
     return {
       status: published ? 'published' : 'prepared',

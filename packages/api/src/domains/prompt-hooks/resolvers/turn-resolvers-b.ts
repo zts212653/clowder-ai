@@ -30,25 +30,6 @@ export class D11Resolver implements HookResolver {
 }
 
 // ---------------------------------------------------------------------------
-// D12 — 最近发言者 (Recent Speaker; not execution state)
-// ---------------------------------------------------------------------------
-
-export class D12Resolver implements HookResolver {
-  resolve(input: AssemblerInput): ResolveResult {
-    if (input.activeParticipants.length === 0) {
-      return skip('no_active_participants', 'No active participants');
-    }
-    const recentSpeaker = input.activeParticipants
-      .filter((participant) => participant.catId !== input.catId)
-      .find((participant) => participant.lastMessageAt > 0);
-    if (!recentSpeaker) {
-      return skip('no_recent_speaker', 'No qualifying recent speaker (other cat with messages)');
-    }
-    return { status: 'fired', vars: { RECENT_SPEAKER_LABEL: recentSpeaker.label } };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // D13 — 路由策略 (Routing Policy)
 // Pre-computed by ContextAssembler into routingPolicyParts string.
 // ---------------------------------------------------------------------------

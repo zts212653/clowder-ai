@@ -1,5 +1,6 @@
-import { type MessageContent, MessageContentsSchema } from '@cat-cafe/shared';
+import { type MessageContent, MessageContentsSchema, type MessageFrom } from '@cat-cafe/shared';
 import type { MessageDraft, PluginManifest, SendReceipt } from '@clowder-ai/plugin-contract';
+import { messageFrom } from '../../cats/services/stores/message-from.js';
 import { storedMessageSource } from '../../cats/services/stores/message-source.js';
 import {
   deriveGrowingSourceMessageRevision,
@@ -67,6 +68,10 @@ export type PluginMessage = Pick<
   | 'replyTo'
   | 'deliveryStatus'
 > & {
+  /** Canonical sender proof, independent of presentation. No connector addresses or private service IDs. */
+  readonly from:
+    | Extract<MessageFrom, { kind: 'user' | 'agent' }>
+    | { readonly kind: Exclude<MessageFrom['kind'], 'user' | 'agent'> };
   readonly sourceRevision: string;
   readonly extra?: {
     readonly rich?: NonNullable<StoredMessage['extra']>['rich'];
@@ -311,6 +316,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
 }
 
 function projectMessage(message: StoredMessage): PluginMessage {
+  const from = messageFrom(message);
   const stream = message.extra?.stream;
   const extra: NonNullable<PluginMessage['extra']> = {
     ...(message.extra?.rich ? { rich: message.extra.rich } : {}),
@@ -329,6 +335,12 @@ function projectMessage(message: StoredMessage): PluginMessage {
     threadId: message.threadId,
     userId: message.userId,
     catId: message.catId,
+    from:
+      from.kind === 'user'
+        ? { kind: from.kind, userId: from.userId }
+        : from.kind === 'agent'
+          ? { kind: from.kind, catId: from.catId }
+          : { kind: from.kind },
     content: message.content,
     mentions: message.mentions,
     timestamp: message.timestamp,

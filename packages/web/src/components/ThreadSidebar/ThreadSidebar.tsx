@@ -409,7 +409,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
     requestDelete: handleDeleteRequest,
     confirmDelete: handleDeleteConfirm,
     cancelDelete,
-    canRemember,
   } = useThreadDeletion({
     currentThreadId: currentConversationId,
     navigateToThread,
@@ -2145,7 +2144,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         <ThreadDeleteConfirmDialog
           key={deleteTarget.id}
           thread={deleteTarget}
-          canRemember={canRemember}
           onCancel={cancelDelete}
           onConfirm={handleDeleteConfirm}
         />

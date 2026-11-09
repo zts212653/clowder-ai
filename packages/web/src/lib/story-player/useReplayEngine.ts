@@ -109,10 +109,10 @@ async function fetchAllSessionEvents(sessionId: string): Promise<RawTranscriptEv
 // Sub-hooks (extracted to reduce cognitive complexity)
 // ---------------------------------------------------------------------------
 
-type EngineSetter = React.Dispatch<React.SetStateAction<ReplayEngineState>>;
+export type EngineSetter = React.Dispatch<React.SetStateAction<ReplayEngineState>>;
 
-/** RAF-based tick loop that drives the replay engine forward */
-function useReplayTick(setEngine: EngineSetter, engineRef: React.RefObject<ReplayEngineState>) {
+/** RAF-based tick loop that drives the replay engine forward. Shared with useFeatureReplay. */
+export function useReplayTick(setEngine: EngineSetter, engineRef: React.RefObject<ReplayEngineState>) {
   const lastTickRef = useRef<number>(0);
 
   useEffect(() => {
@@ -136,8 +136,8 @@ function useReplayTick(setEngine: EngineSetter, engineRef: React.RefObject<Repla
   return lastTickRef;
 }
 
-/** Keyboard shortcuts: Space=play/pause, ←→=step */
-function useReplayKeyboard(setEngine: EngineSetter) {
+/** Keyboard shortcuts: Space=play/pause, ←→=step. Shared with useFeatureReplay. */
+export function useReplayKeyboard(setEngine: EngineSetter) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target;

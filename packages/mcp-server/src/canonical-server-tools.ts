@@ -52,9 +52,11 @@ import {
 import { liveMeetingTools } from './tools/live-meeting-tools.js';
 import { memberImageTools } from './tools/member-image-tools.js';
 import { pageActionTools } from './tools/page-action-tools.js';
+import { watcherTools } from './tools/watcher-tools.js';
 
 export const CANONICAL_TOOL_SOURCES = {
   collab: [
+    ...watcherTools,
     ...callbackTools,
     ...capabilityEvolutionTools,
     ...capabilityEvolutionPreparationTools,

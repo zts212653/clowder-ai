@@ -218,7 +218,7 @@ function createNativeFixtureService(spawnFn) {
  * Create a SpawnFn that creates a fresh mock process per call,
  * emits pre-configured events, and records every call for assertions.
  */
-function createTrackingSpawnFn(eventsFn) {
+function createTrackingSpawnFn(eventsFn, onLaunch) {
   const calls = [];
   const spawnFn = mock.fn((_cmd, _args, options) => {
     const proc = createMockProcess();
@@ -226,9 +226,9 @@ function createTrackingSpawnFn(eventsFn) {
     const credential = options.env?.CAT_CAFE_CREDENTIAL_FILE
       ? JSON.parse(readFileSync(options.env.CAT_CAFE_CREDENTIAL_FILE, 'utf8'))
       : undefined;
-    calls.push({ cmd: _cmd, args: _args, options, proc, credential });
-    // Schedule events on next tick so caller can start reading
-    process.nextTick(() =>
+    const call = { cmd: _cmd, args: _args, options, proc, credential };
+    calls.push(call);
+    const finish = () =>
       emitEvents(
         proc,
         eventsFn(calls.length).map((event) =>
@@ -236,8 +236,10 @@ function createTrackingSpawnFn(eventsFn) {
             ? { ...event, init: { ...event.init, agent: _args[_args.indexOf('--agent') + 1], cwd: options.cwd } }
             : event,
         ),
-      ),
-    );
+      );
+    // A lifecycle test may keep the real provider invocation open for its callback.
+    if (onLaunch) onLaunch(call, finish);
+    else process.nextTick(finish);
     return proc;
   });
   spawnFn._calls = calls;
@@ -682,8 +684,16 @@ describe('MCP callback end-to-end flow', () => {
     return app;
   }
 
-  test('callback POST succeeds with invocation from route()', async () => {
-    const claudeSpawn = createTrackingSpawnFn(() => claudeEvents('s-1', 'reply'));
+  test('callback POST succeeds while route() is in flight and rejects after completion', async (t) => {
+    const launched = Promise.withResolvers();
+    let finishCli = () => {};
+    const claudeSpawn = createTrackingSpawnFn(
+      () => claudeEvents('s-1', 'reply'),
+      (call, finish) => {
+        finishCli = finish;
+        launched.resolve(call);
+      },
+    );
     const codexSpawn = createTrackingSpawnFn(() => codexEvents('t-1', 'hi'));
     const geminiSpawn = createTrackingSpawnFn(() => geminiEvents('g-1', 'hi'));
 
@@ -697,37 +707,56 @@ describe('MCP callback end-to-end flow', () => {
       }),
     );
 
-    // 1. route() creates invocation and passes callbackEnv to spawn
-    await collect(router.route('user-1', 'hello'));
-
-    // 2. Use the credential observed while the original launch file existed.
-    const credential = assertCallbackLaunch(claudeSpawn._calls[0]);
-
-    // 3. POST to callback endpoint with credentials from route()
     const app = await createApp();
-    const response = await app.inject({
+    t.after(() => app.close());
+    // Keep the original route/provider alive: credentials alone do not imply write admission.
+    const routed = collect(router.route('user-1', 'hello'));
+    let credential;
+    try {
+      const call = await Promise.race([
+        launched.promise,
+        routed.then(() => {
+          throw new Error('route completed before CLI launch');
+        }),
+      ]);
+      credential = assertCallbackLaunch(call);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers: { 'x-invocation-id': credential.invocationId, 'x-callback-token': credential.callbackToken },
+        payload: { content: 'Callback message from cat!' },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+
+      const recent = messageStore.getRecent(10);
+      const callbackMsg = recent.find((m) => m.content === 'Callback message from cat!');
+      assert.ok(callbackMsg, 'callback message should be in store');
+      assert.equal(callbackMsg.catId, 'opus');
+      assert.equal(callbackMsg.userId, 'user-1');
+      assert.ok(
+        socketManager.getMessages().some((m) => m.content === 'Callback message from cat!'),
+        'should broadcast via socket',
+      );
+    } finally {
+      finishCli();
+      await routed;
+    }
+
+    const storedBeforeLatePost = messageStore.getRecent(10);
+    const broadcastsBeforeLatePost = [...socketManager.getMessages()];
+    const lateResponse = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
       headers: { 'x-invocation-id': credential.invocationId, 'x-callback-token': credential.callbackToken },
-      payload: {
-        content: 'Callback message from cat!',
-      },
+      payload: { content: 'Late callback must not be published' },
     });
-
-    assert.equal(response.statusCode, 200);
-
-    // 4. Verify message was stored
-    const recent = messageStore.getRecent(10);
-    const callbackMsg = recent.find((m) => m.content === 'Callback message from cat!');
-    assert.ok(callbackMsg, 'callback message should be in store');
-    assert.equal(callbackMsg.catId, 'opus');
-    assert.equal(callbackMsg.userId, 'user-1');
-
-    // 5. Verify socket broadcast
-    const broadcasted = socketManager.getMessages();
-    assert.ok(
-      broadcasted.some((m) => m.content === 'Callback message from cat!'),
-      'should broadcast via socket',
+    assert.equal(lateResponse.statusCode, 409, lateResponse.body);
+    assert.equal(lateResponse.json().code, 'RICH_BLOCK_INVOCATION_COMPLETE');
+    assert.deepEqual(messageStore.getRecent(10), storedBeforeLatePost, 'completed callback must not store a message');
+    assert.deepEqual(
+      socketManager.getMessages(),
+      broadcastsBeforeLatePost,
+      'completed callback must not broadcast a message',
     );
   });
 

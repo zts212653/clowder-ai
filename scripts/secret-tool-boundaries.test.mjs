@@ -41,6 +41,9 @@ describe('managed secret boundary, candidate-level evidence', () => {
     ['write_to_file', { TargetFile: `${cwd}/example.txt`, CodeContent: fake }],
     ['replace_file_content', { TargetFile: `${cwd}/example.txt`, ReplacementContent: fake }],
     ['view_file', { AbsolutePath: `${cwd}/.env.local` }],
+    ['read_file', { Path: `${cwd}/.env.local` }],
+    ['write_file', { Path: `${cwd}/example.txt`, Content: fake }],
+    ['edit_file', { Path: `${cwd}/example.txt`, Target: 'ordinary', Replacement: fake }],
     ['call_mcp_tool', { ServerName: 'browser', ToolName: 'input', Arguments: { text: fake } }, 'allow'],
     ['browser_input', { text: fake }, 'allow'],
   ]) {

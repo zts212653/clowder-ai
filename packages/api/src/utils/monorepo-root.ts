@@ -18,18 +18,18 @@ function cacheKey(p: string): string {
 }
 
 type MonorepoRootCacheEntry = {
-  root: string;
+  root: string | null;
   /**
    * Workspace hits are safe to reuse for descendants/ancestors in the traversal
-   * trail. Fallback hits are exact-start only because "no workspace found"
-   * returns the original start directory by contract.
+   * trail. Misses are exact-start only.
    */
   shared: boolean;
 };
 
 const _monorepoRootCache = new Map<string, MonorepoRootCacheEntry>();
 
-export function findMonorepoRoot(start = process.cwd()): string {
+/** The nearest ancestor of `start` (itself included) that holds pnpm-workspace.yaml, or null. */
+export function findMonorepoRootOrNull(start = process.cwd()): string | null {
   const startKey = cacheKey(start);
   const cached = _monorepoRootCache.get(startKey);
   if (cached !== undefined) return cached.root;
@@ -38,7 +38,7 @@ export function findMonorepoRoot(start = process.cwd()): string {
   let dir = resolve(start);
   let root: string | null = null;
 
-  while (dir !== dirname(dir)) {
+  while (true) {
     const dirKey = cacheKey(dir);
     const dirCached = _monorepoRootCache.get(dirKey);
     if (dirCached?.shared) {
@@ -50,21 +50,27 @@ export function findMonorepoRoot(start = process.cwd()): string {
       root = dir;
       break;
     }
-    dir = dirname(dir);
+    const parent = dirname(dir);
+    if (parent === dir) break; // the filesystem root, itself checked above
+    dir = parent;
   }
 
-  const result = root ?? resolve(start);
   if (root) {
-    const entry: MonorepoRootCacheEntry = { root: result, shared: true };
+    const entry: MonorepoRootCacheEntry = { root, shared: true };
     // Memoize all directories we traversed — they all share the same workspace root.
     _monorepoRootCache.set(startKey, entry);
     for (const key of trail) {
       _monorepoRootCache.set(key, entry);
     }
   } else {
-    _monorepoRootCache.set(startKey, { root: result, shared: false });
+    _monorepoRootCache.set(startKey, { root: null, shared: false });
   }
-  return result;
+  return root;
+}
+
+/** `findMonorepoRootOrNull`, or `start` itself when there is no workspace marker above it. */
+export function findMonorepoRoot(start = process.cwd()): string {
+  return findMonorepoRootOrNull(start) ?? resolve(start);
 }
 
 /**
@@ -74,7 +80,7 @@ export function findMonorepoRoot(start = process.cwd()): string {
  */
 const _gitCommonDirCache = new Map<string, string | null>();
 
-function resolveGitCommonDir(projectPath: string): string | null {
+export function resolveGitCommonDir(projectPath: string): string | null {
   const key = cacheKey(projectPath);
   if (_gitCommonDirCache.has(key)) return _gitCommonDirCache.get(key)!;
 

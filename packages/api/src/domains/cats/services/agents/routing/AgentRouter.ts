@@ -67,7 +67,10 @@ import {
 } from '../invocation/invocation-capacity-snapshot.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type { AgentRegistrationFailure } from '../registry/AgentServiceUnavailableError.js';
+import {
+  type AgentRegistrationFailure,
+  isRetryableAgentRegistration,
+} from '../registry/AgentServiceUnavailableError.js';
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
@@ -442,6 +445,7 @@ export interface AgentRouterOptions {
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
+  refreshServices?: () => Promise<void>;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
   /** F045 Gap #4: Redis-backed task progress snapshots */
@@ -566,6 +570,7 @@ export class AgentRouter {
   private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
   addressedPlugins?: AgentRouterOptions['addressedPlugins'];
   private readonly services: Record<string, AgentService>;
+  private readonly refreshServices?: AgentRouterOptions['refreshServices'];
   private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
@@ -674,6 +679,7 @@ export class AgentRouter {
     this.scopedMemberRouting = options.scopedMemberRouting;
     this.addressedPlugins = options.addressedPlugins;
     this.services = {};
+    this.refreshServices = options.refreshServices;
     this.speechMentionRe = /$^/;
     this.rebuildRuntimeCaches(options.agentRegistry);
 
@@ -793,6 +799,18 @@ export class AgentRouter {
   supportsToolExecutionPolicy(catId: string, policy: ToolExecutionPolicy): boolean {
     return this.isRoutableCat(catId) && this.services[catId]?.supportsToolExecutionPolicy?.(policy) === true;
   }
+  async boundedWatcherSessionCapability(catId: string): Promise<import('@cat-cafe/shared').WatcherCapability> {
+    if (!this.isRoutableCat(catId)) return { supported: false, reason: '此成员当前不可用' };
+    const service = this.services[catId];
+    if (catRegistry.tryGet(catId)?.config.clientId !== 'openai')
+      return { supported: false, reason: '此运行方式尚不支持有界续用会话' };
+    try {
+      await service?.prepareWatcherSession?.();
+    } catch {
+      return { supported: false, reason: '暂时无法检查此成员的守望能力' };
+    }
+    return service?.boundedWatcherSessionCapability?.() ?? { supported: false, reason: '此成员尚不支持有界续用会话' };
+  }
 
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
     return (
@@ -830,6 +848,12 @@ export class AgentRouter {
       return id !== '__none__' && catRegistry.has(id) && isCatAvailable(id) ? (id as CatId) : null;
     });
     return targets.every((id): id is CatId => id !== null) ? [...new Set(targets)] : [];
+  }
+
+  isRetryableTargetUnavailable(catId: string): boolean {
+    if (Object.hasOwn(this.services, catId) || this.resolveAdmissionTargets([catId]).length === 0) return false;
+    const reason = this.unavailableServices.get(catId);
+    return reason === undefined || isRetryableAgentRegistration(reason);
   }
 
   /**
@@ -1416,6 +1440,7 @@ export class AgentRouter {
       ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
       ...(this.addressedPlugins ? { addressedPlugins: this.addressedPlugins } : {}),
+      ...(this.refreshServices ? { refreshServices: this.refreshServices } : {}),
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {

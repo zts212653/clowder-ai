@@ -93,6 +93,15 @@ export const ENV_DEFINITIONS_1: readonly EnvDefinition[] = [
     restartRequired: true,
   },
   {
+    name: 'CAT_CAFE_DESKTOP_STARTUP_ID',
+    defaultValue: '(未设置)',
+    description: '桌面进程为本次 API 启动生成的内部就绪标记',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'PREVIEW_GATEWAY_PORT',
     defaultValue: '4100',
     description: 'Preview Gateway 端口（F120 独立 origin 反向代理）',

@@ -254,6 +254,7 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  watcher: 'parsed';
   cloudBridgeReturn: 'parsed';
   taskHandoff: 'parsed';
   taskHandoffInvalid: 'derived';
@@ -276,6 +277,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  richBlockPublicationId: 'parsed';
   messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
@@ -872,6 +874,22 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    const watcher =
+      typeof parsed.watcher === 'object' && parsed.watcher !== null
+        ? (parsed.watcher as Record<string, unknown>)
+        : undefined;
+    if (
+      watcher?.kind === 'nudge' &&
+      isNonEmptyString(watcher.sourceInvocationId) &&
+      isNonEmptyString(watcher.sourceMessageId) &&
+      isNonEmptyString(watcher.watcherInvocationId)
+    )
+      result.watcher = {
+        kind: 'nudge',
+        sourceInvocationId: watcher.sourceInvocationId,
+        sourceMessageId: watcher.sourceMessageId,
+        watcherInvocationId: watcher.watcherInvocationId,
+      };
     const turnExecution = parseTurnExecutionProjection(parsed.turnExecution);
     if (turnExecution) {
       result.turnExecution = turnExecution;
@@ -977,6 +995,10 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isNonEmptyString(parsed.richBlockPublicationId)) {
+      result.richBlockPublicationId = parsed.richBlockPublicationId;
+      hasField = true;
+    }
     if (
       typeof parsed.callbackRichRequestDigest === 'string' &&
       /^[0-9a-f]{64}$/.test(parsed.callbackRichRequestDigest)

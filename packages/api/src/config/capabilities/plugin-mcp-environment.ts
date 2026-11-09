@@ -15,8 +15,7 @@ export function pluginMcpEnvironment(
   invocationEnvironment: Readonly<Record<string, string>>,
 ): Record<string, string> | undefined {
   const env = server.env ? resolveEnvReferences(server.env) : undefined;
-  if (server.source !== 'plugin' || (!env?.CLOWDER_PLUGIN_ACTION_CREDENTIAL_FILE && !env?.CLOWDER_PLUGIN_ACTION_TOKEN))
-    return env;
+  if (server.source !== 'plugin' || !env?.CLOWDER_PLUGIN_ACTION_TOKEN) return env;
   return bindPluginMcpEnvironment(env, invocationEnvironment);
 }
 

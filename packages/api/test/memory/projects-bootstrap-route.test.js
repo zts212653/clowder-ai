@@ -130,6 +130,7 @@ describe('projects-bootstrap routes', () => {
       await new Promise((r) => setTimeout(r, 50));
       assert.equal(bootstrapCalls.length, 1);
       assert.equal(bootstrapCalls[0].projectPath, p);
+      assert.equal(bootstrapCalls[0].options.ownerUserId, 'test-user');
     });
 
     it('returns 400 without projectPath', async () => {

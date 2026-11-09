@@ -165,3 +165,23 @@ RED 日志 `/tmp/f202-pr209-inbox-red.log`（旧记录4/4失败）、`/tmp/f202-
 同型审计覆盖 ask 的空回执创建、写回、重放和重启恢复入口；其他 dispatch/image 预留不使用 null 记录阻断订阅页。本次两条都属于“存量记录不等于可继续执行”，但分别以实际发送窗口与正式授权/入口检查处理，不新增 Host 特例。fallback 检查相对 dacc5bf9 每文件各 +1（connection 的正式/候选入口选择；runtime 的活跃发送或快照跨版本判断），累计阈值触发已人工审视：前者选择真实正式入口，后者拒绝把旧快照当作无关回复，两者均不能删掉且未堆叠恢复策略。
 
 RED `/tmp/f202-pr209-r2-red.log`、额外窗口 RED `/tmp/f202-pr209-r2-snapshot-red.log`；最终 Dot **219/219**、类型检查和显式构建通过。插件精确提交 `3e0e62f407ab3c4c5f14a03aed9e0f0ac1d80a5d`；alpha.40 SHA256 `e177c1f139f93aa1550d03b07aa6842d1c7c566941906ed1434ddd54ef9668e9`，89 文件匹配。精确归档准入与空缓存离线安装 **1/1** 通过（`archive-alpha40.log`）。Host 只更新随包/版本/摘要与本记录；实际 Work、合并冲突和远端新 HEAD 审查不由这些隔离检查代替。
+
+
+## alpha.41 最终迁移范围收敛（2026-11-09）
+
+operator 在本线程 `0001794229941774-000286-45879833` 指出 Host 新增规模不符合迁移预期；只读独立范围建议见 astra `0001794230190314-000300-4cb11d16`。此节取代此前阶段的 Host 外部签发、native 凭据文件刷新及通用共享授权产品方案。原提交 PR 授权仍为 `0001794224103181-000003-ede85be7`；没有合并、发布、安装或重启授权。
+
+最终边界：
+
+- Host 保留已被消费的插件目标准入、投递/持久回复状态、通用 webhook、隔离存储、消息/媒体以及配置展示。Dot 自管新连接的密钥、期限、订阅、验证与撤销。
+- 撤出 Host keyring/外部签发与检查生产接口，native action、MCP 环境和 SDK action client 回到上游既有鉴权；不借迁移建设一套新 native 凭据刷新体系。SDK/Dot 的可选旧签名兼容类型不是本 Host 的签发接口。
+- external-access 只保留旧 opaque token 的导入、读取、实例校验、转发和撤销；移除 ensure/rotate/access，普通启动与状态读取都不能生成 Host 凭据。
+- shared-extension 限于已核验旧 Dot 共享 `/mcp` 的迁移承接。adopt 仅允许 official.chatgpt-dot，保留原 owner/AgentKey、实例/包/运行代、工具面摘要与迟到结果检查；移除新 proposal、prepare/bind/unbind、配置确认接线及其产品测试。工具面变化仍拒绝自动扩大旧授权。
+- 旧连接、消息、图片的只读来源/权限核验、幂等导入、审计和历史 URL 保留。不能把真实旧数据兼容当成开发期 alpha 删除。
+- 从当前树移除本 PR 累积的历史 alpha 包，只新增最终 alpha.41；上游原有 0.1.2 不动。旧 alpha.9 安全回归改为最小恶意 tar fixture；移除 alpha.19 的 Host 业务状态快照，通用 rows/确认校验仍覆盖，图标/归档测试对齐最终产物。
+
+同步 upstream/next `50e5695607` 和插件 main `4051746b` 时，保留上游队列失败类型、生命周期 commit 标记、共享提及语法、配置校验和 GitHub Operations alpha.41 原发布依赖。Plugin 精确提交 `94b70ef2712865929480d8d1b1ae7857379af952`。
+
+验证：SDK237/237及类型检查，Dot219/219，Superagent20/20；Host消息/媒体/native/共享兼容85/85，通用配置/提及/队列的定向检查及旧token 7/7，旧迁移与历史图片15/15，shared路由1/1，原生随包构建15/15；Web快照/终态/占位42/42。API及其 shared/MCP 类型在本工位隔离目录完整编译，不改运行 dist/.next。最终包89个运行/资源/声明/文档文件一致，准入与空缓存离线安装1/1。日志前缀 `/tmp/f202-scope-*`；隔离配置和记录在 `.cat-cafe-runtime/acceptance/f202-target-sync`。
+
+alpha.41 SHA256 `9cd0fc515489a495ccb391a46ff56e8deca7644b172e5cfa1b07ad5d1e42c35d`；匹配SDK归档 SHA256 `54c212b8158d7959a93b62d36f48520f9c7c2b843b8d9c266b0675162f040e84`，锁文件固定实际归档完整性。已冻结的范围缩减与上游冲突解法仍需独立 exact-HEAD 复核；不会用前一轮 cloud 对 3e0e62f4 的结论替代。本轮未推送范围调整或操作运行实例。

@@ -19,7 +19,6 @@ import {
 } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { HostPluginConfigurationService } from '../dist/domains/plugin/manager/plugin-manager-configuration.js';
 import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
-import { PluginSharedExtensionError } from '../dist/domains/plugin/shared-extension/plugin-shared-extension.js';
 import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const pluginId = 'dev.clowder.authorization-fixture';
@@ -114,7 +113,7 @@ const row = (key, actions = [{ action: 'revoke', input: { conversationId: key } 
   actions,
 });
 
-function harness(listResult, sharedExtension) {
+function harness(listResult) {
   const calls = [];
   let state;
   const operations = new InstalledPluginOperations({
@@ -147,7 +146,6 @@ function harness(listResult, sharedExtension) {
         );
       },
     },
-    ...(sharedExtension ? { sharedExtension } : {}),
     now: () => 10_000,
   });
   return {
@@ -174,33 +172,6 @@ describe('F202 W2-3 h1 — rows results', () => {
     assert.equal(result.status, 200, JSON.stringify(result.body));
     assert.equal(result.body.render, 'rows');
     assert.deepEqual(result.body.data, rows);
-  });
-
-  test('the Host rejects a tampered shared confirmation before operation state advances', async () => {
-    const h = harness(
-      { render: 'rows', data: { rows: [row('shared')] } },
-      {
-        validatePresentation: async () => {
-          throw new PluginSharedExtensionError(502, 'invalid_shared_confirmation_presentation');
-        },
-      },
-    );
-    const result = await withOwnerOperationRequest(
-      {
-        pluginId,
-        operationKey: 'authorization',
-        actionId: 'list',
-        userId: 'fixture-owner',
-        requestId: 'fixture-list',
-        sessionBindingId: 'session-one',
-        signal: new AbortController().signal,
-        assertCurrent() {},
-      },
-      () => h.operations.runAction(pluginId, 'authorization', 'list', undefined),
-    );
-    assert.equal(result.status, 502);
-    assert.deepEqual(result.body, { error: 'invalid_shared_confirmation_presentation' });
-    assert.equal(h.state, undefined);
   });
 
   for (const [name, data] of [
@@ -295,116 +266,5 @@ test('the projection gives the web each row action and every declared confirmati
   ]);
   assert.deepEqual(operation.rowActions, [
     { id: 'revoke', label: 'Revoke', confirm: 'Stop routing this conversation to Clowder?', next: 'list' },
-  ]);
-});
-
-test('the frozen Dot manifest projects every self-service connection action without auto-running one', async () => {
-  const dotManifest = JSON.parse(
-    await readFile(
-      new URL('../src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.19/manifest.json', import.meta.url),
-      'utf8',
-    ),
-  );
-  const dotPluginId = dotManifest.pluginId;
-  const dotInstanceId = 'pi_dot_projection_fixture';
-  const projectRoot = await mkdtemp(join(tmpdir(), 'f202-dot-projection-'));
-  roots.push(projectRoot);
-  const service = new HostPluginConfigurationService({
-    projectRoot,
-    inventory: snapshotInventoryFixture({
-      snapshot: async () => ({
-        schemaVersion: 1,
-        packages: [
-          {
-            packageDigest: 'sha512-dot-fixture',
-            pluginId: dotPluginId,
-            version: dotManifest.version,
-            contractVersion: dotManifest.contractVersion,
-            manifest: dotManifest,
-            signalSchemas: {},
-            packageState: 'installed',
-            verifiedAt: 1,
-            updatedAt: 1,
-          },
-        ],
-        instances: [
-          {
-            pluginInstanceId: dotInstanceId,
-            pluginId: dotPluginId,
-            packageDigest: 'sha512-dot-fixture',
-            lifecycleState: 'installed',
-            configReadiness: 'ready',
-            activationState: 'enabled',
-            runtimeState: 'healthy',
-            lifecycleRevision: 1,
-            installedAt: 1,
-            updatedAt: 1,
-          },
-        ],
-        grants: [],
-      }),
-    }),
-  });
-
-  const fields = await service.fields(dotPluginId);
-  const operation = fields.find((field) => field.key === 'connection');
-  const longLived = fields.find((field) => field.key === 'longLivedEndpoint');
-  const temporary = fields.find((field) => field.key === 'temporaryEndpoint');
-
-  assert.deepEqual(longLived.actions, [
-    {
-      id: 'use-long-lived',
-      label: '生成 Server URL',
-      render: 'button',
-      resultRender: 'text',
-      confirm: '确认签发新的外部凭据并生成 Server URL？',
-    },
-  ]);
-  assert.deepEqual(temporary.actions, [
-    {
-      id: 'start-temporary',
-      label: '创建临时入口',
-      render: 'button',
-      resultRender: 'text',
-      confirm: '确认启动一个有时限的临时公网入口？',
-    },
-  ]);
-  assert.equal(longLived.configurationVariants.discriminator, 'endpointMode');
-  assert.equal(temporary.configurationVariants.discriminator, 'endpointMode');
-
-  assert.deepEqual(operation.actions, [
-    {
-      id: 'status',
-      label: '刷新状态',
-      render: 'status',
-      resultRender: 'rows',
-    },
-  ]);
-  assert.deepEqual(operation.rowActions, [
-    { id: 'show-server-url', label: '显示并复制 Server URL' },
-    {
-      id: 'refresh-credential',
-      label: '更新外部凭据',
-      confirm: '确认签发并验证新的外部凭据？现有凭据会保留到新凭据验证成功。',
-    },
-    {
-      id: 'cancel-pending',
-      label: '放弃本次更新',
-      confirm: '放弃待验证的新凭据并关闭对应临时入口？现有凭据不会被替换。',
-    },
-    { id: 'begin-pairing', label: '生成配对说明', confirm: '确认生成一次新的 Dot 配对说明？' },
-    { id: 'show-instructions', label: '复制配对说明' },
-    {
-      id: 'reconnect',
-      label: '重新生成配对说明',
-      confirm: '这会撤销旧配对，旧召唤将不能继续回复。',
-    },
-    {
-      id: 'disconnect',
-      label: '断开连接',
-      confirm: '断开后无法接收召唤，已保存的消息和原图保留。',
-    },
-    { id: 'roundtrip', label: '发起往返测试' },
-    { id: 'check-roundtrip', label: '检查测试结果' },
   ]);
 });

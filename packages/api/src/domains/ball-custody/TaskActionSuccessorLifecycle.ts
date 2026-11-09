@@ -1,12 +1,16 @@
 import type { TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
-import { createModuleLogger } from '../../infrastructure/logger.js';
+import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
+import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { isOrdinaryImplementTask } from '../cats/services/stores/ports/TaskStoreContract.js';
-import type { ActionSuccessorCompletionService } from './ActionSuccessorCompletionService.js';
+import type {
+  ActionSuccessorCompletionResult,
+  ActionSuccessorCompletionService,
+} from './ActionSuccessorCompletionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
+import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
-
-const log = createModuleLogger('ball-custody/task-action-successor-lifecycle');
 
 export interface TaskActionRecoveryStats {
   scanned: number;
@@ -27,10 +31,14 @@ function taskDoneEvidenceRef(task: TaskItem): string {
 export class TaskActionSuccessorLifecycle {
   constructor(
     private readonly deps: {
-      leaseStore: Pick<ActionSuccessorLeaseStore, 'getByIdentity' | 'listActiveTaskLeases'>;
+      leaseStore: Pick<ActionSuccessorLeaseStore, 'getByIdentity' | 'listActiveTaskLeases' | 'recovery'>;
+      notifyRecovery?: ActionRecoveryNotification;
+      now?: () => number;
       completionService: Pick<ActionSuccessorCompletionService, 'complete'>;
     },
-  ) {}
+  ) {
+    this.deps = recoveryGuarded(deps);
+  }
 
   async assertUpdateAllowed(task: TaskItem, input: UpdateTaskInput): Promise<void> {
     const ownerChanges = input.ownerCatId !== undefined && input.ownerCatId !== task.ownerCatId;
@@ -56,43 +64,71 @@ export class TaskActionSuccessorLifecycle {
     const lease = await this.getActiveLease(task);
     if (!lease) return false;
     const ownerCatId = this.assertLeaseMatchesTask(lease, task);
-    return this.completeLease(lease, task, ownerCatId);
+    const result = await this.completeLease(lease, task, ownerCatId);
+    if (result.outcome !== 'committed')
+      throw new Error(`task action completion rejected: ${result.outcome}: ${result.reason}`);
+    return true;
   }
 
   async reconcileDoneTasks(taskStore: Pick<ITaskStore, 'get'>, limit = 100): Promise<TaskActionRecoveryStats> {
     if (!Number.isInteger(limit) || limit <= 0) throw new Error('task action recovery limit must be positive');
-    const leases = await this.deps.leaseStore.listActiveTaskLeases(limit);
     const stats: TaskActionRecoveryStats = {
-      scanned: leases.length,
+      scanned: 0,
       attempted: 0,
       committed: 0,
       skipped: 0,
       errored: 0,
     };
-    for (const lease of leases) {
-      try {
-        const taskId = lease.subjectRef.slice('subject:task:'.length);
-        const task = await taskStore.get(taskId);
-        if (!task || task.status !== 'done' || isOrdinaryImplementTask(task)) {
-          stats.skipped += 1;
-          continue;
-        }
-        stats.attempted += 1;
-        const ownerCatId = this.assertLeaseMatchesTask(lease, task);
-        if (await this.completeLease(lease, task, ownerCatId)) stats.committed += 1;
-      } catch (err) {
-        stats.errored += 1;
-        log.warn(
-          {
-            err,
-            leaseId: lease.leaseId,
-            generation: lease.generation,
-            subjectRef: lease.subjectRef,
+    const batch = await runDueBatch({
+      limit,
+      budgetMs: 5000,
+      selectDue: async (count) => await this.deps.leaseStore.listActiveTaskLeases(count, (this.deps.now ?? Date.now)()),
+      process: async (lease) => {
+        const outcome = await runActionDueRecovery({
+          port: this.deps.leaseStore.recovery,
+          lease,
+          lane: 'task',
+          now: (this.deps.now ?? Date.now)(),
+          notify: this.deps.notifyRecovery,
+          recover: async (current) => {
+            const taskId = current.subjectRef.slice('subject:task:'.length);
+            const task = await taskStore.get(taskId);
+            if (!task || task.status !== 'done' || isOrdinaryImplementTask(task)) {
+              stats.skipped += 1;
+              return !task
+                ? { kind: 'permanent_error', reason: 'task_missing' }
+                : { kind: isOrdinaryImplementTask(task) ? 'settled' : 'waiting' };
+            }
+            stats.attempted += 1;
+            let ownerCatId: string;
+            try {
+              ownerCatId = this.assertLeaseMatchesTask(current, task);
+            } catch {
+              return { kind: 'permanent_error', reason: 'task_standing_mismatch' };
+            }
+            const completion = await this.completeLease(current, task, ownerCatId);
+            if (completion.outcome === 'committed') {
+              stats.committed += 1;
+              return { kind: 'settled' };
+            }
+            if (completion.outcome === 'stale') return { kind: 'stale' };
+            if (completion.outcome === 'insufficient') return { kind: 'waiting' };
+            return { kind: 'permanent_error', reason: 'task_completion_evidence_mismatch' };
           },
-          'F167 task ActionSuccessor completion recovery skipped an invalid lease',
-        );
-      }
-    }
+        });
+        if (outcome.kind === 'permanent_error' || outcome.kind === 'retryable_error') stats.errored += 1;
+      },
+      onItemError: (lease, error) =>
+        recordActionRecoveryBatchFailure(
+          this.deps.leaseStore.recovery,
+          lease,
+          'task',
+          (this.deps.now ?? Date.now)(),
+          error,
+        ),
+    });
+    stats.scanned = batch.selected;
+    stats.errored += batch.failed;
     return stats;
   }
 
@@ -108,18 +144,18 @@ export class TaskActionSuccessorLifecycle {
     return lease?.status === 'active' ? lease : null;
   }
 
-  private async completeLease(lease: ActionSuccessorLease, task: TaskItem, ownerCatId: string): Promise<boolean> {
-    const result = await this.deps.completionService.complete({
+  private async completeLease(
+    lease: ActionSuccessorLease,
+    task: TaskItem,
+    ownerCatId: string,
+  ): Promise<ActionSuccessorCompletionResult> {
+    return this.deps.completionService.complete({
       leaseId: lease.leaseId,
       generation: lease.generation,
       catId: ownerCatId,
       evidenceRefs: [taskDoneEvidenceRef(task)],
       now: task.updatedAt,
     });
-    if (result.outcome !== 'committed') {
-      throw new Error(`task action completion rejected: ${result.outcome}: ${result.reason}`);
-    }
-    return true;
   }
 
   private assertLeaseMatchesTask(lease: ActionSuccessorLease, task: TaskItem): string {

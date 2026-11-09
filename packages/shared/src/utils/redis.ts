@@ -213,8 +213,8 @@ export class SessionStore {
     this.keyPrefix = ((redis.options as Record<string, unknown>).keyPrefix as string) ?? '';
   }
 
-  async getSessionId(userId: string, catId: string, threadId: string): Promise<string | null> {
-    return this.redis.get(SessionKeys.session(userId, catId, threadId));
+  async getSessionId(userId: string, catId: string, threadId: string, purpose?: 'watcher'): Promise<string | null> {
+    return this.redis.get(this.sessionKey(userId, catId, threadId, purpose));
   }
 
   async setSessionId(
@@ -223,12 +223,20 @@ export class SessionStore {
     threadId: string,
     sessionId: string,
     ttlSeconds = 86400,
+    purpose?: 'watcher',
   ): Promise<void> {
-    await this.redis.set(SessionKeys.session(userId, catId, threadId), sessionId, 'EX', ttlSeconds);
+    const key = this.sessionKey(userId, catId, threadId, purpose);
+    if (ttlSeconds > 0) await this.redis.set(key, sessionId, 'EX', ttlSeconds);
+    else await this.redis.set(key, sessionId);
   }
 
-  async deleteSession(userId: string, catId: string, threadId: string): Promise<void> {
-    await this.redis.del(SessionKeys.session(userId, catId, threadId));
+  async deleteSession(userId: string, catId: string, threadId: string, purpose?: 'watcher'): Promise<void> {
+    await this.redis.del(this.sessionKey(userId, catId, threadId, purpose));
+  }
+
+  private sessionKey(userId: string, catId: string, threadId: string, purpose?: 'watcher'): string {
+    const ordinary = SessionKeys.session(userId, catId, threadId);
+    return purpose === 'watcher' ? `${ordinary}:role:watcher` : ordinary;
   }
 
   async getDeliveryCursor(userId: string, catId: string, threadId: string): Promise<string | null> {

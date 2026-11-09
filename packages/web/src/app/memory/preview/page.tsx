@@ -9,5 +9,14 @@ export default function MemoryPreviewPage({
   const tab: MemoryPageTab =
     requested === 'brakes' || requested === 'library' || requested === 'recall' ? requested : 'all';
   const shell = searchParams.shell === 'v2' || searchParams.shell === 'classic' ? searchParams.shell : undefined;
-  return <MemoryPagePreview tab={tab} shell={shell} />;
+  const type = searchParams.type;
+  return (
+    <MemoryPagePreview
+      tab={tab}
+      shell={shell}
+      initialQuery={typeof searchParams.q === 'string' ? searchParams.q : undefined}
+      initialType={type === 'memory' || type === 'documents' || type === 'conversations' ? type : 'all'}
+      initialDepth={searchParams.depth === 'raw' ? 'raw' : 'summary'}
+    />
+  );
 }

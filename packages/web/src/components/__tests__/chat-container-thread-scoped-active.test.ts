@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F173 Phase C Task 2 — pin ChatContainer's `hasActiveInvocation` source-
  * of-truth migration.
@@ -20,6 +21,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 function renderChatContainer(threadId: string) {
   return React.createElement(
@@ -67,6 +69,7 @@ function createMockStoreState() {
 
 let storeState = createMockStoreState();
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: ReturnType<typeof createMockStoreState>) => unknown) => {
     return selector ? selector(storeState) : storeState;
@@ -123,7 +126,10 @@ vi.mock('../MessageActions', () => ({
 }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
-vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../QueuePanel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../QueuePanel')>()),
+  QueuePanel: () => null,
+}));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({
@@ -137,7 +143,10 @@ vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
-describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scoped chain', () => {
+describe.each([
+  'classic',
+  'v2',
+] as const)('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scoped chain (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -152,6 +161,7 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
   });
 
   beforeEach(() => {
+    writeShellPresentation(presentation);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -164,6 +174,7 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
       root.unmount();
     });
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it('AC-C6 race window: flat=false but threadStates[threadId]=true → ChatInput receives hasActiveInvocation=true', () => {

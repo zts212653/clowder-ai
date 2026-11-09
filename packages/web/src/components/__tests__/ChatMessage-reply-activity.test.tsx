@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import {
   installReplyLayersActEnvironment,
   ReplyLayersHarness,
@@ -78,7 +79,7 @@ describe('F322: observed activity on the reply last line', () => {
   it('the v2 nameplate stays still and classic leaves working status to the single execution strip', () => {
     harness.render(working('first'));
     expect(harness.q('cat-nameplate-avatar')?.querySelector('.animate-pulse')).toBeNull();
-    window.localStorage.clear();
+    harness.run(() => writeShellPresentation('classic'));
     harness.render({ ...working('second'), id: 'classic-reply' });
     expect(harness.q('reply-activity-cat')).toBeNull();
     expect(harness.container.querySelector('.animate-pulse')).toBeNull();

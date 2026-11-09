@@ -1,16 +1,18 @@
 /** Bounded post-merge reconciliation. Exact PR commits, never directory/branch guesses. */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { completedDirectRelease, directReleaseReceipt } from './worktree-direct-release.mjs';
 import { validateOrigin } from './worktree-origin.mjs';
-import { readPrTruth } from './worktree-pr.mjs';
-import { automaticReleaseTransactions } from './worktree-release-transactions.mjs';
+import { readPrTruth, worktreePrBinding } from './worktree-pr.mjs';
+import { git } from './worktree-reaper-probes.mjs';
+import { automaticReleaseTransactions, releaseRoot } from './worktree-release-transactions.mjs';
 
 const prRef = (value) => /^pr:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*$/.test(value ?? '');
-export function mergedNoticeKey(repo, path, head, owner, sourceRef, mergedAt) {
+export function mergedNoticeKey(repo, path, head, owner, sourceRef, mergedAt, createdAt) {
   return `worktree:${createHash('sha256')
-    .update(JSON.stringify([repo, path, head, owner, sourceRef, mergedAt]))
+    .update(JSON.stringify([repo, path, head, owner, sourceRef, mergedAt, ...(createdAt ? [createdAt] : [])]))
     .digest('hex')}`;
 }
 export function releasedNoticeKey(repo, release) {
@@ -27,6 +29,72 @@ export function releasedNoticeKey(repo, release) {
       ]),
     )
     .digest('hex')}`;
+}
+
+function unambiguousLegacyRelease(root, path, txn) {
+  return !readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+    .split('\n')
+    .some((line) => {
+      try {
+        const r = JSON.parse(line);
+        return r.from === path && r.action === 'release' && r.state === 'pending' && r.txn !== txn;
+      } catch {
+        return false;
+      }
+    });
+}
+
+/** Resolve one old merged reminder against the existing release owner, never against path absence alone. */
+export function completedMergedNoticeRelease(repo, subject, { readPr = readPrTruth } = {}) {
+  const root = releaseRoot(repo);
+  const r = completedDirectRelease({ repo, root, path: subject.path });
+  if (
+    !r ||
+    !prRef(subject.sourceRef) ||
+    r.owner !== subject.owner ||
+    (r.mergedPr ?? r.sourceRef) !== subject.sourceRef ||
+    r.origin?.threadId !== subject.threadId ||
+    r.origin?.userId !== subject.userId ||
+    !/^worktree:[0-9a-f]{64}$/.test(subject.key ?? '') ||
+    (subject.head && subject.head !== r.head)
+  )
+    return null;
+  const receipt = directReleaseReceipt({
+    repo,
+    root,
+    path: subject.path,
+    owner: subject.owner,
+    sourceRef: r.sourceRef,
+  });
+  if (!receipt) return null;
+  const config = join(receipt.archivePath, 'git-metadata/config.worktree');
+  const read = (key) => {
+    const result = git(repo, ['config', '--file', config, '--get', `catcafe.lifecycle.${key}`]);
+    if (!result.ok) throw new Error('archived worktree lifecycle unavailable');
+    return result.out.trim();
+  };
+  const birth = read('createdAt');
+  const createdAt = Date.parse(birth);
+  if (!Number.isFinite(subject.observedAt) || !Number.isFinite(createdAt) || createdAt > subject.observedAt)
+    return null;
+  const origin = JSON.parse(read('origin'));
+  if (
+    read('owner') !== subject.owner ||
+    ['threadId', 'userId', 'sourceRef', 'role'].some((key) => origin[key] !== r.origin[key])
+  )
+    return null;
+  // Old display metadata deliberately omitted HEAD. Its existing content-addressed key
+  // still binds the exact head/source/merge; manual historical releases may need PR truth.
+  let mergedAt = r.mergedAt;
+  if (!mergedAt) {
+    const pr = readPr(subject.sourceRef);
+    if (pr.sourceRef !== subject.sourceRef || pr.state !== 'MERGED' || !pr.commits.includes(r.head)) return null;
+    mergedAt = pr.mergedAt;
+  }
+  const exact = mergedNoticeKey(repo, r.from, r.head, r.owner, subject.sourceRef, mergedAt, birth);
+  const legacy = mergedNoticeKey(repo, r.from, r.head, r.owner, subject.sourceRef, mergedAt);
+  if (subject.key !== exact && (subject.key !== legacy || !unambiguousLegacyRelease(root, r.from, r.txn))) return null;
+  return receipt;
 }
 
 /** Replay normal completions and explicit interrupted/aborted outcomes through the same History delivery. */
@@ -123,18 +191,20 @@ export function mergedWorktreeNotices(repo, rows, { now = Date.now(), readPr, fi
   const unknown = [];
   for (const row of selected) {
     try {
-      const bound = [row.lifecycle.prSource, row.lifecycle.origin.sourceRef, row.lifecycle.retention?.sourceRef].find(
-        prRef,
-      );
-      const sources = bound ? [bound] : findSources(row.head);
-      for (const sourceRef of sources) {
+      const binding = worktreePrBinding(row.lifecycle, row.head);
+      const sources = binding.sourceRef ? [binding.sourceRef] : findSources(row.head);
+      for (const sourceRef of new Set(sources)) {
         if (!cache.has(sourceRef)) cache.set(sourceRef, readPr(sourceRef));
         const pr = cache.get(sourceRef);
         if (pr.sourceRef !== sourceRef || pr.state !== 'MERGED' || !pr.commits.includes(row.head)) continue;
+        if (binding.sourceRef !== sourceRef) {
+          unknown.push({ path: row.path, sourceRef, reason: binding.reason });
+          continue;
+        }
         const origin = row.lifecycle.origin;
         notices.push({
           kind: 'merged-unfinished',
-          key: mergedNoticeKey(repo, row.path, row.head, row.owner, sourceRef, pr.mergedAt),
+          key: mergedNoticeKey(repo, row.path, row.head, row.owner, sourceRef, pr.mergedAt, row.lifecycle.createdAt),
           threadId: origin.threadId,
           userId: origin.userId,
           owner: row.owner,

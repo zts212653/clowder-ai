@@ -52,7 +52,21 @@ function runtimeFixture(testSource, run) {
     join(browserDirectory, 'default-entry-journey.harness.mjs'),
   );
   const testPath = join(browserDirectory, 'claimed-journey.test.mjs');
-  writeFileSync(testPath, testSource);
+  writeFileSync(
+    testPath,
+    [
+      "import { before, after, test } from 'node:test';",
+      // Like a suite-owned server, this handle keeps the process alive until its
+      // cleanup hook runs. The imported audit must not prevent that cleanup.
+      'let ownedTimer;',
+      'before(() => { ownedTimer = setInterval(() => {}, 1000); });',
+      "after(() => { clearInterval(ownedTimer); console.log('OWNED_FIXTURE_CLEANED'); });",
+      testSource,
+      // Even an unregistered claim can share a file with ordinary tests whose
+      // fixture needs cleanup. A file with no tests never enters that lifecycle.
+      "test('ordinary fixture consumer', () => {});",
+    ].join('\n'),
+  );
   writeFileSync(
     join(claimsDirectory, 'fixture.json'),
     JSON.stringify({
@@ -72,6 +86,22 @@ function runtimeFixture(testSource, run) {
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
+}
+
+function runRuntimeFixture(testPath) {
+  const childEnvironment = { ...process.env };
+  delete childEnvironment.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', testPath], {
+    encoding: 'utf8',
+    env: childEnvironment,
+    timeout: 5000,
+    killSignal: 'SIGKILL',
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.error, undefined, `journey audit must allow cleanup and exit: ${output}`);
+  assert.equal(result.signal, null, output);
+  assert.match(output, /OWNED_FIXTURE_CLEANED/u);
+  return result;
 }
 
 describe('default-entry journey runtime', () => {
@@ -140,14 +170,26 @@ describe('default-entry journey runtime', () => {
         '}',
       ].join('\n'),
       (testPath) => {
-        const childEnvironment = { ...process.env };
-        delete childEnvironment.NODE_TEST_CONTEXT;
-        const result = spawnSync(process.execPath, ['--test', testPath], {
-          encoding: 'utf8',
-          env: childEnvironment,
-        });
-        assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+        const result = runRuntimeFixture(testPath);
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
         assert.match(`${result.stdout}\n${result.stderr}`, /claimed-journey.*never registered/u);
+      },
+    );
+  });
+
+  it('preserves a failed journey and still runs the later suite cleanup', () => {
+    runtimeFixture(
+      [
+        "import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';",
+        "registerDefaultEntryJourney({ journeyId: 'claimed-journey', surfaceTestId: 'claimed-surface' }, async () => {",
+        "  throw new Error('HOST_SURFACE_MISSING');",
+        '});',
+      ].join('\n'),
+      (testPath) => {
+        const result = runRuntimeFixture(testPath);
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+        assert.match(result.stdout, /HOST_SURFACE_MISSING/u);
+        assert.match(result.stdout, /claimed-journey.*never completed/u);
       },
     );
   });
@@ -168,12 +210,7 @@ describe('default-entry journey runtime', () => {
         '});',
       ].join('\n'),
       (testPath) => {
-        const childEnvironment = { ...process.env };
-        delete childEnvironment.NODE_TEST_CONTEXT;
-        const result = spawnSync(process.execPath, ['--test', testPath], {
-          encoding: 'utf8',
-          env: childEnvironment,
-        });
+        const result = runRuntimeFixture(testPath);
         assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
       },
     );
@@ -194,13 +231,8 @@ describe('default-entry journey runtime', () => {
         '});',
       ].join('\n'),
       (testPath) => {
-        const childEnvironment = { ...process.env };
-        delete childEnvironment.NODE_TEST_CONTEXT;
-        const result = spawnSync(process.execPath, ['--test', testPath], {
-          encoding: 'utf8',
-          env: childEnvironment,
-        });
-        assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+        const result = runRuntimeFixture(testPath);
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
         assert.match(`${result.stdout}\n${result.stderr}`, /claimed-journey.*claimed-surface.*never registered/u);
       },
     );

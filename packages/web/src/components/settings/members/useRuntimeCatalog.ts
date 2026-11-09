@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { MemberChoice } from './MemberChoicePicker';
 export interface MemberCatalog {
@@ -122,8 +122,9 @@ export function useRuntimeCatalog(
       });
     return () => controller.abort();
   }, [key, context, refresh, runtimeId, catId, accountRef, requestedModel, customStartup, plugin]);
-  return {
-    catalog:
+  // Keep transitional metadata stable: publishing it must not retrigger a subscribed parent forever.
+  const catalog = useMemo(
+    () =>
       result?.key === key
         ? result.data
         : result?.context === context
@@ -136,6 +137,10 @@ export function useRuntimeCatalog(
               selectedEffortLabel: undefined,
             }
           : null,
+    [result, key, context],
+  );
+  return {
+    catalog,
     loading: !!runtimeId && (loading || result?.key !== key),
   };
 }

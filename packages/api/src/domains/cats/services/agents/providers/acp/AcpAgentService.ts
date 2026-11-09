@@ -1,4 +1,5 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
+import { buildCliDiagnosticContext } from '../../../../../../utils/cli-diagnostics.js';
 import { excerptSanitizedStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
@@ -65,6 +66,7 @@ import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpSe
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
+  captureSessionMcpServers,
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
@@ -74,6 +76,15 @@ import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './ag
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
+import {
+  captureKimiLedgerBoundary,
+  formatKimiTurnFailure,
+  type KimiLedgerBoundary,
+  type KimiTurnFailure,
+  type KimiTurnOutcome,
+  readKimiTurnOutcome,
+  resolveKimiShareDir,
+} from './kimi/kimi-turn-outcome.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
 import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
 import type {
@@ -236,6 +247,13 @@ export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  /**
+   * #1838: an ACP provider process belongs to the multiplex pool, not to one turn. It can serve
+   * several leases and outlive a turn, so no per-execution Windows host link owns it. Declaring no
+   * Job coverage keeps recovery honest: an unproven stop stays unknown instead of claiming a
+   * teardown for a shared process. A clean final prompt response remains this turn's own proof.
+   */
+  readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
@@ -312,10 +330,11 @@ export class AcpAgentService implements AgentService {
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
     const userProjectRoot = input.workingDirectory;
     const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
+    const mcpWhitelist = input.mcpWhitelist ?? this.mcpWhitelist;
     let baseMcpServers: AcpMcpServer[];
     if (!mcpSupport) {
       baseMcpServers = [];
-    } else if (this.mcpWhitelist !== null) {
+    } else if (mcpWhitelist !== null) {
       const binaryRoot = resolveBinaryRoot(this.projectRoot);
       const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
       const {
@@ -325,7 +344,7 @@ export class AcpAgentService implements AgentService {
       } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
       assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
       const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
+      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, [...mcpWhitelist], undefined, {
         mcpSupport,
         disabledServerIds: disabled,
         catId: this.catId as string,
@@ -342,7 +361,7 @@ export class AcpAgentService implements AgentService {
       const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
       if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
     }
-    return { frozenAcpMcpServers: structuredClone(invokeServers) };
+    return { frozenAcpMcpServers: captureSessionMcpServers(invokeServers) };
   }
 
   /**
@@ -494,6 +513,49 @@ export class AcpAgentService implements AgentService {
     }
   }
 
+  /**
+   * Kimi's ACP bridge settles non-auth provider failures as a clean `end_turn`,
+   * so the only surviving cause is the CLI's own turn ledger. Native home comes
+   * from the child's exact env (never ambient); the workspace comes from the
+   * session's effective cwd, which differs from the process bootstrap cwd.
+   */
+  private kimiShareDir(client: object): string | null {
+    if (!this.nativeKimi) return null;
+    const spawnContext = 'spawnContext' in client ? (client as SpawnContextCarrier).spawnContext : undefined;
+    return spawnContext ? resolveKimiShareDir(spawnContext.env) : null;
+  }
+
+  /** Snapshot the ledger append position before the prompt; only new records count. */
+  private async captureKimiBoundary(
+    client: object,
+    sessionId: string | undefined,
+    sessionCwd: string,
+  ): Promise<KimiLedgerBoundary | null> {
+    const shareDir = this.kimiShareDir(client);
+    if (!shareDir || !sessionId) return null;
+    try {
+      return await captureKimiLedgerBoundary({ shareDir, cwd: sessionCwd, sessionId });
+    } catch {
+      // Diagnostics must never decide the turn; absence of evidence stays honest.
+      return null;
+    }
+  }
+
+  private async kimiTurnOutcomeFor(
+    client: object,
+    sessionId: string | undefined,
+    sessionCwd: string,
+    boundary: KimiLedgerBoundary | null,
+  ): Promise<KimiTurnOutcome | null> {
+    const shareDir = this.kimiShareDir(client);
+    if (!shareDir || !sessionId || !boundary) return null;
+    try {
+      return await readKimiTurnOutcome({ shareDir, cwd: sessionCwd, sessionId, boundary });
+    } catch {
+      return null;
+    }
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     if (this.nativeKimi && (options?.pluginNativeLaunch || options?.toolExecutionPolicy?.mode === 'plugin_native')) {
       yield* invokeKimiMember({
@@ -633,11 +695,17 @@ export class AcpAgentService implements AgentService {
       readonly recentCapacitySignal: AcpCapacitySignal | null;
       clearRecentCapacitySignal(): void;
       close?(): Promise<void>;
+      /** True when the latest prompt received a final RPC response, including a provider error. */
+      hasPromptFinalResponse?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    // #1838: an abnormal terminal is held until lease.release reports whether this release actually
+    // stopped the carrier. Emitting it earlier would mark an unknown stop even when the pool then
+    // completes a controlled close, suppressing the cancel terminal the route must broadcast.
+    let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
     let agyActive = true;
@@ -660,6 +728,12 @@ export class AcpAgentService implements AgentService {
     const markPromptAcknowledged = () => {
       if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
     };
+    // #1838: only the final prompt RPC response proves this turn's provider work ended. An abort,
+    // timeout or stream failure can leave the upstream prompt running (session/cancel is a
+    // notification; lease release and iterator return are not stop receipts), so the Host must
+    // keep the physical stop unknown. A prompt that never left the Host owns no writer.
+    const promptStopUnconfirmed = () =>
+      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -1028,6 +1102,8 @@ export class AcpAgentService implements AgentService {
             : prompt;
 
       // Window 4: onAbort listener covers the duration of promptStream
+      // Kimi's cause must be a record appended after this boundary, not a clock guess.
+      const kimiBoundary = await this.captureKimiBoundary(client, sessionId, cwd);
       promptStreamStartedAt = Date.now();
       // Prompt digest: length + hash only (snippets gated by AUDIT_LOG_INCLUDE_PROMPT_SNIPPETS)
       const promptDigest = createPromptDigest(effectivePrompt);
@@ -1163,6 +1239,17 @@ export class AcpAgentService implements AgentService {
       markPromptAcknowledged();
       log.info({ ...ctx, sessionId, eventCount }, 'ACP promptStream completed');
 
+      // Kimi can settle a known provider failure as a fast, empty end_turn. Read
+      // that terminal BEFORE the #1091 empty-resume recovery: an explicit failure
+      // must never be replayed or replaced by a retry guess. The result is reused
+      // below, so this turn reads the ledger once.
+      const kimiOutcome = await this.kimiTurnOutcomeFor(client, sessionId, cwd, kimiBoundary);
+      if (kimiOutcome?.kind === 'failed' && !options?.signal?.aborted) {
+        const pendingThinking = flushAcpThinking(acpState, this.catId, metadata);
+        if (pendingThinking) yield pendingThinking;
+        throw new AcpTerminalFailureError(this.providerName, kimiOutcome.failure, hasResponseOutput);
+      }
+
       // #1091: Zero-event resume detection. Some ACP providers (e.g. kimi) return
       // success from session/load but don't actually restore conversation context.
       // The subsequent promptStream produces zero content events and exits immediately.
@@ -1285,6 +1372,9 @@ export class AcpAgentService implements AgentService {
           let retryHasResponseOutput = false;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
           promptPhase = 'active_unacknowledged';
+          // The retry is a new turn on a new session: take its own append boundary.
+          const retryKimiBoundary = await this.captureKimiBoundary(client, freshSessionId, cwd);
+          promptStreamStartedAt = Date.now();
           for await (const event of this.promptStreamWithBusyRetry(
             client,
             freshSessionId,
@@ -1335,6 +1425,10 @@ export class AcpAgentService implements AgentService {
           // Flush trailing thinking from retry
           const retryThinking = flushAcpThinking(retryState, this.catId, metadata);
           if (retryThinking) yield retryThinking;
+          // The retry is its own turn; only its terminal record may explain it.
+          const retryKimiOutcome = await this.kimiTurnOutcomeFor(client, freshSessionId, cwd, retryKimiBoundary);
+          if (retryKimiOutcome?.kind === 'failed' && !options?.signal?.aborted)
+            throw new AcpTerminalFailureError(this.providerName, retryKimiOutcome.failure, retryHasResponseOutput);
           if (!retryHasResponseOutput && !options?.signal?.aborted) throw new AcpEmptyResponseError(this.providerName);
           client.clearRecentCapacitySignal();
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
@@ -1345,15 +1439,30 @@ export class AcpAgentService implements AgentService {
           }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
+          const terminalFailure = retryErr instanceof AcpTerminalFailureError;
+          const retryErrorCode = terminalFailure
+            ? retryErr.hadResponseOutput
+              ? 'prompt_failure'
+              : 'empty_response'
+            : retryErr instanceof AcpEmptyResponseError
+              ? 'empty_response'
+              : 'prompt_failure';
+          const diagnostics = protocolErrorDiagnostics(retryErr, this.providerName);
           yield {
             type: 'error',
             catId: this.catId,
-            error: `resume_empty_retry_failed: ${retryErrMsg}`,
-            errorCode: retryErr instanceof AcpEmptyResponseError ? 'empty_response' : 'prompt_failure',
-            metadata,
+            error: terminalFailure ? retryErrMsg : `resume_empty_retry_failed: ${retryErrMsg}`,
+            errorCode: retryErrorCode,
+            metadata: {
+              ...metadata,
+              ...(diagnostics ? { cliDiagnostics: diagnostics } : {}),
+            },
             timestamp: Date.now(),
           };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          // A provider error response is still the final prompt response: the turn ended, so the
+          // existing recovery path must see an acknowledged prompt rather than an unknown stop.
+          if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+          deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
           return; // Exit — error path handled completion
         }
       }
@@ -1361,6 +1470,7 @@ export class AcpAgentService implements AgentService {
       // Flush any remaining accumulated thinking before done.
       const trailingThinking = flushAcpThinking(acpState, this.catId, metadata);
       if (trailingThinking) yield trailingThinking;
+      // The Kimi terminal was read once above; only an unproven empty turn remains.
       if (!hasResponseOutput && !options?.signal?.aborted) throw new AcpEmptyResponseError(this.providerName);
       // Successful prompt — provider has recovered; clear stale capacity signal
       client.clearRecentCapacitySignal();
@@ -1387,16 +1497,23 @@ export class AcpAgentService implements AgentService {
       if (pendingThinking) yield pendingThinking;
 
       const { errorCode, errorMsg } = classifyError(err, capacitySignal, client.recentCapacitySignal);
+      const diagnostics = protocolErrorDiagnostics(err, this.providerName);
       log.error({ ...ctx, errorCode, err: errorMsg, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
       yield {
         type: 'error',
         catId: this.catId,
         error: toUserFacingError(this.providerName, errorCode, errorMsg),
         errorCode,
-        metadata,
+        metadata: {
+          ...metadata,
+          ...(diagnostics ? { cliDiagnostics: diagnostics } : {}),
+        },
         timestamp: Date.now(),
       };
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      // A provider error response is still the final prompt response, so this turn ended at the
+      // protocol boundary; only a genuine transport/timeout/cancel stays unconfirmed.
+      if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+      deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
@@ -1459,7 +1576,44 @@ export class AcpAgentService implements AgentService {
         if (onAbort && options?.signal) {
           options.signal.removeEventListener('abort', onAbort);
         }
-        await lease.release();
+        let releaseError: unknown;
+        let releaseStoppedCarrier = false;
+        try {
+          releaseStoppedCarrier = await lease.release();
+        } catch (err) {
+          releaseError = err;
+        }
+        // A release that kept the shared process alive is not stop proof. Only a real exit or a
+        // release whose controlled close completed is: a transport error sets isAlive false without
+        // any native exit, so availability and closed/killed never stand in for stop evidence.
+        const carrierStopped = releaseStoppedCarrier || lease.client.hasExited === true;
+        if (releaseError) {
+          log.warn(
+            { ...ctx, sessionId, err: releaseError instanceof Error ? releaseError.message : String(releaseError) },
+            'ACP lease release did not confirm the carrier stop; keeping the turn stop unknown',
+          );
+          if (deferredTerminal) {
+            // Mark the stop unknown before the failure propagates. invoke-single-cat stops on this
+            // flag; the bridge instead receives the rejected return and emits session_contract_failed.
+            yield {
+              type: 'status',
+              catId: this.catId,
+              providerTeardown: 'unconfirmed' as const,
+              content: '停止尚未确认，执行绑定仍被占用',
+              timestamp: Date.now(),
+            };
+          }
+          throw releaseError;
+        }
+        if (deferredTerminal) {
+          yield {
+            type: 'done',
+            catId: this.catId,
+            metadata: deferredTerminal.metadata,
+            ...(deferredTerminal.unconfirmed && !carrierStopped ? { providerTeardown: 'unconfirmed' as const } : {}),
+            timestamp: Date.now(),
+          };
+        }
       }
     }
   }
@@ -1539,8 +1693,47 @@ class AcpEmptyResponseError extends Error {
   }
 }
 
+/**
+ * ACP settled the prompt as a clean `end_turn`, but the provider's own turn
+ * ledger proves this turn failed. Kimi's bridge only forwards auth errors over
+ * JSON-RPC, so this typed error carries the bounded cause instead.
+ */
+class AcpTerminalFailureError extends Error {
+  constructor(
+    providerName: string,
+    readonly failure: KimiTurnFailure,
+    readonly hadResponseOutput: boolean,
+  ) {
+    super(
+      hadResponseOutput
+        ? `${providerName} 本轮在失败前已输出部分内容，但上游终态为失败。上游报告：${formatKimiTurnFailure(failure)}`
+        : `${providerName} 未返回可用回复或工具调用，无法确认本轮成功。上游报告：${formatKimiTurnFailure(failure)}`,
+    );
+    this.name = 'AcpTerminalFailureError';
+  }
+}
+
+type SpawnContextCarrier = {
+  readonly spawnContext?: { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
+};
+
 /** Pattern for stream idle stall errors thrown by AcpClient idle watchdog. */
 const STREAM_IDLE_RE = /Stream idle|STREAM_IDLE_STALL/i;
+
+/** Supplemental diagnostics are display-only; never feed them into cause classification. */
+function protocolErrorDiagnostics(err: unknown, providerName: string): MessageMetadata['cliDiagnostics'] {
+  const protocolError = err instanceof AcpSessionBindingError ? err.cause : err;
+  if (
+    !(protocolError instanceof AcpProtocolError) ||
+    typeof protocolError.data !== 'object' ||
+    protocolError.data === null
+  )
+    return undefined;
+  const diagnostics = (protocolError.data as Record<string, unknown>).diagnostics;
+  return typeof diagnostics === 'string' && diagnostics.trim()
+    ? buildCliDiagnosticContext({ rawText: diagnostics, debugRef: { command: providerName, signal: null } })
+    : undefined;
+}
 
 function classifyError(
   err: unknown,
@@ -1548,6 +1741,11 @@ function classifyError(
   clientRecentSignal?: AcpCapacitySignal | null,
 ): { errorCode: string; errorMsg: string } {
   if (err instanceof AcpEmptyResponseError) return { errorCode: 'empty_response', errorMsg: err.message };
+  if (err instanceof AcpTerminalFailureError)
+    return {
+      errorCode: err.hadResponseOutput ? 'prompt_failure' : 'empty_response',
+      errorMsg: err.message,
+    };
   if (err instanceof AcpImageInputError) return { errorCode: err.code, errorMsg: err.message };
   if (err instanceof AcpProtocolError) {
     // JSON-RPC data.error carries the real cause (e.g. Kimi wraps exceptions

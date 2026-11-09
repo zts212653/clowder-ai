@@ -254,10 +254,24 @@ for (const scenario of cases) {
     });
     assert.equal(
       listed.statusCode,
-      scenario.name === 'strict' || scenario.name === 'work-allowed' ? 200 : 403,
+      ['strict', 'compatibility', 'unknown', 'work-allowed'].includes(scenario.name) ? 200 : 403,
       listed.body,
     );
     if (listed.statusCode === 200) assert.ok(listed.json().json.includes(savedWork.reference.contentRef));
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/work',
+      headers,
+      payload: { command: works.command(`managed-${scenario.name}-production`) },
+    });
+    assert.equal(
+      created.statusCode,
+      scenario.name === 'strict' || scenario.name === 'work-allowed' ? 200 : 403,
+      `reading retained work must not upgrade the resumed invocation to independent production: ${created.body}`,
+    );
+    if (created.statusCode === 200) {
+      assert.notEqual(JSON.parse(created.json().json).reference.contentRef, savedWork.reference.contentRef);
+    }
     assert.equal(
       (await app.inject({ method: 'GET', url: '/api/callbacks/thread-context', headers })).statusCode,
       scenario.name === 'legacy' || scenario.name === 'work-allowed' ? 403 : 200,
