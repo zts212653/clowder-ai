@@ -74,6 +74,36 @@ describe('workspace git probe failures', () => {
     assert.notEqual(body.isGitRepository, false);
     assert.equal(body.commits.length, 1);
     assert.equal(body.commits[0].subject, 'init');
+
+    for (const endpoint of ['git-status', 'git-health']) {
+      const worktreeOnly = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/${endpoint}?worktreeId=probe-bare`,
+      });
+      assert.equal(worktreeOnly.statusCode, 409, endpoint);
+      assert.equal(JSON.parse(worktreeOnly.payload).code, 'git_worktree_required', endpoint);
+    }
+    const diff = await app.inject({ method: 'GET', url: '/api/workspace/diff?worktreeId=probe-bare' });
+    assert.equal(diff.statusCode, 409);
+    assert.equal(JSON.parse(diff.payload).code, 'git_worktree_required');
+  });
+
+  test('bare core.bare loaded through include stays an error after damage', async () => {
+    const bare = join(root, 'bare-include.git');
+    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
+    writeFileSync(join(bare, 'config'), '[include]\n\tpath = bare-config\n');
+    writeFileSync(join(bare, 'bare-config'), '[core]\n\tbare = true\n');
+    execFileSync('git', ['config', '--includes', '--file', join(bare, 'config'), '--type=bool', '--get', 'core.bare']);
+    rmSync(join(bare, 'HEAD'));
+    rmSync(join(bare, 'objects'), { recursive: true, force: true });
+    registerWorktrees([{ id: 'probe-bare-include', root: bare, branch: '', head: '' }]);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/workspace/git-status?worktreeId=probe-bare-include',
+    });
+    assert.equal(response.statusCode, 503);
+    assert.equal(JSON.parse(response.payload).code, 'git_unavailable');
   });
 
   test('broken global Git configuration stays an error at all four read endpoints', async () => {

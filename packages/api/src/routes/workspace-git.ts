@@ -10,12 +10,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
-import { probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
+import { probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
 
-export { isGitWorkTree, probeGitRepository } from '../domains/workspace/git-worktree-probe.js';
+export { isGitWorkTree, probeGitRepository, probeGitWorkTree } from '../domains/workspace/git-worktree-probe.js';
 
 // ── Parsers (exported for unit testing) ─────────────────────────────
 
@@ -234,7 +234,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitRepository(root);
+      const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
@@ -272,10 +272,14 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitRepository(root);
+      const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return {
@@ -348,10 +352,14 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const probe = await probeGitRepository(root);
+      const probe = await probeGitWorkTree(root);
       if (probe === 'unavailable') {
         reply.status(503);
         return { error: 'Git is unavailable', code: 'git_unavailable' };
+      }
+      if (probe === 'bare') {
+        reply.status(409);
+        return { error: 'Git worktree required', code: 'git_worktree_required' };
       }
       if (probe === 'not-git') {
         return { isGitRepository: false, staleBranches: [], worktrees: [], runtimeDrift: null };
