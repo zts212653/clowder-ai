@@ -1,6 +1,6 @@
 {
   "pluginId": "official.chatgpt-dot",
-  "version": "0.2.0-alpha.35",
+  "version": "0.2.0-alpha.36",
   "contractVersion": "0.3.3-candidate.1",
   "name": "ChatGPT Dot",
   "description": {
@@ -88,9 +88,19 @@
           "label": "生成 Server URL",
           "render": "button",
           "resultRender": "text",
-          "confirm": "生成或显示当前 Server URL？有效入口会被复用，主动更新请使用连接区的轮换操作。",
+          "confirm": "生成或显示当前 Server URL？有效入口会被复用，主动更新请使用下方轮换操作。",
           "action": {
             "method": "dot.use-long-lived"
+          }
+        },
+        {
+          "id": "refresh-credential",
+          "label": "轮换访问密钥",
+          "render": "button",
+          "resultRender": "text",
+          "confirm": "确认轮换现有访问密钥？完整 Server URL 会变化，需要在 ChatGPT 添加新连接并发送订阅消息；验证成功前保留旧正式连接。",
+          "action": {
+            "method": "dot.refresh-credential"
           }
         }
       ]
@@ -110,6 +120,16 @@
           "confirm": "确认启动一个有时限的临时公网入口？",
           "action": {
             "method": "dot.start-temporary"
+          }
+        },
+        {
+          "id": "refresh-credential",
+          "label": "轮换访问密钥",
+          "render": "button",
+          "resultRender": "text",
+          "confirm": "确认轮换现有访问密钥？完整 Server URL 会变化，需要在 ChatGPT 添加新连接并发送订阅消息；验证成功前保留旧正式连接。",
+          "action": {
+            "method": "dot.refresh-credential"
           }
         }
       ]
@@ -164,13 +184,14 @@
           }
         },
         {
-          "id": "refresh-credential",
-          "label": "更新外部凭据",
+          "id": "repair-subscription",
+          "label": "重新连接",
           "render": "row",
           "resultRender": "text",
-          "confirm": "确认轮换访问凭据并验证新入口？现有连接会保留到验证成功。",
+          "next": "status",
+          "confirm": "重新生成当前连接的订阅消息？请将返回的消息发到目标 ChatGPT Work 对话并允许订阅；Server URL 保持不变。",
           "action": {
-            "method": "dot.refresh-credential"
+            "method": "dot.repair-subscription"
           }
         },
         {

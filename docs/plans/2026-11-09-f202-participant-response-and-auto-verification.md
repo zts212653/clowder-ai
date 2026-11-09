@@ -80,3 +80,39 @@ Git 核验：Host 通用 OperationRowsRenderer 的固定列表刷新按钮已存
 现在自动状态在原失效处理完成后重新发起未确认的纯读取，并重开有界观察。旧请求 abort、epoch 检查及 proposal 作废顺序保留；确认型操作继续等待主人确认，不恢复常驻刷新，也不重挂整个设置区。检查本组件的其他清空状态入口：目标/声明变化、proposal 到期、放弃已有对应读取，配置失效是本次遗漏；生成 URL 等兄弟操作仍保持独立结果。
 
 验证：受影响 Web 96/96、reviewer 反例2/2、Web noEmit、Biome/diff 检查通过。新回归覆盖配置变更时的两种读取顺序、旧请求迟到被拒绝及确认权限；隔离浏览器从真实 PluginManagerOperationField/ActionRenderer 输入配置，确认自动重读后显示待连接、无常驻按钮，错误恢复后按钮消失。回执 `status-config-browser-receipt.json`，截图 `status-config-waiting.png`。本轮只改 Host，插件 exact HEAD `f7bb6934` 沿用批准和原 alpha.35 包，未操作运行实例。Host 新提交仍需独立复审；真实 Work 与 soak 未完成。
+
+## alpha.36 按连接状态组织恢复
+
+接受来源 `0001794209197166-001071-d1af11cb`，前述模型 `0001794208818902-001001-f9e9614b`。Before：入口失效仍给放弃更新/断开，operator 需要理解并清理候选。After：状态区只给对应恢复步骤，新 URL 创建替换候选，正式连接保留到新验证成功；历史消息与线程不动。
+
+复用现有 Host operation 字段、通用确认/文本复制/有界观察；不新增 Host 状态判断。插件负责真实状态与恢复，Host 保持安装/生命周期边界，operator 保留创建入口、轮换/撤销及在 Work 发送订阅消息的明确授权。只读交互稿由 astra 源码复核后回传（同线程 alpha.36 design），不等于代码批准。
+
+| 状态 | 操作与结果 |
+| --- | --- |
+| 未配置/已断开 | 待连接，上方生成 URL；查询不创建授权 |
+| 等待发现/等待订阅/验证中 | 无清理、手动检查或测试按钮；指出对应外部步骤 |
+| 可用 | 断开连接，确认后撤销授权，保留历史 |
+| 验证失败/超时且授权仍有效 | 重试验证，复用原作业、nonce/thread/event及已保存证明 |
+| 消息/订阅过期、候选配对失配，URL与密钥有效 | 重新生成订阅消息，同 URL 在目标 Work 发送；恢复候选 intent/binding/proof 时精确 CAS 且不改 current |
+| 入口或访问凭据失效 | 指向上方相应 URL 创建/生成；不以取消/断开充当恢复 |
+| 插件未运行 | 指向插件卡片恢复运行，不提供必失败的验证重试 |
+
+轮换作为上方 URL 区显式独立操作，沿用确认/文本结果，提示完整 URL 可能变化及需外部添加。后台 cancel 与撤销 fence 保留，但不再把它们作为正常恢复步骤。禁止用现有 begin(true) 冒充无损重连；失配恢复保留原 token/URL/discovery，清除失配候选证明，迟到旧操作继续受 candidate/token/attempt/binding 约束。已过期正式 subscription 对象也须更新配对码，不得只判断对象是否存在。验证失败作业不得盖过 runtime/入口/凭据/订阅状态。
+
+实施顺序：先覆盖状态操作的 RED；补插件内同授权恢复与正式订阅过期分支；移位声明及更新旅程说明；完整插件回归、实际通用 rows 文本复制的隔离浏览器、显式构建与精确包离线安装；两份 exact HEAD 独立复审后交 operator 加载体验。真实 Work 和 soak 仍独立于本轮检查。Mission Hub 本轮写入返回 strict_owner_auth_required（403），保留失败事实，未创建替代 Task/接管 legacy owner；本文件与源消息记录进展。
+
+### 实现与自检
+
+交互稿来源 `0001794209489413-001090-b4c09e98`。正常行仅断开；等待/自动验证无清理按钮；访问凭据/入口失效明确指向 URL 区，失败作业不能遮盖这些故障。轮换移为两个 URL operation 的独立确认按钮；尚无可用入口时返回明确操作指引，不签发无效凭据。订阅消息/订阅到期和候选失配通过新的主人恢复动作返回可复制的同 URL 订阅消息。
+
+恢复采用原 external 单记录 CAS：校验原候选、token 与 revision，清除失配候选 binding/intent/proof，保留 token、URL、discovery 及 current；begin 前后仍检查原授权身份。已接受的取消/断开可使迟到恢复失败，不能再生成新的有效 identity。statusState 对失配候选回调不强行 apply，而是展示实际失配供主人恢复。正式 subscription 对象过期时也更新配对码；生成后再次取消息复用该码。
+
+完整 RPC 反例发现：即使新的订阅成功，同 URL/密钥/回调的旧 sent 作业仍会阻止新验证。因此仅在明确修复授权时在 external 保存 verificationGeneration，加入既有验证任务指纹，并随候选转正保存；普通续订/重启的旧指纹不变。旧事件不能给新 intent 记证明，修复前历史测试也不能冒充修复后可用。反例已由未启动自动验证转绿，覆盖候选完整重新订阅与正式订阅过期后的新验证、重启复用。
+
+RED 证据：`/tmp/f202-alpha36-projection-red.log`、`/tmp/f202-alpha36-recovery-red.log`、`/tmp/f202-alpha36-repaired-subscribe.log`、`/tmp/f202-alpha36-mismatch-projection-red.log`。相关恢复检查含候选配对/回调两种失配、CAS 期间替换、提交后断开、旧校验回复迟到、正常/候选重复订阅、首次/替换超时及原入口过期后的完整 discovery/subscribe/read/reply。
+
+隔离浏览器 `connection-recovery-browser.mts` 使用实际 Host operationFieldProjection、PluginManagerOperationField/ActionRenderer、实际插件状态与 owner action；只将网络与 Host 数据置于自有 fixture。入口失效无清理按钮，订阅失效仅重新连接，确认后消息实际写入剪贴板，状态继续到等待订阅且无常驻刷新。回执 `connection-recovery-browser-receipt.json`，截图 `connection-recovery-endpoint.png`、`connection-recovery-subscription.png`；不冒充真实 Work。自有浏览器和服务器均已关闭。
+
+Fallback 检查使用原脚本仅适配插件根路径：生产 automatic-verification +1、connection +1、journey-projection 净0；测试中空 actions/可选 detail 的断言合计触发阈值，并非多级执行兜底。生产新增选择明确对应当前/候选授权和恢复 fence，没有 Host 分支、缓存或新的回退路由。最终安装包须显式构建后归档、逐字节比对与空缓存离线安装，再交两份 exact HEAD 复审。未安装插件、更新运行配置或重启服务。
+
+最终自检：插件 200/200（`/tmp/f202-alpha36-release-suite.log`）、构建/类型检查通过；隔离浏览器确认与实际剪贴板复制通过；精确归档准入及空缓存离线安装1/1（`archive-alpha36-final.log`）。89个运行/资源/声明/文档文件逐字节匹配；alpha.36 SHA256 `7980c52f0a7a2d34fb9887dddfd0c6f6dd53e52bf1e816e1f889dac40ba5832b`。SDK 仍 candidate.12。插件提交 `2d5db3fea3f4b814e5db8491ef65f291f3b3e37d`，Host 增量仅本记录与随包版本/完整性引用；正式 exact-HEAD 复审、实机体验与 soak 保持待完成。
