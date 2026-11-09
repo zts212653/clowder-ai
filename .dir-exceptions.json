@@ -3,50 +3,50 @@
     {
       "path": "packages/api/src/domains/collaborative-content/artifact-review",
       "owner": "codex-astra",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 26 direct TypeScript files in both trees. Response judgment, return intent and reducer settlement share sealed audience and owner-revision checks; moving a response/return subset needs those imports and replay consumers reviewed together. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 27 direct TypeScript files in the reviewed source, 27 in the current public tree. Media evidence, response judgment and return settlement share the published-media access checks, canonical ledger and review store; moving a file subgroup requires its replay and audience checks to move with it. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F326 / cat-cafe#5799 / clowder-ai#1649"
     },
     {
       "path": "packages/api/src/domains/workspace",
       "owner": "codex-astra",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 36 direct TypeScript files in both trees. File resolution, content identity, snapshots and metadata readers share security errors and revision checks. A content-source or snapshot subgroup is plausible, but a file move alone would not establish that dependency boundary. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 36 direct TypeScript files in the reviewed source, 36 in the current public tree. Content readers and snapshots share workspace security, content identity and linked-root contracts. A content-source subgroup needs those consumers reviewed together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F063/F326 / cat-cafe#5799 / clowder-ai#1649"
     },
     {
       "path": "packages/api/src/infrastructure/capability-evolution/adapters",
       "owner": "codex-astra",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 25 direct TypeScript files in both trees. Adapters translate existing evaluation, request-review and archive provenance contracts. Separate them by consumer lifecycle only after preserving the immutable historical source coordinates. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 25 direct TypeScript files in the reviewed source, 25 in the current public tree. The evaluation and archive adapters share microduck owner validation and immutable historical source coordinates; their lifecycle separation requires a consumer-aware change. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F330/F311 / cat-cafe#5854 / clowder-ai#1649"
     },
     {
       "path": "packages/api/src/domains/collaborative-content/collective-artifact",
       "owner": "codex61-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 36 direct TypeScript files in both trees. Markdown, retained media and custody adapters share the artifact owner and effect/receipt settlement. Their published import surface must move with its callers rather than be split to satisfy a count. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 36 direct TypeScript files in the reviewed source, 36 in the current public tree. Markdown authority, media and custody adapters share the artifact owner port and collective scope settlement; their public callers must move with any split. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
     },
     {
       "path": "packages/api/src/domains/collaborative-content/modification",
       "owner": "codex61-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 28 direct TypeScript files in both trees. Collective acceptance, scope snapshots and resolution use the modification journal and recovery lifecycle; a collective subgroup needs its settlement consumers moved together. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 28 direct TypeScript files in the reviewed source, 28 in the current public tree. Acceptance, modification journals and source snapshots share MessageStore, artifact review and published-media access. Separating collective adapters must retain the same recovery lifecycle. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
     },
     {
       "path": "packages/api/src/domains/collaborative-content/workspace-review",
       "owner": "codex61-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 27 direct TypeScript files in both trees. Custody and source adapters meet at the existing public/private review composition boundary; any subgroup must retain that authority boundary and original source identity. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 27 direct TypeScript files in the reviewed source, 27 in the current public tree. Source and custody adapters share workspace content, review anchors and service errors. A subgroup needs to preserve public/private review authority and original source identity. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
     },
     {
       "path": "packages/api/src/domains/video-studio/content-owner",
       "owner": "codex61-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 34 direct TypeScript files in both trees. Immutable versions, content ownership, HTML bodies and collective custody now meet at one owner CAS/effect boundary. HTML6332 just entered the frozen cut; ownership and publication subgroups need a consumer-aware change, not an incidental release repair. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 37 direct TypeScript files in the reviewed source, 37 in the current public tree. New media digest/export and GIF helpers meet the existing types, media-errors and published-media-access boundary. A media subgroup must retain ownership, streamed bytes and publication access checks. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
     },
     {
@@ -73,99 +73,99 @@
     {
       "path": "packages/api/src/domains/cats/services/agents/routing",
       "owner": "opus-48",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 53 direct TypeScript files in both trees. Routing admission, queue policy, artifact tracking and dispatch share invocation interfaces. The existing F23 decomposition is still a separate code change; this exception does not claim that the current directory is cohesive or refactored. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 55 direct TypeScript files in the reviewed source, 54 in the current public tree. Navigation source and scoped-member routing additions use MessageStore, visibility and route helpers. Routing, input assembly and handoff separation must preserve caller visibility and scoped authority. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/routes",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 536 direct TypeScript files in both trees. This is the heterogeneous HTTP composition boundary, not one cohesive module. Domain/HTTP grouping remains necessary architecture work, but moving 536 registered handlers during a frozen publication repair would expand the accepted change to their composition roots and tests. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 556 direct TypeScript files in the reviewed source, 556 in the current public tree. This remains a mixed transport directory, not a cohesive module. New memory, scheduler, watcher and publication readers share request identity, callback auth and store interfaces; moving route families requires their registration and authorization consumers to be reviewed. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/config",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 102 direct TypeScript files in both trees. Configuration adapters cross account, deployment, native capability and persistence boundaries. Their stable subdirectories must follow domain ownership and callers; this publication change does not choose a new architecture. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 106 direct TypeScript files in the reviewed source, 105 in the current public tree. Accounts, identity, member environments and platform authentication remain mixed concerns. Separating launch configuration requires preserving account resolution and plugin composition; a count-only move does not establish that boundary. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/invocation",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 93 direct TypeScript files in both trees. Queue, registry, progress, reconciliation, delivery and authorization paths share current invocation lifecycle interfaces. Splitting those responsibilities requires a dedicated consumer-aware change and is not accomplished by this renewal. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 106 direct TypeScript files in the reviewed source, 106 in the current public tree. New execution evidence, recovery and child-settlement modules meet InvocationRecordStore, TurnExecutionStore and MessageStore. Recovery/launch groups must preserve lifecycle ownership and process-stop evidence. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/providers",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 134 direct TypeScript files in both trees. Provider agents, native carriers, event transformations and launch configuration cross the shared request builder. The cut contains reviewed account/Codex/Kimi changes; preserve their call paths while the existing decomposition debt remains explicit. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 143 direct TypeScript files in the reviewed source, 143 in the current public tree. Provider-specific transports and new watcher/scoped-native modules share event mapping, process lifetime and diagnostic handling. A provider split must keep those public adapters and callers aligned. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/stores/ports",
       "owner": "codex",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 56 direct TypeScript files in both trees. Store contracts are shared by proposal, profile, session and messaging consumers. Interface placement must move with implementations and importers, without changing persistence or authority contracts in this publication repair. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 59 direct TypeScript files in the reviewed source, 59 in the current public tree. New task probe and turn settlement contracts join existing TaskStoreContract and revision/wait interfaces. A port-family split must move both factories and Redis consumers together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F231/F23-followup"
     },
     {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 221 direct TypeScript files in both trees. Memory spans query, indexing, library and governance, and is explicitly not a single cohesive concern. The F102/F23 split requires its data and caller boundaries; the current release repair introduces no such refactor. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 239 direct TypeScript files in the reviewed source, 237 in the current public tree. Search, indexing, library and governance remain distinct responsibilities. New discovery, published-document and selected-message lifecycles share interfaces and evidence stores; a split must preserve canonical read, cancellation and persistence boundaries. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F102"
     },
     {
       "path": "packages/api/src/utils",
       "owner": "codex",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 75 direct TypeScript files in both trees. CLI, process, media, path, network and parsing helpers have callers across domains. Moving them only for the count would leave the dependency coupling untouched; the existing F23 work remains the place for a real boundary change. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 88 direct TypeScript files in the reviewed source, 88 in the current public tree. New media detection and Windows/process ownership helpers add to existing CLI, path and network utilities. These are mixed concerns; regrouping requires following their cross-domain callers rather than just moving files. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/infrastructure/harness-eval",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 68 direct TypeScript files in both trees. Capability, A2A, registry and Hub evaluation paths share persisted metric/verdict inputs. A domain split must preserve those identifiers and consumers; no measurement or execution semantics change in this exception renewal. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 68 direct TypeScript files in the reviewed source, 68 in the current public tree. Evaluation paths still share re-evaluation event schemas and approval contracts. Decomposition must preserve persisted metric/verdict identifiers and their replay consumers. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F192"
     },
     {
       "path": "packages/api/src/infrastructure/harness-eval/publish-verdict",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 29 direct TypeScript files in both trees. Publishing input validation, source types and adapters share the existing exact-verdict transaction and replay contract. Keep the existing extraction stable until its adapter boundaries are changed with their consumers. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 28 direct TypeScript files in the reviewed source, 28 in the current public tree. One stage-path module was removed; remaining validation and publishing adapters share exact verdict types and the Hub read model. Keep that transaction boundary until its consumers move together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F192"
     },
     {
       "path": "packages/api/src/domains/cats/services/stores/redis",
       "owner": "opus",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 81 direct TypeScript files in both trees. Redis implementations must stay aligned with store ports and proposal/community/session consumers. Restructuring them is a persistence-boundary change, not a safe incidental step of the current publication. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 90 direct TypeScript files in the reviewed source, 90 in the current public tree. New recovery Lua/index and turn-settlement modules implement existing ports and Redis key contracts. Separation must keep codecs, atomic operations and persistence recovery aligned. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/auto-dream",
       "owner": "codex-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 35 direct TypeScript files in both trees. Cat-life settings, seeds, stores, run lifecycle and proactive relationships still share existing orchestration interfaces. This renewal leaves F255/F272 decomposition and behavior unchanged. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 35 direct TypeScript files in the reviewed source, 35 in the current public tree. Settings, seeds, stores and relationship orchestration still share store-context, store-types and proactive relationship contracts. The existing decomposition boundary is unchanged. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F255/F272"
     },
     {
       "path": "packages/api/src/domains/ball-custody",
       "owner": "codex-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 126 direct TypeScript files in both trees. Successor actions, typed waits, managed commands and observability share lifecycle receipts. Separation must preserve their ownership and wake semantics; the current publication does not undertake that cross-contract refactor. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 155 direct TypeScript files in the reviewed source, 155 in the current public tree. New recovery/projection owners, managed-command waits and handoff readers share successor state, leases and wake lifecycle contracts. A split must preserve ownership, notification and recovery receipts. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F167/F233/F280"
     },
     {
       "path": "packages/api/src/domains/memory/people",
       "owner": "codex-sol",
-      "reason": "2026-11-01 publication reassessment at source bc698f63 / public 3d106d9a: 70 direct TypeScript files in both trees. Identity, proposal lifecycle, disposition proofs and persistence share people-memory authority. The existing F276/F281/F282 ownership boundaries require a dedicated change with their readers and stores. Existing owner/ticket metadata is retained; this author renewal is not a new feature/Task assignment. Bounded exception through 2026-11-08; no threshold, clock or guard change.",
-      "expiresAt": "2026-11-08",
+      "reason": "2026-11-09 publication reassessment: 70 direct TypeScript files in the reviewed source, 70 in the current public tree. Identity proposals, memory dispositions and persistence still share PersonMemoryStore, keys and record plans; decomposition requires those authority-bearing consumers together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
+      "expiresAt": "2026-11-16",
       "ticket": "F276/F281/F282"
     },
     {
