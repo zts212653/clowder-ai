@@ -123,6 +123,13 @@ async function execute(
         if (job.kind === 'message-search')
           return await store.searchMessagePassages(job.query, {
             ...job.options,
+            onCandidateAudit: (candidateAudit) => {
+              try {
+                report({ phase: 'candidate-audit', candidateAudit });
+              } catch {
+                /* This bounded report shares the existing read-diagnostic transport. */
+              }
+            },
             onCjkRead: (cjk) => {
               try {
                 report({ phase: 'cjk-read', cjk });

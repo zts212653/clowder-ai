@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { SessionSealer } from '../src/domains/cats/services/session/SessionSealer.js';
 import { TranscriptWriter } from '../src/domains/cats/services/session/TranscriptWriter.js';
 import { SessionChainStore } from '../src/domains/cats/services/stores/ports/SessionChainStore.js';
+import { SummaryStore } from '../src/domains/cats/services/stores/ports/SummaryStore.js';
 import {
   scopedSessionBase as base,
   scopedSessionInvocation as scoped,
@@ -35,16 +36,12 @@ test('scoped sealing archives the real transcript without home memory, generativ
     );
     let privateReads = 0;
     let hooks = 0;
-    const sealer = new SessionSealer(store, writer, undefined, undefined, {
-      getBootstrapDepth() {
-        privateReads++;
-        return 'generative';
-      },
-      async resolveProfile() {
-        privateReads++;
-        return null;
-      },
-    });
+    const summaries = new SummaryStore();
+    summaries.listByThread = () => {
+      privateReads++;
+      return [];
+    };
+    const sealer = new SessionSealer(store, writer, undefined, undefined, summaries);
     sealer.registerPostSealHook(async () => {
       hooks++;
     });

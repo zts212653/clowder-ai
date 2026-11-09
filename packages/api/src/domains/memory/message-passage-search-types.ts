@@ -1,5 +1,6 @@
 import type { SearchExecutionMeta, SearchOptions } from './interfaces.js';
 import type { MemoryReadSnapshot } from './memory-read-execution.js';
+import type { MessageCandidateAuditRequest, MessageCandidateAuditSnapshot } from './message-candidate-audit-wire.js';
 import type { CjkReadSnapshot } from './message-cjk-read-diagnostics.js';
 
 /** Internal index admission. These grants/source coordinates come from the server. */
@@ -13,6 +14,10 @@ export interface MessagePassageSearchOptions
   /** Private observers, stripped before IPC; never part of public search metadata. */
   onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;
   onCjkRead?: (snapshot: CjkReadSnapshot) => void;
+  /** Host-only, request-derived HMAC key. Never accepted from public HTTP/MCP input. */
+  candidateAudit?: MessageCandidateAuditRequest;
+  /** Worker adapter to the existing read-diagnostic IPC; stripped from parent jobs. */
+  onCandidateAudit?: (snapshot: MessageCandidateAuditSnapshot) => void;
   excludeSource?: { threadId: string; messageId: string };
 }
 

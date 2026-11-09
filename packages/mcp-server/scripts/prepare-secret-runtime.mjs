@@ -6,6 +6,7 @@ import ts from 'typescript';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(packageRoot, '../..');
 const output = resolve(packageRoot, 'dist/runtime');
+const hostModuleRoots = [resolve(packageRoot, 'dist'), resolve(repository, 'packages/api/dist')];
 // These are retired generated MCP wrappers, never user files. Do not ship
 // stale compiled entrypoints after an incremental build of their removal.
 for (const name of [
@@ -61,7 +62,7 @@ function collect(file) {
     }
     const target = resolve(dirname(path), name);
     // The source hook and its packaged copy call the very same MCP module.
-    if (inside(resolve(packageRoot, 'dist'), target)) {
+    if (hostModuleRoots.some((root) => inside(root, target))) {
       code = code.replaceAll(name, portable(relative(dirname(resolve(output, file)), target)));
       continue;
     }

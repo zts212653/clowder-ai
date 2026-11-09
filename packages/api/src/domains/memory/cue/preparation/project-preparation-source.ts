@@ -1,6 +1,7 @@
 import type { RecallResolverFamily } from '@cat-cafe/shared';
 import type { DiscoveryReadRequest, KnowledgeDiscoverySource } from '../../knowledge-discovery.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
+import { observePreparationPhase, type PreparationPhaseObserver } from './preparation-source-observation.js';
 import type { PreparedCoordinate } from './WorkPreparationOpportunityStore.js';
 
 export interface PreparationSource {
@@ -18,6 +19,7 @@ export function projectPreparationSource<Candidate, Item>(
     item: Item,
     lifetime: Pick<DiscoveryReadRequest, 'signal' | 'deadlineAt'>,
   ) => Promise<PreparationSource | null>,
+  observe?: PreparationPhaseObserver,
 ): KnowledgeDiscoverySource<unknown, PreparationSource> {
   let lifetime: Pick<DiscoveryReadRequest, 'signal' | 'deadlineAt'> = {};
   const wrap = async (item: Item | null) => {
@@ -30,23 +32,29 @@ export function projectPreparationSource<Candidate, Item>(
   return {
     id: native.id,
     tolerateError: true,
-    read: (request) => {
-      lifetime = { signal: request.signal, deadlineAt: request.deadlineAt };
-      return native.read(request);
-    },
+    read: (request) =>
+      observePreparationPhase(observe, 'read', () => {
+        lifetime = { signal: request.signal, deadlineAt: request.deadlineAt };
+        return native.read(request);
+      }),
     eligible: eligible ? (candidate) => eligible(candidate as Candidate) : undefined,
     candidateKey: candidateKey ? (candidate) => candidateKey(candidate as Candidate) : undefined,
-    project: async (candidate) => wrap(await native.project(candidate as Candidate)),
-    projectWave: async (candidates) =>
-      Promise.all(
-        (
-          await (native.projectWave
-            ? native.projectWave(candidates as Candidate[])
-            : Promise.all(candidates.map((candidate) => native.project(candidate as Candidate))))
-        ).map(wrap),
+    project: (candidate) =>
+      observePreparationPhase(observe, 'project', async () => wrap(await native.project(candidate as Candidate))),
+    projectWave: (candidates) =>
+      observePreparationPhase(observe, 'project', async () =>
+        Promise.all(
+          (
+            await (native.projectWave
+              ? native.projectWave(candidates as Candidate[])
+              : Promise.all(candidates.map((candidate) => native.project(candidate as Candidate))))
+          ).map(wrap),
+        ),
       ),
-    revalidate: async (item) =>
-      wrap(native.revalidate ? await native.revalidate(item.native as Item) : (item.native as Item)),
+    revalidate: (item) =>
+      observePreparationPhase(observe, 'revalidate', async () =>
+        wrap(native.revalidate ? await native.revalidate(item.native as Item) : (item.native as Item)),
+      ),
     key: (item) => `${item.family}\0${item.source.anchor}`,
   };
 }
