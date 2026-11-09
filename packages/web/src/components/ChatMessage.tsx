@@ -5,8 +5,10 @@ import {
   companionIdentitySnapshotV1Schema,
   isCrossThreadProvenance,
   type LifecycleActiveRun,
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2,
 } from '@cat-cafe/shared';
 import { type CSSProperties, memo, type ReactNode } from 'react';
+import { WorkCardMessageContext } from '@/components/artifacts/work-card-message-context';
 import { formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -42,7 +44,7 @@ import {
   isLinkedCloudBindingRecoveryNotice,
   projectCloudBindingRecovery,
 } from './cloud-binding-recovery';
-import { cloudCarrierDispatch, cloudReceiptOf } from './cloud-dispatch-receipt';
+import { cloudCarrierDispatch, cloudReceiptOf, hasNativeCloudDeliveryReceipt } from './cloud-dispatch-receipt';
 import { CompanionMessageAvatar, CompanionMessageIdentity } from './concierge/CompanionMessageIdentity';
 import { ContentModificationReceiptCard } from './content-review/ContentModificationReceiptCard';
 import { ContentModificationSourceMessage } from './content-review/ContentModificationSourceMessage';
@@ -61,6 +63,7 @@ import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { MessageDispatchAvatars } from './MessageDispatchAvatars';
 import { MetadataBadge } from './MetadataBadge';
+import { ProviderCitationContext } from './markdown-provider-citations';
 import { buildMessageDisclosureKey, buildRichHtmlDisclosureKey } from './message-disclosure-state';
 import { isConnectorSystemNotice } from './message-render-visibility';
 import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
@@ -68,6 +71,7 @@ import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
+import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
 import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
 import { useReplyRecallProjection } from './reply-layers/ReplyRecallContext';
@@ -87,6 +91,7 @@ import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
+import { SuggestionRow } from './suggestions/SuggestionRow';
 import { NativeFailureDiagnostics, TerminalDiagnosticsPanel } from './TerminalDiagnosticsPanel';
 import { ThinkingContent } from './ThinkingContent';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -104,9 +109,22 @@ const EMPTY_TIMELINE_MESSAGES: readonly ChatMessageType[] = [];
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
 
+const messageTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+});
+
 function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const local = new Date(ts);
+  // Cache the formatting rules, not the OS timezone. Read local calendar
+  // fields on each render, including after timezone changes and across DST.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(local.getFullYear(), local.getMonth(), local.getDate());
+  calendar.setUTCHours(local.getHours(), local.getMinutes());
+  return messageTimeFormatter.format(calendar);
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
@@ -461,7 +479,7 @@ function ChatMessageContent({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
-  if (cloudCarrier && cloudReply.state !== 'unverified')
+  if (cloudCarrier && (cloudReply.state !== 'unverified' || hasNativeCloudDeliveryReceipt(cloudCarrier)))
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
   if (isSummary && message.summary) {
     return (
@@ -496,8 +514,14 @@ function ChatMessageContent({
       case 'briefing':
         return (
           <div data-message-id={message.id} className="flex justify-center mb-3">
-            <div className="max-w-[85%] w-full opacity-80">
-              <BriefingCard block={surface.block} messageId={message.id} />
+            <div
+              className={`max-w-[85%] w-full ${message.extra?.systemKind === 'context_briefing' ? '' : 'opacity-80'}`}
+            >
+              <BriefingCard
+                block={surface.block}
+                messageId={message.id}
+                contextBriefing={message.extra?.systemKind === 'context_briefing'}
+              />
             </div>
           </div>
         );
@@ -631,10 +655,11 @@ function ChatMessageContent({
     // The human colour's light step. With no colour configured the role is the shared cocoa (shell-v2.css bakes its hue and
     // chroma, and CoCreatorHueInjector replaces them when the config has one), so there is no separate neutral fallback.
     const humanFill = 'var(--color-cocreator-surface)';
+    // The action plane measures this zero-size slot; keep it before the human block, outside its text.
     const humanHeader = (
       <div
         data-testid="human-message-header"
-        className={`relative flex w-full justify-end items-center gap-2${humanHasMarks ? ' mb-1' : ''}`}
+        className={`relative flex w-full justify-end items-center gap-2 [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-1/2${humanHasMarks ? ' mb-1' : ''}`}
       >
         <MessageActionSlot />
         {isWhisper && (
@@ -716,6 +741,7 @@ function ChatMessageContent({
         header={userHeader}
         footer={
           <>
+            {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} align="end" /> : null}
             {humanTime}
             {!humanTime ? dispatchLine : null}
             <RoutingWarningNotice warnings={message.extra?.routingWarnings} />
@@ -1024,7 +1050,19 @@ function ChatMessageContent({
     <ReplyOutputBody output={nativeReplyOutput} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
   ) : isStreamOrigin ? (
     cliStdoutContent?.trim() ? (
-      <CollapsibleMarkdown content={cliStdoutContent} className={REPLY_BODY_CLASS} disclosureKey={bodyDisclosureKey} />
+      <div
+        data-context-quote-source={cachedR21SpeechStdout ? 'cli_output' : undefined}
+        data-context-quote-segment-id={cachedR21SpeechStdout ? 'stdout' : undefined}
+        data-context-quote-projection-version={
+          cachedR21SpeechStdout ? MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 : undefined
+        }
+      >
+        <CollapsibleMarkdown
+          content={cliStdoutContent}
+          className={REPLY_BODY_CLASS}
+          disclosureKey={bodyDisclosureKey}
+        />
+      </div>
     ) : null
   ) : hasBlocks ? (
     <ContentBlocks
@@ -1042,7 +1080,13 @@ function ChatMessageContent({
   ) : null;
 
   const assistantBody = isLayeredReply ? (
-    replyBody
+    <>
+      {renderThreadId &&
+        replyRecall?.events
+          .filter((event) => event.resolverFamily === 'matter')
+          .map((event) => <MatterRecallLine key={event.id} event={event} threadId={renderThreadId} />)}
+      {replyBody}
+    </>
   ) : hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
     <ContentBlocks
       blocks={message.contentBlocks!}
@@ -1199,23 +1243,31 @@ function ChatMessageContent({
         />
       )}
       {message.extra?.rich?.blocks && message.extra.rich.blocks.length > 0 && (
-        <RichBlocks
-          runtimeInteractionCard={
-            message.extra.runtimeInteractionCard?.requestKind === 'conversation_decision'
-              ? { ...message.extra.runtimeInteractionCard, requestKind: 'conversation_decision' }
-              : undefined
-          }
-          blocks={message.extra.rich.blocks}
-          publication={publication}
-          catId={message.catId}
-          messageId={message.id}
-          sourceThreadId={renderThreadId}
-          sourceMessageIds={message.projectionSourceMessageIds ?? [message.id]}
-          messageSource={message.source}
-          htmlWidgetDisclosureKeys={richHtmlDisclosureKeys}
-          sendContext={sendContext}
-          confirmations={confirmations}
-        />
+        // F335 交付三：作品卡底行写这条消息的时间；守望猫写的回话（持久的 turnExecution 标记）底行写「守望猫 · 名字」。
+        <WorkCardMessageContext.Provider
+          value={{
+            at: message.timestamp,
+            ...(message.extra?.turnExecution?.executionKind === 'watcher' ? { byline: 'watcher' as const } : {}),
+          }}
+        >
+          <RichBlocks
+            runtimeInteractionCard={
+              message.extra.runtimeInteractionCard?.requestKind === 'conversation_decision'
+                ? { ...message.extra.runtimeInteractionCard, requestKind: 'conversation_decision' }
+                : undefined
+            }
+            blocks={message.extra.rich.blocks}
+            publication={publication}
+            catId={message.catId}
+            messageId={message.id}
+            sourceThreadId={renderThreadId}
+            sourceMessageIds={message.projectionSourceMessageIds ?? [message.id]}
+            messageSource={message.source}
+            htmlWidgetDisclosureKeys={richHtmlDisclosureKeys}
+            sendContext={sendContext}
+            confirmations={confirmations}
+          />
+        </WorkCardMessageContext.Provider>
       )}
       {message.extra?.evolutionUseSourceV1 ? (
         <EvolutionUseSourceDock source={message.extra.evolutionUseSourceV1} />
@@ -1225,6 +1277,8 @@ function ChatMessageContent({
       {message.isStreaming && !isStreamOrigin && (
         <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />
       )}
+      {/* F335 交付二：回话下面那一排，紧挨「召回 · 工具调用 · 轨迹」那一层之前（北极星稿同一位置）。 */}
+      {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} /> : null}
       {isLayeredReply && renderThreadId ? (
         <ReplyLayers
           message={message}
@@ -1243,10 +1297,21 @@ function ChatMessageContent({
 }
 
 export const ChatMessage = memo(function ChatMessage(props: ChatMessageProps) {
+  const shell = useShellPresentation();
   const queue = useChatStore((state) => {
     const threadId = props.threadId ?? state.currentThreadId;
     return threadId === state.currentThreadId ? state.queue : state.threadStates[threadId]?.queue;
   });
   if (isHiddenChatRow(props.message)) return null;
-  return <ChatMessageContent {...props} queue={queue} />;
+  const providerCitations =
+    shell === 'v2' &&
+    props.message.type === 'assistant' &&
+    props.message.from?.kind === 'agent' &&
+    props.message.from.catId === props.message.catId &&
+    (props.message.catId === 'gpt-pro' || props.message.catId === 'gpt-dot');
+  return (
+    <ProviderCitationContext.Provider value={providerCitations}>
+      <ChatMessageContent {...props} queue={queue} />
+    </ProviderCitationContext.Provider>
+  );
 });

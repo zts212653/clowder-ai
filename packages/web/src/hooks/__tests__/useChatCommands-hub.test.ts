@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * useChatCommands — /help and /config command tests.
  * /help now adds a system help message; /config (no args) navigates to /settings.

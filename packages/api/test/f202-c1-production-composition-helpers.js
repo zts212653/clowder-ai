@@ -119,9 +119,14 @@ export async function installConnectorInstance(composition, projectRoot, overrid
   });
   await configuration.reconcile(EXTERNAL_PLUGIN_ID, installed.pluginInstanceId);
 
-  await composition.inventoryStore.transaction((transaction) => {
-    const instance = transaction.instances.get(installed.pluginInstanceId);
-    transaction.instances.put({ ...instance, activationState: 'enabled', runtimeState: 'stopped', updatedAt: 5_001 });
+  await composition.inventoryStore.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(installed.pluginInstanceId);
+    await transaction.instances.put({
+      ...instance,
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: 5_001,
+    });
   });
   return installed.pluginInstanceId;
 }

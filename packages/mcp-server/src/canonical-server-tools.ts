@@ -29,6 +29,7 @@ import {
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
+  matterMemoryTools,
   pawFeelDispositionTools,
   pawFeelInboxAuditScanTools,
   perspectiveTools,
@@ -45,14 +46,17 @@ import {
   signalStudyTools,
   signalsTools,
   skillConsumptionTools,
+  suggestionTools,
   workTools,
 } from './tools/index.js';
 import { liveMeetingTools } from './tools/live-meeting-tools.js';
 import { memberImageTools } from './tools/member-image-tools.js';
 import { pageActionTools } from './tools/page-action-tools.js';
+import { watcherTools } from './tools/watcher-tools.js';
 
 export const CANONICAL_TOOL_SOURCES = {
   collab: [
+    ...watcherTools,
     ...callbackTools,
     ...capabilityEvolutionTools,
     ...capabilityEvolutionPreparationTools,
@@ -74,6 +78,7 @@ export const CANONICAL_TOOL_SOURCES = {
     ...entrustedWorkReadTools,
     ...developmentWorkTools,
     ...developmentReturnTools,
+    ...suggestionTools,
     ...eventMemoryTools,
     ...publishVerdictTools,
     ...evalLifecycleTools,
@@ -89,6 +94,7 @@ export const CANONICAL_TOOL_SOURCES = {
   memory: [
     ...recallMetricsTools,
     ...callbackMemoryTools,
+    ...matterMemoryTools,
     ...distillationTools,
     ...evidenceTools,
     ...externalRuntimeSessionReadTools,

@@ -29,6 +29,8 @@ const FAMILIES: Record<RecallResolverFamily, Parameters<MemoryCueSourceReader['r
   project_knowledge: 'evidence',
   cat_owned_seed: 'owned_seed',
   thread_overview: 'thread_overview',
+  matter: 'matter',
+  message_evidence: 'evidence',
 };
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -58,6 +60,8 @@ function payloadTitle(family: RecallResolverFamily, payload: unknown): string | 
           : undefined;
     case 'thread_overview':
       return title(data.title);
+    case 'matter':
+      return title(record(data.matter).title);
     case 'event':
       return title(data.summary);
     default:
@@ -129,7 +133,13 @@ async function readCueMetadata(
       scope: { ...scope, invocationId: cue.invocation_id },
       consumerCatId: cue.consumer_cat_id,
     });
-    if (read.status !== 'ok') return unavailable;
+    if (read.status !== 'ok')
+      return {
+        ...unavailable,
+        ...(read.invalidationReason === 'source_corrected'
+          ? { sourceUnavailableReason: 'source_corrected' as const }
+          : {}),
+      };
     const name = payloadTitle(cue.resolver_family, read.payload);
     const threadId = record(read.payload).threadId;
     const href =
@@ -137,7 +147,9 @@ async function readCueMetadata(
       typeof threadId === 'string' &&
       cue.source_anchor === `thread-overview:${threadId}`
         ? `/thread/${encodeURIComponent(threadId)}`
-        : null;
+        : cue.resolver_family === 'matter' && typeof record(read.payload).matter === 'object'
+          ? `/memory?matter=${encodeURIComponent(String(record(record(read.payload).matter).matterId))}`
+          : null;
     return { kind: cue.resolver_family, href, ...(name ? { title: name } : {}) };
   } catch {
     return unavailable;

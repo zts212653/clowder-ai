@@ -18,6 +18,7 @@ import { observeApiSessionOwner } from './api-session-identity';
 import { waitForPromiseWithSignal } from './bounded-fetch';
 import { configureConnectionDiagnostics, scheduleConnectionDiagnosticDelivery } from './connection-diagnostics';
 import { diagnosticFetch, recordConnectionNotice } from './connection-request-trace';
+import { observeDeploymentRevisionHeader } from './deployment-revision';
 import { tagSaveRequest, traceSaveTransport } from './member-save-trace';
 
 export { resolveApiUrl } from './api-origin';
@@ -34,23 +35,24 @@ let lastSessionFailureToastAt = 0;
 configureConnectionDiagnostics(API_URL, () => sessionCsrfToken);
 
 const reportedConnectionErrors = new WeakSet<object>();
-let lastConnectionFailureAt = Number.NEGATIVE_INFINITY;
+// Keep the incident latched even when its toast is manually dismissed.
+let connectionFailureToastId: string | null = null;
 
 /** Shared transport feedback; a lost response does not prove a mutation failed. */
 export function reportApiConnectionFailure(error: unknown): boolean {
   if (!(error instanceof Error) || (error.name !== 'TypeError' && error.name !== 'TimeoutError')) return false;
   if (reportedConnectionErrors.has(error)) return true;
   reportedConnectionErrors.add(error);
-  const now = Date.now();
-  const shown = now - lastConnectionFailureAt >= 5_000;
+  const shown = connectionFailureToastId === null;
   if (shown) {
-    lastConnectionFailureAt = now;
     const t = connectionCopy();
-    useToastStore.getState().addToast({
+    connectionFailureToastId = useToastStore.getState().addToast({
       type: 'error',
       title: t.connectionTitle,
       message: t.connectionMessage,
-      duration: 5000,
+      duration: 0,
+      pinned: true,
+      passThrough: true,
     });
   }
   recordConnectionNotice(error, shown);
@@ -80,6 +82,8 @@ interface GetGeneration {
   path: string;
   init: RequestInit | undefined;
   ifNoneMatch: string | null | undefined;
+  controller: AbortController;
+  waiters: number;
 }
 
 interface GetCoordinationState {
@@ -107,9 +111,19 @@ function notifySessionFailure() {
   });
 }
 
+/**
+ * Every physical exchange with the API, session bootstrap and refresh included, goes through
+ * here so that whichever response completes first can reveal a runtime deploy (F294).
+ */
+async function apiTransport(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const res = await diagnosticFetch(API_URL, path, init, timeoutMs);
+  observeDeploymentRevisionHeader(res);
+  return res;
+}
+
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  const gate = diagnosticFetch(API_URL, '/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
+  const gate = apiTransport('/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
     .then(async (res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
@@ -145,12 +159,7 @@ export function refreshApiSession(): Promise<void> {
   const gate = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(async () => {
-      const res = await diagnosticFetch(
-        API_URL,
-        '/api/session',
-        { credentials: 'include' },
-        SESSION_BOOTSTRAP_TIMEOUT_MS,
-      );
+      const res = await apiTransport('/api/session', { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS);
       if (!res.ok) throw new Error(`session bootstrap failed (${res.status})`);
       const body = (typeof res.json === 'function' ? await res.json().catch(() => null) : null) as {
         csrfToken?: unknown;
@@ -237,13 +246,6 @@ function exactGetKey(path: string, init?: RequestInit): string {
   });
 }
 
-function withoutCallerSignal(init?: RequestInit): RequestInit | undefined {
-  if (!init) return undefined;
-  const physicalInit = { ...init };
-  delete physicalInit.signal;
-  return physicalInit;
-}
-
 async function performApiFetch(
   path: string,
   init?: RequestInit,
@@ -251,7 +253,25 @@ async function performApiFetch(
   notifyFailure = true,
 ): Promise<Response> {
   try {
-    return await performSessionRequest(path, init, timeoutMs, notifyFailure);
+    const response = await performSessionRequest(path, init, timeoutMs, notifyFailure);
+    if (notifyFailure && connectionFailureToastId !== null) {
+      const toastState = useToastStore.getState();
+      const notice = toastState.toasts.find((toast) => toast.id === connectionFailureToastId);
+      // Any business HTTP response ends transport loss. Do not close a reader
+      // that the user explicitly opened, even when the connection recovers.
+      if (notice?.manualDismissOnly) {
+        const title = connectionCopy().connectionRecoveredTitle;
+        useToastStore.setState((state) => ({
+          toasts: state.toasts.map((toast) =>
+            toast.id === notice.id ? { ...toast, type: 'info' as const, title } : toast,
+          ),
+        }));
+      } else {
+        toastState.removeToast(connectionFailureToastId);
+      }
+      connectionFailureToastId = null;
+    }
+    return response;
   } catch (error) {
     if (notifyFailure && !init?.signal?.aborted) reportApiConnectionFailure(error);
     throw error;
@@ -271,8 +291,7 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      diagnosticFetch(
-        API_URL,
+      apiTransport(
         path,
         {
           ...normalized,
@@ -293,8 +312,7 @@ async function performSessionRequest(
     init,
     'http.attempt',
     () =>
-      diagnosticFetch(
-        API_URL,
+      apiTransport(
         path,
         {
           ...refreshed,
@@ -319,14 +337,17 @@ function createGetGeneration(
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+  const controller = new AbortController();
   return {
     id: ++nextGetGeneration,
     promise,
     resolve,
     reject,
     path,
-    init: withoutCallerSignal(init),
+    init: { ...init, signal: controller.signal },
     ifNoneMatch,
+    controller,
+    waiters: 0,
   };
 }
 
@@ -341,17 +362,19 @@ function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
   void performApiFetch(generation.path, physicalGetInit(generation))
     .then(generation.resolve, generation.reject)
-    .finally(() => {
-      if (state.active !== generation) return;
-      const trailing = state.trailing;
-      if (!trailing) {
-        coordinatedGets.delete(key);
-        return;
-      }
-      state.active = trailing;
-      state.trailing = null;
-      startGetGeneration(key, state, trailing);
-    });
+    .finally(() => finishGetGeneration(key, state, generation));
+}
+
+function finishGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
+  if (coordinatedGets.get(key) !== state || state.active !== generation) return;
+  const trailing = state.trailing;
+  if (!trailing) {
+    coordinatedGets.delete(key);
+    return;
+  }
+  state.active = trailing;
+  state.trailing = null;
+  startGetGeneration(key, state, trailing);
 }
 
 async function coordinatedGet(
@@ -376,10 +399,29 @@ async function coordinatedGet(
     generation = state.active;
   }
 
-  const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
-  const clone = response.clone();
-  markApiGetGeneration(clone, generation.id);
-  return clone;
+  generation.waiters += 1;
+  let waiting = true;
+  const release = () => {
+    if (!waiting) return;
+    waiting = false;
+    generation.waiters -= 1;
+    if (generation.waiters === 0 && init?.signal?.aborted) {
+      generation.controller.abort();
+      if (state.trailing === generation) state.trailing = null;
+      else finishGetGeneration(key, state, generation);
+    }
+  };
+  // Detach synchronously: a remount in this turn must join a fresh generation.
+  init?.signal?.addEventListener('abort', release, { once: true });
+  try {
+    const response = await waitForPromiseWithSignal(generation.promise, init?.signal);
+    const clone = response.clone();
+    markApiGetGeneration(clone, generation.id);
+    return clone;
+  } finally {
+    init?.signal?.removeEventListener('abort', release);
+    release();
+  }
 }
 
 /**

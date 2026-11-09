@@ -96,6 +96,8 @@ export interface EvidenceResultData {
   anchor: string;
   snippet: string;
   matchRank: 'high' | 'mid' | 'low';
+  rank?: number;
+  relevance?: { state: string };
   retrievalScore?: number;
   sourceType: EvidenceSourceType;
   authority?: string;
@@ -252,6 +254,7 @@ export interface ChatMessage {
       speechContent?: string;
     };
     /** Immutable child execution identity; terminal lifecycle is read from the ledger API. */
+    watcher?: { kind: 'nudge'; sourceInvocationId: string; sourceMessageId: string; watcherInvocationId: string };
     turnExecution?: TurnExecutionMessageProjection;
     /** Non-body child executions attached to the visible turn they assisted. */
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
@@ -347,8 +350,32 @@ export interface ChatMessage {
    * differentiate cache-derived vs live state: cache copies do NOT get the
    * preserve-local treatment when API history wins. Stripped before
    * persisting back to IDB so the marker doesn't leak into the snapshot.
+   *
+   * PR-3a2 (contract §3.11.2) — `'unsubscribed'`: this copy was in the cache when the thread's room
+   * was confirmed again after a gap, so changes broadcast only to that room (deletes, edits, card
+   * updates) may have been missed. Only a History read issued after that recovery round
+   * (`recoveryGeneration`) decides it, by the same rule as an IndexedDB copy.
    */
-  cachedFrom?: 'idb';
+  cachedFrom?: 'idb' | 'unsubscribed';
+  /** PR-3a2 — the recovery round that marked this copy `cachedFrom: 'unsubscribed'`. */
+  recoveryGeneration?: number;
+  /**
+   * PR-3a2 (contract §3.11.1) — for a response still processing: `'complete'` when this page holds
+   * every event of its stream (rebuilt from the server's replay), so live events append and a
+   * processing History read leaves its body alone; `'incomplete'` when the page cannot know what it
+   * missed, so live events do not append and the History draft shows until the terminal snapshot.
+   * Unset keeps the earlier behaviour. Client-only; never persisted.
+   */
+  streamPrefix?: 'complete' | 'incomplete';
+  /** PR-3a2 — `local-write-clock` count of this page's last write to the body / lifecycle. Client-only. */
+  localBodyWriteSeq?: number;
+  /** PR-3a2 — `local-write-clock` count of this page's last write to the metadata. Client-only. */
+  localMetadataWriteSeq?: number;
+  /**
+   * PR-3a2 — for a response this page holds from its first broadcast: the `streamIndex` the next live
+   * event must carry. A lower one is already held; a higher one means events were missed.
+   */
+  streamNextIndex?: number;
 }
 
 export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;

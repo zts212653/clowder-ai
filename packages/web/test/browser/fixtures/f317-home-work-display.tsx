@@ -6,6 +6,7 @@ import '@/app/console-controls.css';
 import '@/app/globals.css';
 import { HomeActionHost } from '@/components/concierge/HomeActionHost';
 import workspaceStyles from '@/components/content-review/review-workspace.module.css';
+import { StandaloneHubSocketProvider } from '@/components/thread-chat/StandaloneHubSocketProvider';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { F307ExperienceWorkbench } from '@/components/workbench/F307ExperienceWorkbench';
 import { useChatStore } from '@/stores/chatStore';
@@ -72,4 +73,8 @@ function Hub() {
 }
 const root = document.getElementById('root');
 if (!root) throw new Error('Owned integration root required');
-createRoot(root).render(<Hub />);
+createRoot(root).render(
+  <StandaloneHubSocketProvider>
+    <Hub />
+  </StandaloneHubSocketProvider>,
+);

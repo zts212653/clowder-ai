@@ -134,6 +134,10 @@ test('manual creation remains available from the automatic configuration path', 
       false,
     );
     let catalogReads = 0;
+    let cancelledReads = 0;
+    state.page.on('requestfailed', (request) => {
+      if (new URL(request.url()).pathname === '/api/agent-providers') cancelledReads++;
+    });
     // Only the ordinary editor reached below consumes the plugin tool catalog.
     // Other first-run cases keep rejecting this unmodeled dependency.
     await state.context.route('**/api/agent-providers', (route) => {
@@ -149,7 +153,8 @@ test('manual creation remains available from the automatic configuration path', 
     await state.panel.waitFor({ state: 'hidden' });
     await state.page.waitForURL((url) => url.searchParams.get('manual') === '1');
     await catalogRead;
-    assert.equal(catalogReads, 1);
+    assert.equal(catalogReads - cancelledReads, 1, 'one current reader survives navigation');
+    assert.ok(cancelledReads <= 1, 'at most the replaced editor request is cancelled');
     assert.equal(new URL(state.page.url()).searchParams.get('manual'), '1');
     assert.equal(state.writes.length, 0);
     assert.deepEqual(state.errors, []);
@@ -157,3 +162,45 @@ test('manual creation remains available from the automatic configuration path', 
     await state.context.close();
   }
 });
+
+test(
+  'leaving a pending ACP catalog for five-partner creation has no late connection notice',
+  { timeout: 60000 },
+  async (t) => {
+    const state = await setup();
+    try {
+      await state.context.route('**/api/agent-providers', () => {});
+      const started = state.page.waitForRequest(
+        (request) => new URL(request.url()).pathname === '/api/agent-providers',
+      );
+      await state.page.getByRole('button', { name: '手动创建单个伙伴', exact: true }).click();
+      await started;
+      await state.page.waitForURL((url) => url.searchParams.get('manual') === '1');
+      const editor = state.page.getByTestId('member-settings-page');
+      await editor.waitFor();
+      t.diagnostic('manual editor mounted with pending catalog');
+      const cancelled = state.page.waitForEvent('requestfailed', {
+        predicate: (request) => new URL(request.url()).pathname === '/api/agent-providers',
+      });
+      await editor.getByRole('button', { name: /^←/ }).click();
+      t.diagnostic('returned to members');
+      await cancelled;
+      t.diagnostic('catalog request cancelled');
+      await state.page.screenshot({ path: path.join(evidence, 'catalog-return-list.png'), fullPage: true });
+      await state.page.getByTestId('member-detect-empty-roster').click({ timeout: 5000 });
+      t.diagnostic('team detection clicked');
+      await state.panel.waitFor({ timeout: 5000 });
+      t.diagnostic('recommended team visible');
+      await create(state.page).click();
+      await state.panel.waitFor({ state: 'hidden' });
+      assert.equal(state.created.length, 5);
+      t.diagnostic('five members created');
+      await state.page.waitForTimeout(30_001);
+      assert.equal(await state.page.getByText('后端连接异常', { exact: true }).count(), 0);
+      assert.deepEqual(state.errors, []);
+      await state.page.screenshot({ path: path.join(evidence, 'cancelled-catalog-five-members.png'), fullPage: true });
+    } finally {
+      await state.context.close();
+    }
+  },
+);

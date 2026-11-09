@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -115,4 +116,26 @@ it('a second refusal cannot silently approve or send to a different replacement'
   });
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(apiFetch).toHaveBeenCalledTimes(2);
+});
+
+it('a no-target refusal preserves the draft without confirming or resubmitting an empty set', async () => {
+  apiFetch.mockReset().mockResolvedValue(
+    response(409, {
+      code: 'ROUTING_TARGET_UNAVAILABLE',
+      error: '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。',
+    }),
+  );
+  await act(async () => {
+    expect(await send('@opus work')).toBe(false);
+  });
+  expect(confirm).not.toHaveBeenCalled();
+  expect(apiFetch).toHaveBeenCalledTimes(1);
+  expect(addMessage).toHaveBeenCalledWith(
+    'thread',
+    expect.objectContaining({
+      type: 'system',
+      variant: 'error',
+      content: expect.stringContaining('指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。'),
+    }),
+  );
 });

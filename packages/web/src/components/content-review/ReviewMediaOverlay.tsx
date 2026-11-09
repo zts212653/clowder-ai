@@ -20,6 +20,7 @@ export function ReviewMediaOverlay({
   onAnnotationActive,
   markup,
   pendingChatMarks = [],
+  imageFrame,
 }: {
   media: ImmutableMedia;
   frame: ReviewMarkupFrame | null | undefined;
@@ -34,13 +35,14 @@ export function ReviewMediaOverlay({
   markup: Parameters<typeof ReviewMarkupLayer>[0] | null;
   /** Places already waiting in the chat composer, numbered as their chips are. */
   pendingChatMarks?: readonly PendingChatMark[];
+  imageFrame?: { frameIndex: number; timestampMs: number };
 }) {
   const anchor = selection.drag ?? selected;
   const region = anchor?.kind === 'image-region' ? anchor : anchor?.kind === 'video-range' ? anchor.frameRegion : null;
   const point = anchor?.kind === 'image-point' ? anchor : anchor?.kind === 'video-range' ? anchor.framePoint : null;
   return (
     <>
-      <ReviewSavedMarkupLayer marks={marks} media={media} frame={frame ?? null} />
+      <ReviewSavedMarkupLayer marks={marks} media={media} frame={frame ?? null} imageFrame={imageFrame} />
       <svg
         viewBox={`0 0 ${media.width} ${media.height}`}
         className={`absolute inset-0 h-full w-full ${selection.selectionActive ? 'touch-none cursor-crosshair' : 'pointer-events-none'}`}

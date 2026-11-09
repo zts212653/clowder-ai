@@ -30,8 +30,8 @@ export async function createPluginTaskAdmissionServices(deps: {
   readonly assertActivation: () => void;
   readonly isCatAvailable: (catId: string) => boolean;
 }): Promise<PluginTaskAdmissionServices> {
-  const initial = await deps.inventory.snapshot();
-  const instance = initial.instances.find((i) => i.pluginInstanceId === deps.pluginInstanceId);
+  const initial = await deps.inventory.readAuthority(deps.pluginInstanceId);
+  const instance = initial?.instance;
   if (!instance || instance.packageDigest !== deps.packageDigest) refuse('Task installation unavailable');
   // Config saves advance the inventory revision without replacing this activation.
   // Keep its starting revision as the durable controller epoch; assertActivation owns
@@ -67,15 +67,13 @@ export async function createPluginTaskAdmissionServices(deps: {
     isCatAvailable: deps.isCatAvailable,
     async assertCurrent() {
       deps.assertActivation();
-      const snapshot = await deps.inventory.snapshot();
+      const current = await deps.inventory.readAuthority(deps.pluginInstanceId);
       deps.assertActivation();
-      const live = snapshot.instances.find((i) => i.pluginInstanceId === deps.pluginInstanceId);
-      const pkg = snapshot.packages.find((p) => p.packageDigest === deps.packageDigest);
+      const live = current?.instance;
+      const pkg = current?.packageRecord;
       if (
         !live ||
-        snapshot.instances.find(
-          (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-        )?.pluginInstanceId !== deps.pluginInstanceId ||
+        current?.current?.pluginInstanceId !== deps.pluginInstanceId ||
         live.lifecycleState !== 'installed' ||
         live.activationState !== 'enabled' ||
         live.configReadiness !== 'ready' ||
@@ -86,14 +84,9 @@ export async function createPluginTaskAdmissionServices(deps: {
     },
     async readCurrentDataControllerAuthority() {
       deps.assertActivation();
-      const snapshot = await deps.inventory.snapshot();
+      const live = await deps.inventory.readAuthority(deps.pluginInstanceId);
       deps.assertActivation();
-      const live = snapshot.instances.find((candidate) => candidate.pluginInstanceId === deps.pluginInstanceId);
-      const current = snapshot.instances.find(
-        (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
-      );
-      const pkg = snapshot.packages.find((candidate) => candidate.packageDigest === deps.packageDigest);
-      return currentDataControllerAuthority(live, current, pkg?.packageState);
+      return currentDataControllerAuthority(live?.instance, live?.current, live?.packageRecord?.packageState);
     },
     async withCurrentDataControllerAuthority<T>(
       run: (current: CurrentPluginTaskDataControllerAuthority) => Promise<T>,
@@ -101,9 +94,9 @@ export async function createPluginTaskAdmissionServices(deps: {
       deps.assertActivation();
       return deps.inventory.transaction(async (transaction) => {
         deps.assertActivation();
-        const live = transaction.instances.get(deps.pluginInstanceId);
-        const current = transaction.instances.getCurrent(pluginId);
-        const pkg = transaction.packages.get(deps.packageDigest);
+        const live = await transaction.instances.get(deps.pluginInstanceId);
+        const current = await transaction.instances.getCurrent(pluginId);
+        const pkg = await transaction.packages.get(deps.packageDigest);
         const verified = currentDataControllerAuthority(live, current, pkg?.packageState);
         if (!verified) {
           refuse('Task data-controller installation is no longer current');

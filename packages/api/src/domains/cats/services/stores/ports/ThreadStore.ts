@@ -14,7 +14,12 @@ import type {
   ThreadKind,
   ThreadPhase,
 } from '@cat-cafe/shared';
-import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import {
+  applyWatcherThreadControlPatch,
+  generateThreadId,
+  normalizeThreadGoalObjective,
+  parseWatcherThreadControl,
+} from '@cat-cafe/shared';
 import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from './OwnedThreadSeed.js';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
@@ -214,6 +219,8 @@ export function isThreadGoalStateV1(value: unknown): value is ThreadGoalStateV1 
  * A conversation thread
  */
 export interface Thread {
+  /** Per-conversation observer intent; absent fields inherit household preferences. */
+  watcher?: import('@cat-cafe/shared').WatcherThreadControl;
   id: string;
   projectPath: string;
   title: string | null;
@@ -756,6 +763,12 @@ export interface IThreadStore {
     options?: ThreadCreateOptions,
   ): Thread | Promise<Thread>;
   get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
+  /** Fresh complete thread+participants reads. Missing/default recovery matches get;
+   * transport/incomplete replies reject before any recovery. No cached authority. */
+  getMany?(
+    ids: readonly string[],
+    options?: StoreReadOptions & { recoverMissing?: false },
+  ): Promise<Map<string, Thread | null>>;
   list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
   /** Read only candidate threads admitted by the durable user visibility index. */
@@ -868,6 +881,15 @@ export interface IThreadStore {
   ): void | Promise<void>;
   /** F187: Update thread labels (replaces entire array). */
   updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
+  updateWatcherControl(
+    threadId: string,
+    expectedRevision: number,
+    patch: import('@cat-cafe/shared').WatcherThreadControlPatch,
+    metadata?: import('@cat-cafe/shared').WatcherControlWriteMetadata,
+  ):
+    | import('@cat-cafe/shared').WatcherThreadControl
+    | null
+    | Promise<import('@cat-cafe/shared').WatcherThreadControl | null>;
   /** #872: Get thread metadata anchor. */
   getThreadMetadata(threadId: string): ThreadMetadataV1 | null | Promise<ThreadMetadataV1 | null>;
   /** #872: Update thread metadata (replace entire object). Use mergeThreadMetadata() to build the merged value. */
@@ -1563,6 +1585,22 @@ export class ThreadStore implements IThreadStore {
   updateLabels(threadId: string, labelIds: string[]): void {
     const thread = this.get(threadId);
     if (thread) thread.labels = labelIds;
+  }
+
+  updateWatcherControl(
+    threadId: string,
+    expectedRevision: number,
+    patch: import('@cat-cafe/shared').WatcherThreadControlPatch,
+    metadata?: import('@cat-cafe/shared').WatcherControlWriteMetadata,
+  ): import('@cat-cafe/shared').WatcherThreadControl | null {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new Error('invalid watcher control revision');
+    const thread = this.threads.get(threadId);
+    if (!thread || thread.deletedAt) return null;
+    const current = parseWatcherThreadControl(thread.watcher);
+    if (current.revision !== expectedRevision) return null;
+    thread.watcher = applyWatcherThreadControlPatch(current, patch, metadata);
+    return parseWatcherThreadControl(thread.watcher);
   }
 
   getThreadMetadata(threadId: string): ThreadMetadataV1 | null {

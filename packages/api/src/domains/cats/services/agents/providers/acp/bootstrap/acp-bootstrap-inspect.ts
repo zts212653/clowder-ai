@@ -1,16 +1,9 @@
-import { dirname, isAbsolute } from 'node:path';
+import { dirname } from 'node:path';
 import { isTrustedHostCompatibilityEnabled } from '../../../../../../../config/trusted-host-compatibility.js';
 import { resolveAcpBootstrapCwd } from '../acp-bootstrap-cwd.js';
+import { isExplicitAcpBootstrapRoot } from './acp-bootstrap-root.js';
 
-export function isExplicitAcpBootstrapRoot(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value.length <= 8192 &&
-    !/[\u0000\r\n]/.test(value) &&
-    isAbsolute(value) &&
-    (process.platform !== 'win32' || /^[a-z]:[\\/]/i.test(value))
-  );
-}
+export { isExplicitAcpBootstrapRoot } from './acp-bootstrap-root.js';
 
 /** Same Host policy as a generic client; never starts an agent or repairs existing ACLs. */
 export function inspectAcpBootstrapDirectory(

@@ -1,5 +1,6 @@
-import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import type { Readable, Writable } from 'node:stream';
 import { observeCliExecutionProcess } from '../../../../../utils/CliExecutionObservation.js';
 import { CliExitOutputDrain } from '../../../../../utils/CliExitOutputDrain.js';
 import type { CliExecutionOwnerRef } from '../../../../../utils/cli-process-ownership.js';
@@ -9,11 +10,15 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervise
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { createStderrTail, type StderrTail } from '../../../../../utils/stderr-tail.js';
+import { type WindowsProviderHost, windowsProviderHostScopeFor } from '../../../../../utils/windows-provider-host.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
 import { codexHostServedModels } from './codex-served-model.js';
 
 /** Bounded stderr kept per direct session for exit diagnostics (pre-F319 value). */
 const DIRECT_STDERR_TAIL_CHARS = 8192;
+
+/** The session only uses these three pipes, which both a direct spawn and a provider host open. */
+type PipedChild = ChildProcess & { stdin: Writable; stdout: Readable; stderr: Readable };
 
 export interface DirectAgentCarrierSessionDeps {
   /** Server-owned per-turn identity; never derive it from ambient or warm-host environment. */
@@ -21,14 +26,39 @@ export interface DirectAgentCarrierSessionDeps {
   windowsSpawnPlan?: typeof resolveWindowsSpawnPlan;
   /** Host-prepared complete environment; ordinary provider sessions still inherit normally. */
   finalEnvironment?: Readonly<NodeJS.ProcessEnv>;
+  /** #1838: a linked Windows provider host this session's provider starts in. */
+  windowsHost?: WindowsProviderHost;
 }
 
-function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
-  return buildChildEnv(input, { workingDirectory });
+/** The host's stdio is opened as pipes; this checks that once where the session needs all three. */
+function launchInHost(
+  host: WindowsProviderHost,
+  plan: { command: string; args: string[]; shell?: boolean | string; env: NodeJS.ProcessEnv; cwd?: string },
+): PipedChild {
+  const child = host.launch({
+    command: plan.command,
+    args: plan.args,
+    env: plan.env,
+    ...(plan.cwd ? { cwd: plan.cwd } : {}),
+    ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
+  });
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    child.kill();
+    throw new Error('windows_provider_host_without_pipes');
+  }
+  return Object.assign(child, { stdin: child.stdin, stdout: child.stdout, stderr: child.stderr });
+}
+
+function normalizeEnv(
+  input: Record<string, string | null> | undefined,
+  workingDirectory: string,
+  inheritParentEnv?: boolean,
+): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory, inheritParentEnv });
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {
-  private readonly child: ChildProcessWithoutNullStreams;
+  private readonly child: PipedChild;
   // F319 Phase B: every stderr line is offered to the served-model registry
   // (trace lines only exist when observation is on); the diagnostic tail stays bounded.
   private readonly stderr: StderrTail = createStderrTail({
@@ -53,7 +83,9 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
       throw new Error('direct_carrier_owner_mismatch');
     }
     const childCwd = options.cwd ?? process.cwd();
-    const env = deps.finalEnvironment ? { ...deps.finalEnvironment } : normalizeEnv(options.env, childCwd);
+    const env = deps.finalEnvironment
+      ? { ...deps.finalEnvironment }
+      : normalizeEnv(options.env, childCwd, options.inheritParentEnv);
     const launch =
       process.platform === 'win32'
         ? { ...(deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(options.command, options.args), env }
@@ -61,16 +93,26 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
             env,
             killGraceMs: 500,
           });
-    this.child = spawn(launch.command, launch.args, {
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      env: launch.env,
-      windowsHide: true,
-      shell:
-        'shell' in launch && (typeof launch.shell === 'string' || typeof launch.shell === 'boolean')
-          ? launch.shell
-          : false,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const shell =
+      'shell' in launch && (typeof launch.shell === 'string' || typeof launch.shell === 'boolean')
+        ? launch.shell
+        : false;
+    // #1838: the same Windows plan, started in a linked host whose own job owns the whole tree.
+    this.child = deps.windowsHost
+      ? launchInHost(deps.windowsHost, {
+          command: launch.command,
+          args: launch.args,
+          env: launch.env,
+          shell,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+        })
+      : spawn(launch.command, launch.args, {
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          env: launch.env,
+          windowsHide: true,
+          shell,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
     observeCliExecutionProcess(this.child, deps.executionOwner);
     this.stdoutDrain = new CliExitOutputDrain(this.child.stdout);
     this.stdioClosed = new Promise((resolve) => this.child.once('close', () => resolve()));
@@ -190,5 +232,13 @@ export async function createDirectAgentCarrierSession(
   options: AgentCarrierSessionOptions,
   deps: DirectAgentCarrierSessionDeps = {},
 ): Promise<AgentCarrierSession> {
+  // #1838: a session of the turn whose host scope is current takes a linked host first. Sessions
+  // with any other invocationId (read-only commands, metadata reads) are not this execution's.
+  const hostScope =
+    process.platform === 'win32' && !deps.windowsHost ? windowsProviderHostScopeFor(options.invocationId) : undefined;
+  if (hostScope) {
+    options.signal?.throwIfAborted();
+    return new DirectAgentCarrierSession(options, { ...deps, windowsHost: await hostScope.take() });
+  }
   return new DirectAgentCarrierSession(options, deps);
 }

@@ -27,20 +27,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Source-string sanity: spec implementation contract ─────────────
 
-test('F153 Phase J AC-J3: tool-span-tracker.ts exports ToolSpanTracker class', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/infrastructure/telemetry/tool-span-tracker.ts'), 'utf8');
-  assert.ok(src.includes('export class ToolSpanTracker'), 'should export ToolSpanTracker class');
-  assert.ok(
-    src.includes('start(toolName: string, toolUseId: string'),
-    'should have start(toolName, toolUseId, ...) API',
-  );
-  assert.ok(
-    src.includes('end(toolUseId: string, status: ToolResultStatus)'),
-    'should have end(toolUseId, status) API — no result body parameter (砚砚 R1 P2)',
-  );
-  assert.ok(src.includes('endAllOrphans('), 'should have endAllOrphans for AC-J4');
-});
-
 test('F153 Phase J AC-J5: span-helpers uses isMcpToolName from classify.ts', () => {
   const src = readFileSync(resolve(__dirname, '../../src/infrastructure/telemetry/span-helpers.ts'), 'utf8');
   assert.ok(

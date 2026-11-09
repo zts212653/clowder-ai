@@ -1,8 +1,8 @@
 {
-  "exportedAt": "2026-11-02T04:41:27.849Z",
+  "exportedAt": "2026-11-09T06:24:14.479Z",
   "minTier": "yellow",
-  "exported": 328,
-  "skipped": 16,
+  "exported": 329,
+  "skipped": 17,
   "errors": 0,
   "skippedFiles": [
     "F061-verification-2026-04-21.md",

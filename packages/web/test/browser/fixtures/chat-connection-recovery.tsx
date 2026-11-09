@@ -5,6 +5,9 @@ import { MessageViewportBoundary } from '@/components/MessageViewportBoundary';
 import { ThreadChatRuntimeProvider, useThreadChatRuntime } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useChatHistory } from '@/hooks/useChatHistory';
+import { useTeleport } from '@/hooks/useTeleport';
+import { useWorkspaceFileChange } from '@/hooks/useWorkspaceFileChange';
+import { WorkspaceNavigateHost } from '@/hooks/useWorkspaceNavigate';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -25,6 +28,16 @@ useChatStore.setState({
     },
   ],
 });
+
+/**
+ * Features that used to open their own Socket.IO connection. They share the page connection
+ * now, so the socket counts asserted by the recovery proof cover them too.
+ */
+function SharedConnectionConsumers() {
+  useTeleport();
+  useWorkspaceFileChange({ worktreeId: 'fixture-wt', path: 'README.md', currentSha: null, onReload: () => {} });
+  return <WorkspaceNavigateHost threadId={threadId} isChatRoute isWorkspaceVisible />;
+}
 
 function Conversation() {
   const { socketConnected } = useThreadChatRuntime([threadId]);
@@ -151,6 +164,12 @@ function ScrollConversation({ activeThread }: { activeThread: string }) {
     </>
   );
 }
+/** Like ChatContainer, the open thread is this page's foreground room (PR-3a2 journeys, `?rooms`). */
+function ForegroundRoom({ activeThread }: { activeThread: string }) {
+  useThreadChatRuntime([activeThread]);
+  return null;
+}
+
 function ScrollProof() {
   const [activeThread, setActiveThread] = useState(() => location.pathname.slice(1) || threadId);
   useEffect(() => {
@@ -162,11 +181,13 @@ function ScrollProof() {
     useChatStore.getState().setCurrentThread(activeThread);
   }, [activeThread]);
   const navigate = (id: string) => {
-    history.pushState({}, '', `/${id}?scroll=1`);
+    const rooms = new URLSearchParams(location.search).has('rooms') ? '&rooms=1' : '';
+    history.pushState({}, '', `/${id}?scroll=1${rooms}`);
     setActiveThread(id);
   };
   return (
     <ThreadChatRuntimeProvider routeThreadId={activeThread}>
+      {new URLSearchParams(location.search).has('rooms') ? <ForegroundRoom activeThread={activeThread} /> : null}
       <button type="button" onClick={() => navigate('chat-other')}>
         Other thread
       </button>
@@ -184,6 +205,7 @@ createRoot(root).render(
     <ScrollProof />
   ) : (
     <ThreadChatRuntimeProvider routeThreadId={threadId}>
+      <SharedConnectionConsumers />
       <Conversation />
     </ThreadChatRuntimeProvider>
   ),

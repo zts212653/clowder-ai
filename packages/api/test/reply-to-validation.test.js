@@ -39,7 +39,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
-    // Register cats so catIdSchema passes for whisper tests
+    // Register the controlled recipients used by whisper tests.
     catRegistry.reset();
     for (const id of ['opus', 'codex', 'gemini']) {
       catRegistry.register(id, stubCatConfig(id));
@@ -57,9 +57,11 @@ describe('POST /api/messages — replyTo validation', () => {
         emitToUser: mock.fn(),
       },
       router: {
+        resolveExplicitTargets: async (targets) => targets,
         previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
         resolveTargetsAndIntent: mock.fn(async () => ({
           targetCats: ['opus'],
+          routing_warnings: [],
           intent: { intent: 'execute' },
         })),
         routeExecution: mock.fn(async function* () {
@@ -443,7 +445,7 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 202);
+    assert.equal(res.statusCode, 202, res.body);
     const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'wider whisper reply');
     assert.ok(sent, 'message should be stored');
@@ -479,7 +481,7 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 202);
+    assert.equal(res.statusCode, 202, res.body);
     const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'same-audience whisper reply');
     assert.ok(sent, 'message should be stored');

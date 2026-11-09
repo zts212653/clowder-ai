@@ -47,6 +47,8 @@ export function resolveMessageDispositionForAdmission(input: {
 
 export interface QueueAdmissionPolicyContext {
   projectRoot?: string;
+  /** Synchronous catalog validation shared by every first-write Queue admission. */
+  resolvePreResolvedTargets?: (requested: readonly string[], implicit: boolean) => string[];
   resolveTargets?: (
     requested: readonly string[],
     threadId: string,

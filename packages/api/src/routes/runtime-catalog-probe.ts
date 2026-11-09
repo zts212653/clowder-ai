@@ -5,6 +5,7 @@ import {
   claudeSdkRuntimeOptions,
 } from '../domains/cats/services/agents/providers/claude-sdk-runtime.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
+import { claudeConfiguredDefaults } from './native-claude-defaults.js';
 import { catalogRpc } from './runtime-catalog-rpc.js';
 import { probeCodexCatalog } from './runtime-codex-discovery.js';
 import {
@@ -75,29 +76,48 @@ async function probeClaude(target: CatalogTarget): Promise<RuntimeModelCatalog> 
   }
   let session: ReturnType<typeof sdkQuery> | undefined;
   try {
-    const runtime = await captureClaudeSdkRuntime(target.command, controller.signal);
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    if (controller.signal.aborted) throw new Error('Model discovery cancelled before SDK query startup');
-    session = query({
-      prompt: noPrompts(),
-      options: {
-        cwd: target.cwd,
-        ...(await claudeSdkRuntimeOptions(
-          runtime,
-          buildChildEnv(undefined, { workingDirectory: target.cwd }),
-          controller.signal,
-        )),
-        abortController: controller,
-        settingSources: ['user', 'project', 'local'],
-        tools: [],
-        mcpServers: {},
-        strictMcpConfig: true,
-        persistSession: false,
-        permissionMode: 'plan',
-      },
-    });
-    const models = parseClaudeModels(await session.supportedModels());
-    return { status: models.length ? 'live' : 'unavailable', models };
+    const { query, resolveSettings } = await import('@anthropic-ai/claude-agent-sdk');
+    // Local settings and model discovery are independent reads under one deadline.
+    // Neither read may discard the successful part of the other.
+    const settingsRead = controller.signal.aborted
+      ? undefined
+      : Promise.race([
+          resolveSettings({ cwd: target.cwd, settingSources: ['user', 'project', 'local'] }).catch(() => undefined),
+          new Promise<undefined>((resolve) =>
+            controller.signal.addEventListener('abort', () => resolve(undefined), { once: true }),
+          ),
+        ]);
+    const models = await captureClaudeSdkRuntime(target.command, controller.signal)
+      .then(async (runtime) => {
+        if (controller.signal.aborted) throw new Error('Model discovery cancelled before SDK query startup');
+        session = query({
+          prompt: noPrompts(),
+          options: {
+            cwd: target.cwd,
+            ...(await claudeSdkRuntimeOptions(
+              runtime,
+              buildChildEnv(undefined, { workingDirectory: target.cwd }),
+              controller.signal,
+            )),
+            abortController: controller,
+            settingSources: ['user', 'project', 'local'],
+            tools: [],
+            mcpServers: {},
+            strictMcpConfig: true,
+            persistSession: false,
+            permissionMode: 'plan',
+          },
+        });
+        return parseClaudeModels(await session.supportedModels());
+      })
+      .catch(() => []);
+    const settings = await settingsRead;
+    return {
+      status: models.length ? 'live' : 'unavailable',
+      models,
+      ...(!models.length ? { message: 'discovery_failed' } : {}),
+      ...(settings ? claudeConfiguredDefaults(settings.effective, models, target.model) : {}),
+    };
   } finally {
     clearTimeout(deadline);
     controller.abort();

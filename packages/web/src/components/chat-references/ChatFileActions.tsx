@@ -22,7 +22,12 @@ export function ChatFileActions({
     <span ref={owned} className="relative inline-flex text-xs">
       <FileActions
         source={{ kind: 'workspace', worktreeId: target.worktreeId, path: target.path }}
-        filename={target.absolutePath.split('/').filter(Boolean).at(-1) ?? '/'}
+        filename={
+          target.absolutePath
+            .split(target.absolutePath.startsWith('/') ? '/' : /[/\\]/)
+            .filter(Boolean)
+            .at(-1) ?? '/'
+        }
         openOnHover
         contextRef={anchorRef ?? ref}
         hideTrigger={hideTrigger && !inline}

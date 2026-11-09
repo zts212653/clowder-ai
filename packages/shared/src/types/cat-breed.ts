@@ -74,6 +74,8 @@ export interface CatVariant {
   /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
   readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
+  /** Member-only environment declarations. Account adapters retain final credential authority. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
   /** null explicitly clears a template profile in a runtime catalog overlay. */
@@ -137,6 +139,7 @@ export interface CatFeatures {
   readonly sessionStrategy?: {
     readonly strategy: 'handoff' | 'compress' | 'hybrid';
     readonly thresholds?: { readonly warn: number; readonly action: number };
+    /** generative is a historical digest read preference, never a generation switch. */
     readonly handoff?: { readonly preSealMemoryDump: boolean; readonly bootstrapDepth: 'extractive' | 'generative' };
     readonly hybrid?: { readonly maxCompressions: number };
     readonly compress?: { readonly maxCompressions?: number; readonly trackPostCompression: boolean };
@@ -200,6 +203,8 @@ export interface RosterEntry {
   readonly lead: boolean;
   /** Whether this cat is available (has quota). co-creator 40 美刀教训！ */
   readonly available: boolean;
+  /** Explicit one-hop replacement for implicit targets; never inherits roles or lead. */
+  readonly successor?: string;
   /** co-creator's evaluation of this cat */
   readonly evaluation: string;
 }
@@ -277,7 +282,7 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Optional familiar form of address, prefilled as co-creator for new installations. */
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
   readonly nickname?: string;
   /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
   readonly nicknameSource?: 'user';

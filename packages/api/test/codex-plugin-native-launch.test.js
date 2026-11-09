@@ -291,6 +291,7 @@ test(
     }
     assert.equal(args.includes('--add-dir'), false);
     const values = configValues(args);
+    assert.doesNotMatch(values.get('developer_instructions') ?? '', /Codex MCP tool routing/);
     const configured = codexConfigObjectFromArgs(args).mcp_servers;
     assert.deepEqual(Object.keys(configured), [f.launch.server.name]);
     assert.equal(configured[f.launch.server.name].command, process.execPath);
@@ -504,6 +505,12 @@ test('a scoped member has the same hard tool fence with its own identity project
   assert.equal(config.get('features.shell_tool'), 'false');
   assert.equal(config.get('features.hooks'), 'false');
   assert.equal(config.get('permissions.plugin_native_public.network'), '{enabled=false}');
+  // Always exercises the final provider argv, including on machines without a native CLI.
+  // The real-CLI suite separately proves MCP availability and native rejection behavior.
+  const nativeConfig = codexConfigObjectFromArgs(f.calls[0].args);
+  assert.equal(nativeConfig.agents.enabled, false);
+  assert.deepEqual(nativeConfig.features.multi_agent_v2, { enabled: false, disable_native_tools: true });
+  assert.equal(nativeConfig.features.code_mode_host, true);
 });
 
 test(

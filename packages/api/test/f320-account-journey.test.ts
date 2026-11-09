@@ -25,6 +25,8 @@ test('real account routes persist login, note, quota and atomically switch a loc
   delete process.env.CODEX_HOME;
   delete process.env.CAT_CAFE_RUNTIME_ROOT;
   mkdirSync(join(root, '.cat-cafe'));
+  // This fixture owns its declared capability source; never inherit a checkout's local registry.
+  writeFileSync(join(root, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
   const variant = (id: string) => ({
     id: `${id}-default`,
     catId: id,

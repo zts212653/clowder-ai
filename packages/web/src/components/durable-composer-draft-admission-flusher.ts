@@ -105,6 +105,9 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
           recoveryRevision: pendingRecovery.revision,
         };
       }
+    }
+    // Successful admission consumes only the recovery it inspected, including an equal-content no-op.
+    if (persisted && state.pendingRecoveryRef.current === pendingRecovery) {
       state.pendingRecoveryRef.current = null;
     }
 

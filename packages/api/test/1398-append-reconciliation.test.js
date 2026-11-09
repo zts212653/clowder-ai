@@ -22,7 +22,7 @@ for (const proof of ['accepted', 'not_accepted', 'unknown']) {
     const initial = f.messageStore.getById(f.admission.message.id);
     assert.equal(initial.lifecycle.appendFailures[0].checkedAt, undefined);
     const rows = await enrichQueueEntries(f.queue.list('thread', 'owner'), f.messageStore);
-    assert.equal(rows[0].recoveryActions?.length ?? 0, 0, 'checking has no resend button');
+    assert.deepEqual(rows, [], 'checking belongs to History, not a synthetic Queue row');
     assert.deepEqual(await f.processor.retryRoutingTarget('thread', 'owner', f.admission.entry.id, 'opus'), {
       started: false,
     });
@@ -42,8 +42,8 @@ for (const proof of ['accepted', 'not_accepted', 'unknown']) {
     } else {
       assert.ok(source.lifecycle.appendFailures[0].checkedAt);
       assert.equal(source.lifecycle.appendFailures[0].acceptance, proof);
-      assert.deepEqual(entry.delivery.routingHeldTargetIds ?? [], proof === 'unknown' ? ['opus'] : []);
-      assert.equal(source.lifecycle.dispatchRefs.length, proof === 'unknown' ? 1 : 0);
+      assert.equal(entry, null, 'a read-only probe cannot create pending work');
+      assert.equal(source.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
     }
   });
 }
@@ -69,7 +69,7 @@ test('late native receipt wins a simultaneous negative reconciliation', async ()
   assert.equal(f.messageStore.getById(f.admission.message.id).lifecycle.dispatchRefs[0].inputRead.status, 'read');
 });
 
-test('a failed recovery write cannot discard the original durable Queue owner after provider handoff', async () => {
+test('a failed recovery write leaves the original handoff recoverable in durable History', async () => {
   const f = await appendRecoveryFixture(async () => ({
     accepted: false,
     reason: 'active_run_closed',
@@ -81,9 +81,8 @@ test('a failed recovery write cannot discard the original durable Queue owner af
   const result = await f.append();
   assert.equal(result.outcome, 'rejected');
   const row = await f.queue.getDurableEntry('thread', f.admission.entry.id);
-  assert.ok(row, 'the first admission must survive both failed compensation writes');
-  assert.deepEqual(row.payload, f.admission.entry.payload);
-  assert.equal(row.delivery.appendPendingByTarget.opus.invocationId, 'turn');
+  assert.equal(row, null);
+  assert.equal(f.messageStore.listUnresolvedAppendMessages('thread')[0].id, f.admission.message.id);
   assert.equal(f.messageStore.getById(f.admission.message.id).lifecycle.dispatchRefs[0].appendAcceptance, 'pending');
 });
 
@@ -107,22 +106,35 @@ test('a pending read-only reconciliation does not hold the thread admission drai
   }
 });
 
-test('a recipient retired during the native handoff is not resurrected from an old admission snapshot', async () => {
-  let refuse;
+test('Stop while an outcome write waits cannot be overtaken by the live admission snapshot', async () => {
+  let release;
   let entered;
-  const handedOff = new Promise((resolve) => {
+  const waiting = new Promise((resolve) => {
     entered = resolve;
   });
-  const f = await appendRecoveryFixture(() => {
-    entered();
-    return new Promise((resolve) => {
-      refuse = resolve;
-    });
+  const gate = new Promise((resolve) => {
+    release = resolve;
   });
+  const f = await appendRecoveryFixture(async () => ({
+    accepted: false,
+    reason: 'active_run_closed',
+    acceptance: 'not_accepted',
+  }));
+  const commit = f.messageStore.commitLifecycleAppendRecovery.bind(f.messageStore);
+  f.messageStore.commitLifecycleAppendRecovery = async (...args) => {
+    entered();
+    await gate;
+    return commit(...args);
+  };
   const appending = f.append();
-  await handedOff;
-  await f.queue.reconcileQueuedMessageTargetsDurable('thread', 'owner', f.admission.entry.id, [], ['opus'], {});
-  refuse({ accepted: false, reason: 'active_run_closed', acceptance: 'not_accepted' });
+  await waiting;
+  f.invocationTracker.cancelAll('thread', 'owner', 'user_cancel');
+  f.processor.suppressAutoResume('thread', 'opus');
+  release();
   await appending;
   assert.equal(await f.queue.getDurableEntry('thread', f.admission.entry.id), null);
+  assert.equal(
+    (await f.messageStore.getById(f.admission.message.id)).lifecycle.appendFailures[0].acceptance,
+    'not_accepted',
+  );
 });

@@ -1180,6 +1180,7 @@ test('F306 maps an explicit ideate route to a current-turn Codex Plan collaborat
   const threadStart = wire.writes.find((message) => message.method === 'thread/start');
   const turnStart = wire.writes.find((message) => message.method === 'turn/start');
   assert.deepEqual(initialize.params.capabilities, { experimentalApi: true });
+  assert.match(threadStart.params.developerInstructions, /registered.*namespace/i);
   assert.deepEqual(turnStart.params.collaborationMode, {
     mode: 'plan',
     settings: {
@@ -1282,6 +1283,7 @@ test('F306 explicitly restores Default when execute resumes a provider thread af
   const turnStart = wire.writes.find((message) => message.method === 'turn/start');
   assert.deepEqual(initialize.params.capabilities, { experimentalApi: true });
   assert.equal(threadResume.params.threadId, 'provider-thread');
+  assert.match(threadResume.params.developerInstructions, /registered.*namespace/i);
   assert.deepEqual(turnStart.params.collaborationMode, {
     mode: 'default',
     settings: {

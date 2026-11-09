@@ -344,7 +344,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.ensureOpen();
     const normalized = normalizeMessageSearchDates(options);
     if (this.usesIsolatedProcesses()) {
-      const { signal, onReadSnapshot, onCjkRead: _onCjkRead, ...serialized } = normalized;
+      const {
+        signal,
+        onReadSnapshot,
+        onCjkRead: _onCjkRead,
+        onCandidateAudit: _onCandidateAudit,
+        ...serialized
+      } = normalized;
       serialized.deadlineAt ??= Date.now() + 15_000;
       return this.runProjectionRead<MessagePassageSearchExecution>(
         {
@@ -361,9 +367,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return searchMessagePassages(query, normalized, {
       db: this.getDb(),
       isEmbeddingAvailable: () => this.isPassageEmbeddingAvailable(normalized),
-      semanticSearch: (limit) => this.semanticPassageNNSearch(query, limit, normalized),
-      hybridSearch: (lexical, limit, accept, compare) =>
-        this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare),
+      semanticSearch: (limit, audit) => this.semanticPassageNNSearch(query, limit, normalized, audit),
+      hybridSearch: (lexical, limit, accept, compare, audit) =>
+        this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare, audit),
     });
   }
 
@@ -377,12 +383,20 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const embedding = snapshot ? this.searchEmbedding() : undefined;
     const value = await runMemoryRead<T>({ ...job, embedding: snapshot }, { ...options, embedding });
     const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
-    if (mode === 'lexical' || !embedding || embedding.isCurrent()) return value;
+    throwIfSearchCancelled(options);
+    // A worker that already fell back discarded vector candidates and ranking.
+    // Its lexical result does not borrow the retired geometry.
+    if (
+      mode === 'lexical' ||
+      executionOf(value).meta.effectiveMode === 'lexical' ||
+      !embedding ||
+      embedding.isCurrent()
+    )
+      return value;
 
     // A retired worker result may contain old geometry with newly hydrated
     // source bodies. Discard it and use the existing lexical consumer once,
     // preserving the original absolute deadline, grants, filters and signal.
-    throwIfSearchCancelled(options);
     const lexicalJob: typeof job =
       job.kind === 'message-search'
         ? { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined }
@@ -1185,17 +1199,20 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     query: string,
     limit: number,
     options?: SearchOptions,
+    audit?: import('./message-candidate-audit.js').MessageCandidateAudit,
   ): Promise<PassageResult[]> {
     const deps = this.embedDeps!;
     const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embedQueries([query], options?.signal);
     await coverageSearchCheckpoint(options);
     embedding.assertCurrent();
+    audit?.nativeStarted();
     const nnResults = deps.passageVectorStore!.search(queryVec[0], limit);
+    audit?.nativeFinished(nnResults.length);
     await coverageSearchCheckpoint(options);
     embedding.assertCurrent();
-    return this.hydratePassageVectorHits(nnResults, options);
+    return this.hydratePassageVectorHits(nnResults, options, audit);
   }
 
   private async hybridPassageRRFSearch(
@@ -1205,10 +1222,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     options?: SearchOptions,
     accept?: (passage: PassageResult) => boolean,
     compare?: (a: PassageResult, b: PassageResult) => number,
+    audit?: import('./message-candidate-audit.js').MessageCandidateAudit,
   ): Promise<PassageResult[]> {
-    const semanticPassages = (await this.semanticPassageNNSearch(query, limit, options)).filter(
+    const semanticPassages = (await this.semanticPassageNNSearch(query, limit, options, audit)).filter(
       (passage) => !accept || accept(passage),
     );
+    audit?.order(3, semanticPassages);
     const rrfK = 60;
     const nnWeight = hasCJKCharacters(query) ? CJK_NN_WEIGHT : 1.0;
     const scores = new Map<string, number>();
@@ -1235,30 +1254,39 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       passageMap.set(key, passage);
     }
 
-    return [...passageMap]
+    const ranked = [...passageMap]
       .sort(([a, left], [b, right]) => (compare?.(left, right) ?? 0) || (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
-      .map(([, passage]) => passage)
-      .slice(0, limit);
+      .map(([, passage]) => passage);
+    audit?.order(4, ranked);
+    return ranked.slice(0, limit);
   }
 
   private hydratePassageVectorHits(
     hits: Array<{ passageKey: string; distance: number }>,
     options?: SearchOptions,
+    audit?: import('./message-candidate-audit.js').MessageCandidateAudit,
   ): PassageResult[] {
     if (!this.db || hits.length === 0) return [];
 
     const parsed = hits
-      .map((hit) => {
+      .map((hit, rawIndex) => {
         try {
-          return { ...parsePassageVectorKey(hit.passageKey), passageKey: hit.passageKey, distance: hit.distance };
+          return {
+            ...parsePassageVectorKey(hit.passageKey),
+            passageKey: hit.passageKey,
+            distance: hit.distance,
+            rawRank: rawIndex + 1,
+          };
         } catch {
           return null;
         }
       })
-      .filter((hit): hit is { docAnchor: string; passageId: string; passageKey: string; distance: number } =>
-        Boolean(hit),
+      .filter(
+        (hit): hit is { docAnchor: string; passageId: string; passageKey: string; distance: number; rawRank: number } =>
+          Boolean(hit),
       );
     if (parsed.length === 0) return [];
+    for (const hit of parsed) audit?.nativeCoordinate(hit, hit.rawRank);
 
     // The message pool can contain 2000 hits, exceeding SQLite's OR depth.
     // Bind exact pairs as rows so hydration still uses the composite index.
@@ -1298,7 +1326,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     for (let index = 0; index < parsed.length; index++) {
       const hit = parsed[index];
       const row = rowMap.get(hit.passageKey);
-      if (!row) continue;
+      if (!row) {
+        audit?.deniedIndex(hit);
+        continue;
+      }
       passages.push({
         docAnchor: row.doc_anchor,
         passageId: row.passage_id,
@@ -1550,7 +1581,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           hint: '读取这篇第一人称日记原文与 provenance',
         };
       } else if (item.sourcePath) {
-        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath);
+        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath, item);
         if (filePath) {
           item.drillDown = {
             tool: 'cat_cafe_read_file_slice',
@@ -1563,7 +1594,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return results;
   }
 
-  private resolveSourcePathForDrillDown(sourcePath: string): string | null {
+  private resolveSourcePathForDrillDown(sourcePath: string, item: EvidenceItem): string | null {
+    if (this.sourceRef === 'published:project')
+      return item.sourceHash ? `cat-cafe://published/${item.sourceHash}/${encodeURIComponent(item.anchor)}` : null;
     if (!this.sourceRoot) return null;
     const resolved = isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(this.sourceRoot, sourcePath);
     const rel = relative(this.sourceRoot, resolved);
@@ -1594,7 +1627,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const deps = this.embedDeps!;
     const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embedQueries([query], options?.signal);
     await coverageSearchCheckpoint(options);
     embedding.assertCurrent();
     const nnResults = deps.vectorStore.search(queryVec[0], pool);
@@ -1636,7 +1669,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const deps = this.embedDeps!;
     const embedding = this.searchEmbedding()!;
     await coverageSearchCheckpoint(options);
-    const queryVec = await embedding.embed([query], options?.signal);
+    const queryVec = await embedding.embedQueries([query], options?.signal);
     await coverageSearchCheckpoint(options);
     embedding.assertCurrent();
     const nnResults = deps.vectorStore.search(queryVec[0], pool);

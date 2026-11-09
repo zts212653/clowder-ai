@@ -1,7 +1,8 @@
 // F186 Phase B: Level 0 scanner — indexes any markdown directory without structure assumptions
 
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { matchGlob } from './CatCafeScanner.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 
 const SKIP_DIRS = new Set([
@@ -50,6 +51,21 @@ export class FlatScanner implements RepoScanner {
   }
 
   parseSingle(filePath: string, root: string): ScannedEvidence | null {
+    const boundRoot = resolve(root);
+    const file = resolve(filePath);
+    const rel = relative(boundRoot, file);
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+    try {
+      // Match walkDir: neither a linked file nor a linked ancestor belongs to this scan.
+      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+      for (let dir = dirname(file); relative(boundRoot, dir) !== ''; dir = dirname(dir)) {
+        if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return null;
+        if (isGitRepositoryRoot(dir)) return null;
+      }
+    } catch {
+      // Stale or unreadable paths must not abort the remaining incremental batch.
+      return null;
+    }
     return this.parseFile(filePath, root);
   }
 
@@ -70,6 +86,8 @@ export class FlatScanner implements RepoScanner {
         if (stat.isDirectory()) {
           if (SKIP_DIRS.has(entry)) continue;
           if (this.isExcluded(relative(root, fullPath))) continue;
+          // Nested repositories own separate collections. The explicitly bound root is still scanned.
+          if (isGitRepositoryRoot(fullPath)) continue;
           this.walkDir(fullPath, root, results, depth + 1);
         } else if (stat.isFile() && entry.endsWith('.md')) {
           if (this.isExcluded(relative(root, fullPath))) continue;
@@ -120,6 +138,16 @@ export class FlatScanner implements RepoScanner {
   }
 }
 
+function isGitRepositoryRoot(dir: string): boolean {
+  const gitPath = join(dir, '.git');
+  const stat = lstatSync(gitPath, { throwIfNoEntry: false });
+  if (stat?.isDirectory()) return true;
+  // A symlink or an arbitrary file named .git is not proof of a repository boundary.
+  if (!stat?.isFile()) return false;
+  const marker = /^gitdir: ([^\r\n]+)\r?\n?$/.exec(readFileSync(gitPath, 'utf-8'));
+  return Boolean(marker?.[1].trim());
+}
+
 function extractTitle(content: string): string | null {
   return content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null;
 }
@@ -148,16 +176,4 @@ function extractSectionKeywords(content: string): string[] {
     if (heading && heading.length <= 80) keywords.push(heading);
   }
   return keywords;
-}
-
-function matchGlob(pattern: string, path: string): boolean {
-  const regex = pattern
-    .replace(/\*\*\//g, '§GLOBSTAR_SLASH§')
-    .replace(/\*\*/g, '§GLOBSTAR§')
-    .replace(/\*/g, '§STAR§')
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/§GLOBSTAR_SLASH§/g, '(.+/)?')
-    .replace(/§GLOBSTAR§/g, '.*')
-    .replace(/§STAR§/g, '[^/]*');
-  return new RegExp(`^${regex}$`).test(path);
 }

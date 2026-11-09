@@ -11,7 +11,7 @@
  * (symlinks, directories).
  */
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { getDefaultUploadDir } from '../../../utils/upload-paths.js';
 import { resolveTtsCacheDir } from '../../cats/services/tts/document-listen-paths.js';
 
@@ -38,7 +38,8 @@ export function createHostMediaPathResolver(roots: HostMediaPathRoots): HostMedi
   // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
   const safeResolve = (base: string, suffix: string): string | undefined => {
     const resolved = resolve(base, suffix);
-    if (!(resolved.startsWith(`${base}/`) || resolved === base)) return undefined;
+    const fromBase = relative(base, resolved);
+    if (fromBase === '..' || fromBase.startsWith(`..${sep}`) || isAbsolute(fromBase)) return undefined;
     return existsSync(resolved) ? resolved : undefined;
   };
   return (url: string): string | undefined => {

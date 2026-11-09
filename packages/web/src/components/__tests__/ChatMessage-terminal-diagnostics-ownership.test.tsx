@@ -78,6 +78,36 @@ describe('actual response owns its complete error without duplicate diagnostics'
     expect(message.extra).toBe(extra);
   });
 
+  it('Pi response keeps recent context in its folded diagnostics, separate from the primary failure', () => {
+    const message: Message = {
+      id: 'pi-response',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'prompt_failure: Pi settled without usable assistant text or tool calls',
+      timestamp: 1,
+      variant: 'error',
+      metadata: { provider: 'Pi', model: 'fixture' },
+      extra: {
+        cliDiagnostics: {
+          publicSummary: '近期 CLI 诊断（仅供排查）',
+          publicHint: '可能来自先前回合，不代表本轮故障原因。',
+          safeExcerpt: 'Previous unrelated lookup: Session not found',
+          excerptSource: 'unknown_raw',
+          debugRef: { command: 'Pi', signal: null },
+        },
+      },
+    };
+    act(() => root.render(<ChatMessage message={message} threadId="thread" getCatById={() => undefined} />));
+    expect(container.textContent).toContain('Pi settled without usable assistant text or tool calls');
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="cli-diagnostics-toggle"]');
+    expect(toggle).not.toBeNull();
+    act(() => toggle?.click());
+    expect(container.querySelector('[data-testid="cli-diagnostics-excerpt"]')?.textContent).toContain(
+      'Previous unrelated lookup: Session not found',
+    );
+    expect(message.content).not.toContain('Session not found');
+  });
+
   it('a standalone admission failure still shows its only error banner', () => {
     const message: Message = {
       id: 'admission-failure',

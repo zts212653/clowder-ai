@@ -1845,7 +1845,7 @@
     {
       "id": "F314",
       "name": "Development Episode Alignment Experiment｜开发交付对齐自进化实验",
-      "status": "in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open, 18-cluster code refactor deferred | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；Task197；Task143 已完成） | **Priority**: P0",
+      "status": "in-progress / Phase B accepted with recorded exceptions; operator B accepts insufficient anchor evidence; method #5788 and published history v10 delivered, content/map design accepted; overall acceptance open; cloud rule-convergence batch (16 PRs) and related test cleanup/speed batch (6 PRs) merged | **Owner**: 小星星·Maine Coon（@codex-astra, GPT-6 Astra；方向与整体结果） | **Execution**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol；原实验Task197；Task143 已完成）；18簇由云端Ragdoll实现，家内Sol6.1独立核对后合入 | **Priority**: P0",
       "file": "F314-development-episode-alignment-experiment.md"
     },
     {
@@ -1935,7 +1935,7 @@
     {
       "id": "F330",
       "name": "团队仓当上游",
-      "status": "in-progress | **Owner**: Ragdoll (@opus55，指挥 Phase A/B) · 小星星 (@codex-astra，指挥 Phase C–E) | **Priority**: P1",
+      "status": "done（operator 确认当前批准范围完成；A/B 与 052 的 next 往返、发布、skills 已交付，未把旧 D–F 规划算成已实现） | **Completed**: 2026-11-02 | **Owner**: Ragdoll (@opus55，Phase A/B) · 小星星 (@codex-astra，052 发布层交付与本次状态同步) | **Priority**: P1",
       "file": "F330-team-repo-upstream.md"
     },
     {
@@ -1961,6 +1961,12 @@
       "name": "Multi-Machine Cat Hosting｜分身不分家：猫在别的机器上干活，还是家里那只",
       "status": "spec | **Owner**: Ragdoll (@opus55, claude-opus-5-5) | **Priority**: P2",
       "file": "F334-multi-machine-cat-hosting.md"
+    },
+    {
+      "id": "F335",
+      "name": "守望猫（别每次都靠你来想起来）",
+      "status": "in-progress | **Owner**: Ragdoll (@fable-5) 判断席 · 架构稿 小星星 (@codex-astra) · 北极星稿与施工指挥 Ragdoll (@opus55) · 施工：交付一 小太阳 6.1 (@codex61-sol)，交付二、三 Ragdoll (@opus55) | **Priority**: P1",
+      "file": "F335-watcher-cat.md"
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type CatRoutingError, CatRoutingErrorSchema } from './types/cat-routing.js';
 import type { CatId } from './types/ids.js';
 
 /** Why the server would route the draft to the projected recipients. */
@@ -42,6 +43,7 @@ export interface RoutingPreviewResponse {
   unavailableTargets?: CatId[];
   /** A named recipient is unavailable; public admission requires human approval of the replacement. */
   requiresConfirmation?: boolean;
+  routingWarnings?: CatRoutingError[];
 }
 
 export const routingPreviewResponseSchema: z.ZodType<RoutingPreviewResponse, z.ZodTypeDef, unknown> = z
@@ -57,6 +59,7 @@ export const routingPreviewResponseSchema: z.ZodType<RoutingPreviewResponse, z.Z
       .transform((ids) => ids as CatId[])
       .optional(),
     requiresConfirmation: z.boolean().optional(),
+    routingWarnings: z.array(CatRoutingErrorSchema).optional(),
   })
   .strict();
 
@@ -66,6 +69,7 @@ export const routingConfirmationRequiredSchema = z
   .object({
     code: z.literal('ROUTING_CONFIRMATION_REQUIRED'),
     error: z.string(),
+    routingWarnings: z.array(CatRoutingErrorSchema).optional(),
     unavailable: z.array(routingConfirmationMemberSchema).min(1).max(50),
     targets: z.array(routingConfirmationMemberSchema).min(1).max(50),
   })

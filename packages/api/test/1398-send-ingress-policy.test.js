@@ -55,7 +55,11 @@ for (const disposition of ['next_work', 'continue_current']) {
     const registry = new InvocationRegistry();
     const router = {
       previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
-      resolveTargetsAndIntent: async () => ({ targetCats: ['opus'], intent: { intent: 'execute' } }),
+      resolveTargetsAndIntent: async () => ({
+        targetCats: ['opus'],
+        intent: { intent: 'execute' },
+        routing_warnings: [],
+      }),
       resolveExplicitTargets: async (cats) => cats,
       resolveConversationTargetsAtAdmission: async (cats) => (cats.length ? cats : ['opus']),
       freshnessCarrierCapability: () => capability,

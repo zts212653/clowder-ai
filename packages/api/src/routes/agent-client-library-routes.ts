@@ -9,11 +9,16 @@ import {
 import type { SessionImplementationRegistry } from '../domains/cats/services/agents/session-contract/implementation-registry.js';
 import {
   AGENT_PROVIDER_DECLARATION_FILE,
-  type AgentProviderDeclaration,
+  type AgentClientProfile,
   parseAgentProviderDeclaration,
   parsePluginAgentRef,
+  readAgentClientProfileList,
+  readAgentProviderConfiguration,
 } from '../domains/cats/services/agents/session-contract/plugin-agent-provider.js';
-import { resolveAgentClientLibrary } from '../domains/plugin/declared/agent-client-library.js';
+import {
+  readAgentClientLibraryConfiguration,
+  resolveAgentClientLibrary,
+} from '../domains/plugin/declared/agent-client-library.js';
 import { readDeclaration } from '../domains/plugin/declared/declared-agent-session-providers.js';
 import { resolvePackageFile } from '../domains/plugin/declared/declared-resource-paths.js';
 import type { VerifiedPluginPackageLocator } from '../domains/plugin/external-runtime/types.js';
@@ -138,46 +143,43 @@ export function registerAgentClientLibraryRoutes(
   app.get('/api/agent-providers', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');
     if ('error' in access) return pluginAccessError(reply, access);
-    const snapshot = await input.inventory.snapshot();
+    const snapshot = await input.inventory.snapshot({ currentOnly: true });
     const libraries = [];
     for (const instance of snapshot.instances.filter((instance) => instance.lifecycleState === 'installed')) {
       const record = snapshot.packages.find((record) => record.packageDigest === instance.packageDigest);
       if (!record?.manifest) continue;
       const pluginName = record.manifest.name;
-      let located: Awaited<ReturnType<VerifiedPluginPackageLocator['resolveInstalledPackage']>> | undefined;
+      const metadata = record.agentClientMetadata;
+      if (metadata === null) continue;
       let configurationKey: string | null = null;
-      let defaultClient: (AgentProviderDeclaration['acp'] & { id: string; name: string }) | undefined;
+      let defaultClient: AgentClientProfile | undefined;
       try {
-        located = await input.packages.resolveInstalledPackage(record.packageDigest);
-        if (!isDeepStrictEqual(located.manifest, record.manifest)) throw new Error('ACP 插件包权威不一致');
-        await located.verifyIntegrity();
-        let raw: unknown;
-        try {
-          raw = await readDeclaration(
-            await resolvePackageFile(located.rootDir, AGENT_PROVIDER_DECLARATION_FILE, 'Agent provider declaration'),
-          );
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw error;
+        if (metadata === undefined) throw new Error('ACP 插件目录尚未登记，请修复插件或重启 Host。');
+        if ('error' in metadata) throw new Error(metadata.error);
+        const { catalog } = metadata;
+        configurationKey = catalog.configurationKey;
+        defaultClient = catalog.defaultClient;
+        if (configurationKey === null && defaultClient?.permissionPolicy === 'auto_allow')
+          throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件声明');
+        let profiles = catalog.clients;
+        if (configurationKey !== null) {
+          const { value, ownerSaved } = await readAgentClientLibraryConfiguration({
+            declaration: defaultClient
+              ? { id: defaultClient.id, transport: 'acp', acp: defaultClient, configurationKey }
+              : { configurationKey },
+            admission: { instance, packageRecord: { ...record, manifest: record.manifest } },
+            configuration: input.configuration,
+          });
+          const configured = defaultClient
+            ? [{ ...defaultClient, ...readAgentProviderConfiguration(value, defaultClient) }]
+            : readAgentClientProfileList(value);
+          if (!ownerSaved && configured.some((profile) => profile.permissionPolicy === 'auto_allow'))
+            throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件默认配置');
+          profiles = configured;
         }
-        await located.verifyIntegrity();
-        const parsed = parseAgentProviderDeclaration(raw, { packageRoot: located.rootDir });
-        if (!parsed.ok) throw new Error(parsed.reason);
-        configurationKey = parsed.declaration.configurationKey ?? null;
-        if ('id' in parsed.declaration)
-          defaultClient = { id: parsed.declaration.id, name: pluginName, ...parsed.declaration.acp };
-        const profiles = await resolveAgentClientLibrary({
-          declaration: parsed.declaration,
-          admission: {
-            instance,
-            packageRecord: { ...record, manifest: record.manifest },
-          },
-          packageRoot: located.rootDir,
-          configuration: input.configuration,
-        });
         libraries.push({
           pluginId: instance.pluginId,
-          presets: 'presets' in parsed.declaration ? (parsed.declaration.presets ?? []) : [],
+          presets: catalog.presets,
           ...(defaultClient ? { configurationMode: 'single' as const, defaultClient } : {}),
           configurationKey,
           clients: profiles.map((profile) => ({
@@ -193,10 +195,11 @@ export function registerAgentClientLibraryRoutes(
           configurationKey,
           ...(defaultClient ? { configurationMode: 'single' as const, defaultClient } : {}),
           clients: [],
-          error: error instanceof Error ? error.message : 'ACP 插件目录读取失败',
+          error:
+            error instanceof Error
+              ? `${defaultClient ? 'ACP 客户端配置无效：' : ''}${error.message}`
+              : 'ACP 插件目录读取失败',
         });
-      } finally {
-        await located?.release();
       }
     }
     return { libraries };

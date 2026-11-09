@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateManifest } from '@clowder-ai/plugin-contract';
 import { PluginRuntimeCarrierRouter } from '../../dist/domains/plugin/carrier/runtime-carrier.js';
+import { snapshotInventoryFixture } from './snapshot-inventory-fixture.js';
 
 export const policy = (overrides = {}) => ({
   mode: 'plugin_native',
@@ -57,12 +58,12 @@ export async function fixture(t, options = {}) {
   let beforeSnapshot = async () => {};
   let beforeConfigWrite = async () => {};
   const router = new PluginRuntimeCarrierRouter(
-    {
+    snapshotInventoryFixture({
       snapshot: async () => {
         await beforeSnapshot();
         return structuredClone(snapshot);
       },
-    },
+    }),
     {
       projectRoot: root,
       persistCapabilities: options.persistCapabilities ?? true,

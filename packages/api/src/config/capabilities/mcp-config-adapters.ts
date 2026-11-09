@@ -9,7 +9,7 @@
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import type { McpServerDescriptor } from '@cat-cafe/shared';
 import { parse as parseToml } from 'smol-toml';
 import { createModuleLogger } from '../../infrastructure/logger.js';
@@ -88,8 +88,9 @@ const CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = Object.fromE
  *
  * Order of precedence:
  *   1. ALLOWED_WORKSPACE_DIRS env (highest — explicit user override)
- *   2. CAT_CAFE_WORKSPACE_ROOT env (separates workspace from runtime binary)
- *   3. process.cwd() fallback
+ *   2. the invocation's thread working directory, when there is one (F041/F043)
+ *   3. CAT_CAFE_WORKSPACE_ROOT env (separates workspace from runtime binary)
+ *   4. process.cwd() fallback
  *
  * Runtime-mode safeguard: when CAT_CAFE_RUNTIME_ROOT is set but no workspace
  * env is set, process.cwd() == runtime worktree (not the user workspace).
@@ -97,9 +98,11 @@ const CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = Object.fromE
  * log a warning so misconfigured runtime startup is loud instead of silent.
  */
 let workspaceRuntimeMisconfigWarned = false;
-export function resolveWorkspaceRoot(): string {
+export function resolveWorkspaceRoot(workingDirectory?: string): string {
   const allowedFromEnv = process.env.ALLOWED_WORKSPACE_DIRS?.trim();
   if (allowedFromEnv) return allowedFromEnv;
+  const threadWorkspace = workingDirectory?.trim();
+  if (threadWorkspace) return resolve(threadWorkspace);
   const explicitWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT?.trim();
   if (explicitWorkspace) return explicitWorkspace;
   const runtimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT?.trim();

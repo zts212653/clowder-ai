@@ -251,7 +251,7 @@ test('unavailable recipient explanation stays visible in the actual desktop and 
   }
 });
 
-test('every state of the design renders its words in a fixed 36px row', async () => {
+test('current execution states and canonical pending queues keep a fixed 36px row', async () => {
   const expected = {
     working: /^宪宪 · Opus 5\.5 处理中 \d+:\d{2}$/,
     queue: /^宪宪 · Opus 5\.5 处理中 \d+:\d{2} · 排队 2$/,
@@ -261,8 +261,8 @@ test('every state of the design renders its words in a fixed 36px row', async ()
     blocked: /^全量门禁 · 不是你发起的，你不能停 \d+:\d{2}$/,
     confirming: /^正在确认运行状态…$/,
     unverified: /^运行状态待确认$/,
-    stuck: /^1 项处理受阻 · 排队 2$/,
-    paused: /^排队已暂停 · 3 条$/,
+    mixed: /^排队 2$/,
+    orphaned: /^排队 3$/,
   };
   for (const [scene, pattern] of Object.entries(expected)) {
     const session = await open(scene);
@@ -369,17 +369,27 @@ test('a force-reset the server refuses is not reported as done; the dialog stays
   await session.page.close();
 });
 
-test('stuck message: the row offers 强制重置 only; 恢复 waits in the panel; dragging sends queued entries only', async () => {
-  const session = await open('stuck');
-  assert.equal(await session.page.locator('[data-testid="execution-row-resume"]').count(), 0, 'no 恢复 on the row');
+test('pending recovery stays reachable; dragging reorders only canonical queued entries', async () => {
+  const session = await open('mixed');
+  assert.equal(
+    await session.page.locator('[data-testid="execution-row-resume"]').count(),
+    1,
+    'orphaned pending work can recover',
+  );
+  assert.equal(
+    await session.page.locator('[data-testid="execution-row-force-reset"]').count(),
+    0,
+    'pending queue entries grant no execution reset',
+  );
+  assert.deepEqual(await session.page.evaluate(() => window.__row.queueIds()), ['a', 'b']);
   await session.page.click('[data-testid="execution-row-toggle"]');
   await session.page.waitForSelector('[data-testid="execution-row-panel"]');
   assert.equal(await text(session.page, 'execution-row-queue-resume'), '恢复');
-  await shot(session.page, 'stuck-open');
+  await shot(session.page, 'pending-open');
 
   // A real pointer drag: pick up entry "b" by its handle and drop it on "a".
   const handles = session.page.locator('button[aria-label="Drag to reorder"]:not([disabled])');
-  assert.equal(await handles.count(), 2, 'the stuck message has no live handle');
+  assert.equal(await handles.count(), 2, 'only the two queued entries have live handles');
   const from = await handles.nth(1).boundingBox();
   const to = await handles.nth(0).boundingBox();
   await session.page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -399,26 +409,41 @@ test('stuck message: the row offers 强制重置 only; 恢复 waits in the panel
   await session.page.close();
 });
 
-test('paused: 继续 on the row posts queue/next; the reason is kept', async () => {
-  const session = await open('paused', {
-    respond: (call) => (call.key.endsWith('/queue/next') ? { status: 200, body: { started: true } } : null),
-  });
-  assert.equal(
-    await session.page.locator('[data-testid="execution-row-text"]').getAttribute('title'),
-    '当前调用已取消',
-  );
-  await session.page.click('[data-testid="execution-row-resume"]');
-  await expectCalls(session, [`POST /api/threads/${THREAD}/queue/next`]);
-  await session.page.click('[data-testid="execution-row-toggle"]');
-  await session.page.waitForSelector('[data-testid="execution-row-pause-reason"]');
-  await shot(session.page, 'paused-open');
-  finish(session);
-  await session.page.close();
+test('orphaned pending recovery posts queue/next and rereads refusals without reporting success', async () => {
+  for (const [outcome, refreshStatus, toast] of [
+    [{ status: 200, body: { started: true } }, 200, null],
+    [{ status: 200, body: { started: false } }, 200, { title: '队列状态已刷新', type: 'info' }],
+    [{ status: 409, body: { started: false, error: 'QUEUE_BUSY' } }, 200, { title: '队列未启动', type: 'info' }],
+    [{ status: 200, body: { started: false } }, 500, { title: '队列未启动', type: 'error' }],
+  ]) {
+    const session = await open('orphaned', {
+      respond: (call) => {
+        if (call.key.endsWith('/queue/next')) return outcome;
+        if (call.key === `GET /api/threads/${THREAD}/queue`) return { status: refreshStatus, body: { queue: [] } };
+        return null;
+      },
+      allowConsole: ['status of 409', 'status of 500'],
+    });
+    assert.equal(await session.page.locator('[data-testid="execution-row-text"]').getAttribute('title'), null);
+    assert.equal(await session.page.locator('[data-testid="execution-row-pause-reason"]').count(), 0);
+    await session.page.click('[data-testid="execution-row-resume"]');
+    await expectCalls(session, [
+      `POST /api/threads/${THREAD}/queue/next`,
+      ...(toast ? [`GET /api/threads/${THREAD}/queue`] : []),
+    ]);
+    if (toast) {
+      await session.page.waitForFunction(() => window.__row.toasts().length > 0);
+      assert.deepEqual(await toasts(session.page), [toast]);
+    } else assert.deepEqual(await toasts(session.page), []);
+    await shot(session.page, `pending-recovery-${outcome.status}-${refreshStatus}-${outcome.body.started}`);
+    finish(session);
+    await session.page.close();
+  }
 });
 
 /**
  * The composer's stop buttons and mic: how many of each, and how many stops come BEFORE the mic in the document. (The
- * classic "replying… cancel" bar has a stop of its own, so classic has two; v2 has one and it is last.)
+ * classic composer has one stop and no mic while running; v2 has one stop and it is last.)
  */
 const composerControls = (page) =>
   page.evaluate(() => {
@@ -472,17 +497,22 @@ test('mounted, new shell, a cat running, empty draft: the one row and the title 
   await page.close();
 });
 
-test('mounted, new shell, text in the draft: the composer has no stop; queue-send is there; the row still stops the run', async () => {
+test('mounted v2 sends the draft normally while the row retains exact execution cancellation', async () => {
   const session = await open('working', { mount: true });
   const { page } = session;
-  await page.fill('textarea', '下一件工作：看一下这个');
-  await page.waitForSelector('button[aria-label="排队发送"]');
+  const draft = '下一件工作：看一下这个';
+  await page.fill('textarea', draft);
+  await page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
   assert.equal(
     await page.locator('button[aria-label="Stop generation"], button[aria-label="停止生成"]').count(),
     0,
     'no composer stop with text',
   );
   await shot(page, 'v2-mounted-typed');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.waitForFunction(() => window.__row.sends().length === 1);
+  assert.deepEqual(await page.evaluate(() => window.__row.sends()[0]), [draft, undefined, undefined, undefined]);
+  assert.equal(await page.locator('textarea').inputValue(), '');
   await page.click('[data-testid="execution-row-stop"] button');
   await waitForCall(session, (c) => c.key === `POST /api/threads/${THREAD}/executions/live/exec-opus/cancel`);
   finish(session);
@@ -628,6 +658,63 @@ test('mounted, new shell: recipient preview follows visible @ text and preferred
   await page.close();
 });
 
+test('a long single-recipient name stays visible and selects its registered mention', async () => {
+  const nickname = '鲸鲸 deepseek-flash-1017 · high';
+  const catalog = [...cats, { ...cats[2], id: 'dsh', displayName: '小鲸鱼', nickname, mentionPatterns: ['@dsh'] }];
+  for (const width of [900, 462]) {
+    const session = await open('working', {
+      mount: true,
+      ready: '[data-testid="composer-routing-preview"]',
+      width,
+      catalog,
+      respond: (call) => {
+        if (call.key === `GET /api/config/conversation-view?threadId=${THREAD}`) {
+          return { status: 200, body: { stored: null, effective: { mode: 'group' }, source: 'product' } };
+        }
+        if (call.key === 'POST /api/routing/preview') {
+          return { status: 200, body: { targetCats: ['dsh'], reason: { kind: 'recent_replier' } } };
+        }
+        return null;
+      },
+    });
+    const { page } = session;
+    const trigger = page.getByTestId('composer-routing-preview');
+    await page.waitForFunction(
+      (name) =>
+        document.querySelector('[data-testid="composer-routing-preview"]')?.getAttribute('aria-label')?.includes(name),
+      nickname,
+    );
+    const layout = await page.getByTestId('composer-routing-name').evaluate((name) => ({
+      visible: getComputedStyle(name).visibility !== 'hidden' && getComputedStyle(name).display !== 'none',
+      available: name.clientWidth,
+      required: name.scrollWidth,
+      overflow: getComputedStyle(name).textOverflow,
+      text: name.textContent,
+      composerFits:
+        document.querySelector('[data-testid="chat-input-composer-row"]').scrollWidth <=
+        document.querySelector('[data-testid="chat-input-composer-row"]').clientWidth,
+    }));
+    measurements.push({ scene: 'long-single-recipient', width, ...layout });
+    await shot(page, `long-single-recipient-${width}`);
+    assert.equal(layout.visible, true, `${width}px: the name must remain readable`);
+    assert.ok(layout.available > 20 && layout.required > layout.available, 'the actual long name overflows its slot');
+    assert.equal(layout.overflow, 'ellipsis');
+    assert.equal(layout.text, nickname);
+    assert.equal(layout.composerFits, true);
+    assert.match(await trigger.getAttribute('aria-label'), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.hover();
+    const tooltip = page.getByTestId('app-tooltip');
+    await tooltip.waitFor();
+    assert.match(await tooltip.textContent(), /鲸鲸 deepseek-flash-1017 · high/);
+    await trigger.click();
+    const recipient = page.getByTestId('composer-recipient-dsh');
+    await recipient.click();
+    assert.equal(await page.locator('textarea').inputValue(), '@dsh ');
+    finish(session);
+    await page.close();
+  }
+});
+
 test('the complete multi-recipient identity is measured and hidden atomically when it does not fit', async () => {
   for (const width of [900, 462]) {
     const session = await open('working', {
@@ -712,9 +799,9 @@ test('the recipient menu disables a catalog entry that has no unique registered 
 
 test('a 430px chat column keeps one useful status, icon actions, and no partial recipient name', async () => {
   for (const [scene, compact, action] of [
-    ['working', '在工作', 'stop'],
-    ['paused', '已暂停', 'resume'],
-    ['silent', '没动静', 'force-reset'],
+    ['working', '宪宪 · Opus 5.5处理中', 'stop'],
+    ['orphaned', '排队 3', 'resume'],
+    ['silent', '宪宪 · Opus 5.5没动静', 'force-reset'],
   ]) {
     const session = await open(scene, { width: 462 });
     const layout = await session.page.evaluate((actionName) => {
@@ -800,13 +887,16 @@ test('a 430px chat column keeps one useful status, icon actions, and no partial 
 
 test('mounted, new shell: send mode lives first in +, saves for this conversation, and the row keeps its visual status cues', async () => {
   let savedDisposition = null;
+  let refuseWrite = false;
   const session = await open('working', {
     mount: true,
+    allowConsole: ['status of 500'],
     respond: (call) => {
       if (call.key === `GET /api/config/message-disposition?threadId=${THREAD}`) {
         return { status: 200, body: dispositionSnapshot(savedDisposition) };
       }
       if (call.key === 'PUT /api/config/message-disposition') {
+        if (refuseWrite) return { status: 500, body: { error: 'CONTROLLED_SAVE_FAILURE' } };
         savedDisposition = call.body.disposition;
         return { status: 200, body: dispositionSnapshot(savedDisposition) };
       }
@@ -815,7 +905,9 @@ test('mounted, new shell: send mode lives first in +, saves for this conversatio
   });
   const { page } = session;
 
-  await page.waitForSelector('textarea[placeholder="继续输入，成为下一件工作…"]');
+  await page.locator('textarea').waitFor();
+  const placeholder = await page.locator('textarea').getAttribute('placeholder');
+  assert.ok(placeholder?.trim(), 'the current general or capability-specific hint is present');
   assert.equal(
     await page.locator('[data-testid="message-disposition-selector"]').count(),
     0,
@@ -844,24 +936,63 @@ test('mounted, new shell: send mode lives first in +, saves for this conversatio
   assert.match(rowPresentation.action ?? '', /停止/, 'the live action stays visible');
 
   await page.click('button[aria-controls="composer-add-menu"]');
-  await page.waitForSelector('[data-testid="message-disposition-menu-section"]');
+  await page.waitForSelector('[data-testid="message-disposition-trigger"]:not([disabled])');
   const sectionComesFirst = await page.evaluate(() => {
-    const section = document.querySelector('[data-testid="message-disposition-menu-section"]');
+    const section = document.querySelector('[data-testid="message-disposition-trigger"]');
     const context = document.querySelector('[data-testid="composer-add-context"]');
     return Boolean(section && context && section.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
   assert.equal(sectionComesFirst, true, 'send mode is the first + menu section');
-  assert.match(await text(page, 'message-disposition-menu-section'), /这条发出去后/);
+  assert.match(await text(page, 'message-disposition-trigger'), /发送策略/);
+  await page.click('[data-testid="message-disposition-trigger"]');
+  await page.locator('[data-testid="message-disposition-panel"]').waitFor();
   await shot(page, 'v2-send-mode-menu');
 
   await page.click('[data-disposition-option="continue_current"]');
   await waitForCall(session, (call) => call.key === 'PUT /api/config/message-disposition');
   const write = session.calls.find((call) => call.key === 'PUT /api/config/message-disposition');
   assert.deepEqual(write.body, { scope: 'thread', threadId: THREAD, disposition: 'continue_current' });
-  await page.waitForSelector('textarea[placeholder="接着当前工作补充…"]');
-  assert.equal(await page.locator('[data-testid="composer-add-menu"]').count(), 0, 'a saved choice closes the menu');
+  assert.equal(
+    await page.locator('textarea').getAttribute('placeholder'),
+    placeholder,
+    'disposition does not replace the composer hint',
+  );
+  await page.locator('[data-testid="message-disposition-panel"]').waitFor({ state: 'hidden' });
+  assert.equal(
+    await page.locator('[data-testid="message-disposition-trigger"]').count(),
+    1,
+    'a saved choice returns to the add menu',
+  );
 
-  measurements.push({ scene: 'v2-send-mode-menu', rowPresentation, write: write.body });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.click('button[aria-controls="composer-add-menu"]');
+  await page.locator('[data-testid="message-disposition-trigger"]:not([disabled])').click();
+  await page.locator('[data-disposition-option="continue_current"][aria-pressed="true"]').waitFor();
+  refuseWrite = true;
+  await page.click('[data-disposition-option="next_work"]');
+  await waitForCall(
+    session,
+    (call) => call.key === 'PUT /api/config/message-disposition' && call.body.disposition === 'next_work',
+  );
+  await page.getByRole('alert').waitFor();
+  assert.equal(await page.locator('[data-disposition-option="continue_current"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('[data-disposition-option="next_work"]').getAttribute('aria-pressed'), 'false');
+  assert.equal(savedDisposition, 'continue_current', 'a failed write does not replace the saved choice');
+  assert.equal(await page.locator('textarea').getAttribute('placeholder'), placeholder);
+  assert.deepEqual(
+    session.calls.filter((call) => call.key === 'PUT /api/config/message-disposition').map((call) => call.body),
+    [
+      { scope: 'thread', threadId: THREAD, disposition: 'continue_current' },
+      { scope: 'thread', threadId: THREAD, disposition: 'next_work' },
+    ],
+  );
+  measurements.push({
+    scene: 'v2-send-mode-menu',
+    rowPresentation,
+    write: write.body,
+    rejectedDisposition: 'next_work',
+    retainedDisposition: savedDisposition,
+  });
   finish(session);
   await page.close();
 });
@@ -892,25 +1023,32 @@ test('mounted, new shell: the title ⌄ holds the normal force-reset — the sam
   await page.close();
 });
 
-test('mounted, classic shell, the same cat running: nothing moved — the old bar, the old "replying… cancel" bar, the stop first, no row, no ⌄', async () => {
+test('mounted classic keeps its execution bar and one stop without a duplicate banner or v2 row', async () => {
   const session = await open('working', { mount: true, shell: 'classic', ready: '[data-testid="chat-body"]' });
   const { page } = session;
   await page.getByText('执行中', { exact: true }).first().waitFor();
-  await page.waitForSelector('[data-testid="active-invocation-banner"]');
+  assert.equal(
+    await page.locator('[data-testid="active-invocation-banner"]').count(),
+    0,
+    'no duplicate replying banner',
+  );
   assert.equal(await page.locator('[data-testid="execution-row"]').count(), 0, 'no new row in classic');
   assert.equal(await page.locator('[data-testid="thread-title-menu-toggle"]').count(), 0, 'no ⌄ in classic');
   assert.equal(
     await page.locator('[data-testid="message-disposition-selector"]').count(),
-    1,
-    'classic keeps its old chip',
+    0,
+    'the old standalone strategy chip is absent in classic too',
   );
   assert.deepEqual(
     await composerControls(page),
-    { stop: 2, mic: 1, stopsBeforeMic: 2 },
-    "classic: the bar's stop and the side stop both stay before the mic, as before",
+    { stop: 1, mic: 0, stopsBeforeMic: -1 },
+    'classic has one composer stop and no spare mic during an active turn',
   );
   await page.waitForSelector('button[aria-label="Stop generation"]:not([disabled])');
   await shot(page, 'classic-mounted');
+  await page.click('button[aria-label="Stop generation"]');
+  await waitForCall(session, (call) => call.key === `POST /api/threads/${THREAD}/executions/live/exec-opus/cancel`);
+  assert.deepEqual(session.calls.find((call) => call.key.endsWith('/exec-opus/cancel')).body, { catId: 'opus' });
   finish(session);
   await page.close();
 });

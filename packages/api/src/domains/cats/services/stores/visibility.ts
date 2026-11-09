@@ -165,6 +165,19 @@ export function isThreadMessageVisibleToViewer(message: StoredMessage, viewerUse
   return resolveThreadMessageVisibility({ includeQueuedCatMessages: true }, viewerUserId)(message);
 }
 
+/** Browser History includes seen recall placeholders and excludes retired route diagnostics. */
+export function isBrowserHistoryMessageVisibleToViewer(message: StoredMessage, viewerUserId: string): boolean {
+  return (
+    !message.deletedAt &&
+    (message.userId === viewerUserId || isSystemUserMessage(message)) &&
+    message.source?.connector !== 'routing-guard-failure' &&
+    resolveThreadMessageVisibility(
+      { includeQueuedCatMessages: true, includeRecalledUserMessages: true },
+      viewerUserId,
+    )(message)
+  );
+}
+
 /**
  * Delivery time and publication order are distinct for real-cat speech: it is
  * published when authored, even if recipient execution custody ends later.

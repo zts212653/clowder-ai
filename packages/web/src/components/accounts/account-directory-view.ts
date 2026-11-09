@@ -7,7 +7,8 @@ import { accountsCopy } from './accounts.shell-copy';
 
 export function accountProvider(account: ProfileItem, t = accountsCopy.zh): string {
   if (account.authType === 'oauth') return builtinClientLabel(account.clientId);
-  if (!account.baseUrl) return account.clientId ? builtinClientLabel(account.clientId) : t.customProvider;
+  if (!account.baseUrl)
+    return account.clientId ? builtinClientLabel(account.clientId, account.authType) : t.customProvider;
   try {
     const host = new URL(account.baseUrl).hostname;
     const providers: Array<[string, string]> = [

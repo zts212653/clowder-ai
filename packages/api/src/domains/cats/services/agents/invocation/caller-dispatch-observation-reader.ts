@@ -1,4 +1,4 @@
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, getLifecycleAppendOutcome } from '@cat-cafe/shared';
 import { projectMessageBundleReadableContentWithCoverage } from '../../context/MessageBundleSourceProjection.js';
 import { messageFrom } from '../../stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
@@ -62,9 +62,9 @@ function isReadableObservationResponse(response: StoredMessage, pointer: CallerD
   );
 }
 
-function unknownLine(pointer: CallerDispatchObservationPointer, reason: string, responseId?: string): ObservationLine {
+function unknownLine(pointer: CallerDispatchObservationPointer, reason: string): ObservationLine {
   return {
-    line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: unknown（${reason}，保留待观察）${responseId ? `; response=${responseId}` : ''}`,
+    line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: unknown（${reason}，保留待观察）`,
     terminal: false,
     fingerprint: `unknown:${reason}`,
   };
@@ -107,7 +107,7 @@ function terminalObservationLine(
   pointer: CallerDispatchObservationPointer,
 ): ObservationLine | null {
   const readable = projectMessageBundleReadableContentWithCoverage(response);
-  if (!readable.fullyRepresented) return unknownLine(pointer, 'terminal payload 无法完整投影', response.id);
+  if (!readable.fullyRepresented) return unknownLine(pointer, 'terminal payload 无法完整投影');
   if (
     response.lifecycle?.kind === 'response' &&
     response.userId === pointer.ownerId &&
@@ -115,7 +115,7 @@ function terminalObservationLine(
     response.lifecycle.inputMessageIds.includes(pointer.sourceMessageId)
   ) {
     if (response.lifecycle.status === 'processing') {
-      return unknownLine(pointer, 'settled ref 指向 processing response', response.id);
+      return unknownLine(pointer, 'settled ref 指向 processing response');
     }
     return {
       line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${response.lifecycle.status}; response=${response.id}`,
@@ -157,6 +157,23 @@ export async function readCallerDispatchObservationLine(
   if (refs.length !== 1) return unknownLine(pointer, 'exact dispatchRef 不唯一');
   const ref = refs[0];
   if (!ref) return unknownLine(pointer, 'exact dispatchRef 缺失');
+  const appendOutcome = getLifecycleAppendOutcome(ref, source.lifecycle);
+  if (appendOutcome === 'not_accepted' || appendOutcome === 'incomplete') {
+    const status =
+      appendOutcome === 'not_accepted'
+        ? 'not_delivered(append not accepted)'
+        : 'incomplete(append did not complete; effects may already exist)';
+    return {
+      line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: ${status}`,
+      terminal: true,
+      fingerprint: `append:${ref.statusMessageId}:${appendOutcome}`,
+    };
+  }
+  if (appendOutcome)
+    return unknownLine(
+      pointer,
+      appendOutcome === 'unknown' ? 'append 接纳未确认，原回复终态不代表收到' : 'append 本输入尚未确认完成',
+    );
   if (ref.phase === 'dispatched') {
     return {
       line: `- ${pointer.sourceMessageId} → ${pointer.targetId}: executing`,
@@ -166,10 +183,10 @@ export async function readCallerDispatchObservationLine(
   }
 
   const responseRead = await readMessage(messageStore, ref.statusMessageId);
-  if (responseRead.failed) return unknownLine(pointer, 'terminal response 读取失败', ref.statusMessageId);
+  if (responseRead.failed) return unknownLine(pointer, 'terminal response 读取失败');
   const response = responseRead.message;
   if (!response || !isReadableObservationResponse(response, pointer)) {
-    return unknownLine(pointer, 'terminal response 不可验证', ref.statusMessageId);
+    return unknownLine(pointer, 'terminal response 不可验证');
   }
-  return terminalObservationLine(response, pointer) ?? unknownLine(pointer, 'response lifecycle 不匹配', response.id);
+  return terminalObservationLine(response, pointer) ?? unknownLine(pointer, 'response lifecycle 不匹配');
 }

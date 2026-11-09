@@ -59,7 +59,7 @@ export interface QueueLedgerExecution {
 export interface QueueLedgerDelivery {
   /** Optional B observation, never execution/recovery authority. No quota/account payload is retained. */
   routingAdmission?: RoutingAdmissionProvenanceV1;
-  /** Original Queue owns each Append until provider acceptance or durable recovery. */
+  /** Legacy upgrade input only. New Append writers keep these facts in History. */
   appendPendingByTarget?: Record<
     string,
     Pick<LifecycleAppendFailure, 'targetId' | 'invocationId' | 'responseMessageId' | 'at'> & {
@@ -68,7 +68,7 @@ export interface QueueLedgerDelivery {
       requiresCompletion?: boolean;
     }
   >;
-  /** Definite refusals await a new run; uncertain inputs remain held while their original handoff is checked. */
+  /** Legacy upgrade input only; not a recovery owner for new work. */
   appendRecoveryByTarget?: Record<string, LifecycleAppendFailure>;
   /** F293 policy refusals wait for an explicit owner attempt, including after restart. */
   routingHeldTargetIds?: string[];
@@ -143,6 +143,8 @@ export type QueueLedgerCommitMode = 'claimed' | 'queued' | 'processing' | 'withd
 
 export interface QueueLedgerStore {
   enqueue(entries: readonly QueueLedgerEntry[], maxQueuedUserEntries?: number): Promise<QueueLedgerEnqueueResult>;
+  /** Read the immutable private producer receipt before resolving a new target. */
+  replayPrivateAdmission(entry: QueueLedgerEntry): Promise<QueueLedgerEnqueueResult | null>;
   /** Atomically bind an optional targetless entry and merge additional targets into that same source entry. */
   expandTargets(
     threadId: string,
@@ -229,22 +231,29 @@ export function cloneQueueLedgerEntry(entry: QueueLedgerEntry): QueueLedgerEntry
  * the same durable source is replayed.
  */
 export function queueLedgerAdmissionsMatch(existing: QueueLedgerEntry, incoming: QueueLedgerEntry): boolean {
-  const { callerTraceContext: _existingTrace, ...existingExecution } = existing.execution;
-  const { callerTraceContext: _incomingTrace, ...incomingExecution } = incoming.execution;
-  return (
-    existing.version === incoming.version &&
-    existing.id === incoming.id &&
-    existing.threadId === incoming.threadId &&
-    isDeepStrictEqual(existing.owner, incoming.owner) &&
-    existing.kind === incoming.kind &&
-    isDeepStrictEqual(existing.from, incoming.from) &&
-    isDeepStrictEqual(existing.targets, incoming.targets) &&
-    isDeepStrictEqual(existing.payload, incoming.payload) &&
-    isDeepStrictEqual(existingExecution, incomingExecution) &&
-    isDeepStrictEqual(existing.delivery.authorIntentByTarget, incoming.delivery.authorIntentByTarget) &&
-    existing.priority === incoming.priority &&
-    existing.sourceCategory === incoming.sourceCategory
-  );
+  return isDeepStrictEqual(admissionIdentity(existing), admissionIdentity(incoming));
+}
+
+/** Private targets are derived; the producer envelope survives target retirement and config changes. */
+function admissionIdentity(entry: QueueLedgerEntry) {
+  const { callerTraceContext: _trace, ...execution } = entry.execution;
+  const { requestedTargetCats, ...privatePayload } = entry.payload;
+  const privateInput = entry.kind === 'private_input';
+  return {
+    version: entry.version,
+    id: entry.id,
+    threadId: entry.threadId,
+    owner: entry.owner,
+    kind: entry.kind,
+    from: entry.from,
+    targets: privateInput ? (requestedTargetCats ?? entry.targets) : entry.targets,
+    // Omitting this derived projection preserves receipts written before successor admission.
+    payload: privateInput ? privatePayload : entry.payload,
+    execution,
+    authorIntentByTarget: entry.delivery.authorIntentByTarget,
+    priority: entry.priority,
+    sourceCategory: entry.sourceCategory,
+  };
 }
 
 /** Key-ordered serialization so two structurally equal envelopes always hash identically. */
@@ -267,24 +276,8 @@ function stableSerialize(value: unknown): string {
  * never disagree about what counts as the same admission.
  */
 export function queueLedgerAdmissionFingerprint(entry: QueueLedgerEntry): string {
-  const { callerTraceContext: _trace, ...execution } = entry.execution;
   return createHash('sha256')
-    .update(
-      stableSerialize({
-        version: entry.version,
-        id: entry.id,
-        threadId: entry.threadId,
-        owner: entry.owner,
-        kind: entry.kind,
-        from: entry.from,
-        targets: entry.targets,
-        payload: entry.payload,
-        execution,
-        authorIntentByTarget: entry.delivery.authorIntentByTarget,
-        priority: entry.priority,
-        sourceCategory: entry.sourceCategory,
-      }),
-    )
+    .update(stableSerialize(admissionIdentity(entry)))
     .digest('hex');
 }
 

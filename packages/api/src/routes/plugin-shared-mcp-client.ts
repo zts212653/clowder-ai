@@ -45,6 +45,7 @@ export function createSharedPluginActionClient(input: {
             assertCurrent: input.assertCurrent,
             // Preserve the inventory-free fence used inside native output commits.
             assertInvocationCurrent: input.fence.assertInvocationCurrent,
+            assertWriteCurrent: input.fence.assertWriteCurrent,
           });
         };
         return await Promise.race([execute(), aborted]);

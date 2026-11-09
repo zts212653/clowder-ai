@@ -74,7 +74,7 @@ export class PersonalChromeSetup {
       return response(400, { error: 'Chrome setup accepts only a fixed action and an empty body' });
     request.assertCurrent();
     request.signal.throwIfAborted();
-    const snapshot = await this.options.inventory.snapshot();
+    const snapshot = await this.options.inventory.snapshot({ pluginId: request.pluginId });
     const initial = snapshot.instances.find((x) => x.pluginId === request.pluginId && x.lifecycleState === 'installed');
     const record = snapshot.packages.find((x) => x.packageDigest === initial?.packageDigest);
     const policy = record && chromeSetupPolicy(record);
@@ -86,7 +86,7 @@ export class PersonalChromeSetup {
     const assertCurrent = async (expected: PluginInstanceRecord) => {
       request.assertCurrent();
       request.signal.throwIfAborted();
-      const latest = await this.options.inventory.snapshot();
+      const latest = await this.options.inventory.snapshot({ pluginInstanceId: initial.pluginInstanceId });
       const instance = latest.instances.find((x) => x.pluginInstanceId === initial.pluginInstanceId);
       const pkg = latest.packages.find((x) => x.packageDigest === instance?.packageDigest);
       if (

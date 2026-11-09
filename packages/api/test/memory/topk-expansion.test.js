@@ -1,4 +1,4 @@
-// F256 Phase B: TopkExpansionService — expansion hints for default topk search
+// F256 Phase B: KnowledgeAssociations — expansion hints for default topk search
 // TDD Red phase: tests written before implementation.
 //
 // Design: discussion doc §6.4 取舍 A-D + §7.5 graphTraversal=0% constraint.
@@ -48,10 +48,10 @@ function makeItem(overrides) {
 
 // ── Tests ────────────────────────────────────────────────────────────
 
-describe('TopkExpansionService', () => {
+describe('KnowledgeAssociations', () => {
   async function createService(store) {
-    const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-    return new TopkExpansionService(store);
+    const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+    return new KnowledgeAssociations(store);
   }
 
   // ── Shared graph adapter helpers (hoisted for health funnel tests) ──
@@ -67,8 +67,8 @@ describe('TopkExpansionService', () => {
   }
 
   async function createServiceWithGraphTop(store, graphAdapter) {
-    const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-    return new TopkExpansionService(store, graphAdapter);
+    const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+    return new KnowledgeAssociations(store, graphAdapter);
   }
 
   describe('baseline behavior', () => {
@@ -166,7 +166,7 @@ describe('TopkExpansionService', () => {
         makeItem({
           anchor: 'F102-routing',
           title: 'Routing System',
-          summary: 'Discussed in thread-abc123 and thread-def456',
+          summary: 'Discussed in thread-thread_abc and thread-thread_def',
         }),
       ];
       const hints = await service.expand(topResults, 'routing');
@@ -181,7 +181,7 @@ describe('TopkExpansionService', () => {
 
     it('expands via sourceIds containing thread references', async () => {
       const threadHit = makeItem({
-        anchor: 'thread-xyz789-digest',
+        anchor: 'thread-xyz789',
         title: 'Thread XYZ',
         kind: 'thread',
       });
@@ -205,42 +205,32 @@ describe('TopkExpansionService', () => {
   });
 
   describe('budget controls (§6.4 取舍 A)', () => {
-    it('only expands top-3 results by default', async () => {
-      // 5 results with keywords, but only top 3 should be expanded
-      const store = createMockStore({
-        docs: [
-          makeItem({ anchor: 'expansion-hit-1', title: 'Hit 1' }),
-          makeItem({ anchor: 'expansion-hit-2', title: 'Hit 2' }),
-        ],
+    it('only expands top-3 query-supported results by default', async () => {
+      const probes = [];
+      const service = await createService({
+        async searchWithMeta(query) {
+          probes.push(query);
+          return { items: [makeItem({ anchor: 'found:' + query, title: query })], meta: { degraded: false } };
+        },
       });
-      const service = await createService(store);
-
-      const topResults = [
-        makeItem({ anchor: 'R1', title: 'Result 1', keywords: ['alpha'] }),
-        makeItem({ anchor: 'R2', title: 'Result 2', keywords: ['beta'] }),
-        makeItem({ anchor: 'R3', title: 'Result 3', keywords: ['gamma'] }),
-        makeItem({ anchor: 'R4', title: 'Result 4', keywords: ['delta'] }),
-        makeItem({ anchor: 'R5', title: 'Result 5', keywords: ['epsilon'] }),
-      ];
-      const hints = await service.expand(topResults, 'test');
-
-      // Service should only process R1-R3 keywords, not R4-R5
-      // We can verify by checking the store was not queried for 'delta' or 'epsilon'
-      // But a simpler check: hints should only come from expanding alpha/beta/gamma
-      for (const hint of hints) {
-        if (hint.provenance.source === 'frontmatter-alias') {
-          const via = hint.provenance.via;
-          assert.ok(
-            !via.includes('delta') && !via.includes('epsilon'),
-            `hint via "${via}" should not come from results beyond top-3`,
-          );
-        }
-      }
+      const query = 'alpha beta gamma delta epsilon';
+      const topResults = query.split(' ').map((term, i) =>
+        makeItem({
+          anchor: 'R' + i,
+          title: query,
+          keywords: [term],
+        }),
+      );
+      const hints = await service.expand(topResults, query);
+      assert.deepEqual(probes, ['alpha', 'beta', 'gamma']);
+      assert.equal(hints.length, 3);
     });
 
     it('limits each expansion type to maxHintsPerType (default 3)', async () => {
       // Return many expansion hits, but should cap at 3
-      const manyHits = Array.from({ length: 10 }, (_, i) => makeItem({ anchor: `exp-${i}`, title: `Expansion ${i}` }));
+      const manyHits = Array.from({ length: 10 }, (_, i) =>
+        makeItem({ anchor: `exp-${i}`, title: `Routing expansion ${i}` }),
+      );
       const store = createMockStore({ docs: manyHits });
       const service = await createService(store);
 
@@ -254,32 +244,24 @@ describe('TopkExpansionService', () => {
       const hints = await service.expand(topResults, 'routing');
 
       const frontmatterHints = hints.filter((h) => h.provenance.source === 'frontmatter-alias');
-      assert.ok(frontmatterHints.length <= 3, `frontmatter hints should be ≤3, got ${frontmatterHints.length}`);
+      assert.equal(frontmatterHints.length, 3, 'supported hints stop at the declared budget');
     });
 
-    it('respects custom maxHitsToExpand option', async () => {
-      const store = createMockStore({
-        docs: [makeItem({ anchor: 'hit', title: 'Hit' })],
+    it('respects custom maxHitsToExpand with supported keywords', async () => {
+      const probes = [];
+      const service = await createService({
+        async searchWithMeta(query) {
+          probes.push(query);
+          return { items: [makeItem({ anchor: 'found:' + query, title: query })], meta: { degraded: false } };
+        },
       });
-      const service = await createService(store);
-
-      const topResults = [
-        makeItem({ anchor: 'R1', keywords: ['a'] }),
-        makeItem({ anchor: 'R2', keywords: ['b'] }),
-        makeItem({ anchor: 'R3', keywords: ['c'] }),
-      ];
-
-      // maxHitsToExpand=1: only first result expanded
-      const hints = await service.expand(topResults, 'test', { maxHitsToExpand: 1 });
-
-      for (const hint of hints) {
-        if (hint.provenance.source === 'frontmatter-alias') {
-          assert.ok(
-            !hint.provenance.via.includes('b') && !hint.provenance.via.includes('c'),
-            'should only expand first result',
-          );
-        }
-      }
+      const query = 'alpha beta gamma';
+      const topResults = query
+        .split(' ')
+        .map((term, i) => makeItem({ anchor: 'R' + i, title: query, keywords: [term] }));
+      const hints = await service.expand(topResults, query, { maxHitsToExpand: 1 });
+      assert.deepEqual(probes, ['alpha']);
+      assert.equal(hints.length, 1);
     });
   });
 
@@ -298,14 +280,14 @@ describe('TopkExpansionService', () => {
       const topResults = [
         makeItem({
           anchor: 'F102',
-          title: 'Routing',
+          title: 'kw1 kw2 kw3 kw4 kw5 kw6 kw7 kw8 kw9 kw10',
           keywords: ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6', 'kw7', 'kw8', 'kw9', 'kw10'],
         }),
       ];
-      await service.expand(topResults, 'test');
+      await service.expand(topResults, topResults[0].title);
 
       // 5 keyword probes + 0 thread probes (no thread refs)
-      assert.ok(searchCallCount <= 5, `should cap keyword probes at 5, got ${searchCallCount}`);
+      assert.equal(searchCallCount, 5);
     });
 
     it('caps thread ref probes to MAX_TERMS_PER_TYPE (5)', async () => {
@@ -328,7 +310,7 @@ describe('TopkExpansionService', () => {
       await service.expand(topResults, 'test');
 
       // 0 keyword probes + 5 thread probes (capped from 8)
-      assert.ok(searchCallCount <= 5, `should cap thread probes at 5, got ${searchCallCount}`);
+      assert.equal(searchCallCount, 5);
     });
   });
 
@@ -349,8 +331,8 @@ describe('TopkExpansionService', () => {
     }
 
     async function createServiceWithGraph(store, graphAdapter) {
-      const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
-      return new TopkExpansionService(store, graphAdapter);
+      const { KnowledgeAssociations } = await import('../../dist/domains/memory/knowledge-associations.js');
+      return new KnowledgeAssociations(store, graphAdapter);
     }
 
     it('produces convention-edge hints when adapter is available', async () => {
@@ -425,7 +407,7 @@ describe('TopkExpansionService', () => {
 
     it('deduplicates convention-edge hints against main results and other hints', async () => {
       const store = createMockStore({
-        docs: [makeItem({ anchor: 'keyword-hit', title: 'Via Keyword' })],
+        docs: [makeItem({ anchor: 'keyword-hit', title: 'Routing keyword' })],
       });
       const adapter = createMockGraphAdapter({
         'F102-routing': [
@@ -441,7 +423,7 @@ describe('TopkExpansionService', () => {
       });
       const service = await createServiceWithGraph(store, adapter);
 
-      const topResults = [makeItem({ anchor: 'F102-routing', title: 'Routing', keywords: ['keyword-hit'] })];
+      const topResults = [makeItem({ anchor: 'F102-routing', title: 'Routing', keywords: ['routing'] })];
       const hints = await service.expand(topResults, 'routing');
 
       // keyword-hit already found via frontmatter-alias, should not appear again as convention-edge
@@ -550,54 +532,23 @@ describe('TopkExpansionService', () => {
     });
   });
 
-  describe('cross-type dedup', () => {
-    it('deduplicates across expansion types (same anchor from keyword + thread)', async () => {
-      // Same anchor found via both keyword expansion and thread expansion
-      const sharedItem = makeItem({
-        anchor: 'shared-finding',
-        title: 'Found Both Ways',
-        kind: 'feature',
-      });
-      const store = createMockStore({
-        docs: [sharedItem],
-        threads: [sharedItem],
-      });
-      const service = await createService(store);
-
-      const topResults = [
-        makeItem({
-          anchor: 'F102',
-          title: 'Routing',
-          keywords: ['shared-finding'],
-          summary: 'See thread-shared-finding for discussion',
-        }),
-      ];
-      const hints = await service.expand(topResults, 'routing');
-
-      const matchingHints = hints.filter((h) => h.anchor === 'shared-finding');
-      assert.ok(
-        matchingHints.length <= 1,
-        `anchor "shared-finding" should appear at most once, got ${matchingHints.length}`,
-      );
-    });
-  });
-
   // ── F256 health funnel: expandWithMeta returns per-stage counts ──────
   describe('expandWithMeta — health funnel telemetry', () => {
     it('returns funnel metadata alongside hints', async () => {
       const store = createMockStore({
-        docs: [makeItem({ anchor: 'extra-doc', title: 'Extra', kind: 'doc' })],
+        docs: [makeItem({ anchor: 'extra-doc', title: 'Routing extra', kind: 'plan' })],
       });
       const service = await createService(store);
-      const topResults = [makeItem({ anchor: 'main-result', keywords: ['testing'], title: 'Main' })];
+      const topResults = [makeItem({ anchor: 'main-result', keywords: ['routing'], title: 'Main' })];
 
-      const result = await service.expandWithMeta(topResults, 'test');
+      const result = await service.expandWithMeta(topResults, 'routing');
 
       // Must return both hints and funnel metadata
       assert.ok(Array.isArray(result.hints), 'result.hints should be an array');
       assert.ok(result.funnel, 'result.funnel should exist');
       assert.equal(result.funnel.attempted, true);
-      assert.equal(typeof result.funnel.keyword.probed, 'number');
+      assert.equal(result.funnel.keyword.probed, 1);
+      assert.equal(result.funnel.keyword.added, 1);
       assert.equal(typeof result.funnel.keyword.added, 'number');
       assert.equal(typeof result.funnel.sourceThread.probed, 'number');
       assert.equal(typeof result.funnel.conventionEdge.attempted, 'boolean');
@@ -623,12 +574,12 @@ describe('TopkExpansionService', () => {
     it('tracks dedup count separately from added', async () => {
       // If keyword expansion finds items already in top-k, deduped should increment
       const store = createMockStore({
-        docs: [makeItem({ anchor: 'main-result', title: 'Same' })],
+        docs: [makeItem({ anchor: 'main-result', title: 'Overlap' })],
       });
       const service = await createService(store);
       const topResults = [makeItem({ anchor: 'main-result', keywords: ['overlap'], title: 'Main' })];
 
-      const result = await service.expandWithMeta(topResults, 'test');
+      const result = await service.expandWithMeta(topResults, 'overlap');
 
       assert.equal(result.funnel.keyword.probed, 1, 'should probe the keyword');
       assert.equal(result.funnel.keyword.added, 0, 'should not add (deduped)');

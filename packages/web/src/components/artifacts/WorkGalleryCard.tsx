@@ -5,7 +5,9 @@ import { useShellCopy } from '@/components/shell/shell-copy';
 import { artifactObjectId } from '@/components/workbench/real-surface-adapters';
 import { FileActions } from '../content-review/FileActions';
 import type { WorkCardDescription } from './useWorkCardDescription';
+import { WorkCoverMenuItems } from './WorkCoverMenuItems';
 import { WorkPreview } from './WorkPreview';
+import { workCardSpot } from './work-cover-layer-store';
 import { worksPanelCopy } from './works-panel.shell-copy';
 import './work-gallery.css';
 /** One card for Works, recent works and chat; each host retains its original owner. */
@@ -26,6 +28,7 @@ export function WorkGalleryCard({
   current,
   compact = false,
   testId = 'workspace-home-artifact-card',
+  previewCover,
 }: {
   artifact: ThreadArtifactDTO;
   metadata?: string;
@@ -43,6 +46,8 @@ export function WorkGalleryCard({
   current?: boolean;
   compact?: boolean;
   testId?: string;
+  /** Cover picker preview: this very card with a candidate picture, without its own actions. */
+  previewCover?: string;
 }) {
   const t = useShellCopy(worksPanelCopy);
   const card = useRef<HTMLElement>(null);
@@ -51,6 +56,15 @@ export function WorkGalleryCard({
     artifact.type === 'image' &&
     (!artifact.name.trim() || (artifact.publicationItem?.kind === 'content-block' && artifact.name === '图片'));
   const label = untitledImage ? t.untitledImage : artifact.name;
+  const coverActions =
+    facts.kind === 'video' && artifact.work && !previewCover ? (
+      <WorkCoverMenuItems
+        artifact={artifact}
+        title={label}
+        metadata={metadata}
+        focusReturn={() => workCardSpot(card.current)}
+      />
+    ) : undefined;
   return (
     <article ref={card} className="work-gallery-card cafe-presentation">
       <button
@@ -70,6 +84,7 @@ export function WorkGalleryCard({
             description={description}
             pending={previewPending}
             compact={compact}
+            previewCover={previewCover}
           />
         </span>
         <span className={`work-gallery-title${compact ? ' home-work-label' : ''}`} title={label}>
@@ -104,7 +119,7 @@ export function WorkGalleryCard({
           </button>
         )}
       </div>
-      {artifact.url && (
+      {artifact.url && !previewCover && (
         <div className="work-gallery-actions">
           <FileActions
             source={{ kind: 'url', url: artifact.url }}
@@ -114,6 +129,7 @@ export function WorkGalleryCard({
             contextRef={card}
             src={facts.kind === 'image' ? artifact.url : null}
             root={card}
+            wholeWorkAction={coverActions}
           />
         </div>
       )}

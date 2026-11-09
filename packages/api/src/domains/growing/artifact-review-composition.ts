@@ -66,7 +66,12 @@ export function createArtifactReviewIntegration(deps: {
     ...(deps.workspace ? { workspace: deps.workspace } : {}),
     ...(deps.evolution ? { evolution: deps.evolution } : {}),
   });
-  const media = new PublishedMediaService({ owner: deps.owner, access, sources });
+  const media = new PublishedMediaService({
+    owner: deps.owner,
+    access,
+    sources,
+    workTitle: (reference, userId) => store.works.get(userId, reference.contentRef, reference.ownerRevision)?.title,
+  });
   const globalArtifactWorkLineage = new GlobalArtifactWorkLineageResolver({
     owner: deps.owner,
     access,

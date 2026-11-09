@@ -1,18 +1,15 @@
 'use client';
 
+import { getLifecycleAppendOutcome, isAppendRepeatSource } from '@cat-cafe/shared';
+
 import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
-import {
-  dispatchReadText,
-  dispatchReceiptDisplay,
-  dispatchReceiptLabel,
-  isUnconfirmedAppend,
-} from '@/lib/dispatch-receipt-display';
-import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
+import { dispatchReadText, dispatchReceiptDisplay, dispatchReceiptLabel } from '@/lib/dispatch-receipt-display';
+import type { ChatMessage } from '@/stores/chat-types';
 import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
-import { cloudDispatchAudit, cloudDispatchReceipt } from './cloud-dispatch-receipt';
+import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } from './cloud-dispatch-receipt';
+import { HistoryAppendActions } from './HistoryAppendActions';
 import type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
-import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudReply } from './useCloudReply';
 
@@ -20,7 +17,6 @@ interface RecipientProps {
   projection: MessageDispatchAvatarProjection;
   message: ChatMessage;
   timelineMessages: readonly ChatMessage[];
-  pending: readonly QueueEntry[];
   getCatLabel: (catId: string) => string;
   agentSource: boolean;
   whisper: boolean;
@@ -44,7 +40,6 @@ export function MessageDispatchRecipient({
   projection,
   message,
   timelineMessages,
-  pending,
   getCatLabel,
   agentSource,
   whisper,
@@ -57,25 +52,18 @@ export function MessageDispatchRecipient({
   const logical = useCloudReply(cloud?.identity, threadId, timelineMessages, { readDotEvent: shell === 'v2' });
   const label = getCatLabel(projection.targetId);
   const ref = message.lifecycle?.dispatchRefs?.find((candidate) => candidate.targetId === projection.targetId);
-  const uncertain = isUnconfirmedAppend(ref, message.lifecycle);
-  const checking =
-    uncertain &&
-    !message.lifecycle?.appendFailures?.find(
-      (failure) => failure.targetId === projection.targetId && failure.responseMessageId === ref?.statusMessageId,
-    )?.checkedAt;
-  const processing = projection.phase === 'processing' && !uncertain;
-  const retryEntry =
-    uncertain && !checking
-      ? pending.find((entry) =>
-          entry.recoveryActions?.some(
-            (action) => action.kind === 'repeat_target' && action.targetCatId === projection.targetId,
-          ),
-        )
-      : undefined;
-  const retryAction = retryEntry?.recoveryActions?.find(
-    (action) => action.kind === 'repeat_target' && action.targetCatId === projection.targetId,
+  const failure = message.lifecycle?.appendFailures?.find(
+    (candidate) => candidate.targetId === projection.targetId && candidate.responseMessageId === ref?.statusMessageId,
   );
-  const linkedMessage = timelineMessages.find((candidate) => candidate.id === projection.statusMessageId);
+  const appendOutcome = getLifecycleAppendOutcome(ref, message.lifecycle);
+  const uncertain = appendOutcome === 'unknown';
+  const checking = uncertain && (!failure || (failure.acceptance === 'unknown' && failure.checkedAt === undefined));
+  const processing = projection.phase === 'processing' && !uncertain && failure?.acceptance !== 'incomplete';
+  const notAccepted = appendOutcome === 'not_accepted';
+  const incomplete = appendOutcome === 'incomplete';
+  const linkedMessage = timelineMessages.find(
+    (candidate) => candidate.id === (projection.statusMessageId ?? ref?.statusMessageId),
+  );
   const linked = linkedMessage?.lifecycle;
   const response = linked?.kind === 'response' ? linked : undefined;
   const appended =
@@ -98,28 +86,36 @@ export function MessageDispatchRecipient({
     cloud.receipt.transport === 'none' &&
     cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
-  const progress =
-    logical.state === 'replied'
-      ? '收到，已回复'
-      : logical.state === 'source_replied'
-        ? '这条消息已有回信'
-        : notSent
-          ? '尚未发送'
-          : awaitingCloudReply
-            ? '收到，回复状态待核对'
-            : uncertain
-              ? checking
-                ? `正在核对 ${label} 收到没…`
-                : '已送出，没确认收到'
-              : failedDelivery
-                ? '没送到'
-                : appended
-                  ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
-                  : processing
-                    ? '收到，正在回…'
-                    : outcome
-                      ? `收到，${outcome}`
-                      : '收到，回复状态待核对';
+  const pendingCloud = cloud ? pendingCloudDeliveryLabel(cloud) : undefined;
+  const progress = notAccepted
+    ? '未并进上一轮（未接收）'
+    : incomplete
+      ? '追加未完成'
+      : appendOutcome === 'awaiting_completion'
+        ? '收到，本条补充消息还未确认完成'
+        : logical.state === 'replied'
+          ? '收到，已回复'
+          : logical.state === 'source_replied'
+            ? '这条消息已有回信'
+            : pendingCloud
+              ? pendingCloud
+              : notSent
+                ? '尚未发送'
+                : awaitingCloudReply
+                  ? '收到，回复状态待核对'
+                  : uncertain
+                    ? checking
+                      ? `正在核对 ${label} 收到没…`
+                      : '已送出，没确认收到'
+                    : failedDelivery
+                      ? '没送到'
+                      : appended
+                        ? `收到，并进了${running ? '正在回' : '已结束'}的这一轮${outcome ? ` · ${outcome}` : ''} · ${dispatchReadText(receipt)}`
+                        : processing
+                          ? '收到，正在回…'
+                          : outcome
+                            ? `收到，${outcome}`
+                            : '收到，回复状态待核对';
   const late = projection.dispatchedAt !== undefined && projection.dispatchedAt - message.timestamp > 60_000;
   return (
     <li
@@ -140,8 +136,21 @@ export function MessageDispatchRecipient({
         {late ? `${formatTime(projection.dispatchedAt!)} ` : ''}
         {progress}
       </span>
-      {retryEntry && retryAction?.kind === 'repeat_target' ? (
-        <QueueTargetRetryButton entry={retryEntry} action={retryAction} label="重新发送" />
+      {(uncertain || notAccepted || incomplete) && ref && threadId ? (
+        <HistoryAppendActions
+          key={`${message.id}:${ref.targetId}:${ref.statusMessageId}`}
+          threadId={threadId}
+          messageId={message.id}
+          delivery={{
+            targetId: ref.targetId,
+            responseMessageId: ref.statusMessageId,
+            ...(response?.invocationId ? { invocationId: response.invocationId } : {}),
+          }}
+          canRepeat={Boolean(
+            isAppendRepeatSource(message.from, ref, failure) && failure && (notAccepted || incomplete || !checking),
+          )}
+          repeatKind={notAccepted ? 'not_accepted' : incomplete ? 'incomplete' : 'unknown'}
+        />
       ) : null}
       {!checking && replyMessageId && (response || logical.state !== 'unverified') ? (
         <button

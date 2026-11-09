@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { RichBlocks } from '../RichBlocks';
@@ -10,7 +11,7 @@ import { approvalRequest, block, cardRef, messageId, okJson, record } from './ru
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 Object.assign(globalThis as Record<string, unknown>, { React });
 
-describe('RuntimeInteractionCard', () => {
+describe.each(['classic', 'v2'] as const)('RuntimeInteractionCard (%s)', (presentation) => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -19,6 +20,7 @@ describe('RuntimeInteractionCard', () => {
   });
   afterAll(() => delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT);
   beforeEach(() => {
+    writeShellPresentation(presentation);
     observeApiSessionOwner('user-1');
     vi.mocked(apiFetch).mockReset();
     container = document.createElement('div');
@@ -28,6 +30,7 @@ describe('RuntimeInteractionCard', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   });
 
   it.each([
@@ -140,8 +143,8 @@ describe('RuntimeInteractionCard', () => {
         body: JSON.stringify({ cardRef, response: { kind: 'decision', decisionId: 'decline' } }),
       }),
     );
-    expect(container.textContent).toContain('你已拒绝这次请求');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.textContent).toContain(presentation === 'classic' ? '你已拒绝这次请求' : '已选「Decline」');
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('shows a non-actionable preparing state while the canonical card is staged', async () => {
@@ -173,7 +176,7 @@ describe('RuntimeInteractionCard', () => {
     });
     expect(container.textContent).toContain('服务重启后，这个旧请求已失效');
     expect(container.textContent).not.toContain('你已拒绝');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('renders confirmation unavailability distinctly from user rejection', async () => {
@@ -192,7 +195,7 @@ describe('RuntimeInteractionCard', () => {
     });
     expect(container.textContent).toContain('此运行没有可用的确认界面');
     expect(container.textContent).not.toContain('你已拒绝');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.querySelectorAll('button:not([aria-expanded])')).toHaveLength(0);
   });
 
   it('fails closed for a copied card while preserving the canonical card actions', async () => {

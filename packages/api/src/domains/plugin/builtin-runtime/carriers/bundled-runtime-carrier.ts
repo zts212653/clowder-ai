@@ -20,6 +20,8 @@ import type { ExecutablePluginPackageRecord, PluginInstanceRecord, RuntimeState 
  * (F202 Train C1 terminal contract, clause 6).
  */
 export interface BundledPluginRuntime {
+  /** Resolves only when an owned execution space exits; normal explicit close resolves without an error. */
+  completion?(pluginInstanceId: string): Promise<Error | undefined> | undefined;
   resolveMcpFactory?(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined>;
   claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean;
   /**
@@ -47,9 +49,10 @@ export interface BundledPluginRuntime {
 }
 
 export interface BundledPluginRuntimeCarrierOptions {
-  readonly inventory: Pick<PluginInventoryStore, 'snapshot' | 'transaction'>;
+  readonly inventory: Pick<PluginInventoryStore, 'readAuthority' | 'transaction'>;
   readonly runtimes: readonly BundledPluginRuntime[];
   readonly now?: () => number;
+  readonly onExecutionError?: (pluginInstanceId: string, error: unknown) => void;
 }
 
 interface RuntimeAuthority {
@@ -68,7 +71,7 @@ interface ActiveBundled {
   stopping: boolean;
 }
 
-/** The in-Host-process carrier. It runs packages a bundled runtime implements; every
+/** The Host-managed carrier. Each bundled runtime owns its execution boundary; every
  * other admitted package belongs to another carrier and is declined here. */
 export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   readonly #active = new Map<string, ActiveBundled>();
@@ -144,6 +147,12 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         packageFailed = true;
         throw error;
       }
+      const completion = runtime.completion?.(pluginInstanceId);
+      if (completion) {
+        void completion
+          .then((error) => (error ? this.runtimeExited(pluginInstanceId, active) : undefined))
+          .catch((error: unknown) => this.options.onExecutionError?.(pluginInstanceId, error));
+      }
       if (this.#active.get(pluginInstanceId) !== active || !active.valid) {
         throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       }
@@ -200,7 +209,22 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     return this.finishStop(pluginInstanceId, reason);
   }
 
-  private async finishStop(pluginInstanceId: string, reason: string): Promise<void> {
+  private async runtimeExited(pluginInstanceId: string, active: ActiveBundled): Promise<void> {
+    if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
+    active.valid = false;
+    await active.startSettled;
+    if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
+    active.stopping = true;
+    this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);
+    await this.finishStop(pluginInstanceId, 'execution_worker_exited', 'crashed');
+  }
+
+  private async finishStop(
+    pluginInstanceId: string,
+    reason: string,
+    terminalState: 'stopped' | 'crashed' = 'stopped',
+  ): Promise<void> {
+    const epoch = this.#startEpoch.get(pluginInstanceId);
     const authority = await this.authority(pluginInstanceId, true);
     const active = this.#active.get(pluginInstanceId);
     if (active) {
@@ -211,7 +235,9 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       // A start implementation may allocate after the first stop; clean that tail as well.
       if (wasStarting) await active.runtime.stop(pluginInstanceId, reason);
       try {
-        await this.setBundledRuntimeState(authority, 'stopped');
+        const state =
+          terminalState === 'crashed' && this.#startEpoch.get(pluginInstanceId) !== epoch ? 'stopped' : terminalState;
+        await this.setBundledRuntimeState(authority, state);
       } finally {
         if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
         active.resolveClosed();
@@ -324,16 +350,8 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   }
 
   private async authority(pluginInstanceId: string, allowStopping = false): Promise<RuntimeAuthority> {
-    const snapshot = await this.options.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const current = instance
-      ? snapshot.instances.find(
-          (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
-        )
-      : undefined;
-    const packageRecord = instance
-      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-      : undefined;
+    const authority = await this.options.inventory.readAuthority(pluginInstanceId);
+    const { instance, current, packageRecord } = authority ?? {};
     const activationAllowed =
       instance?.activationState === 'enabled' ||
       (allowStopping && ['disabling', 'error', 'disabled'].includes(instance?.activationState ?? ''));
@@ -362,16 +380,16 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     runtimeState: RuntimeState,
     failure?: ReturnType<typeof startFailureRecord>,
   ): Promise<void> {
-    return this.options.inventory.transaction((transaction) => {
-      const current = transaction.instances.get(authority.instance.pluginInstanceId);
+    return this.options.inventory.transaction(async (transaction) => {
+      const current = await transaction.instances.get(authority.instance.pluginInstanceId);
+      const revisionChanged = current?.lifecycleRevision !== authority.instance.lifecycleRevision;
+      const observesStopped =
+        runtimeState === 'stopped' && current?.runtimeState === 'stopped' && failure === undefined;
       if (
         !current ||
         current.lifecycleState !== 'installed' ||
         current.packageDigest !== authority.instance.packageDigest ||
-        // A cancelled start may advance its failure revision while stop joins
-        // it. The observed stop grants nothing and preserves current metadata;
-        // package identity still fences out a replacement executable.
-        (runtimeState !== 'stopped' && current.lifecycleRevision !== authority.instance.lifecycleRevision) ||
+        (revisionChanged && !observesStopped) ||
         (runtimeState !== 'stopped' && current.activationState !== 'enabled')
       ) {
         throw new ExternalPluginRuntimeError(
@@ -379,12 +397,15 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
           `${authority.instance.pluginInstanceId} authority changed`,
         );
       }
+      // Startup cancellation may already have projected stopped at a newer revision.
+      // Observe that terminal state without rewriting its owner's metadata.
+      if (revisionChanged) return;
       const base = failure
         ? withRuntimeFailure(current, failure.record)
         : runtimeState === 'starting'
           ? withoutRuntimeFailure(current)
           : current;
-      transaction.instances.put({ ...base, runtimeState, updatedAt: this.#now() });
+      await transaction.instances.put({ ...base, runtimeState, updatedAt: this.#now() });
     });
   }
 }

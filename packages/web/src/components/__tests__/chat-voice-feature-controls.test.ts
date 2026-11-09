@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '../shell/shell-presentation';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
@@ -43,6 +45,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  // These assertions exercise the retained classic presentation explicitly.
+  writeShellPresentation('classic');
   apiFetchMock.mockReset();
   useVoiceSessionStore.setState({ session: null });
   useToastStore.setState({ toasts: [] });
@@ -55,6 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  window.localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
 });
 
 function render(props: Partial<React.ComponentProps<typeof ChatVoiceFeatureControls>> = {}) {

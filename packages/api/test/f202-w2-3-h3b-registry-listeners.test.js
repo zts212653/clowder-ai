@@ -11,13 +11,13 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { CloudConversationHostRegistry } from '../dist/domains/plugin/declared/cloud-conversation-host-registry.js';
 import { DeclaredRuntimeContributions } from '../dist/domains/plugin/declared/declared-runtime-contributions.js';
 import { cleanup, conversationHostHarness, hostManifest, tempRoot } from './f202-w2-3-h3b.fixture.js';
 
-after(cleanup);
+afterEach(cleanup);
 
 const failing = () => {
   throw new Error('listener failed');

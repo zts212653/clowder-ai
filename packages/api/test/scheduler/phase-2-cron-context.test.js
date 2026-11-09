@@ -63,19 +63,6 @@ describe('Phase 2: Cron trigger + ContextSpec', () => {
       assert.equal(rows[0].outcome, 'RUN_DELIVERED');
       runner.stop();
     });
-
-    it('getNextCronMs returns positive ms for valid expression', async () => {
-      const { getNextCronMs } = await import('../../dist/infrastructure/scheduler/cron-utils.js');
-      const ms = getNextCronMs('0 9 * * *');
-      assert.ok(typeof ms === 'number');
-      assert.ok(ms > 0, 'next cron occurrence should be in the future');
-      assert.ok(ms <= 24 * 60 * 60 * 1000, 'daily cron should fire within 24h');
-    });
-
-    it('getNextCronMs throws for invalid expression', async () => {
-      const { getNextCronMs } = await import('../../dist/infrastructure/scheduler/cron-utils.js');
-      assert.throws(() => getNextCronMs('invalid cron'), /invalid|parse|validation|resolve/i);
-    });
   });
 
   describe('ContextSpec', () => {

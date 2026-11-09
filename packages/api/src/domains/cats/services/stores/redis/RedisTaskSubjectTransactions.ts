@@ -10,6 +10,8 @@ import {
 } from '../ports/TaskStoreContract.js';
 import { assertTaskSubjectSnapshot, buildSubjectTaskUpdate } from '../ports/TaskSubjectUpsert.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { TASK_DEPLOYMENT_RECOVERY_LUA } from './deployment-recovery-lua.js';
+import { commitTaskTransaction, publishTaskRecovery } from './publish-task-recovery.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
@@ -40,13 +42,13 @@ export async function upsertTaskWithSubjectSnapshot(
     }
     const tx = session.multi();
     if (!existing) tx.set(key, updated.id);
-    tx.hset(detail, serializeTask(updated));
+    publishTaskRecovery(tx, detail, serializeTask(updated));
     tx.zadd(TaskKeys.thread(updated.threadId), updated.createdAt, updated.id);
     tx.zadd(TaskKeys.kind(updated.kind), updated.createdAt, updated.id);
     if (existing && existing.threadId !== updated.threadId) {
       tx.zrem(TaskKeys.thread(existing.threadId), existing.id);
     }
-    const committed = await tx.exec();
+    const committed = await commitTaskTransaction(tx);
     if (!committed) throw createTaskSubjectSnapshotConflictError(subjectKey);
     for (const [error] of committed) if (error) throw error;
     return updated;
@@ -55,7 +57,7 @@ export async function upsertTaskWithSubjectSnapshot(
 
 export type AtomicSubjectCreateResult = 'created' | 'subject_exists' | 'task_id_exists';
 
-const ATOMIC_OWNED_WRITE_LUA = `
+const ATOMIC_OWNED_WRITE_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
   return 0
 end
@@ -63,13 +65,13 @@ if redis.call('HEXISTS', KEYS[2], 'entrustedWork') == 1 then return -1 end
 if redis.call('HGET', KEYS[2], 'updatedAt') ~= ARGV[3] then return -2 end
 if (redis.call('HGET', KEYS[2], 'deploymentWait') or '') ~= ARGV[4] then return -2 end
 if (redis.call('HGET', KEYS[2], 'pluginWait') or '') ~= ARGV[5] then return -2 end
-redis.call('HSET', KEYS[2], unpack(ARGV, 6, #ARGV))
+writeTaskRecovery(KEYS[2], {unpack(ARGV, 6, #ARGV)})
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
 return 1
 `;
 
-const ATOMIC_CREATE_WITH_SUBJECT_LUA = `
+const ATOMIC_CREATE_WITH_SUBJECT_LUA = `${TASK_DEPLOYMENT_RECOVERY_LUA}
 -- F310_ATOMIC_CREATE_WITH_SUBJECT
 if redis.call('EXISTS', KEYS[1]) == 1 then
   return 0
@@ -77,8 +79,9 @@ end
 if redis.call('EXISTS', KEYS[2]) == 1 then
   return -1
 end
+recoveryPreflight(KEYS[2], ARGV[1])
 redis.call('SET', KEYS[1], ARGV[1])
-redis.call('HSET', KEYS[2], unpack(ARGV, 3, #ARGV))
+writeTaskRecovery(KEYS[2], {unpack(ARGV, 3, #ARGV)})
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
 return 1
@@ -151,10 +154,10 @@ export async function createEntrustedTaskWithPolicy(
     }
     const tx = session.multi();
     if (!existing) tx.set(subject, result.task.id);
-    tx.hset(detail, serializeTask(result.task));
+    publishTaskRecovery(tx, detail, serializeTask(result.task));
     tx.zadd(TaskKeys.thread(result.task.threadId), result.task.createdAt, result.task.id);
     tx.zadd(TaskKeys.kind(result.task.kind), result.task.createdAt, result.task.id);
-    const committed = await tx.exec();
+    const committed = await commitTaskTransaction(tx);
     if (!committed) throw createTaskSubjectSnapshotConflictError(input.subjectKey);
     for (const [error] of committed) if (error) throw error;
     return result;

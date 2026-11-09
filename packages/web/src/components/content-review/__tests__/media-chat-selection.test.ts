@@ -350,6 +350,8 @@ describe('mediaChatTarget', () => {
   it.each([
     ['jpg', 'image/jpeg'],
     ['webp', 'image/webp'],
+    ['gif', 'image/gif'],
+    ['svg', 'image/svg+xml'],
   ])('retains the actual %s original and MIME when handing its circled place to Chat', (extension, mime) => {
     const source = { ...SOURCE, locator: { ...SOURCE.locator, path: `art/original.${extension}` } };
     const result = mediaChatTarget({ title: `original.${extension}`, mime, source });
@@ -363,6 +365,8 @@ describe('mediaChatTarget', () => {
   it.each([
     ['jpg', 'image/jpeg'],
     ['webp', 'image/webp'],
+    ['gif', 'image/gif'],
+    ['svg', 'image/svg+xml'],
   ])('the shared message contract carries a %s without disguising its original bytes as PNG', (extension, mime) => {
     const source = { ...SOURCE, locator: { ...SOURCE.locator, path: `art/original.${extension}` } };
     expect(
@@ -379,8 +383,8 @@ describe('mediaChatTarget', () => {
   });
 
   it('is null for an unsupported type instead of guessing an accepted format', () => {
-    expect(mediaChatTarget({ title: 'a.gif', mime: 'image/gif', source: SOURCE })).toBeNull();
-    expect(mediaChatTarget({ title: 'a.svg', mime: 'image/svg+xml', source: SOURCE })).toBeNull();
+    expect(mediaChatTarget({ title: 'a.avif', mime: 'image/avif', source: SOURCE })).toBeNull();
+    expect(mediaChatTarget({ title: 'a.ico', mime: 'image/x-icon', source: SOURCE })).toBeNull();
   });
 
   it('uses a name the shared schema accepts, never an empty one', () => {

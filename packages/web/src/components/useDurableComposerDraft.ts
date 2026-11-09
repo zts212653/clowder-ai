@@ -354,10 +354,6 @@ export function useDurableComposerDraft({
       revisionRef.current = result.revision;
       lastSavedSignatureRef.current = signature;
       canonicalDraftRef.current = snapshot;
-      // Only clear pendingRecovery if this was an admission save that consumed it
-      if (allowPendingAdmission) {
-        pendingRecoveryRef.current = null;
-      }
       clearFallbackRef.current = null;
       return true;
     },

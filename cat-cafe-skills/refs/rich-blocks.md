@@ -19,7 +19,15 @@
 | media_gallery | 发送已有图片（头像、照片）、截图、设计稿、多图对比 — 不需要现场生成！ |
 | audio | 问候、情感表达、定时播报（系统自动合成语音） |
 | interactive | 需要用户选择/确认的场景（选方案、选猫、确认操作） |
-| html_widget | 数据可视化、自己写的 HTML 面板、交互 demo、mini 工具（沙盒 iframe） |
+| html_widget | 随当前聊天解释局部的小图、控件或 HTML 面板（沙盒 iframe） |
+
+### HTML 交付先按用途分流
+
+受托交付的自包含图解/原型，或要反复使用、持续改版的小工具，默认用 `cat_cafe_work` 保存作品，成功后 `publish-reference` 把固定版本卡附回当前 Chat。随聊天解释局部用 `html_widget`；篇幅仅作提示，小型长期工具也可以是作品。不另加选载体审批。
+
+widget 同样持久保存在聊天历史中并有目录预览；作品增加稳定身份与版本链。保存与附卡分开，附卡失败重试同一 `reference`，不新增版本。已有作品先 `read` / `read-body`，沿原 `contentRef` 和当前 `expectedOwnerRevision` 做 `submit`，不按同名重建。
+
+widget 后来开始持续迭代时，在现有权限内取回原 HTML、以原内容建首版并记录来源消息，再提交修改版；缺原件先找回，不捏造旧版。一次修字不必机械升级，也不因此取得别人的写权。可执行步骤见 [Rich Messaging](../rich-messaging/SKILL.md#html先按用途选再交付)，工具边界见 [HTML 作品指南](../../docs/guides/html-works.md)。
 
 ### 不用 rich block
 

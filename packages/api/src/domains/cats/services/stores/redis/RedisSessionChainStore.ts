@@ -1,3 +1,5 @@
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
+import { PUBLISH_SESSION_STATUS } from './session-status-publication.js';
 /**
  * Redis Session Chain Store
  * F24: Redis-backed session chain storage.
@@ -25,6 +27,7 @@ import type {
   SessionStatus,
   SessionUsageSnapshot,
 } from '@cat-cafe/shared';
+import { parseWatcherSessionState, type WatcherSessionState } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { isHomeSession } from '../../session/session-scope.js';
 import {
@@ -45,6 +48,15 @@ import { assertScopedSessionCreation } from '../ports/SessionChainStore.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
+
+import {
+  initializeSessionSealing,
+  listSessionSealing,
+  listSessionSealingCandidates,
+  PROJECT_SEALING_LUA,
+  recordSessionSealingFailure,
+  SEALING_INDEX_PREFLIGHT,
+} from './session-sealing-index.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
@@ -76,7 +88,8 @@ end
 local seq = 0
 local detailPrefix = string.sub(KEYS[3], 1, string.len(KEYS[3]) - string.len(ARGV[1]))
 for _, chainId in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
-  if redis.call('HGET', detailPrefix .. chainId, 'userId') == ARGV[5] then seq = seq + 1 end
+  if redis.call('HGET', detailPrefix .. chainId, 'userId') == ARGV[5]
+    and (redis.call('HGET', detailPrefix .. chainId, 'sessionPurpose') or '') == ARGV[15] then seq = seq + 1 end
 end
 redis.call('HSET', KEYS[3],
   'id', ARGV[1], 'threadId', ARGV[3],
@@ -92,12 +105,13 @@ end
 if ARGV[9] ~= '' then redis.call('HSET', KEYS[3], 'workingDirectory', ARGV[9]) end
 if ARGV[10] ~= '' then redis.call('HSET', KEYS[3], 'workspaceFingerprint', ARGV[10]) end
 if ARGV[14] ~= '' then redis.call('HSET', KEYS[3], 'scopedInvocation', ARGV[14]) end
+if ARGV[15] ~= '' then redis.call('HSET', KEYS[3], 'sessionPurpose', ARGV[15]) end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('SADD', KEYS[6], ARGV[11])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[6], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
-if ARGV[14] == '' then
+if ARGV[14] == '' and ARGV[15] == '' then
   ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[1], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[1], ARGV[1])`}
   ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[7], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[7], ARGV[1])`}
 end
@@ -130,6 +144,16 @@ ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT
 return 1
 `;
 
+// Read-only identity check: one EVAL, so the owner pointer and record cannot change between reads.
+const IS_ACTIVE_OWNER_SESSION_LUA = `
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'scopedInvocation') == 1 then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+local cli = redis.call('HGET', KEYS[1], 'cliSessionId') or ''
+if cli ~= ARGV[2] then return 0 end
+return 1
+`;
+
 const BIND_HOST_EXECUTION_BOUNDARY_LUA = `
 if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
 if redis.call('HEXISTS', KEYS[1], 'scopedInvocation') == 1 then return 0 end
@@ -158,7 +182,7 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) 
 return 0
 `;
 
-const TRANSITION_TO_SEALING_LUA = `
+const TRANSITION_TO_SEALING_LUA = `${SEALING_INDEX_PREFLIGHT}${PROJECT_SEALING_LUA}
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return -1 end
 if ARGV[4] ~= '' and redis.call('HGET', KEYS[1], 'appliedPolicyRevision') ~= ARGV[4] then return -2 end
@@ -166,6 +190,8 @@ redis.call('HSET', KEYS[1],
   'status', 'sealing',
   'sealReason', ARGV[2],
   'updatedAt', ARGV[3])
+redis.call('HDEL', KEYS[1], '_sealingRecoveryDisposition', '_sealingRecoveryReason', '_sealingRecoveryFailures')
+projectSealing(KEYS[1], ARGV[1], KEYS[4])
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 if redis.call('GET', KEYS[3]) == ARGV[1] then redis.call('DEL', KEYS[3]) end
 return 1
@@ -179,7 +205,7 @@ return 1
  * ARGV[3] displaced seal reason, ARGV[4] now,
  * ARGV[5] user id, ARGV[6] cat id, ARGV[7] thread id.
  */
-const RESTORE_ACTIVE_SESSION_LUA = `
+const RESTORE_ACTIVE_SESSION_LUA = `${SEALING_INDEX_PREFLIGHT}${PROJECT_SEALING_LUA}
 if redis.call('EXISTS', KEYS[1]) == 0 then return {'target_missing'} end
 if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[5]
   or redis.call('HGET', KEYS[1], 'catId') ~= ARGV[6]
@@ -188,7 +214,7 @@ if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[5]
 end
 local actualActive = redis.call('GET', KEYS[3]) or ''
 local targetStatus = redis.call('HGET', KEYS[1], 'status') or ''
-if redis.call('HEXISTS', KEYS[1], 'scopedInvocation') == 1 then
+if redis.call('HEXISTS', KEYS[1], 'scopedInvocation') == 1 or redis.call('HGET', KEYS[1], 'sessionPurpose') == 'watcher' then
   return {'target_not_restorable', targetStatus}
 end
 if targetStatus == 'active' and actualActive == ARGV[1] then
@@ -212,7 +238,10 @@ if actualActive ~= '' then
     'status', 'sealing',
     'sealReason', ARGV[3],
     'updatedAt', ARGV[4])
+  redis.call('HDEL', KEYS[4], '_sealingRecoveryDisposition', '_sealingRecoveryReason', '_sealingRecoveryFailures')
+  projectSealing(KEYS[4], ARGV[2], KEYS[5])
 end
+redis.call('ZREM', KEYS[5], ARGV[1])
 redis.call('HSET', KEYS[1], 'status', 'active', 'updatedAt', ARGV[4])
 redis.call('HDEL', KEYS[1], 'sealReason', 'sealedAt')
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[2], ARGV[1])`}
@@ -335,6 +364,51 @@ return 1
 `;
 
 export class RedisSessionChainStore implements ISessionChainStore {
+  async compareAndSetWatcherState(
+    id: string,
+    expectedRevision: number,
+    next: WatcherSessionState,
+  ): Promise<WatcherSessionState | null> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      throw new Error('invalid watcher session revision');
+    const validated = parseWatcherSessionState(next);
+    if (validated.revision !== expectedRevision + 1) throw new Error('invalid watcher session transition');
+    const userId = await this.redis.hget(SessionChainKeys.detail(id), 'userId');
+    if (!userId) return null;
+    const result = await this.redis.eval(
+      `
+      if redis.call('HGET', KEYS[1], 'sessionPurpose') ~= 'watcher' then return 0 end
+      local current = cjson.decode(redis.call('HGET', KEYS[1], 'watcherState') or '{"revision":0,"afterSequence":0,"notes":""}')
+      local next = cjson.decode(ARGV[2])
+      if current.revision ~= tonumber(ARGV[1]) then return 0 end
+      if next.afterSequence < current.afterSequence then return redis.error_reply('watcher cursor cannot regress') end
+      redis.call('HSET', KEYS[1], 'watcherState', ARGV[2], 'updatedAt', ARGV[3])
+      if next.attempt or next.wakeInvocationId then
+        redis.call('SADD', KEYS[2], ARGV[4])
+      else
+        redis.call('SREM', KEYS[2], ARGV[4])
+      end
+      return 1
+    `,
+      2,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.watcherPending(userId),
+      String(expectedRevision),
+      JSON.stringify(validated),
+      String(Date.now()),
+      id,
+    );
+    return Number(result) === 1 ? validated : null;
+  }
+  async listPendingWatcherSessions(userId: string): Promise<SessionRecord[]> {
+    const ids = await this.redis.smembers(SessionChainKeys.watcherPending(userId));
+    const sessions = await Promise.all(ids.map((id) => this.get(id)));
+    return sessions.filter((record): record is SessionRecord => {
+      if (!record || record.userId !== userId || record.sessionPurpose !== 'watcher') return false;
+      const state = parseWatcherSessionState(record.watcherState);
+      return Boolean(state.attempt || state.wakeInvocationId);
+    });
+  }
   private readonly redis: RedisClient;
   private threadIndexReady = false;
   private threadIndexBuild: {
@@ -345,7 +419,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
   } | null = null;
 
   constructor(redis: RedisClient) {
-    this.redis = redis;
+    this.redis = recoveryRedis(redis);
   }
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
@@ -374,7 +448,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
         cliKey,
         chainKeyIndexKey,
         threadIndexKey,
-        SessionChainKeys.activeOwner(input.userId, input.catId, input.threadId),
+        input.sessionPurpose === 'watcher'
+          ? chainKeyIndexKey
+          : SessionChainKeys.activeOwner(input.userId, input.catId, input.threadId),
         id,
         input.cliSessionId ?? '',
         input.threadId,
@@ -389,6 +465,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         input.reuseExistingActive ? '1' : '0',
         input.compressionCount == null ? '' : String(input.compressionCount),
         input.scopedInvocation ? JSON.stringify(input.scopedInvocation) : '',
+        input.sessionPurpose ?? '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -397,6 +474,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         if (status === 'existing') {
           if (existing) {
             if (existing.scopedInvocation) throw new Error('scoped_session_not_resumable');
+            if (existing.sessionPurpose !== input.sessionPurpose) throw new Error('session_purpose_mismatch');
             return existing;
           }
           await this.redis.eval(COMPARE_DELETE_LUA, 1, cliKey, recordId);
@@ -423,6 +501,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       const seq = Number.parseInt(seqRaw ?? '0', 10);
       return {
         id: recordId,
+        ...(input.sessionPurpose ? { sessionPurpose: input.sessionPurpose } : {}),
         ...(input.scopedInvocation ? { scopedInvocation: Object.freeze({ ...input.scopedInvocation }) } : {}),
         ...(input.cliSessionId ? { cliSessionId: input.cliSessionId } : {}),
         threadId: input.threadId,
@@ -446,6 +525,11 @@ export class RedisSessionChainStore implements ISessionChainStore {
   }
 
   async getOrCreateActive(input: CreateSessionInput): Promise<SessionRecord> {
+    assertScopedSessionCreation(input);
+    if (input.sessionPurpose === 'watcher') {
+      const current = await this.getByChainKey(input.chainKey!);
+      return current?.status === 'active' ? current : this.create({ ...input, reuseExistingActive: true });
+    }
     if (input.scopedInvocation) throw new Error('scoped_session_not_resumable');
     const active = await this.getActive(input.catId, input.threadId, input.userId);
     if (active) return active;
@@ -492,6 +576,21 @@ export class RedisSessionChainStore implements ISessionChainStore {
       await this.redis.eval(COMPARE_DELETE_LUA, 1, SessionChainKeys.byCli(oldCli), id);
     }
     return this.get(id);
+  }
+
+  async isActiveOwnerSession(id: string, expectedCliSessionId: string | undefined): Promise<boolean> {
+    // userId/catId/threadId are immutable identity fields; only status, scope, pointer and runtime ID can race.
+    const record = await this.get(id);
+    if (!record) return false;
+    const result = await this.redis.eval(
+      IS_ACTIVE_OWNER_SESSION_LUA,
+      2,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.activeOwner(record.userId, record.catId, record.threadId),
+      id,
+      expectedCliSessionId ?? '',
+    );
+    return Number(result) === 1;
   }
 
   async bindHostExecutionBoundary(
@@ -580,10 +679,11 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (!record) return null;
     const result = await this.redis.eval(
       TRANSITION_TO_SEALING_LUA,
-      3,
+      4,
       SessionChainKeys.detail(id),
       SessionChainKeys.active(record.catId, record.threadId),
       SessionChainKeys.activeOwner(record.userId, record.catId, record.threadId),
+      SessionChainKeys.sealing(),
       id,
       reason,
       String(Date.now()),
@@ -599,11 +699,12 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const expectedActiveSessionId = input.expectedActiveSessionId ?? '';
     const result = (await this.redis.eval(
       RESTORE_ACTIVE_SESSION_LUA,
-      4,
+      5,
       SessionChainKeys.detail(target.id),
       SessionChainKeys.active(target.catId, target.threadId),
       SessionChainKeys.activeOwner(target.userId, target.catId, target.threadId),
       SessionChainKeys.detail(expectedActiveSessionId || '__none__'),
+      SessionChainKeys.sealing(),
       target.id,
       expectedActiveSessionId,
       input.displacedSealReason,
@@ -819,7 +920,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
   }
 
   async update(id: string, patch: SessionRecordPatch): Promise<SessionRecord | null> {
-    if ('scopedInvocation' in patch) throw new Error('scoped_session_identity_immutable');
+    if ('scopedInvocation' in patch || 'sessionPurpose' in patch) throw new Error('scoped_session_identity_immutable');
     const detailKey = SessionChainKeys.detail(id);
     const exists = await this.redis.exists(detailKey);
     if (!exists) return null;
@@ -832,17 +933,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const deleteFields: string[] = [];
     pairs.push('updatedAt', String(patch.updatedAt ?? Date.now()));
 
-    if (patch.cliSessionId !== undefined) {
-      // Update CLI index: delete old, set new
-      const oldCliId = await this.redis.hget(detailKey, 'cliSessionId');
-      if (oldCliId) await this.redis.del(SessionChainKeys.byCli(oldCliId));
-      if (DEFAULT_TTL_SECONDS > 0) {
-        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id, 'EX', DEFAULT_TTL_SECONDS);
-      } else {
-        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id);
-      }
-      pairs.push('cliSessionId', patch.cliSessionId);
-    }
+    if (patch.cliSessionId !== undefined) pairs.push('cliSessionId', patch.cliSessionId);
     if (patch.workingDirectory !== undefined) {
       pairs.push('workingDirectory', patch.workingDirectory);
     }
@@ -852,27 +943,6 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
     if (patch.status !== undefined) {
       pairs.push('status', patch.status);
-      const catId = await this.redis.hget(detailKey, 'catId');
-      const threadId = await this.redis.hget(detailKey, 'threadId');
-      const userId = await this.redis.hget(detailKey, 'userId');
-      if (catId && threadId && userId) {
-        const activeKey = SessionChainKeys.active(catId, threadId);
-        const ownerActiveKey = SessionChainKeys.activeOwner(userId, catId, threadId);
-        if (patch.status === 'active' && !(await this.redis.hexists(detailKey, 'scopedInvocation'))) {
-          if (DEFAULT_TTL_SECONDS > 0) {
-            await this.redis.set(activeKey, id, 'EX', DEFAULT_TTL_SECONDS);
-            await this.redis.set(ownerActiveKey, id, 'EX', DEFAULT_TTL_SECONDS);
-          } else {
-            await this.redis.set(activeKey, id);
-            await this.redis.set(ownerActiveKey, id);
-          }
-        } else {
-          // A new active record may claim either pointer while this seal write
-          // is in flight. Delete only if the index still names this record.
-          await this.redis.eval(COMPARE_DELETE_LUA, 1, activeKey, id);
-          await this.redis.eval(COMPARE_DELETE_LUA, 1, ownerActiveKey, id);
-        }
-      }
     }
 
     if (patch.contextHealth !== undefined) {
@@ -942,10 +1012,24 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.catHandoffNote !== undefined) {
       pairs.push('catHandoffNote', JSON.stringify(patch.catHandoffNote));
     }
-    await this.redis.hset(detailKey, ...pairs);
-    if (deleteFields.length > 0) {
-      await this.redis.hdel(detailKey, ...deleteFields);
-    }
+    const identity = await this.redis.hmget(detailKey, 'catId', 'threadId', 'userId');
+    await this.redis.eval(
+      PUBLISH_SESSION_STATUS,
+      5,
+      detailKey,
+      SessionChainKeys.active(identity[0] ?? '', identity[1] ?? ''),
+      SessionChainKeys.activeOwner(identity[2] ?? '', identity[0] ?? '', identity[1] ?? ''),
+      SessionChainKeys.byCli(patch.cliSessionId ?? '__none__'),
+      SessionChainKeys.sealing(),
+      id,
+      JSON.stringify(pairs),
+      JSON.stringify(deleteFields),
+      patch.status === undefined ? '0' : '1',
+      identity.every(Boolean) ? '1' : '0',
+      patch.cliSessionId === undefined ? '0' : '1',
+      patch.cliSessionId ?? '',
+    );
+
     return this.get(id);
   }
 
@@ -1033,27 +1117,44 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return this.get(id);
   }
 
-  async listSealingSessions(): Promise<string[]> {
-    const detailKeys = await this.scanKeys('session:*');
-    if (detailKeys.length === 0) return [];
+  async initializeSealingRecovery(rebuild = false): Promise<void> {
+    await initializeSessionSealing(this.redis, () => this.scanKeys('session:*'), rebuild);
+  }
 
-    const ids: string[] = [];
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
-      const batch = detailKeys.slice(i, i + BATCH_SIZE);
-      const pipeline = this.redis.pipeline();
-      for (const key of batch) {
-        pipeline.hmget(key, 'id', 'status');
-      }
-      const results = await pipeline.exec();
-      if (!results) continue;
-      for (const [err, data] of results) {
-        if (err || !data) continue;
-        const [id, status] = data as [string | null, string | null];
-        if (id && status === 'sealing') ids.push(id);
-      }
-    }
-    return ids;
+  async listSealingSessions(limit = 100, before = Number.POSITIVE_INFINITY): Promise<string[]> {
+    await this.initializeSealingRecovery();
+    return listSessionSealing(this.redis, limit, before);
+  }
+
+  async recordSealingRecoveryFailure(id: string, expectedAt: number): Promise<void> {
+    await recordSessionSealingFailure(this.redis, id, expectedAt);
+  }
+
+  async listSealingRecoveryCandidates(
+    limit = 100,
+    before = Number.POSITIVE_INFINITY,
+  ): Promise<{ id: string; expectedAt: number }[]> {
+    await this.initializeSealingRecovery();
+    return listSessionSealingCandidates(this.redis, limit, before);
+  }
+
+  async getSealingRecoveryFacts(
+    id: string,
+  ): Promise<{ failures: number; disposition?: string; reasonCode?: string } | null> {
+    const [exists, failures, disposition, reasonCode] = await this.redis.hmget(
+      SessionChainKeys.detail(id),
+      'id',
+      '_sealingRecoveryFailures',
+      '_sealingRecoveryDisposition',
+      '_sealingRecoveryReason',
+    );
+    return exists
+      ? {
+          failures: Number(failures ?? 0),
+          ...(disposition ? { disposition } : {}),
+          ...(reasonCode ? { reasonCode } : {}),
+        }
+      : null;
   }
 
   private hydrate(data: Record<string, string>): SessionRecord {
@@ -1104,6 +1205,10 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
     return {
       id: data.id!,
+      ...(data.sessionPurpose === 'watcher' ? { sessionPurpose: 'watcher' as const } : {}),
+      ...(data.watcherState !== undefined
+        ? { watcherState: parseWatcherSessionState(JSON.parse(data.watcherState)) }
+        : {}),
       ...(scopedInvocation ? { scopedInvocation: Object.freeze(scopedInvocation) } : {}),
       ...(data.cliSessionId ? { cliSessionId: data.cliSessionId } : {}),
       ...(data.hostExecutionBoundary

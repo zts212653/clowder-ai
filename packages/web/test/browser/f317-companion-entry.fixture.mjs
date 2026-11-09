@@ -1,3 +1,5 @@
+import { WATCHER_CONFIG_DEFAULTS } from '@cat-cafe/shared';
+
 export const COMPANION_THREAD = 'f317-companion-original';
 export const OTHER_THREAD = 'f317-original-work';
 export const CAT = {
@@ -158,6 +160,14 @@ export function createEntryFixture(mode = 'missing') {
     else if (path === '/api/concierge/config') {
       if (method === 'PUT') Object.assign(config, JSON.parse(data));
       body = { config };
+    } else if (path === '/api/watcher/config') {
+      body = {
+        config: { ...WATCHER_CONFIG_DEFAULTS, enabled: false },
+        quietLabels: [],
+        availableLabels: [],
+        members: [{ catId: CAT.id, displayName: CAT.displayName, capability: { supported: false, reason: 'fixture' } }],
+        rolloutEnabled: false,
+      };
     } else if (path === '/api/concierge/thread') body = { threadId: COMPANION_THREAD };
     else if (path === '/api/concierge/desktop') {
       body =

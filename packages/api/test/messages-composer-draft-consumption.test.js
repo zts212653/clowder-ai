@@ -61,7 +61,11 @@ async function fixture({ reject = false, beforeAppend, strict = true, queue = fa
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
     router: {
       previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
-      resolveTargetsAndIntent: async () => ({ targetCats: reject ? [] : ['opus'], intent: { intent: 'execute' } }),
+      resolveTargetsAndIntent: async () => ({
+        targetCats: reject ? [] : ['opus'],
+        intent: { intent: 'execute' },
+        routing_warnings: [],
+      }),
       routeExecution: async function* (...args) {
         dispatches.push(args);
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };

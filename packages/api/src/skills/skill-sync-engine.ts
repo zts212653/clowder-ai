@@ -17,19 +17,20 @@ import {
 } from '../config/governance/skill-sync.js';
 import { pathsEqual } from '../utils/project-path.js';
 import {
-  buildSkillMountTargets,
+  buildProjectSkillMountDirs,
+  buildProjectSkillMountTargets,
   createSkillSymlink,
   ensureSharedSkillRefsMount,
   isManagedDirectoryLevelSkillsSymlink,
   removeSharedSkillRefsMount,
   SHARED_SKILL_REFS_ALIAS,
+  symlinkTargetFor,
 } from '../utils/skill-mount.js';
 import { computeSourceManifestHash, listSourceSkillNames } from '../utils/skill-source.js';
 import { updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
 
-function symlinkTargetFor(linkPath: string, sourcePath: string): string {
-  return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);
-}
+/** Cleanup also visits disabled standard mount points: links made while they were enabled must go. */
+const ALL_STANDARD_DIRS = { includeDisabledStandardMountPoints: true } as const;
 
 /** Classify a mount path: 'missing' | 'managed' | 'conflict'. */
 export async function classifyMountPath(
@@ -77,30 +78,6 @@ async function convertDirectoryLevelMount(
     await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
   }
   return true;
-}
-
-interface MountTarget {
-  id: string;
-  dirs: string[];
-}
-
-function activeMountTargets(projectRoot: string, rules: MountRules): MountTarget[] {
-  const standard = STANDARD_MOUNT_POINT_IDS.filter((id) => rules.mountPoints[id].enabled).map((id) => ({
-    id,
-    dirs: [join(projectRoot, rules.mountPoints[id].path)],
-  }));
-  const custom = buildSkillMountTargets(projectRoot, homedir(), rules)
-    .filter((t) => t.kind === 'custom')
-    .map((t) => ({ id: t.id, dirs: t.candidates }));
-  return [...standard, ...custom];
-}
-
-function allMountDirs(projectRoot: string, rules: MountRules): string[] {
-  const standardDirs = STANDARD_MOUNT_POINT_IDS.map((id) => join(projectRoot, rules.mountPoints[id].path));
-  const customDirs = buildSkillMountTargets(projectRoot, homedir(), rules)
-    .filter((t) => t.kind === 'custom')
-    .flatMap((t) => t.candidates);
-  return [...new Set([...standardDirs, ...customDirs])];
 }
 
 export interface MountConflict {
@@ -296,14 +273,14 @@ async function syncProjectUnlocked(
   ];
 
   // Per-skill mount target resolution
-  const activeTargets = activeMountTargets(projectRoot, mountRules);
+  const activeTargets = buildProjectSkillMountTargets(projectRoot, homedir(), mountRules);
   const activeTargetIds = activeTargets.map((t) => t.id);
   // F228: detect mount points that went from disabled → enabled (scenario 9).
   // Only supplement mount points that were previously KNOWN (in old rules but
   // inactive). Entirely new mount points (e.g., newly configured custom paths)
   // should not auto-cascade — those are new infrastructure, not a re-enable.
   const previousActiveIds = opts.previousMountRules
-    ? new Set(activeMountTargets(projectRoot, opts.previousMountRules).map((t) => t.id))
+    ? new Set(buildProjectSkillMountTargets(projectRoot, homedir(), opts.previousMountRules).map((t) => t.id))
     : undefined;
   const previousKnownIds = opts.previousMountRules
     ? new Set([...STANDARD_MOUNT_POINT_IDS, ...(opts.previousMountRules.customPaths ?? []).map((cp) => cp.alias)])
@@ -420,7 +397,7 @@ async function syncProjectUnlocked(
   // Phase 3: Remove disabled/removed/orphan from ALL mount point dirs
   const cleanupNames = new Set([...disabledNames, ...removedNames]);
   const activeDirSet = new Set(activeTargets.flatMap((t) => t.dirs));
-  for (const skillsDir of allMountDirs(projectRoot, mountRules)) {
+  for (const skillsDir of buildProjectSkillMountDirs(projectRoot, homedir(), mountRules, ALL_STANDARD_DIRS)) {
     try {
       if (await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource)) {
         // R1 P2: disabled mount point's directory-level symlink must be removed.
@@ -456,8 +433,13 @@ async function syncProjectUnlocked(
 
   // Phase 4: Clean up old mount paths from previous mount rules
   if (opts.previousMountRules) {
-    const currentDirs = new Set(allMountDirs(projectRoot, mountRules));
-    for (const oldDir of allMountDirs(projectRoot, opts.previousMountRules)) {
+    const currentDirs = new Set(buildProjectSkillMountDirs(projectRoot, homedir(), mountRules, ALL_STANDARD_DIRS));
+    for (const oldDir of buildProjectSkillMountDirs(
+      projectRoot,
+      homedir(),
+      opts.previousMountRules,
+      ALL_STANDARD_DIRS,
+    )) {
       if (currentDirs.has(oldDir)) continue;
       try {
         if (await isManagedDirectoryLevelSkillsSymlink(oldDir, skillsSource)) {

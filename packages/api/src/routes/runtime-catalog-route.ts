@@ -54,6 +54,10 @@ export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRunt
                     defaultModel: undefined,
                     defaultModelLabel: undefined,
                     selectedModel: undefined,
+                    selectedEffort: undefined,
+                    selectedEffortLabel: undefined,
+                    defaultEffort: undefined,
+                    defaultEffortLabel: undefined,
                     defaultModelStatus: 'unreported' as const,
                   }),
             }
@@ -83,7 +87,10 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
     if (!runtime) return reply.code(404).send({ error: '运行工具不存在，请重新探测' });
     const fallback: RuntimeModelCatalog = {
       status: 'configured',
-      models: runtime.models.map((value) => ({ value, label: value })),
+      models:
+        'modelCatalog' in runtime && runtime.modelCatalog.length
+          ? runtime.modelCatalog
+          : runtime.models.map((value) => ({ value, label: value })),
     };
     if (data.accountRef) {
       const account = resolveByAccountRef(root, data.accountRef);
@@ -94,21 +101,34 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         message: 'account_catalog',
       };
     }
+    const member = data.catId ? catRegistry.tryGet(data.catId)?.config : undefined;
+    if (data.customStartup || member?.cliConfigArgs?.length) return { ...fallback, message: 'custom_startup' };
     // Native streams cannot use ACP discovery. AGY ACP also needs its isolated
     // profile launch contract, so this read path only returns configured models.
-    if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode')
+    if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode') {
+      const selectedModel = data.model || ('configuredModel' in runtime ? runtime.configuredModel : undefined);
+      const selected =
+        'modelCatalog' in runtime ? runtime.modelCatalog.find((model) => model.value === selectedModel) : undefined;
       return {
         ...fallback,
         defaultModel: 'configuredModel' in runtime ? runtime.configuredModel : undefined,
+        defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
+        defaultModelSource: 'tool_config',
+        defaultEffortSource: 'tool_config',
+        ...('configuredThinkingEnabled' in runtime ? { thinkingEnabled: runtime.configuredThinkingEnabled } : {}),
+        ...('modelCatalog' in runtime
+          ? {
+              selectedModel,
+              selectedEffort: selected?.defaultEffort,
+              selectedEffortSource: 'tool_config' as const,
+              effortOptions: selected?.efforts,
+            }
+          : {}),
         message: 'configured_only',
       };
-    const member = data.catId ? catRegistry.tryGet(data.catId)?.config : undefined;
+    }
     // Arbitrary draft commands are never executable via this read-side API.
-    if (
-      data.customStartup ||
-      member?.cliConfigArgs?.length ||
-      (member?.cli?.command && !['codex', 'claude'].includes(member.cli.command) && !runtime.id.startsWith('acp:'))
-    )
+    if (member?.cli?.command && !['codex', 'claude'].includes(member.cli.command) && !runtime.id.startsWith('acp:'))
       return { ...fallback, message: 'custom_startup' };
     if (!runtime.installed) return { ...fallback, status: 'unavailable', message: 'not_installed' };
     const acp = runtime.id.startsWith('acp:')
@@ -158,6 +178,8 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         ? {
             defaultModel: runtime.configuredModel,
             defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
+            defaultModelSource: 'tool_config' as const,
+            defaultEffortSource: 'tool_config' as const,
           }
         : {}),
       ...result,

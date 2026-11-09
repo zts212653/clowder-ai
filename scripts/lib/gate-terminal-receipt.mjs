@@ -331,7 +331,10 @@ export function beginGateExecutionSlice(databasePath, jobId, executionSlaMs, now
   }
 }
 
-export function finishGateExecutionSlice(databasePath, jobId, now = Date.now()) {
+export function finishGateExecutionSlice(databasePath, jobId, now = Date.now(), confirmedSleepMs = 0) {
+  if (!Number.isSafeInteger(confirmedSleepMs) || confirmedSleepMs < 0) {
+    throw new Error('invalid confirmed sleep duration');
+  }
   const database = openRunStore(databasePath);
   try {
     return transaction(database, () => {
@@ -339,7 +342,8 @@ export function finishGateExecutionSlice(databasePath, jobId, now = Date.now()) 
         .prepare("SELECT * FROM gate_runs WHERE job_id = ? AND state = 'active' ORDER BY created_at DESC LIMIT 1")
         .get(jobId);
       if (!run || run.execution_slice_started_at === null) return null;
-      const executionUsedMs = run.execution_used_ms + Math.max(0, now - run.execution_slice_started_at);
+      const executionUsedMs =
+        run.execution_used_ms + Math.max(0, now - run.execution_slice_started_at - confirmedSleepMs);
       database
         .prepare(
           'UPDATE gate_runs SET execution_used_ms = ?, execution_slice_started_at = NULL, heartbeat_at = ? WHERE run_id = ?',

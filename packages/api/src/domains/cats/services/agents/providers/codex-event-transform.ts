@@ -108,7 +108,7 @@ function isCanonicalOwnSignature(
   expectedCatId: CatId,
 ): boolean {
   if (!isConfiguredOwnSignatureIdentity(candidateIdentity, expectedIdentity, expectedIdentityAliases)) return false;
-  if (!canonicalSignature) return false;
+  if (!canonicalSignature) return candidateCatId === undefined || candidateCatId.trim() === expectedCatId;
 
   const canonical = PAW_SIGNATURE_RE.exec(canonicalSignature.trim());
   const canonicalIdentity = canonical?.[1];
@@ -195,10 +195,9 @@ function isMarkdownSignatureSampleContext(text: string, candidateIndex: number):
 }
 
 /**
- * Remove only this cat's runtime-canonical signature when it is the terminal token
- * of one complete Codex `agent_message` turn. Same-cat signatures for other models,
- * quoted/fenced examples, and teammate signatures are content, not transport
- * decoration, and must survive finalization.
+ * Remove this cat's terminal signature from one complete Codex `agent_message`.
+ * A known runtime model must match; an inherited model requires a bare signature
+ * on its own unindented line. Quoted/fenced examples and teammate signatures remain content.
  */
 function stripOwnTrailingTurnSignature(
   text: string,
@@ -215,7 +214,7 @@ function stripOwnTrailingTurnSignature(
   const candidateCatId = match[4];
   if (
     !candidateIdentity ||
-    !candidateModel ||
+    !candidateModel?.trim() ||
     !isCanonicalOwnSignature(
       candidateIdentity,
       candidateModel,
@@ -231,6 +230,11 @@ function stripOwnTrailingTurnSignature(
 
   if (isMarkdownSignatureSampleContext(text, match.index) || isInsideFencedCode(text, match.index)) {
     return { content: text };
+  }
+
+  if (!canonicalSignature) {
+    const lineStart = text.lastIndexOf('\n', Math.max(0, match.index - 1)) + 1;
+    if (match.index !== lineStart || match[0].trimEnd() !== match[1]) return { content: text };
   }
 
   return {
@@ -256,7 +260,9 @@ export function finalizeCodexStream(state: CodexStreamState, catId: CatId): Agen
   ) {
     return null;
   }
-  const signature = state.canonicalSignature ?? state.observedSignature;
+  const canonicalMatch = state.canonicalSignature ? PAW_SIGNATURE_RE.exec(state.canonicalSignature.trim()) : null;
+  const usableCanonical = canonicalMatch?.[2]?.trim() ? state.canonicalSignature : undefined;
+  const signature = usableCanonical ?? state.observedSignature;
   if (!signature) return null;
   state.finalSignatureEmitted = true;
   return {
@@ -268,7 +274,7 @@ export function finalizeCodexStream(state: CodexStreamState, catId: CatId): Agen
       kind: 'cat_signature',
       producer: 'codex_stream_finalizer',
       role: 'answer_suffix',
-      basis: state.canonicalSignature !== undefined ? 'runtime_canonical' : 'provider_observed_fallback',
+      basis: usableCanonical !== undefined ? 'runtime_canonical' : 'provider_observed_fallback',
     },
     timestamp: Date.now(),
   };

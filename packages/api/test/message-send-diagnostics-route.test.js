@@ -49,7 +49,11 @@ for (const stage of ['participants', 'projectImport']) {
       socketManager: { emitToUser() {}, broadcastToRoom() {} },
       router: {
         previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
-        resolveTargetsAndIntent: async () => ({ targetCats: ['opus'], intent: { intent: 'execute' } }),
+        resolveTargetsAndIntent: async () => ({
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          routing_warnings: [],
+        }),
       },
       threadStore: {
         get: async () => ({ id: 'diagnostic-thread', title: 'Diagnostic', createdBy: 'default-user', participants }),

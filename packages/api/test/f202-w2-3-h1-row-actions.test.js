@@ -19,6 +19,7 @@ import {
 } from '../dist/domains/plugin/carrier/plugin-owner-operation-context.js';
 import { HostPluginConfigurationService } from '../dist/domains/plugin/manager/plugin-manager-configuration.js';
 import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 const pluginId = 'dev.clowder.authorization-fixture';
 const pluginInstanceId = 'pi_authorization_fixture';
@@ -116,7 +117,7 @@ function harness(listResult) {
   const calls = [];
   let state;
   const operations = new InstalledPluginOperations({
-    inventory: { snapshot: async () => snapshot(manifest()) },
+    inventory: snapshotInventoryFixture({ snapshot: async () => snapshot(manifest()) }),
     configuration: {
       readActionInput: async () => ({ account: 'owner@example.com' }),
       readOperationState: async () => state,
@@ -254,7 +255,7 @@ test('the projection gives the web each row action and every declared confirmati
   roots.push(projectRoot);
   const service = new HostPluginConfigurationService({
     projectRoot,
-    inventory: { snapshot: async () => snapshot(manifest()) },
+    inventory: snapshotInventoryFixture({ snapshot: async () => snapshot(manifest()) }),
   });
 
   const operation = (await service.fields(pluginId)).find((field) => field.key === 'authorization');

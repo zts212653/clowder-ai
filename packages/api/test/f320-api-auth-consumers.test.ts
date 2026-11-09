@@ -58,7 +58,11 @@ for (const carrier of ['direct', 'pooled'] as const)
             removeSocketDirectory: async () => {},
             spawnHost: async (launch) => {
               launches++;
-              assertSelectedApiAccount(buildChildEnv(launch.env), 'selected-key-fixture', selectedRouting);
+              assertSelectedApiAccount(
+                buildChildEnv(launch.env, { inheritParentEnv: launch.inheritParentEnv }),
+                'selected-key-fixture',
+                selectedRouting,
+              );
               assertSelectedApiProvider(launch, baseUrl);
               assert.notEqual(launch.env.CODEX_HOME, descriptor.credentialHome);
               return {
@@ -104,7 +108,11 @@ for (const carrier of ['direct', 'pooled'] as const)
             ? {
                 agentCarrierSessionFactory: async (options) => {
                   launches++;
-                  assertSelectedApiAccount(buildChildEnv(options.env), 'selected-key-fixture', selectedRouting);
+                  assertSelectedApiAccount(
+                    buildChildEnv(options.env, { inheritParentEnv: options.inheritParentEnv }),
+                    'selected-key-fixture',
+                    selectedRouting,
+                  );
                   assertSelectedApiProvider(options, baseUrl);
                   assert.notEqual(options.env.CODEX_HOME, descriptor.credentialHome);
                   return new F320AccountWire({});

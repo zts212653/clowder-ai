@@ -1,6 +1,6 @@
 ---
 name: ppt-forge
-tips_exempt: "Renewed 2026-10-10: raster versus editable output routing refines the existing slide request; PPT discovery is already covered by the feature-ppt-forge tip, with no separate new capability."
+tips_exempt: "Renewed 2026-11-03: only drops the boundary line for the retired expert-panel; PPT discovery stays covered by the feature-ppt-forge tip, with no new capability."
 description: >
   PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。
   架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。
@@ -156,5 +156,4 @@ status: lofi-draft
 
 - `co-creation-storytelling`：长期真实经历的取材与贡献分镜 — 叙事需要厘清时使用，成稿后回到本技能制作。
 - `image-generation`：通用图片生成 — ppt-forge 是 PPT 专用流程
-- `expert-panel`：多猫分析报告 — ppt-forge 是做 PPT
 - `tech-writing`：写文档 — ppt-forge 做演示文稿（视觉优先）

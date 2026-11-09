@@ -31,9 +31,16 @@ export type ApprovalRequestEvent =
    * `settled`: the producer call returned and the card cannot tell more (the hub store swallows failures into one global
    * string). `http-error` carries the status the card actually saw. `network-error`: no response at all.
    */
-  | { phase: 'end'; kind: ApprovalWriteKind; outcome: 'settled' | 'http-error' | 'network-error'; status?: number };
+  | {
+      phase: 'end';
+      kind: ApprovalWriteKind;
+      outcome: 'settled' | 'http-error' | 'network-error';
+      status?: number;
+      errorCode?: string;
+    };
 
 export interface AuthorizeOptions {
+  readonly decision?: 'approve' | 'reject';
   /**
    * The request being asked about is the next one of a write this host already let out, not a new press: a producer saves a
    * selection and then completes its write, and the second request is asked about on its own. A host that locks writes
@@ -44,6 +51,7 @@ export interface AuthorizeOptions {
 }
 
 export interface ApprovalHost {
+  readonly blockedDecisions?: ReadonlySet<'approve' | 'reject'>;
   /** Presentation only; the classic permissive host supplies no variant. */
   readonly presentation?: 'mailbox';
   readonly decisionWords?: { approve: string; reject: string; clear: string };
@@ -74,11 +82,16 @@ export function useApprovalHost(): ApprovalHost {
 }
 
 /** What a write saw of its own response, when it can tell. A write that cannot tell leaves the default (`settled`). */
-export type WriteEvidence = { outcome: 'settled' | 'http-error' | 'network-error'; status?: number };
+export type WriteEvidence = {
+  outcome: 'settled' | 'http-error' | 'network-error';
+  status?: number;
+  errorCode?: string;
+};
 
 export type GuardedWrite = <T>(
   kind: ApprovalWriteKind,
   write: (reportEvidence: (evidence: WriteEvidence) => void) => Promise<T>,
+  options?: AuthorizeOptions,
 ) => Promise<{ sent: false } | { sent: true; value: T }>;
 
 /**
@@ -95,9 +108,9 @@ export function useGuardedWrite(): GuardedWrite {
   const host = useApprovalHost();
   const latest = useRef(host);
   latest.current = host;
-  return useCallback<GuardedWrite>(async (kind, write) => {
+  return useCallback<GuardedWrite>(async (kind, write, options) => {
     const requestHost = latest.current;
-    if (!requestHost.authorizeWrite(kind)) return { sent: false };
+    if (!requestHost.authorizeWrite(kind, options)) return { sent: false };
     requestHost.reportRequest({ phase: 'start', kind });
     let evidence: WriteEvidence = { outcome: 'settled' };
     try {

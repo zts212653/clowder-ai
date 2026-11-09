@@ -29,6 +29,8 @@ export interface PluginCallContext {
   };
   /** Recheck the local activation and invoking turn after asynchronous provider work. */
   assertCurrent(): Promise<void>;
+  /** Immediate request/native-action lifetime fence, issued only by Host. */
+  assertWriteCurrent?(): void;
   /** Host-only turn/activation fence; never reads inventory or crosses the package ABI. */
   assertInvocationCurrent?(): Promise<void>;
 }

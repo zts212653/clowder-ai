@@ -221,7 +221,6 @@ test('owner catalog stays available while disabled and never starts a client; an
   });
   registerAgentClientLibraryRoutes(app, {
     inventory: h.store,
-    packages: h.packages,
     configuration: h.configuration,
     registry: h.registry,
   });
@@ -246,4 +245,13 @@ test('owner catalog stays available while disabled and never starts a client; an
   assert.equal(h.created.length, 1, 'activation prepares the persisted member for Host capability admission');
   assert.equal(h.created[0].provider.calls.open.length, 0, 'preparation does not open an agent session');
   assert.equal(h.created[0].provider.calls.start.length, 0, 'reading the catalog never starts a client turn');
+  h.set([{ id: 'third', name: 'Fresh config', command: 'node', startupArgs: [] }]);
+  await h.runtime.refreshAgentSessionProviders(h.admission);
+  const refreshed = (await app.inject({ url: '/api/agent-providers', headers })).json().libraries[0];
+  assert.deepEqual(refreshed.clients, [
+    { id: 'third', name: 'Fresh config', ref: `plugin:${h.ref.pluginId}/third`, available: true },
+  ]);
+  await h.runtime.deactivate(h.admission.instance.pluginInstanceId);
+  const stopped = (await app.inject({ url: '/api/agent-providers', headers })).json().libraries[0];
+  assert.equal(stopped.clients[0].available, false, 'disabled implementations keep metadata but cannot execute');
 });

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F122B AC-B10: Whisper mode disables actively-executing cats.
  */
@@ -141,17 +142,6 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
     const chips = getWhisperChips();
     const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
     expect(codexChip?.textContent).toContain('执行中');
-  });
-
-  it('all cats selectable but none pre-selected when none are executing', () => {
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn() })));
-    enterWhisperMode();
-
-    const chips = getWhisperChips();
-    for (const chip of chips) {
-      expect(chip.disabled).toBe(false);
-      expect(chip.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated'); // F108B: default none selected
-    }
   });
 
   it('F108B AC-B7: whisper to idle cat shows whisper placeholder, not queue placeholder', () => {

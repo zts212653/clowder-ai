@@ -4,7 +4,7 @@ related_features: [F202, F205, F247, F325, F290, F314]
 topics: [google, gemini, lyria, veo, flow, flow-music, chrome-extension, plugin, media-generation]
 doc_kind: spec
 created: 2026-10-14
-updated: 2026-10-29
+updated: 2026-11-02
 tips_exempt: "2026-10-27: PR6159 carries the music tip. Paired previews and follow-up fixes are merged; real Alpha Manager/native generation and project delivery passed. Billing/Ultra-credit verification remains open. Phase B/C have no shipped entry."
 description: "把 You 的 Google AI 订阅里家里用得上的能力（音乐、视频、Gemini 网页等）接进 Clowder AI，让猫自己用，不靠人在网页上手点转发。"
 description_source: human

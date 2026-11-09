@@ -4,10 +4,60 @@ import { createRequire } from 'node:module';
 const requireApi = createRequire(new URL('../../../api/package.json', import.meta.url));
 const sharp = requireApi('sharp');
 
+/** Read the actual clipboard PNG and compare its decoded pixels with the requested original frame. */
+export async function checkGifClipboardFrame(page, dialog, bytes, frameIndex) {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(() => navigator.clipboard.writeText('before GIF frame copy'));
+  await dialog.getByRole('button', { name: '作品更多操作', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^复制图片/ }).click();
+  await dialog.getByText('已复制图片', { exact: true }).waitFor({ state: 'visible' });
+  // A previous success notice can still be visible; the text sentinel must be replaced by this PNG.
+  const png = await page.evaluate(async () => {
+    const deadline = performance.now() + 10_000;
+    while (performance.now() < deadline) {
+      const item = (await navigator.clipboard.read()).find((entry) => entry.types.includes('image/png'));
+      if (item) return Array.from(new Uint8Array(await (await item.getType('image/png')).arrayBuffer()));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('This GIF copy did not replace the clipboard sentinel with a PNG');
+  });
+  const actual = await sharp(Buffer.from(png)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const expected = await sharp(bytes, { page: frameIndex }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.equal(actual.info.width, expected.info.width, 'clipboard is one logical GIF frame wide');
+  assert.equal(actual.info.height, expected.info.height, 'clipboard is one logical GIF frame high');
+  assert.deepEqual(
+    actual.data,
+    expected.data,
+    'clipboard pixels match the displayed frame, not frame zero or the atlas',
+  );
+  return { frameIndex, width: actual.info.width, height: actual.info.height, bytes: png.length, pixelsMatch: true };
+}
+
 /** Asymmetric original pixels make a rotation or mirror error observable, rather than testing dimensions alone. */
 export async function nativeImageBytes(kind, candidate = false) {
   const width = 480,
     height = 320;
+  if (kind === 'svg')
+    return Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="-10 20 480 320"><defs><linearGradient id="g"><stop stop-color="${candidate ? '#446c86' : '#be6d47'}"/><stop offset="1" stop-color="#ead4a6"/></linearGradient></defs><rect x="-10" y="20" width="480" height="320" fill="url(#g)"/><circle id="sun" cx="${candidate ? 340 : 300}" cy="125" r="50" fill="#f5df9c"/><text x="30" y="260" font-size="28">Clowder AI · v${candidate ? 2 : 1}</text></svg>`,
+    );
+  if (kind === 'gif') {
+    const frames = [];
+    for (let frame = 0; frame < 3; frame++)
+      frames.push(
+        await sharp(
+          Buffer.from(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="#f4e9d7"/><circle cx="${80 + frame * 130}" cy="145" r="50" fill="${candidate ? '#446c86' : '#be6d47'}"/><text x="30" y="280" font-size="28">FRAME ${frame + 1}</text></svg>`,
+          ),
+        )
+          .ensureAlpha()
+          .raw()
+          .toBuffer(),
+      );
+    return sharp(Buffer.concat(frames), { raw: { width, height: height * 3, channels: 4, pageHeight: height } })
+      .gif({ delay: [80, 180, 320], loop: 0 })
+      .toBuffer();
+  }
   const raw = Buffer.alloc(width * height * 3);
   const colors = candidate
     ? [

@@ -6,6 +6,7 @@ export default function MemoryPage({ searchParams }: { searchParams: Record<stri
   const requested = searchParams.tab;
   const tab = requested === 'brakes' || requested === 'library' || requested === 'recall' ? requested : 'all';
   const query = typeof searchParams.q === 'string' ? searchParams.q : undefined;
+  const type = searchParams.type;
   const findSessionId = typeof searchParams.findSession === 'string' ? searchParams.findSession : undefined;
   return (
     <MemoryEntry
@@ -13,7 +14,10 @@ export default function MemoryPage({ searchParams }: { searchParams: Record<stri
       from={from}
       profileSource={readProfileSourceTarget(searchParams)}
       initialQuery={query}
+      initialType={type === 'memory' || type === 'documents' || type === 'conversations' ? type : 'all'}
+      initialDepth={searchParams.depth === 'raw' ? 'raw' : 'summary'}
       findSessionId={findSessionId}
+      matterId={typeof searchParams.matter === 'string' ? searchParams.matter : undefined}
     />
   );
 }

@@ -102,6 +102,7 @@ export async function readRecallSourceViews(
   rows: Array<{ candidates_json: string | null }>,
   cueInvocationIds: string[],
   readers: RecallSourceReaders,
+  includeMatter = true,
 ) {
   const anchors = new Set(
     rows.flatMap((row) =>
@@ -123,9 +124,10 @@ export async function readRecallSourceViews(
       .prepare(`SELECT invocation_id, cue_id, resolver_family, source_anchor,
       source_revision, consumer_cat_id FROM memory_cue_events
       WHERE owner_user_id = ? AND thread_id = ? AND invocation_id IN (${cueInvocationIds.map(() => '?').join(',')})
+      AND (? = 1 OR resolver_family != 'matter')
       GROUP BY invocation_id, cue_id, resolver_family, source_anchor, source_revision, consumer_cat_id
       ORDER BY MAX(occurred_at) DESC, invocation_id DESC, cue_id DESC LIMIT 200`)
-      .all(userId, threadId, ...cueInvocationIds) as RecallCueCoordinate[];
+      .all(userId, threadId, ...cueInvocationIds, includeMatter ? 1 : 0) as RecallCueCoordinate[];
     const readCue = recallCueViewReader(
       { ownerUserId: userId, threadId },
       read,

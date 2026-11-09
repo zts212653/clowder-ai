@@ -14,12 +14,18 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
+import sharp from 'sharp';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 ensureFakeCliOnPath('claude');
 ensureFakeCliOnPath('codex');
+
+const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: 'red' } })
+  .png()
+  .toBuffer();
+const jpeg = await sharp(png).jpeg().toBuffer();
 
 describe('saveUploadedImages', () => {
   let uploadDir;
@@ -35,7 +41,7 @@ describe('saveUploadedImages', () => {
   it('saves a valid PNG file and returns metadata', async () => {
     const { saveUploadedImages } = await import('../dist/routes/image-upload.js');
 
-    const fakeFile = createMockFile('test.png', 'image/png', Buffer.from('fake-png'));
+    const fakeFile = createMockFile('test.png', 'image/png', png);
     const saved = await saveUploadedImages([fakeFile], uploadDir);
 
     assert.equal(saved.length, 1);
@@ -48,7 +54,7 @@ describe('saveUploadedImages', () => {
     const files = await readdir(uploadDir);
     assert.equal(files.length, 1);
     const content = await readFile(join(uploadDir, files[0]));
-    assert.equal(content.toString(), 'fake-png');
+    assert.deepEqual(content, png);
   });
 
   it('rejects unsupported MIME types', async () => {
@@ -87,10 +93,7 @@ describe('saveUploadedImages', () => {
   it('saves multiple files with unique names', async () => {
     const { saveUploadedImages } = await import('../dist/routes/image-upload.js');
 
-    const files = [
-      createMockFile('a.png', 'image/png', Buffer.from('aaa')),
-      createMockFile('b.jpg', 'image/jpeg', Buffer.from('bbb')),
-    ];
+    const files = [createMockFile('a.png', 'image/png', png), createMockFile('b.jpg', 'image/jpeg', jpeg)];
     const saved = await saveUploadedImages(files, uploadDir);
 
     assert.equal(saved.length, 2);
@@ -103,7 +106,7 @@ describe('saveUploadedImages', () => {
   it('uses MIME extension, ignores malicious filename (regression: XSS via .html)', async () => {
     const { saveUploadedImages } = await import('../dist/routes/image-upload.js');
 
-    const fakeFile = createMockFile('evil.html', 'image/png', Buffer.from('fake-png'));
+    const fakeFile = createMockFile('evil.html', 'image/png', png);
     const saved = await saveUploadedImages([fakeFile], uploadDir);
 
     assert.equal(saved.length, 1);
@@ -118,7 +121,7 @@ describe('extractImagePaths', () => {
 
     const dir = getDefaultUploadDir();
     assert.ok(
-      dir.endsWith('/packages/api/uploads'),
+      dir.replaceAll('\\', '/').endsWith('/packages/api/uploads'),
       `expected default upload dir to end with /packages/api/uploads, got ${dir}`,
     );
   });
@@ -321,6 +324,7 @@ describe('multipart image target routing', () => {
       async resolveTargetsAndIntent() {
         return {
           targetCats: ['opus'],
+          routing_warnings: [],
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };
       },
@@ -356,8 +360,10 @@ describe('multipart image target routing', () => {
     const payload = Buffer.concat([
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n请看图\r\n`),
       Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="images"; filename="clip.png"\r\nContent-Type: image/png\r\n\r\nfake-png-bytes\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="images"; filename="clip.png"\r\nContent-Type: image/png\r\n\r\n`,
       ),
+      png,
+      Buffer.from('\r\n'),
       Buffer.from(`--${boundary}--\r\n`),
     ]);
     return app.inject({

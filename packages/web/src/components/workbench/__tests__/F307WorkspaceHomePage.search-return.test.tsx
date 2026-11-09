@@ -34,6 +34,8 @@ describe('F307 Home return search restoration', () => {
     localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
+    // Legacy owner-surface contracts explicitly retain classic; v2 cases select v2 below.
+    writeShellPresentation('classic');
     root = createRoot(container);
   });
 

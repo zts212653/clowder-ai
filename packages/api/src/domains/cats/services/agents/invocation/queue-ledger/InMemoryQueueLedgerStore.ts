@@ -21,6 +21,18 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
 
   private readonly privateAdmissions = new InMemoryQueueLedgerPrivateAdmissions();
 
+  replayPrivateAdmissionNow(entry: QueueLedgerEntry): QueueLedgerEnqueueResult | null {
+    const verdict = this.privateAdmissions.verdict(entry.threadId, entry);
+    if (verdict === 'unseen') return null;
+    if (verdict === 'conflict') return { outcome: 'conflict', entries: [] };
+    const current = this.getNow(entry.threadId, entry.id);
+    return { outcome: 'replayed', entries: current ? [current] : [] };
+  }
+
+  async replayPrivateAdmission(entry: QueueLedgerEntry): Promise<QueueLedgerEnqueueResult | null> {
+    return this.replayPrivateAdmissionNow(entry);
+  }
+
   enqueueNow(entries: readonly QueueLedgerEntry[], maxQueuedUserEntries?: number): QueueLedgerEnqueueResult {
     if (entries.length === 0) throw new Error('queue ledger enqueue requires at least one row');
     for (const entry of entries) assertQueueLedgerEntry(entry);
@@ -265,16 +277,24 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
   }
 
   /** Used only inside the synchronous Message/Queue Append recovery transaction. */
-  replaceAppendRecoveryNow(expected: QueueLedgerEntry | null, entry: QueueLedgerEntry): void {
-    assertQueueLedgerEntry(entry);
-    const current = this.getNow(entry.threadId, entry.id);
+  replaceAppendRecoveryNow(expected: QueueLedgerEntry | null, entry: QueueLedgerEntry | null): void {
+    const identity = entry ?? expected;
+    if (!identity) return;
+    if (entry) assertQueueLedgerEntry(entry);
+    const current = this.getNow(identity.threadId, identity.id);
     if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Append recovery Queue changed');
-    const rows = this.rows.get(entry.threadId) ?? [];
-    const index = rows.findIndex((row) => row.id === entry.id);
-    if (index < 0) rows.push(cloneQueueLedgerEntry(entry));
-    else rows[index] = cloneQueueLedgerEntry(entry);
-    this.rows.set(entry.threadId, rows);
-    this.messageIndex.index(entry.threadId, [entry]);
+    const rows = this.rows.get(identity.threadId) ?? [];
+    const index = rows.findIndex((row) => row.id === identity.id);
+    if (entry) {
+      if (index < 0) rows.push(cloneQueueLedgerEntry(entry));
+      else rows[index] = cloneQueueLedgerEntry(entry);
+      this.rows.set(entry.threadId, rows);
+      this.messageIndex.index(entry.threadId, [entry]);
+    } else {
+      if (index >= 0) rows.splice(index, 1);
+      this.messageIndex.unindex(identity.threadId, [identity]);
+      if (!rows.length) this.rows.delete(identity.threadId);
+    }
   }
 
   async claim(

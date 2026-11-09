@@ -32,6 +32,7 @@ export interface RoutingCandidateCatalogSource {
 
 interface RoutingContextReadResolver {
   resolve(input: ResolveRoutingContextInput): Promise<RoutingContextResolution>;
+  resolveWithDecisionSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources>;
   resolveWithSources(input: ResolveRoutingContextInput): Promise<RoutingContextResolutionWithSources>;
 }
 
@@ -87,12 +88,33 @@ export class RoutingContextReadService {
   }
 
   async read(input: RoutingContextReadInput): Promise<RoutingContextReadModelV1> {
+    return this.readModel(input, async (resolverInput) => {
+      const loaded = await this.dependencies.resolver.resolveWithSources(resolverInput);
+      return {
+        ...loaded,
+        signalEvents: latest(loaded.signalEvents),
+        preferenceRevisions: latest(loaded.preferenceRevisions),
+      };
+    });
+  }
+
+  /** Invocation guidance needs decision sources, never the presentation ledger's latest-N window. */
+  async readForPrompt(input: RoutingContextReadInput): Promise<RoutingContextReadModelV1> {
+    return this.readModel(input, (resolverInput) =>
+      this.dependencies.resolver.resolveWithDecisionSources(resolverInput),
+    );
+  }
+
+  private async readModel(
+    input: RoutingContextReadInput,
+    load: (input: ResolveRoutingContextInput) => Promise<RoutingContextResolutionWithSources>,
+  ): Promise<RoutingContextReadModelV1> {
     const catalog = await this.dependencies.catalogSource.load({
       ownerId: input.ownerId,
       targetCatIds: input.targetCatIds,
       observedAt: input.observedAt,
     });
-    const loaded = await this.dependencies.resolver.resolveWithSources({
+    const loaded = await load({
       ownerId: input.ownerId,
       observedAt: input.observedAt,
       catalogRevision: catalog.catalogRevision,
@@ -106,8 +128,8 @@ export class RoutingContextReadService {
       observedAt: input.observedAt,
       catalogRevision: catalog.catalogRevision,
       resolution,
-      signalEvents: latest(loaded.signalEvents),
-      preferenceRevisions: latest(loaded.preferenceRevisions),
+      signalEvents: loaded.signalEvents,
+      preferenceRevisions: loaded.preferenceRevisions,
     });
   }
 }

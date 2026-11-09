@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { readCapabilitiesConfig } from '../dist/config/capabilities/capability-orchestrator.js';
 import { BundledPluginRuntimeCarrier } from '../dist/domains/plugin/builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { PluginRuntimeCarrierRouter } from '../dist/domains/plugin/carrier/runtime-carrier.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
 /**
  * F202 Train C1 — clause 1 / 2 / 6 of the terminal acceptance contract
@@ -54,7 +55,7 @@ function inventoryOf(...manifests) {
     updatedAt: 0,
   }));
   const live = new Map(instances.map((instance) => [instance.pluginInstanceId, instance]));
-  return {
+  return snapshotInventoryFixture({
     snapshot: async () => ({ packages, instances: [...live.values()] }),
     transaction: async (apply) =>
       apply({
@@ -63,7 +64,7 @@ function inventoryOf(...manifests) {
           put: (record) => live.set(record.pluginInstanceId, record),
         },
       }),
-  };
+  });
 }
 
 function recordingCarrier(name, claims, calls) {

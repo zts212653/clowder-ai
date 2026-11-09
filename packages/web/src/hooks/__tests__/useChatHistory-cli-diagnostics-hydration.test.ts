@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F212 Phase B 云端 codex P2 regression (2026-05-27):
  *
@@ -331,7 +332,7 @@ describe('F212 Phase B — cold hydration restores cliDiagnostics (云端 codex 
     expect(hydrated?.recovery).toEqual(recovery);
   });
   it('cold history preserves upstream classification, hint and request ID from the backend payload', async () => {
-    const { buildCliDiagnostics } = await import('../../../../api/src/utils/cli-diagnostics');
+    const { buildCliDiagnostics } = await import('../../../../api/dist/utils/cli-diagnostics');
     const requestId = '7ab62694-a1b3-4ef6-977e-7edb76b44640';
     const diag = buildCliDiagnostics({
       rawText: `stream disconnected before completion: An error occurred while processing your request. Please include the request ID ${requestId} in your message.`,

@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { recoveryRedis, sameRecoveryRedisClient } from '../../../../../../infrastructure/recovery/recovery-redis.js';
 import {
   assertQueueLedgerEntry,
   cloneQueueLedgerEntry,
@@ -35,6 +36,7 @@ import {
   listAllRedisQueueLedgerEntries,
   listRedisQueueLedgerEntries,
   listRedisQueueLedgerThreadIds,
+  replayRedisPrivateAdmission,
   verifyRedisQueueLedgerReplay,
 } from './RedisQueueLedgerReader.js';
 
@@ -43,10 +45,19 @@ export { hydrateQueueLedgerEntry, migrateQueueLedgerRowsToV2 } from './RedisQueu
 export class RedisQueueLedgerStore implements QueueLedgerStore {
   private readonly migrations = new Map<string, Promise<void>>();
 
-  constructor(private readonly redis: RedisClient) {}
+  private readonly admissionIdentity: RedisClient;
+  constructor(private readonly redis: RedisClient) {
+    this.admissionIdentity = redis;
+    this.redis = recoveryRedis(redis);
+  }
 
   usesRedisClient(redis: RedisClient): boolean {
-    return this.redis === redis;
+    return sameRecoveryRedisClient(this.admissionIdentity, redis);
+  }
+
+  async replayPrivateAdmission(entry: QueueLedgerEntry): Promise<QueueLedgerEnqueueResult | null> {
+    await this.ensureThreadMigrated(entry.threadId);
+    return replayRedisPrivateAdmission(this.redis, entry);
   }
 
   private get keyPrefix(): string {

@@ -93,7 +93,9 @@ describe('background thread socket handling', () => {
       expect(ts.catStatuses.opus).toBe('done');
     });
 
-    it('done event fires success toast', () => {
+    // PR-3a: the background completed / failed toast belongs to the user-room lifecycle snapshot
+    // (lifecycle-terminal.test.ts); a room event toasting too would announce a split pane twice.
+    it('done marks the cat done and leaves the completion toast to the lifecycle snapshot', () => {
       simulateBackgroundMessage({
         type: 'done',
         catId: 'codex',
@@ -101,30 +103,11 @@ describe('background thread socket handling', () => {
         timestamp: Date.now(),
       });
 
-      const toasts = useToastStore.getState().toasts;
-      expect(toasts).toHaveLength(1);
-      expect(toasts[0].type).toBe('success');
-      expect(toasts[0].title).toBe('codex 完成');
-      expect(toasts[0].threadId).toBe('thread-bg');
+      expect(useChatStore.getState().getThreadState('thread-bg').catStatuses.codex).toBe('done');
+      expect(useToastStore.getState().toasts).toHaveLength(0);
     });
 
-    it('projects the runtime member name in background completion toasts', () => {
-      simulateBackgroundMessage(
-        {
-          type: 'done',
-          catId: 'cat-eqdvbcxw',
-          threadId: 'thread-bg',
-          timestamp: Date.now(),
-        },
-        () => '缅因猫（sol）',
-      );
-
-      const [toast] = useToastStore.getState().toasts;
-      expect(toast.title).toBe('缅因猫（sol） 完成');
-      expect(toast.message).toBe('缅因猫（sol） 已完成处理');
-    });
-
-    it('text with isFinal completes and preserves the whole answer in its recovery toast', () => {
+    it('text with isFinal completes the response without a room toast', () => {
       const fullAnswer = '完整内容。'.repeat(80) + 'TAIL';
       simulateBackgroundMessage({
         type: 'text',
@@ -139,7 +122,8 @@ describe('background thread socket handling', () => {
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.catStatuses.opus).toBe('done');
-      expect(useToastStore.getState().toasts.at(-1)?.message).toBe(fullAnswer);
+      expect(ts.messages.find((message) => message.id === 'resp-1')?.content).toBe(fullAnswer);
+      expect(useToastStore.getState().toasts).toHaveLength(0);
     });
 
     it('done ends a background raw stream; the committed snapshot carries the canonical persisted content', () => {
@@ -222,7 +206,7 @@ describe('background thread socket handling', () => {
       expect(ts.catStatuses.opus).toBe('error');
     });
 
-    it('done after error does not emit success toast', () => {
+    it('done after error keeps the error status and toasts nothing from the room', () => {
       simulateBackgroundMessage({
         type: 'error',
         catId: 'opus',
@@ -230,9 +214,7 @@ describe('background thread socket handling', () => {
         error: 'fail',
         timestamp: Date.now(),
       });
-      // 1 error toast
-      expect(useToastStore.getState().toasts).toHaveLength(1);
-      expect(useToastStore.getState().toasts[0].type).toBe('error');
+      expect(useChatStore.getState().getThreadState('thread-bg').catStatuses.opus).toBe('error');
 
       simulateBackgroundMessage({
         type: 'done',
@@ -241,8 +223,8 @@ describe('background thread socket handling', () => {
         timestamp: Date.now(),
       });
 
-      // Should still be just 1 toast (the error), no success toast added
-      expect(useToastStore.getState().toasts).toHaveLength(1);
+      expect(useChatStore.getState().getThreadState('thread-bg').catStatuses.opus).toBe('error');
+      expect(useToastStore.getState().toasts).toHaveLength(0);
     });
 
     // F183 Phase B1.7 (砚砚 R1 P1) regression: an error without messageId (no admitted
@@ -732,7 +714,7 @@ describe('background thread socket handling', () => {
       expect(ts.messages).toEqual([expect.objectContaining({ id: 'resp-1', content: 'partial', isStreaming: false })]);
       expect(ts.messages.some((m) => m.type === 'system')).toBe(false);
       expect(ts.catStatuses.opus).toBe('error');
-      expect(useToastStore.getState().toasts.map((toast) => toast.type)).toEqual(['error']);
+      expect(useToastStore.getState().toasts).toHaveLength(0);
     });
   });
 

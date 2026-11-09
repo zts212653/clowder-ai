@@ -70,7 +70,7 @@ export const searchEvidenceInputSchema = {
     .enum(['time', 'relevance'])
     .optional()
     .describe(
-      'Message mode only: time (oldest candidate first, default) or relevance. Limited recall does not prove the first occurrence in all history.',
+      'Message mode only: time (default) orders the first 32 admitted relevance sources by canonical time; relevance returns a relevance-ranked page. A partial window reports its actual size. Neither proves the earliest occurrence in all history.',
     ),
   agentKeyCatId: z
     .string()
@@ -244,6 +244,8 @@ export async function handleSearchEvidence(
         anchor: string;
         snippet: string;
         matchRank: 'high' | 'mid' | 'low';
+        rank?: number;
+        relevance?: RecallPreviewItem['relevance'];
         retrievalScore?: number;
         sourceType: string;
         status?: string;
@@ -282,6 +284,14 @@ export async function handleSearchEvidence(
       degradeReason?: string;
       effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
       variantId?: string;
+      sourceProjection?: {
+        state: string;
+        publicationRef?: string;
+        indexedVersion?: string;
+        observedVersion?: string;
+        pendingPaths?: number;
+        lastSuccessAt?: string;
+      };
       filterExecution?: {
         requestedThreadId: string;
         executedThreadId: string;
@@ -306,12 +316,15 @@ export async function handleSearchEvidence(
       };
     };
 
+    const sourceBanner = data.sourceProjection
+      ? `Source projection (${data.sourceProjection.publicationRef ?? 'unknown ref'}, observed at ${data.sourceProjection.lastSuccessAt ?? 'unknown'}): ${data.sourceProjection.state} · indexed:${data.sourceProjection.indexedVersion ?? 'unknown'} · observed:${data.sourceProjection.observedVersion ?? 'unknown'}${data.sourceProjection.pendingPaths != null ? ' · pending:' + data.sourceProjection.pendingPaths : ''}${data.sourceProjection.state !== 'up_to_date' ? '. Results may omit published changes; no result does not prove no source exists.' : ''}`
+      : undefined;
     const degradedBanner = formatDegradedBanner(data.degraded, data.degradeReason, data.effectiveMode);
 
     // Keep search-depth telemetry for measurement; the retired query-count nudge is not model-facing.
     searchCount++;
     const docHitsForTelemetry = data.results.filter(
-      (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
+      (r) => hasRelevanceEvidence(r) && DOC_SOURCE_TYPES.has(r.sourceType),
     );
     console.error(
       `[cat-cafe-search-depth] ${JSON.stringify({
@@ -330,6 +343,7 @@ export async function handleSearchEvidence(
       const nudge = composeMemoryNavigationNudge(data); // F188 AC-F3 + KD-7
       const coverageNudge = composeCoverageIntentNudge(input.query);
       const parts = [
+        sourceBanner,
         degradedBanner,
         noResultMsg,
         filterExecutionLine,
@@ -348,6 +362,7 @@ export async function handleSearchEvidence(
     }
 
     const lines: string[] = [];
+    if (sourceBanner) lines.push(sourceBanner);
     if (degradedBanner) {
       lines.push(degradedBanner);
       lines.push('');
@@ -367,7 +382,7 @@ export async function handleSearchEvidence(
 
     for (const r of data.results) {
       lines.push(
-        `[match:${r.matchRank} · authority:${r.authority ?? 'unknown'} · updated:${r.updatedAt ?? 'unknown'}] ${r.title}`,
+        `[rank:${r.rank ?? r.matchRank} · relevance:${r.relevance?.state ?? 'unknown'} · authority:${r.authority ?? 'unknown'} · updated:${r.updatedAt ?? 'unknown'}] ${r.title}`,
       );
       lines.push(`  anchor: ${r.anchor}`);
       lines.push(`  type: ${r.sourceType}`);
@@ -433,16 +448,14 @@ export async function handleSearchEvidence(
       lines.push('');
     }
 
-    const docHits = data.results.filter(
-      (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
-    );
+    const docHits = data.results.filter((r) => hasRelevanceEvidence(r) && DOC_SOURCE_TYPES.has(r.sourceType));
 
     // F188 Phase F AC-F3 + KD-7: deterministic nudge on low-hit (no high/mid doc anchors)
     const nudgeText = composeMemoryNavigationNudge(data);
 
     // Hook F-1: Read reminder for high/mid match-rank doc anchors (F177 Phase F)
     if (docHits.length > 0) {
-      lines.push(`📌 高匹配文档命中 ${docHits.length} 个：`);
+      lines.push(`📌 有文本匹配依据的候选 ${docHits.length} 个（仍需读源核对）：`);
       for (const d of docHits) {
         lines.push(`   - ${d.anchor}`);
       }
@@ -488,8 +501,8 @@ export async function handleSearchEvidence(
         previewItems: data.results.slice(0, 3).map(toRecallPreviewItem),
         readNextHint:
           docHits.length > 0
-            ? `Read high/mid match-rank doc anchors directly: ${docHits.map((d) => d.anchor).join(', ')}`
-            : 'Low match-rank search result; consider graph_resolve/list_recent or a narrower query.',
+            ? `Read text-supported candidates and verify applicability: ${docHits.map((d) => d.anchor).join(', ')}`
+            : 'Relevance is unknown; consider graph_resolve/list_recent or a narrower query.',
         // F256 Wave 1b: expansion health funnel for telemetry correlation
         ...(data.expansionMeta ? { expansionFunnel: data.expansionMeta } : {}),
       }),
@@ -497,7 +510,14 @@ export async function handleSearchEvidence(
 
     const rendered = lines.join('\n');
     if (rendered.length <= TOPK_TOOL_RESPONSE_CHAR_BUDGET) return successResult(rendered);
-    return successResult(renderCompactTopkResponse(data.results, queryLabel, data.degraded));
+    return successResult(
+      [
+        sourceBanner,
+        renderCompactTopkResponse(data.results, queryLabel, data.degraded, (sourceBanner?.length ?? 0) + 1),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
@@ -555,6 +575,8 @@ function toRecallPreviewItem(result: {
   anchor: string;
   snippet: string;
   matchRank: RecallMatchRank;
+  rank?: number;
+  relevance?: RecallPreviewItem['relevance'];
   authority?: string;
   updatedAt?: string;
 }): RecallPreviewItem {
@@ -562,6 +584,8 @@ function toRecallPreviewItem(result: {
     title: result.title,
     anchor: result.anchor,
     matchRank: result.matchRank,
+    ...(result.rank != null ? { rank: result.rank } : {}),
+    ...(result.relevance ? { relevance: result.relevance } : {}),
     ...(result.authority ? { authority: result.authority } : {}),
     ...(result.updatedAt ? { updatedAt: result.updatedAt } : {}),
     snippet: result.snippet.length > 160 ? `${result.snippet.slice(0, 160)}...` : result.snippet,
@@ -577,8 +601,12 @@ function toRecallPreviewItem(result: {
  * Replaces PostToolUse hook (KD-7 v1 strategy). FM-5 measures effectiveness:
  * if猫 ignores nudge AND falls back to Bash grep, nudge has failed.
  */
+function hasRelevanceEvidence(result: { relevance?: { state: string } }): boolean {
+  return ['exact_anchor', 'exact_title', 'phrase'].includes(result.relevance?.state ?? 'unknown');
+}
+
 function composeMemoryNavigationNudge(data: {
-  results: Array<{ matchRank: string; sourceType: string }>;
+  results: Array<{ matchRank: string; sourceType: string; relevance?: { state: string } }>;
 }): string | null {
   if (data.results.length === 0) {
     return [
@@ -588,12 +616,10 @@ function composeMemoryNavigationNudge(data: {
       '  • 换切面/多刀搜 → 加载 memory-search-best-practices skill（8 种题型 recipe + 何时停）',
     ].join('\n');
   }
-  const hasHighOrMidDocHit = data.results.some(
-    (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
-  );
+  const hasHighOrMidDocHit = data.results.some((r) => hasRelevanceEvidence(r) && DOC_SOURCE_TYPES.has(r.sourceType));
   if (!hasHighOrMidDocHit) {
     return [
-      '🧭 Memory navigation — low match-rank hits, consider an alternate entry:',
+      '🧭 Memory navigation — relevance unknown, consider an alternate entry:',
       '  • 看 anchor 周边关系 → cat_cafe_graph_resolve',
       '  • 时间窗口扫描 → cat_cafe_list_recent',
       '  • 换切面/多刀搜 → 加载 memory-search-best-practices skill（题型 recipe + 补刀策略）',
@@ -679,6 +705,8 @@ function renderCompactTopkResponse(
     anchor: string;
     snippet: string;
     matchRank: string;
+    rank?: number;
+    relevance?: RecallPreviewItem['relevance'];
     sourceType: string;
     authority?: string;
     updatedAt?: string;
@@ -691,6 +719,7 @@ function renderCompactTopkResponse(
   }>,
   queryLabel: string,
   degraded: boolean,
+  reservedChars = 0,
 ): string {
   const lines = [
     `${EVIDENCE_RESULT_MARKER} Found ${results.length} result(s) for ${boundTopkField(queryLabel, 220)} [bounded topk]:`,
@@ -699,7 +728,7 @@ function renderCompactTopkResponse(
   ];
   for (const result of results) {
     lines.push(
-      `[match:${result.matchRank} · authority:${boundTopkField(result.authority ?? 'unknown', 80)} · updated:${boundTopkField(result.updatedAt ?? 'unknown', 80)}] ${boundTopkField(result.title, 140)}`,
+      `[rank:${result.rank ?? result.matchRank} · relevance:${result.relevance?.state ?? 'unknown'} · authority:${boundTopkField(result.authority ?? 'unknown', 80)} · updated:${boundTopkField(result.updatedAt ?? 'unknown', 80)}] ${boundTopkField(result.title, 140)}`,
       `  anchor: ${boundTopkField(result.anchor, 300)}`,
       `  type: ${boundTopkField(result.sourceType, 60)}`,
     );
@@ -735,7 +764,7 @@ function renderCompactTopkResponse(
     }),
   );
   const text = lines.join('\n');
-  if (text.length > TOPK_TOOL_RESPONSE_CHAR_BUDGET) {
+  if (text.length + reservedChars > TOPK_TOOL_RESPONSE_CHAR_BUDGET) {
     throw new Error('Topk source reference projection exceeds the declared response budget');
   }
   return text;
@@ -761,9 +790,9 @@ export const evidenceTools = [
       'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
       'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
       'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
-      'To attach that same bounded message result as a source-backed answer card, explicitly use cat_cafe_prepare_message_search_answer; ordinary recall here never publishes a card. ' +
-      'MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
-      'GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
+      'To prepare an answer card, explicitly use cat_cafe_prepare_message_search_answer with your chosen sources, exact quotations and selection reasons; Host verifies provenance while your reasons remain your judgment. New cards require selections. Only saved legacy query-only operations accept retries without selections, using their original arguments without new search or qualification. Ordinary recall never publishes a card or launches a generative judge. ' +
+      'MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=time (default) orders the first 32 admitted relevance sources by canonical time; relevance stops at the admitted page plus one witness. Incomplete windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
+      'GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
       'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
       'QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. ' +
@@ -785,7 +814,7 @@ export const evidenceTools = [
       'Split broad topics into 2-3 targeted queries from different angles (e.g. "how it was built" vs "how it is governed"). ' +
       'Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. ' +
       'SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks "哪些 / 所有 / 历史上 / 提过 / 沉淀", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. ' +
-      'READING RESULTS: matchRank = rank-based match position, retrievalScore = store score when available, authority = document reliability, updated = source freshness. These are independent axes. ' +
+      'READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. ' +
       'RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. ' +
       'DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. ' +
       'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. ' +
@@ -794,7 +823,7 @@ export const evidenceTools = [
       'zero-prior / scan recent → cat_cafe_list_recent; ' +
       'this tool (search_evidence) = semantic/fuzzy find; ' +
       'session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. ' +
-      'When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
+      'When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
     operation: {
       kind: 'single',
       action: 'read',

@@ -22,15 +22,32 @@ const TERMINAL = `on run argv
 end run`;
 /** The URL and browser never cross this adapter. Only an argv-quoted command is sent to Terminal. */
 export async function openCodexLoginTerminal(shellCommand: string): Promise<void> {
+  if (process.platform === 'win32') {
+    const powershell = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+    const encoded = Buffer.from(shellCommand, 'utf16le').toString('base64');
+    await execute(
+      powershell,
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Start-Process -FilePath ${quote(powershell)} -ArgumentList '-NoLogo -NoProfile -NoExit -EncodedCommand ${encoded}' -WindowStyle Normal`,
+      ],
+      { timeout: 5000, maxBuffer: 1024, windowsHide: true },
+    );
+    return;
+  }
   await execute('/usr/bin/osascript', ['-e', TERMINAL, shellCommand], { timeout: 5000, maxBuffer: 1024 });
 }
 function quote(value: string): string {
+  if (process.platform === 'win32') return `'${value.replaceAll("'", "''")}'`;
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 export function createCodexTerminalLoginDriver(
   options: {
     command?: string;
-    assertSupport?: (home: string) => void | Promise<void>;
+    assertSupport?: (home: string, command?: string) => void | Promise<void>;
     openTerminal?: typeof openCodexLoginTerminal;
   } = {},
 ): CodexLoginDriver {
@@ -40,7 +57,7 @@ export function createCodexTerminalLoginDriver(
       const command = options.command ?? resolveCliCommand('codex');
       if (!command) throw new Error('codex_cli_unavailable');
       mkdirSync(input.home, { recursive: true, mode: 0o700 });
-      await (options.assertSupport ?? assertCodexManagedPlatformSupport)(input.home);
+      await (options.assertSupport ?? assertCodexManagedPlatformSupport)(input.home, command);
       const args = ['-c', 'cli_auth_credentials_store="file"', 'login'];
       const env = finalizeCodexAccountEnvironment(
         {
@@ -57,6 +74,7 @@ export function createCodexTerminalLoginDriver(
       const request = join(dirname(input.home), 'terminal-request.json');
       const result = join(dirname(input.home), 'terminal-result.json');
       const cancel = join(dirname(input.home), 'terminal-cancel');
+      const ready = join(dirname(input.home), 'terminal-ready');
       writeFileSync(
         request,
         JSON.stringify({ command, cwd: input.cwd, home: input.home, env, ownerPid: process.pid }),
@@ -65,13 +83,18 @@ export function createCodexTerminalLoginDriver(
       const source = import.meta.url.endsWith('.ts');
       const worker = fileURLToPath(new URL(`./codex-login-terminal-worker.${source ? 'ts' : 'js'}`, import.meta.url));
       const nodeArgs = source
-        ? ['--import', fileURLToPath(new URL('../../node_modules/tsx/dist/loader.mjs', import.meta.url))]
+        ? ['--import', new URL('../../node_modules/tsx/dist/loader.mjs', import.meta.url).href]
         : [];
-      const shellCommand = [process.execPath, ...nodeArgs, worker, request].map(quote).join(' ');
+      const shellCommand = `${process.platform === 'win32' ? '& ' : ''}${[process.execPath, ...nodeArgs, worker, request].map(quote).join(' ')}`;
       let finished = false;
       try {
         // Keep Terminal's interactive shell: worker/CLI failure must leave its output visible.
         await (options.openTerminal ?? openCodexLoginTerminal)(shellCommand);
+        const startupDeadline = Date.now() + 15_000;
+        while (!existsSync(ready) && !existsSync(result)) {
+          if (Date.now() >= startupDeadline) throw new Error('codex_terminal_open_failed');
+          await delay(100, undefined, { signal: input.signal });
+        }
         input.signal.throwIfAborted();
         input.onReady();
         const deadline = Date.now() + 15 * 60_000;

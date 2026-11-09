@@ -27,7 +27,18 @@ import { rowCompactStatusText, rowStatusText } from './row-model';
 import { type ExecutionRowController, useExecutionRow } from './useExecutionRow';
 
 function Avatars({ controller }: { controller: ExecutionRowController }) {
-  const { model, executions } = controller;
+  const { model, executions, waits } = controller;
+  if (model.status === 'holding') {
+    return (
+      <span data-testid="execution-row-avatars" className="flex items-center">
+        {waits.slice(0, 3).map((wait, index) => (
+          <span key={wait.waitId} className={index === 0 ? '' : '-ml-1.5'}>
+            <CatAvatar catId={wait.catId} size={waits.length === 1 ? 20 : 18} />
+          </span>
+        ))}
+      </span>
+    );
+  }
   if (model.single)
     return (
       <span data-testid="execution-row-avatars" className="flex-none">
@@ -78,6 +89,7 @@ function Body({
   const { model, resolveCatName } = controller;
 
   const fullStatus = rowStatusText(model, resolveCatName, words);
+  const named = model.single ?? model.hold;
   return (
     <>
       <Avatars controller={controller} />
@@ -98,7 +110,7 @@ function Body({
         aria-label={fullStatus}
         className={`${styles.compactStatus} min-w-0 flex-1 items-center gap-1 font-medium text-cafe-secondary`}
       >
-        {model.single ? <span className="min-w-0 truncate">{resolveCatName(model.single.catId)}</span> : null}
+        {named ? <span className="min-w-0 truncate">{resolveCatName(named.catId)}</span> : null}
         <span className="flex-none whitespace-nowrap">{rowCompactStatusText(model, words)}</span>
       </output>
       {model.staleNote ? (

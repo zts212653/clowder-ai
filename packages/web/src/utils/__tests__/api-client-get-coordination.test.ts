@@ -113,6 +113,47 @@ describe('apiFetch exact-GET coordination', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('discards an abandoned trailing generation without issuing its GET', async () => {
+    const business = deferred<Response>();
+    const mockFetch = vi.fn((url: string) =>
+      url.includes('/api/session') ? Promise.resolve(new Response('{}')) : business.promise,
+    );
+    globalThis.fetch = mockFetch as typeof fetch;
+    const apiFetch = await loadApiFetch();
+    const current = apiFetch('/api/agent-providers');
+    const controller = new AbortController();
+    const trailing = apiFetch('/api/agent-providers', { signal: controller.signal }, { afterCurrentGet: true });
+    controller.abort();
+    await expect(trailing).rejects.toMatchObject({ name: 'AbortError' });
+    business.resolve(new Response('{}'));
+    await current;
+    expect(mockFetch.mock.calls.filter(([url]) => url.endsWith('/api/agent-providers'))).toHaveLength(1);
+  });
+
+  it('promotes live trailing readers when the last active reader leaves', async () => {
+    const generations = [deferred<Response>(), deferred<Response>()];
+    const signals: AbortSignal[] = [];
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/session')) return Promise.resolve(new Response('{}'));
+      signals.push(init!.signal!);
+      return generations[signals.length - 1]!.promise;
+    }) as typeof fetch;
+    const apiFetch = await loadApiFetch();
+    const controller = new AbortController();
+    const current = apiFetch('/api/agent-providers', { signal: controller.signal });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    const trailing = apiFetch('/api/agent-providers', undefined, { afterCurrentGet: true });
+    controller.abort();
+    const joining = apiFetch('/api/agent-providers');
+    await expect(current).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+    generations[1]!.resolve(new Response('fresh'));
+    await expect((await trailing).text()).resolves.toBe('fresh');
+    await expect((await joining).text()).resolves.toBe('fresh');
+  });
+
   it('queues exactly one trailing generation for concurrent causal invalidations', async () => {
     const generations = [deferred<Response>(), deferred<Response>()];
     let businessCalls = 0;

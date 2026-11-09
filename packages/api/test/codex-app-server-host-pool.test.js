@@ -465,17 +465,17 @@ test('host launch strips invocation-scoped callback identity and uses a unix web
     const session = await pool.createSession(sessionOptions());
     const launch = hosts[0].launch;
 
-    assert.equal(
-      launch.env.CAT_CAFE_INVOCATION_ID,
-      null,
-      'a tombstone is required so the real spawn layer cannot re-inherit the API process value',
-    );
-    assert.equal(launch.env.CAT_CAFE_CALLBACK_TOKEN, null);
-    assert.equal(launch.env.CAT_CAFE_THREAD_ID, null);
+    assert.equal(launch.inheritParentEnv, false, 'the complete snapshot must not inherit again');
+    assert.equal(launch.env.CAT_CAFE_INVOCATION_ID, undefined);
+    assert.equal(launch.env.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(launch.env.CAT_CAFE_THREAD_ID, undefined);
     assert.equal(launch.env.HOME, '/home/user');
     assert.equal(launch.args.includes('--stdio'), false);
     assert.equal(launch.args.includes('--listen'), true);
-    assert.match(launch.args[launch.args.indexOf('--listen') + 1], /^unix:\/\/\/private\/tmp\/codex-host-test-/);
+    assert.match(
+      launch.args[launch.args.indexOf('--listen') + 1].replaceAll('\\', '/'),
+      /^unix:\/\/\/private\/tmp\/codex-host-test-/,
+    );
     assert.doesNotMatch(JSON.stringify(launch), /callback-secret-token|invocation-secret-id|thread-secret-id/);
     await session.close();
   } finally {

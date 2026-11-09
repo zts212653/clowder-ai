@@ -1,7 +1,7 @@
 /**
  * Resolves MCP server configs for ACP sessions.
  *
- * Built-in cat-cafe* servers: auto-generated from projectRoot (zero config).
+ * Built-in cat-cafe* servers: resolved from the API's installed MCP package (zero config).
  * External servers (pencil, etc.): read from capabilities.json (#712).
  * User project servers: merged from userProjectRoot/.mcp.json (F145 Phase E).
  *
@@ -30,6 +30,7 @@ import {
   resolveDeclaredCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
 import { readInvocationMcpFile } from '../../../../../../config/capabilities/invoke-mcp-config.js';
+import { resolveManagedMcpEntrypoint } from '../../../../../../config/capabilities/managed-mcp-config.js';
 import {
   isRetiredGithubMcpCapability,
   isRetiredGithubMcpConfigEntry,
@@ -41,7 +42,6 @@ const log = createModuleLogger('acp-mcp-resolver');
 
 // ─── Built-in Clowder AI MCP auto-provision ────────────────────────
 
-const MCP_SERVER_DIST = 'packages/mcp-server/dist';
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
 function isAbsoluteMcpPath(value: string): boolean {
@@ -91,13 +91,13 @@ function builtinEntrypoint(name: string): string | null {
  * Auto-generate an AcpMcpServerStdio for a built-in cat-cafe server.
  * Returns null for non-builtin names.
  */
-export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): AcpMcpServerStdio | null {
+export function resolveBuiltinCatCafeServer(_projectRoot: string, name: string): AcpMcpServerStdio | null {
   const entry = builtinEntrypoint(name);
   if (!entry) return null;
   return {
     name,
     command: resolveCatCafeNodeCommand(),
-    args: [resolve(resolveBinaryRoot(projectRoot), MCP_SERVER_DIST, entry)],
+    args: [resolveManagedMcpEntrypoint(entry)],
     env: [],
   };
 }
@@ -233,7 +233,7 @@ export function resolveAcpUserProjectExcludeNames(
  * Resolve MCP servers for an ACP session.
  *
  * Three-layer priority (F145 Phase E):
- *   1. Built-in cat-cafe* — auto-generated from projectRoot (highest)
+ *   1. Built-in cat-cafe* — the API's installed MCP package (highest)
  *   2. Whitelist externals — from projectRoot/.cat-cafe/capabilities.json (#712)
  *   3. User project servers — from userProjectRoot/.mcp.json (lowest, additive)
  *
@@ -256,8 +256,7 @@ export async function resolveAcpMcpServers(
     /**
      * Root directory of the capabilities.json that supplied the config.
      * Used to resolve relative paths (workingDir/command/args) in external MCP entries.
-     * Falls back to projectRoot when not provided. Builtins always use projectRoot
-     * (MCP dist is under the runtime root).
+     * Falls back to projectRoot when not provided. Builtins use the API's installed MCP package.
      */
     configSourceRoot?: string;
     accessScope?: 'global' | 'project';
@@ -314,7 +313,7 @@ export async function resolveAcpMcpServers(
   const servers: AcpMcpServer[] = [];
   const externalNames: string[] = [];
 
-  // Phase 1: resolve builtins from projectRoot (no .mcp.json needed)
+  // Phase 1: resolve builtins from the installed package (no .mcp.json needed)
   for (const name of expanded) {
     if (retiredCapabilityIds.has(name)) {
       log.info({ name }, 'Skipping retired GitHub MCP server (capabilities.json)');

@@ -1,6 +1,11 @@
 import type { IEmbeddingService } from './interfaces.js';
+import { queryEmbeddingInput } from './query-embedding-input.js';
 
-export type SearchEmbeddingCapability = IEmbeddingService & { isCurrent(): boolean; assertCurrent(): void };
+export type SearchEmbeddingCapability = IEmbeddingService & {
+  embedQueries: IEmbeddingService['embed'];
+  isCurrent(): boolean;
+  assertCurrent(): void;
+};
 
 /** A borrowed query capability; provider readiness cannot reopen a retired projection. */
 export function createSearchEmbeddingCapability(
@@ -9,6 +14,12 @@ export function createSearchEmbeddingCapability(
 ): SearchEmbeddingCapability {
   const assertCurrent = () => {
     if (!isCurrent()) throw new Error('Vector projection is not ready');
+  };
+  const embed: IEmbeddingService['embed'] = async (texts, signal) => {
+    assertCurrent();
+    const vectors = await embedding.embed(texts, signal);
+    assertCurrent();
+    return vectors;
   };
   return {
     isCurrent,
@@ -23,11 +34,16 @@ export function createSearchEmbeddingCapability(
       await embedding.reprobeIfNeeded(signal);
       assertCurrent();
     },
-    async embed(texts, signal) {
+    // Parent RPC forwarding also borrows this capability. Its payload was
+    // prepared by the worker query boundary and must remain byte-for-byte raw.
+    embed,
+    async embedQueries(texts, signal) {
       assertCurrent();
-      const vectors = await embedding.embed(texts, signal);
-      assertCurrent();
-      return vectors;
+      const modelId = embedding.getModelInfo().modelId;
+      return embed(
+        texts.map((text) => queryEmbeddingInput(text, modelId)),
+        signal,
+      );
     },
     isReady: () => isCurrent() && embedding.isReady(),
     getModelInfo: () => embedding.getModelInfo(),

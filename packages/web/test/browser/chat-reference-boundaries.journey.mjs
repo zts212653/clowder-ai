@@ -81,16 +81,37 @@ export async function verifyReferenceBoundaries({ page, source, evidence, langua
   await regression.screenshot({ path: path.join(evidence, 'ordinary-and-legacy.png'), animations: 'disabled' });
 
   const message = page.locator(`[data-message-id="${source.message.id}"]`).first();
-  const menus = page.getByRole('group', { name: language === 'en' ? 'File actions' : '文件操作', exact: true });
+  const keyboard = [];
+  const menus = page.getByRole('menu', {
+    name: language === 'en' ? 'More artwork actions' : '作品更多操作',
+    exact: true,
+  });
   for (const kind of ['github', 'missing']) {
     const reference = message.locator(`[data-chat-reference-kind=${kind}]`).first();
-    const control = kind === 'missing' ? reference : reference.locator('button').first();
+    const control = kind === 'missing' ? reference : reference.getByRole('link', { name: /^#5963 / });
     await control.scrollIntoViewIfNeeded();
     await control.focus();
     await page.keyboard.press('Shift+Tab');
-    await page.keyboard.press('Tab');
+    // Focusing the preceding file can open its real action menu, whose items enter the native Tab order.
+    // Walk that order instead of assuming Shift+Tab then one Tab always returns to the reference.
+    const trail = [];
+    for (let step = 0; step < 24; step++) {
+      await page.keyboard.press('Tab');
+      const state = await control.evaluate((element) => ({
+        reached: element === document.activeElement && element.matches(':focus-visible'),
+        tabIndex: element.tabIndex,
+        activeTag: document.activeElement?.tagName,
+        activeLabel:
+          document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.slice(0, 120),
+      }));
+      trail.push(state);
+      if (state.reached) break;
+    }
+    keyboard.push({ kind, trail });
+    await writeFile(path.join(evidence, 'reference-keyboard.json'), JSON.stringify(keyboard, null, 2));
     assert.ok(
-      await control.evaluate((element) => element === document.activeElement && element.matches(':focus-visible')),
+      trail.at(-1)?.reached && trail.at(-1).tabIndex >= 0,
+      `Native keyboard focus reaches ${kind}: ${JSON.stringify(trail)}`,
     );
     const tooltip = page.getByRole('tooltip');
     await tooltip.waitFor();
@@ -129,7 +150,7 @@ export async function verifyReferenceBoundaries({ page, source, evidence, langua
       response.url().includes('/api/workspace/file/actions/reveal?') && response.request().method() === 'POST',
   );
   await menu
-    .getByRole('button', { name: language === 'en' ? 'Show in Finder' : '在 Finder 中显示', exact: true })
+    .getByRole('menuitem', { name: language === 'en' ? 'Show in Finder' : '在 Finder 中显示', exact: true })
     .click();
   await sent;
   assert.equal(desktop.length, before + 1);

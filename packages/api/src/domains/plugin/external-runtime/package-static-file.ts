@@ -98,7 +98,7 @@ export async function readVerifiedPackageStaticFile(input: {
     const bytes = selected === undefined ? undefined : await extract(selected);
     await verifyArchiveDigest(archive, input.packageDigest);
     if ((await archiveIdentity(archive)) !== identity) invalid('sealed static archive changed during read');
-    return { manifest: validation.manifest, bytes };
+    return { manifest: structuredClone(value) as typeof validation.manifest, bytes };
   } finally {
     await rm(stage, { recursive: true, force: true });
   }

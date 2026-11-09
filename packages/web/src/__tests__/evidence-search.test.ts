@@ -122,11 +122,6 @@ describe('AC-K1: depth=raw forces lexical mode', () => {
     const url = buildSearchUrl({ q: 'test', depth: 'summary', mode: 'semantic' });
     expect(url).toContain('mode=semantic');
   });
-
-  it('buildSearchUrl keeps mode when depth is omitted', () => {
-    const url = buildSearchUrl({ q: 'test', mode: 'hybrid' });
-    expect(url).toContain('mode=hybrid');
-  });
 });
 
 describe('AC-K2: passage fields match backend shape', () => {

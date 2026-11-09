@@ -2,6 +2,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { readAgentClientMetadata } from './declared/agent-client-metadata.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
@@ -154,7 +155,10 @@ export class OfficialPluginPackageInstaller {
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) {
-      const snapshot = await this.options.inventory.store.snapshot();
+      const snapshot = await this.options.inventory.store.snapshot({
+        pluginId: entry.pluginId,
+        packageDigests: [entry.packageDigest],
+      });
       const installed = snapshot.packages.find((pkg) => pkg.packageDigest === entry.packageDigest);
       if (
         !installed?.manifest ||
@@ -200,7 +204,10 @@ export class OfficialPluginPackageInstaller {
   ) {
     const entry = await this.catalogEntry(catalogId);
     assertExpectedRelease(entry, expectedRelease);
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
     const current = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
@@ -410,6 +417,7 @@ export class OfficialPluginPackageInstaller {
         }
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
+      const agentClientMetadata = await readAgentClientMetadata(located);
       await publishPluginPackageArchive(this.packagesRoot, entry.packageDigest, bytes);
       return await accept({
         manifest: located.manifest,
@@ -417,6 +425,7 @@ export class OfficialPluginPackageInstaller {
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
         signalSchemas,
+        agentClientMetadata,
         provenance: {
           kind: 'catalog',
           catalogId: entry.catalogId,
@@ -459,12 +468,16 @@ export class OfficialPluginPackageInstaller {
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
       signalSchemas: {},
+      agentClientMetadata: null,
       provenance: { kind: 'catalog', catalogId: entry.catalogId, packageName: entry.packageName },
     });
   }
 
   private async assertNewerReplacement(entry: OfficialPluginCatalogEntry): Promise<void> {
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const known = snapshot.packages.find((record) => record.packageDigest === entry.packageDigest);
     if (known) assertInstalledPackageVersion(entry, known.version);
     const instance = snapshot.instances.find(
@@ -482,7 +495,10 @@ export class OfficialPluginPackageInstaller {
   }
 
   private async existingExactInstall(entry: OfficialPluginCatalogEntry) {
-    const snapshot = await this.options.inventory.store.snapshot();
+    const snapshot = await this.options.inventory.store.snapshot({
+      pluginId: entry.pluginId,
+      packageDigests: [entry.packageDigest],
+    });
     const instance = snapshot.instances.find(
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
     );

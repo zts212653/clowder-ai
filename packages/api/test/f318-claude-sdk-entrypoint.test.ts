@@ -76,7 +76,7 @@ for (const [setting, expected] of [
     assert.equal(spawn.env.ANTHROPIC_BASE_URL, undefined);
     assert.equal(prepared.sdkOptions.model, 'claude-opus-4-6');
     assert.equal(prepared.sdkOptions.resume, '11111111-1111-4111-8111-111111111111');
-    assert.equal(prepared.sdkOptions.systemPrompt, 'native identity');
+    assert.deepEqual(prepared.sdkOptions.systemPrompt, { type: 'custom', prompt: 'native identity', snapshot: false });
     assert.equal(spawn.args[spawn.args.indexOf('--input-format') + 1], 'stream-json');
   });
 }

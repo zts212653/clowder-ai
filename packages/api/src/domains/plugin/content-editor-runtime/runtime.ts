@@ -1,6 +1,7 @@
 import type { ContentEditorProviderContribution } from '@clowder-ai/plugin-contract';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
+import { startFailureRecord } from '../diagnostics/plugin-start-failure.js';
 import { type StaticSurfaceServer, startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
@@ -10,6 +11,12 @@ import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
 import { staticEditorContributions } from './admission.js';
+import {
+  type EditorFailureObservation,
+  EditorHeartbeatDiagnostics,
+  type EditorRuntimeFailureReport,
+  logEditorRuntimeFailure,
+} from './failure-diagnostics.js';
 
 interface Options {
   readonly inventory: PluginInventoryStore;
@@ -19,6 +26,7 @@ interface Options {
   readonly parentOrigin: string;
   readonly now?: () => number;
   readonly onRevoke?: (installationInstanceId: string) => Promise<void>;
+  readonly onFailure?: (report: EditorRuntimeFailureReport) => void;
 }
 
 export interface PluginContentEditorHandle {
@@ -45,6 +53,7 @@ interface ActivePackage {
   timer?: ReturnType<typeof setTimeout>;
   closing?: Promise<void>;
   ready: boolean;
+  failure?: EditorRuntimeFailureReport;
 }
 
 /** Trusted Host adapter for the admitted static transport class. It imports no
@@ -64,7 +73,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       verifyActivePackage: async (id, digest) => {
         const run = this.active.get(id);
         if (!run || run.packageDigest !== digest) throw new Error('active package is unavailable');
-        await run.package.verifyIntegrity();
+        await this.verifySurfacePackage(run);
       },
     });
   }
@@ -119,9 +128,9 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
     let pkg: VerifiedPluginPackage | undefined;
     let connection: BuiltinBrokerConnection | undefined;
     try {
-      const inventory = await this.options.inventory.snapshot();
-      const instance = inventory.instances.find((r) => r.pluginInstanceId === id && r.lifecycleState === 'installed');
-      const installed = instance && inventory.packages.find((r) => r.packageDigest === instance.packageDigest);
+      const authority = await this.options.inventory.readAuthority(id);
+      const instance = authority?.instance?.lifecycleState === 'installed' ? authority.instance : undefined;
+      const installed = authority?.packageRecord;
       if (!instance || !installed?.manifest || staticEditorContributions(installed.manifest).length === 0)
         throw new Error('unsupported static editor');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
@@ -146,9 +155,8 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       });
       signal.throwIfAborted();
       await connection.ready({ bindingNonce: binding.bindingNonce });
-      const preferences = (await this.options.brokerStore.snapshot()).staticFeatures?.preferences ?? [];
       for (const feature of pkg.manifest.features) {
-        if (preferences.find((r) => r.pluginInstanceId === id && r.featureId === feature.id)?.enabled === false)
+        if ((await this.options.brokerStore.read.staticFeatures.getPreference(id, feature.id))?.enabled === false)
           continue;
         const pending = await this.features.begin(id, feature.id);
         signal.throwIfAborted();
@@ -189,40 +197,70 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
   }
 
   private scheduleHeartbeat(id: string, run: ActivePackage): void {
-    run.timer = setTimeout(
-      () => {
-        void (async () => {
-          if (this.active.get(id) !== run) return;
-          await run.package.verifyIntegrity();
-          await run.connection.renewRuntimeLease();
-          if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
-        })()
-          .catch(() => this.fail(id, run))
-          .catch(() => undefined);
-      },
-      Math.max(1, Math.floor(this.options.broker.activeRuntimeLeaseTtlMs / 3)),
-    );
+    const intervalMs = Math.max(1, Math.floor(this.options.broker.activeRuntimeLeaseTtlMs / 3));
+    const dueAt = (this.options.now ?? Date.now)() + intervalMs;
+    run.timer = setTimeout(() => {
+      const diagnostics = new EditorHeartbeatDiagnostics((this.options.now ?? Date.now)() - dueAt);
+      void (async () => {
+        if (this.active.get(id) !== run) return;
+        await diagnostics.measure('package-verification', () => this.verifySurfacePackage(run));
+        await diagnostics.measure('lease-renew', () => run.connection.renewRuntimeLease());
+        if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
+      })()
+        .catch((error) => this.fail(id, run, diagnostics.failure(error)))
+        .catch(() => undefined);
+    }, intervalMs);
     run.timer.unref();
   }
 
-  private async fail(id: string, run: ActivePackage): Promise<void> {
-    if (this.active.get(id) !== run) return;
+  private verifySurfacePackage(run: ActivePackage): Promise<void> {
+    // Ready surfaces serve frozen Host buffers. Startup and executable workers
+    // retain full byte verification; each warm use still checks the private seal.
+    if (run.ready && run.package.verifyStaticIntegrity) return run.package.verifyStaticIntegrity();
+    return run.package.verifyIntegrity();
+  }
+
+  private async fail(
+    id: string,
+    run: ActivePackage,
+    observation: EditorFailureObservation = { phase: 'surface' },
+  ): Promise<void> {
+    if (this.active.get(id) !== run || run.closing) return;
     const pending = this.starting.get(id);
     if (pending) {
       pending.controller.abort();
       await pending.promise.catch(() => undefined);
     }
-    if (this.active.has(id) && this.active.get(id) !== run) return;
+    if (this.active.get(id) !== run || run.closing) return;
+    const failure = run.failure ?? {
+      ...observation,
+      pluginInstanceId: id,
+      lifecycleRevision: run.lifecycleRevision,
+      occurredAt: (this.options.now ?? Date.now)(),
+    };
+    if (!run.failure) {
+      run.failure = failure;
+      try {
+        (this.options.onFailure ?? logEditorRuntimeFailure)(failure);
+      } catch {
+        // A diagnostic observer must never prevent authority revocation or durable failure.
+      }
+    }
     await this.close(id, 'static_editor_runtime_failed');
-    await this.options.inventory.transaction((tx) => {
-      const current = tx.instances.get(id);
+    await this.options.inventory.transaction(async (tx) => {
+      const current = await tx.instances.get(id);
       if (
         current?.packageDigest === run.packageDigest &&
         current.lifecycleRevision === run.lifecycleRevision &&
         current.activationState === 'enabled' &&
         !this.active.has(id)
       ) {
-        tx.instances.put({ ...current, runtimeState: 'crashed', updatedAt: (this.options.now ?? Date.now)() });
+        await tx.instances.put({
+          ...current,
+          runtimeState: 'crashed',
+          updatedAt: (this.options.now ?? Date.now)(),
+          lastRuntimeError: startFailureRecord(failure.occurredAt).record,
+        });
       }
     });
   }

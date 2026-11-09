@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import { memberEnvironmentSchema } from './member-environment.js';
 import { captureMemberIdentitySources, projectMemberIdentitySources } from './member-identity-sources.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
@@ -135,6 +136,7 @@ const catVariantSchema = z
     defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
     executionApproval: z.enum(['auto', 'ask_user']).optional(),
     mcpSupport: z.boolean(),
+    env: memberEnvironmentSchema.optional(),
     cli: cliConfigSchema.optional(),
     agyProfile: agyProfileSchema,
     commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
@@ -235,6 +237,7 @@ export const sessionStrategySchema = z
     handoff: z
       .object({
         preSealMemoryDump: z.boolean(),
+        // Legacy generative values only select historical digest files when bootstrapping.
         bootstrapDepth: z.enum(['extractive', 'generative']),
       })
       .optional(),
@@ -296,6 +299,7 @@ const rosterEntrySchema = z.object({
   roles: z.array(z.string().min(1)).min(1),
   lead: z.boolean(),
   available: z.boolean(),
+  successor: z.string().min(1).optional(),
   evaluation: z.string().min(1),
 });
 
@@ -791,6 +795,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         ...(variant.executionApproval ? { executionApproval: variant.executionApproval } : {}),
         mcpSupport: variant.mcpSupport,
+        ...(variant.env ? { env: { ...variant.env } } : {}),
         ...(variant.agyProfile != null ? { agyProfile: variant.agyProfile } : {}),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
@@ -832,7 +837,7 @@ export function toFlatConfigs(config: CatCafeConfig): Record<string, CatConfig> 
 
 /**
  * F032 P2 cleanup: Get all cat IDs from config (replaces hardcoded fallbacks).
- * Used by cat-voices.ts, cat-budgets.ts, TaskExtractor.ts.
+ * Used by cat-voices.ts and cat-budgets.ts.
  */
 export function getAllCatIdsFromConfig(): readonly string[] {
   try {
@@ -999,65 +1004,22 @@ let _defaultCatId: CatId | null = null;
 /** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
 let _runtimeDefaultCatId: CatId | null = null;
 
-function isKnownAvailableDefaultCat(catId: string): boolean {
-  const config = getCachedConfig();
-  if (!config) {
-    const id = createCatId(catId);
-    // Empty registry = bootstrap/no members → nothing is "known available".
-    // Returning true here would let any catId pass (including hardcoded ones
-    // that don't exist), causing "Unknown cat ID" errors downstream (#937).
-    if (catRegistry.getAllIds().length === 0) return false;
-    return catRegistry.has(id);
-  }
-
-  if (!_catIdToBreed || _catIdToBreedSource !== config) {
-    _catIdToBreed = buildCatIdToBreedIndex(config);
-    _catIdToBreedSource = config;
-  }
-
-  return _catIdToBreed.has(catId) && isCatAvailable(catId, config);
-}
-
 /**
  * Get the default cat ID.
  * Priority: runtime override (F154) → breeds[0].defaultVariantId (F32-b R4).
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
  */
 export function getDefaultCatId(): CatId {
-  if (_runtimeDefaultCatId) {
-    if (isKnownAvailableDefaultCat(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
-    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable or unknown, falling back');
+  const configured = _runtimeDefaultCatId ?? process.env.DEFAULT_CAT_ID?.trim();
+  if (configured) return resolveCatSuccessor(configured) ?? createCatId('__none__');
+  if (!_defaultCatId) {
+    const firstBreed = getCachedConfig()?.breeds[0];
+    if (firstBreed) {
+      const variant = firstBreed.variants.find((v) => v.id === firstBreed.defaultVariantId);
+      _defaultCatId = createCatId(variant?.catId ?? firstBreed.catId);
+    }
   }
-
-  const envCatId = process.env.DEFAULT_CAT_ID?.trim();
-  if (envCatId) {
-    const id = createCatId(envCatId);
-    if (isKnownAvailableDefaultCat(id)) return id;
-    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
-  }
-
-  if (_defaultCatId) return _defaultCatId;
-
-  const config = getCachedConfig();
-  const firstBreed = config?.breeds[0];
-  if (firstBreed) {
-    const defaultVariant = firstBreed.variants.find((v) => v.id === firstBreed.defaultVariantId);
-    // variant has independent catId → use it; otherwise inherit breed's
-    _defaultCatId = createCatId(defaultVariant?.catId ?? firstBreed.catId);
-    return _defaultCatId;
-  }
-
-  // Ultimate fallback: prefer DEFAULT_CAT_ID env even if not yet "known available"
-  // (config may not be loaded yet on first message), then try first registered cat,
-  // then fall back to env value raw. Never hardcode a specific cat ID (#937).
-  const envFallback = process.env.DEFAULT_CAT_ID?.trim();
-  const registeredIds = catRegistry.getAllIds();
-  if (registeredIds.length > 0) return registeredIds[0]!;
-  if (envFallback) return createCatId(envFallback);
-  // Truly empty — no config, no env, no registered cats. Return a sentinel
-  // that callers (AgentRouter) should handle as "no targets available".
-  log.warn('No cats registered and no DEFAULT_CAT_ID set — returning __none__ sentinel');
-  return createCatId('__none__');
+  return (_defaultCatId && resolveCatSuccessor(_defaultCatId)) || createCatId('__none__');
 }
 
 /** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
@@ -1072,7 +1034,7 @@ export function clearRuntimeDefaultCatId(): void {
 
 /** F154 AC-A4: Check whether a runtime override is active. */
 export function hasRuntimeDefaultCatOverride(): boolean {
-  return _runtimeDefaultCatId !== null && isKnownAvailableDefaultCat(_runtimeDefaultCatId);
+  return _runtimeDefaultCatId !== null && resolveCatSuccessor(_runtimeDefaultCatId) !== null;
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
@@ -1329,6 +1291,21 @@ export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const entry = roster[catId];
   // If not in roster, assume available (backward compat)
   return entry?.available !== false;
+}
+
+/** Implicit targets may follow exactly one configured edge; explicit targets use resolveCatTarget. */
+export function resolveCatSuccessor(catId: string): CatId | null {
+  if (catId === '__none__' || !catRegistry.has(catId)) return null;
+  const roster = getRoster();
+  if (roster[catId]?.available !== false) return createCatId(catId);
+  const successor = roster[catId]?.successor;
+  return successor &&
+    successor !== catId &&
+    successor !== '__none__' &&
+    catRegistry.has(successor) &&
+    isCatAvailable(successor)
+    ? createCatId(successor)
+    : null;
 }
 
 /**

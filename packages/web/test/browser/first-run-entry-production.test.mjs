@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { openFirstRunEntryApi } from '../fixtures/first-run-entry-api.mjs';
 import { cats, createChatProofApi } from './fixtures/f322-chat-real-page-data.mjs';
+import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 
 // Actual production UI and entry/guide/draft handlers with atomic preference files.
 // Other HTTP reads, the Socket.IO wire and authenticated session identity remain explicit fixtures;
@@ -207,6 +208,9 @@ async function fixture(shell, scenario) {
       case '/api/cats':
         assert.equal(method, 'GET');
         return reply({ cats: [cats[0]] });
+      case '/api/threads/default/suggestions':
+        assert.equal(method, 'GET');
+        return reply({ threadId: 'default', suggestions: [] });
       case '/api/guide-flows/first-run-entry': {
         const response = await entryApi.request(url.pathname);
         return reply(response.json(), response.statusCode);
@@ -231,6 +235,8 @@ async function fixture(shell, scenario) {
       return reply(response.json(), response.statusCode);
     }
     if (Object.hasOwn(bodies, url.pathname)) return reply(bodies[url.pathname]);
+    const watcher = disabledWatcherRead(req, url, ['default']);
+    if (watcher) return route.fulfill(watcher);
     const response = common.respond(req, url);
     if (response) return route.fulfill(response);
     state.unexpected.push(`${method} ${url.pathname}`);

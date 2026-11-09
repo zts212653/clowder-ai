@@ -159,6 +159,31 @@ operator experience："不建议你这个可配置是编辑到什么 Markdown �
 | KD-14 | 生命周期通知 sender 使用服务端权威身份（`system`），不用客户端传入的 `createdBy` | Maine Coon(gpt52) P1 发现：`createdBy` 是客户端传入，用作 notification sender 会引入身份冒充路径 | 2026-04-10 |
 | KD-15 | 定时任务通知采用三层 UX 契约：生命周期回执降为 ephemeral toast；trigger 仅作 hidden reply anchor；真正强调落在首条 scheduler reply | 避免“管理态回执”抢走真正提醒的视觉焦点，同时保留 reply chain / retry / audit 所需的结构锚点 | 2026-04-13 |
 
+## User Journey
+
+### Creating and deleting schedules
+
+When a cat proposes creating or permanently deleting a schedule, Chat and the Approval Hub
+show an approval card. The task is not created or deleted before the owner approves it;
+rejecting the proposal leaves the existing task state unchanged. The card identifies the
+original request and, for deletion, the exact existing task being removed.
+
+Pause and resume remain direct actions after identity verification. They do not require
+deleting and recreating a schedule.
+
+### Updating recurring task parameters
+
+For an existing reminder or subscription, the user asks a cat to change its content parameters.
+The cat submits the original schedule task ID and the requested parameter patch. Chat and the
+Approval Hub show the same original task, unchanged timing/destination, and the changed values.
+Before approval or after rejection, the task keeps its old definition. Approval preserves the ID
+and progress, and reports the confirmed update through the original card and retained result.
+
+If the definition changed since the proposal was prepared, approval returns a conflict and the cat
+must prepare a fresh proposal. If the persistent effect committed but runtime refresh was interrupted,
+the card offers retry; it re-reads the current owner record and resumes from the checkpoint. Moving
+that recovery card between Inbox groups must not resurrect the old pending-create action.
+
 ## Review Gate
 
 - Phase A: Maine Coon review（跨 family 优先）

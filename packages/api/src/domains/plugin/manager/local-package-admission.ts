@@ -6,6 +6,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { PluginArchiveReplacementConfirmation } from '@cat-cafe/shared';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import { readAgentClientMetadata } from '../declared/agent-client-metadata.js';
 import type { ExternalPluginLifecycleService } from '../external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
@@ -388,7 +389,7 @@ export class LocalPluginPackageAdmission {
   ) {
     // Capture current instance and lifecycle state before asynchronous source work.
     // A later owner mutation must win over this directory reselection.
-    const inventoryAtRequest = await this.options.inventory.store.snapshot();
+    const inventoryAtRequest = await this.options.inventory.store.snapshot({ currentOnly: true });
     const bytes =
       source.kind === 'local-directory'
         ? await archiveLocalDirectory(source.path, this.packagesRoot, this.tarBin, this.options.npmBin, fence.signal)
@@ -442,6 +443,7 @@ export class LocalPluginPackageAdmission {
         expectedPackageDigest: digest,
         packagePluginId: located.manifest.pluginId,
         signalSchemas,
+        agentClientMetadata: await readAgentClientMetadata(located),
         provenance: admittedProvenance,
       };
       const confirmedReplacement = confirmArchiveReplacement(
@@ -502,8 +504,8 @@ export class LocalPluginPackageAdmission {
       let upgraded: InventoryMutationResult | undefined;
       const rollback = async () => {
         if (!upgraded) return;
-        await this.options.inventory.store.transaction((tx) => {
-          const instance = tx.instances.getCurrent(current.pluginId);
+        await this.options.inventory.store.transaction(async (tx) => {
+          const instance = await tx.instances.getCurrent(current.pluginId);
           if (
             instance?.pluginInstanceId !== current.pluginInstanceId ||
             instance.packageDigest !== upgraded?.packageDigest ||
@@ -511,7 +513,7 @@ export class LocalPluginPackageAdmission {
           )
             throw new PluginInventoryError('STALE_INSTANCE', 'replacement is no longer current');
           // Keep fences monotonic: old leases must not become valid again.
-          tx.instances.put({
+          await tx.instances.put({
             ...current,
             runtimeState: 'stopped',
             lifecycleRevision: instance.lifecycleRevision + 1,

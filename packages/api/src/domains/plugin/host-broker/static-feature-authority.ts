@@ -70,9 +70,9 @@ export class StaticFeatureAuthority {
     }
     const decision = await this.options.store.transaction((tx) =>
       this.options.inventory.transaction(async (inventory): Promise<Decision<StaticFeatureLease>> => {
-        const { instance, manifest } = this.current(tx, inventory, binding);
+        const { instance, manifest } = await this.current(tx, inventory, binding);
         this.declarations(manifest, featureId);
-        const ledger = tx.staticFeatures.get();
+        const ledger = await tx.staticFeatures.getForActivation(pluginInstanceId, featureId, binding.brokerSessionId);
         const desired = ledger.preferences.find(
           (r) => r.pluginInstanceId === pluginInstanceId && r.featureId === featureId,
         );
@@ -92,7 +92,7 @@ export class StaticFeatureAuthority {
         if (epoch?.state === 'damaged') throw denied('package integrity epoch is damaged');
         if (!packageTrusted) {
           if (epoch)
-            tx.staticFeatures.put(
+            await tx.staticFeatures.update(
               containStaticFeatureEpoch(ledger, pluginInstanceId, epoch.integrityEpoch, this.now()),
             );
           return { error: denied('package integrity is untrusted') };
@@ -128,7 +128,7 @@ export class StaticFeatureAuthority {
         };
         if (!desired) ledger.preferences.push({ pluginInstanceId, featureId, enabled: true });
         ledger.leases.push(record);
-        tx.staticFeatures.put(ledger);
+        await tx.staticFeatures.update(ledger);
         return { value: structuredClone(record) };
       }),
     );
@@ -138,7 +138,7 @@ export class StaticFeatureAuthority {
 
   commit(executionLease: string): Promise<StaticFeatureLease> {
     return this.withLease(executionLease, 'provisioning', async (record, tx, inventory) => {
-      const manifest = inventory.packages.get(record.packageRevision)?.manifest;
+      const manifest = (await inventory.packages.get(record.packageRevision))?.manifest;
       if (!manifest) throw denied('Plugin version is incompatible');
       const live = {
         ...record,
@@ -146,9 +146,9 @@ export class StaticFeatureAuthority {
         contributionIds: this.declarations(manifest, record.featureId),
         updatedAt: this.now(),
       };
-      const ledger = tx.staticFeatures.get();
+      const ledger = await tx.staticFeatures.getActive(record.pluginInstanceId);
       ledger.leases = ledger.leases.map((r) => (r.executionLease === executionLease ? live : r));
-      tx.staticFeatures.put(ledger);
+      await tx.staticFeatures.update(ledger);
       return structuredClone(live);
     });
   }
@@ -172,7 +172,7 @@ export class StaticFeatureAuthority {
   }
 
   async resolve(pluginInstanceId: string, providerId: string): Promise<StaticFeatureLease | null> {
-    const record = (await this.options.store.snapshot()).staticFeatures?.leases.find(
+    const record = (await this.options.store.read.staticFeatures.getActive(pluginInstanceId)).leases.find(
       (r) => r.pluginInstanceId === pluginInstanceId && r.state === 'active' && r.contributionIds.includes(providerId),
     );
     if (!record) return null;
@@ -186,18 +186,18 @@ export class StaticFeatureAuthority {
 
   async setDesired(pluginInstanceId: string, featureId: string, enabled: boolean): Promise<void> {
     await this.options.store.transaction((tx) =>
-      this.options.inventory.transaction((inventory) => {
-        const instance = inventory.instances.get(pluginInstanceId);
-        const manifest = instance && inventory.packages.get(instance.packageDigest)?.manifest;
+      this.options.inventory.transaction(async (inventory) => {
+        const instance = await inventory.instances.get(pluginInstanceId);
+        const manifest = instance && (await inventory.packages.get(instance.packageDigest))?.manifest;
         if (!instance || instance.lifecycleState !== 'installed' || !manifest)
           throw denied('instance is not installed');
         this.declarations(manifest, featureId);
-        const ledger = tx.staticFeatures.get();
+        const ledger = await tx.staticFeatures.getActive(pluginInstanceId);
         ledger.preferences = ledger.preferences.filter(
           (r) => r.pluginInstanceId !== pluginInstanceId || r.featureId !== featureId,
         );
         ledger.preferences.push({ pluginInstanceId, featureId, enabled });
-        tx.staticFeatures.put(
+        await tx.staticFeatures.update(
           enabled
             ? ledger
             : revokeStaticFeatures(
@@ -222,9 +222,9 @@ export class StaticFeatureAuthority {
     // Package IO must not hold the shared Broker/inventory locks: a slow scan
     // otherwise starves renewal and owner revocation. Recheck all authority
     // inside the transaction after the scan, including the current clock.
-    const candidate = (
-      await measure('feature-snapshot', () => this.options.store.snapshot(diagnostics?.snapshotDiagnostics))
-    ).staticFeatures?.leases.find((r) => r.executionLease === executionLease);
+    const candidate = await measure('feature-snapshot', async () =>
+      this.options.store.read.staticFeatures.getLease(executionLease),
+    );
     if (!candidate || candidate.state === 'revoked') throw denied('feature lease is revoked or unknown');
     if (candidate.state !== phase) throw denied(`feature lease is not ${phase}`);
     let packageTrusted = true;
@@ -248,16 +248,16 @@ export class StaticFeatureAuthority {
       this.options.store.transaction((tx) =>
         measure('inventory-transaction', () =>
           this.options.inventory.transaction(async (inventory): Promise<Decision<T>> => {
-            const ledger = tx.staticFeatures.get();
+            const ledger = await tx.staticFeatures.getActive(candidate.pluginInstanceId);
             const record = ledger.leases.find((r) => r.executionLease === executionLease);
             if (!record || record.state === 'revoked') return { error: denied('feature lease is revoked or unknown') };
             if (record.state !== phase) return { error: denied(`feature lease is not ${phase}`) };
             try {
+              const { instance, manifest } = await this.current(tx, inventory, {
+                ...record,
+                packageDigest: record.packageRevision,
+              });
               const checkAuthority = () => {
-                const { instance, manifest } = this.current(tx, inventory, {
-                  ...record,
-                  packageDigest: record.packageRevision,
-                });
                 this.declarations(manifest, record.featureId);
                 const desired = ledger.preferences.find(
                   (r) => r.pluginInstanceId === record.pluginInstanceId && r.featureId === record.featureId,
@@ -276,13 +276,13 @@ export class StaticFeatureAuthority {
               if (diagnostics) diagnostics.checkAuthority(checkAuthority);
               else checkAuthority();
             } catch (error) {
-              tx.staticFeatures.put(
+              await tx.staticFeatures.update(
                 revokeStaticFeatures(ledger, (r) => r.executionLease === executionLease, this.now()),
               );
               return { error: error instanceof HostBrokerError ? error : denied('feature authority changed') };
             }
             if (!packageTrusted) {
-              tx.staticFeatures.put(
+              await tx.staticFeatures.update(
                 containStaticFeatureEpoch(ledger, record.pluginInstanceId, record.integrityEpoch, this.now()),
               );
               return { error: denied('package integrity is untrusted') };
@@ -296,7 +296,7 @@ export class StaticFeatureAuthority {
     return decision.value;
   }
 
-  private current(
+  private async current(
     tx: HostBrokerTransaction,
     inventory: PluginInventoryTransaction,
     binding: Pick<
@@ -304,10 +304,10 @@ export class StaticFeatureAuthority {
       'pluginInstanceId' | 'connectionId' | 'brokerSessionId' | 'runtimeLeaseId' | 'packageDigest'
     >,
   ) {
-    const session = tx.sessions.getByConnectionId(binding.connectionId);
-    const runtime = tx.runtimeLeases.get(binding.runtimeLeaseId);
-    const instance = inventory.instances.get(binding.pluginInstanceId);
-    const pkg = instance && inventory.packages.get(instance.packageDigest);
+    const session = await tx.sessions.getByConnectionId(binding.connectionId);
+    const runtime = await tx.runtimeLeases.get(binding.runtimeLeaseId);
+    const instance = await inventory.instances.get(binding.pluginInstanceId);
+    const pkg = instance && (await inventory.packages.get(instance.packageDigest));
     if (
       !session ||
       session.phase !== 'active' ||
@@ -324,7 +324,7 @@ export class StaticFeatureAuthority {
       runtime.pluginInstanceId !== binding.pluginInstanceId ||
       runtime.packageDigest !== binding.packageDigest ||
       !instance ||
-      inventory.instances.getCurrent(instance.pluginId)?.pluginInstanceId !== instance.pluginInstanceId ||
+      (await inventory.instances.getCurrent(instance.pluginId))?.pluginInstanceId !== instance.pluginInstanceId ||
       instance.lifecycleState !== 'installed' ||
       instance.activationState !== 'enabled' ||
       instance.configReadiness !== 'ready' ||

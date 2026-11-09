@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { validateManifest } from '@clowder-ai/plugin-contract';
+import { workerObservation } from './helpers/worker-observation.js';
 
 const { FileMessagingMediaLedger } = await import('../dist/domains/messaging/media-ledger.js');
 const { HostMediaSourceImporter } = await import('../dist/domains/plugin/media-source-importer.js');
@@ -243,7 +244,7 @@ test('real source stream publishes one final HMR envelope and recovery does not 
 test('an admitted in-test media-source plugin is invoked through the production carrier and publishes once', async () => {
   const projectRoot = await mkdtemp(join(tmpdir(), 'media-source-e1b-project-'));
   const packageRoot = await mkdtemp(join(tmpdir(), 'media-source-e1b-package-'));
-  const marker = `__mediaSourceE1b_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const observation = workerObservation(join(projectRoot, 'media-observation.json'), { reads: [], released: 0 });
   let runtime;
   try {
     const pluginId = 'dev.clowder.media-source-e1b-fixture';
@@ -284,8 +285,8 @@ test('an admitted in-test media-source plugin is invoked through the production 
     await writeFile(join(packageRoot, 'manifest.json'), JSON.stringify(packageManifest));
     await writeFile(
       join(packageRoot, 'dist/plugin.js'),
-      `const state=(globalThis[${JSON.stringify(marker)}] ??= {reads:[],released:0});
-      export default {create(){return {start(){return {actions:{},streams:{async *read(reference){state.reads.push(reference); try{yield Buffer.from('real-plugin-bytes');}finally{state.released++;}}},stop(){}};}};}};`,
+      `${observation.source}
+      export default {create(){return {start(){return {actions:{},streams:{async *read(reference){state.reads.push(reference); saveState(); try{yield Buffer.from('real-plugin-bytes');}finally{state.released++; saveState();}}},stop(){}};}};}};`,
     );
     const messageStore = new MessageStore();
     let wakes = 0;
@@ -343,12 +344,11 @@ test('an admitted in-test media-source plugin is invoked through the production 
       (await runtime.mediaLedger.readChunk(hmrId, 0, 100)).dataBase64,
       Buffer.from('real-plugin-bytes').toString('base64'),
     );
-    const state = globalThis[marker];
+    const state = observation.read();
     assert.deepEqual(state.reads, ['pmr_real-source']);
     assert.equal(state.released, 1);
   } finally {
     await runtime?.shutdown();
-    delete globalThis[marker];
     await rm(projectRoot, { recursive: true, force: true });
     await rm(packageRoot, { recursive: true, force: true });
   }

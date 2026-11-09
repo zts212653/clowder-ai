@@ -20,6 +20,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      # Branch creation has no previous commit; other runs compare the exact event baseline.
+      CAT_CAFE_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +66,27 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Codex final environment and account consumers
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/f320-account-consumers.test.ts
+          test/f320-api-auth-consumers.test.ts
+          test/issue-1654-native-codex-launch.test.ts
+      - name: Codex provider fixture isolates inherited proxy aliases
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          --env NO_PROXY= --env no_proxy=parent-proxy-fixture.invalid --env No_Proxy=
+          node --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/issue-1666-provider-environment.test.js
+      - name: ACP catalog static discovery and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/agent-client-catalog-configuration.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
       - name: DSH packaged secret guard admission
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs

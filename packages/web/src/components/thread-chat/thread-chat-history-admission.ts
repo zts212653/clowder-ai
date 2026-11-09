@@ -9,6 +9,13 @@ export interface ThreadChatHistoryRequest<T> {
   consumerId: symbol;
   requestKey: string;
   task: () => Promise<T>;
+  /**
+   * Start the task only once no other request of this thread is running, on any surface. A
+   * catch-up must be a read issued after the reads already in flight (each surface turns a read
+   * away while its own is running): waiting here runs nothing, so it cannot spend the caller's
+   * failure retries, and the read it then issues lands after theirs.
+   */
+  startWhenIdle?: boolean;
 }
 
 export type ThreadChatHistoryBootstrapOutcome = 'succeeded' | 'failed';
@@ -34,7 +41,11 @@ interface HistoryRequestEntry {
   consumerId: symbol;
   registrationGeneration: symbol;
   abandoned: boolean;
+  /** The task has been started (a `startWhenIdle` request is not running while it waits). */
+  running: boolean;
   promise: Promise<ThreadChatHistoryRequestResult<unknown>>;
+  /** Settles after the request has left `requests`. */
+  settled: Promise<void>;
 }
 
 interface ThreadAdmissionEntry {
@@ -170,11 +181,29 @@ export function createThreadChatHistoryAdmission(): ThreadChatHistoryAdmission {
     entry.status = outcome === 'succeeded' ? 'ready' : 'failed';
   };
 
+  /**
+   * Start `start` once no other request of the thread is running. The check and the start happen
+   * in one synchronous step, and every wait is on a running request's settlement, so this never
+   * spins; requests that are themselves still waiting are not waited on, so two never deadlock.
+   */
+  const startOnceIdle = <T>(threadId: string, request: HistoryRequestEntry, start: () => Promise<T>) => {
+    const waitForIdle = (): Promise<T | undefined> => {
+      if (request.abandoned) return Promise.resolve(undefined);
+      const running = [...(entries.get(threadId)?.requests.values() ?? [])].filter(
+        (candidate) => candidate !== request && candidate.running,
+      );
+      if (running.length === 0) return start();
+      return Promise.all(running.map((candidate) => candidate.settled)).then(waitForIdle);
+    };
+    return waitForIdle();
+  };
+
   const runRequest = <T>({
     threadId: rawThreadId,
     consumerId,
     requestKey: rawRequestKey,
     task,
+    startWhenIdle,
   }: ThreadChatHistoryRequest<T>): Promise<ThreadChatHistoryRequestResult<T>> => {
     const threadId = requireCoordinate(rawThreadId, 'threadId');
     const requestKey = requireCoordinate(rawRequestKey, 'requestKey');
@@ -187,18 +216,24 @@ export function createThreadChatHistoryAdmission(): ThreadChatHistoryAdmission {
     const existing = entry.requests.get(requestKey);
     if (existing) return existing.promise as Promise<ThreadChatHistoryRequestResult<T>>;
 
-    let taskPromise: Promise<T>;
-    try {
-      taskPromise = task();
-    } catch (error) {
-      taskPromise = Promise.reject(error);
-    }
     const request: HistoryRequestEntry = {
       consumerId,
       registrationGeneration: consumer.registrationGeneration,
       abandoned: false,
+      running: false,
       promise: Promise.resolve({ status: 'abandoned' }),
+      settled: Promise.resolve(),
     };
+    const start = (): Promise<T> => {
+      request.running = true;
+      try {
+        return task();
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+    // An abandoned waiter never starts its task and resolves as abandoned below.
+    const taskPromise = (startWhenIdle ? startOnceIdle(threadId, request, start) : start()) as Promise<T>;
     const promise: Promise<ThreadChatHistoryRequestResult<T>> = taskPromise.then(
       (value): ThreadChatHistoryRequestResult<T> =>
         request.abandoned ? { status: 'abandoned' } : { status: 'completed', value },
@@ -216,7 +251,7 @@ export function createThreadChatHistoryAdmission(): ThreadChatHistoryAdmission {
         currentEntry?.requests.delete(requestKey);
       }
     };
-    void promise.then(clearRequest, clearRequest);
+    request.settled = promise.then(clearRequest, clearRequest);
     return promise;
   };
 

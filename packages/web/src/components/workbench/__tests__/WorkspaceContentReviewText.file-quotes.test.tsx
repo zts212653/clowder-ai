@@ -2,6 +2,7 @@ import type { WorkspaceFileQuotePage, WorkspaceFileQuoteReference } from '@cat-c
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { useChatStore } from '@/stores/chatStore';
 import { WorkspaceContentReviewText } from '../content-review/WorkspaceContentReviewText';
@@ -48,6 +49,7 @@ let container: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
+  writeShellPresentation('v2');
   mocks.fetch.mockReset();
   mocks.open.mockReset();
   useChatStore.setState({ currentThreadId: 'here', messages: [], rightPanelOpen: true });
@@ -60,6 +62,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -243,7 +246,8 @@ it('does not guess an unsent position for a different version, duplicate passage
   expect(container.textContent).not.toContain('尚未发送');
 });
 
-it('can explicitly recheck an already loaded message projection and removes withdrawn references', async () => {
+it('classic can explicitly recheck an already loaded message projection and removes withdrawn references', async () => {
+  writeShellPresentation('classic');
   mocks.fetch.mockResolvedValue(
     new Response(JSON.stringify({ sourceRevision: revision, quotes: [reference('current')] })),
   );
@@ -306,7 +310,11 @@ it('focuses the clicked paragraph group by its composite message identity, not t
   expect(mocks.open).not.toHaveBeenCalled();
 });
 
-it('prepends older pages in chronological order including timestamp/id ties', async () => {
+it.each([
+  'classic',
+  'v2',
+] as const)('%s: prepends older pages in chronological order including timestamp/id ties', async (presentation) => {
+  writeShellPresentation(presentation);
   const older = [
     { ...reference('current', 'm1'), timestamp: 5 },
     { ...reference('current', 'm2'), timestamp: 10 },
@@ -324,8 +332,9 @@ it('prepends older pages in chronological order including timestamp/id ties', as
   expect(list).not.toBeNull();
   if (list) list.open = true;
   const more = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent === '读取更多消息',
+    (button) => button.textContent === (presentation === 'v2' ? '查看更早的引用' : '读取更多消息'),
   );
+  expect(more).toBeDefined();
   await act(async () => more?.click());
   expect(mocks.fetch.mock.calls.at(-1)?.[0]).toContain('before=10%3Am3');
   expect(

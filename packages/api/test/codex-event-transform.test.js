@@ -910,6 +910,111 @@ test('#1272: completed Codex turns keep all prose but emit one canonical final s
   assert.equal(text, '第一段进度。\n\n第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]');
 });
 
+test('#1795: absent canonical captures one provider signature at the real stream end', () => {
+  const state = { hadPriorTextTurn: false, signatureIdentity: '砚砚' };
+  const messages = ['第一段。', '第二段。'].map((body) =>
+    transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: `${body}\n\n[砚砚/GPT-6🐾]` } },
+      CAT,
+      state,
+    ),
+  );
+  const suffix = completeAndFinalize(state);
+  assert.equal(messages.map((message) => message.content).join(''), '第一段。\n\n第二段。');
+  assert.equal(suffix?.content, '\n\n[砚砚/GPT-6🐾]');
+  assert.equal(suffix?.hostOutput?.basis, 'provider_observed_fallback');
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+[
+  ['quote', '> [砚砚/GPT-6🐾]'],
+  ['open fence', '```text\n[砚砚/GPT-6🐾]'],
+  ['indented code', '    [砚砚/GPT-6🐾]'],
+  ['other identity', '[宪宪/Opus🐾]'],
+  ['other cat id', '[砚砚/GPT-6🐾@other-cat]'],
+  ['blank model', '[砚砚/ 🐾]'],
+].forEach(([name, text]) => {
+  test(`#1795: absent canonical preserves ${name} as content`, () => {
+    const state = { hadPriorTextTurn: false, signatureIdentity: '砚砚' };
+    const message = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text } }, CAT, state);
+    assert.equal(message?.content, text);
+    assert.equal(state.observedSignature, undefined);
+    assert.equal(completeAndFinalize(state), null);
+  });
+});
+
+[undefined, '[砚砚/GPT-6🐾]'].forEach((observedSignature) => {
+  test(`#1795: malformed canonical cannot override an observed signature (${observedSignature ?? 'none'})`, () => {
+    const state = {
+      hadPriorTextTurn: true,
+      lastTurnTerminal: 'successful',
+      canonicalSignature: '[砚砚/🐾]',
+      observedSignature,
+    };
+    const suffix = finalizeCodexStream(state, CAT);
+    if (!observedSignature) assert.equal(suffix, null);
+    else {
+      assert.equal(suffix?.content, `\n\n${observedSignature}`);
+      assert.equal(suffix?.hostOutput?.basis, 'provider_observed_fallback');
+    }
+  });
+});
+
+test('#1795: unknown model without a provider signature leaves the body unsigned', () => {
+  const state = { hadPriorTextTurn: false, signatureIdentity: '砚砚' };
+  const message = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '只有正文。' } },
+    CAT,
+    state,
+  );
+  assert.equal(message?.content, '只有正文。');
+  assert.equal(completeAndFinalize(state), null);
+});
+
+[
+  '请使用签名示例：`[砚砚/example-model🐾]`',
+  'Use this format: [砚砚/example-model🐾]',
+  '正文签名样例：[砚砚/example-model🐾]',
+  '- 示例签名：[砚砚/example-model🐾]',
+  '1. [砚砚/example-model🐾]',
+  '`[砚砚/example-model🐾]`',
+  '``[砚砚/example-model🐾]``',
+  '- Format:\n  [砚砚/example-model🐾]',
+].forEach((sample, index) => {
+  test(`#1795 review P1: inherited model preserves signature sample ${index}`, () => {
+    const state = { hadPriorTextTurn: false, signatureIdentity: '砚砚' };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    assert.equal(body?.content, sample);
+    assert.equal(state.observedSignature, undefined);
+    assert.equal(completeAndFinalize(state), null);
+  });
+});
+
+test('#1795 review P1: real standalone alias/catId tail survives beside signature samples', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    signatureIdentityAliases: ['缅因猫'],
+  };
+  const sample = '请使用签名示例：`[砚砚/example-model🐾]`';
+  const signature = '[缅因猫/GPT-6🐾@codex]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: `${sample}\n\n${signature}` } },
+    CAT,
+    state,
+  );
+  assert.equal(body?.content, sample);
+  assert.equal(state.observedSignature, signature);
+  const suffix = completeAndFinalize(state);
+  assert.equal(suffix?.content, `\n\n${signature}`);
+  assert.equal(suffix?.hostOutput?.basis, 'provider_observed_fallback');
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
 test('#1272 review P1: multiple completed turns keep the canonical signature at the real stream end', () => {
   const state = {
     hadPriorTextTurn: false,

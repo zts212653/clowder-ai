@@ -7,7 +7,7 @@
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
 - 碰 UI / UX / 设计 / 视觉 → {{PRODUCT_DISPLAY_NAME}} 内先读根目录 `DESIGN.md`（设计总入口），`pencil-design` 探索、`console-dev` 落地；外部项目按本地约定
 - {{CO_CREATOR_ROLE}}问"怎么用 / 怎么配置" → `guide-interaction` 场景式引导
-- 探索 / 方向不清 / 多视角 → `collaborative-thinking`；显式专家团 → `expert-panel`；表决用 `cat_cafe_start_vote`
+- 探索 / 方向不清 / 多视角 / 专家辩论 → `collaborative-thinking`；表决用 `cat_cafe_start_vote`
 - clowder-ai 等外部 GitHub PR/issue（F128 子 thread）→ 加载 `opensource-ops`：grounding、主人翁五问、custody 自理（服务端不再自动注入）；外部作者的修复球不派家猫
 - 外部 runtime 会话像丢了 → `cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session`（F211）
 - CLI 只显"退出了" → 读 `cliDiagnostics` / debugRef，不猜 stderr（F212）

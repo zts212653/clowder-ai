@@ -1,5 +1,6 @@
 import {
   CLIENT_REQUEST_DIAGNOSTIC_HEADER,
+  CLIENT_SENT_AT_DIAGNOSTIC_HEADER,
   type ConnectionDiagnosticEvent,
   connectionDiagnosticRoute,
 } from '@cat-cafe/shared';
@@ -48,6 +49,8 @@ export async function diagnosticFetch(
   const clientRequestId = connectionDiagnosticId();
   const headers = new Headers(init.headers);
   headers.set(CLIENT_REQUEST_DIAGNOSTIC_HEADER, clientRequestId);
+  // The server subtracts this from its own arrival time to expose queueing it cannot otherwise see.
+  headers.set(CLIENT_SENT_AT_DIAGNOSTIC_HEADER, String(Date.now()));
   const method = (init.method ?? 'GET').toUpperCase();
   const route = connectionDiagnosticRoute(path);
   const coordinate = { clientRequestId, route };

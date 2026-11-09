@@ -16,7 +16,7 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 import { createCorrectionItem, installCorrectionApi } from './memory-correction-approval.fixture';
 
 let container: HTMLDivElement, root: Root, item: ApprovalHubItem;
-let pending: boolean, owner: string, changed: boolean, terminal: boolean, approveOnPost: boolean;
+let pending: boolean, owner: string, changed: boolean, terminal: boolean, approveOnPost: boolean, approving: boolean;
 beforeEach(() => {
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -28,9 +28,10 @@ beforeEach(() => {
   changed = false;
   terminal = false;
   approveOnPost = false;
+  approving = false;
   item = createCorrectionItem();
   installCorrectionApi(
-    () => ({ pending, owner, changed, terminal, approveOnPost }),
+    () => ({ pending, owner, changed, terminal, approveOnPost, approving }),
     () => item,
     () => {
       pending = false;
@@ -77,6 +78,37 @@ it('keeps the original memory readable but sends nothing after its displayed rev
   const reject = [...container.querySelectorAll('button')].find((b) => b.textContent === '拒绝这条建议');
   expect(reject?.disabled).toBe(false);
   expect(accept()?.disabled).toBe(true);
+});
+
+it('rereads the same correction when a failed write advances its canonical recovery phase', async () => {
+  const read = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation(async (path, init, options) => {
+    if (init?.method === 'POST') {
+      approving = true;
+      return Response.json({ error: 'finalization interrupted after the original effect' }, { status: 500 });
+    }
+    return read(path, init, options);
+  });
+  await act(async () => root.render(<ApprovalItemCard item={item} />));
+  await act(async () => accept()?.click());
+  expect(posts()).toHaveLength(1);
+  expect(container.textContent).toContain('暂时不能处理');
+
+  item = {
+    ...item,
+    resolution: 'accepted',
+    materialization: { state: 'outcome_unknown' },
+    inlineApprovable: false,
+  };
+  delete item.decisionMode;
+  await act(async () => root.render(<ApprovalItemCard item={item} />));
+  const resume = [...container.querySelectorAll('button')].find((button) => button.textContent === '重试这次接受');
+  expect(resume?.disabled).toBe(false);
+  expect(container.textContent).not.toContain('拒绝这条建议');
+  expect(posts()).toHaveLength(1);
+  const reads = vi.mocked(apiFetch).mock.calls.length;
+  await act(async () => root.render(<ApprovalItemCard item={{ ...item }} />));
+  expect(vi.mocked(apiFetch).mock.calls).toHaveLength(reads);
 });
 
 it('does not host a foreign owner memory record', async () => {
@@ -250,6 +282,8 @@ it('keeps an injected-action correction copy readonly instead of sending a gener
 });
 
 it('places the original correction on the closed first layer instead of requiring a generic row toggle', async () => {
+  // The host consumes the already completed shared pending read; mounting a card must not fetch that table.
+  useApprovalHubStore.setState({ items: [item], pendingReadAvailable: true, isLoading: false });
   const row = approvalRow(item),
     read = okRead([row]);
   const sessions = createApprovalSessions({

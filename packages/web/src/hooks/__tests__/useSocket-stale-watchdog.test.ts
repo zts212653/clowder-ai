@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Regression: stale-invocation watchdog unsticks the UI when a done(isFinal)
  * event is dropped on a still-connected socket.
@@ -465,6 +466,25 @@ describe('useSocket stale-invocation watchdog', () => {
     expect(mockStoreState.clearThreadCatStatuses).toHaveBeenCalledWith('thread-1');
     expect(mockStoreState.setThreadMessageStreaming).toHaveBeenCalledWith('thread-1', 'ghost-stream-1', false);
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('reconciles a processing hint whose queue fetch failed before any invocation slot arrived', async () => {
+    mockStoreState.currentThreadId = 'busy-without-slot';
+    mockStoreState.hasActiveInvocation = true;
+    mockStoreState.activeInvocations = {};
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ activeInvocations: [] }) });
+    act(() =>
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'busy-without-slot',
+        }),
+      ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(31_000));
+    expect(queueProbeCalls()).toHaveLength(1);
+    expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('busy-without-slot');
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('busy-without-slot');
   });
 
   it('respects cooldown: does not re-probe the same thread on subsequent watchdog ticks', async () => {

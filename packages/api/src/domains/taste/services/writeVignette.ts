@@ -15,7 +15,10 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { TasteProposal } from '@cat-cafe/shared';
+import { parse as parseYaml } from 'yaml';
+import { parseTasteVignette } from '../../memory/taste/TasteMemoryReader.js';
 import {
   type GitTastePublicationOptions,
   isTastePublicationIndeterminateError,
@@ -60,30 +63,99 @@ function escapeYamlDoubleQuoted(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\t/g, '\\t');
 }
 
+/**
+ * Approval recovery compares a retried vignette byte for byte with the already published one, so the
+ * released form is kept for every proposal it wrote publishable: accepted by the reader and, when
+ * public, without a line-end blank. Any other proposal gets the quoted form, used only when it is
+ * publishable too and reads back exactly; otherwise approval refuses rather than write a vignette the
+ * reader rejects or the commit guard blocks.
+ */
 export function formatVignette(proposal: TasteProposal): string {
-  const when = new Date(proposal.createdAt).toISOString().slice(0, 10);
-  const quotesYaml = `  - "${escapeYamlDoubleQuoted(proposal.quote)}"`;
-  // Indent scene continuation lines for YAML block scalar
-  const sceneLines = proposal.scene.split('\n');
-  const sceneYaml =
-    sceneLines.length === 1 ? `>\n  ${sceneLines[0]}` : `>\n${sceneLines.map((l) => `  ${l}`).join('\n')}`;
-  const tagsYaml = `[${proposal.tags.map((t) => `"${escapeYamlDoubleQuoted(t)}"`).join(', ')}]`;
-  const lines = [
+  const released = formatVignetteLines(
+    proposal,
+    (text) => `"${escapeYamlDoubleQuoted(text)}"`,
+    (scene) => {
+      const sceneLines = scene.split('\n');
+      return sceneLines.length === 1 ? `>\n  ${sceneLines[0]}` : `>\n${sceneLines.map((l) => `  ${l}`).join('\n')}`;
+    },
+  );
+  // Only public vignettes are committed, so only they must pass the commit guard's line-end check.
+  const sensitive = proposal.privacy === 'sensitive';
+  const publishable = (content: string) =>
+    !(!sensitive && hasLineEndBlank(content)) &&
+    parseTasteVignette(content, sensitive ? 'private' : 'public', false) !== null;
+  if (publishable(released)) return released;
+  const quoted = formatVignetteLines(proposal, yamlQuoted, yamlQuoted);
+  if (publishable(quoted) && readsBackExactly(quoted, proposal)) return quoted;
+  throw new Error(`Taste vignette for proposal ${proposal.id} cannot be written readable`);
+}
+
+function formatVignetteLines(
+  proposal: TasteProposal,
+  quote: (text: string) => string,
+  scene: (text: string) => string,
+): string {
+  return [
     '---',
-    `when: ${when}`,
+    `when: ${new Date(proposal.createdAt).toISOString().slice(0, 10)}`,
     'quotes:',
-    quotesYaml,
-    ...(proposal.takeaway ? [`takeaway: "${escapeYamlDoubleQuoted(proposal.takeaway)}"`] : []),
-    `scene: ${sceneYaml}`,
-    `tags: ${tagsYaml}`,
+    `  - ${quote(proposal.quote)}`,
+    ...(proposal.takeaway ? [`takeaway: ${quote(proposal.takeaway)}`] : []),
+    `scene: ${scene(proposal.scene)}`,
+    `tags: [${proposal.tags.map(quote).join(', ')}]`,
     `dimension: ${proposal.dimension}`,
     `privacy: ${proposal.privacy}`,
     `catId: ${proposal.catId}`,
     `proposalId: ${proposal.id}`,
     '---',
     '',
-  ];
-  return lines.join('\n');
+  ].join('\n');
+}
+
+/**
+ * A one-line YAML double-quoted scalar. Everything other than printable YAML content is escaped:
+ * line breaks, controls, DEL, C1, NEL, U+2028/U+2029, BOM and lone surrogates.
+ */
+function yamlQuoted(text: string): string {
+  let body = '';
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (character === '"' || character === '\\') body += `\\${character}`;
+    else if (isPlainYamlContent(code)) body += character;
+    else if (code <= 0xffff) body += `\\u${code.toString(16).padStart(4, '0')}`;
+    else body += `\\U${code.toString(16).padStart(8, '0')}`;
+  }
+  return `"${body}"`;
+}
+
+function isPlainYamlContent(code: number): boolean {
+  if (code >= 0x20 && code <= 0x7e) return true;
+  if (code === 0x2028 || code === 0x2029) return false;
+  return (code >= 0xa0 && code <= 0xd7ff) || (code >= 0xe000 && code <= 0xfffd && code !== 0xfeff) || code >= 0x10000;
+}
+
+function hasLineEndBlank(content: string): boolean {
+  return content.split('\n').some((line) => /[ \t\r\v\f]$/.test(line));
+}
+
+/** The frontmatter, read as the Taste reader reads it, holds exactly the proposal's text. */
+function readsBackExactly(content: string, proposal: TasteProposal): boolean {
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  if (frontmatter === undefined) return false;
+  try {
+    const parsed = parseYaml(frontmatter, { maxAliasCount: 0 });
+    return isDeepStrictEqual(
+      { quotes: parsed?.quotes, takeaway: parsed?.takeaway, scene: parsed?.scene, tags: parsed?.tags },
+      {
+        quotes: [proposal.quote],
+        takeaway: proposal.takeaway || undefined,
+        scene: proposal.scene,
+        tags: proposal.tags,
+      },
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -190,6 +262,8 @@ export function createVignetteWriter(
       ? new FileTasteRepository(repositoryOrProjectRoot)
       : repositoryOrProjectRoot;
   return async (proposal: TasteProposal): Promise<WriteVignetteResult> => {
+    // A blank scene publishes a vignette that the reader rejects as empty.
+    if (!proposal.scene.trim()) throw new Error('Taste scene is blank');
     const slug = deriveSlug(proposal);
     const content = formatVignette(proposal);
 

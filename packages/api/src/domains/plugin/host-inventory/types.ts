@@ -1,5 +1,6 @@
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { DesktopWindowFailureReason } from '../desktop-window-runtime/failure-reason.js';
+import type { PluginAgentClientMetadata } from './agent-client-metadata.js';
 import type { StoredPluginManifest } from './stored-manifest.js';
 
 export const PLUGIN_INVENTORY_SCHEMA_VERSION = 1 as const;
@@ -61,6 +62,8 @@ export interface PluginPackageRecord {
   readonly incompatibleManifest?: StoredPluginManifest;
   /** Package-local schemas resolved from the exact admitted archive. */
   readonly signalSchemas: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** Optional display source captured from this admitted digest; absent on legacy inventory. */
+  readonly agentClientMetadata?: PluginAgentClientMetadata;
   /** Admission origin is immutable package metadata, not an inference from current catalog reachability. */
   readonly provenance?: PluginPackageProvenance;
   readonly packageState: PackageState;
@@ -101,6 +104,7 @@ export interface PackageAdmissionCandidate {
   readonly expectedPackageDigest: string;
   readonly packagePluginId: string;
   readonly signalSchemas?: PluginPackageRecord['signalSchemas'];
+  readonly agentClientMetadata?: PluginAgentClientMetadata;
   readonly provenance?: PluginPackageProvenance;
 }
 

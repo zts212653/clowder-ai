@@ -20,6 +20,7 @@ export interface PluginRuntimeInfo {
   readonly logDirectory: string;
 }
 export interface PluginNeutralHost {
+  readonly ownerChat?: import('./plugin-owner-chat.js').PluginOwnerChatHost;
   readonly runtimeInfo?: { get(): Promise<PluginRuntimeInfo> };
   readonly memberSessions?: import('../member-sessions/host.js').PluginMemberSessionsHost;
   readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
@@ -27,6 +28,7 @@ export interface PluginNeutralHost {
   readonly members: PluginMembersHost;
 }
 interface Deps {
+  readonly ownerChat?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['ownerChat'];
   readonly runtimeInfo?: () => PluginRuntimeInfo;
   readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
@@ -44,11 +46,11 @@ function refuse(message: string): never {
 
 /** One activation's neutral ports. The plugin never receives these authority dependencies. */
 export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutralHost> {
-  const initial = await deps.inventory.snapshot();
-  const instance = initial.instances.find((item) => item.pluginInstanceId === deps.pluginInstanceId);
+  const initial = await deps.inventory.readAuthority(deps.pluginInstanceId);
+  const instance = initial?.instance;
 
   if (!instance || instance.packageDigest !== deps.packageDigest) refuse('Neutral installation unavailable');
-  const pkg = initial.packages.find((item) => item.packageDigest === deps.packageDigest);
+  const pkg = initial?.packageRecord?.packageDigest === deps.packageDigest ? initial.packageRecord : undefined;
   if (!pkg) refuse('Neutral package unavailable');
   // Config saves advance the inventory revision without replacing this activation.
   // assertActivation owns stop/restart invalidation; package and lifecycle fences remain.
@@ -66,14 +68,15 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
   }
   async function current(): Promise<void> {
     deps.assertActivation();
-    const snapshot = await deps.inventory.snapshot();
+    const authority = await deps.inventory.readAuthority(deps.pluginInstanceId);
     check(
-      snapshot.instances.find((i) => i.pluginInstanceId === deps.pluginInstanceId),
-      snapshot.packages.find((p) => p.packageDigest === deps.packageDigest),
+      authority?.instance,
+      authority?.packageRecord?.packageDigest === deps.packageDigest ? authority.packageRecord : undefined,
     );
   }
   const collective = pkg.pluginId === 'official.collective-connector' && instance.pluginId === pkg.pluginId;
   return Object.freeze({
+    ...(deps.ownerChat ? { ownerChat: deps.ownerChat(current) } : {}),
     ...(deps.runtimeInfo
       ? {
           runtimeInfo: {

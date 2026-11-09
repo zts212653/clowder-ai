@@ -13,6 +13,10 @@ export class PiAcpEvents {
   completedAssistant = false;
   constructor(private readonly update: (value: PiRecord) => void) {}
 
+  get hasResponseOutput(): boolean {
+    return this.textChars > 0 || this.toolEvents > 0;
+  }
+
   accept(event: PiRecord): void {
     const message = record(event.message);
     if (event.type === 'message_start' && message.role === 'assistant') {

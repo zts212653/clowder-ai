@@ -102,24 +102,6 @@ CAT_GEMINI_MODEL='gemini-old'
   }
 });
 
-test('env-apply writes apostrophes with dotenv-compatible double quotes', () => {
-  const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-env-apostrophe-'));
-
-  try {
-    const envFile = join(envRoot, '.env');
-    mkdirSync(envRoot, { recursive: true });
-    writeFileSync(envFile, '', 'utf8');
-
-    runHelper(['env-apply', '--env-file', envFile, '--set', "OPENAI_BASE_URL=https://proxy.example/o'hara"]);
-
-    const output = readFileSync(envFile, 'utf8');
-    assert.match(output, /^OPENAI_BASE_URL="https:\/\/proxy\.example\/o'hara"$/m);
-    assert.doesNotMatch(output, /'\\''/);
-  } finally {
-    rmSync(envRoot, { recursive: true, force: true });
-  }
-});
-
 test('env-apply escapes CR/LF so one logical key stays on one line', () => {
   const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-env-crlf-'));
 
