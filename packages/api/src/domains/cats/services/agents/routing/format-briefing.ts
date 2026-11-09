@@ -118,6 +118,8 @@ function formatPresentationCounts(projection: ContextSurfaceProjection): string 
 
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
+  receiverCatId?: string;
+  receiverDisplayName?: string;
   threadMemorySummary?: string;
   anchorSummaries?: string[];
   baton?: BatonContext;
@@ -137,7 +139,7 @@ export function buildBriefingMessage(
   threadId: string,
   options?: BriefingMessageOptions,
 ): AppendMessageInput {
-  const { summary, richBlock } = formatContextBriefing(
+  const { summary } = formatContextBriefing(
     coverageMap,
     options?.threadMemorySummary,
     options?.anchorSummaries,
@@ -176,6 +178,7 @@ export function buildBriefingMessage(
   // canonical lifecycle state and no invalidator, so a closed question would keep
   // presenting itself as current work — on the card and, since the briefing is
   // persisted as a thread message, in later prompts too.
+  const handoffBodyIndex = options?.baton ? bodyParts.length : -1;
   if (options?.baton) {
     const b = options.baton;
     const timeStr = formatPromptTime(b.timestamp, { timeZone: getCoCreatorConfig().timeZone });
@@ -196,6 +199,7 @@ export function buildBriefingMessage(
     bodyParts.push(`**最近产物**:\n${artifactLines.join('\n')}`);
   }
   const directiveSources = options?.rankedSources ? selectDirectiveSources(options.rankedSources) : [];
+  const sourceBodyIndex = directiveSources.length ? bodyParts.length : -1;
   if (directiveSources.length) {
     const sourceLines = directiveSources.map((s) => `- [${s.type}] ${s.label} — ${s.ref}`);
     bodyParts.push(`**真相源**:\n${sourceLines.join('\n')}`);
@@ -245,14 +249,34 @@ export function buildBriefingMessage(
           ]
         : []),
     ],
-    ...(options?.contextSurfaceProjection
-      ? {
-          meta: {
-            kind: 'context_briefing',
-            contextSurfaceProjection: options.contextSurfaceProjection,
-          },
-        }
-      : {}),
+    meta: {
+      kind: 'context_briefing',
+      ...(options?.receiverCatId ? { receiverCatId: options.receiverCatId } : {}),
+      ...(options?.receiverDisplayName ? { receiverDisplayName: options.receiverDisplayName } : {}),
+      coverageSummary: `近期消息 ${coverageMap.burst.count} 条 · 历史略过 ${coverageMap.omitted.count} 条`,
+      coverageDetails: summary,
+      // Display-only projection: raw title/fields/body and the delivered context stay unchanged.
+      contextDisplay: {
+        threadId,
+        ...(options?.baton
+          ? {
+              handoff: {
+                from: options.baton.fromSpeakerDisplay,
+                time: formatPromptTime(options.baton.timestamp, { timeZone: getCoCreatorConfig().timeZone }),
+                excerpt: options.baton.mentionExcerpt,
+                warning: options.baton.staleHoldWarning,
+              },
+            }
+          : {}),
+        sources: directiveSources.map(({ type, label, ref }) => ({ type, label, ref })),
+        coverage: formatContextBriefing(coverageMap, options?.threadMemorySummary, options?.anchorSummaries).summary,
+        // These two exact pieces have structured counterparts above; all other body content remains.
+        detailsMarkdown: bodyParts
+          .filter((_, index) => index !== handoffBodyIndex && index !== sourceBodyIndex)
+          .join('\n\n'),
+      },
+      ...(options?.contextSurfaceProjection ? { contextSurfaceProjection: options.contextSurfaceProjection } : {}),
+    },
   };
 
   const rich: RichMessageExtra = { v: 1, blocks: [card] };
