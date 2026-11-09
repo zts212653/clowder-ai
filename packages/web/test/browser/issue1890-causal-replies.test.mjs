@@ -518,6 +518,8 @@ test('issue1890 causal reading remains consistent live, complete and after refre
         dispatchRefs: [{ ...settledInput.lifecycle.dispatchRefs[0], statusMessageId: 'late-R' }],
       },
     };
+    // This complete page must agree with hydrateThread(..., false), including background HTTP refreshes.
+    hasMore = false;
     history = [
       lateResponse,
       lateInput,
@@ -529,6 +531,15 @@ test('issue1890 causal reading remains consistent live, complete and after refre
         timestamp: 3000 + index,
       })),
     ];
+    const lateWirePage = await page.evaluate(async () => {
+      const result = await fetch('/api/messages?threadId=issue1890');
+      return result.json();
+    });
+    assert.equal(
+      lateWirePage.hasMore,
+      false,
+      'late-proof fixture must expose the same complete page over HTTP and hydration',
+    );
     await page.evaluate((messages) => window.issue1890Hydrate(messages), history);
     await page.evaluate(() => window.issue1890Focus('late-S'));
     const readingAnchor = page.locator('[data-message-id="late-S"]');
