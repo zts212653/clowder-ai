@@ -305,3 +305,19 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - 本轮无页面布局/交互改动，上一轮历史刷新浏览器证据继续适用。隔离真实Host类与冻结插件检查不是实际ChatGPT Work，也不替代新soak；未安装、重启、合并或发布。
 
 - Host最终完整API隔离编译与Biome/diff通过；编译结束后重跑最终alpha.50构建/闭包/显示/精确冻结安装19/19（/tmp/f202-alpha50-host-acceptance-final.log）。首次并发编译期间的随包测试读到旧缓存已拒绝，不计通过；重跑使用最终产物。最终补强长期URL测试从无入口开始，以覆盖实际创建而非只读复用；6f595400的两条同型反例2/2 RED（/tmp/f202-r9-sibling-red-final.log），当前产品实现均GREEN。
+
+
+### R10：公开动作准入与旧投递事实；真实调度器自动重放
+
+核对插件deea1ee0上的4516538933/4516538941、配套Host03dd602a上的4516613884/4516613899/4516613911；后两项与插件意见同根因。继续原PR作者修复范围，不合并或发布。
+
+- 所有创建/轮换入口（临时、长期、轮换）在两层公开actions首次异步鉴权前共用endpoint epoch；disconnect失效旧epoch。长期入口和轮换的原快照CAS继续保留，分别覆盖鉴权前与首次快照后暂停。断开后的新显式创建仍可用。
+- alpha.49记录缺deliveryReason时，ask关联不足以判断原投递种类。源码已核Host旧addressed ID为ad_<sha256>，subscription ID为delivery_<sha256>。现在只对已知旧subscription ID族再核原ask/接收人/来源，ad_和未知格式不改；当前新记录始终以Host给出的deliveryReason为准。没有新增Host读取接口/SDK契约，也不从消息正文猜投递种类。旧真实addressed格式经升级、read、restart/reply保留完成身份。
+- receipt-pending仅保留游标不足以保证自动重试。Dot在ask回执持久提交、重新校验attempt/凭据后，重申同一订阅；Host通用register在注册完成后通知现有调度器，runtime-composition复用onMessagePublished调度接线。游标和幂等不重置，无Dot分支，无定时轮询或无限失败重试链。
+- 三条插件反例先RED后GREEN；Host真实registration/scheduler反例先RED，修后GREEN。精确alpha.50→alpha.51冻结包对照：已确认旧addressed carrier从被清除、保持waiting，变为由真实Host SendService/settlePublishedTargetResponse完成；普通旧subscription仍恢复成功。
+- 新自动重放探针接真实Host EventStreamService/SubscriptionDelivery/SubscriptionDrainScheduler及精确冻结DotRuntime；alpha.50在回执提交后仍无webhook为RED，alpha.51自动重放一次并推进游标为GREEN，全程没有手动drain或回执后deliver。探针是隔离内存fixture，不是Work实机。
+- 插件最终HEAD4e2dc4e50b02954a52de982d28c9907bbef18361：干净Dot258/258，类型与两份构建通过。alpha.51 SHA2566214d9b5717900bde17691ff255d148df90423b46fe7820476f6bc1ce3c4283e；压缩22,378,705/展开61,823,586字节，89自有产物与本地最终构建逐字节一致，32/64MiB预算不变。SDK/contract未变。
+- 证据：/tmp/f202-r10-red.log、/tmp/f202-r10-green.log、/tmp/f202-r10-registration-red.log、/tmp/f202-r10-registration-green.log；/tmp/f202-r10-dot-full-final.log；Host工位ignored acceptance的packaged-legacy-delivery-check.mts/receipt和packaged-auto-replay-check.mts/receipt，以及/tmp/f202-r10-packaged-red-final.log、/tmp/f202-r10-packaged-green-latest.log、/tmp/f202-r10-auto-replay-red-final.log、/tmp/f202-r10-auto-replay-green-final.log。无运行实例操作，不以本轮隔离检查替代新Work/soak。
+- 本轮fallback分析：旧格式分支是有边界的alpha兼容，当前交付不猜种类；epoch与原revision分别约束准入和提交，注册回调复用单一已有调度器，不增加三层fallback链。
+
+- 最终Host完整隔离API编译通过；精确随包19项加真实生产订阅/发布/调度回归合计37/37（/tmp/f202-alpha51-host-acceptance.log）。最终自动重放同时核对真实cursor.ackedSequence=2，无回执后手动drain/deliver。Biome检查无错误，保留既有复杂度/非空断言6条警告；diff通过。

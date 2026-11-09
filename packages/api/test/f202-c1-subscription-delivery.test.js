@@ -288,3 +288,41 @@ describe('F202 C1 — Host-driven subscription delivery', () => {
     );
   });
 });
+
+test('re-registering a ready subscriber schedules its unacked input without another publication', async () => {
+  const { SubscriptionDrainScheduler } = await import('../dist/domains/messaging/subscription-drain-scheduler.js');
+  let ready = false;
+  const rejected = Promise.withResolvers();
+  const accepted = Promise.withResolvers();
+  const scheduler = new SubscriptionDrainScheduler(() => rejected.resolve());
+  const driver = createSubscriptionDelivery({
+    messaging,
+    presentation: async (_thread, actor) => ({ actor: { displayName: actor.id }, thread: { shortId: THREAD_ID } }),
+    onRegistered: scheduler.schedule,
+    delivery: {
+      async deliver(_subscriber, input) {
+        if (!ready) throw new Error('receipt_pending');
+        accepted.resolve(input);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+  });
+  scheduler.attach(driver);
+  const handleId = await subscribeHandle(SUBSCRIBER_A);
+  const declaration = { subscriberId: SUBSCRIBER_A, threadId: THREAD_ID, handleId };
+  await driver.register(declaration);
+  await produce('fast reply', 'fast-reply');
+  scheduler.schedule(THREAD_ID);
+  await rejected.promise;
+  ready = true;
+  await driver.register(declaration);
+  const timeout = setTimeout(
+    () => accepted.reject(new Error('ready registration did not resume the pending cursor')),
+    200,
+  );
+  try {
+    assert.equal((await accepted.promise).threadId, THREAD_ID);
+  } finally {
+    clearTimeout(timeout);
+  }
+});

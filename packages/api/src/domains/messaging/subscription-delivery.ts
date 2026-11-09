@@ -72,6 +72,8 @@ export interface SubscriptionDeliveryDeps {
   readonly resolveInvocationId?: (messageId: string) => Promise<string | undefined>;
   /** A grant or action failure is operationally visible without logging envelope contents. */
   readonly onError?: (fields: { subscriberId: string; threadId: string; errorKind: string }) => void;
+  /** Re-registration can make an unacked input consumable without a new publication. */
+  readonly onRegistered?: (threadId: string) => void;
   /** Events per read page. */
   readonly readLimit?: number;
   /**
@@ -337,6 +339,7 @@ export class SubscriptionDelivery {
     if (index === -1) existing.push(replacement);
     else existing[index] = replacement;
     this.byThread.set(declaration.threadId, existing);
+    this.deps.onRegistered?.(declaration.threadId);
   }
 
   unregister(subscriberId: string, threadId: string): void {

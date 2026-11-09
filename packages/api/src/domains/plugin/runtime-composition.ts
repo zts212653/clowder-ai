@@ -455,6 +455,7 @@ export function createDormantPluginRuntimeComposition(
   };
   const subscriptionDelivery = createSubscriptionDelivery({
     messaging,
+    onRegistered: options.onMessagePublished,
     presentation:
       options.deliveryPresentation ??
       ((threadId, actor) => Promise.resolve(buildDeliveryPresentation(threadId, actor))),
