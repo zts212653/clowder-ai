@@ -343,18 +343,14 @@ export class TaskRunnerV2 {
       return true;
     }
     const def = this.getSuppressedHoldWakeDef(taskId);
-    // Online holds validate their planned window, allowing callback jitter. Restored
-    // past-due holds also check actual time. Legacy/unknown online shapes stay compatible.
+    // Enforce the absolute deadline at every wake attempt. Legacy/unknown
+    // online shapes retain their existing compatibility boundary below.
     if (!def) {
       const store = this.dynamicTaskStore;
       if (!store) return false;
       const current = store.getById(taskId);
       if (!current || current.trigger.type !== 'once') return false;
-      const recovery = classifyTimerHoldRecovery(
-        current,
-        store.getPrivateOwnerAuthProvenance(current.id),
-        task.onceLifecycle?.recoverMissed ? Date.now() : current.trigger.fireAt,
-      );
+      const recovery = classifyTimerHoldRecovery(current, store.getPrivateOwnerAuthProvenance(current.id), Date.now());
       if (!task.onceLifecycle && !(recovery.kind === 'invalid' && recovery.reason === 'sla_not_after_wake')) {
         return false;
       }

@@ -20,7 +20,7 @@ isolateManagedJobData();
 const NOW = 1_800_000_000_000;
 const DELAY = 5_000;
 
-async function fixture(t) {
+async function fixture(t, rejectStatus = false) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: NOW });
   const db = new Database(':memory:');
   applyMigrations(db);
@@ -49,6 +49,7 @@ async function fixture(t) {
     dynamicTaskStore: store,
     notifyLifecycle: (notice) => notices.push(notice),
     deliver: async (input) => {
+      if (rejectStatus && input.source?.meta.phase === 'status') throw new Error('status sink unavailable');
       deliveries.push(input);
       const saved = await messages.append({
         ...input,
@@ -64,6 +65,7 @@ async function fixture(t) {
   registerCallbackHoldBallRoutes(app, {
     registry,
     threadStore,
+    ownerUserId: 'sla-owner',
     taskRunner: runner,
     dynamicTaskStore: store,
     holdQuotaStore: quota,
@@ -89,7 +91,7 @@ async function fixture(t) {
         waitSourceRef: { kind: 'task', value: 'external-ci', expectedSignal: 'ci_complete', slaUntilMs },
       },
     });
-  return { app, store, ledger, quota, runner, hold, deliveries, notices, thread };
+  return { app, store, ledger, quota, runner, hold, deliveries, notices, thread, messages };
 }
 
 for (const gap of [-69, 0]) {
@@ -111,13 +113,13 @@ for (const gap of [-69, 0]) {
   });
 }
 
-test('accepted online hold wakes exactly once despite 5ms callback jitter, with only 1ms of planned margin', async (t) => {
+test('accepted online hold wakes exactly once with 25ms jitter inside its 600ms deadline margin', async (t) => {
   const f = await fixture(t);
-  const accepted = await f.hold(NOW + DELAY + 1);
+  const accepted = await f.hold(NOW + DELAY + 600);
   assert.equal(accepted.statusCode, 200);
   const id = accepted.json().taskId;
   f.runner.start();
-  t.mock.timers.setTime(NOW + 5);
+  t.mock.timers.setTime(NOW + 25);
   t.mock.timers.tick(DELAY);
   await setImmediate();
   assert.equal(f.deliveries.length, 1);
@@ -129,6 +131,54 @@ test('accepted online hold wakes exactly once despite 5ms callback jitter, with 
   t.mock.timers.tick(60_000);
   await setImmediate();
   assert.equal(f.deliveries.length, 1);
+});
+
+for (const jump of [5, 120_000, 28_800_000]) {
+  test(`online hold does not wake past its absolute deadline after ${jump}ms clock delay`, async (t) => {
+    const f = await fixture(t);
+    const accepted = await f.hold(NOW + DELAY + (jump === 5 ? 1 : 600));
+    assert.equal(accepted.statusCode, 200);
+    const id = accepted.json().taskId;
+    f.runner.start();
+    t.mock.timers.setTime(NOW + jump);
+    t.mock.timers.tick(DELAY);
+    await setImmediate();
+    assert.equal(f.deliveries.filter((delivery) => delivery.targetCatId).length, 0);
+    assert.equal(f.ledger.query(id, 1).length, 0);
+    assert.equal(f.store.getById(id).params.holdLifecycle.status, 'retired_expired');
+    assert.equal(f.store.getById(id).params.holdLifecycle.dispositionReason, 'sla_elapsed');
+    assert.equal(f.deliveries[0].source.meta.phase, 'status');
+  });
+}
+
+test('original waiting hold retains its failure reason when the optional status notification is rejected', async (t) => {
+  const f = await fixture(t, true);
+  const accepted = await f.hold(NOW + DELAY + 600);
+  const id = accepted.json().taskId;
+  f.runner.unregister(id);
+  t.mock.timers.setTime(NOW + DELAY + 601);
+  assert.equal(f.runner.hydrateDynamic(f.store, { get: () => reminderTemplate }), 0);
+  await setImmediate();
+  assert.equal(f.deliveries.length, 0);
+  const history = await f.messages.getByThread(f.thread.id, 10, 'sla-owner');
+  assert.equal(history.length, 1);
+  assert.equal(
+    (await f.messages.getByIdempotencyKey('sla-owner', f.thread.id, `hold-ball-waiting:${id}`)).id,
+    history[0].id,
+  );
+  const status = await f.app.inject({
+    method: 'GET',
+    url: `/api/callbacks/hold-ball/${id}/status`,
+    headers: { 'x-cat-cafe-user': 'sla-owner' },
+  });
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.json().status, 'retired_expired');
+  assert.equal(status.json().cancelable, false);
+  assert.equal(status.json().lifecycle.dispositionReason, 'sla_elapsed');
+  const restored = new TaskRunnerV2({ logger: { info() {}, error() {} }, ledger: f.ledger, dynamicTaskStore: f.store });
+  assert.equal(restored.hydrateDynamic(f.store, { get: () => reminderTemplate }), 0);
+  restored.stop();
+  assert.equal(f.deliveries.length, 0);
 });
 
 for (const mode of [
