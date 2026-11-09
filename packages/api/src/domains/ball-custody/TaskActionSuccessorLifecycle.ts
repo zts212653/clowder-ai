@@ -130,49 +130,59 @@ export class TaskActionSuccessorLifecycle {
   }
 
   async readRecoveryIncidents(task: TaskItem): Promise<TaskRecoveryIncident[]> {
-    const lease = await this.getActiveLease(task);
     const recovery = this.deps.leaseStore.recovery;
-    if (!lease || !recovery) return [];
+    if (!recovery) return [];
     const lanes = ['return', 'dispatch', 'task'] as const;
-    const snapshots = await Promise.allSettled(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
-    return snapshots.flatMap((result, index) => {
-      const lane = lanes[index];
-      if (lane === undefined) return [];
-      if (result.status === 'rejected')
-        return [
-          {
-            source: 'action_successor' as const,
-            lane,
-            disposition: 'needs_attention' as const,
-            reasonCode: 'action_recovery_lane_read_failed',
-            executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
-          },
-        ];
-      const snapshot = result.value;
-      if (
-        snapshot &&
-        (snapshot.lease.leaseId !== lease.leaseId ||
-          snapshot.lease.generation !== lease.generation ||
-          snapshot.fact.generation !== lease.generation)
-      )
-        return [];
-      const fact = snapshot?.fact;
-      return fact?.disposition && fact.reasonCode
-        ? [
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const lease = await this.getReadableLease(task);
+      if (!lease) return [];
+      const snapshots = await Promise.allSettled(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
+      const changedOwner = snapshots.some(
+        (result) =>
+          result.status === 'fulfilled' &&
+          result.value !== null &&
+          (result.value.lease.leaseId !== lease.leaseId ||
+            result.value.lease.generation !== lease.generation ||
+            result.value.fact.generation !== lease.generation),
+      );
+      if (changedOwner) continue;
+      return snapshots.flatMap((result, index) => {
+        const lane = lanes[index];
+        if (lane === undefined) return [];
+        if (result.status === 'rejected')
+          return [
             {
               source: 'action_successor' as const,
               lane,
-              disposition: fact.disposition,
-              reasonCode: fact.reasonCode,
+              disposition: 'needs_attention' as const,
+              reasonCode: 'action_recovery_lane_read_failed',
               executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
             },
-          ]
-        : [];
-    });
+          ];
+        const fact = result.value?.fact;
+        return fact?.disposition && fact.reasonCode
+          ? [
+              {
+                source: 'action_successor' as const,
+                lane,
+                disposition: fact.disposition,
+                reasonCode: fact.reasonCode,
+                executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
+              },
+            ]
+          : [];
+      });
+    }
+    return [];
   }
 
   private async getActiveLease(task: TaskItem): Promise<ActionSuccessorLease | null> {
     if (isOrdinaryImplementTask(task)) return null;
+    return this.getReadableLease(task);
+  }
+
+  /** Historical recovery evidence remains readable after an ordinary-task cutover, without restoring write authority. */
+  private async getReadableLease(task: TaskItem): Promise<ActionSuccessorLease | null> {
     if (!task.userId) return null;
     const lease = await this.deps.leaseStore.getByIdentity({
       tenantScope: task.userId,

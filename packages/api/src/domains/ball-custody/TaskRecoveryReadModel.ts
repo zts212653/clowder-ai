@@ -38,6 +38,15 @@ export class TaskRecoveryReadModel {
       });
     }
     if (facts) {
+      if (facts.disposition === 'needs_attention' && facts.reasonCode) {
+        incidents.push({
+          source: 'ball_probe',
+          lane: 'probe',
+          disposition: 'needs_attention',
+          reasonCode: facts.reasonCode,
+          executionRef: `${facts.subjectKey}:owner`,
+        });
+      }
       for (const lane of ['probe', 'idle'] as const) {
         const fact = facts[lane];
         if (fact?.disposition !== 'needs_attention' || !fact.reasonCode) continue;

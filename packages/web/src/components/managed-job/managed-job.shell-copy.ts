@@ -13,6 +13,7 @@ export const managedJobCopy = defineShellCopy(
       stopping: '正在停止…',
       trace: '执行记录',
       recoveryTitle: '自动恢复已暂停',
+      recoveryPending: '正在核验原任务的恢复责任…',
       recoveryState: {
         parked: '已停放',
         interrupted: '已中断',
@@ -45,6 +46,7 @@ export const managedJobCopy = defineShellCopy(
       stopping: 'Stopping…',
       trace: 'Execution history',
       recoveryTitle: 'Automatic recovery paused',
+      recoveryPending: 'Checking recovery responsibility on the original task…',
       recoveryState: {
         parked: 'Parked',
         interrupted: 'Interrupted',

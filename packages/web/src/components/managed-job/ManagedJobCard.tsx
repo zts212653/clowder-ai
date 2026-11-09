@@ -7,6 +7,7 @@ import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { useShellCopy } from '../shell/shell-copy';
 import { ManagedCommandLine } from './ManagedCommandLine';
 import { managedJobCopy } from './managed-job.shell-copy';
+import { recoveryObject as object, type RecoveryDetail, readRecovery, recoveryPending } from './recovery-projection';
 
 const ACTIVE = new Set(['queued', 'running', 'cancelling']);
 type JobState = keyof typeof managedJobCopy.zh.state;
@@ -22,40 +23,6 @@ interface JobDetail {
   recovery: RecoveryDetail[];
   recoveryPending: boolean;
 }
-type RecoveryDisposition = 'parked' | 'interrupted' | 'needs_attention';
-interface RecoveryDetail {
-  owner: 'wait' | 'job';
-  disposition: RecoveryDisposition;
-  reasonCode: string;
-  recheck: boolean;
-}
-const object = (value: unknown): Record<string, unknown> | null =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-
-function readRecovery(value: unknown, owner: RecoveryDetail['owner']): RecoveryDetail | null {
-  const fact = object(value);
-  const recheck = object(fact?.recheck);
-  if (
-    !fact ||
-    !['parked', 'interrupted', 'needs_attention'].includes(String(fact.disposition)) ||
-    typeof fact.reasonCode !== 'string'
-  )
-    return null;
-  return {
-    owner,
-    disposition: fact.disposition as RecoveryDisposition,
-    reasonCode: fact.reasonCode,
-    recheck: recheck?.kind === 'observe_original_wait' || recheck?.kind === 'observe_original_job',
-  };
-}
-
-function recoveryPending(value: unknown): boolean {
-  const fact = object(value);
-  if (!fact || fact.disposition) return false;
-  const wakeIntent = object(fact.wakeIntent);
-  return typeof fact.nextAttemptAt === 'number' || object(fact.claim) !== null || wakeIntent?.status === 'pending';
-}
-
 function readDetail(body: unknown, taskId: string, jobId: string): JobDetail | null {
   const envelope = object(body);
   const job = object(envelope?.job);

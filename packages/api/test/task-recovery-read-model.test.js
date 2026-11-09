@@ -86,7 +86,80 @@ test('one corrupt recovery owner cannot hide healthy Tasks from the canonical li
   assert.equal(projected[1].recovery.incidents[0].reasonCode, 'healthy_owner_parked');
 });
 
-test('action recovery projection ignores snapshots from a replacement generation', async () => {
+for (const reasonCode of ['invalid_recovery_metadata', 'invalid_projection'])
+  test(`owner-level Ball ${reasonCode} remains visible on the original Task`, async () => {
+    const model = new TaskRecoveryReadModel({
+      ball: {
+        getRecoveryFacts: async (subjectKey) => ({
+          v: 1,
+          subjectKey,
+          generation: 0,
+          notices: {},
+          disposition: 'needs_attention',
+          reasonCode,
+          originalRaw: '{broken legacy bytes',
+        }),
+      },
+    });
+    const projected = await model.project(task);
+    assert.deepEqual(projected.recovery.incidents, [
+      {
+        source: 'ball_probe',
+        lane: 'probe',
+        disposition: 'needs_attention',
+        reasonCode,
+        executionRef: `ball:task:${task.id}:owner`,
+      },
+    ]);
+  });
+
+test('ordinary Tasks retain historical action recovery evidence without regaining action authority', async () => {
+  const { TaskActionSuccessorLifecycle } = await import('../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js');
+  const selected = {
+    leaseId: 'lease-historical',
+    tenantScope: 'owner-user',
+    subjectRef: `subject:task:${task.id}`,
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
+    generation: 3,
+    status: 'active',
+    holderCatIds: ['codex61-sol'],
+    holderThreadId: task.threadId,
+    terminalPredicate: { kind: 'task_done' },
+  };
+  let completions = 0;
+  const lifecycle = new TaskActionSuccessorLifecycle({
+    leaseStore: {
+      getByIdentity: async () => selected,
+      recovery: {
+        read: async (_leaseId, lane) => ({
+          lease: selected,
+          revision: 1,
+          fact: {
+            v: 1,
+            generation: 3,
+            attempts: 5,
+            nextAttemptAt: null,
+            ...(lane === 'dispatch' ? { disposition: 'parked', reasonCode: 'historical_dispatch_failed' } : {}),
+          },
+        }),
+      },
+    },
+    completionService: {
+      complete: async () => {
+        completions++;
+        return { outcome: 'committed' };
+      },
+    },
+  });
+  const ordinary = { ...task, userId: 'owner-user' };
+  assert.equal((await lifecycle.readRecoveryIncidents(ordinary))[0].reasonCode, 'historical_dispatch_failed');
+  await lifecycle.assertUpdateAllowed(ordinary, { ownerCatId: 'somebody-else' });
+  assert.equal(await lifecycle.completeStatusTransition(ordinary, { ...ordinary, status: 'done' }), false);
+  assert.equal(completions, 0, 'read compatibility must not restore execution or completion authority');
+});
+
+test('action recovery projection re-reads the current owner after a replacement generation', async () => {
   const { TaskActionSuccessorLifecycle } = await import('../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js');
   const selected = {
     leaseId: 'lease-selected',
@@ -100,16 +173,18 @@ test('action recovery projection ignores snapshots from a replacement generation
     holderThreadId: task.threadId,
     terminalPredicate: { kind: 'task_done' },
   };
+  const replacement = { ...selected, generation: 5 };
+  let identityReads = 0;
   const lifecycle = new TaskActionSuccessorLifecycle({
     leaseStore: {
-      getByIdentity: async () => selected,
+      getByIdentity: async () => (identityReads++ === 0 ? selected : replacement),
       recovery: {
         read: async (_leaseId, lane) => ({
-          lease: { ...selected, generation: lane === 'dispatch' ? 5 : 4 },
+          lease: replacement,
           revision: 1,
           fact: {
             v: 1,
-            generation: lane === 'dispatch' ? 5 : 4,
+            generation: 5,
             attempts: 5,
             nextAttemptAt: null,
             disposition: 'parked',
@@ -128,8 +203,10 @@ test('action recovery projection ignores snapshots from a replacement generation
   assert.deepEqual(
     incidents.map(({ lane, executionRef }) => [lane, executionRef]),
     [
-      ['return', 'action-successor:lease-selected:g4:return'],
-      ['task', 'action-successor:lease-selected:g4:task'],
+      ['return', 'action-successor:lease-selected:g5:return'],
+      ['dispatch', 'action-successor:lease-selected:g5:dispatch'],
+      ['task', 'action-successor:lease-selected:g5:task'],
     ],
   );
+  assert.equal(identityReads, 2);
 });

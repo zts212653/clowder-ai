@@ -152,4 +152,33 @@ describe('ConnectorBubble hold status lifecycle', () => {
     expect(container.textContent).not.toContain('取消持球');
     expect(container.textContent).not.toContain('取消并反馈');
   });
+
+  it('keeps a legacy wait recovery visible on the original card without a job id', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'inactive',
+          cancelable: false,
+          recovery: {
+            version: 1,
+            attempts: 5,
+            nextAttemptAt: null,
+            disposition: 'parked',
+            reasonCode: 'legacy_wait_failed',
+            recheck: { kind: 'observe_original_wait', taskId: 'hold-ball-refresh' },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message: holdMessage() }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('legacy_wait_failed');
+    expect(container.textContent).toContain('重新检查');
+    expect(container.textContent).not.toContain('已结束');
+  });
 });
