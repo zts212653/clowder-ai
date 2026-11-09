@@ -53,6 +53,9 @@ export function classifyTimerHoldRecovery(
   ) {
     return { kind: 'invalid', reason: 'timer_wait_identity_mismatch' };
   }
+  if (slaUntilMs <= def.trigger.fireAt) {
+    return { kind: 'invalid', reason: 'sla_not_after_wake' };
+  }
   return now > slaUntilMs
     ? { kind: 'expired', slaUntilMs }
     : { kind: 'recover', retryUntil: slaUntilMs, scheduledAt: wakeAt };

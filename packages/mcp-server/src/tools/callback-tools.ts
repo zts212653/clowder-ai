@@ -3416,7 +3416,7 @@ export async function handleHoldBall(input: {
           text: await renderCurrentCoCreatorText(
             'Error: waitSourceRef is REQUIRED when using wakeAfterMs. ' +
               'Declare what external condition justifies the timer — e.g. ' +
-              '{ kind: "github_issue", value: "#123", expectedSignal: "CI pass", slaUntilMs: 3600000 }. ' +
+              '{ kind: "github_issue", value: "#123", expectedSignal: "CI pass", slaUntilMs: Date.now() + 3600000 }. ' +
               'If you are waiting for a person to respond, use {{coCreator.mention}} or @句柄 instead of hold_ball.',
           ),
         },
@@ -4774,7 +4774,9 @@ export const callbackTools = [
             .number()
             .int()
             .positive()
-            .describe('SLA deadline in ms from epoch. Must be ≤ now + 3_600_000 (1h). No SLA = no hold.'),
+            .describe(
+              'SLA deadline in ms from epoch. Must be later than the server-computed wakeAt; leave execution margin. Must be ≤ now + 3_600_000 (1h). No SLA = no hold.',
+            ),
         })
         .optional()
         .describe(
