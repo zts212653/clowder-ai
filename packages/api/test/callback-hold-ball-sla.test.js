@@ -122,6 +122,7 @@ test('accepted online hold wakes exactly once despite 5ms callback jitter, with 
   await setImmediate();
   assert.equal(f.deliveries.length, 1);
   assert.equal(f.deliveries[0].source.meta.phase, 'wake');
+  assert.equal(f.deliveries[0].source.meta.cancelable, false);
   assert.equal(f.deliveries[0].targetCatId, 'codex');
   assert.equal(f.ledger.query(id, 1)[0].outcome, 'RUN_DELIVERED');
   assert.equal(f.store.getById(id).params.holdLifecycle.status, 'fired');
@@ -184,6 +185,7 @@ for (const mode of [
     }
     assert.equal(f.deliveries.length, 1);
     assert.equal(f.deliveries[0].source.meta.phase, 'status');
+    assert.equal(f.deliveries[0].source.meta.cancelable, false);
     assert.equal(f.deliveries[0].targetCatId, undefined);
     assert.match(f.deliveries[0].content, /截止|窗口/);
     assert.doesNotMatch(f.deliveries[0].content, /服务未运行/);
@@ -216,6 +218,7 @@ for (const invalid of [false, true]) {
     await setImmediate();
     assert.equal(f.deliveries.length, 1);
     assert.equal(f.deliveries[0].source.meta.phase, invalid ? 'status' : 'wake');
+    assert.equal(f.deliveries[0].source.meta.cancelable, false);
     assert.equal(f.deliveries[0].targetCatId, invalid ? undefined : 'codex');
     if (invalid) {
       assert.equal(f.store.getById(id).params.holdLifecycle.status, 'retired_invalid');

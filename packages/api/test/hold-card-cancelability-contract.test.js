@@ -69,7 +69,12 @@ const EXPECTED_PRODUCERS = [
     cancelable: false,
     count: 1,
   },
-  { file: 'infrastructure/scheduler/TaskRunnerV2.ts', path: 'missed wake window', cancelable: false, count: 1 },
+  {
+    file: 'infrastructure/scheduler/TaskRunnerV2.ts',
+    path: 'missed wake window + pre-execution expiry/invalid window',
+    cancelable: false,
+    count: 2,
+  },
   {
     file: 'infrastructure/scheduler/templates/reminder.ts',
     path: 'wake receipt + wake-admission failure',
@@ -133,7 +138,7 @@ test('the four exceptional terminals stay stated as terminal despite their "stat
   const exceptional = [
     ['routes/callback-hold-ball-routes.ts', 'launch cancellation'],
     ['domains/ball-custody/ManagedCommandWakeRecoveryEngine.ts', 'spawn/runner loss'],
-    ['infrastructure/scheduler/TaskRunnerV2.ts', 'missed wake window'],
+    ['infrastructure/scheduler/TaskRunnerV2.ts', 'missed/pre-execution wake window'],
     ['infrastructure/scheduler/templates/reminder.ts', 'wake-admission failure'],
   ];
   for (const [file, label] of exceptional) {
