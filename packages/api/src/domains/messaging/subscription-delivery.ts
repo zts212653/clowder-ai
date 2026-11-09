@@ -342,6 +342,15 @@ export class SubscriptionDelivery {
     this.deps.onRegistered?.(declaration.threadId);
   }
 
+  /** Activation can restore registrations before its carrier can accept delivery. */
+  resumeInstance(subscriberId: string): void {
+    if (this.stopped.has(subscriberId)) return;
+    for (const [threadId, registrations] of this.byThread) {
+      if (registrations.some((registration) => registration.subscriberId === subscriberId))
+        this.deps.onRegistered?.(threadId);
+    }
+  }
+
   unregister(subscriberId: string, threadId: string): void {
     const remaining = (this.byThread.get(threadId) ?? []).filter((entry) => entry.subscriberId !== subscriberId);
     if (remaining.length === 0) this.byThread.delete(threadId);

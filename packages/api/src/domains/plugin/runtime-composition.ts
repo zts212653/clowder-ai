@@ -682,6 +682,7 @@ export function createDormantPluginRuntimeComposition(
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),
     }),
+    (instanceId) => subscriptionDelivery.resumeInstance(instanceId),
   );
   deliveryTarget.current = supervisor;
   supervisor.register(

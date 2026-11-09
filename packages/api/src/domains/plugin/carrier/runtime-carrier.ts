@@ -107,6 +107,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
     private readonly projectOutputs?: PluginProjectOutputs,
+    private readonly afterStart?: (instanceId: string) => void,
   ) {
     this.nativeActions = new NativePluginActions((id) => this.#admission(id));
     this.#nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
@@ -167,7 +168,10 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
       // stop/stopAll invalidate this admission even after carrier readiness.
-      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
+      if (this.nativeActions.generation(pluginInstanceId) === generation) {
+        this.ui.activate(admission);
+        this.afterStart?.(pluginInstanceId);
+      }
       return result;
     } catch (error) {
       if (!admitted) throw error;

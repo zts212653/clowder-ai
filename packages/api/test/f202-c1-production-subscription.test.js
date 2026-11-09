@@ -31,15 +31,15 @@ async function tempRoot(label) {
   return root;
 }
 
-async function waitFor(predicate, message) {
-  const deadline = Date.now() + 2_000;
+async function waitFor(predicate, message, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error(message);
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 
-test('production composition delivers concurrent cat replies exactly once to an installed package action', async () => {
+async function productionSubscriptionScenario(recovering) {
   const projectRoot = await tempRoot('cat-cafe-f202-production-subscription-project-');
   const packageRoot = await tempRoot('cat-cafe-f202-production-subscription-package-');
   const observation = workerObservation(join(projectRoot, 'subscription-observation.json'), {
@@ -75,6 +75,7 @@ test('production composition delivers concurrent cat replies exactly once to an 
         capabilities: ['message.event.subscribe', 'thread.write'],
       },
     ],
+    configuration: [{ key: 'initializationGate', label: 'Initialization gate', kind: 'string', required: false }],
     runtime: { transport: 'builtin', entrypoint: 'dist/plugin.js' },
   };
   await mkdir(join(packageRoot, 'dist'), { recursive: true });
@@ -85,10 +86,12 @@ test('production composition delivers concurrent cat replies exactly once to an 
       observation.source,
       'export default { create() { return {',
       '  async start(host) {',
-      '    const thread = await host.threads.create({ title: "Fixture" });',
+      '    const thread = state.threadId ? await host.threads.get(state.threadId) : await host.threads.create({ title: "Fixture" });',
       '    state.threadId = thread.id;',
       '    saveState();',
       "    await host.messaging.subscribe({ threadId: thread.id, method: 'fixture.outbound' });",
+      '    state.restored = true; saveState();',
+      "    await host.config.get('initializationGate');",
       '    return {',
       "      actions: { 'fixture.outbound': async (input) => { if(input.kind==='message') { state.calls.push(input); state.sequence.push('message'); } else { state.lifecycleCalls.push(input); state.sequence.push(input.state); } saveState(); return {deliveryId:input.deliveryId}; } },",
       '      stop() {},',
@@ -109,8 +112,22 @@ test('production composition delivers concurrent cat replies exactly once to an 
     onPublishFailure: (error, stored) => failures.push({ error, threadId: stored.threadId }),
   });
   const threadStore = new ThreadStore();
+  let startingPaused = false;
+  const startupGate = Promise.withResolvers();
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
+    configuration: {
+      async readConfig(_instanceId, key) {
+        if (recovering && key === 'initializationGate' && observation.read().restored) {
+          startingPaused = true;
+          await startupGate.promise;
+        }
+        return undefined;
+      },
+      async readSecret() {
+        return undefined;
+      },
+    },
     messageStore,
     lifecyclePresentation: async () => ({
       actor: { displayName: 'Fixture Cat', emoji: '🐱' },
@@ -133,6 +150,45 @@ test('production composition delivers concurrent cat replies exactly once to an 
 
   const installed = await manager.install({ source: { kind: 'local-directory', path: packageRoot } });
   const beforeEnable = (await manager.get(installed.pluginId)).plugin;
+  if (recovering) {
+    const thread = await threadStore.create('owner-1', 'Recovered thread');
+    await writeFile(
+      join(projectRoot, 'subscription-observation.json'),
+      JSON.stringify({ ...observation.read(), threadId: thread.id }),
+    );
+    const instanceId = beforeEnable.pluginInstanceId;
+    const { handleId } = await runtime.messaging.ensureThreadHandle({
+      pluginInstanceId: instanceId,
+      threadId: thread.id,
+      userId: 'owner-1',
+      scope: { canSend: false, canSubscribe: true },
+    });
+    const { subscriptionId } = await runtime.messaging.subscribe({ pluginInstanceId: instanceId }, handleId);
+    await messageStore.append({
+      from: { kind: 'agent', catId: 'opus' },
+      threadId: thread.id,
+      userId: 'owner-1',
+      content: 'pending before Host restart',
+      timestamp: 1,
+    });
+    const enabling = manager.setEnabled(installed.pluginId, {
+      enabled: true,
+      expectedRevision: beforeEnable.lifecycleRevision,
+    });
+    try {
+      await waitFor(() => startingPaused, 'package did not pause after restoring its subscription', 10_000);
+      await waitFor(() => failures.length > 0, 'the initial drain must encounter the not-yet-loaded module');
+      assert.equal(observation.read().calls.length, 0);
+    } finally {
+      startupGate.resolve();
+    }
+    await enabling;
+    await waitFor(() => observation.read().calls.length === 1, 'ready activation never resumed the recovered cursor');
+    await runtime.subscriptionDelivery.enqueueThread(thread.id, async () => {});
+    assert.equal((await stores.cursors.get(instanceId, subscriptionId)).ackedSequence, 1);
+    assert.equal(observation.read().calls[0].envelope.payload.elements[0].payload.text, 'pending before Host restart');
+    return;
+  }
   await manager.setEnabled(installed.pluginId, { enabled: true, expectedRevision: beforeEnable.lifecycleRevision });
   let state = observation.read();
   assert.ok(state?.threadId, 'the installed package must reach its Host subscription surface');
@@ -225,4 +281,9 @@ test('production composition delivers concurrent cat replies exactly once to an 
   await new Promise((resolve) => setTimeout(resolve, 20));
   state = observation.read();
   assert.equal(state.calls.length, 4, 'disabled packages must be absent from the live delivery set');
-});
+}
+
+test('production composition delivers concurrent cat replies exactly once to an installed package action', () =>
+  productionSubscriptionScenario(false));
+test('production activation replays a restored unacked cursor after slow package startup', () =>
+  productionSubscriptionScenario(true));

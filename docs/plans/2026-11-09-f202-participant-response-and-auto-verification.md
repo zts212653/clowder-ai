@@ -321,3 +321,17 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - 本轮fallback分析：旧格式分支是有边界的alpha兼容，当前交付不猜种类；epoch与原revision分别约束准入和提交，注册回调复用单一已有调度器，不增加三层fallback链。
 
 - 最终Host完整隔离API编译通过；精确随包19项加真实生产订阅/发布/调度回归合计37/37（/tmp/f202-alpha51-host-acceptance.log）。最终自动重放同时核对真实cursor.ackedSequence=2，无回执后手动drain/deliver。Biome检查无错误，保留既有复杂度/非空断言6条警告；diff通过。
+
+
+### R11：真实activation就绪后的订阅恢复
+
+接受当前Host84a504e0上的云端P2 4516857739。注册就绪与runtime可投递是两个事实：ModulePluginRuntime在plugin.start返回前尚未写入loaded，已注册的恢复订阅可能先drain失败。单次注册通知不能替代activation就绪。
+
+- 在真实生产composition测试中预置已订阅、未ack的游标和成员回复；实际安装的独立worker插件恢复同一线程订阅后暂停于配置读取。先确认真实初次drain因模块尚未loaded而失败，再释放初始化。旧代码无新消息时永不回流，为RED。没有用延时假定ready或手动drain绕过启动。
+- 通用carrier router仅在carrier.start及声明资源准入成功、原native generation未被stop取消后，发出afterStart通知。composition把通知接到SubscriptionDelivery.resumeInstance，重新调度该实例现存订阅，使用同一已有scheduler和cursor。没有Dot分支、后台轮询或重置cursor。
+- 同一真实worker慢启动测试修后GREEN，自动送达一次，已确认游标推进到1。普通生产并发消息仍恰好一次；新增router对照确认启动失败或启动中停止不发ready通知。源代码定向11/11、完整隔离API编译通过。
+- 插件4e2dc4e50b02954a52de982d28c9907bbef18361和alpha.51归档未变，沿用其当前精确云端无重大问题回执6748856158和已核CI全绿。SHA256仍6214d9b5717900bde17691ff255d148df90423b46fe7820476f6bc1ce3c4283e；不重包、不重触发未变化插件的复审。
+- 证据：/tmp/f202-r11-ready-red.log、/tmp/f202-r11-ready-green-final.log、/tmp/f202-r11-types.log；真实fixture在f202-c1-production-subscription.test.js，实际独立worker/ModulePluginRuntime/CarrierRouter/SubscriptionDelivery均参与。测试使用临时目录、独立存储，不读取运行实例配置、用户数据或Work。
+- fallback审视：本轮只有真实就绪信号与原代际守卫，没有新增catch/重试/多层fallback。尚未覆盖新的完整Host套件或实机soak，未安装、重启、合并或发布。
+
+- 最终受影响carrier/module/生产订阅/发布/投递检查84/84（/tmp/f202-r11-regression.log）；Biome无错误，7条警告未作无关重构；diff通过。
