@@ -213,3 +213,18 @@ Host CI 反馈也在原范围内处理：目标回复状态模块下沉至 messa
 验证：Host消息/媒体/投递63/63、自有无端口Redis持久状态1/1、完整API隔离编译、使用实际新 shared/API 产物的 Web 全量类型检查、受影响组件 ESLint（0错误）、全部受跟踪文件 Biome 通过。最终实际编译产物的随包构建/闭包、显示、归档准入及桌面公开链路25/25，原SIGINT检查拆出的两条2/2。普通本地 pnpm check 已经过 source checks，但格式器会扫描本工位未跟踪的验收产物，故不声称该命令全绿；另以受跟踪文件范围核对格式，远端干净CI仍是后续真相。
 
 alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233bd`，89个运行/资源/声明/文档文件一致，精确归档空缓存离线安装通过。当前树仍仅新增最终归档，不保留alpha.41。日志 `/tmp/f202-pr209-r3-*`、`/tmp/f202-alpha42-*`、`/tmp/f202-ci-*`。未合并、发布、安装到运行实例或重启；新HEAD后仅回云端继续审查，不以旧本地批准替代。
+
+
+## 当前 PR CI 与跨平台闭包（alpha.44）
+
+本轮继续处理 PR1923 / PR209 的 CI 与云端意见，没有合并、发布或运行实例操作授权。
+
+- Superagent 的早期 npm 验证不足：SDK candidate.11 的真实注册表包依赖 contract candidate.0，而旧 shrinkwrap 写成了 candidate.1，且 integrity 不符。现在由注册表重建真实嵌套依赖；声明仍使用已发布且足够的 SDK11，直接 contract 为 candidate.1。干净 pnpm 的 TS2742 已复现，fixture 使用显式返回类型后，pnpm 与独立 npm ci --include=dev 均通过类型、20项测试及构建，生产闭包检查通过。
+- Host 云端 P1（discussion_r4513917964）成立：默认归档只有打包机 native sharp，其他平台的插件入口和迁移 importer 都会失败。全平台原生库试包超过既有预检预算，未交付到运行实例。最终 alpha.44 改为当前 native 后端加 sharp 已锁定的 WASM 后端，sharp 对齐仓内已有 0.34.5；不提高 Host 32MiB 压缩、64MiB 展开上限，也不新增 Host 目标平台安装分支。清空消费者中的当前 native 库后，真实离线安装、插件启停与两份独立安装的数据/图片迁移完整通过。
+- Linux Dot CI 的 controller 反例实际注入 Node 假 tunnel，却被默认打包 binary 的 macOS 平台限制拦住。限制现仅约束默认资产，显式 binary 仍经文件/摘要/代际检查；默认非 macOS arm64 拒绝不变，没有扩大默认 tunnel 平台支持。
+- 能力路由测试去掉重复嵌套的 writer fixture，避免清理后恢复到已删除的配置根；89/89通过。安装器断言跟随当前支持到 contract candidate.1 的范围，26/26通过；旧共享恢复的固定公开指引断言更新，manager routes 34/34通过。均未放宽生产校验。
+- Web 生产夹具补齐新增的 addressed-targets GET；隔离生产 build 成功，当前真实 classic/v2 完成/退出/刷新四条浏览器旅程4/4通过，控制台及意外请求均为空。首次本地失败来自隔离编译根漏拷贝 guides，已补齐实际 YAML 资源重跑；未 mock 掉引导接口或放松断言。构建证据对应 Host 607532408c，后续只有随包与验收说明变化。
+
+最终插件 HEAD `0c3b8457dcce0bd25330fe74707b1c17f99acd39`；干净冻结安装 Dot 222/222、89个自有发布文件逐字节一致。alpha.44 SHA256 `a39d8168901fd47091a15266571f12dcc82693f5d0cd73ae8d87043e1931ef99`，压缩22,375,382字节，展开61,803,004字节。当前树仅保留这一新增Dot版本；旧签名/native重构和通用共享授权产品仍在本次范围之外。完整API隔离编译通过，精确Host最终包预检/空缓存离线安装/入口与PNG实测通过，随包构建、闭包与显示检查19/19通过。归档检查由TS转为公共JS测试，并接入Windows smoke；远端当前HEAD CI仍是后续真相。
+
+日志：`/tmp/f202-alpha44-*`、`/tmp/f202-superagent-pnpm-green.log`、`/tmp/f202-superagent-npm-final.log`、`/tmp/f202-capabilities-fixture-green-query.log`、`/tmp/f202-official-contract-range-green.log`、`/tmp/f202-manager-guidance-green.log`、`/tmp/f202-host-production-page-green.log`。本轮隔离证据不替代新的Work/soak；外部finding修复后回云端，不继承旧HEAD的本地批准。
