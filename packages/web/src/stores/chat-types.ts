@@ -211,6 +211,8 @@ export interface ChatMessage {
   extra?: {
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
     /** Host receipt: input acceptance only, never a model response. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
     pluginAddressedReceipt?: {
       inputMessageId: string;
       targetId: string;

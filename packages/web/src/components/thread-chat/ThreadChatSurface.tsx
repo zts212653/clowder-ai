@@ -184,9 +184,6 @@ export function ThreadChatSurface({
   const uiThinkingExpandedByDefault = useChatStore((state) => state.uiThinkingExpandedByDefault);
   const isOfflineSnapshot = useChatStore((state) => state.isOfflineSnapshot);
   const { historyHostRef, composerOnly } = useThreadChatHistoryPresentation(presentation);
-  const pluginDeliveryVisit = useRef({ threadId, startedAt: Date.now() });
-  if (pluginDeliveryVisit.current.threadId !== threadId)
-    pluginDeliveryVisit.current = { threadId, startedAt: Date.now() };
   const compact = density === 'compact';
 
   const lifecycleActiveRuns = useMemo<readonly LifecycleActiveRun[]>(
@@ -265,7 +262,6 @@ export function ThreadChatSurface({
         compact={compact}
         threadId={threadId}
         timelineMessages={timelineProjectionMessages}
-        pluginDeliveryLiveSince={pluginDeliveryVisit.current.startedAt}
         activeRuns={message.lifecycle?.dispatchRefs?.length ? lifecycleActiveRuns : undefined}
         getCatById={getCatById}
         onEditCat={handleEditCat}

@@ -1022,6 +1022,7 @@ local extra=cjson.decode(ARGV[1])
 local currentRaw=redis.call('HGET',KEYS[1],'extra')
 local current={}
 if currentRaw and currentRaw ~= '' then current=cjson.decode(currentRaw) end
+extra.targetResponse=current.targetResponse
 extra.messageSearchAnswer=current.messageSearchAnswer
 if current.messageSearchAnswer then
   local binding=current.messageSearchAnswer
@@ -3659,6 +3660,38 @@ export class RedisMessageStore {
     const result = await this.getById(id);
     if (result) notifyMessageTimelineChange(this, result);
     return result;
+  }
+
+  async compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): Promise<StoredMessage | null> {
+    const changed = await this.redis.eval(
+      `
+if redis.call('EXISTS',KEYS[1]) == 0 then return 0 end
+if redis.call('HGET',KEYS[1],'recall') or redis.call('HGET',KEYS[1],'_tombstone') then return 0 end
+local raw=redis.call('HGET',KEYS[1],'extra')
+if not raw or raw == '' then return 0 end
+local extra=cjson.decode(raw)
+local prior=extra.targetResponse
+local next=cjson.decode(ARGV[2])
+if not prior then
+  local receipt=extra.pluginAddressedReceipt
+  if tonumber(ARGV[1]) ~= 0 or next.revision ~= 1 or not receipt or
+     receipt.targetId ~= next.targetId or receipt.inputMessageId ~= next.inputMessageId then return 0 end
+elseif prior.revision ~= tonumber(ARGV[1]) or next.revision ~= prior.revision+1 or
+   next.targetId ~= prior.targetId or next.inputMessageId ~= prior.inputMessageId or
+   next.execution.id ~= prior.execution.id then return 0 end
+extra.targetResponse=next
+redis.call('HSET',KEYS[1],'extra',cjson.encode(extra))
+return 1`,
+      1,
+      MessageKeys.detail(id),
+      String(expectedRevision),
+      JSON.stringify(next),
+    );
+    return Number(changed) === 1 ? this.getById(id) : null;
   }
 
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {

@@ -71,7 +71,7 @@
     "@clowder-ai/plugin-contract-beta27": "npm:@clowder-ai/plugin-contract@0.1.0-beta.27",
     "@clowder-ai/plugin-contract-beta28": "npm:@clowder-ai/plugin-contract@0.1.0-beta.28",
     "@clowder-ai/plugin-contract-beta29": "npm:@clowder-ai/plugin-contract@0.1.0-beta.29",
-    "@clowder-ai/plugin-sdk": "file:vendor/clowder-ai-plugin-sdk-0.3.0-beta.2-candidate.11.tgz",
+    "@clowder-ai/plugin-sdk": "file:vendor/clowder-ai-plugin-sdk-0.3.0-beta.2-candidate.12.tgz",
     "@fastify/cookie": "9",
     "@fastify/cors": "^9.0.0",
     "@fastify/multipart": "8",

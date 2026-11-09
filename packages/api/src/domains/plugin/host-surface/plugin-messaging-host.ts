@@ -11,6 +11,7 @@ import { isSystemUserMessage, resolveThreadMessageVisibility } from '../../cats/
 import { MessagingError } from '../../messaging/contract/host-types.js';
 import { validateDraft } from '../../messaging/contract/validate.js';
 import type { MessagingService } from '../../messaging/messaging-service.js';
+import { resolveTargetResponse } from '../../messaging/target-response.js';
 import { pluginMessageSourceOf } from './plugin-messaging-source.js';
 import {
   createUnavailablePluginMessagingSubscriptionHost,
@@ -29,6 +30,7 @@ const SEND_KEYS = new Set([
   'idempotencyKey',
   'sourceEventId',
   'replyTo',
+  'response',
   'payload',
   'wake',
   'sender',
@@ -43,6 +45,10 @@ export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
   readonly contentBlocks?: readonly MessageContent[];
   readonly identity?: string;
   readonly meta?: Readonly<Record<string, unknown>>;
+  readonly response?: {
+    readonly deliveryId: string;
+    readonly status: import('@cat-cafe/shared').TargetResponseResult['status'];
+  };
 };
 
 /** Public message facts; private execution/custody records are never projected. */
@@ -245,6 +251,16 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       if (parsedContentBlocks !== undefined && !parsedContentBlocks.success) {
         throw new MessagingError('VALIDATION', 'contentBlocks failed Host validation');
       }
+      const responseResult =
+        record.response === undefined
+          ? undefined
+          : await resolveTargetResponse(
+              input.messageStore as IMessageStore,
+              input.pluginInstanceId,
+              threadId,
+              record.replyTo,
+              record.response,
+            );
       const { source, sender } = pluginMessageSourceOf(input.manifest, origin, {
         sender: record.sender,
         identity: record.identity,
@@ -281,6 +297,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const draft = { ...validated, address };
       const receipt = await input.messaging.sendFromHost({ pluginInstanceId: input.pluginInstanceId }, draft, {
         source,
+        ...(responseResult ? { responseResult } : {}),
         ...(input.assertAdmissionCurrent ? { assertAdmissionCurrent: input.assertAdmissionCurrent } : {}),
         ...(parsedContentBlocks === undefined
           ? {}

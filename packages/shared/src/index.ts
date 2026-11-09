@@ -103,6 +103,7 @@ export { richBlockSchema } from './schemas/rich-block.schema.js';
 export * from './shared-markdown-selection.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
+export * from './target-response.js';
 export * from './text-utils.js';
 export * from './thread-works.js';
 export * from './types/approval-decision-receipt.js';

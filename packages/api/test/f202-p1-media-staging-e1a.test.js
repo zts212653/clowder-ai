@@ -200,6 +200,69 @@ test('deferred media reply publishes its persisted reply link and finalized bloc
   assert.equal(envelope.message.content, stored.content);
 });
 
+test('deferred terminal reply settles the durable target only when its result is published', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('terminal reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'send image',
+    mentions: [],
+    timestamp: 1,
+  });
+  const deliveryId = 'ad_staged-result';
+  const carrier = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'system',
+    from: { kind: 'system', service: 'plugin_delivery' },
+    content: 'receipt',
+    mentions: [],
+    timestamp: 2,
+    extra: {
+      targetResponse: {
+        v: 1,
+        revision: 1,
+        inputMessageId: parent.id,
+        targetId: ctx.pluginInstanceId,
+        execution: { kind: 'plugin', id: deliveryId },
+        status: 'waiting',
+        startedAt: 2,
+        updatedAt: 2,
+      },
+    },
+  });
+  const receipt = await h.service.send(
+    ctx,
+    { ...h.draft, replyTo: parent.id },
+    {
+      source,
+      responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'completed' },
+    },
+  );
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'waiting');
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'e'.repeat(32)}` });
+  await until(() => broadcasts.some(([, event]) => event === 'connector_message'));
+  const result = h.messageStore.getById(receipt.messageId);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.resultMessageId, result.id);
+  const live = broadcasts.find(([, event]) => event === 'connector_message')[2].message;
+  assert.equal(live.replyTo, parent.id);
+  assert.deepEqual(live.extra.targetResponseResult, result.extra.targetResponseResult);
+  const revision = h.messageStore.getById(carrier.id).extra.targetResponse.revision;
+  await h.pending.recover();
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.revision, revision);
+  assert.equal(broadcasts.filter(([, event]) => event === 'connector_message').length, 1);
+});
+
 test('post-processing enriches the one durable publication before wake without losing the HMR', async () => {
   const processed = [];
   const hmrId = `hmr_${'a'.repeat(32)}`;

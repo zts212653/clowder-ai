@@ -2735,6 +2735,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         const existing = messages[existingIndex]!;
         if (
+          existing.extra?.targetResponse &&
+          msg.extra?.targetResponse &&
+          existing.extra.targetResponse.revision > msg.extra.targetResponse.revision
+        )
+          return messages;
+        if (
           existing.lifecycle?.kind === 'response' &&
           existing.lifecycle.status !== 'processing' &&
           msg.lifecycle?.kind === 'response' &&

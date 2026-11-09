@@ -76,6 +76,7 @@ test('publishes a durable plugin dispatch while delivery is still awaiting ackno
     const receipt = (await store.getById(ref.statusMessageId))!;
     assert.equal((receipt.extra?.pluginAddressedReceipt as { phase?: string })?.phase, 'sending');
     assert.equal(receipt.lifecycle?.kind === 'response', false);
+    assert.equal(receipt.extra?.targetResponse?.status, 'delivering');
     assert.ok(
       updates.some(
         (row) =>
@@ -96,6 +97,7 @@ test('publishes a durable plugin dispatch while delivery is still awaiting ackno
   const source = (await store.getById(sent.message.id))!;
   const receipt = (await store.getById(source.lifecycle!.dispatchRefs![0]!.statusMessageId))!;
   assert.equal(receipt.extra?.pluginAddressedReceipt?.accepted, true);
+  assert.equal(receipt.extra?.targetResponse?.status, 'waiting');
   assert.equal(source.lifecycle!.dispatchRefs![0]!.phase, 'settled');
   await delivery.deliver(claimed, 'pi_original');
   assert.equal(calls, 1);
@@ -383,4 +385,51 @@ test('a late acknowledgement after timeout does not rewrite the uncertain receip
   assert.equal(recovered.extra?.pluginAddressedReceipt?.accepted, false);
   assert.equal(recovered.extra?.pluginAddressedReceipt?.phase, 'unconfirmed');
   assert.equal(calls, 1);
+});
+
+test('reply completion arriving before transport acknowledgement remains terminal after the queue retires', async () => {
+  const { advanceTargetResponse } = await import('../src/domains/messaging/target-response.js');
+  const store = new MessageStore(),
+    queue = new InvocationQueue();
+  const delivery = new AddressedPluginQueueDelivery({
+    targets: { isInstanceId: async () => true } as never,
+    queue,
+    messageStore: store,
+    manager: {
+      deliverAddressed: async (_id, input) => {
+        const carrier = await store.getByIdempotencyKey('system', 'thread', `plugin-addressed:${input.deliveryId}`);
+        await advanceTargetResponse(store, carrier!.id, { status: 'completed', resultMessageId: 'actual-reply' });
+        return { deliveryId: input.deliveryId };
+      },
+    },
+  });
+  const sent = await queue.send(
+    store,
+    {
+      userId: 'owner',
+      threadId: 'thread',
+      from: { kind: 'user', userId: 'owner' },
+      deliveryStatus: 'queued',
+      content: 'hello',
+      mentions: [],
+      timestamp: 1,
+    },
+    {
+      userId: 'owner',
+      threadId: 'thread',
+      from: { kind: 'user', userId: 'owner' },
+      kind: 'conversation_input',
+      content: 'hello',
+      targetCats: ['pi_target'],
+      ownerAuthProvenance: 'strict',
+      intent: 'execute',
+    },
+  );
+  if (sent.outcome !== 'enqueued') throw Error('not admitted');
+  const claimed = await queue.markProcessingByIdDurable('thread', sent.entries[0]!.id, 'pi_target');
+  const result = await delivery.deliver(claimed!, 'pi_target');
+  assert.equal(result.extra?.pluginAddressedReceipt?.accepted, true);
+  assert.equal(result.extra?.targetResponse?.status, 'completed');
+  assert.equal(result.extra?.targetResponse?.resultMessageId, 'actual-reply');
+  assert.equal((await queue.listAllDurable('thread')).length, 0);
 });

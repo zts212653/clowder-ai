@@ -15,7 +15,6 @@ interface ChatMessageRowProps {
   compact?: boolean;
   threadId: string;
   timelineMessages: readonly ChatMessageData[];
-  pluginDeliveryLiveSince?: number;
   activeRuns?: readonly LifecycleActiveRun[];
   getCatById: (id: string) => CatData | undefined;
   onEditCat: (catId: string) => void;
@@ -50,7 +49,6 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   compact = false,
   threadId,
   timelineMessages,
-  pluginDeliveryLiveSince,
   activeRuns,
   getCatById,
   onEditCat,
@@ -98,7 +96,6 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           compact={compact}
           threadId={threadId}
           timelineMessages={timelineMessages}
-          pluginDeliveryLiveSince={pluginDeliveryLiveSince}
           activeRuns={activeRuns}
           getCatById={getCatById}
           onEditCat={onEditCat}

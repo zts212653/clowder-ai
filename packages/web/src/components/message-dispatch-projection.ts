@@ -1,5 +1,6 @@
 import {
   hasExactLifecycleProcessingDispatch,
+  isTargetResponseTerminal,
   type LifecycleActiveRun,
   type LifecycleDispatchRef,
   type LifecycleStoredMessageMetadata,
@@ -119,7 +120,17 @@ export function projectMessageDispatchAvatars(
     const statusMessage = exactMessageById(timelineMessages, ref.statusMessageId);
     const receipt = pluginDeliveryReceipt(statusMessage);
     if (receipt?.inputMessageId === message.id && receipt.targetId === ref.targetId)
-      return [linkedProjection(ref, ref.phase === 'settled' ? 'settled' : 'delivered', statusMessage!.timestamp)];
+      return [
+        linkedProjection(
+          ref,
+          statusMessage?.extra?.targetResponse && isTargetResponseTerminal(statusMessage.extra.targetResponse.status)
+            ? 'settled'
+            : statusMessage?.extra?.targetResponse?.status === 'processing'
+              ? 'processing'
+              : 'delivered',
+          statusMessage!.timestamp,
+        ),
+      ];
     const statusLifecycle = statusMessage?.lifecycle;
     if (!statusLifecycle) return [deliveredProjection(ref)];
     const linked = projectDispatchRef(message.id, refs, ref, statusLifecycle, activeRuns);

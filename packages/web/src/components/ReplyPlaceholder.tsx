@@ -13,7 +13,15 @@ export function ReplyPlaceholder({
   avatar?: ReactNode;
   heading: ReactNode;
   children: ReactNode;
-  state: 'delivering' | 'awaiting_reply' | 'processing';
+  state:
+    | 'delivering'
+    | 'awaiting_reply'
+    | 'processing'
+    | 'unconfirmed'
+    | 'completed'
+    | 'failed'
+    | 'canceled'
+    | 'interrupted';
   targetId?: string;
 }) {
   return (
@@ -26,7 +34,14 @@ export function ReplyPlaceholder({
       role="status"
     >
       {avatar ? (
-        <span data-reply-avatar className="animate-pulse motion-reduce:animate-none">
+        <span
+          data-reply-avatar
+          className={
+            ['delivering', 'awaiting_reply', 'processing'].includes(state)
+              ? 'animate-pulse motion-reduce:animate-none'
+              : undefined
+          }
+        >
           {avatar}
         </span>
       ) : null}

@@ -300,6 +300,16 @@ describe('ThreadChatSurface plugin reply position', () => {
       content: '插件投递与接收状态。',
       timestamp: Date.now() + 1,
       extra: {
+        targetResponse: {
+          v: 1,
+          revision: 1,
+          inputMessageId: source.id,
+          targetId: 'pi_helper',
+          execution: { kind: 'plugin', id: `delivery-${source.id}` },
+          status: phase === 'sending' ? 'delivering' : phase === 'accepted' ? 'waiting' : 'unconfirmed',
+          startedAt: 1,
+          updatedAt: 1,
+        },
         pluginAddressedReceipt: {
           inputMessageId: source.id,
           targetId: 'pi_helper',
@@ -363,13 +373,16 @@ describe('ThreadChatSurface plugin reply position', () => {
     await render([a, b, receipt(a, 'accepted'), receipt(b, 'accepted'), image]);
     expect(container.querySelectorAll('[data-reply-target="pi_helper"]')).toHaveLength(1);
   });
-  it('does not animate historical receipts or let an empty/hidden reply remove a live placeholder', async () => {
+  it('recovers durable waiting, keeps legacy receipts quiet, and ignores empty or hidden replies', async () => {
     await render([]);
     const sent = input(),
       ack = receipt(sent);
     ack.timestamp = 1;
-    await render([sent, ack]);
+    const legacy = { ...ack, extra: { pluginAddressedReceipt: ack.extra!.pluginAddressedReceipt } };
+    await render([sent, legacy]);
     expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    await render([sent, ack]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
     const fresh = receipt(sent);
     await render([sent, fresh, reply(sent, 'pi_helper', '')]);
     expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
@@ -380,9 +393,11 @@ describe('ThreadChatSurface plugin reply position', () => {
     ]);
     expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
     await render([sent, receipt(sent, 'unconfirmed')]);
-    expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    expect(container.querySelector('[data-reply-target="pi_helper"]')?.textContent).toContain('投递结果未确认');
+    expect(container.querySelector('[data-reply-target="pi_helper"] .animate-pulse')).toBeNull();
     await render([sent, receipt(sent, 'unconfirmed'), reply(sent)]);
-    expect(container.textContent).toContain('已回复');
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    expect(container.textContent).toContain('hello');
     expect(container.textContent).not.toContain('请检查插件后重新发送');
   });
 });

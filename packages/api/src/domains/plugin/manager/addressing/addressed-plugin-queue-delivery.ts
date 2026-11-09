@@ -3,6 +3,7 @@ import type { InvocationQueue, QueueEntry } from '../../../cats/services/agents/
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
 import { projectEnvelope } from '../../../messaging/envelope.js';
 import type { MediaEntitlementLedger } from '../../../messaging/media-entitlements.js';
+import { advanceTargetResponse } from '../../../messaging/target-response.js';
 import type { PluginManagerService } from '../plugin-manager-service.js';
 import type { PluginAddressedTargets } from './plugin-addressed-targets.js';
 
@@ -55,7 +56,19 @@ export class AddressedPluginQueueDelivery {
         threadId: source.threadId,
         from: { kind: 'system', service: 'plugin_delivery' },
         content: '插件投递与接收状态。',
-        extra: { pluginAddressedReceipt: { targetId, inputMessageId: source.id, accepted: false, phase: 'sending' } },
+        extra: {
+          pluginAddressedReceipt: { targetId, inputMessageId: source.id, accepted: false, phase: 'sending' },
+          targetResponse: {
+            v: 1,
+            revision: 1,
+            inputMessageId: source.id,
+            targetId,
+            execution: { kind: 'plugin', id: deliveryId },
+            status: 'delivering',
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        },
         mentions: [],
         timestamp: Date.now(),
         idempotencyKey: receiptKey,
@@ -93,6 +106,8 @@ export class AddressedPluginQueueDelivery {
         },
       });
       if (!status) throw new Error('Plugin receipt is unavailable');
+      if (status.extra?.targetResponse)
+        status = await advanceTargetResponse(messageStore, status.id, { status: accepted ? 'waiting' : 'unconfirmed' });
     } else if (status.extra?.pluginAddressedReceipt?.phase === 'sending') {
       // The previous process may have exposed the message. A restart cannot prove
       // rejection, and must not replay an unfinished delivery as a fresh request.
@@ -101,6 +116,8 @@ export class AddressedPluginQueueDelivery {
       });
       if (!status) throw new Error('Plugin receipt is unavailable');
     }
+    if (status.extra?.targetResponse?.status === 'delivering')
+      status = await advanceTargetResponse(messageStore, status.id, { status: 'unconfirmed' });
     const settled = await messageStore.advanceLifecycleInputDispatch(source.id, { ...identity, phase: 'settled' });
     if (settled.kind !== 'applied' && settled.kind !== 'replayed')
       throw new Error('Plugin acceptance settlement conflict');

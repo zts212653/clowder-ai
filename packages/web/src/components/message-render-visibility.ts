@@ -4,6 +4,8 @@ import { doesAssistantMessageRenderBubble } from './assistant-message-renderabil
 import { isKnownReason } from './CliDiagnosticsPanel';
 import { isAbsorbedManagedJobMessage, isHiddenChatRow } from './chat-row-surface';
 import { isLinkedCloudBindingRecoveryNotice } from './cloud-binding-recovery';
+import { isLinkedDeliveryFailureCarrier, pluginDeliveryReceipt } from './message-dispatch-projection';
+import { projectTargetReply } from './target-response-projection';
 
 /**
  * F322 B segment 1 (human message) — does this row put anything on screen?
@@ -37,6 +39,9 @@ export function messageRendersNothing(
   context: VisibilityContext = {},
 ): boolean {
   if (isHiddenChatRow(message)) return true;
+  const targetReply = projectTargetReply(message, timeline);
+  if (targetReply?.showFrame) return false;
+  if (pluginDeliveryReceipt(message) && isLinkedDeliveryFailureCarrier(message, timeline)) return true;
   const isOwn = message.from?.kind === 'user';
 
   // The first thing ChatMessage does: a summary with its content is a card (without it, the row falls through to nothing).

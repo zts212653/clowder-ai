@@ -433,6 +433,13 @@ function mergeMessageExtra(
   // chooses its own monotonic version independently of body preference.
   const fields: RequiredMessageExtraFields = {
     pluginAddressedReceipt: pick('pluginAddressedReceipt'),
+    targetResponse:
+      preferred?.targetResponse && fallback?.targetResponse
+        ? preferred.targetResponse.revision >= fallback.targetResponse.revision
+          ? preferred.targetResponse
+          : fallback.targetResponse
+        : pick('targetResponse'),
+    targetResponseResult: pick('targetResponseResult'),
     // No fallback inheritance: this layout belongs to the selected full body.
     outputLayout: preferred?.outputLayout,
     liveCompanion: pick('liveCompanion'),

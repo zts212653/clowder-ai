@@ -1,3 +1,4 @@
+import { isTargetResponseRecord } from '@cat-cafe/shared';
 /**
  * Redis message field parsers — 从 RedisMessageStore 拆出的纯函数
  *
@@ -260,6 +261,8 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   collectiveOwnerAdmissionV1: 'parsed';
   collectiveAuthorizationInvalid: 'derived';
   pluginAddressedReceipt: 'parsed';
+  targetResponse: 'parsed';
+  targetResponseResult: 'parsed';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -552,6 +555,24 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       parsed.collectiveWorkDelegationV1 !== undefined
     ) {
       result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (isTargetResponseRecord(parsed.targetResponse)) {
+      result.targetResponse = parsed.targetResponse;
+      hasField = true;
+    }
+    const rr = parsed.targetResponseResult;
+    if (
+      rr &&
+      isNonEmptyString(rr.carrierMessageId) &&
+      isNonEmptyString(rr.deliveryId) &&
+      ['processing', 'completed', 'failed', 'canceled', 'interrupted'].includes(rr.status)
+    ) {
+      result.targetResponseResult = {
+        carrierMessageId: rr.carrierMessageId,
+        deliveryId: rr.deliveryId,
+        status: rr.status,
+      };
       hasField = true;
     }
     const pluginReceipt = parsed.pluginAddressedReceipt;

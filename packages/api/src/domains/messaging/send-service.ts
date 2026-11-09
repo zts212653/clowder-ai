@@ -67,6 +67,7 @@ export interface SendServiceDeps {
 
 export interface HostSendOptions {
   readonly source: ConnectorSource;
+  readonly responseResult?: import('@cat-cafe/shared').TargetResponseResult;
   readonly contentBlocks?: readonly MessageContent[];
   readonly sender?: { readonly id: string; readonly name?: string };
   readonly wake?: import('./ingress-wake.js').PluginMessageWake;
@@ -248,6 +249,7 @@ export class SendService {
         // URI-encoded so ':' inside ids cannot forge a foreign instance's key space.
         idempotencyKey: `plugmsg:${encodeURIComponent(ctx.pluginInstanceId)}:${encodeURIComponent(draft.idempotencyKey)}`,
         extra: {
+          ...(hostOptions?.responseResult ? { targetResponseResult: hostOptions.responseResult } : {}),
           pluginMessage: {
             ...(source === undefined ? {} : { presentation: source }),
             instanceId: ctx.pluginInstanceId,
@@ -321,6 +323,7 @@ export class SendService {
       // this send still returned a success receipt.
       if (ingress) {
         await deliverIngressEffectsOnce(this.deps.ledger, {
+          messageStore: this.deps.messageStore,
           instanceId: ctx.pluginInstanceId,
           idempotencyKey: draft.idempotencyKey,
           threadId: handle.threadId,

@@ -66,10 +66,8 @@ import { isLinkedDeliveryFailureCarrier, pluginDeliveryReceipt } from './message
 import { isConnectorSystemNotice } from './message-render-visibility';
 import { CrossThreadLetter } from './message-v2/CrossThreadLetter';
 import { isLastOfOwnRun } from './own-message-run';
-import { PluginReplyPending } from './PluginReplyPending';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
-import { ReplyPlaceholder } from './ReplyPlaceholder';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
 import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
@@ -92,9 +90,11 @@ import { SystemNoticeBar } from './SystemNoticeBar';
 import { useShellCopy } from './shell/shell-copy';
 import { useShellPresentation } from './shell/shell-presentation';
 import { SuggestionRow } from './suggestions/SuggestionRow';
+import { TargetReplyFrame } from './TargetReplyFrame';
 import { NativeFailureDiagnostics, TerminalDiagnosticsPanel } from './TerminalDiagnosticsPanel';
 import { ThinkingContent } from './ThinkingContent';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { projectTargetReply } from './target-response-projection';
 import { useCloudReply } from './useCloudReply';
 
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
@@ -168,7 +168,6 @@ interface ChatMessageProps {
   compact?: boolean;
   threadId?: string;
   timelineMessages?: readonly ChatMessageType[];
-  pluginDeliveryLiveSince?: number;
   activeRuns?: readonly LifecycleActiveRun[];
   queue?: readonly import('@/stores/chat-types').QueueEntry[];
   getCatById: (id: string) => CatData | undefined;
@@ -219,7 +218,6 @@ function ChatMessageContent({
   compact = false,
   threadId,
   timelineMessages,
-  pluginDeliveryLiveSince,
   activeRuns,
   queue,
   getCatById,
@@ -484,6 +482,57 @@ function ChatMessageContent({
       : ('done' as const);
   if (cloudCarrier && cloudReply.state !== 'unverified')
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
+  const targetReply = projectTargetReply(message, threadMessages);
+  if (targetReply?.showFrame)
+    return (
+      <TargetReplyFrame
+        view={targetReply}
+        messageId={message.id}
+        timestamp={assistantPresentationTime}
+        getCatById={getCatById}
+        memberIdentity={
+          targetReply.backend === 'member'
+            ? {
+                avatar:
+                  catData && (shellPresentation !== 'v2' || compact) ? (
+                    <SenderAvatar sender={sender} presentation="message" />
+                  ) : undefined,
+                heading: (
+                  <div className="flex items-center gap-2 text-xs">
+                    {catData && shellPresentation === 'v2' && !compact ? (
+                      <CatNameplate
+                        sender={sender}
+                        catId={catData.id}
+                        name={catStyle?.label ?? sender.label}
+                        onEditCat={onEditCat ? () => onEditCat(catData.id) : undefined}
+                      />
+                    ) : (
+                      <span className="font-semibold" style={{ color: catStyle?.textColor }}>
+                        {catStyle?.label ?? sender.label}
+                      </span>
+                    )}
+                    <span className="text-cafe-muted">{formatTime(assistantPresentationTime)}</span>
+                  </div>
+                ),
+              }
+            : undefined
+        }
+      >
+        {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? (
+          <CodexStartupRecoveryStatus message={message} />
+        ) : null}
+        <NativeFailureDiagnostics message={message} />
+        {targetReply.status === 'processing' && showCapabilityTip && capabilityTipContexts ? (
+          <CapabilityTipStrip
+            surface="pending_bubble"
+            contexts={capabilityTipContexts}
+            audience="cvo"
+            enabled
+            firstDelayMs={0}
+          />
+        ) : null}
+      </TargetReplyFrame>
+    );
   if (isSummary && message.summary) {
     return (
       <div data-message-id={message.id}>
@@ -499,8 +548,7 @@ function ChatMessageContent({
   }
 
   if (isSystem) {
-    if (pluginDeliveryReceipt(message) && isLinkedDeliveryFailureCarrier(message, threadMessages))
-      return <PluginReplyPending message={message} messages={threadMessages} liveSince={pluginDeliveryLiveSince} />;
+    if (pluginDeliveryReceipt(message) && isLinkedDeliveryFailureCarrier(message, threadMessages)) return null;
     if (shellPresentation === 'v2' && isLinkedCloudBindingRecoveryNotice(message, threadMessages))
       return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
     const contentModificationReceipt = contentModificationReceiptOf(message.extra);
@@ -824,58 +872,7 @@ function ChatMessageContent({
     hasCliBlock,
     hasCrossThreadSource: Boolean(crossThreadSourceThreadId),
   };
-  if (!doesAssistantMessageRenderBubble(message, assistantRenderContext)) {
-    const notice = emptyResponseNotice;
-    if (notice?.tone === 'processing') {
-      return (
-        <ReplyPlaceholder
-          messageId={message.id}
-          targetId={message.catId}
-          state="processing"
-          avatar={
-            catData && (shellPresentation !== 'v2' || compact) ? (
-              <SenderAvatar sender={sender} presentation="message" />
-            ) : undefined
-          }
-          heading={
-            <div className="flex items-center gap-2 text-xs">
-              {catData && shellPresentation === 'v2' && !compact ? (
-                <CatNameplate
-                  sender={sender}
-                  catId={catData.id}
-                  name={catStyle?.label ?? sender.label}
-                  onEditCat={onEditCat ? () => onEditCat(catData.id) : undefined}
-                />
-              ) : (
-                <span className="font-semibold" style={{ color: catStyle?.textColor }}>
-                  {catStyle?.label ?? sender.label}
-                </span>
-              )}
-              <span className="text-cafe-muted">{formatTime(assistantPresentationTime)}</span>
-            </div>
-          }
-        >
-          {message.extra?.startupRecovery && message.extra.startupRecovery.stage !== 'ready' ? (
-            <div className="mt-2 text-cafe-muted">
-              <CodexStartupRecoveryStatus message={message} />
-            </div>
-          ) : (
-            <p className="mt-2 text-sm text-cafe-muted">已接下，还没有输出</p>
-          )}
-          {showCapabilityTip && capabilityTipContexts ? (
-            <CapabilityTipStrip
-              surface="pending_bubble"
-              contexts={capabilityTipContexts}
-              audience="cvo"
-              enabled
-              firstDelayMs={0}
-            />
-          ) : null}
-        </ReplyPlaceholder>
-      );
-    }
-    return null;
-  }
+  if (!doesAssistantMessageRenderBubble(message, assistantRenderContext)) return null;
 
   /* F322 B segment 1: in the Café 1.6 presentation a cat's ordinary reply is a nameplate over unframed text.
    * Compact replies and live companions keep their own presentation. A missing catalog profile uses the existing author

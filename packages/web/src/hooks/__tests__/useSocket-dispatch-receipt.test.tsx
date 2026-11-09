@@ -335,4 +335,38 @@ describe('dispatch receipt Queue publication', () => {
     expect(pluginReplyFor('other-source', 'pi_helper', messages)).toBeUndefined();
     if (threadId !== THREAD_ID) expect(useChatStore.getState().messages).toHaveLength(0);
   });
+  it('keeps a persisted terminal target response when its earlier acceptance snapshot arrives late', async () => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const state = {
+      v: 1,
+      revision: 3,
+      inputMessageId: 'source',
+      targetId: 'pi_helper',
+      execution: { kind: 'plugin', id: 'ad_deliver' },
+      status: 'completed',
+      startedAt: 1,
+      updatedAt: 3,
+      resultMessageId: 'reply',
+    };
+    const message = {
+      id: 'carrier',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: 'delivery',
+      timestamp: 1,
+      extra: { targetResponse: state },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId: THREAD_ID, message }));
+    act(() =>
+      emitServerEvent('message_snapshot_updated', {
+        threadId: THREAD_ID,
+        message: {
+          ...message,
+          extra: { targetResponse: { ...state, revision: 2, status: 'waiting', resultMessageId: undefined } },
+        },
+      }),
+    );
+    expect(useChatStore.getState().messages[0]?.extra?.targetResponse?.status).toBe('completed');
+  });
 });
