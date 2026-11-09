@@ -235,6 +235,13 @@
       ]
     },
     {
+      "id": "exempt:domains/memory/knowledge-discovery.ts",
+      "owner": "packages/api/src/domains/memory/knowledge-discovery.ts",
+      "state": "exempt",
+      "reason": "Enforces one active discovery read's original absolute deadline (15 seconds by default). Early timer wakes re-arm only the remaining delay; deadline expiry cancels the owned read, and abort or completion clears the latest timer in finally. It does not enumerate historical work or admit recovery/wake retries.",
+      "sites": ["packages/api/src/domains/memory/knowledge-discovery.ts#withinDiscoveryLifetime.expire.timer"]
+    },
+    {
       "id": "exempt:domains/memory/thread-index-startup.ts",
       "owner": "packages/api/src/domains/memory/thread-index-startup.ts",
       "state": "exempt",
