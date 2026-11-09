@@ -289,3 +289,19 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - 插件 `6f595400aabaa2ef60bda5461c4f7d3062529cac`：完整干净Dot246/246，增强重投递断言的干净journey16/16，类型与构建通过。alpha.49 SHA256 `6bc8a58ba1a6c3bd46f534e5f913c129e2a1d84a65adcec3ee3eb5a8865987f6`；89自有产物一致；压缩22,377,470/展开61,815,458字节，32/64MiB预算不变。
 - 五条意见均在原GitHub载体回复并逐字回读；新HEAD仍待CI/云端复审。本轮无运行实例操作、安装、重启、合并或发布。原contract/SDK未改，不重复不受影响的全套。
 - 最终Host API隔离完整编译、Biome/diff通过；精确alpha.49归档/闭包/显示/空缓存离线安装19项与历史56项共75/75，最终历史夹具重跑56/56；SendService及adversarial23/23。证据/tmp/f202-alpha49-host-acceptance.log、/tmp/f202-r8-host-send-regression.log，实际页面与冻结包边界证据如上。
+
+
+### R9：首条回流游标、已确认旧事件与断开前的操作
+
+接受当前 Host b3f3f720 / 插件6f595400上的三条云端P2（Host4516301038，插件4516299007/4516299018），不改变已接受迁移范围。共同检查贯穿公开动作准入→存储快照→候选/runner副作用，以及ask→回流订阅→已确认dispatch→升级后RPC。
+
+- 首次ask在发送wake:auto之前建立Host线程订阅，完成后再次核原凭据/attempt；订阅失败不发送。现有未保存ask回执的回流重试继续使用，不改Host订阅从当前head开始的契约。精确alpha.49冻结包接真实Host SendService/EventStreamService游标，早到成员回复被跳过为RED；alpha.50保留回复、待回执重试、读取及回复通过。
+- 新dispatch保存Host交付的deliveryReason，明确addressed仍结算真实carrier。旧已确认事件在RPC授权读取时，从同attempt/thread、已保存ask父消息和实际接收成员核对旧subscription记录并持久修正，不依赖重投递；重启后直接reply与read→reply均覆盖。原source/owner/实例/凭据验证仍先执行。
+- 临时启动在两层公开动作入口的第一次异步鉴权前共用一份epoch；鉴权、首次状态读取和候选CAS均核原票据。disconnect取消票据后，旧动作不得创建候选或runner。首次状态读取与最初caller鉴权暂停各有回归。
+- 同型扫描还复现长期URL/轮换在首次快照后遇到disconnect仍重新创建候选，修为按原external revision提交；不借新快照越过断开。两条额外反例RED→GREEN。未改runtime配置或Host权限。
+- 插件产品提交955ec6011b6f0addb2f7301f70e6404250448f38（最终HEAD deea1ee06d9cf5f2d62a54757fb823a4de69e6a8仅增强一行测试前置）：干净冻结夹具完整Dot254/254，源码关键路径49/49，类型与构建通过。alpha.50 SHA256 2cdba275dfbf17f2c35d90830011637091ccf7212c9cdf0389842403278b143c，压缩22,378,478/展开61,821,655字节，89自有产物与该提交本地构建逐字节一致；原32/64MiB预算不变。
+- 证据：/tmp/f202-r9-red.log、/tmp/f202-r9-sibling-red-final.log、/tmp/f202-r9-green-final.log、/tmp/f202-r9-dot-clean-full.log；Host工位ignored acceptance中的packaged-first-ask-check.mts与packaged-first-ask-receipt.json；/tmp/f202-r9-cursor-red.log、/tmp/f202-r9-cursor-green-final.log。第一次临时打包夹具沿用旧dist已被检查拒绝，最终归档经过明确clean build后重新打包，旧临时产物未交付。
+- fallback审视：本轮新增稳定交付种类、动作准入票据和原快照CAS约束，没有新重试/远端兜底链。仓内脚本默认origin/main扫描了非本轮全部上游差异，518文件触发不代表本轮新增；本轮新增单文件未达到三层fallback。
+- 本轮无页面布局/交互改动，上一轮历史刷新浏览器证据继续适用。隔离真实Host类与冻结插件检查不是实际ChatGPT Work，也不替代新soak；未安装、重启、合并或发布。
+
+- Host最终完整API隔离编译与Biome/diff通过；编译结束后重跑最终alpha.50构建/闭包/显示/精确冻结安装19/19（/tmp/f202-alpha50-host-acceptance-final.log）。首次并发编译期间的随包测试读到旧缓存已拒绝，不计通过；重跑使用最终产物。最终补强长期URL测试从无入口开始，以覆盖实际创建而非只读复用；6f595400的两条同型反例2/2 RED（/tmp/f202-r9-sibling-red-final.log），当前产品实现均GREEN。
