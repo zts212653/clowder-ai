@@ -1,9 +1,12 @@
 import type { ApprovalHubItem, RichCardBlock, ScheduleMutationProposal } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useGuardedWrite, useWriteBlocked } from '@/components/ApprovalHost';
+import { useApprovalHost, useGuardedWrite, useWriteBlocked } from '@/components/ApprovalHost';
+import { approvalReconcileCopy } from '@/components/shell/mailbox/approval-reconcile.shell-copy';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '@/components/shell/use-unified-attention';
+import { isScheduleDriftBlocked } from '@/stores/approval-decision-attempts';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import {
   readScheduleSource,
@@ -60,6 +63,14 @@ export function useScheduleApprovalController({ block, item, coordinate, message
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null),
     [unknown, setUnknown] = useState(false);
+  const host = useApprovalHost();
+  const driftCopy = useShellCopy(approvalReconcileCopy);
+  const blockedDrifts = useApprovalHubStore((state) => state.scheduleDriftBlocked);
+  const drifted =
+    Boolean(proposal && isScheduleDriftBlocked({ ...proposal, sourceFeatureId: 'F139' }, blockedDrifts)) ||
+    Boolean(host.blockedDecisions?.has('approve'));
+  const driftMessage =
+    proposal?.mutation.kind === 'update' ? driftCopy.scheduleUpdateDrift : driftCopy.scheduleDeleteDrift;
   const live = useRef<ScheduleMutationProposal | null>(null),
     mounted = useRef(true),
     inFlight = useRef(false);
@@ -86,6 +97,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
       if (
         !previous ||
         blocked ||
+        (decision === 'approve' && drifted) ||
         inFlight.current ||
         (decision === 'reject'
           ? previous.status !== 'pending'
@@ -102,30 +114,54 @@ export function useScheduleApprovalController({ block, item, coordinate, message
           setError(t.changed);
           return;
         }
-        const result = await guardedWrite('producer-card', async (report) => {
-          const response = await apiFetch(
-            `/api/schedule-proposals/${encodeURIComponent(previous.proposalId)}/${decision}`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
-          );
-          report(
-            response.ok
-              ? { outcome: 'settled', status: response.status }
-              : { outcome: 'http-error', status: response.status },
-          );
-          const body: unknown = await response.json().catch(() => null);
-          return (
-            response.ok &&
-            scheduleObject(body) &&
-            body.proposalId === previous.proposalId &&
-            body.status === (decision === 'approve' ? 'approved' : 'rejected')
-          );
-        });
+        const result = await guardedWrite(
+          'producer-card',
+          async (report) => {
+            const response = await apiFetch(
+              `/api/schedule-proposals/${encodeURIComponent(previous.proposalId)}/${decision}`,
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+            );
+            const body: unknown = await response.json().catch(() => null);
+            const drift =
+              decision === 'approve' &&
+              previous.mutation.kind !== 'create' &&
+              response.status === 409 &&
+              scheduleObject(body) &&
+              body.code === 'SCHEDULE_TASK_DRIFT';
+            report(
+              response.ok
+                ? { outcome: 'settled', status: response.status }
+                : {
+                    outcome: 'http-error',
+                    status: response.status,
+                    ...(drift ? { errorCode: 'SCHEDULE_TASK_DRIFT' } : {}),
+                  },
+            );
+            const accepted =
+              response.ok &&
+              scheduleObject(body) &&
+              body.proposalId === previous.proposalId &&
+              body.status === (decision === 'approve' ? 'approved' : 'rejected');
+            return { accepted, drift };
+          },
+          { decision },
+        );
         if (!mounted.current || !result.sent) return;
         const current = await refresh();
         if (!mounted.current) return;
         const terminal = current?.status === 'approved' || current?.status === 'rejected';
-        setUnknown(!terminal && !result.value && current?.status !== 'applying');
-        if (!terminal) setError(result.value ? t.unknown : current?.status === 'applying' ? t.failed : t.unknown);
+        if (result.value.drift) useApprovalHubStore.getState().rememberScheduleDrift(previous);
+        setUnknown(!terminal && !result.value.accepted && !result.value.drift && current?.status !== 'applying');
+        if (!terminal)
+          setError(
+            result.value.drift
+              ? driftMessage
+              : result.value.accepted
+                ? t.unknown
+                : current?.status === 'applying'
+                  ? t.failed
+                  : t.unknown,
+          );
         for (const event of UNIFIED_ATTENTION_INVALIDATION_EVENTS) window.dispatchEvent(new Event(event));
       } catch {
         if (mounted.current) {
@@ -138,7 +174,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
         if (mounted.current) setBusy(false);
       }
     },
-    [blocked, refresh, guardedWrite, t.changed, t.failed, t.unknown],
+    [blocked, drifted, driftMessage, refresh, guardedWrite, t.changed, t.failed, t.unknown],
   );
   const reread = () => {
     setUnknown(false);
@@ -151,9 +187,10 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     proposal,
     checking,
     busy,
-    error,
+    error: drifted && proposal?.status === 'pending' ? driftMessage : error,
     unknown,
     blocked,
+    drifted,
     decide,
     reread,
     retained: original.retained,

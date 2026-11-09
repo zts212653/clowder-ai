@@ -51,6 +51,19 @@ export interface DecisionAttempt {
 
 export type DecisionAttempts = Record<string, DecisionAttempt>;
 
+/** Transient witnessed conflicts, scoped to the exact owner/version; never an approval lifecycle. */
+export type ScheduleDriftBlocked = Record<string, { ownerUserId: string; createdAt: number }>;
+export function isScheduleDriftBlocked(
+  item: Pick<ApprovalHubItem, 'proposalId' | 'ownerUserId' | 'createdAt' | 'sourceFeatureId'>,
+  blocked: ScheduleDriftBlocked,
+) {
+  const observed = blocked[item.proposalId];
+  return (
+    item.sourceFeatureId === 'F139' &&
+    Boolean(observed && observed.ownerUserId === item.ownerUserId && observed.createdAt === item.createdAt)
+  );
+}
+
 /** The slice of store state this module reads and writes. */
 export interface DecisionAttemptsSlice {
   decisionAttempts: DecisionAttempts;
@@ -108,7 +121,7 @@ export function beginDecisionAttempt(
     /** The server answered. The optional effect is a bounded original-writer response fact, not permission or lifecycle. */
     received(
       response: { status: number; ok: boolean },
-      body?: { error?: unknown; message?: unknown },
+      body?: { error?: unknown; message?: unknown; code?: unknown },
       domainEffect?: DomainApprovalEffect,
     ) {
       responded = true;
@@ -116,7 +129,11 @@ export function beginDecisionAttempt(
         phase: 'response_received',
         status: response.status,
         ok: response.ok,
-        ...(typeof body?.error === 'string' ? { errorCode: body.error } : {}),
+        ...(typeof body?.code === 'string'
+          ? { errorCode: body.code }
+          : typeof body?.error === 'string'
+            ? { errorCode: body.error }
+            : {}),
         ...(typeof body?.message === 'string' ? { message: body.message } : {}),
         ...(response.ok && domainEffect ? { domainEffect } : {}),
       });
