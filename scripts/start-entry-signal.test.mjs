@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -33,7 +33,7 @@ for (const viaPnpm of [false, true])
       writeFileSync(join(scripts, 'lib', 'platform-status.mjs'), 'export function runWindowsStatus() {}\n', 'utf8');
       writeFileSync(
         join(scripts, 'start-dev.sh'),
-        `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap - INT TERM; cleanup; exit 130' INT\ntrap 'trap - INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
+        `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap "" INT TERM; cleanup; exit 130' INT\ntrap 'trap "" INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
         { mode: 0o755 },
       );
       writeFileSync(
@@ -64,11 +64,15 @@ for (const viaPnpm of [false, true])
 
       try {
         await waitFor(() => output.includes('launcher-ready'));
-        process.kill(-command.pid, 'SIGINT');
-        const exit = await new Promise((resolveExit, reject) => {
+        const exited = new Promise((resolveExit, reject) => {
           command.once('error', reject);
           command.once('exit', (code, signal) => resolveExit({ code, signal }));
         });
+        // Like start-dev.sh finish_launcher, the fixture ignores repeated signals during cleanup.
+        process.kill(-command.pid, 'SIGINT');
+        await waitFor(() => existsSync(marker) && readFileSync(marker, 'utf8').includes('cleanup-start'));
+        process.kill(-command.pid, 'SIGINT');
+        const exit = await exited;
         const cleanup = readFileSync(marker, 'utf8');
         assert.match(cleanup, /cleanup-done/, `wrapper exited before cleanup completed\n${output}`);
         // pnpm may consume SIGINT and return zero after its child has finished.

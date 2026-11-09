@@ -356,3 +356,12 @@ Host b304fbd4的CI 42689653610给出可定位失败：distributable-5预检、�
 - 冻结包消费者落为真实consumer.mjs，避免eval入口与worker启动方式混杂；保留阶段日志并输出后端、运行版本、并发值及worker创建/online。默认平台和强制WASM均执行真实PNG编码及metadata，安装及两个消费者各60秒硬期限，测试总期限210秒覆盖三段；无强制成功退出/跳过/重试。离线安装与原归档SHA及预算检查不变。
 - 本机实际空缓存安装/默认native/隔离WASM1/1，后端路径均来自临时消费目录；另用官方Node24.20.0 Darwin执行仓库外真实WASM隔离探针成功。不是Linux namespace验证。日志/tmp/f202-r13-frozen-green.log、/tmp/f202-r13-transactions-green.log、/tmp/f202-r13-lane4.log、/tmp/f202-r13-lane5.log。
 - 本轮只有测试与取证说明；Host产品和alpha.51字节不变，插件4e2dc4e5仍CI绿及精确云端无重大问题。Linux PNG缺口保留，提交后按已有PR回调取得新日志；不改工作流网络边界、产品依赖、运行实例或发布状态。
+
+### R14：启动清理夹具的重复信号竞态
+
+Host fb3b76e7的CI 42692687559中，Lint失败于start-entry-signal.test.mjs的node wrapper分支：已见launcher-ready，wrapper退出时cleanup-done缺失。PNG所在lane5仍运行，不能把本次通知误读为PNG再次失败。lane4已成功，日志确认R13两条恢复事务检查均GREEN。
+
+- 根因在测试夹具：真实start-dev.sh的finish_launcher先忽略INT/TERM再清理；夹具却trap -恢复默认信号。进程组SIGINT与wrapper转发可能先后到达，清理阶段被第二次INT打断。新增在真实cleanup-start后再发组SIGINT的可控交错，旧夹具node/pnpm两路径均RED；只把夹具改为忽略清理期后续信号，两路径GREEN，wrapper仍须等待cleanup-done并保留信号退出状态。
+- 修正exit观察的时机，在发信号前登记exit promise，避免短进程已退出后才监听。信号只发向直接创建的隔离fixture进程组，不运行真实启动脚本、不操作运行实例。
+- 定向启动与信号检查7/7（/tmp/f202-r14-signal-green.log）；完整check:pre-merge-gate为173通过、47个既有跳过、0失败（/tmp/f202-r14-gate-scripts.log），RED在/tmp/f202-r14-signal-red.log；Linux原失败在/tmp/f202-r14-lint.log，Redis成功在/tmp/f202-r14-lane4.log。未改变start-entry.mjs/start-dev.sh或任何产品、插件包、CI边界。
+- 当前诊断CI仍有未结束分片，不立刻push触发concurrency取消；先保留PNG/worker诊断结果，再按已有PR回调接续提交。本节不宣称Linux PNG已解决或全套已绿。
