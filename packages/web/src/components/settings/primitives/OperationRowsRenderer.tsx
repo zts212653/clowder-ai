@@ -459,6 +459,13 @@ export function OperationRowsRenderer({
 
   const buttons = operation.actions.filter((action) => action.id !== listAction.id && action.render !== 'row');
   const proposalPending = rows?.validUntil !== undefined;
+  // Polling is an automatically observed state, not a permanent manual action.
+  // Explicit confirmation and recovery remain actionable on the same generic renderer.
+  const automaticStatus = listAction.render === 'polling' && !listAction.confirm;
+  const observationPaused =
+    expiredObservationKey !== null && expiredObservationKey === rows?.rows.map(({ key }) => key).join('\u0000');
+  const showRefresh = !proposalPending && (!automaticStatus || Boolean(listError) || observationPaused);
+  const refreshLabel = automaticStatus ? '重新检查' : listAction.label;
 
   const abandonProposal = useCallback(() => {
     activeProposalValidUntil.current = undefined;
@@ -469,42 +476,49 @@ export function OperationRowsRenderer({
 
   return (
     <div className="space-y-2" data-testid={`${target.id}-rows`}>
-      <div className="flex flex-wrap items-center gap-2">
-        {!proposalPending && (
-          <button
-            type="button"
-            disabled={listing}
-            onClick={() => void refresh()}
-            className={buttonClass}
-            data-testid={`${target.id}-rows-refresh`}
-          >
-            {listAction.label}
-          </button>
-        )}
-        {proposalPending && (
-          <button
-            type="button"
-            disabled={listing}
-            onClick={abandonProposal}
-            className={buttonClass}
-            data-testid={`${target.id}-rows-abandon`}
-          >
-            放弃本次准备
-          </button>
-        )}
-        {buttons.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            disabled={listing}
-            onClick={() => void runButton(action)}
-            className={buttonClass}
-            data-testid={`${target.id}-action-${action.id}`}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
+      {(showRefresh || proposalPending || buttons.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {showRefresh && (
+            <button
+              type="button"
+              disabled={listing}
+              onClick={() => void refresh()}
+              className={buttonClass}
+              data-testid={`${target.id}-rows-refresh`}
+            >
+              {refreshLabel}
+            </button>
+          )}
+          {proposalPending && (
+            <button
+              type="button"
+              disabled={listing}
+              onClick={abandonProposal}
+              className={buttonClass}
+              data-testid={`${target.id}-rows-abandon`}
+            >
+              放弃本次准备
+            </button>
+          )}
+          {buttons.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              disabled={listing}
+              onClick={() => void runButton(action)}
+              className={buttonClass}
+              data-testid={`${target.id}-action-${action.id}`}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {automaticStatus && listing && !rows && (
+        <p role="status" className="text-xs text-cafe-muted">
+          正在读取状态…
+        </p>
+      )}
       {listError && (
         <p role="alert" className="text-xs text-conn-red-text">
           {listError}
@@ -527,9 +541,9 @@ export function OperationRowsRenderer({
       {actionResult && actionResult.rowKey === undefined && (
         <ActionResultLink result={actionResult.result} testId={`${target.id}-result-link`} />
       )}
-      {expiredObservationKey !== null && expiredObservationKey === rows?.rows.map(({ key }) => key).join('\u0000') && (
+      {observationPaused && (
         <p className="text-xs text-cafe-secondary" data-testid={`${target.id}-rows-observation-paused`}>
-          自动检查已到本次等待上限；现有证据仍保留。点“{listAction.label}”可重新检查。
+          自动检查已到本次等待上限；现有证据仍保留。点“{refreshLabel}”可重新检查。
         </p>
       )}
       {rows && rows.rows.length === 0 && (

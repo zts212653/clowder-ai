@@ -155,6 +155,50 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     Array.from(container.querySelectorAll('button')).find((button) => button.textContent === text);
   const sent = (action: string) => calls.filter(({ url }) => url.endsWith(`/authorization/${action}`));
 
+  it('loads a polling status on entry without an always-visible refresh control', async () => {
+    serve([row('waiting')]);
+    const passive: PlatformOperationStatus = {
+      ...operation,
+      actions: [{ ...operation.actions[0]!, render: 'polling' }],
+    };
+    await render(<ActionRenderer target={target} operation={passive} />);
+    expect(sent('list')).toHaveLength(1);
+    expect(byTestId('chatgpt-pro-row-waiting')).not.toBeNull();
+    expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
+  });
+
+  it('offers a retry only after a polling status read fails and removes it after recovery', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(jsonResponse({ error: 'Connection unavailable' }, 502))
+      .mockResolvedValue(jsonResponse({ ok: true, render: 'rows', data: { rows: [row('ready')] } }));
+    const passive: PlatformOperationStatus = {
+      ...operation,
+      actions: [{ ...operation.actions[0]!, render: 'polling' }],
+    };
+    await render(<ActionRenderer target={target} operation={passive} />);
+    expect(byTestId('chatgpt-pro-rows-refresh')?.textContent).toBe('重新检查');
+    await click(byTestId('chatgpt-pro-rows-refresh'));
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(byTestId('chatgpt-pro-row-ready')).not.toBeNull();
+    expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
+  });
+
+  it('retains owner confirmation for a polling list that explicitly requires it', async () => {
+    serve([row('ready')]);
+    const guarded: PlatformOperationStatus = {
+      ...operation,
+      actions: [{ ...operation.actions[0]!, render: 'polling', confirm: 'Allow this status read?' }],
+    };
+    await render(<ActionRenderer target={target} operation={guarded} />);
+    expect(sent('list')).toHaveLength(0);
+    await click(byTestId('chatgpt-pro-rows-refresh'));
+    await click(dialogButton('取消'));
+    expect(sent('list')).toHaveLength(0);
+    await click(byTestId('chatgpt-pro-rows-refresh'));
+    await click(dialogButton('确认'));
+    expect(sent('list')).toHaveLength(1);
+  });
+
   it('does not restore a previous rows receipt before an owner-confirmed list action', async () => {
     serve([]);
     const injected = {
@@ -477,14 +521,23 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     });
 
     try {
-      act(() => root.render(<ActionRenderer target={target} operation={operation} />));
+      act(() =>
+        root.render(
+          <ActionRenderer
+            target={target}
+            operation={{ ...operation, actions: [{ ...operation.actions[0]!, render: 'polling' }] }}
+          />,
+        ),
+      );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
+      expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
       });
       expect(byTestId('chatgpt-pro-rows-observation-paused')?.textContent).toContain('自动检查已到本次等待上限');
+      expect(byTestId('chatgpt-pro-rows-refresh')?.textContent).toBe('重新检查');
       const callsAtDeadline = sent('list').length;
 
       act(() => (byTestId('chatgpt-pro-rows-refresh') as HTMLButtonElement).click());
