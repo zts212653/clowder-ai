@@ -343,18 +343,25 @@ export class TaskRunnerV2 {
       return true;
     }
     const def = this.getSuppressedHoldWakeDef(taskId);
-    // Recovery validation belongs only to a timer restored after its fireAt.
-    // Online holds, including old persisted shapes and unknown owner provenance,
-    // retain their original one-shot firing semantics.
-    if (!def && task.onceLifecycle?.recoverMissed) {
+    // Enforce the absolute deadline at every wake attempt. Legacy/unknown
+    // online shapes retain their existing compatibility boundary below.
+    if (!def) {
       const store = this.dynamicTaskStore;
       if (!store) return false;
       const current = store.getById(taskId);
-      if (!current) return false;
-      const recovery = classifyTimerHoldRecovery(current, store.getPrivateOwnerAuthProvenance(current.id));
+      if (!current || current.trigger.type !== 'once') return false;
+      const recovery = classifyTimerHoldRecovery(current, store.getPrivateOwnerAuthProvenance(current.id), Date.now());
+      // A verified timer can expire during admission, before onceLifecycle is configured.
+      if (
+        !task.onceLifecycle &&
+        recovery.kind !== 'expired' &&
+        !(recovery.kind === 'invalid' && recovery.reason === 'sla_not_after_wake')
+      ) {
+        return false;
+      }
       if (recovery.kind === 'recover' || recovery.kind === 'not_timer_hold') return false;
       if (recovery.kind === 'expired' || recovery.kind === 'invalid') {
-        persistTimerHoldDisposition(store, current, {
+        const retired = persistTimerHoldDisposition(store, current, {
           status: recovery.kind === 'expired' ? 'retired_expired' : 'retired_invalid',
           at: Date.now(),
           reason: recovery.kind === 'expired' ? 'sla_elapsed' : recovery.reason,
@@ -362,11 +369,38 @@ export class TaskRunnerV2 {
         this.unregister(taskId);
         holdStaleWakeSuppressedTotal.add(1);
         this.logger.info(`[scheduler] ${taskId}: suppressed invalid timer hold before execution`);
+        if (retired) {
+          const content =
+            recovery.kind === 'expired'
+              ? '等待已结束：唤醒已超过等待截止时间，未执行后续任务。原任务未完成，请重新评估后安排跟进。'
+              : '等待已结束：唤醒计划无法在等待截止时间前执行，未执行后续任务。原任务未完成，请重新评估后安排跟进。';
+          notifyTaskFailed(this.notifyLifecycle, current, content);
+          if (current.deliveryThreadId && this.deliver) {
+            void this.deliver({
+              threadId: current.deliveryThreadId,
+              userId: (current.params.triggerUserId as string) || 'default-user',
+              content,
+              idempotencyKey: `hold-ball-${recovery.kind}:${taskId}`,
+              source: {
+                connector: 'hold-ball',
+                label: '持球状态',
+                icon: '🏓',
+                meta: {
+                  managedHold: true,
+                  phase: 'status',
+                  cancelable: false,
+                  taskId,
+                  threadId: current.deliveryThreadId,
+                  catId: readHoldBallCatId(current),
+                },
+              },
+            }).catch((err) => this.logger.error(`[scheduler] ${taskId}: failed to persist retired hold status`, err));
+          }
+        }
         return true;
       }
       return false;
     }
-    if (!def) return false;
     this.unregister(taskId);
     holdStaleWakeSuppressedTotal.add(1);
     if (isRetiredHoldStillEnabled(def)) emitHoldExpiredAfterSatisfied(def);
@@ -403,7 +437,7 @@ export class TaskRunnerV2 {
         ...store.getPrivateOwnerAuthorization(def.id),
       });
       if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now()) {
-        this.configureTimerHoldRecovery(spec, def.id, store);
+        this.configureTimerHoldRecovery(spec, def.id, store, true);
       }
       // Ordinary once tasks still expire; durable owner returns explicitly recover.
       if (
@@ -627,6 +661,7 @@ export class TaskRunnerV2 {
           task.trigger.fireAt = Date.now() + (fp.deferIntervalMs ?? 30_000);
           // persist re-armed fireAt so a restart mid-defer doesn't read a stale (missed) window
           this.dynamicTaskStore?.updateTrigger(task.id, task.trigger);
+          if (this.suppressRetiredHoldWake(task)) return;
           this.logger.info(
             `[scheduler] ${task.id}: pre-fire defer (thread ${fp.threadId} busy, ${deferred + 1}/${maxDefers})`,
           );
@@ -721,6 +756,13 @@ export class TaskRunnerV2 {
   private handleMissedOnceTask(def: DynamicTaskDef, store: DynamicTaskStore): void {
     const fireAt = def.trigger.type === 'once' ? def.trigger.fireAt : 0;
     const fireAtIso = new Date(fireAt).toISOString();
+    const timerHold = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
+    const holdFailure =
+      timerHold.kind === 'expired'
+        ? `原定 ${fireAtIso} 的唤醒已超过等待截止时间，未执行后续任务。原任务未完成，请重新评估后安排跟进。`
+        : timerHold.kind === 'invalid'
+          ? `原定 ${fireAtIso} 的唤醒等待窗口无效，未执行后续任务。原任务未完成，请重新评估后安排跟进。`
+          : undefined;
     this.logger.info(`[scheduler] ${def.id}: once task missed window (fireAt=${fireAtIso}), retiring`);
 
     // Record in ledger for audit trail
@@ -742,7 +784,7 @@ export class TaskRunnerV2 {
         void this.deliver({
           threadId: def.deliveryThreadId,
           userId: triggerUserId,
-          content: `等待已结束：原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`,
+          content: `等待已结束：${holdFailure ?? `原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`}`,
           idempotencyKey: `hold-ball-missed:${def.id}`,
           source: {
             connector: 'hold-ball',
@@ -770,14 +812,13 @@ export class TaskRunnerV2 {
         toast: {
           type: 'error',
           title: '定时任务错过执行窗口',
-          message: `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
+          message: holdFailure ?? `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
           duration: SCHEDULER_TOAST_DURATION_MS.error,
           lifecycleEvent: 'missed_window',
         },
       });
     }
 
-    const timerHold = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
     if (timerHold.kind === 'expired' || timerHold.kind === 'invalid') {
       persistTimerHoldDisposition(store, def, {
         status: timerHold.kind === 'expired' ? 'retired_expired' : 'retired_invalid',
@@ -790,14 +831,19 @@ export class TaskRunnerV2 {
     }
   }
 
-  private configureTimerHoldRecovery(task: AnyTaskSpec, dynamicDefId: string, store = this.dynamicTaskStore): void {
+  private configureTimerHoldRecovery(
+    task: AnyTaskSpec,
+    dynamicDefId: string,
+    store = this.dynamicTaskStore,
+    recoverMissed = false,
+  ): void {
     if (!store || task.onceLifecycle) return;
     const def = store.getById(dynamicDefId);
     if (!def) return;
     const recovery = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
     if (recovery.kind !== 'recover') return;
     task.onceLifecycle = {
-      recoverMissed: true,
+      recoverMissed,
       retryUntil: recovery.retryUntil,
       scheduledAt: recovery.scheduledAt,
       retire: () => {
