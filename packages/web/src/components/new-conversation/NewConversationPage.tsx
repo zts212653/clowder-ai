@@ -18,6 +18,7 @@ import { ShellGlyph } from '../shell/ShellIcons';
 import { useShellCopy } from '../shell/shell-copy';
 import { getProjectPaths } from '../ThreadSidebar/thread-utils';
 import { ThreadComposerHost } from '../thread-chat/ThreadComposerHost';
+import { LocalDraftSaveNotice } from './LocalDraftSaveNotice';
 import { NewConversationComposerContext } from './NewConversationComposerContext';
 import { newConversationCopy } from './new-conversation.shell-copy';
 import { queueWorkDiscussion } from './queue-work-discussion';
@@ -115,9 +116,19 @@ function AdmissionNotice({
   phase,
   loadFailed,
   localSaveFailed,
+  localSaveState,
+  canCancelSave,
+  preparingSend,
   onRetry,
-}: Pick<ReturnType<typeof useNewConversationAdmission>, 'phase' | 'loadFailed' | 'localSaveFailed'> & {
+  onRetrySave,
+  onCancelSave,
+}: Pick<
+  ReturnType<typeof useNewConversationAdmission>,
+  'phase' | 'loadFailed' | 'localSaveFailed' | 'localSaveState' | 'canCancelSave' | 'preparingSend'
+> & {
   onRetry: () => void;
+  onRetrySave: () => void;
+  onCancelSave: () => void;
 }) {
   const copy = useShellCopy(newConversationCopy);
   const message = admissionMessage(phase, localSaveFailed, copy);
@@ -132,6 +143,17 @@ function AdmissionNotice({
           {copy.retryPage}
         </button>
       </div>
+    );
+  }
+  if (localSaveState !== 'idle' || preparingSend) {
+    return (
+      <LocalDraftSaveNotice
+        state={localSaveState === 'idle' ? 'saving' : localSaveState}
+        canCancel={canCancelSave}
+        preparingSend={preparingSend}
+        onRetry={onRetrySave}
+        onCancel={onCancelSave}
+      />
     );
   }
   return message ? (
@@ -332,7 +354,12 @@ export function NewConversationPage(props: NewConversationPageProps) {
           phase={admission.phase}
           loadFailed={admission.loadFailed}
           localSaveFailed={admission.localSaveFailed}
+          localSaveState={admission.localSaveState}
+          canCancelSave={admission.canCancelSave}
+          preparingSend={admission.preparingSend}
           onRetry={admission.retryLoad}
+          onRetrySave={admission.retrySave}
+          onCancelSave={admission.cancelSave}
         />
         {props.onShowCollaboration && <DemoEntryActions onShowCollaboration={props.onShowCollaboration} />}
         {floating.error && <p role="alert">{floating.error}</p>}
