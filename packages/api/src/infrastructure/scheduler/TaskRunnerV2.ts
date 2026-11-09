@@ -377,7 +377,7 @@ export class TaskRunnerV2 {
           if (current.deliveryThreadId && this.deliver) {
             void this.deliver({
               threadId: current.deliveryThreadId,
-              userId: current.params.triggerUserId as string,
+              userId: (current.params.triggerUserId as string) || 'default-user',
               content,
               idempotencyKey: `hold-ball-${recovery.kind}:${taskId}`,
               source: {
@@ -755,6 +755,13 @@ export class TaskRunnerV2 {
   private handleMissedOnceTask(def: DynamicTaskDef, store: DynamicTaskStore): void {
     const fireAt = def.trigger.type === 'once' ? def.trigger.fireAt : 0;
     const fireAtIso = new Date(fireAt).toISOString();
+    const timerHold = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
+    const holdFailure =
+      timerHold.kind === 'expired'
+        ? `原定 ${fireAtIso} 的唤醒已超过等待截止时间，未执行后续任务。原任务未完成，请重新评估后安排跟进。`
+        : timerHold.kind === 'invalid'
+          ? `原定 ${fireAtIso} 的唤醒等待窗口无效，未执行后续任务。原任务未完成，请重新评估后安排跟进。`
+          : undefined;
     this.logger.info(`[scheduler] ${def.id}: once task missed window (fireAt=${fireAtIso}), retiring`);
 
     // Record in ledger for audit trail
@@ -776,7 +783,7 @@ export class TaskRunnerV2 {
         void this.deliver({
           threadId: def.deliveryThreadId,
           userId: triggerUserId,
-          content: `等待已结束：原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`,
+          content: `等待已结束：${holdFailure ?? `原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`}`,
           idempotencyKey: `hold-ball-missed:${def.id}`,
           source: {
             connector: 'hold-ball',
@@ -804,14 +811,13 @@ export class TaskRunnerV2 {
         toast: {
           type: 'error',
           title: '定时任务错过执行窗口',
-          message: `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
+          message: holdFailure ?? `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
           duration: SCHEDULER_TOAST_DURATION_MS.error,
           lifecycleEvent: 'missed_window',
         },
       });
     }
 
-    const timerHold = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
     if (timerHold.kind === 'expired' || timerHold.kind === 'invalid') {
       persistTimerHoldDisposition(store, def, {
         status: timerHold.kind === 'expired' ? 'retired_expired' : 'retired_invalid',

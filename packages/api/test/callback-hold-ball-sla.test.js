@@ -130,26 +130,36 @@ test('accepted online hold wakes exactly once despite 5ms callback jitter, with 
   assert.equal(f.deliveries.length, 1);
 });
 
-for (const mode of ['recovery expiry', 'invalid persisted window', 'busy defer']) {
+for (const mode of [
+  'recovery expiry',
+  'missed expiry',
+  'invalid persisted window',
+  'invalid missed window',
+  'busy defer',
+]) {
   test(`${mode} preserves a terminal failure receipt without invoking the cat`, async (t) => {
     const f = await fixture(t);
     const accepted = await f.hold(NOW + DELAY + 10);
     assert.equal(accepted.statusCode, 200);
     const id = accepted.json().taskId;
-    if (mode === 'recovery expiry') {
+    if (mode === 'recovery expiry' || mode === 'missed expiry') {
       f.runner.unregister(id);
-      t.mock.timers.setTime(NOW + DELAY + 1);
-      assert.equal(f.runner.hydrateDynamic(f.store, { get: () => reminderTemplate }), 1);
+      t.mock.timers.setTime(NOW + DELAY + (mode === 'missed expiry' ? 11 : 1));
+      assert.equal(f.runner.hydrateDynamic(f.store, { get: () => reminderTemplate }), mode === 'missed expiry' ? 0 : 1);
       t.mock.timers.setTime(NOW + DELAY + 11);
       f.runner.start();
       t.mock.timers.tick(0);
-    } else if (mode === 'invalid persisted window') {
+    } else if (mode === 'invalid persisted window' || mode === 'invalid missed window') {
       f.runner.unregister(id);
       const params = f.store.getById(id).params;
       params.holdLifecycle.waitSourceRef.slaUntilMs = NOW + DELAY - 69;
       params.holdLifecycle.await.expiresAt = NOW + DELAY - 69;
       f.store.updateParams(id, params);
-      assert.equal(f.runner.hydrateDynamic(f.store, { get: () => reminderTemplate }), 1);
+      if (mode === 'invalid missed window') t.mock.timers.setTime(NOW + DELAY + 1);
+      assert.equal(
+        f.runner.hydrateDynamic(f.store, { get: () => reminderTemplate }),
+        mode === 'invalid missed window' ? 0 : 1,
+      );
       f.runner.start();
       t.mock.timers.tick(DELAY);
     } else {
@@ -161,12 +171,58 @@ for (const mode of ['recovery expiry', 'invalid persisted window', 'busy defer']
     const terminal = f.store.getById(id);
     assert.equal(terminal.enabled, false);
     assert.match(terminal.params.holdLifecycle.status, /^retired_(expired|invalid)$/);
+    if (mode === 'invalid missed window') {
+      assert.equal(terminal.params.holdLifecycle.status, 'retired_invalid');
+      assert.equal(terminal.params.holdLifecycle.dispositionReason, 'sla_not_after_wake');
+      assert.doesNotMatch(f.notices[0].toast.message, /服务.*未运行/);
+    }
+    if (mode === 'missed expiry') {
+      assert.equal(terminal.params.holdLifecycle.status, 'retired_expired');
+      assert.equal(terminal.params.holdLifecycle.dispositionReason, 'sla_elapsed');
+      assert.match(f.deliveries[0].content, /超过等待截止/);
+      assert.doesNotMatch(f.notices[0].toast.message, /服务.*未运行/);
+    }
     assert.equal(f.deliveries.length, 1);
     assert.equal(f.deliveries[0].source.meta.phase, 'status');
     assert.equal(f.deliveries[0].targetCatId, undefined);
     assert.match(f.deliveries[0].content, /截止|窗口/);
     assert.doesNotMatch(f.deliveries[0].content, /服务未运行/);
     assert.equal(f.notices.length, 1);
+    assert.ok(!f.runner.getRegisteredTasks().includes(id));
+    t.mock.timers.tick(60_000);
+    await setImmediate();
+    assert.equal(f.deliveries.length, 1);
+  });
+}
+
+for (const invalid of [false, true]) {
+  test(`legacy online hold without onceLifecycle ${invalid ? 'rejects an invalid window' : 'still wakes once'}`, async (t) => {
+    const f = await fixture(t);
+    const accepted = await f.hold(NOW + DELAY + 10);
+    const id = accepted.json().taskId;
+    f.runner.unregister(id);
+    const def = f.store.getById(id);
+    if (invalid) {
+      delete def.params.triggerUserId;
+      def.params.holdLifecycle.waitSourceRef.slaUntilMs = NOW + DELAY - 69;
+      def.params.holdLifecycle.await.expiresAt = NOW + DELAY - 69;
+      f.store.updateParams(id, def.params);
+    }
+    const spec = reminderTemplate.createSpec(id, { ...def, ...f.store.getPrivateOwnerAuthorization(id) });
+    assert.equal(spec.onceLifecycle, undefined);
+    f.runner.register(spec);
+    f.runner.start();
+    t.mock.timers.tick(DELAY);
+    await setImmediate();
+    assert.equal(f.deliveries.length, 1);
+    assert.equal(f.deliveries[0].source.meta.phase, invalid ? 'status' : 'wake');
+    assert.equal(f.deliveries[0].targetCatId, invalid ? undefined : 'codex');
+    if (invalid) {
+      assert.equal(f.store.getById(id).params.holdLifecycle.status, 'retired_invalid');
+      assert.equal(f.store.getById(id).params.holdLifecycle.dispositionReason, 'sla_not_after_wake');
+      assert.equal(f.notices.length, 1);
+      assert.equal(f.deliveries[0].userId, 'default-user');
+    }
     assert.ok(!f.runner.getRegisteredTasks().includes(id));
     t.mock.timers.tick(60_000);
     await setImmediate();
