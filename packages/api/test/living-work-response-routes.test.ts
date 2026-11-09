@@ -74,12 +74,12 @@ test('real callback submits one MP4 with original Human feedback and repairs its
     db.close();
     store.close();
   });
-  const call = (command: unknown) =>
+  const call = (command: unknown, contentTaskId = 'task-cover') =>
     app.inject({
       method: 'POST',
       url: '/api/callbacks/work',
       headers: { 'x-invocation-id': credentials.invocationId, 'x-callback-token': credentials.callbackToken },
-      payload: { command, contentTaskId: 'task-cover' },
+      payload: { command, contentTaskId },
     });
   const inspected = await service.inspectSource({ worktreeId: 'root', path: 'movie.mp4' }, human);
   const created = await call({
@@ -226,6 +226,17 @@ test('real callback submits one MP4 with original Human feedback and repairs its
       })),
     },
   };
+  credentials = await registry.create(
+    'operator',
+    createCatId('codex-astra'),
+    'thread-cover',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'unknown',
+  );
+  assert.equal((await call(command, 'unrelated-task')).statusCode, 403);
   f.messages.set(message.id, { ...message, deletedAt: 10002 });
   assert.equal(
     (await call(command)).statusCode,

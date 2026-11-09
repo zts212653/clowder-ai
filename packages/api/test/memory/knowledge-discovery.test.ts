@@ -26,7 +26,9 @@ test('discovery tops up rejected candidates and deduplicates canonical coordinat
   assert.deepEqual(new Set(result.items), new Set(['message:1', 'message:2', 'message:3']));
   assert.equal(result.items.length, 3);
   assert.equal(reads.length, 2);
-  assert.ok(reads.every((request) => request.signal === controller.signal && request.deadlineAt === deadlineAt));
+  assert.ok(reads.every((request) => request.signal === reads[0]?.signal && request.deadlineAt === deadlineAt));
+  assert.notEqual(reads[0]?.signal, controller.signal, 'discovery owns its read scope');
+  assert.equal(controller.signal.aborted, false);
   assert.equal(result.version, 'knowledge-discovery-v1');
 });
 

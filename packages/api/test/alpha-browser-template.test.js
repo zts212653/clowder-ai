@@ -173,7 +173,7 @@ for (const ownership of ['owner', 'guardian']) {
     assert.equal(f.delivered[0].targetCatId, 'fixture-cat');
     assert.equal(f.delivered[0].idempotencyKey, `alpha-triage:exact-job:1:${taskId}`);
     assert.equal(f.triggered.length, 0, 'atomic admission never creates a second trigger');
-    assert.equal([...f.tasks.values()][0].ownerCatId, ownership === 'owner' ? 'fixture-cat' : null);
+    assert.equal([...f.tasks.values()][0].ownerCatId, 'fixture-cat', 'explicit guardian owns unresolved repair');
   });
 }
 
@@ -327,6 +327,7 @@ test('Alpha browser verification is unavailable without the complete installed h
     'alpha-browser-worker.mjs',
     'alpha-browser-checkout.mjs',
     'alpha-browser-failures.mjs',
+    'alpha-browser-failure-signature.mjs',
     'gate-execution-api.mjs',
   ];
   assert.equal(supportsAlphaBrowserVerification(root), false);

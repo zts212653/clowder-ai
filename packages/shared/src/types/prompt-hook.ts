@@ -255,13 +255,6 @@ export interface PingPongInput {
   count: number;
 }
 
-/** Active participant info for D12. */
-export interface ActiveParticipantInput {
-  catId: string;
-  label: string;
-  lastMessageAt: number;
-}
-
 /** SOP stage hint info for D14. */
 export interface SopStageInput {
   featureId: string;
@@ -321,7 +314,6 @@ export interface AssemblerInput {
   /** A private declaration/action discrepancy, distinct from unrouted mentions. */
   voidHoldFeedback?: boolean;
   promptTags: readonly string[];
-  activeParticipants: readonly ActiveParticipantInput[];
   routingPolicyParts: string | null;
   sopStageHint: SopStageInput | null;
   voiceMode: boolean;

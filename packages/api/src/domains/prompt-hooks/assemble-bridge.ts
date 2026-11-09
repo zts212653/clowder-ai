@@ -31,7 +31,6 @@ import {
   formatAlwaysOnDocs,
   formatHandleFreeLabel,
   PROVIDER_LABELS,
-  resolveActiveParticipants,
   resolveDirectMessage,
   resolveModel,
   resolveTeammates,
@@ -133,7 +132,6 @@ export function assembleForSession(catId: CatId, options?: StaticIdentityOptions
     teammates: [],
     mentionRoutingItems: [],
     promptTags: [],
-    activeParticipants: [],
     routingPolicyParts: null,
     sopStageHint: null,
     voiceMode: false,
@@ -194,7 +192,6 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
     mentionRoutingItems: routingItems,
     voidHoldFeedback: context.mentionRoutingFeedback?.items.some((item) => item.reason === 'void_hold') ?? false,
     promptTags: context.promptTags ? [...context.promptTags] : [],
-    activeParticipants: resolveActiveParticipants(context.activeParticipants),
     routingPolicyParts: formatRoutingPolicy(context.routingPolicy),
     sopStageHint: context.sopStageHint
       ? {

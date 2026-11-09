@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -48,6 +48,7 @@ function badgeFor(state: MailboxState): RailBadge {
 export function MailboxButton() {
   const t = useShellCopy(mailboxEntryCopy);
   const pathname = usePathname() ?? '/';
+  const router = useRouter();
   const view = useUnifiedAttention();
   // Decisions made on an approval's original card are followed here, not in the panel: the panel closes, the decision goes on.
   const sessions = useApprovalSessions(view);
@@ -107,15 +108,14 @@ export function MailboxButton() {
     if (restoreFocus) buttonRef.current?.focus();
   }, []);
 
-  // An exact place is reached directly (the source message, a collective-work result). A list is a workspace panel,
-  // and opening a panel needs a chat route to host the Workspace; from elsewhere go back to the last thread first.
+  // Exact places own their target conversation, including prepared reviews in Workspace.
+  // Only an unlocated list returns to the last conversation to find a Workspace host.
   const openInChat = useOpenInChat();
   const openPlace = useCallback(
     (place: OriginalPlace) => {
       setOpen(false);
       if (place.kind === 'exact') {
-        if (place.host === 'workspace') openInChat(() => openExactPlace(place.actionRef, pathname));
-        else openExactPlace(place.actionRef, pathname);
+        openExactPlace(place.actionRef, pathname, router.push);
         return;
       }
       if (place.destination === 'approval') {
@@ -127,7 +127,7 @@ export function MailboxButton() {
         setWorkspaceMode(place.destination);
       });
     },
-    [openInChat, setWorkspaceMode, pathname],
+    [openInChat, setWorkspaceMode, pathname, router],
   );
 
   const stateText = mailboxStateText(state, t);

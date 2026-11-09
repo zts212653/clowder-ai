@@ -261,7 +261,7 @@ export interface SessionStrategyConfig {
   handoff?: {
     /** Attempt MEMORY.md dump before seal */
     preSealMemoryDump: boolean;
-    /** Bootstrap injection depth */
+    /** Read preference: generative accepts historical digest.handoff.md; sealing never generates one. */
     bootstrapDepth: 'extractive' | 'generative';
   };
   /** compress strategy parameters */

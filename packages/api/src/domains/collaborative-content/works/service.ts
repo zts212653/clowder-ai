@@ -104,7 +104,9 @@ export class LivingWorkService {
     const response = command.action === 'submit' ? command.reviewResponse : undefined;
     if (response && isHtmlWorkSource(command.source)) throw new MediaOwnerError('invalid_media');
     if (response && !this.deps.responses) throw new MediaOwnerError('media_unavailable');
-    await this.deps.authorize({ principal, permission: 'write' });
+    // A continuation first proves current read identity, then authorizes its known target below.
+    // A new work has no existing content grant and keeps independent production admission.
+    await this.deps.authorize({ principal, permission: command.action === 'create' ? 'write' : 'read' });
     const contentRef = command.action === 'submit' ? command.contentRef : createdWorkRef(command, principal);
     const current = await this.describeExisting(contentRef);
     const scope = current?.publicationScope;
@@ -119,7 +121,7 @@ export class LivingWorkService {
           createdBy: principal.actor,
         };
     if (!workScope.threadId) throw new MediaOwnerError('access_denied');
-    await this.deps.authorize({ principal, permission: 'write', scope: workScope });
+    await this.deps.authorize({ principal, permission: 'write', scope: workScope, operation: command.action });
     const requestDigest = sha(JSON.stringify(command));
     const previous = current
       ? (await this.deps.owner.listOutbox(contentRef)).find((item) => item.operationId === command.operationId)
@@ -160,7 +162,7 @@ export class LivingWorkService {
           : undefined;
       const authorizeEffect = async () => {
         await opened.revalidate();
-        await this.deps.authorize({ principal, permission: 'write', scope: workScope });
+        await this.deps.authorize({ principal, permission: 'write', scope: workScope, operation: command.action });
         if (pending) await this.deps.responses!.assertEffect(pending, principal);
         await assertSubmitCoverSource(this.covers, frozenCover, principal);
       };
@@ -263,9 +265,9 @@ export class LivingWorkService {
   }
 
   async inspectSource(locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>, principal: WorkPrincipal) {
-    await this.deps.authorize({ principal, permission: 'write' });
+    await this.deps.authorize({ principal, permission: 'read' });
     const description = await this.deps.source.inspect({ locator, principal });
-    await this.deps.authorize({ principal, permission: 'write' });
+    await this.deps.authorize({ principal, permission: 'read' });
     return description;
   }
 

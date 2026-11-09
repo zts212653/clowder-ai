@@ -563,30 +563,3 @@ describe('regression: factory with fresh health store = current behavior', () =>
     assert.equal(service._carrierFallbackFrom, undefined);
   });
 });
-
-// ─── Legacy: opusService lazy wrapper contract (砚砚 Step-3 P1) ───
-
-test('砚砚 Step-3 P1 re-review: opusService lazy wrapper invoke() returns AsyncIterable directly (not Promise)', () => {
-  let inited = false;
-  const factory = (catId) => {
-    inited = true;
-    return {
-      catId,
-      async *invoke() {
-        yield { type: 'done', catId, timestamp: Date.now(), metadata: { provider: 'mock', model: 'm' } };
-      },
-    };
-  };
-  let _svc;
-  const lazyService = {
-    invoke(prompt, options) {
-      return (async function* () {
-        if (!_svc) _svc = factory('opus');
-        yield* _svc.invoke(prompt, options);
-      })();
-    },
-  };
-  const iter = lazyService.invoke('hi');
-  assert.ok(typeof iter[Symbol.asyncIterator] === 'function', 'must be AsyncIterable directly');
-  assert.equal(inited, false, 'lazy init must NOT happen at invoke() call time');
-});

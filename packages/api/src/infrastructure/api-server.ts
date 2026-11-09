@@ -28,6 +28,7 @@
  * which keeps the error reply inside the markers below. Making one async needs
  * this rule extended first.
  */
+import { MAX_CONTENT_FILE_BASENAME_LENGTH } from '@cat-cafe/shared';
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -127,7 +128,9 @@ function installReplyOwnership(app: FastifyInstance): void {
 }
 
 export function createApiServer(options: FastifyServerOptions = {}): FastifyInstance {
-  const app = Fastify(options);
+  // find-my-way checks decoded parameter length. Its default 100 also shadows /uploads/*
+  // when the GIF poster's :filename route exists, so match the existing basename contract.
+  const app = Fastify({ ...options, maxParamLength: options.maxParamLength ?? MAX_CONTENT_FILE_BASENAME_LENGTH });
   installReplyOwnership(app);
   return app;
 }

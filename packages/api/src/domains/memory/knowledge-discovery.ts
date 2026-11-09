@@ -60,6 +60,10 @@ export interface KnowledgeDiscoveryResult<Item> {
   sources: DiscoverySourceResult<Item>[];
 }
 
+type OwnedDiscoveryOptions<Candidate, Item> = KnowledgeDiscoveryOptions<Candidate, Item> & {
+  cancel(reason: unknown): void;
+};
+
 export function checkDiscoveryLifetime(options: { signal?: AbortSignal; deadlineAt?: number; check?(): void }): void {
   options.signal?.throwIfAborted();
   if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
@@ -69,7 +73,7 @@ export function checkDiscoveryLifetime(options: { signal?: AbortSignal; deadline
 
 async function withinDiscoveryLifetime<T>(
   read: () => Promise<T>,
-  options: { signal?: AbortSignal; deadlineAt?: number; check?(): void },
+  options: { signal?: AbortSignal; deadlineAt?: number; check?(): void; cancel(reason: unknown): void },
 ): Promise<T> {
   checkDiscoveryLifetime(options);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -78,11 +82,22 @@ async function withinDiscoveryLifetime<T>(
     return await new Promise<T>((resolve, reject) => {
       abort = () => reject(options.signal?.reason ?? new DOMException('Discovery canceled', 'AbortError'));
       options.signal?.addEventListener('abort', abort, { once: true });
-      if (options.deadlineAt !== undefined)
-        timer = setTimeout(
-          () => reject(new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError')),
-          Math.max(0, options.deadlineAt - Date.now()),
-        );
+      const deadlineAt = options.deadlineAt;
+      if (deadlineAt !== undefined) {
+        const expire = () => {
+          // A timer may wake before Date.now crosses the absolute deadline.
+          // Callers use that same deadline to classify cancellation as partial.
+          const remaining = deadlineAt - Date.now();
+          if (remaining > 0) {
+            timer = setTimeout(expire, remaining);
+            return;
+          }
+          const reason = new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError');
+          options.cancel(reason);
+          reject(reason);
+        };
+        timer = setTimeout(expire, Math.max(0, deadlineAt - Date.now()));
+      }
       Promise.resolve().then(read).then(resolve, reject);
     });
   } finally {
@@ -94,7 +109,7 @@ async function withinDiscoveryLifetime<T>(
 async function discoverSource<Candidate, Item>(
   query: string,
   source: KnowledgeDiscoverySource<Candidate, Item>,
-  options: KnowledgeDiscoveryOptions<Candidate, Item>,
+  options: OwnedDiscoveryOptions<Candidate, Item>,
 ): Promise<DiscoverySourceResult<Item>> {
   const result: DiscoverySourceResult<Item> = { sourceId: source.id, items: [], inspected: 0, stopReason: 'exhausted' };
   const seen = new Set<string>();
@@ -176,7 +191,30 @@ export async function discoverKnowledge<Candidate, Item>(
   query: string,
   options: KnowledgeDiscoveryOptions<Candidate, Item>,
 ): Promise<KnowledgeDiscoveryResult<Item>> {
-  options = { ...options, deadlineAt: options.deadlineAt ?? Date.now() + 15_000 };
+  const controller = new AbortController();
+  const inheritAbort = () => controller.abort(options.signal?.reason);
+  options.signal?.addEventListener('abort', inheritAbort, { once: true });
+  if (options.signal?.aborted) inheritAbort();
+  try {
+    return await discoverOwned(query, {
+      ...options,
+      signal: controller.signal,
+      deadlineAt: options.deadlineAt ?? Date.now() + 15_000,
+      cancel: (reason) => controller.abort(reason),
+    });
+  } catch (error) {
+    controller.abort(error);
+    throw error;
+  } finally {
+    controller.abort(new DOMException('Knowledge discovery finished', 'AbortError'));
+    options.signal?.removeEventListener('abort', inheritAbort);
+  }
+}
+
+async function discoverOwned<Candidate, Item>(
+  query: string,
+  options: OwnedDiscoveryOptions<Candidate, Item>,
+): Promise<KnowledgeDiscoveryResult<Item>> {
   checkDiscoveryLifetime(options);
   const sources: DiscoverySourceResult<Item>[] = [];
   for (let offset = 0; offset < options.sources.length; offset += 4) {
@@ -193,10 +231,25 @@ export async function discoverKnowledge<Candidate, Item>(
     const result = sources[index]!;
     if (!adapter.revalidate) continue;
     const current: Item[] = [];
+    let sourceFailed = false;
     for (const item of result.items) {
       checkDiscoveryLifetime(options);
-      const fresh = await withinDiscoveryLifetime(() => adapter.revalidate!(item), options);
+      const fresh = await withinDiscoveryLifetime(async () => {
+        try {
+          return await adapter.revalidate!(item);
+        } catch (error) {
+          checkDiscoveryLifetime(options);
+          if (!adapter.tolerateError) throw error;
+          sourceFailed = true;
+          return null;
+        }
+      }, options);
       checkDiscoveryLifetime(options);
+      if (sourceFailed) {
+        result.stopReason = 'error';
+        current.length = 0;
+        break;
+      }
       if (fresh !== null && adapter.key(fresh) === adapter.key(item)) current.push(fresh);
     }
     result.items = current;
