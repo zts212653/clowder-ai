@@ -116,3 +116,16 @@ RED 证据：`/tmp/f202-alpha36-projection-red.log`、`/tmp/f202-alpha36-recover
 Fallback 检查使用原脚本仅适配插件根路径：生产 automatic-verification +1、connection +1、journey-projection 净0；测试中空 actions/可选 detail 的断言合计触发阈值，并非多级执行兜底。生产新增选择明确对应当前/候选授权和恢复 fence，没有 Host 分支、缓存或新的回退路由。最终安装包须显式构建后归档、逐字节比对与空缓存离线安装，再交两份 exact HEAD 复审。未安装插件、更新运行配置或重启服务。
 
 最终自检：插件 200/200（`/tmp/f202-alpha36-release-suite.log`）、构建/类型检查通过；隔离浏览器确认与实际剪贴板复制通过；精确归档准入及空缓存离线安装1/1（`archive-alpha36-final.log`）。89个运行/资源/声明/文档文件逐字节匹配；alpha.36 SHA256 `7980c52f0a7a2d34fb9887dddfd0c6f6dd53e52bf1e816e1f889dac40ba5832b`。SDK 仍 candidate.12。插件提交 `2d5db3fea3f4b814e5db8491ef65f291f3b3e37d`，Host 增量仅本记录与随包版本/完整性引用；正式 exact-HEAD 复审、实机体验与 soak 保持待完成。
+
+## alpha.37 恢复身份与过期邀请边界修正
+
+复审来源 `0001794211206761-001191-49673b4f`（插件两个 P2）、`0001794211207100-001192-c3c07ee8`（随包，没有独立 Host finding）。两条 reviewer 反例在原 HEAD 独立重跑为 RED：`/tmp/f202-alpha37-reviewer-red.log`；移入原测试集后同样 RED：`/tmp/f202-alpha37-regression-red.log`。
+
+- P2-1：删除 begin 失败分支的补偿撤销。配对身份在持久提交后可能已被其他主人请求采用，旧操作不能再认定独占并反向撤销。失败保留可重试的未完成身份，原 external 授权、订阅、候选证明与撤销检查继续决定实际访问；显式断开/重置保留原语义。新增中断首次初始化的检查，证明旧 token 已被撤销、新候选不能执行 business、未配对 identity 不能 ready，主人重试复用身份。
+- P2-2：主人恢复先经 owner/installation 检查，再核对捕获 identity 的 attempt/revision 及 external 原 candidate/token/revision CAS。移除在这一主人入口调用 sameAttempt(false) 时附带的旧邀请期限要求。真正首次配置的回归明确清空 fixture legacy token，覆盖 base identity、候选配对窗口和候选订阅都过期后的完整重新订阅、读取与回复。远程过期邀请仍被拒绝，公共 subscribe/read/reply 的期限检查没有修改。
+
+同型审视：两个问题都将“初始化/恢复的身份连续性”与“授权是否仍有效”耦合。已核 begin 全部设置入口与 repair 调用，撤销仅留在显式断开/重置；远程 sameAttempt 与候选 token/binding/event 校验不动。没有增加独占身份标记、补偿 Store 或新的 Host 分支。
+
+最终插件提交 `c7e0c7c34898be4d3753a9985a310d50b30f75ae`。原 reviewer 2/2 GREEN（`/tmp/f202-alpha37-reviewer-green.log`）；插件全套203/203（`/tmp/f202-alpha37-release-suite.log`）、显式构建/类型检查通过。原隔离浏览器的真实投影/组件/插件动作、确认/剪贴板复制/等待状态继续通过（`connection-recovery-alpha37-browser.log`），自有实例已关闭。
+
+alpha.37 最终包 SHA256 `11037b27a9598ea62b8e1907505b8c9f59a0a518d1f09bbdb5056412af563942`，89文件逐字节比对；精确准入与空缓存离线安装1/1（`archive-alpha37.log`）。Fallback 生产 connection 净减少3，累计阈值为既有代码总量，本轮未增加回退层。Host 增量仍仅随包/版本/摘要及本记录。独立新 HEAD 复审尚待返回；真实 Work、operator 体验与 fork soak 未完成。未安装、重启或更改运行配置/凭据。
