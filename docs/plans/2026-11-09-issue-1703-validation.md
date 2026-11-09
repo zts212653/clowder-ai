@@ -70,7 +70,7 @@ status: evidence-reviewed-installation-pending
 
 2026-11-09 只读核对：本机 Hyper-V 已启用，但 Get-VM 返回空，常用镜像目录未找到 ISO/VHD/VHDX，Windows Sandbox 未启用；当前连接也没有可用验收 limb。没有启用系统组件、创建虚拟机、断开整机网络或运行原 AppId 安装器。已询问可复用的 Windows 验收机/镜像。原 AppId 安装器应在独立 Windows 环境验收，避免覆盖宿主机原安装登记。
 
-fork 的 Actions 只读返回 enabled=true，build-windows-desktop.yml 为 active，旧交接中的 Actions-disabled 阻塞不再作为现行事实。原有 Verify Desktop Candidate 的输入契约限定 upstream orchestrator producer，不能把 fork standalone build 冒充其受支持输入，也不为运行方便移除该 provenance guard。后续云端工件若重建，须单独绑定其 source/hash，不能继承本地 5bed18 的实包大小与安装结论。
+fork 的 Actions 只读接口返回 enabled=true，build-windows-desktop.yml 为 active；但随后在已推送的 6a1aa310a 上实际 dispatch 仍返回 HTTP 422: Actions has been disabled for this repository，没有创建 run。有效执行阻塞仍在，不能用只读权限开关冒充可用性，也没有修改仓库设置。原有 Verify Desktop Candidate 的输入契约限定 upstream orchestrator producer，不能把 fork standalone build 冒充其受支持输入，也不为运行方便移除该 provenance guard。后续云端工件若重建，须单独绑定其 source/hash，不能继承本地 5bed18 的实包大小与安装结论。
 
 [可公开的本轮证据摘要](evidence/2026-11-09-issue-1703-next-package-slimming.json)只含源码、实包身份、统计与证据哈希；完整原始日志和安装器仍以实际下载回执为准。
 
