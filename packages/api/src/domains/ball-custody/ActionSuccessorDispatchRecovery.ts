@@ -12,7 +12,6 @@ import {
 } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
-import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import type { ActionSuccessorDispatchFailureReason, ActionSuccessorLease } from './action-successor-state-machine.js';
 import { isRetiredTaskAction } from './retired-task-action.js';
 
@@ -59,7 +58,6 @@ export interface ActionSuccessorDispatchRecoveryDeps {
     fence: ActionSuccessorFence,
     ownerAuthProvenance: OwnerAuthProvenance,
   ) => Promise<ActionSuccessorDispatchDeliveryResult>;
-  readonly notifyRecovery?: ActionRecoveryNotification;
   readonly now?: () => number;
   readonly scanLimit?: number;
 }
@@ -137,7 +135,6 @@ export class ActionSuccessorDispatchRecovery {
           lease,
           lane: 'dispatch',
           now: this.now(),
-          notify: this.deps.notifyRecovery,
           recover: async (current) => {
             if (!current.terminalPredicate) return { kind: 'permanent_error', reason: 'dispatch_predicate_missing' };
             const result = await this.recover(current);

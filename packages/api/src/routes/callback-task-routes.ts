@@ -205,6 +205,10 @@ export function registerCallbackTaskRoutes(
     developmentDocuments?: DevelopmentScopeDocuments;
     liveTaskAuthority?: LiveTaskAuthority;
     ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
+    taskRecovery?: Pick<
+      import('../domains/ball-custody/TaskRecoveryReadModel.js').TaskRecoveryReadModel,
+      'projectMany'
+    >;
   },
 ): void {
   const { taskStore, messageStore, socketManager, threadStore } = deps;
@@ -605,7 +609,7 @@ export function registerCallbackTaskRoutes(
       ...(taskId ? { taskId } : {}),
       ...(featureId ? { featureId } : {}),
     });
-    const tasks = [...result.tasks];
+    const tasks = deps.taskRecovery ? await deps.taskRecovery.projectMany(result.tasks) : [...result.tasks];
 
     // F236 AC-A4: anchor the why field (head preview + whyLength + whyTruncated + drillDown).
     // A taskId drill returns that task's why in full.

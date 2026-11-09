@@ -1255,10 +1255,6 @@ async function main(): Promise<void> {
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
-  const { createActionRecoveryNotification } = await import(
-    './domains/ball-custody/action-successor-recovery-notification.js'
-  );
-  const notifyActionRecovery = createActionRecoveryNotification({ messages: messageStore, threads: threadStore });
   let taskActionSuccessorLifecycle:
     | import('./domains/ball-custody/TaskActionSuccessorLifecycle.js').TaskActionSuccessorLifecycle
     | undefined;
@@ -1335,7 +1331,6 @@ async function main(): Promise<void> {
     actionSuccessorCompletionService = completionService;
     taskActionSuccessorLifecycle = new taskActionLifecycleMod.TaskActionSuccessorLifecycle({
       leaseStore: actionSuccessorLeaseStore,
-      notifyRecovery: notifyActionRecovery,
       completionService: actionSuccessorCompletionService,
     });
     taskActionSuccessorOrphanRecovery = new orphanRecoveryMod.TaskActionSuccessorOrphanRecovery({
@@ -1389,6 +1384,11 @@ async function main(): Promise<void> {
       taskActionSuccessorLifecycle,
     );
   }
+  const { TaskRecoveryReadModel } = await import('./domains/ball-custody/TaskRecoveryReadModel.js');
+  const taskRecoveryReadModel = new TaskRecoveryReadModel({
+    ...(taskActionSuccessorLifecycle ? { action: taskActionSuccessorLifecycle } : {}),
+    ...(ballCustodyProjectionStore ? { ball: ballCustodyProjectionStore } : {}),
+  });
 
   // F153 Phase F AC-F4: Hydrate trace store from Redis messages on cold start
   if (telemetryHandle.traceStore && redis) {
@@ -3247,7 +3247,6 @@ async function main(): Promise<void> {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     await actionSuccessorLeaseStore.initializeRecovery();
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
-      notifyRecovery: notifyActionRecovery,
       tasks: taskStore,
       leaseStore: actionSuccessorLeaseStore,
       deliverReturnCarrier: async (carrier) => {
@@ -3297,7 +3296,6 @@ async function main(): Promise<void> {
         return recoveryStatus === 'terminal' ? { outcome: 'unavailable' as const } : { outcome: 'enqueued' as const };
       },
       dispatch: {
-        notifyRecovery: notifyActionRecovery,
         tasks: taskStore,
         leaseStore: actionSuccessorLeaseStore,
         truthResolver: actionSubjectTruthResolver,
@@ -4998,6 +4996,7 @@ async function main(): Promise<void> {
 
   const callbackOpts = {
     ordinaryTaskHandoffs,
+    taskRecovery: taskRecoveryReadModel,
     ...(routingContextRuntime ? { routingSelection: routingContextRuntime.selectionService } : {}),
     proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
@@ -7009,6 +7008,7 @@ async function main(): Promise<void> {
     socketManager,
     deploymentWaitLifecycleHolder,
     humanTerminal: entrustedWorkHumanTerminal,
+    taskRecovery: taskRecoveryReadModel,
   });
   registerDeploymentWaitProjectionRoutes(app, {
     threadStore,
@@ -8776,7 +8776,7 @@ async function main(): Promise<void> {
   // F233 PR4: realtime blocked-task probe. Side effects live here, not in projector/rebuild.
   if (ballCustodyIngest && ballCustodyProjectionStore) {
     const [
-      { BallCustodyProbeScheduler, createBallProbeRecoveryNotification },
+      { BallCustodyProbeScheduler },
       { DefaultBallCustodyProbeEvaluator },
       { SchedulerBallCustodyWakeSender },
       { createBallCustodyProbeTaskSpec },
@@ -8791,7 +8791,6 @@ async function main(): Promise<void> {
       projectionStore: ballCustodyProjectionStore,
       taskStore,
       ballCustody: ballCustodyIngest,
-      notifyRecovery: createBallProbeRecoveryNotification({ messages: messageStore, threads: threadStore }),
       probeEvaluator: new DefaultBallCustodyProbeEvaluator({ redis }),
       wakeSender: new SchedulerBallCustodyWakeSender({
         deliver: schedulerDeliver,

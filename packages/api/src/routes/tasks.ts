@@ -1,6 +1,7 @@
 import { adoptOrdinaryTaskTenant } from '../domains/ball-custody/adopt-ordinary-task-tenant.js';
 import { OrdinaryTaskHandoffError } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 import type { OrdinaryTaskHandoffService } from '../domains/ball-custody/OrdinaryTaskHandoffService.js';
+import type { TaskRecoveryReadModel } from '../domains/ball-custody/TaskRecoveryReadModel.js';
 import type { PreparedArtifactReader } from '../domains/growing/ports/PreparedArtifactReader.js';
 /**
  * Task CRUD Routes (毛线球)
@@ -49,6 +50,7 @@ export interface TasksRoutesOptions {
   artifactReader?: PreparedArtifactReader;
   deploymentWaitLifecycleHolder?: { current?: DeploymentWaitLifecycleService };
   humanTerminal?: EntrustedWorkHumanTerminalService;
+  taskRecovery?: Pick<TaskRecoveryReadModel, 'project' | 'projectMany'>;
 }
 
 type WaitCancelLifecycle = {
@@ -210,7 +212,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     let tasks = await taskStore.listByThread(threadId);
     if (kind) tasks = tasks.filter((t) => t.kind === kind);
-    return { tasks };
+    return { tasks: opts.taskRecovery ? await opts.taskRecovery.projectMany(tasks) : tasks };
   });
 
   // GET /api/tasks/:id
@@ -221,7 +223,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       reply.status(404);
       return { error: 'Task not found' };
     }
-    return task;
+    return opts.taskRecovery ? await opts.taskRecovery.project(task) : task;
   });
 
   // PATCH /api/tasks/:id

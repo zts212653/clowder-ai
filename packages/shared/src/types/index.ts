@@ -1716,6 +1716,8 @@ export type {
   TaskItem,
   TaskKind,
   TaskProbeSpec,
+  TaskRecoveryIncident,
+  TaskRecoveryProjection,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';

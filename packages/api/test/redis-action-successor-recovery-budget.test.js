@@ -1,42 +1,26 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runActionDueRecovery } from '../dist/domains/ball-custody/action-successor-due-recovery.js';
-import { ActionSuccessorKeys } from '../dist/domains/ball-custody/action-successor-keys.js';
-import { createActionRecoveryNotification } from '../dist/domains/ball-custody/action-successor-recovery-notification.js';
-import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { actionRecoveryLease as lease, withActionRecoveryRedis } from './helpers/action-recovery-fixture.js';
 import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const isolated = { skip: redisIsolationSkipReason(process.env.REDIS_URL) };
 test(
-  'five actual failures park only the original lane; crash after append produces one status Message across restart and rebuild',
+  'five actual failures park only the original lane without creating a second Message across restart and rebuild',
   isolated,
   async () => {
     await withActionRecoveryRedis(async ({ redis, store, seed }) => {
       const original = lease(1, false);
       await seed(original);
       await store.initializeRecovery();
-      const messages = new RedisMessageStore(redis);
-      const send = createActionRecoveryNotification({
-        messages,
-        threads: { get: async () => ({ createdBy: original.tenantScope }) },
-        now: () => 200,
-      });
-      let attempted = 0,
-        notices = 0;
-      const notify = async (input) => {
-        notices++;
-        await send(input);
-        if (notices === 1) throw new Error('crash_after_append');
-        return 'delivered';
-      };
+      let attempted = 0;
       const recover = async () => {
         attempted++;
         throw new Error('backend read unavailable');
       };
       let now = 1;
       for (let n = 0; n < 5; n++) {
-        await runActionDueRecovery({ port: store.recovery, lease: original, lane: 'dispatch', now, notify, recover });
+        await runActionDueRecovery({ port: store.recovery, lease: original, lane: 'dispatch', now, recover });
         now = (await store.recovery.read(original.leaseId, 'dispatch')).fact.nextAttemptAt;
       }
       let snapshot = await store.recovery.read(original.leaseId, 'dispatch');
@@ -44,23 +28,16 @@ test(
       assert.equal(snapshot.fact.attempts, 5);
       assert.equal(snapshot.lease.status, original.status);
       assert.equal(snapshot.lease.revision, original.revision);
-      assert.equal(snapshot.fact.notification.deliveredAt, undefined);
-      const key = snapshot.fact.notification.key;
-      assert.ok(await messages.getByIdempotencyKey(original.tenantScope, original.holderThreadId, key));
+      assert.equal(snapshot.fact.notification, undefined);
       const { RedisActionSuccessorLeaseStore } = await import(
         '../dist/domains/ball-custody/RedisActionSuccessorLeaseStore.js'
       );
       const restarted = new RedisActionSuccessorLeaseStore(redis);
       await restarted.initializeRecovery(true);
-      await runActionDueRecovery({ port: restarted.recovery, lease: original, lane: 'dispatch', now, notify, recover });
+      await runActionDueRecovery({ port: restarted.recovery, lease: original, lane: 'dispatch', now, recover });
       snapshot = await restarted.recovery.read(original.leaseId, 'dispatch');
       assert.equal(snapshot.fact.nextAttemptAt, null);
-      assert.ok(snapshot.fact.notification.deliveredAt);
       assert.equal(attempted, 5);
-      assert.equal(notices, 2);
-      const threadMessages = await messages.getByThread(original.holderThreadId, 10);
-      assert.equal(threadMessages.length, 1);
-      assert.deepEqual(threadMessages[0].mentions, []);
       assert.equal((await restarted.listPendingDispatches()).length, 0);
       assert.equal(
         (await restarted.listActiveTaskLeases()).length,

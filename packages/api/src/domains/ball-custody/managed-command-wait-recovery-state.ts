@@ -15,13 +15,6 @@ export interface ManagedCommandWaitRecoveryFact {
     readonly catId: string;
     readonly generation: number;
   };
-  readonly notification?: {
-    readonly key: string;
-    readonly reasonCode: string;
-    readonly attempts: number;
-    readonly deliveredAt?: number;
-    readonly target?: { readonly userId: string; readonly threadId: string; readonly catId: string };
-  };
 }
 
 export interface ManagedCommandWaitRecoverySnapshot {
@@ -42,14 +35,20 @@ export function planManagedCommandWaitRecovery(
   taskId: string,
   now: number,
 ): ManagedCommandWaitRecoveryFact {
-  const { claim: _claim, ...fact } = current;
+  const {
+    claim: _claim,
+    notification: _legacyNotification,
+    ...fact
+  } = current as ManagedCommandWaitRecoveryFact & {
+    notification?: unknown;
+  };
   if (outcome.kind === 'stale') return { ...fact, nextAttemptAt: now + 30_000 };
   if (outcome.kind === 'settled')
     return {
       ...fact,
       disposition: undefined,
       reasonCode: undefined,
-      nextAttemptAt: fact.notification && !fact.notification.deliveredAt && fact.notification.attempts < 5 ? now : null,
+      nextAttemptAt: null,
     };
   if (outcome.kind === 'waiting' && !outcome.parkReason) return { ...fact, nextAttemptAt: now + 30_000 };
   if (outcome.kind === 'waiting')
@@ -58,30 +57,17 @@ export function planManagedCommandWaitRecovery(
       disposition: 'parked',
       reasonCode: outcome.parkReason,
       recheck: { kind: 'observe_original_wait', taskId },
-      nextAttemptAt: outcome.notifyOwner === false ? null : now,
-      notification:
-        outcome.notifyOwner === false
-          ? fact.notification
-          : (fact.notification ?? {
-              key: `managed-wait:${taskId}:g${fact.waitGeneration ?? fact.consumption?.generation ?? 0}:${outcome.parkReason}`,
-              reasonCode: outcome.parkReason ?? 'carrier_unresolved',
-              attempts: 0,
-            }),
+      nextAttemptAt: null,
     };
   const attempts = current.attempts + (outcome.kind === 'retryable_error' ? 1 : 0);
   if (outcome.kind === 'permanent_error' || attempts >= 5)
     return {
       ...fact,
       attempts,
-      nextAttemptAt: now,
+      nextAttemptAt: null,
       disposition: outcome.kind === 'permanent_error' ? 'needs_attention' : 'parked',
       reasonCode: outcome.reason,
       recheck: { kind: 'observe_original_wait', taskId },
-      notification: fact.notification ?? {
-        key: `managed-wait:${taskId}:g${fact.waitGeneration ?? fact.consumption?.generation ?? 0}:${outcome.reason}`,
-        reasonCode: outcome.reason,
-        attempts: 0,
-      },
     };
   return { ...fact, attempts, nextAttemptAt: now + Math.min(300_000, 1000 * 2 ** attempts) };
 }

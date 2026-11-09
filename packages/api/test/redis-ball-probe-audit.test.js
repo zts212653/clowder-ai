@@ -4,8 +4,6 @@ import { test } from 'node:test';
 import { RedisBallCustodyProjectionStore } from '../dist/domains/ball-custody/BallCustodyProjectionStore.js';
 import { buildWakeSentEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
 import { createInitialProjection } from '../dist/domains/ball-custody/ball-custody-projection-reducer.js';
-import { createBallProbeRecoveryNotification } from '../dist/domains/ball-custody/ball-probe-recovery-notification.js';
-import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 import { auditRecoveryRedis } from './helpers/recovery-store-audit.js';
 
@@ -74,31 +72,21 @@ test('audit failures leave automatic recovery after five attempts, retaining exa
   assert.deepEqual(await store.listWakeAudits(1, 1_000_000), []);
 });
 
-test('status notification append-before-ack recovery writes one real Message and no wake', async () => {
-  const { redis, store, candidate } = await prepare('notice-receipt');
+test('a permanent probe recovery error remains on the original task owner without a status Message', async () => {
+  const { redis, store, candidate } = await prepare('owner-disposition');
   await store.finishRecovery(candidate, 'permanent_error', 2000, {
     userId: 'user',
     threadId: 'home',
     taskId: 'pending',
   });
-  const [selected] = await store.listRecoveryNotices(1, 2000);
-  const messages = new RedisMessageStore(redis);
-  const notify = createBallProbeRecoveryNotification({
-    messages,
-    threads: { get: async () => ({ id: 'home', createdBy: 'user' }) },
-  });
-  assert.equal(await notify(selected.notice), 'delivered'); // Process loss before recording the notice ACK.
-  const cold = new RedisBallCustodyProjectionStore(redis),
-    [pending] = await cold.listRecoveryNotices(1, 2000);
-  assert.equal(await notify(pending.notice), 'delivered');
-  await cold.finishRecoveryNotice(subject, pending.notice, 'delivered', 2000);
+  const facts = await store.getRecoveryFacts(subject);
+  assert.equal(facts.probe.disposition, 'needs_attention');
+  assert.equal(facts.probe.reasonCode, 'ball_recovery_failed');
+  assert.deepEqual(facts.notices, {});
+  const cold = new RedisBallCustodyProjectionStore(redis);
   await cold.initializeRecovery(true);
   assert.deepEqual(await cold.listRecoveryNotices(1, 1_000_000), []);
-  assert.equal((await messages.getByThread('home', 100, 'user')).length, 1);
-  const message = await messages.getByIdempotencyKey('user', 'home', pending.notice.key);
-  assert.deepEqual(message.mentions, []);
-  assert.equal(message.source.meta.phase, 'status');
-  assert.equal((await cold.getRecoveryNotice(subject, pending.notice.key)).state, 'delivered');
+  assert.equal((await cold.getRecoveryFacts(subject)).probe.disposition, 'needs_attention');
 });
 
 test('tenfold archived audit and notice history does not expand pending metadata or periodic reads', async () => {

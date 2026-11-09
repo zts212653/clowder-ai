@@ -1,4 +1,4 @@
-import type { TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
+import type { TaskItem, TaskRecoveryIncident, UpdateTaskInput } from '@cat-cafe/shared';
 import { recoveryGuarded } from '../../infrastructure/recovery/recovery-deadline.js';
 import { runDueBatch } from '../../infrastructure/recovery/run-due-batch.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
@@ -9,7 +9,6 @@ import type {
 } from './ActionSuccessorCompletionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import { recordActionRecoveryBatchFailure, runActionDueRecovery } from './action-successor-due-recovery.js';
-import type { ActionRecoveryNotification } from './action-successor-recovery-state.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
 export interface TaskActionRecoveryStats {
@@ -32,7 +31,6 @@ export class TaskActionSuccessorLifecycle {
   constructor(
     private readonly deps: {
       leaseStore: Pick<ActionSuccessorLeaseStore, 'getByIdentity' | 'listActiveTaskLeases' | 'recovery'>;
-      notifyRecovery?: ActionRecoveryNotification;
       now?: () => number;
       completionService: Pick<ActionSuccessorCompletionService, 'complete'>;
     },
@@ -89,7 +87,6 @@ export class TaskActionSuccessorLifecycle {
           lease,
           lane: 'task',
           now: (this.deps.now ?? Date.now)(),
-          notify: this.deps.notifyRecovery,
           recover: async (current) => {
             const taskId = current.subjectRef.slice('subject:task:'.length);
             const task = await taskStore.get(taskId);
@@ -130,6 +127,29 @@ export class TaskActionSuccessorLifecycle {
     stats.scanned = batch.selected;
     stats.errored += batch.failed;
     return stats;
+  }
+
+  async readRecoveryIncidents(task: TaskItem): Promise<TaskRecoveryIncident[]> {
+    const lease = await this.getActiveLease(task);
+    const recovery = this.deps.leaseStore.recovery;
+    if (!lease || !recovery) return [];
+    const lanes = ['return', 'dispatch', 'task'] as const;
+    const snapshots = await Promise.all(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
+    return snapshots.flatMap((snapshot, index) => {
+      const lane = lanes[index];
+      const fact = snapshot?.fact;
+      return lane !== undefined && fact?.disposition && fact.reasonCode
+        ? [
+            {
+              source: 'action_successor' as const,
+              lane,
+              disposition: fact.disposition,
+              reasonCode: fact.reasonCode,
+              executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
+            },
+          ]
+        : [];
+    });
   }
 
   private async getActiveLease(task: TaskItem): Promise<ActionSuccessorLease | null> {

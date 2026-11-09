@@ -59,7 +59,7 @@ test('the periodic wait selector caps real reads before decoding while settled h
   }
 });
 
-test('five real delivery failures park the original wait, notify once, and survive due-index rebuilding', async () => {
+test('five real delivery failures park the original wait without a second Message and survive due-index rebuilding', async () => {
   const db = new Database(':memory:');
   try {
     applyMigrations(db);
@@ -94,8 +94,21 @@ test('five real delivery failures park the original wait, notify once, and survi
     const parked = store.getManagedCommandRecoveryState(waiting.id).fact;
     assert.equal(parked.attempts, 5);
     assert.equal(parked.disposition, 'parked');
-    assert.ok(parked.notification.deliveredAt);
+    assert.equal(parked.notification, undefined);
     assert.equal(store.getById(waiting.id).params.holdLifecycle.managedCommand.state, 'condition_met');
+    const legacy = store.getManagedCommandRecoveryState(waiting.id);
+    assert.equal(
+      store.updateManagedCommandRecoveryState(waiting.id, legacy.revision, {
+        ...legacy.fact,
+        nextAttemptAt: now,
+        notification: { key: 'legacy-wait-notice', reasonCode: 'wake_admission_failed', attempts: 1 },
+      }),
+      true,
+    );
+    await sweep.runOnce();
+    const upgraded = store.getManagedCommandRecoveryState(waiting.id).fact;
+    assert.equal(upgraded.notification, undefined, 'upgrade retires the old notification outbox in place');
+    assert.equal(upgraded.nextAttemptAt, null, 'upgrade removes the disposed wait from the due index');
     db.exec('DROP INDEX idx_dynamic_managed_recovery_due');
     db.exec(MANAGED_COMMAND_RECOVERY_INDEX);
     for (let n = 0; n < 10; n++) {
@@ -103,8 +116,7 @@ test('five real delivery failures park the original wait, notify once, and survi
       now += 60_000;
     }
     assert.equal(admissions, 5, 'retired automatic work cannot be revived by rebuilding its index');
-    assert.equal(messages.getByThread('thread').length, 1, 'the incident has one durable status notice');
-    assert.equal(messages.getByThread('thread')[0].source.meta.cancelable, 'unchanged');
+    assert.equal(messages.getByThread('thread').length, 0, 'the original wait remains the only visible owner');
     assert.deepEqual(store.listManagedCommandCandidates(now, 100), []);
     const original = store.getById(waiting.id);
     store.updateParamsIfCurrent(waiting.id, original.params, {
@@ -112,16 +124,20 @@ test('five real delivery failures park the original wait, notify once, and survi
       holdLifecycle: { ...original.params.holdLifecycle, await: { v: 1, generation: 2 } },
     });
     assert.equal(
-      store.getManagedCommandRecoveryState(waiting.id).fact.notification,
+      store.getManagedCommandRecoveryState(waiting.id).fact.disposition,
       undefined,
-      'a replacement generation must not inherit the prior incident receipt',
+      'a replacement generation must not inherit the prior disposition',
     );
     for (let n = 0; n < 5; n++) {
       await sweep.runOnce();
       now += 60_000;
     }
     assert.equal(admissions, 10);
-    assert.equal(messages.getByThread('thread').length, 2, 'a distinct generation owns its own single incident');
+    assert.equal(
+      messages.getByThread('thread').length,
+      0,
+      'a distinct generation still cannot create a status Message',
+    );
   } finally {
     db.close();
   }
