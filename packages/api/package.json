@@ -46,7 +46,7 @@
     "lint": "tsc --noEmit",
     "clean": "node ../../scripts/clean-path.mjs dist",
     "test:artifact-review": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 --test-timeout=60000 test/artifact-review-*.test.ts test/asset-canon-*.test.ts test/content-owner-media-history.test.ts test/content-modification-chat-*.test.ts test/published-media-*.test.ts test/persisted-queue-delivery.test.ts",
-    "test:companion": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2 --test-timeout=60000 test/f317-*.test.ts test/f317-*.test.mjs test/plugin-authority-*.test.mjs",
+    "test:companion": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2 --test-timeout=60000 test/f317-*.test.ts test/f317-*.test.mjs test/plugin-authority-*.test.mjs test/openai-platform.test.ts test/google-platform-account.test.ts test/anthropic-platform-account.test.ts",
     "test:page-action": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && pnpm run test:page-action:prepared",
     "test:page-action:prepared": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node ./scripts/run-page-action-tests.mjs",
     "test:claude-sdk": "node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-timeout=60000 test/f318-claude-sdk*.test.ts test/f318-delayed-read-receipt.test.mjs",

@@ -8,7 +8,13 @@ import { artifactObjectId, createFilePreviewSurface } from '@/components/workben
 import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { HomeWorksSummary } from '../HomeWorksSummary';
 
-const data = vi.hoisted(() => ({ artifacts: [] as ThreadArtifactDTO[], loading: false }));
+type Admission = 'opened' | 'preview' | 'pending';
+const data = vi.hoisted(() => ({
+  artifacts: [] as ThreadArtifactDTO[],
+  loading: false,
+  admission: 'opened' as Admission,
+  openingError: null as string | null,
+}));
 vi.mock('@/hooks/useThreadArtifacts', () => ({
   useThreadArtifacts: () => ({ ...data, works: data.artifacts, total: data.artifacts.length, complete: true }),
 }));
@@ -18,14 +24,20 @@ vi.mock('@/components/content-review/useArtifactLightbox', () => ({
   useArtifactLightbox: () => {
     const scope = useArtworkLightboxScope();
     return {
-      error: null,
+      error: data.openingError,
       open: (artifact: ThreadArtifactDTO, origin: WorkspaceFileNavigationOrigin | undefined) => {
+        data.openingError = data.admission === 'preview' ? '原作品暂时不可用' : null;
         scope?.open({
           url: artifact.url ?? '',
           title: artifact.name,
           alt: artifact.name,
           mediaType: 'image',
-          surface: createFilePreviewSurface({ worktreeId: 'fixture', path: 'exact.png', navigationOrigin: origin }),
+          navigationOrigin: origin,
+          pending: data.admission === 'pending',
+          surface:
+            data.admission === 'opened'
+              ? createFilePreviewSurface({ worktreeId: 'fixture', path: 'exact.png', navigationOrigin: origin })
+              : null,
         });
         return !!scope;
       },
@@ -49,7 +61,9 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.unstubAllGlobals();
 });
-async function openAndReplace() {
+async function openAndReplace(admission: Admission = 'opened') {
+  data.admission = admission;
+  data.openingError = null;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div');
   host.dataset.testid = 'f307-workspace-home-page';
@@ -89,14 +103,28 @@ async function openAndReplace() {
   expect(replacement).not.toBe(original);
   return { host, replacement, render };
 }
-it('native preview returns to the exact replacement Home card after catalogue refresh', async () => {
-  const { replacement } = await openAndReplace();
+it('unavailable preview reports its opening error once without duplicating it above the cards', async () => {
+  const { host } = await openAndReplace('preview');
+  const alerts = host.querySelectorAll('[role="alert"]');
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]?.textContent).toBe('原作品暂时不可用');
+});
+it.each<Admission>([
+  'opened',
+  'preview',
+  'pending',
+])('%s native preview returns to the exact replacement Home card after catalogue refresh', async (admission) => {
+  const { replacement } = await openAndReplace(admission);
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(document.activeElement).toBe(replacement);
 });
-it('native preview close does not take focus away from another owner', async () => {
-  await openAndReplace();
+it.each<Admission>([
+  'opened',
+  'preview',
+  'pending',
+])('%s native preview close does not take focus away from another owner', async (admission) => {
+  await openAndReplace(admission);
   const other = document.createElement('button');
   document.body.append(other);
   cleanups.push(() => other.remove());
@@ -104,8 +132,12 @@ it('native preview close does not take focus away from another owner', async () 
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(document.activeElement).toBe(other);
 });
-it('native preview close cannot restore an origin from the previous thread', async () => {
-  const { render, replacement } = await openAndReplace();
+it.each<Admission>([
+  'opened',
+  'preview',
+  'pending',
+])('%s native preview close cannot restore an origin from the previous thread', async (admission) => {
+  const { render, replacement } = await openAndReplace(admission);
   await render('elsewhere');
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(document.activeElement).not.toBe(replacement);

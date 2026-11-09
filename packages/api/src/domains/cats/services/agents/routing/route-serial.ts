@@ -558,15 +558,6 @@ export async function* routeSerial(
   let yieldedFinalDone = false;
   let providerTeardownUnconfirmed = false;
   let routeFailed = false;
-  // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
-  let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
-  if (deps.invocationDeps.threadStore) {
-    try {
-      activeParticipants = await deps.invocationDeps.threadStore.getParticipantsWithActivity(threadId);
-    } catch {
-      /* best-effort: activity fetch failure does not block invocation */
-    }
-  }
   // F042: Fetch thread routingPolicy once before loop (threadId doesn't change).
   checkpointPreparation('lineage_and_participants');
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
@@ -1257,7 +1248,6 @@ export async function* routeSerial(
           ...(pingPongWarning ? { pingPongWarning } : {}),
           ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
           ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
-          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
           ...(voiceMode ? { voiceMode } : {}),
@@ -1474,6 +1464,8 @@ export async function* routeSerial(
                 : {}),
               sameRouteOutputMessageIds,
               exactA2ATriggerMessageId: streamReplyTo,
+              invocationInputMessageIds: isOriginalTarget ? options.persistedPromptMessageIds : undefined,
+              nowMs: Date.now(),
               ...(contextProjection ? { contextProjection } : {}),
             },
           );

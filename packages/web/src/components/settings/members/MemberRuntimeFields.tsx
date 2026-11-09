@@ -75,6 +75,8 @@ export function MemberRuntimeFields({
   const { libraries: clientLibraries, error: libraryError } = useAgentClientLibraries(String(refresh), !nativeSetup);
   useEffect(() => {
     const controller = new AbortController();
+    const runtimeRevision = useMemberModelCatalogs.getState().runtimeRevision + 1;
+    useMemberModelCatalogs.setState({ runtimeRevision });
     setLoading(true);
     setError(false);
     apiFetch(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`, { signal: controller.signal })
@@ -84,7 +86,11 @@ export function MemberRuntimeFields({
       })
       .then((data) => {
         if (!controller.signal.aborted) {
-          useMemberModelCatalogs.setState({ runtimes: data.runtimes });
+          useMemberModelCatalogs.setState((state) =>
+            state.runtimeConfirmedRevision <= runtimeRevision
+              ? { runtimes: data.runtimes, runtimeConfirmedRevision: runtimeRevision }
+              : state,
+          );
         }
       })
       .catch(() => {

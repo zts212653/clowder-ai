@@ -762,7 +762,7 @@ describe('F322 待办 (the mailbox) on the unified read', () => {
         expect(document.querySelector('[data-testid="mailbox-place-note"]')).toBeNull();
         expect(openOriginal()[0].textContent).toBe('打开原处处理');
         act(() => openOriginal()[0].click());
-        expect(data.navigate).toHaveBeenCalledWith('message:thread-1:msg-1#block-1', '/thread/current');
+        expect(data.navigate).toHaveBeenCalledWith('message:thread-1:msg-1#block-1', '/thread/current', data.push);
         // An exact place is not a workspace panel: the workspace mode is left alone.
         expect(data.mode).not.toHaveBeenCalled();
         expect(panel()).toBeNull();

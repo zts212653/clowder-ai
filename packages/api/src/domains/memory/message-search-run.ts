@@ -56,7 +56,8 @@ export async function runMessageSearch(
   const workCutoff = deadlineAt - 2000;
   const publicationCutoff = deadlineAt - 100;
   const limit = input.limit ?? 20;
-  const diagnostics = new MessageSearchDiagnostics(context.onTrace);
+  const searchId = randomUUID();
+  const diagnostics = new MessageSearchDiagnostics(context.onTrace, { searchId, ownerId: principal.userId });
   const observe = observeMessageSearchExecution(diagnostics.trace, diagnostics);
   let stoppedEarly = false;
   let projectionWaveMs = 0;
@@ -86,6 +87,7 @@ export async function runMessageSearch(
                   signal: request.signal,
                   deadlineAt: request.deadlineAt,
                   onReadSnapshot: diagnostics.worker,
+                  candidateAudit: diagnostics.candidateEvidence?.request,
                   visibleThreadIds: [...threads.keys()],
                   threadId: input.threadId,
                   sort: input.sort ?? 'time',
@@ -100,8 +102,17 @@ export async function runMessageSearch(
             },
             threadIds: new Set(threads.keys()),
             source: principal.source,
-            project: (candidate) => ops.project(candidate, diagnostics),
-            projectWave: (rows) => ops.projectWave(rows, diagnostics),
+            project: async (candidate) => {
+              const row = await ops.project(candidate, diagnostics);
+              diagnostics.candidateEvidence?.projection(candidate, row);
+              return row;
+            },
+            projectWave: async (rows) => {
+              const projected = await ops.projectWave(rows, diagnostics);
+              for (const [index, candidate] of rows.entries())
+                diagnostics.candidateEvidence?.projection(candidate, projected[index] ?? null);
+              return projected;
+            },
             beforeWave: async (read) => {
               if (Date.now() + projectionWaveMs >= workCutoff) {
                 stoppedEarly = true;
@@ -120,6 +131,7 @@ export async function runMessageSearch(
       }),
     );
     const canonical = discovery.items;
+    diagnostics.candidateEvidence?.window(canonical);
     if (!execution) throw new Error('Message discovery did not retrieve a source window');
     // Isolate optional mutations: a late ledger read cannot mutate the published rows.
     const labelled = canonical.slice(0, limit + 1).map((row) => ({ ...row.result }));
@@ -149,6 +161,7 @@ export async function runMessageSearch(
           break;
         }
         const fresh = work.value;
+        diagnostics.candidateEvidence?.final(row, fresh);
         if (fresh && fresh.contentRevision === row.contentRevision) {
           const facts = labelled.find(
             (item) => item.threadId === row.threadId && item.messageId === row.messageId,
@@ -162,7 +175,7 @@ export async function runMessageSearch(
     });
     if (!results.length && stoppedEarly) throw new DOMException('No source completed final admission', 'TimeoutError');
     const response = boundDecisionSearchResponse({
-      searchId: randomUUID(),
+      searchId,
       query: input.query,
       results: results.slice(0, limit),
       meta: {
@@ -181,6 +194,8 @@ export async function runMessageSearch(
         decisionIndex,
       },
     });
+    checkSearchExecution(context);
+    diagnostics.candidateEvidence?.publish();
     checkSearchExecution(context);
     return response;
   } finally {

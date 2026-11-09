@@ -22,6 +22,7 @@ import { OwnerPreparationSources } from './preparation/OwnerPreparationSources.j
 import type { WorkPreparationAuthority } from './preparation/WorkPreparationAuthority.js';
 import type { WorkPreparationOpportunityStore } from './preparation/WorkPreparationOpportunityStore.js';
 import { WorkPreparationService } from './preparation/WorkPreparationService.js';
+import type { WorkPreparationLogger } from './preparation/work-preparation-diagnostics.js';
 import { projectInvocationCues } from './project-invocation-cues.js';
 import { CatOwnedSeedCueResolver } from './resolvers/CatOwnedSeedCueResolver.js';
 import { DecisionCueResolver } from './resolvers/DecisionCueResolver.js';
@@ -60,6 +61,7 @@ export function createMemoryCueRuntime(input: {
     authority: WorkPreparationAuthority;
     store: WorkPreparationOpportunityStore;
     messages: MessageSearchService;
+    logger?: WorkPreparationLogger;
   };
   matterMemoryService?: MatterMemoryService;
   threadOverviewSource?: ThreadOverviewMemoryCueSource;
@@ -143,6 +145,7 @@ export function createMemoryCueRuntime(input: {
         store: input.workPreparation.store,
         episodes: input.episodeStore,
         handles: input.handles,
+        logger: input.workPreparation.logger,
         sources: new OwnerPreparationSources({
           project: contextProjectSource,
           messages: input.workPreparation.messages,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,6 +28,7 @@ import {
 } from './f307-real-surface-fixtures.mjs';
 import { registerV2FocusExitJourneys } from './f307-v2-focus-exit.journey.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
+import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -389,8 +390,7 @@ async function assertArtifactFullWindowRoundTrip(page) {
 let server;
 let browser;
 let baseUrl;
-let testDistDirPath;
-let testTsconfigPath;
+let environment;
 
 before(async () => {
   const sync = spawnSync(process.execPath, [path.resolve(WEB_ROOT, 'scripts/sync-vendor-assets.mjs')], {
@@ -399,35 +399,12 @@ before(async () => {
   });
   assert.equal(sync.status, 0, `vendor token sync failed:\n${sync.stdout}\n${sync.stderr}`);
   await mkdir(EVIDENCE_DIR, { recursive: true });
-  testDistDirPath = await mkdtemp(path.join(WEB_ROOT, '.next-test-f307-'));
-  const testDistDir = path.basename(testDistDirPath);
-  testTsconfigPath = path.join(WEB_ROOT, `tsconfig.${testDistDir.slice(1)}.json`);
-  await writeFile(
-    testTsconfigPath,
-    `${JSON.stringify(
-      {
-        extends: './tsconfig.json',
-        compilerOptions: { noEmit: true },
-        include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', `${testDistDir}/types/**/*.ts`],
-        exclude: ['node_modules'],
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  environment = await createNextDevTestEnvironment('f307', { CAT_CAFE_DEPLOYMENT_ID: 'feature-test' });
   const port = await findFreePort();
   const output = [];
   server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
-    env: {
-      ...process.env,
-      NEXT_PUBLIC_API_URL: '',
-      CAT_CAFE_DEPLOYMENT_ID: 'feature-test',
-      CAT_CAFE_WEB_TEST_DIST_DIR: testDistDir,
-      CAT_CAFE_WEB_TEST_TSCONFIG: path.basename(testTsconfigPath),
-      NEXT_TELEMETRY_DISABLED: '1',
-      NODE_ENV: 'development',
-    },
+    env: environment.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stdout.on('data', (chunk) => output.push(chunk.toString()));
@@ -440,8 +417,7 @@ before(async () => {
 after(async () => {
   if (browser) await browser.close();
   if (server) await stopServer(server);
-  if (testDistDirPath) await rm(testDistDirPath, { recursive: true, force: true });
-  if (testTsconfigPath) await rm(testTsconfigPath, { force: true });
+  await environment?.cleanup();
 });
 
 registerHomeSearchReturnJourneys(() => ({ browser, baseUrl, evidenceDir: EVIDENCE_DIR }));

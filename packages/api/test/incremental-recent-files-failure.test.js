@@ -24,6 +24,20 @@ function fixture(branch, getFilesTouched, sessions = [session]) {
     services: {},
     messageStore: messages,
     deliveryCursorStore: new DeliveryCursorStore(),
+    taskStore: {
+      listByThread: async () => [
+        {
+          id: 'owner-file-work',
+          kind: 'work',
+          threadId,
+          userId,
+          title: 'Inspect owner files',
+          status: 'doing',
+          ownerCatId: catId,
+          updatedAt: 1,
+        },
+      ],
+    },
     invocationDeps: {
       threadStore: {
         get: async () => ({ id: threadId, title: 'Startup remains available', createdBy: userId }),
@@ -73,7 +87,15 @@ for (const branch of ['active', 'chain']) {
       assert.deepEqual(f.calls, [[session.id, { threadId, catId }]]);
       assert.ok(result.contextText.includes(f.input.id));
       assert.ok(result.contextText.includes('Start with this authoritative owner message'));
-      assert.ok(result.navigationHeader.includes('真相源: 未定位'), 'unavailable history is not a file-state fact');
+      assert.ok(
+        result.navigationHeader.includes('Inspect owner files'),
+        'the real active work survives the read failure',
+      );
+      assert.doesNotMatch(
+        result.navigationHeader,
+        /最近产物:|工作材料:|真相源: 未定位/,
+        'unavailable file history neither invents an artifact nor creates a recovery obligation',
+      );
     });
   }
 

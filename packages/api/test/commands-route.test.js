@@ -14,19 +14,6 @@ import { CommandRegistry } from '../dist/infrastructure/commands/CommandRegistry
 import { commandsRoutes } from '../dist/routes/commands.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
-// Mock opus service
-const mockOpusService = {
-  async *invoke() {
-    yield { type: 'text', content: '[{"title": "Extracted task", "why": "From test", "sourceIndex": 0}]' };
-    yield { type: 'done', catId: 'opus' };
-  },
-};
-
-// Mock socket manager
-const mockSocketManager = {
-  broadcastToRoom: () => {},
-};
-
 const TEST_MESSAGE_TIMESTAMP = Date.now();
 const opusConfig = catRegistry.getOrThrow('opus').config;
 
@@ -37,10 +24,12 @@ describe('Commands Routes', () => {
   let threadStore;
   let ownThreadId;
   let otherThreadId;
+  let broadcasts;
 
   beforeEach(async () => {
     catRegistry.reset();
     catRegistry.register('opus', opusConfig);
+    broadcasts = [];
     app = Fastify();
     messageStore = new MessageStore();
     taskStore = new TaskStore();
@@ -51,14 +40,16 @@ describe('Commands Routes', () => {
     await app.register(commandsRoutes, {
       messageStore,
       taskStore,
-      socketManager: mockSocketManager,
-      opusService: mockOpusService,
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
       threadStore,
     });
     await app.ready();
   });
 
-  afterEach(() => catRegistry.reset());
+  afterEach(async () => {
+    await app.close();
+    catRegistry.reset();
+  });
 
   it('POST /api/commands/extract-tasks creates tasks', async () => {
     // Add some messages first
@@ -83,7 +74,15 @@ describe('Commands Routes', () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.count, 1);
-    assert.equal(body.tasks[0].title, 'Extracted task');
+    assert.equal(body.tasks[0].title, 'write tests');
+    assert.equal(body.degraded, false, 'rule extraction is the normal mode');
+    assert.equal(body.tasks[0].createdBy, 'user');
+    assert.ok(body.tasks[0].sourceMessageId);
+    assert.deepEqual(
+      broadcasts.map(([room, event, task]) => [room, event, task.id, task.sourceMessageId]),
+      [[`thread:${ownThreadId}`, 'task_created', body.tasks[0].id, body.tasks[0].sourceMessageId]],
+    );
+    assert.equal((await taskStore.get(body.tasks[0].id)).sourceMessageId, body.tasks[0].sourceMessageId);
   });
 
   it('POST /api/commands/extract-tasks returns 400 for missing threadId', async () => {
@@ -136,6 +135,44 @@ describe('Commands Routes', () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.count, 1);
+  });
+
+  it('works with no configured cat and respects the requested message window', async () => {
+    catRegistry.reset();
+    for (const [offset, content] of ['TODO: old task', 'TODO: latest task'].entries()) {
+      await messageStore.append(
+        canonicalTestMessageInput({
+          content,
+          userId: 'test-user',
+          threadId: ownThreadId,
+          timestamp: TEST_MESSAGE_TIMESTAMP + offset,
+        }),
+      );
+    }
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/commands/extract-tasks',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { threadId: ownThreadId, messageCount: 1 },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().degraded, false);
+    assert.deepEqual(
+      res.json().tasks.map((task) => task.title),
+      ['latest task'],
+    );
+    assert.equal(broadcasts.length, 1);
+  });
+
+  it('returns 404 for an unknown thread without creating or broadcasting tasks', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/commands/extract-tasks',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { threadId: 'unknown' },
+    });
+    assert.equal(res.statusCode, 404);
+    assert.deepEqual(broadcasts, []);
   });
 
   it('returns 401 when identity is missing', async () => {
@@ -198,11 +235,6 @@ function buildListingApp(extraSkill) {
     messageStore: new MessageStore(),
     taskStore: new TaskStore(),
     socketManager: { broadcastToRoom: () => {} },
-    opusService: {
-      async *invoke() {
-        yield { type: 'done', catId: 'opus' };
-      },
-    },
     registry,
   });
   return app;

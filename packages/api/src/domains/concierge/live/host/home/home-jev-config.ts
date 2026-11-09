@@ -2,9 +2,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { createJevPageSelector } from '../../../action/jev/JevPageSelector.js';
+import { readOpenAIPageSelector } from '../../../action/jev/OpenAIPageSelector.js';
 
 /** Owner's existing local credential stays in API memory; no page-specific configuration is needed at home. */
-export async function readHomeJevSelector(env: NodeJS.ProcessEnv = process.env) {
+export async function readHomeJevSelector(
+  env: NodeJS.ProcessEnv = process.env,
+  onOpenAIAccountUnavailable?: () => void,
+) {
+  const platform = readOpenAIPageSelector(env, undefined, onOpenAIAccountUnavailable);
+  if (platform) return platform;
   let apiKey = env.TYPESAFE_API_KEY;
   if (!apiKey) {
     const path = env.TYPESAFE_API_KEY_FILE ?? join(homedir(), '.config', 'typesafe', 'api-key');
