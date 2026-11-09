@@ -37,6 +37,7 @@ import {
 } from './preview-auto-open-delivery';
 import { hasStaleActiveThreadPresentation } from './queue-active-invocation-reconciliation';
 import { bumpLiveQueueHydrateEpoch, getLiveQueueHydrateEpoch, reconcileThreadWithServer } from './queue-reconciliation';
+import { useThreadHistoryReconciliation } from './thread-history-watermark';
 
 export { reconcileThreadWithServer } from './queue-reconciliation';
 
@@ -262,7 +263,9 @@ function checkForStaleActiveInvocations(): void {
       const starts = Object.values(state.activeInvocations ?? {})
         .map((inv) => inv?.startedAt)
         .filter((n): n is number => typeof n === 'number');
-      if (starts.length > 0 && now - Math.min(...starts) >= STALE_IDLE_THRESHOLD_MS) {
+      // A processing hint can arrive before its /queue read fails. Without a
+      // slot there is no startedAt to age; let the existing queue reconcile retry.
+      if (starts.length === 0 || now - Math.min(...starts) >= STALE_IDLE_THRESHOLD_MS) {
         toProbe.add(currentThreadId);
       }
     } else {
@@ -1377,6 +1380,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   );
 
   const foregroundRoomsKey = (foregroundThreadIds ?? (threadId ? [threadId] : [])).join('\u0000');
+  useThreadHistoryReconciliation(foregroundRoomsKey);
   const previousForegroundRoomsKeyRef = useRef<string | null>(null);
 
   // The first render joins the foreground threads; every later change of the foreground set
