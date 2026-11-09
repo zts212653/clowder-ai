@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalHostContext, PERMISSIVE_APPROVAL_HOST } from '@/components/ApprovalHost';
 import { ApprovalItemCard } from '@/components/ApprovalItemCard';
 import { writeShellLanguage } from '@/components/shell/shell-language';
+import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
 import { RichBlocks } from '../RichBlocks';
 import { coordinate, ok, scheduleBlock, scheduleItem, scheduleProposal } from './schedule-approval.fixture';
@@ -59,6 +60,7 @@ function settled(status: 'approved' | 'rejected') {
   };
 }
 beforeEach(() => {
+  useApprovalHubStore.setState({ scheduleDriftBlocked: {} });
   vi.stubGlobal('React', React);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   writeShellLanguage('zh');
@@ -202,6 +204,65 @@ describe('original scheduled task, both hosts', () => {
     await click();
     expect(sent()).toHaveLength(1);
     expect(container.textContent).toContain('定时任务已永久删除');
+  });
+  it.each([
+    'delete',
+    'update',
+  ] as const)('explains %s drift, blocks the old approval and still permits rejecting it', async (kind) => {
+    const task = proposal.mutation.kind === 'create' ? proposal.mutation.task : proposal.mutation.taskSnapshot;
+    proposal.mutation = {
+      kind: 'delete',
+      taskId: task.id,
+      taskSnapshot: task,
+      expectedFingerprint: 'original-fingerprint',
+    };
+    if (kind === 'update')
+      proposal.mutation = {
+        ...proposal.mutation,
+        kind,
+        taskSnapshot: { ...task, trigger: { type: 'interval', ms: 60000 } },
+        params: { text: 'Updated' },
+      };
+    const originalFetch = vi.mocked(apiFetch).getMockImplementation();
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (options?.method === 'POST' && String(path).endsWith('/approve'))
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ code: 'SCHEDULE_TASK_DRIFT', error: 'Task changed' }),
+        } as Response;
+      return originalFetch?.(path, options) as Promise<Response>;
+    });
+    await mount();
+    await click();
+    expect(container.textContent).toContain('任务已变化');
+    expect(container.textContent).toContain(kind === 'delete' ? '当前删除请求' : '当前修改请求');
+    expect(container.textContent).not.toContain('尚未确认这次处理结果');
+    expect(button('schedule-approve')?.disabled).toBe(true);
+    expect(button('schedule-reject')?.disabled).toBe(false);
+    await click();
+    expect(sent()).toHaveLength(1);
+    await click('schedule-reject');
+    expect(sent().at(-1)?.[0]).toBe('/api/schedule-proposals/schedule-1/reject');
+    expect(container.textContent).toContain('已拒绝');
+  });
+  it('honors a host-known drift after the original card remounts without blocking rejection', async () => {
+    const task = proposal.mutation.kind === 'create' ? proposal.mutation.task : proposal.mutation.taskSnapshot;
+    proposal.mutation = { kind: 'delete', taskId: task.id, taskSnapshot: task, expectedFingerprint: 'original' };
+    await act(async () =>
+      root.render(
+        <ApprovalHostContext.Provider value={{ ...PERMISSIVE_APPROVAL_HOST, blockedDecisions: new Set(['approve']) }}>
+          <ApprovalItemCard item={scheduleItem(proposal)} />
+        </ApprovalHostContext.Provider>,
+      ),
+    );
+    expect(button('schedule-approve')?.disabled).toBe(true);
+    expect(button('schedule-reject')?.disabled).toBe(false);
+    await click();
+    expect(sent()).toHaveLength(0);
+    await click('schedule-reject');
+    expect(sent()).toHaveLength(1);
+    expect(container.textContent).toContain('已拒绝');
   });
   it('rehydrates a canonical approved proposal after reload without offering writes', async () => {
     settled('approved');

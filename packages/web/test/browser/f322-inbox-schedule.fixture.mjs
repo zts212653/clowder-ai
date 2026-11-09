@@ -16,6 +16,7 @@ import { TaskRunnerV2 } from '../../../api/dist/infrastructure/scheduler/TaskRun
 import { createAlphaBrowserTemplate } from '../../../api/dist/infrastructure/scheduler/templates/alpha-browser.js';
 import { reminderTemplate } from '../../../api/dist/infrastructure/scheduler/templates/reminder.js';
 import { buildScheduleMutationCardBlock } from '../../../api/dist/routes/schedule-mutation-card-block.js';
+import { publishScheduleMutationProposal } from '../../../api/dist/routes/schedule-mutation-proposal.js';
 import { scheduleProposalDecisionRoutes } from '../../../api/dist/routes/schedule-proposal-decision-routes.js';
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
 
@@ -188,6 +189,45 @@ export async function createInboxScheduleFixture(language) {
           store,
           tasks,
           runner,
+          pauseDeletionTarget() {
+            const record = records.find((r) => r.action === 'delete');
+            tasks.upsert({ ...record.task, enabled: false });
+            runner.unregister(record.task.id);
+          },
+          async reproposeDeletion() {
+            const record = records.find((r) => r.action === 'delete');
+            assert.equal(store.getById(record.proposalId).status, 'rejected');
+            const task = tasks.getById(record.task.id);
+            const proposal = await publishScheduleMutationProposal({
+              ownerUserId: owner,
+              principal: {
+                kind: 'cat',
+                authKind: 'invocation',
+                catId: 'codex61-sol',
+                userId: owner,
+                invocationId: 'isolated-browser-reproposal',
+                threadId: record.thread.id,
+              },
+              mutation: {
+                kind: 'delete',
+                taskId: task.id,
+                taskSnapshot: task,
+                expectedFingerprint: fingerprintDynamicTaskDef(task),
+              },
+              cardThreadId: record.thread.id,
+              approvalIngress: ingress,
+              store,
+            });
+            const fresh = {
+              ...record,
+              action: 'reproposed-delete',
+              proposalId: proposal.proposalId,
+              task,
+              envelope: proposal.publication.envelope,
+            };
+            records.push(fresh);
+            return fresh;
+          },
           failRegistrationOnce() {
             failNextRegistration = true;
           },
