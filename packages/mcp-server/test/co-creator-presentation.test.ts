@@ -78,7 +78,7 @@ for (const principal of ['invocation', 'agent-key'] as const) {
           text:
             'Error: waitSourceRef is REQUIRED when using wakeAfterMs. ' +
             'Declare what external condition justifies the timer — e.g. ' +
-            '{ kind: "github_issue", value: "#123", expectedSignal: "CI pass", slaUntilMs: 3600000 }. ' +
+            '{ kind: "github_issue", value: "#123", expectedSignal: "CI pass", slaUntilMs: Date.now() + 3600000 }. ' +
             `If you are waiting for a person to respond, use ${mention} or @句柄 instead of hold_ball.`,
         },
       ]);
