@@ -1,5 +1,5 @@
 import { validateManifest } from '@clowder-ai/plugin-contract';
-import manifestJson from './bundled-packages/chatgpt-dot/0.2.0-alpha.37/manifest.json' with { type: 'json' };
+import manifestJson from './bundled-packages/chatgpt-dot/0.2.0-alpha.38/manifest.json' with { type: 'json' };
 
 const validated = validateManifest(manifestJson);
 if (!validated.valid) {

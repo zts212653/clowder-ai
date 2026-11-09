@@ -129,3 +129,13 @@ Fallback 检查使用原脚本仅适配插件根路径：生产 automatic-verifi
 最终插件提交 `c7e0c7c34898be4d3753a9985a310d50b30f75ae`。原 reviewer 2/2 GREEN（`/tmp/f202-alpha37-reviewer-green.log`）；插件全套203/203（`/tmp/f202-alpha37-release-suite.log`）、显式构建/类型检查通过。原隔离浏览器的真实投影/组件/插件动作、确认/剪贴板复制/等待状态继续通过（`connection-recovery-alpha37-browser.log`），自有实例已关闭。
 
 alpha.37 最终包 SHA256 `11037b27a9598ea62b8e1907505b8c9f59a0a518d1f09bbdb5056412af563942`，89文件逐字节比对；精确准入与空缓存离线安装1/1（`archive-alpha37.log`）。Fallback 生产 connection 净减少3，累计阈值为既有代码总量，本轮未增加回退层。Host 增量仍仅随包/版本/摘要及本记录。独立新 HEAD 复审尚待返回；真实 Work、operator 体验与 fork soak 未完成。未安装、重启或更改运行配置/凭据。
+
+## alpha.38 请求结束后的后台验证
+
+故障来源 `0001794214590332-001425-e283d9be`：订阅后等待读取超时，点击重试仍失败。只读核对目标测试实例：Host health 正常，部署 revision 为 `4e2ae176`；已安装 Dot alpha.37。08:54:46 UTC 收到 events/subscribe，08:54:50 的验证通知已得到成功回执；该事件 sourceReadAt/replyMessageId 均为空。08:56:13 的 retry-verification 返回502，库存 runtimeState 变为 crashed；用户随后确认 ChatGPT 显示订阅成功、之后没有新消息。这些证据证明没有成功读取，不能单独证明云端已执行或未执行工具。
+
+独立隔离复现使用实际 Host ModulePluginRuntime/execution worker 和真实插件 AutomaticDotVerification，数据与回调均为自有 fixture。正常 activation 后触发 owner/native 请求，延迟后台 Host 读取跨过请求结束：旧版继承已结束的 request authority，后台读取被拒绝，错误日志的远程 Promise 也被拒绝，worker 退出，下一次调用无可用模块。无请求上下文的对照成功。原 alpha.37 已安装代码仅作为只读模块导入到新建测试 worker，未修改或调用运行实例。
+
+修复仅在插件内捕获 runtime 构造时的 activation async context，并在该上下文创建后台计时器；状态查询、主人重试的同步授权仍按原上下文检查。后台任务仍逐步检查 installation/attempt/token/candidate/binding/event，停用与取消仍终止任务；未放宽 Host caller fence，也未引入新的 Host 后台权限接口。首次订阅与主人重试均覆盖请求结束后继续执行，并复用同一事件。
+
+RED/GREEN：`sol-auto-worker-repro.test.mjs`（本目录 acceptance/f202-target-response），旧包日志 `/tmp/f202-alpha38-worker-old.log`，修复日志 `/tmp/f202-alpha38-worker-new.log`；插件回归新增 activation/request 生命周期检查，完整204/204通过（`/tmp/f202-alpha38-suite.log`）。显式构建与类型检查通过。alpha.38 SHA256 `14b4d67f12c21350dcb2307d93ede8b74b4c00198303fd4b788ac58a1a43fd7d`，89个运行/资源/声明/文档文件匹配，精确准入与空缓存离线安装1/1。插件提交 `9385ebb6b955fb1d5e616ba0a73fd58bf3a1713b`，Host 仅随包与记录。独立复审待返回；尚未更新运行插件、重启或更改配置/凭据。最初通知未触发成功读取的云端原因，以及修复加载后的真实 Work 往返，仍待实机确认；不能将隔离回归当作已恢复。
