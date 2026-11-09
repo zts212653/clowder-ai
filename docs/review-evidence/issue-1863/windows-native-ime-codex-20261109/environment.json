@@ -1,0 +1,17 @@
+{
+    "executor":  "codex / GPT-6.1-Sol",
+    "method":  "Native Windows SendInput scan codes; visible isolated Edge window; no Chinese paste or DOM/CDP composition injection",
+    "os":  "Windows 11 Pro for Workstations 10.0.26300 build 26300",
+    "browser":  "Microsoft Edge 157.0.4341.42",
+    "ime":  "Sogou Pinyin Chinese mode 16.10.0.5813",
+    "desktop":  "Default",
+    "inputLanguageTip":  "0804:{E7EA138E-69F8-11D7-A6EA-00065B844310}{E7EA138F-69F8-11D7-A6EA-00065B844311}",
+    "testedSource":  "cb70a3ecf1e31cbaedab40bcb4611ea32e8b1ee6",
+    "continuityMerge":  "0e6582cc99d8287e76b5928112a6a4b3c6edb626",
+    "entry":  "http://127.0.0.1:4177/",
+    "boundary":  "Real production ChatInput component fixture; API/submission mocked; not full API journey",
+    "staticBundleBuiltUtc":  "2026-11-08T17:13:18Z",
+    "round1":  "results.json",
+    "round2":  "confirmation-results.json",
+    "rawEventFlagsPreserved":  true
+}
