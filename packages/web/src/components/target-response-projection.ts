@@ -46,11 +46,12 @@ export function projectTargetReply(
       return {
         targetId: authority.targetId,
         backend: 'plugin',
-        status: result.status,
+        status: authority.status,
         hasBody: body,
-        terminal: isTargetResponseTerminal(result.status),
+        terminal: isTargetResponseTerminal(authority.status),
         resultMessageId: message.id,
-        showFrame: !body,
+        // The delivery carrier owns the single empty/waiting frame; result rows own only visible content.
+        showFrame: false,
       };
     }
   }
@@ -77,19 +78,20 @@ export function projectTargetReply(
   const status =
     state?.status ?? (receipt.phase === 'sending' ? 'delivering' : receipt.accepted ? 'waiting' : 'unconfirmed');
   const terminal = isTargetResponseTerminal(status);
+  const referencedResult = state?.resultMessageId
+    ? timeline.find((row) => row.id === state.resultMessageId)
+    : undefined;
+  const showFrame = Boolean(state) && !reply && !(terminal && state?.resultMessageId && !referencedResult);
+  const resultMessageId = showFrame ? message.id : (reply?.id ?? state?.resultMessageId);
   return {
     targetId: receipt.targetId,
     backend: 'plugin',
     status,
     hasBody: Boolean(reply),
     terminal,
-    ...(state?.resultMessageId
-      ? { resultMessageId: state.resultMessageId }
-      : reply
-        ? { resultMessageId: reply.id }
-        : {}),
+    ...(resultMessageId ? { resultMessageId } : {}),
     // Old receipts did not own a response lifecycle. They are read as transport facts only.
-    showFrame: Boolean(state) && !reply && !(terminal && state?.resultMessageId),
+    showFrame,
   };
 }
 

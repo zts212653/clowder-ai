@@ -257,6 +257,19 @@ describe('F202 C1 — plugin Host messaging.send', () => {
       'completed',
     );
     assert.deepEqual(await host.send(complete), result);
+    const beforeRetry = broadcasts.length;
+    assert.deepEqual(
+      await host.send(
+        draft(thread.id, {
+          idempotencyKey: 'partial',
+          replyTo: source.id,
+          response: { deliveryId, status: 'processing' },
+          text: 'partial',
+        }),
+      ),
+      partial,
+    );
+    assert.equal(broadcasts.length, beforeRetry, 'accepted replay must not republish content or reopen the outcome');
     // A broad metadata update cannot overwrite the dedicated response CAS field.
     messages.updateExtra(carrier.id, { targetResponse: { ...carrier.extra.targetResponse, status: 'waiting' } });
     assert.equal(messages.getById(carrier.id).extra.targetResponse.status, 'completed');

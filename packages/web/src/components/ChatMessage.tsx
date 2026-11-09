@@ -24,6 +24,7 @@ import { setPendingCrossPostScroll } from '@/utils/crosspost-scroll-target';
 import { AppendedInputReceipts } from './AppendedInputReceipts';
 import {
   doesAssistantMessageRenderBubble,
+  hasAssistantBody,
   projectEmptyResponseLifecycleNotice,
 } from './assistant-message-renderability';
 import { CapabilityTipStrip } from './CapabilityTipStrip';
@@ -483,6 +484,7 @@ function ChatMessageContent({
   if (cloudCarrier && cloudReply.state !== 'unverified')
     return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
   const targetReply = projectTargetReply(message, threadMessages);
+  if (message.from?.kind === 'plugin' && message.extra?.targetResponseResult && !hasAssistantBody(message)) return null;
   if (targetReply?.showFrame)
     return (
       <TargetReplyFrame

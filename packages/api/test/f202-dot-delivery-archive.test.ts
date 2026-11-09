@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { preflightPluginArchive } from '../src/domains/plugin/external-runtime/archive-preflight.js';
 
-const expectedSha256 = '87bb4740ff2d70160d786755e8a74bccd955a0b6509f620f834f598d6a83b377';
+const expectedSha256 = '05734f5b8f9a443fb7963e6de85304e288cc57d25a436a1482aa109020ef2685';
 const deliveryArchive = fileURLToPath(
-  new URL('../src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.33/package.tgz', import.meta.url),
+  new URL('../src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.34/package.tgz', import.meta.url),
 );
 
 test('the exact frozen Dot delivery archive passes admission and installs offline', async (t) => {
@@ -40,10 +40,10 @@ test('the exact frozen Dot delivery archive passes admission and installs offlin
     await readFile(join(consumer, 'node_modules/@clowder-ai/chatgpt-dot/package.json'), 'utf8'),
   ) as { name: string; version: string };
   assert.equal(installedPackage.name, '@clowder-ai/chatgpt-dot');
-  assert.equal(installedPackage.version, '0.2.0-alpha.33');
+  assert.equal(installedPackage.version, '0.2.0-alpha.34');
   const installedManifest = parse(
     await readFile(join(consumer, 'node_modules/@clowder-ai/chatgpt-dot/plugin.yaml'), 'utf8'),
   ) as { pluginId: string; version: string };
   assert.equal(installedManifest.pluginId, 'official.chatgpt-dot');
-  assert.equal(installedManifest.version, '0.2.0-alpha.33');
+  assert.equal(installedManifest.version, '0.2.0-alpha.34');
 });

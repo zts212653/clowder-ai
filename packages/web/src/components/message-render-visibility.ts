@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@/stores/chat-types';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
-import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
+import { doesAssistantMessageRenderBubble, hasAssistantBody } from './assistant-message-renderability';
 import { isKnownReason } from './CliDiagnosticsPanel';
 import { isAbsorbedManagedJobMessage, isHiddenChatRow } from './chat-row-surface';
 import { isLinkedCloudBindingRecoveryNotice } from './cloud-binding-recovery';
@@ -40,6 +40,7 @@ export function messageRendersNothing(
 ): boolean {
   if (isHiddenChatRow(message)) return true;
   const targetReply = projectTargetReply(message, timeline);
+  if (message.from?.kind === 'plugin' && message.extra?.targetResponseResult && !hasAssistantBody(message)) return true;
   if (targetReply?.showFrame) return false;
   if (pluginDeliveryReceipt(message) && isLinkedDeliveryFailureCarrier(message, timeline)) return true;
   const isOwn = message.from?.kind === 'user';

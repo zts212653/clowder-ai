@@ -28,9 +28,9 @@
 证据目录：`.cat-cafe-runtime/acceptance/f202-target-response/`，仅隔离数据。
 
 - 观察 RED：旧 Host SDK send 拒绝 response 字段；旧插件订阅后不会自动开始验证。
-- Host source-backed 检查 64/64：实际发送、延迟附件发布、队列、旧回执升级、专用 Redis CAS、精确归档准入与空缓存离线安装。
-- Web 受影响 98/98；共用身份适配的最终增量另跑页面/隔离/可见性检查。API/Web noEmit 类型检查通过。
-- 插件 178/178：首次及候选自动验证、旧订阅过期恢复、重复订阅、启动恢复、失败重试、创建结果未知、停用排空，以及验证中再次调度。SDK module runtime 23/23；workspace version links 2/2。
+- Host source-backed 检查 65/65：实际发送、延迟附件发布、队列、旧回执升级、专用 Redis CAS、精确归档准入与空缓存离线安装。
+- Web 受影响 101/101；共用身份适配的最终增量另跑页面/隔离/可见性检查。API/Web noEmit 类型检查通过。
+- 插件 188/188：首次及候选自动验证、旧订阅过期恢复、重复订阅、启动恢复、失败重试、创建结果未知、停用排空，以及验证中再次调度。SDK module runtime 23/23；workspace version links 2/2。
 - 真实生产接线的隔离浏览器：InvocationQueue → addressed delivery → 系统回执推送；SDK send → SendService → broadcastIngress/connector_message → Socket.IO → useSocket → Zustand → ThreadChatSurface。正文接替、成员/插件失败终态及刷新无旧占位均验证，无状态轮询。外部 ChatGPT 与 history/provider hooks 为 fixture，不能冒充真实 Work。
 - 新插件归档中的 87 个运行、资源与 manifest 文件和重建输出逐字节一致，随包 manifest 与插件声明一致。最终 SHA256 见同目录 archive-sha256.txt 及 Host bundled definition。
 
@@ -47,3 +47,16 @@ Tips：沿用现有目标回复与插件安装操作，无新增用户入口；�
 根目录无媒体工件；截图与打包证据保留验收目录。未重建运行 Host 的 API dist/Web .next，未更新运行配置、安装插件、重启或旋转现有凭据。
 
 独立复审及 operator 加载后真实 Work/普通 @dot/重试体验、fork soak 仍为后续验收。本文件不代替这些结果。
+
+## alpha.34 独立复审修正
+
+来源：Host finding `0001794202224593-000593-33288a85`、插件 finding `0001794202244306-000598-c0cafc41`，四个 P2 均有独立 RED。本轮先区分“已有记录”和“流程完成”：接受过的内容、投递的当前状态、证明的本地提交分别恢复。
+
+- H1：真实实例/源消息归属仍在 SDK 边界核验；终态准入检查移动到 send ledger/staging/持久消息索引区分新旧之后。新请求不能重开终态，旧请求取回原回执；已接受附件迟到发布只发内容，不改终态或最终结果引用。
+- H2：同一次投递只有原 carrier 拥有等待或空终态框。空 processing/result 行没有第二个框，读取该 delivery 最新状态；可见的分段正文保留。空结果对应的导航指向实际显示框，正文或附件到达后旧空帧一起消失；历史缺 carrier 时空结果也不另造头像。
+- D1：读取持久 dispatch 与真正发布的 reply，核对 nonce、digest、源/线程关系和原 candidate/token/binding，复用原 recordPendingEvidence 提交读取/回复证明及转正。sent/failed 作业恢复也先补本地证明；不再把 replyMessageId 存在视作已完成转正。取消、替换、断开后的旧证明拒绝提交，不重发正文。测试 fixture 补存真实 Host 本来就保存的 replyTo，恢复检查未放宽。
+- D2：candidate-verification-timeout 明确给 retry-verification，保留适用的 cancel/disconnect。重试复用 nonce/thread/source/event，不依赖状态查询触发工作。
+
+复验：reviewer 6 条后端复现及 1 条投影复现转绿；插件自动验证 19 条包括首次/替换、启动/手动恢复、三个在途取消变体、两个超时恢复和被改写正文拒绝转正。全套插件 188/188；Host 65/65（包括空缓存离线安装）、Web 101/101；API/Web/Dot noEmit 通过。浏览器实际 Queue/SDK/Socket.IO 链增加合法空 processing 结果，验证仍只显示一个框，最终正文接替、空失败终态和刷新不复活均通过。
+
+最终 alpha.34 随包 87 个运行/资源/manifest 文件（连两份 README 共 89）逐字节一致；SHA256 `05734f5b8f9a443fb7963e6de85304e288cc57d25a436a1482aa109020ef2685`。SDK 仍为 candidate.12。运行实例与凭据保持未操作，真实 Work 与 soak 的未完成状态不变。

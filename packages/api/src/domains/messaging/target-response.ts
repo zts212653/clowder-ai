@@ -18,11 +18,9 @@ export async function advanceTargetResponse(
     if (!carrier || carrier.recall || !isTargetResponseRecord(prior))
       throw new MessagingError('NOT_FOUND', 'target response is unavailable');
     // Acceptance is a transport fact. It never overwrites a reply or terminal result.
-    if (isTargetResponseTerminal(prior.status)) {
-      if (update.resultMessageId && update.status !== prior.status)
-        throw new MessagingError('CONFLICT', 'terminal response outcome cannot change');
-      return carrier;
-    }
+    // Publication may resume an earlier accepted result after a later result finished.
+    // It may publish content, but never rewrite the delivery's authoritative terminal outcome.
+    if (isTargetResponseTerminal(prior.status)) return carrier;
     if (['waiting', 'unconfirmed'].includes(update.status) && prior.status !== 'delivering') return carrier;
     const changed = await store.compareAndSetTargetResponse(carrierId, prior.revision, {
       ...prior,
@@ -103,13 +101,20 @@ export async function resolveTargetResponse(
     !parent.lifecycle.dispatchRefs.some((ref) => ref.targetId === instanceId && ref.statusMessageId === carrier.id)
   )
     throw new MessagingError('PERMISSION', 'response does not belong to this delivery');
-  if (isTargetResponseTerminal(state.status) && state.status !== candidate.status)
-    throw new MessagingError('CONFLICT', 'a terminal response cannot be reopened');
   return {
     carrierMessageId: carrier.id,
     deliveryId: candidate.deliveryId,
     status: candidate.status as TargetResponseResult['status'],
   };
+}
+
+/** Only new sends need an open outcome; accepted replays retain their original receipt. */
+export async function assertTargetResponseOpen(store: IMessageStore, result: TargetResponseResult) {
+  const carrier = await store.getById(result.carrierMessageId);
+  const state = carrier?.extra?.targetResponse;
+  if (!isTargetResponseRecord(state)) throw new MessagingError('NOT_FOUND', 'target response is unavailable');
+  if (isTargetResponseTerminal(state.status) && state.status !== result.status)
+    throw new MessagingError('CONFLICT', 'a terminal response cannot be reopened');
 }
 
 /** Both immediate and deferred publication recover this idempotently from the stored result. */

@@ -64,7 +64,9 @@ export function MessageDispatchRecipient({
   const targetReply = linkedMessage ? projectTargetReply(linkedMessage, timelineMessages) : undefined;
   const resultMessageId = targetReply?.resultMessageId;
   const pluginReply =
-    pluginReceipt && resultMessageId ? timelineMessages.find((row) => row.id === resultMessageId) : undefined;
+    pluginReceipt && targetReply?.hasBody && resultMessageId
+      ? timelineMessages.find((row) => row.id === resultMessageId)
+      : undefined;
   const pluginTarget = knownTargets.find((candidate) => candidate.id === projection.targetId);
   const pluginRecipient = pluginTarget !== undefined || pluginReceipt !== undefined;
   const label = pluginTarget?.alias ?? (pluginRecipient ? '插件' : getCatLabel(projection.targetId));

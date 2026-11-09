@@ -640,3 +640,73 @@ for (const wake of ['auto', { catId: 'removed-member' }]) {
     }
   });
 }
+
+test('regression: accepted delayed partial publishes after final completion', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('terminal reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'send image',
+    mentions: [],
+    timestamp: 1,
+  });
+  const deliveryId = 'ad_staged-result';
+  const carrier = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'system',
+    from: { kind: 'system', service: 'plugin_delivery' },
+    content: 'receipt',
+    mentions: [],
+    timestamp: 2,
+    extra: {
+      targetResponse: {
+        v: 1,
+        revision: 1,
+        inputMessageId: parent.id,
+        targetId: ctx.pluginInstanceId,
+        execution: { kind: 'plugin', id: deliveryId },
+        status: 'waiting',
+        startedAt: 2,
+        updatedAt: 2,
+      },
+    },
+  });
+  const receipt = await h.service.send(
+    ctx,
+    { ...h.draft, replyTo: parent.id },
+    {
+      source,
+      responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'processing' },
+    },
+  );
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'waiting');
+  const final = await h.service.send(
+    ctx,
+    {
+      ...h.draft,
+      idempotencyKey: 'final',
+      replyTo: parent.id,
+      payload: { ...h.draft.payload, elements: [{ elementId: 'final', kind: 'text', payload: { text: 'done' } }] },
+    },
+    { source, responseResult: { carrierMessageId: carrier.id, deliveryId, status: 'completed' } },
+  );
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'e'.repeat(32)}` });
+  await new Promise((r) => setTimeout(r, 100));
+  await h.pending.recover();
+  assert.ok(
+    broadcasts.some(([, event, data]) => event === 'connector_message' && data.message.id === receipt.messageId),
+    'accepted partial must still publish without reopening terminal',
+  );
+  assert.equal(h.messageStore.getById(carrier.id).extra.targetResponse.status, 'completed');
+});

@@ -101,3 +101,62 @@ describe('one participant response projection', () => {
     expect(projectTargetReply(done, [source, done])?.showFrame).toBe(false);
   });
 });
+
+describe('one empty frame owner for a multi-result delivery', () => {
+  const empty: ChatMessage = {
+    id: 'progress',
+    type: 'connector',
+    from: { kind: 'plugin', instanceId: 'instance' },
+    replyTo: 'input',
+    content: '',
+    timestamp: 3,
+    extra: { targetResponseResult: { carrierMessageId: 'receipt', deliveryId: 'delivery', status: 'processing' } },
+  };
+  const progress: ChatMessage = {
+    ...receipt,
+    extra: {
+      ...receipt.extra,
+      targetResponse: { ...receipt.extra!.targetResponse!, status: 'processing', resultMessageId: empty.id },
+    },
+  };
+  it('keeps only the carrier waiting before visible content, even with repeated empty progress', () => {
+    const another = { ...empty, id: 'another' };
+    const timeline = [source, progress, empty, another];
+    expect(timeline.filter((row) => projectTargetReply(row, timeline)?.showFrame)).toEqual([progress]);
+  });
+  it('removes all empty frames on final content and reads the latest authoritative outcome', () => {
+    const final: ChatMessage = {
+      ...empty,
+      id: 'final',
+      content: 'finished',
+      extra: { targetResponseResult: { ...empty.extra!.targetResponseResult!, status: 'completed' } },
+    };
+    const done: ChatMessage = {
+      ...progress,
+      extra: {
+        ...progress.extra,
+        targetResponse: { ...progress.extra!.targetResponse!, status: 'completed', resultMessageId: final.id },
+      },
+    };
+    const timeline = [source, done, empty, final];
+    expect(timeline.filter((row) => projectTargetReply(row, timeline)?.showFrame)).toEqual([]);
+    expect(projectTargetReply(empty, timeline)?.status).toBe('completed');
+  });
+  it('keeps one empty terminal notice on the carrier, rather than one for every result', () => {
+    const final: ChatMessage = {
+      ...empty,
+      id: 'failed',
+      extra: { targetResponseResult: { ...empty.extra!.targetResponseResult!, status: 'failed' } },
+    };
+    const failed: ChatMessage = {
+      ...progress,
+      extra: {
+        ...progress.extra,
+        targetResponse: { ...progress.extra!.targetResponse!, status: 'failed', resultMessageId: final.id },
+      },
+    };
+    const timeline = [source, failed, empty, final];
+    expect(timeline.filter((row) => projectTargetReply(row, timeline)?.showFrame)).toEqual([failed]);
+    expect(projectTargetReply(failed, timeline)?.resultMessageId).toBe(failed.id);
+  });
+});

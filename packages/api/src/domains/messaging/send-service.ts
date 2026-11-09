@@ -38,15 +38,14 @@ import {
   type ResolvedIngress,
   sourceForConnectorIngress,
 } from './ingress-wake.js';
-
 import type { MessagingLedger } from './ledger.js';
 import { replaceLegacyMediaReferences } from './legacy-media.js';
 import type { PendingMediaPublication } from './media-pending-publication.js';
 import type { MediaReferenceAuthority } from './media-reference-authority.js';
 import { type MediaSourceResolver, mediaStageKey, type StagedMediaSend } from './media-staging.js';
 import type { AddressHandleRecord, EventLogStore } from './stores/ports.js';
-
 import { clampRetention } from './stores/ports.js';
+import { assertTargetResponseOpen } from './target-response.js';
 
 export interface SendServiceDeps {
   readonly messageStore: IMessageStore;
@@ -263,6 +262,18 @@ export class SendService {
           },
         },
       };
+
+      // The ledger/staging and permanent Message index distinguish recovery from new work.
+      // Resolve caller/source identity in the Host as usual, but do not reject an already
+      // accepted partial merely because the target completed since it was accepted.
+      if (hostOptions?.responseResult) {
+        const existing = await this.deps.messageStore.getByIdempotencyKey(
+          handle.userId,
+          handle.threadId,
+          appendInput.idempotencyKey!,
+        );
+        if (!existing) await assertTargetResponseOpen(this.deps.messageStore, hostOptions.responseResult);
+      }
 
       const accepted = await this.acceptPendingMedia({ ctx, draft, handle, appendInput, hostOptions, wake, timestamp });
       if (accepted) return await this.settleReceipt(ctx, draft, claim.claimToken, accepted);

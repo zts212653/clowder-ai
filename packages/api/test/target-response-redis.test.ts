@@ -48,5 +48,6 @@ test('target response CAS preserves terminal truth across restart, conflict and 
   const restored = await new RedisMessageStore(redis, { ttlSeconds: 0 }).getById(row.id);
   assert.deepEqual(restored?.extra?.targetResponse, completed.extra?.targetResponse);
   assert.equal(restored?.extra?.pluginAddressedReceipt?.accepted, true);
-  await assert.rejects(advanceTargetResponse(store, row.id, { status: 'failed', resultMessageId: 'another' }));
+  const late = await advanceTargetResponse(store, row.id, { status: 'failed', resultMessageId: 'another' });
+  assert.deepEqual(late.extra?.targetResponse, completed.extra?.targetResponse);
 });
