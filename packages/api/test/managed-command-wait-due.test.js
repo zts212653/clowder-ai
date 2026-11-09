@@ -143,6 +143,136 @@ test('five real delivery failures park the original wait without a second Messag
   }
 });
 
+test('explicit recheck resumes the original admission when its parked result has no Message yet', async () => {
+  const db = new Database(':memory:');
+  try {
+    applyMigrations(db);
+    const store = new DynamicTaskStore(db);
+    const waiting = task(4242);
+    waiting.params.holdLifecycle.managedCommand = {
+      ...waiting.params.holdLifecycle.managedCommand,
+      state: 'condition_met',
+      conditionMetAt: 1,
+      wakeContent: 'original result',
+    };
+    store.insert(waiting, { ownerAuthProvenance: 'strict' });
+    const messages = new MessageStore();
+    let now = 60_000;
+    let admissionAvailable = false;
+    let admissions = 0;
+    const sweep = new ManagedCommandWakeRecoverySweep({
+      dynamicTaskStore: store,
+      messageStore: messages,
+      socketManager: { broadcastToRoom() {} },
+      taskRunner: { unregister() {} },
+      invocationRecordStore: { getByIdempotencyKey: () => null },
+      now: () => now,
+      admitWake: async (input) => {
+        admissions++;
+        if (!admissionAvailable) throw new Error('original admission unavailable');
+        const stored = messages.append(input.message);
+        return { messageId: stored.id };
+      },
+    });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await sweep.runOnce();
+      now += 60_000;
+    }
+    assert.equal(store.getManagedCommandRecoveryState(waiting.id).fact.disposition, 'parked');
+    assert.equal(store.getById(waiting.id).params.holdLifecycle.managedCommand.messageId, undefined);
+    assert.equal(messages.getByThread('thread').length, 0);
+
+    admissionAvailable = true;
+    let snapshot = store.getManagedCommandRecoveryState(waiting.id);
+    assert.equal(
+      store.updateManagedCommandRecoveryState(waiting.id, snapshot.revision, {
+        ...snapshot.fact,
+        waitGeneration: 2,
+      }),
+      true,
+    );
+    assert.equal(await sweep.recoverTask(waiting.id, true), 'pending');
+    assert.equal(admissions, 5, 'a stale generation cannot replay the saved result');
+    assert.equal(store.getById(waiting.id).params.holdLifecycle.managedCommand.messageId, undefined);
+    snapshot = store.getManagedCommandRecoveryState(waiting.id);
+    assert.equal(
+      store.updateManagedCommandRecoveryState(waiting.id, snapshot.revision, {
+        ...snapshot.fact,
+        waitGeneration: 1,
+      }),
+      true,
+    );
+    assert.equal(await sweep.recoverTask(waiting.id, true), 'pending');
+    const recovered = store.getById(waiting.id).params.holdLifecycle.managedCommand;
+    assert.equal(recovered.state, 'enqueued');
+    assert.equal(typeof recovered.messageId, 'string');
+    assert.equal(messages.getById(recovered.messageId).content, '[定时任务] original result');
+    assert.equal(store.getManagedCommandRecoveryState(waiting.id).fact.disposition, undefined);
+    assert.equal(admissions, 6, 'recheck retries only the original production intent');
+  } finally {
+    db.close();
+  }
+});
+
+test('explicit recheck separately observes an existing original Message without admitting another one', async () => {
+  const db = new Database(':memory:');
+  try {
+    applyMigrations(db);
+    const store = new DynamicTaskStore(db);
+    const waiting = task(4343);
+    waiting.params.holdLifecycle.managedCommand = {
+      ...waiting.params.holdLifecycle.managedCommand,
+      state: 'condition_met',
+      conditionMetAt: 1,
+      wakeContent: 'original result',
+    };
+    store.insert(waiting, { ownerAuthProvenance: 'strict' });
+    const messages = new MessageStore();
+    let carrier = { state: 'pending' };
+    let admissions = 0;
+    const sweep = new ManagedCommandWakeRecoverySweep({
+      dynamicTaskStore: store,
+      messageStore: messages,
+      socketManager: { broadcastToRoom() {} },
+      taskRunner: { unregister() {} },
+      invocationRecordStore: { getByIdempotencyKey: () => null },
+      now: () => 60_000,
+      getEventCarrier: async () => carrier,
+      admitWake: async (input) => {
+        admissions++;
+        const stored = messages.append(input.message);
+        return { messageId: stored.id };
+      },
+    });
+    assert.equal(await sweep.recoverTask(waiting.id), 'pending');
+    const admitted = store.getById(waiting.id).params.holdLifecycle.managedCommand;
+    assert.equal(admitted.state, 'enqueued');
+    assert.equal(typeof admitted.messageId, 'string');
+    const snapshot = store.getManagedCommandRecoveryState(waiting.id);
+    assert.equal(
+      store.updateManagedCommandRecoveryState(waiting.id, snapshot.revision, {
+        ...snapshot.fact,
+        disposition: 'parked',
+        reasonCode: 'carrier_unresolved',
+        recheck: { kind: 'observe_original_wait', taskId: waiting.id },
+        nextAttemptAt: null,
+      }),
+      true,
+    );
+
+    carrier = { state: 'handled', invocationId: 'original-invocation' };
+    assert.equal(await sweep.recoverTask(waiting.id, true), 'recovered');
+    const consumed = store.getById(waiting.id).params.holdLifecycle.managedCommand;
+    assert.equal(consumed.state, 'consumed');
+    assert.equal(consumed.invocationId, 'original-invocation');
+    assert.equal(store.getManagedCommandRecoveryState(waiting.id).fact.disposition, undefined);
+    assert.equal(admissions, 1, 'an existing Message remains the one original delivery owner');
+    assert.ok(messages.getById(admitted.messageId));
+  } finally {
+    db.close();
+  }
+});
+
 test('long healthy waits and batch deferral preserve zero failures for visited and unvisited owners', async () => {
   const db = new Database(':memory:');
   try {

@@ -37,6 +37,13 @@ function consumptionMatches(task: DynamicTaskDef, fact: ManagedCommandWaitRecove
   );
 }
 
+function recheckMatchesOriginalWait(task: DynamicTaskDef, fact: ManagedCommandWaitRecoveryFact): boolean {
+  const command = readManagedCommandWakeProjection(task);
+  if (!command || fact.waitGeneration !== generation(task)) return false;
+  if (command.messageId) return consumptionMatches(task, fact);
+  return command.state === 'condition_met' && typeof command.wakeContent === 'string' && command.wakeContent.length > 0;
+}
+
 /** Recovery facts and consumption fencing remain owned by this exact wait row, independent of the job producer. */
 export async function processManagedCommandWait(
   deps: ManagedCommandWakeRecoveryDeps,
@@ -54,8 +61,8 @@ export async function processManagedCommandWait(
   const mayRecheckDisposition =
     snapshot.fact.disposition &&
     force &&
-    command?.messageId &&
-    Boolean(await deps.messageStore.getById?.(command.messageId));
+    recheckMatchesOriginalWait(task, snapshot.fact) &&
+    (!command?.messageId || Boolean(await deps.messageStore.getById?.(command.messageId)));
   if (snapshot.fact.disposition && !mayRecheckDisposition) {
     const { notification: _legacyNotification, ...fact } = snapshot.fact as ManagedCommandWaitRecoveryFact & {
       notification?: unknown;
