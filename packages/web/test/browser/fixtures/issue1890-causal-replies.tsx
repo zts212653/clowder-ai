@@ -39,6 +39,7 @@ Object.assign(window, {
   issue1890State: () => ({
     messages: useChatStore.getState().getThreadState(threadId).messages,
     hasMore: useChatStore.getState().getThreadState(threadId).hasMore,
+    isLoadingHistory: useChatStore.getState().isLoadingHistory,
     reading: readChatScrollState(threadId),
     pending: useChatStore.getState().pendingChatInsert,
   }),

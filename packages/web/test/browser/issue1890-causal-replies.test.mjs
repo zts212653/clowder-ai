@@ -473,7 +473,14 @@ test('issue1890 causal reading remains consistent live, complete and after refre
       hasMore: true,
     });
     // Reload recovers the association through HTTP, not a saved expanded view.
+    const reloadedHistory = page.waitForResponse((reply) => {
+      const url = new URL(reply.url());
+      return url.pathname === '/api/messages' && !url.searchParams.has('anchorMessageId');
+    });
     await page.reload();
+    await (await reloadedHistory).finished();
+    await page.waitForFunction(() => window.issue1890State().isLoadingHistory === false);
+    assert.equal((await page.evaluate(() => window.issue1890State())).hasMore, true);
     await source.getByRole('button', { name: '看砚砚的回复' }).click();
     await reference.getByText('服务端的最终结果。', { exact: true }).waitFor();
     references.delete('R');
@@ -573,6 +580,7 @@ test('issue1890 causal reading remains consistent live, complete and after refre
       Math.abs(readingAfter - readingTop) <= 2,
       `late proof moved the reading anchor ${readingAfter - readingTop}px; saved=${JSON.stringify(readingBeforeProof)}`,
     );
+    assert.equal((await page.evaluate(() => window.issue1890State())).hasMore, false);
     results.push({ stage: 'late-proof-reading', drift: readingAfter - readingTop });
     // Once the reader leaves, a subsequent body update may adopt the verified
     // ranges. No new scroll owner or persistent reading state is involved.
