@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { configuredCredentialValues } from './secret-credential-paths.mjs';
 import { protectSecretToolResult } from './secret-tool-io.mjs';
 
 /** Wrappers may exit immediately after this function resolves; a pipe write must finish first. */
@@ -16,7 +17,7 @@ async function notify(notice) {
 }
 
 /** Buffer bounded output so a credential cannot be streamed past the redactor. */
-export async function executeSecretSafeCommand(command, args, env) {
+export async function executeSecretSafeCommand(command, args, env, credentials = []) {
   const result = spawnSync(command, args, { env, stdio: ['inherit', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   const safe = await protectSecretToolResult(
     {
@@ -25,7 +26,7 @@ export async function executeSecretSafeCommand(command, args, env) {
         { type: 'text', text: result.stderr?.toString('utf8') ?? '' },
       ],
     },
-    { callId: `shell:${randomUUID()}`, notify },
+    { callId: `shell:${randomUUID()}`, notify, knownCredentials: [...configuredCredentialValues(env), ...credentials] },
   );
   if (result.error) {
     await writeOutput(

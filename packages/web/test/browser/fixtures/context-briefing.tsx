@@ -22,6 +22,7 @@ const sample = params.get('case') ?? 'modern';
 const legacy = sample === 'legacy';
 const missing = sample === 'missing';
 const warning = sample === 'warning';
+const currentInputs = sample === 'inputs';
 const extraBody = `**线程记忆**: 已提供的线程记忆摘要\n\n**锚点**: 已提供的锚点摘要\n\n**活跃任务**: 保留原有活跃任务\n\n**最近产物**:\n- docs/${'long-reference-'.repeat(12)}plan.md\n\n**证据召回**: 候选仅为指针，未提供正文`;
 const card = {
   id: 'briefing-1',
@@ -36,16 +37,29 @@ const card = {
           ...(!missing ? { receiverCatId: 'kimi', receiverDisplayName: '墨墨' } : {}),
           contextDisplay: {
             threadId,
-            ...(!missing
+            ...(currentInputs
               ? {
-                  handoff: {
-                    from: '砚砚',
-                    time: '08:02',
-                    excerpt: params.get('excerpt') ?? '请核对侧栏菜单。先复现窗口缩窄的情况，再核对长标题。',
-                    warning,
-                  },
+                  inputs: [
+                    { fromMessageId: 'input-one', from: '验收用户', time: '08:01' },
+                    {
+                      fromMessageId: 'input-two',
+                      from: '砚砚',
+                      time: '08:02',
+                      sourceThreadId: threadId,
+                      sourceMessageId: 'original-input',
+                    },
+                  ],
                 }
-              : {}),
+              : !missing
+                ? {
+                    handoff: {
+                      from: '砚砚',
+                      time: '08:02',
+                      excerpt: params.get('excerpt') ?? '请核对侧栏菜单。先复现窗口缩窄的情况，再核对长标题。',
+                      warning,
+                    },
+                  }
+                : {}),
             sources: missing
               ? []
               : [{ type: 'feature-doc', label: '侧栏菜单样式说明', ref: 'docs/design/sidebar-menu.md' }],

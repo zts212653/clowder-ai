@@ -8,13 +8,14 @@ import {
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import type { InvocationRecord } from '../../../cats/services/agents/invocation/InvocationRegistry.js';
 import { KnowledgeResolver } from '../../KnowledgeResolver.js';
-import type { KnowledgeDiscoverySource } from '../../knowledge-discovery.js';
+import { checkDiscoveryLifetime, type KnowledgeDiscoverySource } from '../../knowledge-discovery.js';
 import { ContextSourceWorkBudget } from '../ContextSourceWorkBudget.js';
 import type { MemoryCueDrillCoordinate, MemoryCueDrillHandleService } from '../MemoryCueDrillHandleService.js';
 import type { MemoryCueEpisodeStore, MemoryCueInvalidationReason } from '../MemoryCueEpisodeStore.js';
 import { buildCueEnvelope } from '../MemoryCueResolverRegistry.js';
 import type { MemoryCueSourceReader } from '../MemoryCueSourceReader.js';
 import { getRecallOpportunityCatalogEntry } from '../RecallOpportunityCatalog.js';
+import { PreparationSourceObservations } from './preparation-source-observation.js';
 import type { PreparationSource } from './project-preparation-source.js';
 import type { WorkPreparationAuthority } from './WorkPreparationAuthority.js';
 import type {
@@ -22,11 +23,18 @@ import type {
   WorkPreparationOpportunityStore,
   WorkPreparationRecord,
 } from './WorkPreparationOpportunityStore.js';
+import {
+  preparationFailureFields,
+  type WorkPreparationLogger,
+  type WorkPreparationStage,
+} from './work-preparation-diagnostics.js';
 
 export interface PreparationDiscoveryInput {
   record: WorkPreparationRecord;
   query: string;
   signal: AbortSignal;
+  deadlineAt?: number;
+  observations?: PreparationSourceObservations;
 }
 export interface WorkPreparationSources {
   create(input: PreparationDiscoveryInput): Promise<KnowledgeDiscoverySource<unknown, PreparationSource>[]>;
@@ -45,6 +53,7 @@ export class WorkPreparationService {
       episodes: MemoryCueEpisodeStore;
       handles: MemoryCueDrillHandleService;
       sources: WorkPreparationSources;
+      logger?: WorkPreparationLogger;
     },
   ) {}
 
@@ -59,11 +68,26 @@ export class WorkPreparationService {
     const empty = (status: string) => ({ status, delivery: 'unknown' as const, pointers: [] });
     const deadlineAt = Math.min(Date.now() + 1500, input.deadlineAt ?? Infinity);
     const budget = new ContextSourceWorkBudget(Math.max(0, deadlineAt - Date.now()));
+    const check = () => checkDiscoveryLifetime({ signal: input.signal, deadlineAt });
+    const started = performance.now();
+    const observations = new PreparationSourceObservations();
+    let stage: WorkPreparationStage = 'bind';
+    let stageStarted = started;
+    const enter = (next: WorkPreparationStage) => {
+      check();
+      stage = next;
+      stageStarted = performance.now();
+    };
     const discoveryQuery = `${input.activity} ${input.query}`;
     let received: WorkPreparationRecord | undefined;
     try {
-      input.signal.throwIfAborted();
-      const binding = await budget.run(() => this.deps.authority.bind(input.auth), 200);
+      check();
+      const binding = await budget.run(
+        (signal) => this.deps.authority.bind(input.auth, { signal, deadlineAt: deadlineAt - 200 }),
+        200,
+        input.signal,
+      );
+      check();
       if (!binding) return empty('not_available');
       const opportunity = {
         v: 1 as const,
@@ -84,6 +108,7 @@ export class WorkPreparationService {
       const queryDigest = createHash('sha256')
         .update(input.query.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim())
         .digest('hex');
+      enter('receive');
       const record = this.deps.store.receive({
         ...binding,
         opportunityId: opportunity.opportunityId,
@@ -93,10 +118,21 @@ export class WorkPreparationService {
         expiresAt: input.receivedAt + entry.expiresAfterMs,
       });
       received = record;
+      enter('create');
       const sources = await budget.run(
-        () => this.deps.sources.create({ record, query: discoveryQuery, signal: input.signal }),
+        (signal) =>
+          this.deps.sources.create({
+            record,
+            query: discoveryQuery,
+            signal,
+            deadlineAt: deadlineAt - 200,
+            observations,
+          }),
         200,
+        input.signal,
       );
+      check();
+      enter('source_metadata');
       this.deps.store.recordSources(
         record.opportunityId,
         sources.map((source) => source.id),
@@ -124,6 +160,7 @@ export class WorkPreparationService {
         revalidate: async (item: PreparationSource) =>
           keepUnknown(source.revalidate ? await source.revalidate(item) : item),
       }));
+      enter('discovery');
       const discovered = await budget.run(
         (signal) =>
           KnowledgeResolver.discover(discoveryQuery, {
@@ -131,17 +168,26 @@ export class WorkPreparationService {
             limit: entry.maxCues,
             candidateBudget: Math.floor(20 / Math.max(1, sources.length)),
             waveSize: 2,
-            signal: AbortSignal.any([signal, input.signal]),
+            signal,
             deadlineAt,
           }),
         200,
+        input.signal,
       );
-      const current = await budget.run(() => this.deps.authority.validate(record));
-      input.signal.throwIfAborted();
+      enter('validate');
+      const current = await budget.run(
+        (signal) => this.deps.authority.validate(record, { signal, deadlineAt }),
+        0,
+        input.signal,
+      );
+      check();
       if (!current) {
+        enter('finish');
         this.deps.store.finish(record.opportunityId, 'not_available');
+        check();
         return empty('not_available');
       }
+      enter('publish');
       const envelope = {
         status: 'ok',
         delivery: 'unknown' as const,
@@ -151,11 +197,31 @@ export class WorkPreparationService {
         discoveryVersion: discovered.version,
         sources: discovered.sources.map(({ sourceId }) => ({ sourceId })),
       };
-      const pointers = this.createPointers(opportunity, record, discovered.items, entry.maxPromptTokens, envelope);
+      const pointers = this.createPointers(
+        opportunity,
+        record,
+        discovered.items,
+        entry.maxPromptTokens,
+        envelope,
+        check,
+      );
+      enter('finish');
       this.deps.store.finish(record.opportunityId, 'resolved', discovered);
+      check();
       return { ...envelope, pointers };
-    } catch {
+    } catch (error) {
       const status = input.signal.aborted ? 'cancelled' : 'source_unavailable';
+      try {
+        this.deps.logger?.warn(
+          {
+            ...preparationFailureFields(input.auth, received?.opportunityId, stage, started, stageStarted, error),
+            sourcePhases: observations.snapshot(),
+          },
+          '[F332] work preparation stopped',
+        );
+      } catch {
+        /* Optional diagnostics must not replace the original result. */
+      }
       if (received) this.deps.store.finish(received.opportunityId, status);
       return empty(status);
     }
@@ -167,9 +233,11 @@ export class WorkPreparationService {
     items: readonly PreparationSource[],
     maxTokens: number,
     envelope: Record<string, unknown>,
+    check: () => void,
   ) {
     const pointers = [];
     for (const item of items) {
+      check();
       let prepared: PreparedCoordinate | undefined;
       const cue = cueEnvelopeV1Schema.parse(
         buildCueEnvelope({
@@ -202,9 +270,11 @@ export class WorkPreparationService {
         ...(item.family === 'matter' ? { application: 'not_supported' } : {}),
       };
       if (estimateTokens(JSON.stringify({ ...envelope, pointers: [...pointers, pointer] })) > maxTokens) break;
+      check();
       this.deps.store.save(record.opportunityId, prepared);
       pointers.push(pointer);
     }
+    check();
     return pointers;
   }
 

@@ -44,6 +44,21 @@ function createDeps(overrides = {}) {
     },
     messageStore: overrides.messageStore ?? new MessageStore(),
     deliveryCursorStore: overrides.deliveryCursorStore ?? new DeliveryCursorStore(),
+    taskStore: {
+      listByThread: async () =>
+        overrides.activeTasks ?? [
+          {
+            id: 'artifact-work',
+            kind: 'work',
+            threadId: 'thread-1',
+            userId: overrides.userId ?? 'user-1',
+            title: 'Inspect the current work files',
+            status: 'doing',
+            ownerCatId: 'opus',
+            updatedAt: 1,
+          },
+        ],
+    },
   };
 }
 
@@ -64,7 +79,7 @@ function appendToolUse(transcriptWriter, session, toolName, path) {
   );
 }
 
-describe('F232 live recent artifacts in incremental context', () => {
+describe('F232 live recent artifacts for active work in incremental context', () => {
   it('falls back to the active session transcript buffer when recentFilesTouched is omitted', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f232-live-artifacts-'));
     tempDirs.push(dataDir);
@@ -151,6 +166,7 @@ describe('F232 live recent artifacts in incremental context', () => {
 
     const result = await assembleIncrementalContext(
       createDeps({
+        userId: 'alice',
         transcriptWriter,
         sessionChainStore,
         threadStore: createThreadStore(),
@@ -162,6 +178,22 @@ describe('F232 live recent artifacts in incremental context', () => {
 
     assert.ok(!result.navigationHeader?.includes('bob-only.ts'));
     assert.ok(!result.contextText.includes('bob-only.ts'));
+  });
+
+  it('does not present file observations as work materials without an active Task', async () => {
+    const result = await assembleIncrementalContext(
+      createDeps({ activeTasks: [], threadStore: createThreadStore() }),
+      'user-1',
+      'thread-1',
+      'opus',
+      undefined,
+      undefined,
+      { recentFilesTouched: [{ path: 'src/unassigned-file.ts', ops: ['edit'] }] },
+    );
+
+    assert.match(result.navigationHeader, /\[导航\]/);
+    assert.doesNotMatch(result.navigationHeader, /unassigned-file\.ts|最近产物:|工作材料:|真相源: 未定位/);
+    assert.ok(!result.contextText.includes('unassigned-file.ts'));
   });
 
   it('preserves unknown-tool file paths in the live transcript buffer', async () => {
@@ -205,6 +237,7 @@ describe('F232 live recent artifacts in incremental context', () => {
 
     const result = await assembleIncrementalContext(
       createDeps({
+        userId: 'alice',
         transcriptWriter,
         sessionChainStore,
         threadStore: createThreadStore(),

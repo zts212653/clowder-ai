@@ -124,7 +124,7 @@
     "check:skills:manifest": "node scripts/check-skills-manifest.mjs",
     "check:skills:references": "node --test scripts/check-skill-reference-integrity.test.mjs && node scripts/check-skill-reference-integrity.mjs",
     "check:skills:surfaces": "node --test scripts/check-skill-first-party-surfaces.test.mjs && node scripts/check-skill-first-party-surfaces.mjs",
-    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/pre-merge-gate-guard.alpha.test.mjs scripts/lib/alpha-redis-leases.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs scripts/lib/gate-continuity-claim.test.mjs scripts/lib/gate-continuity-secret.test.mjs scripts/run-preserving-signal-exit.test.mjs",
+    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/pre-merge-gate-guard.alpha.test.mjs scripts/lib/alpha-redis-leases.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/gate-command-clock.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs scripts/lib/gate-continuity-claim.test.mjs scripts/lib/gate-continuity-secret.test.mjs scripts/run-preserving-signal-exit.test.mjs",
     "check:eval-metric-glossary": "pnpm --filter @cat-cafe/api build && pnpm check:eval-metric-glossary:prepared",
     "check:eval-metric-glossary:prepared": "node --test packages/api/test/harness-eval/eval-hub-metric-glossary-coverage.test.js",
     "check:vendor-stylesheets": "node --test scripts/vendor-stylesheets.test.mjs",
@@ -153,6 +153,7 @@
     "check:fseventsd-recovery": "python3 -I -S -B scripts/macos/test_fseventsd_recovery.py && python3 -I -S -B scripts/macos/test_fseventsd_recovery_native.py && node --test scripts/lib/gate-resource-receipts-noop.test.mjs",
     "check:dossier-prompts": "node --test scripts/dossier-prompt-fixture.test.mjs",
     "check:recovery-loops": "node --test scripts/recovery-loop-contract.test.mjs && node scripts/check-recovery-loops.mjs",
+    "platform:request": "node ./scripts/platform-request.mjs",
     "check:brand-guard:home": "node --test scripts/deployment-brand.test.mjs scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs scripts/public-brand-validation.test.mjs"
   },
   "devDependencies": {

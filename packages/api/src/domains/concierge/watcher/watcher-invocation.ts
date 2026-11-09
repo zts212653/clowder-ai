@@ -11,7 +11,7 @@ import {
   watcherInvocationAuthority,
   watcherProviderLaunch,
 } from './watcher-authority.js';
-import { saveWatcherState } from './watcher-checkpoint.js';
+import { failWatcherAttempt, saveWatcherState } from './watcher-checkpoint.js';
 import { finalizeWatcherWake, finishIdleWatcherWake } from './watcher-finalization.js';
 import type {
   WatcherInvocationInput,
@@ -279,25 +279,7 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
     }
     if (!run.committed) throw new Error('watcher_checkpoint_not_committed');
   } catch (error) {
-    try {
-      run.boundary?.assertHealthy();
-    } catch (boundaryError) {
-      error = boundaryError;
-    }
-    const latest = await owners.sessions.get(run.session.id);
-    const failedState = parseWatcherSessionState(latest?.watcherState);
-    if (
-      failedState.attempt?.invocationId === auth.invocationId &&
-      ['running', 'failed'].includes(failedState.attempt.phase)
-    )
-      await saveWatcherState(owners.sessions, run.session.id, failedState, {
-        attempt: {
-          ...failedState.attempt,
-          phase: 'failed',
-          failure: (error instanceof Error ? error.message : String(error)).slice(0, 500),
-        },
-      }).catch(() => undefined);
-    throw error;
+    throw await failWatcherAttempt(owners, run, auth.invocationId, error, signal);
   } finally {
     rejectToolCalls(new Error('Watcher invocation closed'));
     await bridge?.close().catch(() => undefined);

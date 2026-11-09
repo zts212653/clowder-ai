@@ -42,16 +42,19 @@ async function heartbeatFixture(t: TestContext, stage: 'package-verification' | 
   const packages = {
     resolveInstalledPackage: async (digest: string) => {
       const pkg = await locator.resolveInstalledPackage(digest);
+      const verifyStaticIntegrity = pkg.verifyStaticIntegrity?.bind(pkg);
+      const verify = async (work: () => Promise<void>) => {
+        if (armed && stage === 'package-verification') {
+          entered();
+          await verificationGate;
+          throw fault;
+        }
+        await work();
+      };
       return {
         ...pkg,
-        verifyIntegrity: async () => {
-          if (armed && stage === 'package-verification') {
-            entered();
-            await verificationGate;
-            throw fault;
-          }
-          await pkg.verifyIntegrity();
-        },
+        verifyIntegrity: () => verify(() => pkg.verifyIntegrity()),
+        ...(verifyStaticIntegrity ? { verifyStaticIntegrity: () => verify(verifyStaticIntegrity) } : {}),
       };
     },
   };

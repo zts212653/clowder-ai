@@ -192,7 +192,7 @@ describe('SessionSealer', () => {
       const hangingWriter = {
         flush: () => new Promise(() => {}), // never resolves
       };
-      const sealer = new SessionSealer(store, hangingWriter, undefined, undefined, undefined, undefined, {
+      const sealer = new SessionSealer(store, hangingWriter, undefined, undefined, undefined, {
         finalizeTimeoutMs: 10,
       });
 
