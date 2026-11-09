@@ -243,3 +243,14 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 插件 HEAD `29ead50d3d576faa2db9bf3823229512ccbac428`；alpha.45 SHA256 `7e301c48d84fa7e2062f79e46e6e67c54d9a20c253e1ea3753370799e7950b5b`，89个自有文件一致，压缩22,375,510字节、展开61,804,886字节，原归档预算不变。完整API隔离编译通过。Host上一精确提交的Windows冻结入口实测已通过（/tmp/f202-windows-5ba.log），构建与Web生产旅程也已远端通过；这些是上一HEAD的事实，不能直接宣称新HEAD CI全绿。
 
 本轮证据 `/tmp/f202-r4-*`、`/tmp/f202-alpha45-*`。代码与随包需回云端新HEAD复审；不继承5ba67573的无finding回执，不合并/发布/修改运行实例。
+
+### 2026-11-09：R5 原凭据与候选入口提交边界、校验器内存恢复
+
+- 对插件当前云端两项 P2 按同一授权不变量复查：异步读取后的快照不能替代原 RPC 凭据，最终转正不能只看 token 而忽略入口租约。退订 external CAS 核对原 caller 的 token、issuer 和当前有效性；候选读取/回复的 readiness 与最终 promotion CAS 共用入口检查。正式入口仍使用 pending.previousEndpoint，候选退出不损伤正式连接。
+- 精确基线 `29ead50d` 的新隔离反例为 RED（旧退订借用新连接、临时入口退出/到期的最终提交和发布前检查）；原 CAS 快照保护的对照保持通过。修后 candidate-binding 24/24、干净完整 Dot 232/232，类型与构建通过。审核 subscribe、proof/evidence 和业务发布的同型边界，没有恢复 Host 签发或放宽旧授权。
+- Host CI 的 manifest-memory 检查本地精确复现约 41 MB retained heap 增长。根因是每次新读配置都向全局 Ajv 编译新分支 schema。已验证的分支语法只允许字符串 const/enum，改为直接集合匹配；完整性/互斥性和原对象修改检查保留，8 MiB 阈值不变。contract 全套 663/663、类型通过，Host 原内存检查 2/2、契约政策/库存 23/23通过。
+- 固定源码契约归档 `clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz`，SHA256 `d8793602f937e5d52cf34bf7fdd2de90f2d5c3ec7efe9f770f3cea004c069204`；文件名明确区分未发布源码构建与注册表包，更新 file 依赖、override、锁和摘要断言；未发布 npm 或伪造注册表 integrity。
+- Companion 目录失败来自本分支对其无必要的 SDK/contract 构建依赖升级。恢复 main 的已发布 SDK candidate.9 / contract candidate.0，保留目录摘要。重建包的81文件和完整未压缩 tar 与 npm 已发布 alpha.37 逐字节一致；本机 gzip 压缩字节差异不冒充 Linux Machine catalog 已通过。
+- 最终 Dot alpha.46，插件 `d21829674ff361aedd86e617a83dfac322ceae42`；89个自有产物与实际构建一致。SHA256 `8cec747364acbcfc7936a95f701335b7c4f457aef8db2f2789e81d9ebd2ae893`，压缩22,375,777字节、展开61,806,526字节，原32/64 MiB预算不变。上轮 alpha.45 的Windows与构建通过仅记作历史证据，不能覆盖新HEAD。
+- API完整隔离编译通过。首次归档周边检查因本地 NODE_ENV=production 安装缺少开发工具 Biome 而失败，显式恢复 feature 工位开发依赖后重跑；不修改产品或测试来掩盖工具缺失。当前随包与契约增量仍待新HEAD的远端CI与云端复审，无新增fallback链、无运行实例操作。
+- 最终随包/闭包/显示/离线归档 19/19 通过（`/tmp/f202-alpha46-host-final-green.log`）。重跑时同步隔离 stage 的源码 producer 与编译 producer，避免 source 模式仍选到旧 alpha.45；没有为此改变产品或断言。最终 API 编译、Biome及diff检查通过。插件两条 inline 已逐字回读确认；等待两份新提交的真实远端结果。

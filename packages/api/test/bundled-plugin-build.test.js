@@ -9,7 +9,7 @@ import { parse } from 'yaml';
 
 import { bundledBuildFixture as fixture } from './helpers/bundled-plugin-build-fixture.js';
 
-const frozenSha256 = '7e301c48d84fa7e2062f79e46e6e67c54d9a20c253e1ea3753370799e7950b5b';
+const frozenSha256 = '8cec747364acbcfc7936a95f701335b7c4f457aef8db2f2789e81d9ebd2ae893';
 
 function archiveManifest(archive, prebuilt = false) {
   const tar = gunzipSync(archive);
