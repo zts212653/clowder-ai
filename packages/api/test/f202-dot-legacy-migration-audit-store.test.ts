@@ -105,3 +105,20 @@ test('answers exact completion and durable owner supersession independently', as
     },
   ]);
 });
+
+test('same-installation audit recovery keeps owner, source and instance isolation', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'dot-migration-recovery-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'audit.json');
+  await new FileDotLegacyMigrationAuditStore(path).save(audit('instance-a'));
+  const store = new FileDotLegacyMigrationAuditStore(path);
+  const query = { ownerUserId: 'owner-1', sourceInstanceId: 'legacy-instance', pluginInstanceId: 'instance-a' };
+  assert.deepEqual(await store.findCompleted(query), audit('instance-a'));
+  for (const changed of [
+    { ownerUserId: 'other' },
+    { sourceInstanceId: 'other' },
+    { pluginInstanceId: 'other' },
+    { packageDigest: 'other' },
+  ])
+    assert.equal(await store.findCompleted({ ...query, ...changed }), undefined);
+});

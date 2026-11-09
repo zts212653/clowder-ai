@@ -185,3 +185,16 @@ operator 在本线程 `0001794229941774-000286-45879833` 指出 Host 新增规�
 验证：SDK237/237及类型检查，Dot219/219，Superagent20/20；Host消息/媒体/native/共享兼容85/85，通用配置/提及/队列的定向检查及旧token 7/7，旧迁移与历史图片15/15，shared路由1/1，原生随包构建15/15；Web快照/终态/占位42/42。API及其 shared/MCP 类型在本工位隔离目录完整编译，不改运行 dist/.next。最终包89个运行/资源/声明/文档文件一致，准入与空缓存离线安装1/1。日志前缀 `/tmp/f202-scope-*`；隔离配置和记录在 `.cat-cafe-runtime/acceptance/f202-target-sync`。
 
 alpha.41 SHA256 `9cd0fc515489a495ccb391a46ff56e8deca7644b172e5cfa1b07ad5d1e42c35d`；匹配SDK归档 SHA256 `54c212b8158d7959a93b62d36f48520f9c7c2b843b8d9c266b0675162f040e84`，锁文件固定实际归档完整性。已冻结的范围缩减与上游冲突解法仍需独立 exact-HEAD 复核；不会用前一轮 cloud 对 3e0e62f4 的结论替代。本轮未推送范围调整或操作运行实例。
+
+
+## alpha.41 Host 旧共享连接的受限恢复
+
+复审来源 `0001794233446071-000466-b9ceda55`，Host `659545192e` 的一个 P2；插件/SDK `94b70ef2` 沿用独立批准（`0001794233446207-000467-db524d1c`），包和摘要未变。
+
+原 reviewer 两条反例已在修改前复现 RED：`/tmp/f202-scope-shared-recovery-red.log`。共同原因是删掉通用重绑定后，保留的旧共享失配状态没有受限恢复出口。现在启用后按 owner/source/同一安装实例查原完成审计，仍不重导入旧密钥或写新迁移审计；协调器向 shared adoption 传当前安装摘要。`ensure` 的精确包导入去重与已消费来源保护不变。
+
+adoption 保留原 owner、实例、lineage 和批准工具摘要，当前安装/运行代及主人请求仍重核；恢复原工具面可从 needs-confirmation 回 active，实际扩大工具面仍持久失配并返回明确的新连接迁移指引。提交前比较原绑定快照；并发撤销/替换、请求失效、运行代变化不能被旧操作覆盖。没有恢复 prepare/bind/unbind、Host 签发或新授权产品。
+
+已覆盖同安装更新、工具面恢复及扩大拒绝、原绑定撤销、其他 owner/实例/lineage、主人请求失效和迟到绑定/运行代/主体变化。新源码定向30/30；实际编译代码的迁移/图片/旧凭据安装集成与相关检查12/12；完整 API 在隔离输出类型编译通过。日志 `/tmp/f202-scope-recovery-{regression-red,targeted,compiled,types}.log`。另复验 reviewer 两条断言为2/2 GREEN（`/tmp/f202-scope-shared-recovery-green.log`）：第一条内存 audit mock 仅增加了新查询支持，允许省略 packageDigest 查同安装原审计，断言未改；原文件未动。另有真实 FileDotLegacyMigrationAuditStore + coordinator + journey + shared RPC 检查，不只依赖该 mock。
+
+本轮未推送、发布、安装或重启，未改插件/SDK/归档，未将隔离检查当作新的 Work/soak 验收。新 Host exact HEAD 仍待独立复审。

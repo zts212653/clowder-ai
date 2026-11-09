@@ -77,9 +77,17 @@ export class FileDotLegacyMigrationAuditStore implements DotLegacyMigrationProgr
     readonly ownerUserId: string;
     readonly sourceInstanceId: string;
     readonly pluginInstanceId: string;
-    readonly packageDigest: string;
+    readonly packageDigest?: string;
   }): Promise<DotLegacyMigrationAudit | undefined> {
-    return (await this.read()).records[auditKey(input)];
+    return Object.values((await this.read()).records)
+      .filter(
+        (record) =>
+          record.ownerUserId === input.ownerUserId &&
+          record.sourceInstanceId === input.sourceInstanceId &&
+          record.pluginInstanceId === input.pluginInstanceId &&
+          (input.packageDigest === undefined || record.packageDigest === input.packageDigest),
+      )
+      .sort((left, right) => right.completedAt - left.completedAt)[0];
   }
 
   async hasCompletedSource(input: {

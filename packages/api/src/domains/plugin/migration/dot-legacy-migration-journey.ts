@@ -118,13 +118,19 @@ export class DotLegacyMigrationJourney {
     if (!source || source.ownerUserId !== input.ownerUserId) return;
     const sourceQuery = { ownerUserId: input.ownerUserId, sourceInstanceId: source.pluginInstanceId };
     if (await this.options.audit.isSuperseded(sourceQuery)) return;
+    // The audit proves this installation consumed the source; its import digest
+    // need not equal today's package. Only the shared binding is reconciled here.
     const completed = await this.options.audit.findCompleted({
       ...sourceQuery,
       pluginInstanceId: input.pluginInstanceId,
-      packageDigest: input.packageDigest,
     });
     if (!completed) return;
-    await this.options.coordinator.reconcileShared?.(completed);
+    input.assertCurrent();
+    if (await this.options.audit.isSuperseded(sourceQuery)) return;
+    await this.options.coordinator.reconcileShared?.(completed, {
+      packageDigest: input.packageDigest,
+      assertCurrent: input.assertCurrent,
+    });
     input.assertCurrent();
   }
 

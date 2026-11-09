@@ -162,14 +162,14 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
       ownerUserId: string;
       sourceInstanceId: string;
       pluginInstanceId: string;
-      packageDigest: string;
+      packageDigest?: string;
     }) =>
       progress.records.find(
         (record) =>
           record.ownerUserId === query.ownerUserId &&
           record.sourceInstanceId === query.sourceInstanceId &&
           record.pluginInstanceId === query.pluginInstanceId &&
-          record.packageDigest === query.packageDigest,
+          (query.packageDigest === undefined || record.packageDigest === query.packageDigest),
       ),
     hasCompletedSource: async (query: { ownerUserId: string; sourceInstanceId: string }) =>
       progress.records.some(

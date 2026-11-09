@@ -99,7 +99,7 @@ export interface PluginManagerRouteOptions {
 
 function sendManagerError(reply: FastifyReply, error: unknown) {
   if (error instanceof PluginSharedExtensionError) {
-    return reply.status(error.statusCode).send({ error: 'Shared plugin connection failed', code: error.code });
+    return reply.status(error.statusCode).send({ error: error.message, code: error.code });
   }
   const migrationCode = error instanceof Error && /^dot_[a-z0-9_]{1,80}$/.test(error.message) ? error.message : null;
   if (migrationCode) {

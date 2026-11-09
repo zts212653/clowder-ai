@@ -33,7 +33,7 @@ export const pluginSharedExtensionRoutes: FastifyPluginAsync<{ service: PluginSh
       return await options.service.handle(secret, parsed.data);
     } catch (error) {
       if (error instanceof PluginSharedExtensionError) {
-        return reply.code(error.statusCode).send({ error: error.code });
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
       }
       request.log.warn({ error }, 'Shared extension request failed');
       return reply.code(503).send({ error: 'shared_extension_unavailable' });

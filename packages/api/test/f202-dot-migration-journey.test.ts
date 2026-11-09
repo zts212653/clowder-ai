@@ -59,14 +59,14 @@ function fixture({
       ownerUserId: string;
       sourceInstanceId: string;
       pluginInstanceId: string;
-      packageDigest: string;
+      packageDigest?: string;
     }) =>
       existing.find(
         (record) =>
           record.ownerUserId === query.ownerUserId &&
           record.sourceInstanceId === query.sourceInstanceId &&
           record.pluginInstanceId === query.pluginInstanceId &&
-          record.packageDigest === query.packageDigest,
+          (query.packageDigest === undefined || record.packageDigest === query.packageDigest),
       ),
     hasCompletedSource: async (query: { ownerUserId: string; sourceInstanceId: string }) =>
       existing.some(
@@ -137,4 +137,28 @@ test('a first-import conflict stays inside the isolated lifecycle migration inst
 
   await assert.rejects(f.journey.ensure(input('target-instance')), /dot_migration_conflict/);
   assert.equal(await f.journey.needsMigration(pluginId, ownerUserId), true);
+});
+
+test('owner enable after same-instance update reuses the original completed audit without importing keys', async () => {
+  const prior = completed('target-instance');
+  const reconciled: unknown[] = [];
+  const f = fixture({
+    existing: [prior],
+    reconcileShared: async (...args) => {
+      reconciled.push(args);
+    },
+  });
+  const updated = { ...input('target-instance'), packageDigest: 'updated-digest' };
+  assert.equal(await f.journey.ensure(updated), null);
+  await f.journey.afterEnable(updated);
+  assert.equal(f.migrateCalls(), 0);
+  assert.equal(reconciled.length, 1);
+  assert.deepEqual(reconciled, [
+    [prior, { packageDigest: updated.packageDigest, assertCurrent: updated.assertCurrent }],
+  ]);
+  await f.journey.afterEnable({ ...updated, pluginInstanceId: 'replacement' });
+  await f.journey.afterEnable({ ...updated, ownerUserId: 'other' });
+  await f.journey.supersede(updated, 'owner_reconnect');
+  await f.journey.afterEnable(updated);
+  assert.equal(reconciled.length, 1);
 });

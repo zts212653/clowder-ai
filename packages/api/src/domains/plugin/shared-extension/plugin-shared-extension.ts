@@ -204,7 +204,11 @@ export class PluginSharedExtensionError extends Error {
     readonly statusCode: number,
     readonly code: string,
   ) {
-    super(code);
+    super(
+      code === 'shared_surface_changed'
+        ? `${code}: The legacy shared connection cannot authorize changed tools. Restore the previously approved plugin version and enable it again, or generate a Server URL in Dot settings, add that connection in ChatGPT and send its subscription message.`
+        : code,
+    );
   }
 }
 
@@ -449,52 +453,42 @@ export class PluginSharedExtensionService {
 
   /** Preserve the pre-plugin shared /mcp behavior after the owner-fenced legacy import.
    * This is not exposed to packages: the migration coordinator supplies the verified
-   * owner and exact package digest. A same-lineage reinstall is adopted only when the
+   * owner and exact package digest. The same installation is recovered only when the
    * published surface is byte-for-byte the already approved surface. */
   async adoptVerifiedLegacy(input: {
     readonly instanceId: string;
     readonly expectedPackageDigest: string;
     readonly ownerUserId: string;
     readonly evidenceRef: string;
+    readonly assertCurrent?: () => void;
   }): Promise<SharedConnectionView | null> {
+    input.assertCurrent?.();
     if (!(await this.availablePrincipal(input.ownerUserId))) return null;
+    const key = bindingKey(input.ownerUserId);
+    const observed = (await this.options.store.snapshot()).bindings.find((candidate) => recordKey(candidate) === key);
     const basis = await this.basis(input.instanceId);
     if (basis.packageRecord.pluginId !== 'official.chatgpt-dot') fail(403, 'legacy_dot_installation_required');
     if (basis.packageRecord.packageDigest !== input.expectedPackageDigest) fail(409, 'shared_installation_changed');
     const runtimeGeneration = basis.instance.lifecycleRevision;
     const surface = await this.surface(basis.instance);
     await this.basis(input.instanceId, basis.packageRecord.packageDigest, runtimeGeneration);
+    if (!(await this.availablePrincipal(input.ownerUserId))) return null;
     const principal = { kind: 'cloud-cat' as const, logicalId: SHARED_CAT_ID };
-    return this.options.store.update((state) => {
-      const key = bindingKey(input.ownerUserId, principal.logicalId);
+    const result = await this.options.store.update((state) => {
+      input.assertCurrent?.();
       const existing = state.bindings.find((candidate) => recordKey(candidate) === key);
-      if (existing && existing.state !== 'revoked' && existing.lineage !== basis.lineage) {
+      if (observed ? !existing || !sameBinding(existing, observed) : existing) fail(409, 'shared_slot_changed');
+      if (
+        existing &&
+        existing.state !== 'revoked' &&
+        (existing.lineage !== basis.lineage || existing.instanceId !== input.instanceId)
+      ) {
         fail(409, 'shared_slot_occupied');
       }
       if (existing?.state === 'revoked') {
         return { state, result: this.view(existing, surface) };
       }
-      if (existing?.state === 'needs-confirmation') {
-        if (existing.instanceId === input.instanceId && existing.packageDigest === basis.packageRecord.packageDigest) {
-          return { state, result: this.view(existing, surface) };
-        }
-        const changed: SharedBindingRecord = {
-          ...existing,
-          instanceId: input.instanceId,
-          lineage: basis.lineage,
-          packageDigest: basis.packageRecord.packageDigest,
-          revision: existing.revision + 1,
-          updatedAt: this.now(),
-        };
-        return {
-          state: {
-            ...state,
-            bindings: [...state.bindings.filter((candidate) => recordKey(candidate) !== key), changed],
-          },
-          result: this.view(changed, surface),
-        };
-      }
-      if (existing?.state === 'active' && existing.approvedSurfaceDigest !== surface.digest) {
+      if (existing && existing.approvedSurfaceDigest !== surface.digest) {
         const changed: SharedBindingRecord = {
           ...existing,
           instanceId: input.instanceId,
@@ -530,16 +524,17 @@ export class PluginSharedExtensionService {
         result: this.view(binding, surface),
       };
     });
+    if (result.binding.state === 'needs-confirmation') fail(409, 'shared_surface_changed');
+    return result;
   }
 
   async handle(secret: string, rpc: Readonly<Record<string, unknown>>): Promise<unknown> {
     const verified = await this.options.keys.verify(secret);
     if (!verified.ok || verified.record.catId !== SHARED_CAT_ID) fail(403, 'shared_principal_rejected');
     const state = await this.options.store.snapshot();
-    const binding = state.bindings.find(
-      (candidate) => recordKey(candidate) === bindingKey(verified.record.userId) && candidate.state === 'active',
-    );
-    if (!binding) fail(404, 'shared_extension_not_bound');
+    const binding = state.bindings.find((candidate) => recordKey(candidate) === bindingKey(verified.record.userId));
+    if (!binding || binding.state === 'revoked') fail(404, 'shared_extension_not_bound');
+    if (binding.state === 'needs-confirmation') fail(409, 'shared_surface_changed');
     assertApprovedRpc(binding, rpc);
     const basis = await this.basis(binding.instanceId);
     const runtimeGeneration = basis.instance.lifecycleRevision;

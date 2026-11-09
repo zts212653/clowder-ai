@@ -65,7 +65,8 @@ export interface DotLegacyMigrationProgressPort extends DotLegacyMigrationAuditP
     readonly ownerUserId: string;
     readonly sourceInstanceId: string;
     readonly pluginInstanceId: string;
-    readonly packageDigest: string;
+    /** Omit only for shared-binding recovery across updates of the same installation. */
+    readonly packageDigest?: string;
   }): Promise<DotLegacyMigrationAudit | undefined>;
   hasCompletedSource(input: { readonly ownerUserId: string; readonly sourceInstanceId: string }): Promise<boolean>;
   isSuperseded(input: { readonly ownerUserId: string; readonly sourceInstanceId: string }): Promise<boolean>;
@@ -87,6 +88,7 @@ export class DotLegacyMigrationCoordinator {
           readonly expectedPackageDigest: string;
           readonly ownerUserId: string;
           readonly evidenceRef: string;
+          readonly assertCurrent?: () => void;
         }): Promise<unknown>;
       };
       readonly now?: () => number;
@@ -173,13 +175,17 @@ export class DotLegacyMigrationCoordinator {
     return audit;
   }
 
-  async reconcileShared(audit: DotLegacyMigrationAudit): Promise<void> {
+  async reconcileShared(
+    audit: DotLegacyMigrationAudit,
+    current?: { readonly packageDigest: string; readonly assertCurrent: () => void },
+  ): Promise<void> {
     if (!audit.authority.active) return;
     await this.options.sharedExtension?.adoptVerifiedLegacy({
       instanceId: audit.pluginInstanceId,
-      expectedPackageDigest: audit.packageDigest,
+      expectedPackageDigest: current ? current.packageDigest : audit.packageDigest,
       ownerUserId: audit.ownerUserId,
       evidenceRef: `legacy-dot:${audit.sourceInstanceId}:${audit.authority.agentKeyId}`,
+      ...(current ? { assertCurrent: current.assertCurrent } : {}),
     });
   }
 
