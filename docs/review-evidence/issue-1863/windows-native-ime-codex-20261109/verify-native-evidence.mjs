@@ -16,13 +16,13 @@ for (const file of process.argv.slice(2)) {
   assert.equal(report.results.length, 12);
   for (const classic of [false, true]) {
     for (const [name, value, caret] of expected) {
-      const result = report.results.find(item => item.classic === classic && item.name === name);
+      const result = report.results.find((item) => item.classic === classic && item.name === name);
       assert.equal(result.pass, true);
       assert.equal(result.after.value, value);
       assert.equal(result.after.start, caret);
       assert.equal(result.after.end, caret);
-      assert.ok(result.during.events.some(event => event.type === 'compositionstart' && event.isTrusted));
-      assert.ok(result.during.events.some(event => event.type === 'compositionupdate' && event.data === 'zhongwen'));
+      assert.ok(result.during.events.some((event) => event.type === 'compositionstart' && event.isTrusted));
+      assert.ok(result.during.events.some((event) => event.type === 'compositionupdate' && event.data === 'zhongwen'));
       if (classic) {
         assert.equal(result.after.mirrorActive, null);
         assert.equal(result.after.ranges.length, 0);
@@ -31,10 +31,13 @@ for (const file of process.argv.slice(2)) {
         assert.notEqual(result.during.textColor, 'rgba(0, 0, 0, 0)');
         const linked = name !== 'replace';
         assert.equal(result.after.mirrorActive, String(linked));
-        assert.deepEqual(result.after.ranges.map(range => range.text), linked ? [value.split(' ')[0]] : []);
+        assert.deepEqual(
+          result.after.ranges.map((range) => range.text),
+          linked ? [value.split(' ')[0]] : [],
+        );
       }
     }
-    const { undo, redo, pass } = report.results.find(item => item.classic === classic && item.name === 'undo-redo');
+    const { undo, redo, pass } = report.results.find((item) => item.classic === classic && item.name === 'undo-redo');
     assert.equal(pass, true);
     assert.deepEqual([undo.value, undo.start, undo.end], [baseline, 0, 8]);
     assert.deepEqual([redo.value, redo.start, redo.end], ['中文 说明', 2, 2]);
