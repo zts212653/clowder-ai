@@ -25,7 +25,10 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, type CliEffortPreset, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
-import { summarizeMcpInjection } from '../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  resolveBinaryRoot,
+  summarizeMcpInjection,
+} from '../../../../../config/capabilities/capability-orchestrator.js';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -362,6 +365,11 @@ export function resolveDefaultClaudeMcpServerPath(cwd = process.cwd()): string |
     resolve(cwd, 'packages/mcp-server/dist/index.js'),
     resolve(cwd, '../../packages/mcp-server/dist/index.js'),
   ];
+
+  // Desktop declares its shipped binaries separately from the writable project.
+  if (process.env.CAT_CAFE_RUNTIME_ROOT?.trim()) {
+    candidates.push(resolve(resolveBinaryRoot(cwd), 'packages/mcp-server/dist/index.js'));
+  }
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;

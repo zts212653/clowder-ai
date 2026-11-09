@@ -80,11 +80,11 @@ export async function runMessageSearch(
         sources: [
           messageDiscoverySource({
             search: input,
-            read: async () => {
+            read: async (request) => {
               execution = await observe('retrieval', () =>
                 ops.retrieve(input.query, {
-                  signal: context.signal,
-                  deadlineAt,
+                  signal: request.signal,
+                  deadlineAt: request.deadlineAt,
                   onReadSnapshot: diagnostics.worker,
                   visibleThreadIds: [...threads.keys()],
                   threadId: input.threadId,
