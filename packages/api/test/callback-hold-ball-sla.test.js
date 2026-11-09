@@ -79,7 +79,7 @@ async function fixture(t, rejectStatus = false) {
     quota.close();
     db.close();
   });
-  const hold = (slaUntilMs) =>
+  const hold = (slaUntilMs, wakeAfterMs = DELAY) =>
     app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
@@ -87,7 +87,7 @@ async function fixture(t, rejectStatus = false) {
       payload: {
         reason: 'wait for external CI',
         nextStep: 'recheck CI',
-        wakeAfterMs: DELAY,
+        wakeAfterMs,
         waitSourceRef: { kind: 'task', value: 'external-ci', expectedSignal: 'ci_complete', slaUntilMs },
       },
     });
@@ -132,6 +132,47 @@ test('accepted online hold wakes exactly once with 25ms jitter inside its 600ms 
   await setImmediate();
   assert.equal(f.deliveries.length, 1);
 });
+
+for (const jump of [120_000, 28_800_000]) {
+  test(`strict timer crossing its deadline during async admission by ${jump}ms retains an expired original hold`, async (t) => {
+    const f = await fixture(t, true);
+    const tryAdmit = f.quota.tryAdmit.bind(f.quota);
+    t.mock.method(f.quota, 'tryAdmit', async (...args) => {
+      const admitted = await tryAdmit(...args);
+      t.mock.timers.setTime(NOW + jump);
+      return admitted;
+    });
+    const deadline = NOW + 8_600;
+    const accepted = await f.hold(deadline, 8_000);
+    assert.equal(accepted.statusCode, 200);
+    assert.equal(accepted.json().held, true);
+    const id = accepted.json().taskId;
+    assert.equal(f.store.getPrivateOwnerAuthProvenance(id), 'strict');
+    assert.equal(f.store.getById(id).params.holdLifecycle.await.expiresAt, deadline);
+    f.runner.start();
+    t.mock.timers.tick(0);
+    await setImmediate();
+    assert.equal(f.deliveries.filter((delivery) => delivery.targetCatId).length, 0);
+    assert.equal(f.ledger.query(id, 1).length, 0);
+    const terminal = f.store.getById(id);
+    assert.notEqual(terminal, null);
+    assert.equal(terminal.enabled, false);
+    assert.equal(terminal.params.holdLifecycle.status, 'retired_expired');
+    assert.equal(terminal.params.holdLifecycle.dispositionReason, 'sla_elapsed');
+    assert.equal(f.runner.getRegisteredTasks().includes(id), false);
+    assert.equal((await f.messages.getByThread(f.thread.id, 10, 'sla-owner')).length, 1);
+    const status = await f.app.inject({
+      method: 'GET',
+      url: `/api/callbacks/hold-ball/${id}/status`,
+      headers: { 'x-cat-cafe-user': 'sla-owner' },
+    });
+    assert.equal(status.statusCode, 200);
+    assert.equal(status.json().status, 'retired_expired');
+    assert.equal(status.json().cancelable, false);
+    assert.equal(status.json().lifecycle.dispositionReason, 'sla_elapsed');
+    assert.equal(f.deliveries.length, 0);
+  });
+}
 
 for (const jump of [5, 120_000, 28_800_000]) {
   test(`online hold does not wake past its absolute deadline after ${jump}ms clock delay`, async (t) => {
@@ -248,7 +289,7 @@ for (const mode of [
 }
 
 for (const invalid of [false, true]) {
-  test(`legacy online hold without onceLifecycle ${invalid ? 'rejects an invalid window' : 'still wakes once'}`, async (t) => {
+  test(`strict online hold without onceLifecycle ${invalid ? 'rejects an invalid window' : 'still wakes once'}`, async (t) => {
     const f = await fixture(t);
     const accepted = await f.hold(NOW + DELAY + 10);
     const id = accepted.json().taskId;
@@ -277,6 +318,61 @@ for (const invalid of [false, true]) {
       assert.equal(f.deliveries[0].userId, 'default-user');
     }
     assert.ok(!f.runner.getRegisteredTasks().includes(id));
+    t.mock.timers.tick(60_000);
+    await setImmediate();
+    assert.equal(f.deliveries.length, 1);
+  });
+}
+
+for (const expired of [false, true]) {
+  test(`unknown-provenance online timer ${expired ? 'past its deadline' : 'inside its window'} retains legacy execution`, async (t) => {
+    const f = await fixture(t);
+    const id = 'hold-ball-legacy-unknown';
+    const fireAt = NOW + DELAY;
+    const deadline = fireAt + 600;
+    const def = {
+      id,
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt },
+      params: {
+        message: 'legacy hold',
+        triggerUserId: 'sla-owner',
+        targetCatId: 'codex',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          wakeAt: fireAt,
+          waitSourceRef: { slaUntilMs: deadline },
+          await: {
+            subjectRef: `timer:${id}`,
+            generation: 1,
+            expiresAt: deadline,
+            baseline: { kind: 'timer', fireAt },
+            continuation: { when: [{ kind: 'timer_elapsed' }] },
+          },
+        },
+      },
+      display: { label: 'legacy hold', category: 'system', subjectKind: 'none' },
+      deliveryThreadId: f.thread.id,
+      enabled: true,
+      createdBy: 'hold-ball:codex',
+      createdAt: NOW,
+    };
+    // The old writer omitted private authorization; do not forge a new strict registration.
+    f.store.insert(def);
+    assert.equal(f.store.getPrivateOwnerAuthProvenance(id), 'unknown');
+    const spec = reminderTemplate.createSpec(id, { ...def, ...f.store.getPrivateOwnerAuthorization(id) });
+    assert.equal(spec.onceLifecycle, undefined);
+    f.runner.register(spec);
+    f.runner.start();
+    if (expired) t.mock.timers.setTime(NOW + 120_000);
+    t.mock.timers.tick(DELAY);
+    await setImmediate();
+    assert.equal(f.deliveries.length, 1);
+    assert.equal(f.deliveries[0].targetCatId, 'codex');
+    assert.equal(f.deliveries[0].source.meta.phase, 'wake');
+    assert.equal(f.ledger.query(id, 1)[0].outcome, 'RUN_DELIVERED');
+    assert.equal(f.store.getById(id), null);
     t.mock.timers.tick(60_000);
     await setImmediate();
     assert.equal(f.deliveries.length, 1);

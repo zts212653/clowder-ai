@@ -351,7 +351,12 @@ export class TaskRunnerV2 {
       const current = store.getById(taskId);
       if (!current || current.trigger.type !== 'once') return false;
       const recovery = classifyTimerHoldRecovery(current, store.getPrivateOwnerAuthProvenance(current.id), Date.now());
-      if (!task.onceLifecycle && !(recovery.kind === 'invalid' && recovery.reason === 'sla_not_after_wake')) {
+      // A verified timer can expire during admission, before onceLifecycle is configured.
+      if (
+        !task.onceLifecycle &&
+        recovery.kind !== 'expired' &&
+        !(recovery.kind === 'invalid' && recovery.reason === 'sla_not_after_wake')
+      ) {
         return false;
       }
       if (recovery.kind === 'recover' || recovery.kind === 'not_timer_hold') return false;
