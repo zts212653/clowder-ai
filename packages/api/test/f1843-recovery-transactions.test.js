@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { taskProbeSource } from '../dist/domains/cats/services/stores/ports/TaskProbeSource.js';
 import { RedisTaskStore } from '../dist/domains/cats/services/stores/redis/RedisTaskStore.js';
 import { recoveryGuarded, withinRecoveryDeadline } from '../dist/infrastructure/recovery/recovery-deadline.js';
@@ -30,7 +30,8 @@ test('a late WATCH read cannot start a new Task transaction, and its exclusive c
     lateWrite = false,
     ended = false,
     cleanupCalls = 0,
-    disconnectCalls = 0;
+    disconnectCalls = 0,
+    sessionEnded;
   const gate = new Promise((resolve) => {
     release = resolve;
   });
@@ -42,6 +43,7 @@ test('a late WATCH read cannot start a new Task transaction, and its exclusive c
       if (key === 'duplicate')
         return (...args) => {
           session = target.duplicate(...args);
+          sessionEnded = once(session, 'end', { signal: AbortSignal.timeout(1000) });
           const read = session.hgetall.bind(session),
             multi = session.multi.bind(session),
             unwatch = session.unwatch.bind(session),
@@ -90,7 +92,7 @@ test('a late WATCH read cannot start a new Task transaction, and its exclusive c
     await completion.catch(() => {});
   }
   assert.equal(lateWrite, false);
-  await delay(0);
+  await sessionEnded;
   assert.equal(session.status, 'end');
   assert.equal(cleanupCalls, 1, 'unwatch is permitted even after the scope expires');
   assert.equal((await actual.get(task.id)).status, 'blocked');
@@ -115,16 +117,25 @@ test('fluent MULTI/pipeline builders retain their creating scope; valid transact
     assert.equal(await raw.get(`late-${kind}`), null);
     assert.equal(await raw.get(`valid-${kind}`), 'yes');
   }
-  let owned;
+  let owned,
+    ownedEnded,
+    disposed = false;
   await withinRecoveryDeadline(
     performance.now() + 1000,
     () => performance.now(),
     async () => {
       owned = redis.duplicate();
+      ownedEnded = once(owned, 'end', { signal: AbortSignal.timeout(1000) });
+      const disconnect = owned.disconnect.bind(owned);
+      owned.disconnect = (...args) => {
+        disposed = true;
+        return disconnect(...args);
+      };
       assert.equal(await owned.ping(), 'PONG');
     },
   );
-  await delay(0);
+  assert.equal(disposed, true, 'scope disposal initiates disconnect before returning');
+  await ownedEnded;
   assert.equal(owned.status, 'end');
   await owned.unwatch().catch(() => {});
   owned.disconnect();

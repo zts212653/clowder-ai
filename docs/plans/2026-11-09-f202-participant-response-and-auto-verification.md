@@ -342,6 +342,17 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 当前Host1b8f0c8268的CI 42682674057：16项成功、distributable-5在30分钟job期限被取消，Public汇总因缺分片证明失败；插件4e2dc4e5两项CI仍成功。不能把取消说成业务断言已失败，也不能把其他通过项冒充全绿。
 
 - 精确计划artifact public-test-plan-378c8d4f5c2cb010c6f1f701b792f3f138b92762-attempt-1已下载到ignored acceptance/f202-ci-r12-plan。该lane日志最后完成f202-c1-publishing-message-store，下一文件是f202-dot-delivery-archive；之后25分钟无输出。阶段尚未定位到preflight/npm/模块或PNG处理中的哪一个，不宣称已知根因。
-- 本机按相同Node资源guard运行精确冻结包检查1/1通过；另从精确归档隔离提取并移开自身Darwin native后端，强制WASM成功编码PNG、读取metadata并正常退出。Docker CLI存在但无daemon，因此没有伪称本机Linux namespace复现。没有启动容器服务或访问运行实例。
+- 本机按相同Node资源guard运行精确冻结包检查1/1通过；当时从归档提取并移开自身Darwin native后端的检查被误记为强制WASM；R13核对require.cache发现它从祖先工作树加载了native，因此撤回该条WASM证据，详见R13。Docker CLI存在但无daemon，因此没有伪称本机Linux namespace复现。没有启动容器服务或访问运行实例。
 - 只改该冻结包测试：预检、空缓存npm离线安装、模块与PNG消费者各有即时阶段日志；安装与消费者各60秒硬期限，测试150秒期限，失败保留子进程错误与内部阶段。仍严格校验原归档SHA、空缓存/offline、真实安装模块和PNG输出；无跳过、重试变绿、放宽网络或生产预算。
 - 本机加阶段日志的原检查再次1/1通过（/tmp/f202-r12-stage-green.log），尚不能据此声明Linux卡住已修复。目标CI必须回读新日志再决定修复。证据/tmp/f202-r12-ci-distributable5.log、/tmp/f202-r12-ci-public-gate.log、/tmp/f202-r12-offline-guard-repro.log、/tmp/f202-r12-wasm-repro.log。产品代码和alpha.51包未变，沿用1b8f0c8268/4e2dc4e5的云端无重大问题回执；未合并或发布。
+
+
+### R13：缩定Linux PNG卡点，修正隔离证据及事务测试事件等待
+
+Host b304fbd4的CI 42689653610给出可定位失败：distributable-5预检、空缓存npm离线安装、入口及迁移模块加载均完成，消费者停在sharp编码PNG，60秒后ETIMEDOUT。根因仍未确认，不能将Darwin成功等同于Linux成功。distributable-4另在上游已有的f1843-recovery-transactions:128断言ready!==end；该测试与恢复实现相对upstream/next无改动。
+
+- 事务测试原先用delay(0)推断socket完成关闭；ioredis disconnect先stream.end，close事件后才设置end。改为在退出scope前登记真实end事件、有界1秒等待，并显式核对scope退出已发起disconnect；迟到事务拒绝、独占连接释放及共享连接可用断言均保留。Linux精准RED为原run，修后Darwin同文件2/2通过；未改F1843产品实现。
+- 更正R12的WASM取证：原提取目录位于工作树之下，移开自身native后仍可向祖先node_modules解析；require.cache证实实际加载native。该条成功不能证明WASM。新的检查用仓库外临时目录、核对所有实际sharp后端均属于隔离安装目录，移开native后必须确认加载sharp-wasm32。没有移除或修改真实依赖目录。
+- 冻结包消费者落为真实consumer.mjs，避免eval入口与worker启动方式混杂；保留阶段日志并输出后端、运行版本、并发值及worker创建/online。默认平台和强制WASM均执行真实PNG编码及metadata，安装及两个消费者各60秒硬期限，测试总期限210秒覆盖三段；无强制成功退出/跳过/重试。离线安装与原归档SHA及预算检查不变。
+- 本机实际空缓存安装/默认native/隔离WASM1/1，后端路径均来自临时消费目录；另用官方Node24.20.0 Darwin执行仓库外真实WASM隔离探针成功。不是Linux namespace验证。日志/tmp/f202-r13-frozen-green.log、/tmp/f202-r13-transactions-green.log、/tmp/f202-r13-lane4.log、/tmp/f202-r13-lane5.log。
+- 本轮只有测试与取证说明；Host产品和alpha.51字节不变，插件4e2dc4e5仍CI绿及精确云端无重大问题。Linux PNG缺口保留，提交后按已有PR回调取得新日志；不改工作流网络边界、产品依赖、运行实例或发布状态。
