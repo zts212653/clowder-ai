@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { registerOriginalReviewNavigation } from './f309-original-place.journey.mjs';
 import { runChatRealPageJourney } from './f322-chat-real-page.mjs';
 import { runGroupPeekJourney } from './f322-group-peek.journey.mjs';
 import { runPianoJourneys } from './f322-piano.journey.mjs';
@@ -183,6 +184,7 @@ async function openProof({
   viewport = { width: 1440, height: 900 },
   participantCount = 2,
   retainedApproval = false,
+  reviewNavigation = false,
   // Called once per unified read, with the 1-based attempt number; returns { status?, body, raw? } (may be async: a slow read).
   unified = () => ({ body: unifiedRead() }),
   // Offered every other /api request first; returns { status?, body, raw?, abort? } to answer it, or null to fall through.
@@ -197,14 +199,15 @@ async function openProof({
     unexpected = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(
-    ({ pins, shell, language, participantCount, retainedApproval }) => {
+    ({ pins, shell, language, participantCount, retainedApproval, reviewNavigation }) => {
       if (shell !== null) localStorage.setItem('cat-cafe:shell-presentation', shell);
       localStorage.setItem('cat-cafe:shell-language', language);
       localStorage.setItem('cat-cafe:pinned-settings-sections', JSON.stringify(pins));
       window.__F322_PARTICIPANT_COUNT__ = participantCount;
       window.__F322_RETAINED_APPROVAL__ = retainedApproval;
+      window.__F309_REVIEW_NAVIGATION__ = reviewNavigation;
     },
-    { pins, shell, language, participantCount, retainedApproval },
+    { pins, shell, language, participantCount, retainedApproval, reviewNavigation },
   );
   await page.route('**/*', async (handler) => {
     const request = handler.request(),
@@ -339,7 +342,15 @@ async function openProof({
     });
   });
   await page.goto(origin + route, { waitUntil: 'networkidle' });
-  if (shell === 'v2') await page.getByRole('button', { name: ready, exact: true }).waitFor();
+  if (shell === 'v2') {
+    try {
+      await page.getByRole('button', { name: ready, exact: true }).waitFor();
+    } catch (cause) {
+      const body = (await page.locator('body').innerText()).slice(0, 3500);
+      await page.close();
+      throw new Error(JSON.stringify({ ready, errors, unexpected, body }), { cause });
+    }
+  }
   return { page, errors, requests, unexpected };
 }
 async function closeProof(proof) {
@@ -347,6 +358,7 @@ async function closeProof(proof) {
   assert.deepEqual(proof.errors, []);
   assert.deepEqual(proof.unexpected, []);
 }
+registerOriginalReviewNavigation({ openProof, closeProof, unifiedRead });
 async function pointAt(page, locator) {
   const box = await locator.boundingBox();
   assert.ok(box);

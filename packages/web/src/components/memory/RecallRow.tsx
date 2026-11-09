@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useState } from 'react';
-import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
+import { openSourcePlace } from '@/components/shell/mailbox/open-exact-place';
 import { useWorkspaceChatReveal } from '@/components/workbench/WorkspaceChatReveal';
 import { recallDeliveryLabel, recallResultHref, recallResultTitle, recallTypeLabel } from '@/hooks/recall-display';
 import type { RecallKind } from '@/hooks/recall-feed-model';
@@ -128,7 +128,7 @@ export function RecallCard({
                       // The Chat host owns panel visibility (it re-opens a 'workspace' panel on its own);
                       // ask it to reveal this conversation so the exact message is not left under the overlay.
                       revealChat?.(source[1]);
-                      openExactPlace(`message:${source[1]}:${source[2]}`, window.location.pathname);
+                      openSourcePlace(`message:${source[1]}:${source[2]}`, window.location.pathname);
                     }}
                     className="text-cafe-accent hover:underline"
                   >

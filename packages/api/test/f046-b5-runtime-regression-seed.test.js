@@ -29,7 +29,8 @@ describe('F046 B5 runtime regression scenarios after lifecycle cutover', () => {
     });
 
     assert.match(context, /^Direct message from 布偶猫\(opus\)/m);
-    assert.match(context, /最近发言：布偶猫\(opus\)/);
-    assert.doesNotMatch(context, /Direct message from @opus|最近发言：@opus/);
+    assert.match(context, /reply to 布偶猫\(opus\)/);
+    assert.doesNotMatch(context, /Direct message from @opus|reply to @opus/);
+    assert.doesNotMatch(context, /最近发言/, 'Retired D12 activity summaries are not injected');
   });
 });

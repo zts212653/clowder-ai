@@ -83,7 +83,21 @@ for (const kind of ['gif', 'svg'] as const)
       candidate = await bytes(2);
     const locator = { worktreeId: 'original', path: 'mislabeled.png' };
     await writeFile(join(root, locator.path), original);
-    const inspected = await source.inspect({ locator, principal });
+    const reader = await registry.create(
+      'operator',
+      'codex-sol',
+      'thread-cover',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      kind === 'gif' ? 'unknown' : 'compatibility_fallback',
+    );
+    const inspected = await service.inspectSource(locator, {
+      ...principal,
+      actor: { kind: 'cat', actorId: 'codex-sol' },
+      invocationId: reader.invocationId,
+    });
     assert.equal(inspected.mediaType, kind === 'gif' ? 'image/gif' : 'image/svg+xml');
     const first = await service.commit(
       {

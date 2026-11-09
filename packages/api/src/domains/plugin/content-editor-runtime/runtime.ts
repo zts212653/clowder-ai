@@ -73,7 +73,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       verifyActivePackage: async (id, digest) => {
         const run = this.active.get(id);
         if (!run || run.packageDigest !== digest) throw new Error('active package is unavailable');
-        await run.package.verifyIntegrity();
+        await this.verifySurfacePackage(run);
       },
     });
   }
@@ -203,7 +203,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       const diagnostics = new EditorHeartbeatDiagnostics((this.options.now ?? Date.now)() - dueAt);
       void (async () => {
         if (this.active.get(id) !== run) return;
-        await diagnostics.measure('package-verification', () => run.package.verifyIntegrity());
+        await diagnostics.measure('package-verification', () => this.verifySurfacePackage(run));
         await diagnostics.measure('lease-renew', () => run.connection.renewRuntimeLease());
         if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
       })()
@@ -211,6 +211,13 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
         .catch(() => undefined);
     }, intervalMs);
     run.timer.unref();
+  }
+
+  private verifySurfacePackage(run: ActivePackage): Promise<void> {
+    // Ready surfaces serve frozen Host buffers. Startup and executable workers
+    // retain full byte verification; each warm use still checks the private seal.
+    if (run.ready && run.package.verifyStaticIntegrity) return run.package.verifyStaticIntegrity();
+    return run.package.verifyIntegrity();
   }
 
   private async fail(

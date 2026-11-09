@@ -33,6 +33,7 @@ after(async () => browser?.close());
   { name: 'desktop-long-excerpt', width: 1280, theme: 'light', sample: 'long' },
   { name: 'mobile-long-excerpt', width: 320, theme: 'dark', sample: 'long' },
   { name: 'mobile-375-long-excerpt', width: 375, theme: 'light', sample: 'long' },
+  { name: 'mobile-current-inputs', width: 320, theme: 'dark', sample: 'inputs' },
 ].forEach(({ name, width, theme, sample }) => {
   test(`${name}: long briefing content remains inside the real chat card`, { timeout: 30_000 }, async (t) => {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
@@ -61,6 +62,10 @@ after(async () => browser?.close());
     assert.doesNotMatch(await row.innerText(), /42|本次提供给猫的背景/);
     if (sample === 'modern' || sample === 'warning') assert.match(await row.innerText(), /请核对侧栏菜单/);
     if (sample === 'warning') assert.match(await row.innerText(), /之前有“别动”指令/);
+    if (sample === 'inputs') {
+      assert.match(await row.innerText(), /来自验收用户、砚砚的 2 条输入/);
+      assert.doesNotMatch(await row.innerText(), /input-one|交接来源未记录/);
+    }
     await page.screenshot({ path: path.join(evidence, `${name}-collapsed.png`), fullPage: true });
     await row.screenshot({ path: path.join(evidence, `${name}-card-collapsed.png`) });
     const inspect = () =>
@@ -114,6 +119,12 @@ after(async () => browser?.close());
     assert.match(await row.innerText(), /保留独有字段值/);
     assert.match(await row.innerText(), /候选仅为指针/);
     assert.match(await row.innerText(), /T0 7/);
+    if (sample === 'inputs') {
+      assert.match(await row.innerText(), /input-one/);
+      assert.match(await row.innerText(), /input-two/);
+      assert.match(await row.innerText(), /original-input/);
+      assert.doesNotMatch(await row.innerText(), /未记录交接来源/);
+    }
     await page.screenshot({ path: path.join(evidence, `${name}-expanded.png`), fullPage: true });
     await row.screenshot({ path: path.join(evidence, `${name}-card-expanded.png`) });
     const expanded = await inspect();

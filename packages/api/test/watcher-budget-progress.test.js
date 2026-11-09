@@ -7,13 +7,13 @@ import { SessionChainStore } from '../dist/domains/cats/services/stores/ports/Se
 import { nextWatcherWindowTokens } from '../dist/domains/concierge/watcher/context/watcher-budget-progress.js';
 import { watcherWindow } from '../dist/domains/concierge/watcher/context/watcher-window.js';
 import { watcherInvocationAuthority } from '../dist/domains/concierge/watcher/watcher-authority.js';
-import { recoverWatcherAttempt } from '../dist/domains/concierge/watcher/watcher-checkpoint.js';
+import { failWatcherAttempt, recoverWatcherAttempt } from '../dist/domains/concierge/watcher/watcher-checkpoint.js';
 import { finalizeWatcherWake } from '../dist/domains/concierge/watcher/watcher-finalization.js';
 import { runWatcherInvocation } from '../dist/domains/concierge/watcher/watcher-invocation.js';
 import { watcherNativePort } from '../dist/domains/concierge/watcher/watcher-native-run.js';
 import { watcherWorld } from './helpers/watcher-world.js';
 
-function fixture(tokens = 2500) {
+function fixture(tokens = 2500, failure = 'watcher_context_budget_exceeded:31000') {
   const sessions = new SessionChainStore();
   const session = sessions.create({
     userId: 'owner',
@@ -48,7 +48,7 @@ function fixture(tokens = 2500) {
       startedAt: 100,
       nativeTurnId: 'turn',
       phase: 'failed',
-      failure: 'watcher_context_budget_exceeded:31000',
+      failure,
       retries: 1,
       window: { frontier: window.frontier, offset: 0, messageIds: window.messageIds, complete: true },
     },
@@ -95,6 +95,116 @@ function fixture(tokens = 2500) {
     },
   };
 }
+
+for (const unavailable of [true, false])
+  test(`local cancellation keeps its original cause when the shared counter is ${unavailable ? 'unavailable' : 'exhausted'}`, async () => {
+    const f = fixture(1250, 'prior non-budget failure');
+    const abort = new AbortController();
+    const original = new Error('watcher_repeated_tool_budget_denial');
+    abort.abort(original);
+    const cause = await failWatcherAttempt(
+      {
+        ...f.owners,
+        registry: {
+          watcherToolCallCount() {
+            if (unavailable) throw new Error('counter unavailable');
+            return 6;
+          },
+        },
+      },
+      { session: f.session, state: { ...f.state(), rawWindowTokens: 1250 } },
+      'wake',
+      new Error('Codex app-server request failed'),
+      abort.signal,
+    );
+    const expected = unavailable ? original.message : 'watcher_context_recovery_tool_budget_exhausted';
+    assert.equal(cause.message, expected);
+    if (unavailable) assert.equal(cause, original);
+    assert.equal(f.state().attempt.failure, expected);
+    const audit = f.events.find((event) => event.type === 'watcher_attempt_failure');
+    assert.equal(audit.reason, expected);
+    assert.equal(audit.abortReason, original.message);
+    assert.equal(f.state().afterSequence, 5);
+    assert.equal(f.state().consumedThrough, undefined);
+  });
+
+for (const reason of ['watcher_disabled', 'watcher_repeated_tool_budget_denial', 'watcher_deadline_exceeded'])
+  test(`the owner cancellation ${reason} is not replaced by a secondary socket error`, async () => {
+    const f = fixture(1250);
+    const abort = new AbortController();
+    abort.abort(new Error(reason));
+    const cause = await failWatcherAttempt(
+      { ...f.owners, registry: { watcherToolCallCount: () => 6 } },
+      {
+        session: f.session,
+        state: { ...f.state(), rawWindowTokens: 1250 },
+        boundary: {
+          assertHealthy() {
+            throw new Error('socket hang up');
+          },
+        },
+      },
+      'wake',
+      new Error('Codex app-server request failed'),
+      abort.signal,
+    );
+    const expected =
+      reason === 'watcher_repeated_tool_budget_denial'
+        ? 'watcher_context_recovery_tool_budget_exhausted'
+        : reason === 'watcher_deadline_exceeded'
+          ? 'watcher_context_recovery_deadline_exceeded'
+          : reason;
+    assert.equal(cause.message, expected);
+    const audit = f.events.find((e) => e.type === 'watcher_attempt_failure');
+    assert.equal(audit.abortReason, reason);
+    assert.equal(audit.boundaryReason, 'socket hang up');
+    assert.equal(f.state().afterSequence, 5);
+  });
+
+test('an independent transport failure after a smaller window is not a budget skip', async () => {
+  const f = fixture(1250, 'prior non-budget failure');
+  const original = new Error('controlled upstream failure');
+  const cause = await failWatcherAttempt(
+    f.owners,
+    { session: f.session, state: { ...f.state(), rawWindowTokens: 1250 } },
+    'wake',
+    original,
+    new AbortController().signal,
+  );
+  assert.equal(cause, original);
+  const next = await recoverWatcherAttempt(f.owners, f.session, f.state(), f.client);
+  assert.equal(next.afterSequence, 5);
+  assert.equal(next.consumedThrough, undefined);
+  assert.equal(
+    f.events.some((e) => e.type === 'watcher_window_skipped'),
+    false,
+  );
+});
+
+test('an unavailable failed-phase store does not mask a local cancellation', async () => {
+  const f = fixture();
+  const abort = new AbortController();
+  const original = new Error('watcher_repeated_tool_budget_denial');
+  abort.abort(original);
+  const cause = await failWatcherAttempt(
+    {
+      ...f.owners,
+      sessions: {
+        get() {
+          throw new Error('session unavailable');
+        },
+      },
+    },
+    { session: f.session, state: f.state() },
+    'wake',
+    new Error('Codex app-server request failed'),
+    abort.signal,
+  );
+  assert.equal(cause, original);
+  assert.equal(f.events.find((event) => event.type === 'watcher_attempt_failure').abortReason, original.message);
+  assert.equal(f.state().afterSequence, 5);
+  assert.equal(f.state().consumedThrough, undefined);
+});
 
 test('a budget failure shrinks the delivered window instead of failing the source and retrying it next wake', async () => {
   const f = fixture();
@@ -168,40 +278,45 @@ test('an unprocessable minimum window records exact skipped originals before adv
   assert.ok(f.calls.includes('thread/revert'));
 });
 
-test('budget recovery does not prune or acknowledge an active native turn', async () => {
-  const f = fixture(128);
-  f.active();
-  await assert.rejects(recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window), /still_active/);
-  assert.equal(f.state().afterSequence, 5);
-  assert.equal(f.calls.includes('thread/revert'), false);
-  assert.equal(f.events.length, 0);
-});
+for (const failure of ['watcher_context_budget_exceeded:31000', 'watcher_context_recovery_deadline_exceeded']) {
+  test(`${failure} does not prune or acknowledge an active native turn`, async () => {
+    const f = fixture(128, failure);
+    f.active();
+    await assert.rejects(
+      recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window),
+      /still_active/,
+    );
+    assert.equal(f.state().afterSequence, 5);
+    assert.equal(f.calls.includes('thread/revert'), false);
+    assert.equal(f.events.length, 0);
+  });
 
-test('skip audit failure never advances the cursor or discards the outstanding owner', async () => {
-  const f = fixture(128);
-  f.owners.transcript.appendDurableEvent = async (_s, event) => {
-    if (event.type === 'watcher_window_skipped') throw new Error('audit unavailable');
-  };
-  await assert.rejects(
-    recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window),
-    /audit unavailable/,
-  );
-  assert.equal(f.state().afterSequence, 5);
-  assert.equal(f.state().attempt.invocationId, 'wake');
-  assert.equal(f.state().consumedThrough, undefined);
-});
+  test(`${failure} audit failure never advances the cursor or discards the outstanding owner`, async () => {
+    const f = fixture(128, failure);
+    f.owners.transcript.appendDurableEvent = async (_s, event) => {
+      if (event.type === 'watcher_window_skipped') throw new Error('audit unavailable');
+    };
+    await assert.rejects(
+      recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window),
+      /audit unavailable/,
+    );
+    assert.equal(f.state().afterSequence, 5);
+    assert.equal(f.state().attempt.invocationId, 'wake');
+    assert.equal(f.state().consumedThrough, undefined);
+  });
 
-test('budget recovery cannot change an ordinary execution or a mismatched watcher', async () => {
-  const f = fixture(128);
-  const original = f.owners.executions.get.bind(f.owners.executions);
-  f.owners.executions.get = (id) => ({ ...original(id), executionKind: 'ordinary' });
-  await assert.rejects(
-    recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window),
-    /binding_mismatch/,
-  );
-  assert.equal(f.calls.length, 0);
-  assert.equal(f.state().afterSequence, 5);
-});
+  test(`${failure} cannot change an ordinary execution or a mismatched watcher`, async () => {
+    const f = fixture(128, failure);
+    const original = f.owners.executions.get.bind(f.owners.executions);
+    f.owners.executions.get = (id) => ({ ...original(id), executionKind: 'ordinary' });
+    await assert.rejects(
+      recoverWatcherAttempt(f.owners, f.session, f.state(), f.client, true, f.window),
+      /binding_mismatch/,
+    );
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.state().afterSequence, 5);
+  });
+}
 
 test('an original whose header cannot fit the minimum window is audibly skipped without launching a provider', async () => {
   const w = await watcherWorld();
@@ -360,4 +475,32 @@ for (const large of [false, true])
     await createPort().callTool({ ...args('reordered'), arguments: { limit: 4, query: 'same matter' } });
     assert.equal(fetches, 4, 'argument key order does not create another physical read');
     assert.equal(await registry.watcherToolCallCount(auth.invocationId), 6);
+  });
+
+for (const reason of ['watcher_deadline_exceeded', 'watcher_repeated_tool_budget_denial', 'watcher_disabled'])
+  test(`a first real context refusal concurrent with ${reason} remains recoverable without weakening controls`, async () => {
+    const f = fixture();
+    const abort = new AbortController();
+    abort.abort(new Error(reason));
+    const budget = new Error('watcher_context_budget_exceeded:29441');
+    const cause = await failWatcherAttempt(
+      { ...f.owners, registry: { watcherToolCallCount: () => 6 } },
+      {
+        session: f.session,
+        state: f.state(),
+        boundary: {
+          assertHealthy() {
+            throw budget;
+          },
+        },
+      },
+      'wake',
+      new Error('generic native failure'),
+      abort.signal,
+    );
+    assert.equal(cause, reason === 'watcher_disabled' ? abort.signal.reason : budget);
+    const audit = f.events.find((e) => e.type === 'watcher_attempt_failure');
+    assert.equal(audit.abortReason, reason);
+    assert.equal(audit.boundaryReason, budget.message);
+    assert.equal(f.state().afterSequence, 5);
   });

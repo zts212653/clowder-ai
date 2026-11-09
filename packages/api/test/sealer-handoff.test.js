@@ -1,184 +1,92 @@
-/**
- * SessionSealer handoff digest integration tests — F065 Phase C Task 3
- *
- * Tests that SessionSealer.finalize() generates and writes handoff digest
- * when bootstrapDepth is 'generative' and API key is available.
- */
-
+/** Sealing is extractive; legacy bootstrap preferences never enable model generation. */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, test } from 'node:test';
+import { afterEach, beforeEach, describe, mock, test } from 'node:test';
+import { SessionSealer } from '../dist/domains/cats/services/session/SessionSealer.js';
+import { TranscriptReader } from '../dist/domains/cats/services/session/TranscriptReader.js';
+import { TranscriptWriter } from '../dist/domains/cats/services/session/TranscriptWriter.js';
+import { SessionChainStore } from '../dist/domains/cats/services/stores/ports/SessionChainStore.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 
-describe('SessionSealer handoff digest integration', () => {
-  let tempDir;
-
+describe('sealing without hidden generation', () => {
+  let directory;
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'sealer-handoff-'));
+    directory = await mkdtemp(join(tmpdir(), 'sealer-handoff-'));
   });
   afterEach(async () => {
-    await rm(tempDir, { recursive: true });
+    mock.restoreAll();
+    await rm(directory, { recursive: true });
   });
 
-  async function createFixtures(handoffConfig) {
-    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
-    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
-    const { TranscriptReader } = await import('../dist/domains/cats/services/session/TranscriptReader.js');
-
-    const store = new SessionChainStore();
-    const writer = new TranscriptWriter({ dataDir: tempDir });
-    const reader = new TranscriptReader({ dataDir: tempDir });
-
-    // Minimal threadStore mock
-    const threadMemories = new Map();
-    const threadStore = {
-      get: async (threadId) => ({ threadId, projectPath: '/test/project' }),
-      getThreadMemory: async (threadId) => threadMemories.get(threadId) ?? null,
-      updateThreadMemory: async (threadId, memory) => {
-        threadMemories.set(threadId, memory);
-      },
-    };
-
-    const sealer = new SessionSealer(store, writer, threadStore, reader, handoffConfig);
-
-    return { store, writer, reader, sealer };
+  for (const bootstrapDepth of ['generative', 'extractive']) {
+    test(`${bootstrapDepth} policy preserves extractive digest, ThreadMemory and post-seal hooks without network`, async () => {
+      const network = mock.method(globalThis, 'fetch', async () => {
+        throw new Error('no provider allowed');
+      });
+      const store = new SessionChainStore();
+      const threads = new ThreadStore();
+      const thread = threads.create('user-1', 'Historical policy');
+      const writer = new TranscriptWriter({ dataDir: directory });
+      const reader = new TranscriptReader({ dataDir: directory });
+      const sealer = new SessionSealer(store, writer, threads, reader);
+      const hooks = [];
+      sealer.registerPostSealHook(async (event) => {
+        hooks.push(event);
+      });
+      const record = store.create({
+        cliSessionId: 'cli-1',
+        threadId: thread.id,
+        catId: 'opus',
+        userId: 'user-1',
+        appliedPolicy: {
+          config: {
+            strategy: 'handoff',
+            thresholds: { warn: 0.7, action: 0.85 },
+            handoff: { preSealMemoryDump: false, bootstrapDepth },
+          },
+          source: 'config_file',
+          revision: 'historical-policy',
+          changedAt: 1,
+          execution: { status: 'active', missingCapabilities: [] },
+        },
+      });
+      writer.appendEvent(
+        { sessionId: record.id, threadId: thread.id, catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
+        { type: 'text', content: 'We decided to keep source coordinates.' },
+      );
+      assert.equal((await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' })).accepted, true);
+      assert.deepEqual(await sealer.finalize({ sessionId: record.id }), { sealed: true, clean: true });
+      assert.equal(network.mock.callCount(), 0);
+      assert.equal(store.get(record.id).status, 'sealed');
+      assert.ok(await reader.readDigest(record.id, thread.id, 'opus'));
+      assert.ok(threads.getThreadMemory(thread.id));
+      assert.equal(await reader.readHandoffDigest(record.id, thread.id, 'opus'), null);
+      assert.deepEqual(
+        hooks.map((event) => [event.sessionId, event.ownerUserId]),
+        [[record.id, 'user-1']],
+      );
+    });
   }
 
-  test('generates and writes handoff digest when bootstrapDepth=generative', async () => {
-    let fetchCalled = false;
-    const handoffConfig = {
-      getBootstrapDepth: (_catId) => 'generative',
-      resolveProfile: async (_threadId, _catId) => ({
-        apiKey: 'sk-test',
-        baseUrl: 'https://api.anthropic.com',
-      }),
-      fetchFn: async () => {
-        fetchCalled = true;
-        return {
-          ok: true,
-          json: async () => ({
-            content: [{ type: 'text', text: '## Session Summary\nDid great work.' }],
-          }),
-        };
-      },
-    };
-
-    const { store, writer, sealer } = await createFixtures(handoffConfig);
-    const record = store.create({
-      cliSessionId: 'cli-1',
-      threadId: 'thread-1',
-      catId: 'opus',
-      userId: 'user-1',
-    });
-
-    // Append some events so transcript flush writes files
+  test('finalizing an archived session leaves historical handoff bytes unchanged', async () => {
+    const store = new SessionChainStore();
+    const writer = new TranscriptWriter({ dataDir: directory });
+    const reader = new TranscriptReader({ dataDir: directory });
+    const sealer = new SessionSealer(store, writer);
+    const record = store.create({ cliSessionId: 'cli-1', threadId: 't1', catId: 'opus', userId: 'u1' });
     writer.appendEvent(
-      { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
-      { type: 'text', content: 'Hello world' },
+      { sessionId: record.id, threadId: 't1', catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
+      { type: 'text', content: 'Archive' },
     );
-
-    await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
+    await sealer.requestSeal({ sessionId: record.id, reason: 'manual' });
     await sealer.finalize({ sessionId: record.id });
-
-    assert.ok(fetchCalled, 'should have called Haiku API');
-
-    // Check handoff digest was written
-    const sessionDir = join(tempDir, 'threads', 'thread-1', 'opus', 'sessions', record.id);
-    const handoffPath = join(sessionDir, 'digest.handoff.md');
-    const content = await readFile(handoffPath, 'utf-8');
-    assert.ok(content.includes('Session Summary'));
-    assert.ok(content.includes('v: 1'));
-  });
-
-  test('skips handoff when bootstrapDepth=extractive', async () => {
-    let fetchCalled = false;
-    const handoffConfig = {
-      getBootstrapDepth: (_catId) => 'extractive',
-      resolveProfile: async () => ({ apiKey: 'sk-test', baseUrl: 'https://api.anthropic.com' }),
-      fetchFn: async () => {
-        fetchCalled = true;
-        return { ok: true, json: async () => ({ content: [] }) };
-      },
-    };
-
-    const { store, writer, sealer } = await createFixtures(handoffConfig);
-    const record = store.create({
-      cliSessionId: 'cli-1',
-      threadId: 'thread-1',
-      catId: 'opus',
-      userId: 'user-1',
-    });
-
-    writer.appendEvent(
-      { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
-      { type: 'text', content: 'Hello' },
-    );
-
-    await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
+    const path = join(reader.getSessionDir('t1', 'opus', record.id), 'digest.handoff.md');
+    const historical = '---\nv: 1\nmodel: historical\ngeneratedAt: 1\n---\n\nOriginal handoff\n';
+    await writeFile(path, historical);
     await sealer.finalize({ sessionId: record.id });
-
-    assert.equal(fetchCalled, false, 'should NOT call Haiku for extractive cat');
-  });
-
-  test('skips handoff when no API key available', async () => {
-    let fetchCalled = false;
-    const handoffConfig = {
-      getBootstrapDepth: (_catId) => 'generative',
-      resolveProfile: async () => null,
-      fetchFn: async () => {
-        fetchCalled = true;
-        return { ok: true, json: async () => ({ content: [] }) };
-      },
-    };
-
-    const { store, writer, sealer } = await createFixtures(handoffConfig);
-    const record = store.create({
-      cliSessionId: 'cli-1',
-      threadId: 'thread-1',
-      catId: 'opus',
-      userId: 'user-1',
-    });
-
-    writer.appendEvent(
-      { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
-      { type: 'text', content: 'Hello' },
-    );
-
-    await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
-    await sealer.finalize({ sessionId: record.id });
-
-    assert.equal(fetchCalled, false, 'should NOT call Haiku without API key');
-  });
-
-  test('handoff generation failure seals the session as terminal partial', async () => {
-    const handoffConfig = {
-      getBootstrapDepth: (_catId) => 'generative',
-      resolveProfile: async () => ({ apiKey: 'sk-test', baseUrl: 'https://api.anthropic.com' }),
-      fetchFn: async () => {
-        throw new Error('Network failure');
-      },
-    };
-
-    const { store, writer, sealer } = await createFixtures(handoffConfig);
-    const record = store.create({
-      cliSessionId: 'cli-1',
-      threadId: 'thread-1',
-      catId: 'opus',
-      userId: 'user-1',
-    });
-
-    writer.appendEvent(
-      { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-1', seq: 0 },
-      { type: 'text', content: 'Hello' },
-    );
-
-    await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
-    const result = await sealer.finalize({ sessionId: record.id });
-
-    const finalRecord = store.get(record.id);
-    assert.equal(finalRecord?.status, 'sealed', 'session should still seal on handoff failure');
-    assert.deepEqual(result, { sealed: true, clean: false });
+    assert.equal(await readFile(path, 'utf8'), historical);
+    assert.equal((await reader.readHandoffDigest(record.id, 't1', 'opus')).model, 'historical');
   });
 });
