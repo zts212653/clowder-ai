@@ -557,62 +557,21 @@ describe('F296 AC-A3: local artifact reachability', () => {
 const { formatNavigationHeader } = await import('../dist/domains/cats/services/agents/routing/navigation-context.js');
 const { buildBriefingMessage } = await import('../dist/domains/cats/services/agents/routing/format-briefing.js');
 
-describe('G5: navigation header with truth source', () => {
-  it('shows 真相源 with canonical provenance (no tag)', () => {
+describe('navigation work materials are pointers, never forced next actions', () => {
+  it('shows a validated material ref without a next-step directive', () => {
     const header = formatNavigationHeader({
-      baton: null,
-      tasks: [],
-      artifacts: [],
-      truthSource: { label: 'F148 spec', ref: 'docs/features/F148-foo.md', provenance: 'canonical' },
-      bestNextSource: '先看 F148 spec: docs/features/F148-foo.md',
-    });
-    assert.ok(header.includes('真相源: F148 spec'), 'should show truth source label');
-    assert.ok(!header.includes('推断'), 'canonical should not have (推断) tag');
-  });
-
-  it('shows 真相源 with (推断) for regex provenance', () => {
-    const header = formatNavigationHeader({
-      baton: null,
-      tasks: [],
-      truthSource: { label: 'F148 spec', ref: 'docs/features/F148-foo.md', provenance: 'regex' },
-    });
-    assert.ok(header.includes('真相源: F148 spec (推断)'), 'regex should have (推断) tag');
-  });
-
-  it('shows 真相源: 未定位 when no source', () => {
-    const header = formatNavigationHeader({
-      baton: null,
-      tasks: [],
-      truthSource: null,
-    });
-    assert.ok(header.includes('真相源: 未定位'), 'should show 未定位 for null truth source');
-  });
-
-  it('shows 下一步 when bestNextSource provided', () => {
-    const header = formatNavigationHeader({
-      baton: null,
       tasks: [],
       truthSource: { label: 'F148 spec', ref: 'docs/features/F148-foo.md', provenance: 'canonical' },
-      bestNextSource: '先看 F148 spec: docs/features/F148-foo.md',
     });
-    assert.ok(header.includes('下一步: 先看 F148 spec'), 'should include best-next-source');
+    assert.ok(header.includes('工作材料: F148 spec'));
+    assert.ok(header.includes('docs/features/F148-foo.md'));
+    assert.doesNotMatch(header, /下一步|先看/);
   });
-
-  it('shows 下一步 even with single source (G5 two-line minimum)', () => {
-    const header = formatNavigationHeader({
-      baton: null,
-      tasks: [],
-      truthSource: { label: 'F148 spec', ref: 'docs/features/F148-foo.md', provenance: 'canonical' },
-      bestNextSource: '先看 F148 spec: docs/features/F148-foo.md',
-    });
-    assert.ok(header.includes('真相源: F148 spec'), 'should have truth source');
-    assert.ok(header.includes('下一步: 先看 F148 spec'), 'single source should still show actionable pointer');
-  });
-
-  it('omits truth source lines when truthSource is undefined (backward compat)', () => {
-    const header = formatNavigationHeader({ baton: null, tasks: [] });
-    assert.ok(!header.includes('真相源'), 'should not have truth source when undefined');
-    assert.ok(!header.includes('下一步'), 'should not have best next source when undefined');
+  it('omits absent materials rather than manufacturing a lookup', () => {
+    for (const truthSource of [undefined, null]) {
+      const header = formatNavigationHeader({ tasks: [], truthSource });
+      assert.doesNotMatch(header, /工作材料|真相源|未定位|下一步|cat_cafe_get_thread_context/);
+    }
   });
 });
 
@@ -661,7 +620,7 @@ describe('G5: briefing with full ledger', () => {
     const truthField = card?.fields?.find((field) => field.label === '真相源')?.value ?? '';
     const nextField = card?.fields?.find((field) => field.label === '下一步')?.value ?? '';
 
-    assert.ok(truthField.includes('未定位'), 'regex source must fail closed in the truth field');
+    assert.equal(truthField, '', 'regex source is omitted from the material field');
     assert.ok(!nextField.includes('F148 spec'), 'regex source must not produce a command-like next step');
     assert.ok(!body.includes('F148 spec'), 'briefing body must not reintroduce the heuristic candidate');
   });

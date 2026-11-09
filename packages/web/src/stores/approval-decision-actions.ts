@@ -12,7 +12,7 @@
 import type { EntityConflictResolutionRequest, HumanDispositionFeedbackInput } from '@cat-cafe/shared';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-import { beginDecisionAttempt } from './approval-decision-attempts';
+import { beginDecisionAttempt, isScheduleDriftBlocked } from './approval-decision-attempts';
 import {
   applyConflictFeedback,
   type DecisionErrorBody,
@@ -45,6 +45,7 @@ export function createApprovalDecisionActions(
 
     approveProposal: async (proposalId: string) => {
       const item = findItem(proposalId);
+      if (item && isScheduleDriftBlocked(item, get().scheduleDriftBlocked)) return;
       const attempt = beginDecisionAttempt(set, proposalId, 'approve', item);
       set((s) => ({ deciding: { ...s.deciding, [proposalId]: 'approving' as const } }));
       try {
@@ -52,6 +53,11 @@ export function createApprovalDecisionActions(
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
           attempt.received(res, data);
+          if (item?.sourceFeatureId === 'F139' && res.status === 409 && data.code === 'SCHEDULE_TASK_DRIFT') {
+            get().rememberScheduleDrift(item);
+            set((state) => ({ error: null, deciding: withoutDecision(state.deciding, proposalId) }));
+            return;
+          }
           const conflict = data.conflict;
           if (conflict) {
             const message = decisionErrorMessage(data, `Approve failed: ${res.status}`);

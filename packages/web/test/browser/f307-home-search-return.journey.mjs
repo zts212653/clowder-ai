@@ -445,6 +445,7 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
   const image = publication ? await readFile(new URL('../../public/avatars/antig-opus.png', import.meta.url)) : null;
   let returning = false;
   const requests = [];
+  const catalogues = [];
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   await context.addInitScript(() => {
     if (window.top !== window || sessionStorage.getItem('f307-works-return-initialized') === '1') return;
@@ -465,6 +466,7 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     let response = realSurfaceApiResponse(request, false);
     if (url.pathname === `/api/threads/${THREAD_ID}/artifacts`) {
       const artifacts = returning ? [companion('newer.txt'), ...initial] : initial;
+      catalogues.push({ returning, names: artifacts.map((artifact) => artifact.name) });
       response = {
         body: {
           threadId: THREAD_ID,
@@ -503,6 +505,7 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     await ensureWorkspaceOpen(page);
     const draft = page.locator('[data-guide-id="chat.input"] textarea');
     await draft.fill(`Home card draft ${width} ${kind}`);
+    const originalDraft = await draft.elementHandle();
     const home = page.getByTestId('f307-workspace-home-page');
     const card = home.getByTestId('workspace-home-artifact-card').filter({ hasText: chosen.name });
     await card.waitFor({ state: 'visible' });
@@ -526,11 +529,11 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     assert.ok(source?.artifactId && Number.isFinite(source.offset));
     const workbench = page.getByTestId('f307-experience-workbench');
     if (publication) {
-      await page
-        .getByRole('dialog', { name: chosen.name, exact: true })
-        .getByRole('button', { name: '批注', exact: true })
-        .click();
-      await workbench.getByRole('alert').waitFor({ state: 'visible' });
+      // The current owner resolves on opening and keeps unavailable media in its
+      // original floating preview; there is no separate annotation landing.
+      const dialog = page.getByRole('dialog', { name: chosen.name, exact: true });
+      await dialog.getByRole('status').filter({ hasText: '无法批注' }).waitFor({ state: 'visible' });
+      assert.equal(await dialog.getByTestId('workspace-content-review-surface').count(), 0);
       assert.equal(requests.length, 1);
       assert.equal(requests[0].source.threadId, THREAD_ID);
       assert.equal(requests[0].source.messageId, chosen.sourceMessageId);
@@ -550,21 +553,44 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     }
     const activeId = await workbench.getAttribute('data-active-surface');
     returning = true;
+    if (publication) {
+      // Exercise the existing source-invalidation boundary while the dialog is
+      // open. Its owner rereads the four-item catalogue before we return.
+      const refreshed = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === `/api/threads/${THREAD_ID}/artifacts`,
+      );
+      await page.evaluate((threadId) => {
+        window.dispatchEvent(
+          new CustomEvent('cat-cafe:entrusted-work-projection-invalidated', {
+            detail: { threadId, reason: 'works_changed' },
+          }),
+        );
+      }, THREAD_ID);
+      const refreshedBody = await (await refreshed).json();
+      assert.equal(refreshedBody.artifacts.length, 4);
+      await home.getByTestId('workspace-home-artifact-card').filter({ hasText: 'newer.txt' }).waitFor();
+    }
     const back = publication
-      ? workbench.getByRole('button', { name: '返回来源', exact: true })
+      ? page
+          .getByRole('dialog', { name: chosen.name, exact: true })
+          .getByRole('button', { name: '关闭作品', exact: true })
       : workbench.getByRole('button', { name: '‹ Workspace 首页', exact: true });
     await back.click();
     await card.waitFor({ state: 'visible' });
-    await page.waitForFunction((expected) => {
-      const home = document.querySelector('[data-testid="f307-workspace-home-page"]');
-      const card = Array.from(home?.querySelectorAll('[data-home-artifact-id]') ?? []).find(
-        (node) => node.getAttribute('data-home-artifact-id') === expected.artifactId,
-      );
-      return (
-        card?.getAttribute('aria-current') === 'true' &&
-        Math.abs(card.getBoundingClientRect().top - home.getBoundingClientRect().top - expected.offset) <= 2
-      );
-    }, source);
+    await page.waitForFunction(
+      ({ expected, publication }) => {
+        const home = document.querySelector('[data-testid="f307-workspace-home-page"]');
+        const card = Array.from(home?.querySelectorAll('[data-home-artifact-id]') ?? []).find(
+          (node) => node.getAttribute('data-home-artifact-id') === expected.artifactId,
+        );
+        return (
+          (publication || card?.getAttribute('aria-current') === 'true') &&
+          card === document.activeElement &&
+          Math.abs(card.getBoundingClientRect().top - home.getBoundingClientRect().top - expected.offset) <= 2
+        );
+      },
+      { expected: source, publication },
+    );
     assert.equal(await card.getAttribute('data-home-artifact-id'), source.artifactId);
     assert.equal(
       await home.getByTestId('workspace-home-artifact-card').count(),
@@ -574,17 +600,43 @@ async function runHomeWorksReturnCase({ browser, baseUrl, evidenceDir }, width, 
     assert.ok(await card.evaluate((node) => node === document.activeElement));
     assert.equal(await workbench.getAttribute('data-active-surface'), activeId);
     assert.equal(await draft.inputValue(), `Home card draft ${width} ${kind}`);
+    if (publication) assert.equal(await draft.evaluate((node, original) => node === original, originalDraft), true);
     await page.screenshot({ path: path.join(evidenceDir, `${name}.png`) });
     await writeFile(
       path.join(evidenceDir, `${name}.json`),
-      JSON.stringify({ source, activeId, requests, errors, publicationPrepared: false }, null, 2),
+      JSON.stringify({ source, activeId, requests, catalogues, errors, publicationPrepared: false }, null, 2),
     );
     assert.deepEqual(errors, []);
   } catch (error) {
     await page.screenshot({ path: path.join(evidenceDir, `${name}-failed.png`) }).catch(() => undefined);
+    const returnState = await page.evaluate(() => {
+      const expected = window.__homeWorksSource;
+      const home = document.querySelector('[data-testid="f307-workspace-home-page"]');
+      const card = [...(home?.querySelectorAll('[data-home-artifact-id]') ?? [])].find(
+        (node) => node.getAttribute('data-home-artifact-id') === expected?.artifactId,
+      );
+      return {
+        expected,
+        activeElement: document.activeElement?.outerHTML.slice(0, 500),
+        focused: card === document.activeElement,
+        offset: card && home ? card.getBoundingClientRect().top - home.getBoundingClientRect().top : null,
+        scrollTop: home?.scrollTop,
+      };
+    });
     await writeFile(
       path.join(evidenceDir, `${name}-failed.json`),
-      JSON.stringify({ requests, errors, failure: String(error) }, null, 2),
+      JSON.stringify(
+        {
+          requests,
+          catalogues,
+          errors,
+          returnState,
+          failure: String(error),
+          body: await page.locator('body').innerText(),
+        },
+        null,
+        2,
+      ),
     );
     throw error;
   } finally {

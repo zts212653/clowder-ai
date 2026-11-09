@@ -5319,7 +5319,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             const digestInput = captureExecutionDigest(
               capturedMissionPack,
               {
-                summary: '', // Populated by HandoffDigestGenerator in future enhancement
+                summary: '', // Visible invocation metadata is populated by the running member.
                 filesChanged: [],
                 blocked: false,
                 hadError: hadStreamError,

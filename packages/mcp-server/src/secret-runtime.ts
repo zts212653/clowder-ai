@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error The credential-source policy is a plain Node ESM asset.
 import * as sources from '../dist/runtime/scripts/lib/secret-credential-paths.mjs';
+// @ts-expect-error The send payload reader is the same package-local Node ESM asset.
+import * as payload from '../dist/runtime/scripts/lib/secret-payload-files.mjs';
 // @ts-expect-error The canonical shared boundary is a plain Node ESM asset.
 import * as boundary from '../dist/runtime/scripts/lib/secret-tool-io.mjs';
 
@@ -15,6 +17,12 @@ export interface CredentialSources {
   files: string[];
   directories: string[];
 }
+export const readSecretPayload = payload.readSecretPayload as (
+  path: string,
+  cwd?: string,
+  credentialSources?: CredentialSources,
+) => Buffer;
+export const assertSecretFree = payload.assertSecretFree as (content: string | Uint8Array) => void;
 export const credentialSourcesFromEnvironment = sources.credentialSourcesFromEnvironment as (
   environment: Record<string, string | undefined>,
   cwd?: string,

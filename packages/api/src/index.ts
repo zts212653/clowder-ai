@@ -56,10 +56,10 @@ import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { resolveAnthropicRuntimeProfile, validateRuntimeProviderBinding } from './config/account-resolver.js';
+import { validateRuntimeProviderBinding } from './config/account-resolver.js';
 import { resolveInvokeCapabilityRoot } from './config/capabilities/invoke-capability-root.js';
 import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
-import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './config/cat-account-binding.js';
+import { usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
   bootstrapDefaultCatCatalog,
   getCoCreatorConfig,
@@ -226,7 +226,6 @@ import {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
 } from './domains/cats/services/session/context/PresentationLedger.js';
-import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
 import { TranscriptWriter } from './domains/cats/services/session/TranscriptWriter.js';
@@ -1449,39 +1448,11 @@ async function main(): Promise<void> {
   const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
   const transcriptWriter = new TranscriptWriter({ dataDir: transcriptDataDir });
   const transcriptReader = new TranscriptReader({ dataDir: transcriptDataDir });
-  // F065 Phase C: HandoffConfig for LLM-generated digest on seal
-  const handoffConfig: HandoffConfig = {
-    getBootstrapDepth: (catId: string) => getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth ?? 'extractive',
-    resolveProfile: async (threadId: string, catId: string) => {
-      try {
-        let projectRoot = findMonorepoRoot(process.cwd());
-        const thread = await threadStore.get(threadId);
-        if (thread?.projectPath && thread.projectPath !== 'default') {
-          projectRoot = thread.projectPath;
-        }
-        const catConfig = catRegistry.tryGet(catId)?.config;
-        if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
-          const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
-          // Digests always use Anthropic, including for an OpenCode-bound gateway.
-          const runtime = resolveAnthropicRuntimeProfile(projectRoot, effectiveAccountRef);
-          if (!runtime?.apiKey) return null;
-          return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
-        }
-
-        const runtime = resolveAnthropicRuntimeProfile(projectRoot);
-        if (!runtime.apiKey) return null;
-        return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
-      } catch {
-        return null;
-      }
-    },
-  };
   const sessionSealer = new SessionSealer(
     sessionChainStore,
     transcriptWriter,
     threadStore,
     transcriptReader,
-    handoffConfig,
     summaryStore,
   );
 
@@ -2812,6 +2783,7 @@ async function main(): Promise<void> {
     workPreparation: {
       store: workPreparationStore,
       messages: messageSearchService,
+      logger: app.log,
       authority: new WorkPreparationAuthority({
         threads: threadStore,
         messages: messageStore,
@@ -6416,7 +6388,10 @@ async function main(): Promise<void> {
       if (principal.actor.kind === 'human') {
         if (principal.actor.actorId !== privateUserId || principal.invocationId)
           throw new MediaOwnerError('access_denied');
-      } else await producerAuthorizer({ principal, permission: 'read' });
+      } else {
+        // Canon's shared admission also guards independent asset mutations; retain its production boundary.
+        await producerAuthorizer({ principal, permission: 'write' });
+      }
     },
     authorizeWork: (reference, principal, permission) =>
       livingWorks.authorizeVersion(
@@ -6737,6 +6712,8 @@ async function main(): Promise<void> {
         repoRoot,
         ownerUserId: privateUserId,
         tasks: taskStore,
+        messages: messageStore,
+        queue: invocationQueue,
         resolveCat: (mention) => {
           const candidates = Object.entries(catRegistry.getAllConfigs()).filter(
             ([id, config]) =>
@@ -7778,38 +7755,10 @@ async function main(): Promise<void> {
     `[api] F142-B: CommandRegistry loaded (${commandRegistry.getAll().length} commands, ${skillCommandMap.size} skills)`,
   );
 
-  // Commands route needs the configured opus service for task extraction.
-  // Lazy-init: empty catalog (first-run) has no opus entry yet — defer until first use.
-  // 砚砚 Step-3 P1 re-review: invoke() must directly return AsyncIterable
-  // (not Promise<AsyncIterable>), otherwise `for await (... of svc.invoke())`
-  // crashes at runtime. Use sync generator wrapper that defers async setup
-  // to first yield.
-  let _opusService: AgentService | undefined;
-  const opusService: AgentService = {
-    invoke(prompt, options) {
-      // Sync return of AsyncGenerator — IS AsyncIterable. Lazy init happens
-      // before first yield, then delegates.
-      return (async function* opusLazyInvoke() {
-        if (!_opusService) {
-          const opusConfig = catRegistry.tryGet('opus')?.config;
-          if (opusConfig?.carrier === 'sdk') {
-            _opusService = new ClaudeSdkAgentService({ catId: 'opus' as CatId });
-          } else {
-            const { createClaudeAgentServiceForCanary } = await import(
-              './domains/cats/services/agents/providers/claude-carrier-factory.js'
-            );
-            _opusService = createClaudeAgentServiceForCanary('opus' as CatId);
-          }
-        }
-        yield* _opusService.invoke(prompt, options);
-      })();
-    },
-  };
   await app.register(commandsRoutes, {
     messageStore,
     taskStore,
     socketManager,
-    opusService,
     threadStore,
     registry: commandRegistry,
   });

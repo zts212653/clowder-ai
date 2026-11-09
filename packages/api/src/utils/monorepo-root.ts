@@ -80,7 +80,7 @@ export function findMonorepoRoot(start = process.cwd()): string {
  */
 const _gitCommonDirCache = new Map<string, string | null>();
 
-function resolveGitCommonDir(projectPath: string): string | null {
+export function resolveGitCommonDir(projectPath: string): string | null {
   const key = cacheKey(projectPath);
   if (_gitCommonDirCache.has(key)) return _gitCommonDirCache.get(key)!;
 

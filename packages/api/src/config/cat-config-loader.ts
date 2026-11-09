@@ -237,6 +237,7 @@ export const sessionStrategySchema = z
     handoff: z
       .object({
         preSealMemoryDump: z.boolean(),
+        // Legacy generative values only select historical digest files when bootstrapping.
         bootstrapDepth: z.enum(['extractive', 'generative']),
       })
       .optional(),
@@ -836,7 +837,7 @@ export function toFlatConfigs(config: CatCafeConfig): Record<string, CatConfig> 
 
 /**
  * F032 P2 cleanup: Get all cat IDs from config (replaces hardcoded fallbacks).
- * Used by cat-voices.ts, cat-budgets.ts, TaskExtractor.ts.
+ * Used by cat-voices.ts and cat-budgets.ts.
  */
 export function getAllCatIdsFromConfig(): readonly string[] {
   try {

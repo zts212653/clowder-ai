@@ -7,6 +7,9 @@ import { __resetPendingTeleportForTest, peekPendingTeleport } from '@/utils/tele
 import { useTeleport } from '../useTeleport';
 import { useWorkspaceNavigate } from '../useWorkspaceNavigate';
 
+// The connection-recovery browser host mounts these transport consumers without a Next app router.
+vi.unmock('next/navigation');
+
 beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 });

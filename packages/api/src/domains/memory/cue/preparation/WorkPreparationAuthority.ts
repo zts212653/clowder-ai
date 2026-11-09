@@ -8,6 +8,7 @@ import {
   isInternalNonQuotableParent,
   passesManagedHoldViewerBoundary,
 } from '../../../cats/services/stores/visibility.js';
+import { checkDiscoveryLifetime, type DiscoveryReadRequest } from '../../knowledge-discovery.js';
 import type { WorkPreparationRecord } from './WorkPreparationOpportunityStore.js';
 
 export class WorkPreparationAuthority {
@@ -19,19 +20,26 @@ export class WorkPreparationAuthority {
     },
   ) {}
 
-  async bind(auth: InvocationRecord) {
+  async bind(auth: InvocationRecord, lifetime: Pick<DiscoveryReadRequest, 'signal' | 'deadlineAt'> = {}) {
+    checkDiscoveryLifetime(lifetime);
     if (auth.ownerAuthProvenance !== 'strict' || auth.state !== 'active') return null;
     const sourceMessageId = auth.originTriggerMessageId ?? auth.a2aTriggerMessageId;
     if (!sourceMessageId) return null;
     const scope = { ownerUserId: auth.userId, threadId: auth.threadId, invocationId: auth.invocationId };
     const frame = { scope, consumerCatId: auth.catId, sourceMessageId };
-    const context = await this.current(frame);
+    const context = await this.current(frame, lifetime);
     return context ? { ...frame, ...context } : null;
   }
 
-  private async current(record: Pick<WorkPreparationRecord, 'scope' | 'consumerCatId' | 'sourceMessageId'>) {
+  private async current(
+    record: Pick<WorkPreparationRecord, 'scope' | 'consumerCatId' | 'sourceMessageId'>,
+    lifetime: Pick<DiscoveryReadRequest, 'signal' | 'deadlineAt'>,
+  ) {
+    checkDiscoveryLifetime(lifetime);
     const thread = await this.deps.threads.get(record.scope.threadId);
+    checkDiscoveryLifetime(lifetime);
     const message = await this.deps.messages.getById(record.sourceMessageId);
+    checkDiscoveryLifetime(lifetime);
     if (
       !thread ||
       thread.deletedAt ||
@@ -54,11 +62,15 @@ export class WorkPreparationAuthority {
         threadId: record.scope.threadId,
       }),
     );
+    checkDiscoveryLifetime(lifetime);
     return epoch ? { contextEpoch: epoch.contextEpoch, projectPath: thread.projectPath } : null;
   }
 
-  async validate(record: WorkPreparationRecord): Promise<boolean> {
-    const current = await this.current(record);
+  async validate(
+    record: WorkPreparationRecord,
+    lifetime: Pick<DiscoveryReadRequest, 'signal' | 'deadlineAt'> = {},
+  ): Promise<boolean> {
+    const current = await this.current(record, lifetime);
     return current?.contextEpoch === record.contextEpoch && current.projectPath === record.projectPath;
   }
 }
