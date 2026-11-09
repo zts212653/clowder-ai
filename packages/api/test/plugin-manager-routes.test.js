@@ -304,7 +304,10 @@ test('post-enable shared-connection reconciliation preserves its bounded error c
     });
     assert.equal(response.statusCode, 409, response.payload);
     assert.deepEqual(response.json(), {
-      error: 'Shared plugin connection failed',
+      error:
+        'shared_surface_changed: The legacy shared connection cannot authorize changed tools. ' +
+        'Restore the previously approved plugin version and enable it again, or generate a Server URL ' +
+        'in Dot settings, add that connection in ChatGPT and send its subscription message.',
       code: 'shared_surface_changed',
     });
     assert.equal(enableCalls, 1);

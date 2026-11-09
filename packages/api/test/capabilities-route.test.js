@@ -1041,7 +1041,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('uses project mount rules for capability skill health', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -1558,7 +1557,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('ignores broken project skill symlinks for deleted skills', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -1596,7 +1594,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('accepts ?projectPath query param for multi-project support', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -1770,7 +1767,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('discovers antigravity MCP from homedir instead of a stale project-local file', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -1826,7 +1822,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('realigns stale managed cat-cafe MCP paths to the stable main repo root on GET', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -1881,7 +1876,6 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('does not use project-local manifests to prune installed plugin skills', async (t) => {
-    useCapabilityWriterFixture(t);
     await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
