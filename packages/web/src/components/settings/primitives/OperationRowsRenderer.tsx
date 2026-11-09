@@ -126,6 +126,8 @@ export function OperationRowsRenderer({
   const activeProposalValidUntil = useRef<number>();
   // Detail refreshes change runtime timestamps, not the declared operation or this receipt.
   const inputKey = JSON.stringify([stableTarget, operation.name, operation.actions, operation.rowActions]);
+  // Polling is automatically observed; explicitly confirmed reads remain owner actions.
+  const automaticStatus = listAction.render === 'polling' && !listAction.confirm;
   const configKey = JSON.stringify(pendingConfigValues ?? {});
   const previousConfigKey = useRef(configKey);
   const previousRefreshRevision = useRef(refreshRevision);
@@ -252,7 +254,10 @@ export function OperationRowsRenderer({
     setBusyKeys(new Set());
     setRowErrors(new Map());
     setExpiredObservationKey(null);
-  }, [configKey, invalidateListRequests]);
+    // Invalidation removes stale proposals and aborts old reads. A passive status
+    // must then resume observation; it has no permanent manual refresh control.
+    if (automaticStatus) void list(false, true);
+  }, [automaticStatus, configKey, invalidateListRequests, list]);
 
   useEffect(() => {
     if (actionMessage === null || actionMessage.persistent) return;
@@ -459,9 +464,6 @@ export function OperationRowsRenderer({
 
   const buttons = operation.actions.filter((action) => action.id !== listAction.id && action.render !== 'row');
   const proposalPending = rows?.validUntil !== undefined;
-  // Polling is an automatically observed state, not a permanent manual action.
-  // Explicit confirmation and recovery remain actionable on the same generic renderer.
-  const automaticStatus = listAction.render === 'polling' && !listAction.confirm;
   const observationPaused =
     expiredObservationKey !== null && expiredObservationKey === rows?.rows.map(({ key }) => key).join('\u0000');
   const showRefresh = !proposalPending && (!automaticStatus || Boolean(listError) || observationPaused);

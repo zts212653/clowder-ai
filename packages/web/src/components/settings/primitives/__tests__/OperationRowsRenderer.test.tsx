@@ -167,6 +167,44 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
   });
 
+  it.each([
+    'pending',
+    'settled',
+  ] as const)('rereads polling status after a config edit while the previous read is %s', async (previousRead) => {
+    const first = deferred<Response>();
+    const replacement = deferred<Response>();
+    mockApiFetch.mockReturnValueOnce(first.promise).mockReturnValueOnce(replacement.promise);
+    const passive: PlatformOperationStatus = {
+      ...operation,
+      actions: [{ ...operation.actions[0]!, render: 'polling' }],
+    };
+    const draw = (proxy: string) =>
+      render(<ActionRenderer target={target} operation={passive} pendingConfigValues={{ proxy }} />);
+    await draw('');
+    const firstSignal = mockApiFetch.mock.calls[0]?.[1]?.signal;
+    if (previousRead === 'settled') {
+      await act(async () => first.resolve(jsonResponse({ ok: true, render: 'rows', data: { rows: [row('old')] } })));
+      expect(byTestId('chatgpt-pro-row-old')).not.toBeNull();
+    }
+    await draw('http://127.0.0.1:7897');
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    if (previousRead === 'pending') expect(firstSignal?.aborted).toBe(true);
+    expect(byTestId('chatgpt-pro-row-old')).toBeNull();
+    expect(container.textContent).toContain('正在读取状态');
+    expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
+
+    await act(async () =>
+      replacement.resolve(jsonResponse({ ok: true, render: 'rows', data: { rows: [row('current')] } })),
+    );
+    // A transport may resolve even after abort; its stale result must stay fenced out.
+    if (previousRead === 'pending') {
+      await act(async () => first.resolve(jsonResponse({ ok: true, render: 'rows', data: { rows: [row('old')] } })));
+    }
+    expect(byTestId('chatgpt-pro-row-current')).not.toBeNull();
+    expect(byTestId('chatgpt-pro-row-old')).toBeNull();
+    expect(byTestId('chatgpt-pro-rows-refresh')).toBeNull();
+  });
+
   it('offers a retry only after a polling status read fails and removes it after recovery', async () => {
     mockApiFetch
       .mockResolvedValueOnce(jsonResponse({ error: 'Connection unavailable' }, 502))
@@ -190,6 +228,8 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
       actions: [{ ...operation.actions[0]!, render: 'polling', confirm: 'Allow this status read?' }],
     };
     await render(<ActionRenderer target={target} operation={guarded} />);
+    expect(sent('list')).toHaveLength(0);
+    await render(<ActionRenderer target={target} operation={guarded} pendingConfigValues={{ proxy: 'changed' }} />);
     expect(sent('list')).toHaveLength(0);
     await click(byTestId('chatgpt-pro-rows-refresh'));
     await click(dialogButton('取消'));

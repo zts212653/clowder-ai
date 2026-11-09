@@ -72,3 +72,11 @@ Git 核验：Host 通用 OperationRowsRenderer 的固定列表刷新按钮已存
 验证：原行为 RED（固定按钮、无默认状态）→GREEN；Web 受影响 94/94（含确认取消/确认、操作后刷新、观察期限与恢复）、插件全套188/188、Web/Dot 类型检查通过。默认行也直接通过通用 operation rows 校验（移除无动作行上的 undefined actions，保持 JSON 传输语义）。隔离浏览器使用真实 PluginManagerOperationField/ActionRenderer、真实插件投影和模拟传输，确认进页自动读取、仅“待连接”、无按钮，以及错误后重试恢复；截图 status-default-waiting.png，回执 status-default-browser-receipt.json。未操作运行实例。
 
 最终包在显式构建后归档，89 个运行/资源/声明及文档文件逐字节匹配，SDK 仍 candidate.12；独立复审与实机加载仍待推进。
+
+### alpha.35 配置失效后的状态恢复
+
+独立复审来源 `0001794206684416-000881-65887a7a`。隐藏常驻按钮后，原有 configKey 失效路径只清空 rows、取消请求和终止观察，却没有重读；修改 callbackProxy 等共享字段会留下永久空白。已先独立重跑 reviewer 反例，polling 分支 RED；补入初读仍在途、读取已完成两条回归也均按缺少第二次读取失败。
+
+现在自动状态在原失效处理完成后重新发起未确认的纯读取，并重开有界观察。旧请求 abort、epoch 检查及 proposal 作废顺序保留；确认型操作继续等待主人确认，不恢复常驻刷新，也不重挂整个设置区。检查本组件的其他清空状态入口：目标/声明变化、proposal 到期、放弃已有对应读取，配置失效是本次遗漏；生成 URL 等兄弟操作仍保持独立结果。
+
+验证：受影响 Web 96/96、reviewer 反例2/2、Web noEmit、Biome/diff 检查通过。新回归覆盖配置变更时的两种读取顺序、旧请求迟到被拒绝及确认权限；隔离浏览器从真实 PluginManagerOperationField/ActionRenderer 输入配置，确认自动重读后显示待连接、无常驻按钮，错误恢复后按钮消失。回执 `status-config-browser-receipt.json`，截图 `status-config-waiting.png`。本轮只改 Host，插件 exact HEAD `f7bb6934` 沿用批准和原 alpha.35 包，未操作运行实例。Host 新提交仍需独立复审；真实 Work 与 soak 未完成。
