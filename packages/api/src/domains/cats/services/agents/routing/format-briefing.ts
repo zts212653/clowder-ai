@@ -1,8 +1,9 @@
 // F148 Phase E: Pure function to format context briefing content.
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
+import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { formatInjectionProvenance } from '../../../../memory/injection-provenance.js';
-import { formatPromptTimeRange } from '../../format-time.js';
+import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
 import type { ContextSurfaceProjection } from '../../session/context/context-surface-projection.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
@@ -97,6 +98,8 @@ function formatPresentationCounts(projection: ContextSurfaceProjection): string 
 
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
+  receiverCatId?: string;
+  receiverDisplayName?: string;
   threadMemorySummary?: string;
   anchorSummaries?: string[];
   sources?: readonly InvocationSource[];
@@ -155,6 +158,7 @@ export function buildBriefingMessage(
   // canonical lifecycle state and no invalidator, so a closed question would keep
   // presenting itself as current work — on the card and, since the briefing is
   // persisted as a thread message, in later prompts too.
+  const inputBodyIndex = options?.sources?.length ? bodyParts.length : -1;
   if (options?.sources?.length) {
     bodyParts.push(
       `**本轮输入来源**:\n${options.sources.map((source) => `- ${formatInvocationSource(source)}`).join('\n')}`,
@@ -172,6 +176,7 @@ export function buildBriefingMessage(
     bodyParts.push(`**最近产物**:\n${artifactLines.join('\n')}`);
   }
   const directiveSources = options?.rankedSources ? selectDirectiveSources(options.rankedSources) : [];
+  const sourceBodyIndex = directiveSources.length ? bodyParts.length : -1;
   if (directiveSources.length) {
     const sourceLines = directiveSources.map((s) => `- [${s.type}] ${s.label} — ${s.ref}`);
     bodyParts.push(`**真相源**:\n${sourceLines.join('\n')}`);
@@ -222,14 +227,32 @@ export function buildBriefingMessage(
           ]
         : []),
     ],
-    ...(options?.contextSurfaceProjection
-      ? {
-          meta: {
-            kind: 'context_briefing',
-            contextSurfaceProjection: options.contextSurfaceProjection,
-          },
-        }
-      : {}),
+    meta: {
+      kind: 'context_briefing',
+      ...(options?.receiverCatId ? { receiverCatId: options.receiverCatId } : {}),
+      ...(options?.receiverDisplayName ? { receiverDisplayName: options.receiverDisplayName } : {}),
+      coverageSummary: `近期消息 ${coverageMap.burst.count} 条 · 历史略过 ${coverageMap.omitted.count} 条`,
+      coverageDetails: summary,
+      // Display-only projection: raw title/fields/body and the delivered context stay unchanged.
+      contextDisplay: {
+        threadId,
+        // Exact route inputs are provenance, not a handoff or authority claim.
+        inputs: (options?.sources ?? []).map((source) => ({
+          fromMessageId: source.fromMessageId,
+          from: source.fromSpeakerDisplay,
+          time: formatPromptTime(source.timestamp, { timeZone: getCoCreatorConfig().timeZone }),
+          ...(source.sourceThreadId ? { sourceThreadId: source.sourceThreadId } : {}),
+          ...(source.sourceMessageId ? { sourceMessageId: source.sourceMessageId } : {}),
+        })),
+        sources: directiveSources.map(({ type, label, ref }) => ({ type, label, ref })),
+        coverage: formatContextBriefing(coverageMap, options?.threadMemorySummary, options?.anchorSummaries).summary,
+        // Inputs and materials have structured counterparts above; all other body content remains.
+        detailsMarkdown: bodyParts
+          .filter((_, index) => index !== inputBodyIndex && index !== sourceBodyIndex)
+          .join('\n\n'),
+      },
+      ...(options?.contextSurfaceProjection ? { contextSurfaceProjection: options.contextSurfaceProjection } : {}),
+    },
   };
 
   const rich: RichMessageExtra = { v: 1, blocks: [card] };

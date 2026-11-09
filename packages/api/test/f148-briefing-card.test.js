@@ -24,6 +24,68 @@ function makeCoverage(overrides = {}) {
 }
 
 describe('briefing card — actual inputs and optional missing-material reads', () => {
+  it('adds a receiver and display projection while preserving every input, memory and task', () => {
+    const source = {
+      fromMessageId: 'input-one',
+      fromSpeakerDisplay: '砚砚',
+      timestamp: 1000,
+      sourceThreadId: 'original-thread',
+      sourceMessageId: 'original-message',
+    };
+    const options = {
+      receiverCatId: 'kimi',
+      receiverDisplayName: '墨墨',
+      sources: [source],
+      threadMemorySummary: '已提供的线程记忆',
+      anchorSummaries: ['已提供的锚点'],
+      activeTasks: [{ id: 't', title: '保留活跃任务', status: 'doing', ownerCatId: 'codex61-sol' }],
+      rankedSources: [
+        {
+          type: 'feature-doc',
+          label: '菜单说明',
+          ref: 'docs/menu.md',
+          provenance: 'canonical',
+          directiveEligible: true,
+        },
+        { type: 'pr', label: '候选不能变依据', ref: '#999', provenance: 'recency' },
+      ],
+    };
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo', options).extra.rich.blocks[0];
+    const display = card.meta.contextDisplay;
+    assert.equal(card.meta.receiverCatId, 'kimi');
+    assert.equal(card.meta.receiverDisplayName, '墨墨');
+    assert.equal(card.meta.coverageSummary, '近期消息 5 条 · 历史略过 42 条');
+    assert.deepEqual(
+      display.inputs.map(({ time, ...input }) => input),
+      [
+        {
+          fromMessageId: source.fromMessageId,
+          from: source.fromSpeakerDisplay,
+          sourceThreadId: source.sourceThreadId,
+          sourceMessageId: source.sourceMessageId,
+        },
+      ],
+    );
+    assert.ok(display.inputs[0].time);
+    assert.equal(display.handoff, undefined, 'route provenance cannot become a handoff claim');
+    assert.deepEqual(display.sources, [{ type: 'feature-doc', label: '菜单说明', ref: 'docs/menu.md' }]);
+    assert.match(display.coverage, /看到 5 条.*省略 42 条.*记忆 3 sessions/);
+    assert.match(display.detailsMarkdown, /已提供的线程记忆/);
+    assert.match(display.detailsMarkdown, /已提供的锚点/);
+    assert.match(display.detailsMarkdown, /保留活跃任务/);
+    assert.doesNotMatch(display.detailsMarkdown, /input-one|菜单说明|候选不能变依据/);
+    assert.match(card.bodyMarkdown, /input-one/);
+    assert.match(card.bodyMarkdown, /菜单说明/);
+  });
+
+  it('does not invent sender, receiver or handoff excerpt when route provenance is missing', () => {
+    const card = buildBriefingMessage(makeCoverage(), 'thread-demo').extra.rich.blocks[0];
+    assert.equal(card.meta.receiverCatId, undefined);
+    assert.equal(card.meta.receiverDisplayName, undefined);
+    assert.deepEqual(card.meta.contextDisplay.inputs, []);
+    assert.equal(card.meta.contextDisplay.handoff, undefined);
+  });
+
   it('complete context without sources has no invented handoff or next action', () => {
     const coverage = makeCoverage({
       omitted: { count: 0, timeRange: { from: 0, to: 0 }, participants: [] },

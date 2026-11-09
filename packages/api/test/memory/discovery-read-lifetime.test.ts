@@ -60,6 +60,29 @@ test('a discovery deadline cancels its owned read without canceling the external
   read.finish();
 });
 
+test('an early timer wake does not expire a read before its absolute deadline', async (t) => {
+  // Node's timer wake and Date.now() need not cross the same millisecond together.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let wallTime = 1000;
+  t.mock.method(Date, 'now', () => wallTime);
+  const read = heldSource();
+  t.after(read.finish);
+  const pending = KnowledgeResolver.discover('neutral', {
+    limit: 1,
+    deadlineAt: 1100,
+    sources: [read.source],
+  });
+  const rejected = assert.rejects(pending, { name: 'TimeoutError' });
+  await read.entered;
+  wallTime = 1099;
+  t.mock.timers.tick(100);
+  assert.equal(read.canceled(), false, 'a timer notification is not proof that the absolute deadline passed');
+  wallTime = 1100;
+  t.mock.timers.tick(1);
+  await rejected;
+  assert.equal(read.canceled(), true, 'the original deadline must still cancel the pending source');
+});
+
 test('one source failure cancels its active siblings without changing the failure or its shared parent', async (t) => {
   const parent = new AbortController();
   const read = heldSource();

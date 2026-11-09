@@ -1501,6 +1501,8 @@ export async function* routeSerial(
               : undefined;
             pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
               ...inc.briefingContext,
+              receiverCatId: catId,
+              receiverDisplayName: catConfig?.displayName,
               ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
             });
           } else {

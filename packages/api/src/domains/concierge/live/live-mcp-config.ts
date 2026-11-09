@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { resolveActiveProjectRoot } from '../../../utils/active-project-root.js';
 import type { CodexAppServerJsonObject } from '../../cats/services/agents/providers/CodexAppServerEventMapper.js';
 import type { LiveNativeCredentials } from './live-native-credentials.js';
 
@@ -62,7 +63,7 @@ export async function buildLiveMcpConfig(input: {
       command: process.execPath,
       args: [entry],
       // Search returns repository-relative docs paths; file authority remains the explicit roots below.
-      cwd: resolve(input.mcpDistDir, '../../..'),
+      cwd: resolveActiveProjectRoot(),
       // Codex otherwise asks for approval of truthful open-world inspection, which Live cannot prompt for.
       // This only permits selection; the Host still requires a separate owner confirmation before any page effect.
       ...(family === 'collab'

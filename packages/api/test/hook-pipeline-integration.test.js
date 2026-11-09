@@ -174,7 +174,7 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     const input = makeRichInput();
     const result = pipeline.executeStage('per-turn', input);
 
-    // 23 per-turn hooks should produce trace events
+    // D12 and D20 are retired; the 22 remaining hooks produce trace events.
     assert.equal(result.events.length, 22, `Expected 22 events, got ${result.events.length}`);
 
     const firedIds = result.events.filter((e) => e.status === 'fired').map((e) => e.hookId);
