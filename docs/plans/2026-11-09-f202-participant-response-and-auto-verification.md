@@ -153,3 +153,15 @@ RED/GREEN：`sol-auto-worker-repro.test.mjs`（本目录 acceptance/f202-target-
 同型检查：本 PR 中以新 delivery contract 解码持久原始 delivery 的入口只有 Superagent inbox；其读队列、检查、重试均共用该 schema。Dot 其他按 generation 保留 current 的到期路径已有 no-op，显式撤销仍有意清除授权。本轮三种失败分别属于存量解码、未完成关联的确认、幂等终态；未放松身份与撤销边界。
 
 RED 日志 `/tmp/f202-pr209-inbox-red.log`（旧记录4/4失败）、`/tmp/f202-pr209-dot-red.log`（快速回复被错误确认、重复取消清掉endpoint）。修复后 Superagent20/20及类型检查/构建、Dot205/205及显式构建通过；fallback检查相对9385ebb6没有模式增长。插件提交 `dacc5bf92dc0ef7c82761bbd8de30e744601fb1c`。alpha.39精确包SHA256 `2070781d7ef590712874e651462e2c96a416cef69d1c952bb74cca9131589836`，89文件匹配，归档准入/空缓存离线安装1/1。Host仅更新配套包与本记录，未操作运行实例。修复证据沿原GitHub线程回复并重触发cloud review，不召回已完成本地reviewer续签；新HEAD的远端审查尚待返回。
+
+
+## alpha.40 第二轮 GitHub 审查修复
+
+本轮承接 PR209 对 `dacc5bf9` 的两条 P2，未扩大到合并、发布或运行实例操作：
+
+- [遗留 ask 预留阻断重放](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4512777633)：只有当前运行中的同 key ask 可以暂缓游标；按 ask key 串行发送，失败或中断的空回执预留保留供原 client_message_id 幂等重试，但不再阻断无关消息。发送前和发送后报错、重启、后续有效回复均覆盖；已提交后报错的显式重试不重复发消息。同型检查额外复现了存储快照期间发送刚完成的窗口，使用发送修订计数检测跨快照变化，保留重放而不错误确认快速回复。此修订计数只判断本进程是否仍有可能提交回执，不冒充持久任务真相；未完成记录和幂等键仍持久保留。
+- [正式返回入口不可用仍确认投递](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4512777641)：`ready` 检查正式凭据期限、安装实例与正式入口租约，签名凭据还检查 Host 当前有效性。候选未转正时使用 previousEndpoint 核对旧正式入口，不让候选的新 URL 替代正式返回路径；legacy 兼容路径保留。到期、停止、无入口、错误实例、Host 撤销及读取期间入口失效均拒绝成功 webhook 回执；长期入口与候选隔离回归通过。
+
+同型审计覆盖 ask 的空回执创建、写回、重放和重启恢复入口；其他 dispatch/image 预留不使用 null 记录阻断订阅页。本次两条都属于“存量记录不等于可继续执行”，但分别以实际发送窗口与正式授权/入口检查处理，不新增 Host 特例。fallback 检查相对 dacc5bf9 每文件各 +1（connection 的正式/候选入口选择；runtime 的活跃发送或快照跨版本判断），累计阈值触发已人工审视：前者选择真实正式入口，后者拒绝把旧快照当作无关回复，两者均不能删掉且未堆叠恢复策略。
+
+RED `/tmp/f202-pr209-r2-red.log`、额外窗口 RED `/tmp/f202-pr209-r2-snapshot-red.log`；最终 Dot **219/219**、类型检查和显式构建通过。插件精确提交 `3e0e62f407ab3c4c5f14a03aed9e0f0ac1d80a5d`；alpha.40 SHA256 `e177c1f139f93aa1550d03b07aa6842d1c7c566941906ed1434ddd54ef9668e9`，89 文件匹配。精确归档准入与空缓存离线安装 **1/1** 通过（`archive-alpha40.log`）。Host 只更新随包/版本/摘要与本记录；实际 Work、合并冲突和远端新 HEAD 审查不由这些隔离检查代替。
