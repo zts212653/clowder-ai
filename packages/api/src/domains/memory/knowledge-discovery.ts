@@ -78,11 +78,18 @@ async function withinDiscoveryLifetime<T>(
     return await new Promise<T>((resolve, reject) => {
       abort = () => reject(options.signal?.reason ?? new DOMException('Discovery canceled', 'AbortError'));
       options.signal?.addEventListener('abort', abort, { once: true });
-      if (options.deadlineAt !== undefined)
-        timer = setTimeout(
-          () => reject(new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError')),
-          Math.max(0, options.deadlineAt - Date.now()),
-        );
+      if (options.deadlineAt !== undefined) {
+        const deadlineAt = options.deadlineAt;
+        const rejectAtDeadline = () => {
+          const remaining = deadlineAt - Date.now();
+          if (remaining > 0) {
+            timer = setTimeout(rejectAtDeadline, remaining);
+            return;
+          }
+          reject(new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError'));
+        };
+        timer = setTimeout(rejectAtDeadline, Math.max(0, deadlineAt - Date.now()));
+      }
       Promise.resolve().then(read).then(resolve, reject);
     });
   } finally {
