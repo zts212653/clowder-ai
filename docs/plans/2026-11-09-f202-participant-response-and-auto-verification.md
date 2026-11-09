@@ -198,3 +198,18 @@ adoption 保留原 owner、实例、lineage 和批准工具摘要，当前安装
 已覆盖同安装更新、工具面恢复及扩大拒绝、原绑定撤销、其他 owner/实例/lineage、主人请求失效和迟到绑定/运行代/主体变化。新源码定向30/30；实际编译代码的迁移/图片/旧凭据安装集成与相关检查12/12；完整 API 在隔离输出类型编译通过。日志 `/tmp/f202-scope-recovery-{regression-red,targeted,compiled,types}.log`。另复验 reviewer 两条断言为2/2 GREEN（`/tmp/f202-scope-shared-recovery-green.log`）：第一条内存 audit mock 仅增加了新查询支持，允许省略 packageDigest 查同安装原审计，断言未改；原文件未动。另有真实 FileDotLegacyMigrationAuditStore + coordinator + journey + shared RPC 检查，不只依赖该 mock。
 
 本轮未推送、发布、安装或重启，未改插件/SDK/归档，未将隔离检查当作新的 Work/soak 验收。新 Host exact HEAD 仍待独立复审。
+
+
+## PR209 第三轮云端意见与 alpha.42
+
+来源：[保存的前任临时租约](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4513922164)、[Superagent npm 锁定](https://github.com/zts212653/clowder-ai-plugins/pull/209#discussion_r4513922169)，审查源为插件 `94b70ef2`。修复提交 `149db48d687f40c2bc1001b39afe50875ee692ca`。
+
+- 启动时同步失效主 endpoint 及 pending.previousEndpoint 中的临时租约；expireTemporary 在同一次 external CAS 内按 generation 处理两个位置，不误伤新租约、不清凭据。重启、两类候选、取消后恢复以及旧租约结束的3条新增反例 RED→GREEN，formal 长期入口继续可用；同型审视覆盖启动、结束通知及取消恢复。 进一步用真实runner子进程复现结束回调继承已退休请求上下文；控制器在activation构造时捕获快照，结束写回回到activation，原代际及停用fence保留。新增反例RED→GREEN，最终冷装全套仍222/222。
+- Superagent 不消费 SDK candidate.12 新接口，因此撤销无必要的版本提升，声明保持已发布 candidate.11，与现有 npm-shrinkwrap 精确一致。独立生产依赖闭包检查先 RED 后 GREEN；真正 npm ci 后类型检查与20/20通过，未用 workspace SDK 链接代替 npm 证明。
+- Dot 两个测试文件直接使用 MCP client，补显式开发依赖1.26.0，并将其共同使用的 Zod 对齐3.25.76。干净、无公共 MCP hoist 的目录冻结安装、contract/SDK构建后 Dot222/222通过，含真实协议客户端与离线打包检查。运行源码的凭据/授权接口未增加；SDK源及版本不变。
+
+Host CI 反馈也在原范围内处理：目标回复状态模块下沉至 messaging/target-response，纯搬移经逐字比较（仅两条相对导入）；删除合并遗留的未用导入；增量打包夹具带齐其真实运行入口。更新依赖后保持桌面桥1.7.0原有精确准入边界，没有把新版通用 manifest schema 当作扩大授权的理由。SIGINT 检查区分 Node wrapper 与 pnpm：两条都必须等清理完成，Node自身仍严格保留信号退出码；pnpm 在Linux可能已消费信号返回0，不将其误当 wrapper 退出码。
+
+验证：Host消息/媒体/投递63/63、自有无端口Redis持久状态1/1、完整API隔离编译、使用实际新 shared/API 产物的 Web 全量类型检查、受影响组件 ESLint（0错误）、全部受跟踪文件 Biome 通过。最终实际编译产物的随包构建/闭包、显示、归档准入及桌面公开链路25/25，原SIGINT检查拆出的两条2/2。普通本地 pnpm check 已经过 source checks，但格式器会扫描本工位未跟踪的验收产物，故不声称该命令全绿；另以受跟踪文件范围核对格式，远端干净CI仍是后续真相。
+
+alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233bd`，89个运行/资源/声明/文档文件一致，精确归档空缓存离线安装通过。当前树仍仅新增最终归档，不保留alpha.41。日志 `/tmp/f202-pr209-r3-*`、`/tmp/f202-alpha42-*`、`/tmp/f202-ci-*`。未合并、发布、安装到运行实例或重启；新HEAD后仅回云端继续审查，不以旧本地批准替代。

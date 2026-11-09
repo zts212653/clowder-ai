@@ -4,20 +4,14 @@ import { getLifecycleAppendOutcome, isAppendRepeatSource } from '@cat-cafe/share
 
 import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
-import {
-  dispatchReadText,
-  dispatchReceiptDisplay,
-  dispatchReceiptLabel,
-  isUnconfirmedAppend,
-} from '@/lib/dispatch-receipt-display';
-import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
+import { dispatchReadText, dispatchReceiptDisplay, dispatchReceiptLabel } from '@/lib/dispatch-receipt-display';
+import type { ChatMessage } from '@/stores/chat-types';
 import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } from './cloud-dispatch-receipt';
 import { HistoryAppendActions } from './HistoryAppendActions';
 import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
 import { PluginTargetIcon } from './PluginTargetIcon';
-import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 import { useShellPresentation } from './shell/shell-presentation';
 import { projectTargetReply } from './target-response-projection';
 import { useCloudReply } from './useCloudReply';

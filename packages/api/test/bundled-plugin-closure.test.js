@@ -44,7 +44,7 @@ test('incremental native version migration has the exact fresh file set and froz
   const previousManifest = JSON.parse(currentManifest);
   assert.equal(previousManifest.version, incremental.version);
   previousManifest.version = '0.1.1';
-  await cp(incremental.assets, join(incremental.assets, '../../0.1.1/assets'), { recursive: true });
+  await cp(join(incremental.assets, '..'), join(incremental.assets, '../../0.1.1'), { recursive: true });
   await writeFile(incremental.manifestPath, JSON.stringify(previousManifest));
   let result = incremental.build();
   assert.equal(result.status, 0, result.stderr);

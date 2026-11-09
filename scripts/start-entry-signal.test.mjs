@@ -20,62 +20,72 @@ function waitFor(predicate, timeoutMs = 5_000) {
   });
 }
 
-test(
-  'start:direct does not return terminal control before the launcher finishes SIGINT cleanup',
-  { timeout: 10_000, skip: process.platform === 'win32' },
-  async () => {
-    const fixture = mkdtempSync(join(tmpdir(), 'cat-cafe-start-entry-signal-'));
-    const scripts = join(fixture, 'scripts');
-    const marker = join(fixture, 'cleanup.log');
-    mkdirSync(join(scripts, 'lib'), { recursive: true });
-    cpSync(join(ROOT, 'scripts', 'start-entry.mjs'), join(scripts, 'start-entry.mjs'));
-    writeFileSync(join(scripts, 'lib', 'platform-status.mjs'), 'export function runWindowsStatus() {}\n', 'utf8');
-    writeFileSync(
-      join(scripts, 'start-dev.sh'),
-      `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap - INT TERM; cleanup; exit 130' INT\ntrap 'trap - INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
-      { mode: 0o755 },
-    );
-    writeFileSync(
-      join(fixture, 'package.json'),
-      JSON.stringify({
-        private: true,
-        scripts: { 'start:direct': 'node ./scripts/start-entry.mjs start:direct --profile=opensource' },
-      }),
-      'utf8',
-    );
+for (const viaPnpm of [false, true])
+  test(
+    `start:direct waits for SIGINT cleanup (${viaPnpm ? 'pnpm' : 'node wrapper'})`,
+    { timeout: 10_000, skip: process.platform === 'win32' },
+    async () => {
+      const fixture = mkdtempSync(join(tmpdir(), 'cat-cafe-start-entry-signal-'));
+      const scripts = join(fixture, 'scripts');
+      const marker = join(fixture, 'cleanup.log');
+      mkdirSync(join(scripts, 'lib'), { recursive: true });
+      cpSync(join(ROOT, 'scripts', 'start-entry.mjs'), join(scripts, 'start-entry.mjs'));
+      writeFileSync(join(scripts, 'lib', 'platform-status.mjs'), 'export function runWindowsStatus() {}\n', 'utf8');
+      writeFileSync(
+        join(scripts, 'start-dev.sh'),
+        `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap - INT TERM; cleanup; exit 130' INT\ntrap 'trap - INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        join(fixture, 'package.json'),
+        JSON.stringify({
+          private: true,
+          scripts: { 'start:direct': 'node ./scripts/start-entry.mjs start:direct --profile=opensource' },
+        }),
+        'utf8',
+      );
 
-    let output = '';
-    const command = spawn('pnpm', ['start:direct'], {
-      cwd: fixture,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    for (const stream of [command.stdout, command.stderr]) {
-      stream.setEncoding('utf8');
-      stream.on('data', (chunk) => {
-        output += chunk;
-      });
-    }
-
-    try {
-      await waitFor(() => output.includes('launcher-ready'));
-      process.kill(-command.pid, 'SIGINT');
-      const exit = await new Promise((resolveExit, reject) => {
-        command.once('error', reject);
-        command.once('exit', (code, signal) => resolveExit({ code, signal }));
-      });
-      const cleanup = readFileSync(marker, 'utf8');
-      assert.match(cleanup, /cleanup-done/, `wrapper exited before cleanup completed\n${output}`);
-      assert.ok(exit.code === 130 || exit.signal === 'SIGINT', JSON.stringify({ exit, output }));
-    } finally {
-      if (command.exitCode === null && command.signalCode === null) {
-        try {
-          process.kill(-command.pid, 'SIGKILL');
-        } catch (error) {
-          if (error.code !== 'ESRCH') throw error;
-        }
+      let output = '';
+      const command = spawn(
+        viaPnpm ? 'pnpm' : process.execPath,
+        viaPnpm ? ['start:direct'] : [join(scripts, 'start-entry.mjs'), 'start:direct', '--profile=opensource'],
+        {
+          cwd: fixture,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      for (const stream of [command.stdout, command.stderr]) {
+        stream.setEncoding('utf8');
+        stream.on('data', (chunk) => {
+          output += chunk;
+        });
       }
-      rmSync(fixture, { recursive: true, force: true });
-    }
-  },
-);
+
+      try {
+        await waitFor(() => output.includes('launcher-ready'));
+        process.kill(-command.pid, 'SIGINT');
+        const exit = await new Promise((resolveExit, reject) => {
+          command.once('error', reject);
+          command.once('exit', (code, signal) => resolveExit({ code, signal }));
+        });
+        const cleanup = readFileSync(marker, 'utf8');
+        assert.match(cleanup, /cleanup-done/, `wrapper exited before cleanup completed\n${output}`);
+        // pnpm may consume SIGINT and return zero after its child has finished.
+        // The wrapper itself must preserve the signal status; both paths await cleanup.
+        assert.ok(
+          exit.code === 130 || exit.signal === 'SIGINT' || (viaPnpm && exit.code === 0),
+          JSON.stringify({ exit, output }),
+        );
+      } finally {
+        if (command.exitCode === null && command.signalCode === null) {
+          try {
+            process.kill(-command.pid, 'SIGKILL');
+          } catch (error) {
+            if (error.code !== 'ESRCH') throw error;
+          }
+        }
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    },
+  );
