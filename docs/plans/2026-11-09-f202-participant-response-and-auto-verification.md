@@ -265,3 +265,14 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - 插件 `4aa4e10e7e1f41ad7ac0695cb999d1303de53810`，定向43/43、干净完整Dot235/235、类型与构建通过。alpha.47 自有89文件逐字节一致；SHA256 `41fd333caa75b7cf33ed7a92b0c00d667406b433305336052479912e2dc2e208`，压缩22,375,959字节、展开61,807,562字节，预算不变。contract/SDK未新增改动，前轮contract663项与内存检查证据按原源码适用。
 - GitHub 确认前一插件提交 d218 的两项CI均绿，catalog恢复已由Linux CI确认，发布步骤跳过。Host1b0348云端未发现主要问题；这些均不充当两份新HEAD的批准。两条新意见已分别回复并从远端逐字回读，仍待新HEAD的CI和复审；未合并、发布、安装或重启。
 - 最终配套 Host API 隔离编译、Biome/diff通过；精确alpha.47归档/闭包/显示与空缓存离线安装19/19（`/tmp/f202-alpha47-host-acceptance.log`）。本轮未重复不受影响的Web页面或contract全套，也没有使用旧Head的远端结果冒充新Head批准。
+
+### 2026-11-09：R7 延迟清理的提交顺序与归属
+
+本轮把根因收拢为：副作用必须绑定原 authority，并在新一代可见前完成其前置检查。legacy connection 与 external 是两份持久记录，不能先撤销 external、再以另一份记录拒绝请求；runner 的身份是 generation，不能把停止当作“停止当前任何一个”。
+
+- legacy unsubscribe 先CAS提交原 connection revision/attempt/revokedAt，再按捕获 candidateId/tokenId/revision/attempt 清理。新attempt在任一阶段胜出均不会被旧请求修改或撤销；没有声称跨两条记录是原子事务。新式正式凭据退订仍在单次external CAS完成。原 external-CAS 反例RED，修后原连接提交前、候选清理前两个交错窗口保持新 connection/external/URL与撤销历史不变。
+- owner取消绑定开始观察的candidateId，CAS冲突重试不能清理替换候选；提交后停止携带旧generation。scoped stop只清理同步捕获的匹配runner，不推进全局epoch；因此不影响替代runner或后来正在准备的start。expiry定时器同样绑定自身generation；停用/disconnect/启动失败保留整体shutdown。Settings CAS提交前/后竞态与真实runner/controller交错反例均先RED后GREEN。
+- 插件 `dcfae819d141e783f031a871b61327d2dcfe221e`：定向59/59、干净完整Dot240/240、类型与构建通过。alpha.48，89自有产物一致；SHA256 `42f80b89341701ef07848699c423a813195160182d13a02c3f652ec99f36b0f5`，压缩22,376,575/展开61,810,357字节，32/64MiB预算保持。
+- Host当前CI另复现回复引用用例的router替身缺少resolveAdmissionTargets：两条whisper回复500。仅补受控成员替身接口，保留同收件人引用和扩大收件人不能引用的断言，原RED→12/12 GREEN；同型检索另外三处是队列层私语测试，不走该HTTP入口，未机械扩改。生产member-only私语校验不动。
+- 两条云端意见已回复并逐字回读。前一插件4aa的完整CI已绿，不替代新提交结果。本轮仍无运行配置/实例改动、安装、重启、合并或发布。
+- 最终Host API隔离完整编译、Biome/diff通过，精确alpha.48随包/闭包/显示及空缓存离线安装19/19（`/tmp/f202-alpha48-host-acceptance.log`）。等待新HEAD的远端CI/云端复审，不将4aa CI绿与5dcb云端无finding挪用于当前提交。
