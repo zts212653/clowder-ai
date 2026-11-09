@@ -207,11 +207,13 @@ export function registerCallbackTaskRoutes(
     ordinaryTaskHandoffs?: OrdinaryTaskHandoffService;
     taskRecovery?: Pick<
       import('../domains/ball-custody/TaskRecoveryReadModel.js').TaskRecoveryReadModel,
-      'projectMany'
+      'project' | 'projectMany'
     >;
   },
 ): void {
   const { taskStore, messageStore, socketManager, threadStore } = deps;
+  const projectTask = (task: TaskItem): Promise<TaskItem> =>
+    deps.taskRecovery ? deps.taskRecovery.project(task) : Promise.resolve(task);
   registerCallbackDevelopmentWorkRoutes(app, deps);
   const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore, {
     artifactReader: new F232PreparedArtifactReader({ messages: messageStore }),
@@ -328,10 +330,11 @@ export function registerCallbackTaskRoutes(
         return { error: 'Failed to update task' };
       }
 
-      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      const projected = await projectTask(updated);
+      socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
       return {
         status: 'ok',
-        task: updated,
+        task: projected,
         ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
       };
     }),
@@ -422,10 +425,11 @@ export function registerCallbackTaskRoutes(
       try {
         await assertCurrent();
         const task = await entrustedWorkLifecycle.close(parsed.data, assertCurrent);
-        socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
+        const projected = await projectTask(task);
+        socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
         return {
           status: 'closed',
-          task,
+          task: projected,
           ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
         };
       } catch (error) {
@@ -472,10 +476,11 @@ export function registerCallbackTaskRoutes(
       try {
         await assertCurrent();
         const task = await entrustedWorkLifecycle.update(parsed.data, existing);
-        socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
+        const projected = await projectTask(task);
+        socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
         return {
           status: 'updated',
-          task,
+          task: projected,
           ...(await reconcileOwnedTaskWaits(taskStore, deps.ownedWaitStatusReader, actor)),
         };
       } catch (error) {

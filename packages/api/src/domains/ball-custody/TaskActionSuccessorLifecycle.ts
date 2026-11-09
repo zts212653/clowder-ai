@@ -134,11 +134,30 @@ export class TaskActionSuccessorLifecycle {
     const recovery = this.deps.leaseStore.recovery;
     if (!lease || !recovery) return [];
     const lanes = ['return', 'dispatch', 'task'] as const;
-    const snapshots = await Promise.all(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
-    return snapshots.flatMap((snapshot, index) => {
+    const snapshots = await Promise.allSettled(lanes.map((lane) => recovery.read(lease.leaseId, lane)));
+    return snapshots.flatMap((result, index) => {
       const lane = lanes[index];
+      if (lane === undefined) return [];
+      if (result.status === 'rejected')
+        return [
+          {
+            source: 'action_successor' as const,
+            lane,
+            disposition: 'needs_attention' as const,
+            reasonCode: 'action_recovery_lane_read_failed',
+            executionRef: `action-successor:${lease.leaseId}:g${lease.generation}:${lane}`,
+          },
+        ];
+      const snapshot = result.value;
+      if (
+        snapshot &&
+        (snapshot.lease.leaseId !== lease.leaseId ||
+          snapshot.lease.generation !== lease.generation ||
+          snapshot.fact.generation !== lease.generation)
+      )
+        return [];
       const fact = snapshot?.fact;
-      return lane !== undefined && fact?.disposition && fact.reasonCode
+      return fact?.disposition && fact.reasonCode
         ? [
             {
               source: 'action_successor' as const,

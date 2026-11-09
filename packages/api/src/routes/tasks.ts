@@ -184,6 +184,8 @@ function publishHumanTerminalResult(socketManager: SocketManager, result: Entrus
 
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, socketManager } = opts;
+  const projectTask = (task: TaskItem): Promise<TaskItem> =>
+    opts.taskRecovery ? opts.taskRecovery.project(task) : Promise.resolve(task);
 
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
@@ -287,9 +289,10 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     await opts.deploymentWaitLifecycleHolder?.current?.recordTaskMutationOutcome(updated);
 
-    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    const projected = await projectTask(updated);
+    socketManager.broadcastToRoom(`thread:${projected.threadId}`, 'task_updated', projected);
 
-    return updated;
+    return projected;
   });
 
   // POST /api/tasks/:id/cancel-wait — authenticated, server-bound terminal transition.
@@ -342,12 +345,13 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
         reply.status(409);
         return { error: 'Wait changed before cancellation' };
       }
-      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', await projectTask(updated));
       return { status: 'cancelled', result: updated.pluginWait?.waitOutcome };
     }
     const result = await selection.lifecycle.cancel(task.id, { kind: 'user', userId });
     const updated = await taskStore.get(task.id);
-    if (updated) socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    if (updated)
+      socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', await projectTask(updated));
     return { status: 'cancelled', result };
   });
 

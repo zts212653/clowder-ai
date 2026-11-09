@@ -60,7 +60,7 @@ test(
 );
 
 test(
-  'identity mismatch is disposed once across lanes and never executes or loses the original business record',
+  'identity mismatch is disposed across lanes without a second Message and never loses the original business record',
   isolated,
   async () => {
     await withActionRecoveryRedis(async ({ redis, store, seed }) => {
@@ -83,7 +83,7 @@ test(
         });
         assert.equal((await store.recovery.read(original.leaseId, lane)).fact.nextAttemptAt, null);
       }
-      assert.equal(notices.size, 1, 'one owner mismatch is one incident, not three lane incidents');
+      assert.equal(notices.size, 0, 'recovery disposition stays on the original owner instead of a notice Message');
       await store.initializeRecovery(true);
       assert.equal((await store.listPendingDispatches()).length, 0);
       assert.deepEqual(await store.get(original.leaseId), {

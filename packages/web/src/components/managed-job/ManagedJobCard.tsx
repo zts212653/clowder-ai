@@ -20,6 +20,7 @@ interface JobDetail {
   durationMs?: number;
   transitions: { revision: number; at: number; state: string }[];
   recovery: RecoveryDetail[];
+  recoveryPending: boolean;
 }
 type RecoveryDisposition = 'parked' | 'interrupted' | 'needs_attention';
 interface RecoveryDetail {
@@ -46,6 +47,13 @@ function readRecovery(value: unknown, owner: RecoveryDetail['owner']): RecoveryD
     reasonCode: fact.reasonCode,
     recheck: recheck?.kind === 'observe_original_wait' || recheck?.kind === 'observe_original_job',
   };
+}
+
+function recoveryPending(value: unknown): boolean {
+  const fact = object(value);
+  if (!fact || fact.disposition) return false;
+  const wakeIntent = object(fact.wakeIntent);
+  return typeof fact.nextAttemptAt === 'number' || object(fact.claim) !== null || wakeIntent?.status === 'pending';
 }
 
 function readDetail(body: unknown, taskId: string, jobId: string): JobDetail | null {
@@ -81,6 +89,7 @@ function readDetail(body: unknown, taskId: string, jobId: string): JobDetail | n
     recovery: [readRecovery(envelope?.recovery, 'wait'), readRecovery(job.recovery, 'job')].filter(
       (item): item is RecoveryDetail => item !== null,
     ),
+    recoveryPending: recoveryPending(envelope?.recovery) || recoveryPending(job.recovery),
   };
 }
 
@@ -128,7 +137,7 @@ export function ManagedJobCard({
         setUnavailable(!next);
         if (next) {
           setDetail(next);
-          terminal = !ACTIVE.has(next.state);
+          terminal = !ACTIVE.has(next.state) && !next.recoveryPending;
         }
       } catch {
         if (!disposed) setUnavailable(true);

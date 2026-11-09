@@ -12,8 +12,31 @@ export class TaskRecoveryReadModel {
 
   async project(task: TaskItem): Promise<TaskItem> {
     const incidents: TaskRecoveryIncident[] = [];
-    if (this.sources.action) incidents.push(...(await this.sources.action.readRecoveryIncidents(task)));
-    const facts = await this.sources.ball?.getRecoveryFacts(`ball:task:${task.id}`);
+    if (this.sources.action) {
+      try {
+        incidents.push(...(await this.sources.action.readRecoveryIncidents(task)));
+      } catch {
+        incidents.push({
+          source: 'action_successor',
+          lane: 'task',
+          disposition: 'needs_attention',
+          reasonCode: 'action_recovery_read_failed',
+          executionRef: `task:${task.id}:action-recovery`,
+        });
+      }
+    }
+    let facts: Awaited<ReturnType<IBallCustodyProjectionStore['getRecoveryFacts']>> | null | undefined;
+    try {
+      facts = await this.sources.ball?.getRecoveryFacts(`ball:task:${task.id}`);
+    } catch {
+      incidents.push({
+        source: 'ball_probe',
+        lane: 'probe',
+        disposition: 'needs_attention',
+        reasonCode: 'ball_recovery_read_failed',
+        executionRef: `ball:task:${task.id}`,
+      });
+    }
     if (facts) {
       for (const lane of ['probe', 'idle'] as const) {
         const fact = facts[lane];
