@@ -222,3 +222,28 @@ test('anchor history verifies thread ownership before allowing a system-user anc
     [defaultAnchor.id],
   );
 });
+
+test('anchor snapshots do not recover newer publications or acknowledge their History frontier', async (t) => {
+  const f = await fixture(t);
+  const anchor = f.append('old response', { timestamp: 1000 });
+  const initial = await f.read({ threadId: THREAD, limit: '1' });
+  const applied = initial.json().historyWatermark;
+  assert.equal(typeof applied, 'string');
+  const newer = f.append('newer publication', { timestamp: 2000 });
+
+  for (const query of [{}, { afterVisibility: applied }]) {
+    const snapshot = await f.read({ threadId: THREAD, anchorMessageId: anchor.id, limit: '1', ...query });
+    assert.equal(snapshot.statusCode, 200, snapshot.body);
+    assert.deepEqual(
+      snapshot.json().messages.map((message) => message.id),
+      [anchor.id],
+    );
+    assert.equal(Object.hasOwn(snapshot.json(), 'historyWatermark'), false);
+    assert.equal(Object.hasOwn(snapshot.json(), 'historyPageCursor'), false);
+  }
+
+  const recovered = await f.read({ threadId: THREAD, limit: '1', afterVisibility: applied });
+  assert.equal(recovered.statusCode, 200, recovered.body);
+  assert.ok(recovered.json().messages.some((message) => message.id === newer.id));
+  assert.notEqual(recovered.json().historyWatermark, applied);
+});

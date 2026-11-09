@@ -515,8 +515,14 @@ function ChatMessageContent({
       case 'briefing':
         return (
           <div data-message-id={message.id} className="flex justify-center mb-3">
-            <div className="max-w-[85%] w-full opacity-80">
-              <BriefingCard block={surface.block} messageId={message.id} />
+            <div
+              className={`max-w-[85%] w-full ${message.extra?.systemKind === 'context_briefing' ? '' : 'opacity-80'}`}
+            >
+              <BriefingCard
+                block={surface.block}
+                messageId={message.id}
+                contextBriefing={message.extra?.systemKind === 'context_briefing'}
+              />
             </div>
           </div>
         );
