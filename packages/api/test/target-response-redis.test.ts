@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RedisMessageStore } from '../src/domains/cats/services/stores/redis/RedisMessageStore.js';
-import { advanceTargetResponse } from '../src/domains/messaging/target-response.js';
+import { advanceTargetResponse } from '../src/domains/messaging/target-response/state.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
 const fixture = ownedRedisFixture('f202-target-response');

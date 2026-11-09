@@ -388,7 +388,7 @@ test('a late acknowledgement after timeout does not rewrite the uncertain receip
 });
 
 test('reply completion arriving before transport acknowledgement remains terminal after the queue retires', async () => {
-  const { advanceTargetResponse } = await import('../src/domains/messaging/target-response.js');
+  const { advanceTargetResponse } = await import('../src/domains/messaging/target-response/state.js');
   const store = new MessageStore(),
     queue = new InvocationQueue();
   const delivery = new AddressedPluginQueueDelivery({

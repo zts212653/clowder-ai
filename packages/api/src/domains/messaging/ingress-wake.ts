@@ -3,7 +3,7 @@ import { emitStoredMessageUpdated } from '../cats/services/agents/invocation/lif
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { MessagingError } from './contract/host-types.js';
 import type { MessagingLedger } from './ledger.js';
-import { settlePublishedTargetResponse } from './target-response.js';
+import { settlePublishedTargetResponse } from './target-response/state.js';
 
 export type PluginMessageWake = 'auto' | { readonly catId: string; readonly exact?: true };
 

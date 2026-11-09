@@ -45,7 +45,7 @@ import type { MediaReferenceAuthority } from './media-reference-authority.js';
 import { type MediaSourceResolver, mediaStageKey, type StagedMediaSend } from './media-staging.js';
 import type { AddressHandleRecord, EventLogStore } from './stores/ports.js';
 import { clampRetention } from './stores/ports.js';
-import { assertTargetResponseOpen } from './target-response.js';
+import { assertTargetResponseOpen } from './target-response/state.js';
 
 export interface SendServiceDeps {
   readonly messageStore: IMessageStore;

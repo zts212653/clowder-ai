@@ -12,7 +12,7 @@ import { isSystemUserMessage, resolveThreadMessageVisibility } from '../../cats/
 import { MessagingError } from '../../messaging/contract/host-types.js';
 import { validateDraft } from '../../messaging/contract/validate.js';
 import type { MessagingService } from '../../messaging/messaging-service.js';
-import { resolveTargetResponse } from '../../messaging/target-response.js';
+import { resolveTargetResponse } from '../../messaging/target-response/state.js';
 import { pluginMessageSourceOf } from './plugin-messaging-source.js';
 import {
   createUnavailablePluginMessagingSubscriptionHost,

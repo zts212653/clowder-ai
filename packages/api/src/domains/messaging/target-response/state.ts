@@ -4,8 +4,8 @@ import {
   type TargetResponseRecord,
   type TargetResponseResult,
 } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
-import { MessagingError } from './contract/host-types.js';
+import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
+import { MessagingError } from '../contract/host-types.js';
 
 export async function advanceTargetResponse(
   store: IMessageStore,

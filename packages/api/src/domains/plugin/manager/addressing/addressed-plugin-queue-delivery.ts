@@ -3,7 +3,7 @@ import type { InvocationQueue, QueueEntry } from '../../../cats/services/agents/
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
 import { projectEnvelope } from '../../../messaging/envelope.js';
 import type { MediaEntitlementLedger } from '../../../messaging/media-entitlements.js';
-import { advanceTargetResponse } from '../../../messaging/target-response.js';
+import { advanceTargetResponse } from '../../../messaging/target-response/state.js';
 import type { PluginManagerService } from '../plugin-manager-service.js';
 import type { PluginAddressedTargets } from './plugin-addressed-targets.js';
 
