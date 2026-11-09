@@ -165,6 +165,41 @@ test('a terminal importer failure publishes text with a typed unavailable elemen
   assert.equal((await h.events.readAfter('thread-media', 0, 10)).length, 1);
 });
 
+test('deferred media reply publishes its persisted reply link and finalized blocks on the live ingress', async () => {
+  const gate = deferred();
+  const broadcasts = [];
+  const blocks = [{ type: 'image', url: '/uploads/imported.png' }];
+  const h = await harness({
+    importer: { import: () => gate.promise },
+    postProcess: async () => ({ contentBlocks: blocks }),
+    ingressWake: {
+      invokeTrigger: { trigger: async () => assert.fail('reply must not wake a member') },
+      socketManager: { broadcastToRoom: (...args) => broadcasts.push(args) },
+    },
+  });
+  const parent = await h.messageStore.append({
+    threadId: 'thread-media',
+    userId: 'owner',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'please send an image',
+    mentions: [],
+    timestamp: Date.now(),
+  });
+  const draft = { ...h.draft, replyTo: parent.id };
+  const receipt = await h.service.send(ctx, draft, { source });
+  assert.equal(receipt.pendingPublication, true);
+  assert.equal(broadcasts.length, 0);
+  gate.resolve({ kind: 'imported', hmrId: `hmr_${'d'.repeat(32)}` });
+  await until(() => broadcasts.length === 1);
+  const stored = h.messageStore.getById(receipt.messageId);
+  const [, event, envelope] = broadcasts[0];
+  assert.equal(event, 'connector_message');
+  assert.equal(envelope.message.replyTo, parent.id);
+  assert.deepEqual(envelope.message.contentBlocks, blocks);
+  assert.deepEqual(envelope.message.contentBlocks, stored.contentBlocks);
+  assert.equal(envelope.message.content, stored.content);
+});
+
 test('post-processing enriches the one durable publication before wake without losing the HMR', async () => {
   const processed = [];
   const hmrId = `hmr_${'a'.repeat(32)}`;

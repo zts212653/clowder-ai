@@ -86,6 +86,7 @@ function draft(threadId, overrides = {}) {
     ...(overrides.wake === undefined ? {} : { wake: overrides.wake }),
     ...(overrides.sender === undefined ? {} : { sender: overrides.sender }),
     ...(overrides.contentBlocks === undefined ? {} : { contentBlocks: overrides.contentBlocks }),
+    ...(overrides.replyTo === undefined ? {} : { replyTo: overrides.replyTo }),
     ...(overrides.identity === undefined ? {} : { identity: overrides.identity }),
     ...(overrides.url === undefined ? {} : { url: overrides.url }),
     ...(overrides.meta === undefined ? {} : { meta: overrides.meta }),
@@ -160,6 +161,35 @@ async function fixture(options = {}) {
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  test('live plugin replies retain the persisted reply link and attachments without replaying the broadcast', async () => {
+    const { host, messages, threads, broadcasts, wakes } = await fixture();
+    const thread = await threads.create(OWNER, 'Reply delivery');
+    const source = await messages.append({
+      threadId: thread.id,
+      userId: OWNER,
+      from: { kind: 'user', userId: OWNER },
+      content: '@fixture hello',
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    const contentBlocks = [{ type: 'image', url: '/uploads/fixture.png', alt: 'reply attachment' }];
+    const input = draft(thread.id, { replyTo: source.id, contentBlocks });
+    const receipt = await host.send(input);
+    const stored = await messages.getById(receipt.messageId);
+    assert.equal(stored.replyTo, source.id);
+    assert.equal(broadcasts.length, 1);
+    const [room, event, envelope] = broadcasts[0];
+    assert.equal(room, `thread:${thread.id}`);
+    assert.equal(event, 'connector_message');
+    assert.equal(envelope.message.id, stored.id);
+    assert.deepEqual(envelope.message.from, stored.from);
+    assert.equal(envelope.message.replyTo, stored.replyTo, 'live publication must preserve reply ownership');
+    assert.deepEqual(envelope.message.contentBlocks, stored.contentBlocks);
+    assert.deepEqual(await host.send(input), receipt);
+    assert.equal(broadcasts.length, 1);
+    assert.equal(wakes.length, 0);
+  });
+
   function addressedPlugins() {
     const targets = [
       { id: INSTANCE_ID, alias: 'dot', kind: 'plugin' },

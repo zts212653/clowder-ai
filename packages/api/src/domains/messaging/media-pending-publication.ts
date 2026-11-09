@@ -239,6 +239,7 @@ export class PendingMediaPublication {
       userId: stored.userId,
       messageId: stored.id,
       content: stored.content,
+      ...(stored.replyTo === undefined ? {} : { replyTo: stored.replyTo }),
       ...(stored.contentBlocks === undefined ? {} : { contentBlocks: stored.contentBlocks }),
       ...(row.sender === undefined ? {} : { sender: row.sender }),
       timestamp: stored.timestamp,

@@ -112,6 +112,8 @@ interface ConnectorMessageEvent {
     type: 'connector';
     from?: MessageFrom;
     content: string;
+    replyTo?: string;
+    contentBlocks?: import('../stores/chat-types').ChatMessage['contentBlocks'];
     source?: import('../stores/chat-types').ConnectorSourceData;
     extra?: import('../stores/chat-types').ChatMessage['extra'];
     timestamp: number;
@@ -1070,6 +1072,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         ...(data.message.from ? { from: data.message.from } : {}),
         ...(data.message.from?.kind === 'agent' ? { catId: data.message.from.catId } : {}),
         content: semantic?.action === 'replace' ? semantic.projection.content : (data.message.content ?? ''),
+        ...(data.message.replyTo === undefined ? {} : { replyTo: data.message.replyTo }),
+        ...(data.message.contentBlocks === undefined ? {} : { contentBlocks: data.message.contentBlocks }),
         ...(data.message.source ? { source: data.message.source } : {}),
         ...(data.message.extra ? { extra: data.message.extra } : {}),
         timestamp: data.message.timestamp ?? Date.now(),

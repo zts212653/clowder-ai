@@ -53,6 +53,8 @@ export function broadcastIngress(
     readonly messageId: string;
     readonly instanceId: string;
     readonly content: string;
+    readonly replyTo?: string;
+    readonly contentBlocks?: readonly MessageContent[];
     readonly source: ConnectorSource;
     readonly timestamp: number;
   },
@@ -64,6 +66,8 @@ export function broadcastIngress(
       type: 'connector' as const,
       from: { kind: 'plugin' as const, instanceId: input.instanceId },
       content: input.content,
+      ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
       source: input.source,
       timestamp: input.timestamp,
     },
@@ -94,6 +98,7 @@ export async function deliverIngressEffectsOnce(
     userId: string;
     messageId: string;
     content: string;
+    replyTo?: string;
     contentBlocks?: readonly MessageContent[];
     sender?: { readonly id: string; readonly name?: string };
     timestamp: number;
@@ -115,6 +120,8 @@ export async function deliverIngressEffectsOnce(
         messageId: input.messageId,
         instanceId: input.instanceId,
         content: input.content,
+        ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+        ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
         source: ingress.source,
         timestamp: input.timestamp,
       });

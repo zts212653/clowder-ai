@@ -2,6 +2,7 @@ import EventEmitter from 'node:events';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { pluginReplyFor } from '@/components/plugin-reply-state';
 import { QueuePanel } from '@/components/QueuePanel';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -307,5 +308,31 @@ describe('dispatch receipt Queue publication', () => {
       emitServerEvent('message_snapshot_updated', { threadId: THREAD_ID, message: { ...message, from: undefined } });
     });
     expect(useChatStore.getState().messages).toHaveLength(0);
+  });
+
+  it.each([
+    THREAD_ID,
+    'thread-background',
+  ])('recognizes plugin replies on the production connector event immediately in their exact thread: %s', async (threadId) => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const reply = {
+      id: 'connector-reply',
+      type: 'connector',
+      from: { kind: 'plugin', instanceId: 'pi_helper' },
+      content: '',
+      timestamp: Date.now(),
+      replyTo: 'source',
+      contentBlocks: [{ type: 'image', url: '/uploads/fixture.png' }],
+    };
+    act(() => emitServerEvent('connector_message', { threadId, message: reply }));
+    const messages = useChatStore.getState().getThreadState(threadId).messages;
+    const received = messages.find((message) => message.id === reply.id);
+    expect(received?.replyTo).toBe('source');
+    expect(received?.contentBlocks).toEqual(reply.contentBlocks);
+    expect(pluginReplyFor('source', 'pi_helper', messages)?.id).toBe(reply.id);
+    expect(pluginReplyFor('source', 'pi_other', messages)).toBeUndefined();
+    expect(pluginReplyFor('other-source', 'pi_helper', messages)).toBeUndefined();
+    if (threadId !== THREAD_ID) expect(useChatStore.getState().messages).toHaveLength(0);
   });
 });
