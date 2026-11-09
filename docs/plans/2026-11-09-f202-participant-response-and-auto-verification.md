@@ -254,3 +254,14 @@ alpha.42 SHA256 `7c261354961482b652d25dd34a85181b9e3891709815bd5a75fa3351e7c233b
 - 最终 Dot alpha.46，插件 `d21829674ff361aedd86e617a83dfac322ceae42`；89个自有产物与实际构建一致。SHA256 `8cec747364acbcfc7936a95f701335b7c4f457aef8db2f2789e81d9ebd2ae893`，压缩22,375,777字节、展开61,806,526字节，原32/64 MiB预算不变。上轮 alpha.45 的Windows与构建通过仅记作历史证据，不能覆盖新HEAD。
 - API完整隔离编译通过。首次归档周边检查因本地 NODE_ENV=production 安装缺少开发工具 Biome 而失败，显式恢复 feature 工位开发依赖后重跑；不修改产品或测试来掩盖工具缺失。当前随包与契约增量仍待新HEAD的远端CI与云端复审，无新增fallback链、无运行实例操作。
 - 最终随包/闭包/显示/离线归档 19/19 通过（`/tmp/f202-alpha46-host-final-green.log`）。重跑时同步隔离 stage 的源码 producer 与编译 producer，避免 source 模式仍选到旧 alpha.45；没有为此改变产品或断言。最终 API 编译、Biome及diff检查通过。插件两条 inline 已逐字回读确认；等待两份新提交的真实远端结果。
+
+### 2026-11-09：R6 legacy lane 与保存的正式 tunnel
+
+本轮先汇总新意见再核共同状态：`credential === undefined` 是 legacy 身份，并非可跳过授权；展示 endpoint 可能属于候选，并非仍在运行的正式 endpoint。前轮分别覆盖新式 credential 与 endpoint 结束，但未覆盖这两种旧入口/候选交错。
+
+- subscribe 在开始及挑战完成后无条件执行原凭据授权；与 unsubscribe 共用 `requireCurrentCaller`，最终 external CAS 只允许原新式 token/issuer，或仍处于 legacy 的无 credential 调用。真实隔离 rpc 在首次 legacy 授权后转正同 attempt/配对码/回调的 B，旧 HEAD 继续写新 binding；修后拒绝且逐字保持 B。没有重开 owner 权限，也没有将历史 opaque 解释成新凭据。
+- start-temporary 查当前展示 endpoint 与保存的正式 previousEndpoint，复用仍有效 runner 并核对 generation，不为未经验证的候选停止正式 tunnel；保留原到期时间。首次临时正式 A→长期候选 B→临时候选 C 的原反例 RED；修后取消 C 和完整验证 C 都只 start 一次。真实 Settings/RPC 流程使用 controller 隔离替身；原实际子进程/controller 生命周期检查继续覆盖 start/allowToken/stop，不冒充公网或 Work 验收。
+- 同型检查覆盖所有可选 credential 分支、subscribe/unsubscribe CAS、read/reply/image/ask 和 proof/evidence，以及取消/轮换/切换对共享 runner 的影响。没有新增 Host 产品逻辑、恢复签发体系或添加 fallback 链；同一 caller CAS 约束被收拢复用。
+- 插件 `4aa4e10e7e1f41ad7ac0695cb999d1303de53810`，定向43/43、干净完整Dot235/235、类型与构建通过。alpha.47 自有89文件逐字节一致；SHA256 `41fd333caa75b7cf33ed7a92b0c00d667406b433305336052479912e2dc2e208`，压缩22,375,959字节、展开61,807,562字节，预算不变。contract/SDK未新增改动，前轮contract663项与内存检查证据按原源码适用。
+- GitHub 确认前一插件提交 d218 的两项CI均绿，catalog恢复已由Linux CI确认，发布步骤跳过。Host1b0348云端未发现主要问题；这些均不充当两份新HEAD的批准。两条新意见已分别回复并从远端逐字回读，仍待新HEAD的CI和复审；未合并、发布、安装或重启。
+- 最终配套 Host API 隔离编译、Biome/diff通过；精确alpha.47归档/闭包/显示与空缓存离线安装19/19（`/tmp/f202-alpha47-host-acceptance.log`）。本轮未重复不受影响的Web页面或contract全套，也没有使用旧Head的远端结果冒充新Head批准。

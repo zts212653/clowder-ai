@@ -5,6 +5,6 @@ export const BUNDLED_PLUGIN_DEFINITIONS = [
   {
     catalogId: 'chatgpt-dot',
     manifest: CHATGPT_DOT_PLUGIN_MANIFEST,
-    prebuilt: { sha256: '8cec747364acbcfc7936a95f701335b7c4f457aef8db2f2789e81d9ebd2ae893' },
+    prebuilt: { sha256: '41fd333caa75b7cf33ed7a92b0c00d667406b433305336052479912e2dc2e208' },
   },
 ];
