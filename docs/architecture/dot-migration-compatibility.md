@@ -1,6 +1,6 @@
 # Dot plugin migration: compatibility and validation
 
-This describes the paired migration candidate in [Host #1923](https://github.com/zts212653/clowder-ai/pull/1923) and [plugins #209](https://github.com/zts212653/clowder-ai-plugins/pull/209). Public scope discussion is [#1932](https://github.com/zts212653/clowder-ai/issues/1932); an open discussion is not acceptance or release approval.
+This describes the paired migration candidate in [Host #1923](https://github.com/zts212653/clowder-ai/pull/1923) and [plugins #209](https://github.com/zts212653/clowder-ai-plugins/pull/209). The [accepted scope in #1932](https://github.com/zts212653/clowder-ai/issues/1932#issuecomment-6760968355) defines ownership, legacy compatibility and off-mode boundaries. Scope acceptance does not approve the implementation, merge or release.
 
 ## Product boundary
 
