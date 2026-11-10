@@ -56,7 +56,7 @@ test('start:status reads the official runtime namespace unless an open-source ch
     startEntry.indexOf("if (mode === 'status')"),
     startEntry.indexOf('} else if (IS_WINDOWS)'),
   );
-  assert.match(statusBlock, /args = \['daemon-status'\]/);
+  assert.match(statusBlock, /args = \['daemon-status', \.\.\.runtimeTargetArgs\(rest\)\]/);
   assert.match(statusBlock, /cmd = resolve\(__dirname, 'runtime-worktree\.sh'\)/);
   // In-place starts use start-dev.sh's namespace, so start, start:status and stop agree.
   assert.match(

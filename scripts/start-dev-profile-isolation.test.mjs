@@ -1287,8 +1287,12 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
           `runtime-worktree.sh start -- --daemon ${options.join(' ')}`,
         );
       }
+      // status queries the named runtime: pnpm's leading `--` is dropped and only target options are passed.
       assert.deepEqual(runStartEntry(project, ['status', '--', '--dir', '../custom-runtime']), [
-        'runtime-worktree.sh daemon-status',
+        'runtime-worktree.sh daemon-status --dir ../custom-runtime',
+      ]);
+      assert.deepEqual(runStartEntry(project, ['status', '--', '--branch', 'runtime/custom', '--remote', 'upstream']), [
+        'runtime-worktree.sh daemon-status --branch runtime/custom --remote upstream',
       ]);
     });
   });
@@ -1313,7 +1317,7 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
         );
         assert.deepEqual(
           runStartEntry(project, ['start:status', '--', '--dir', customRuntime], {}, { viaPnpm: true }),
-          ['runtime-worktree.sh daemon-status'],
+          [`runtime-worktree.sh daemon-status --dir ${customRuntime}`],
         );
         assert.equal(
           runStartEntry(project, ['start', '--', '--daemon'], {}, { viaPnpm: true })[0],

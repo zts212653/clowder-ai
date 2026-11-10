@@ -65,6 +65,22 @@ function requestsRuntime(args) {
   return false;
 }
 
+/**
+ * Runtime target options for `daemon-status`. runtime-worktree.sh consumes the
+ * leading `--` only for start/restart, so drop pnpm's separator here and pass
+ * just the options that select which runtime to read.
+ */
+function runtimeTargetArgs(args) {
+  const options = args[0] === '--' ? args.slice(1) : args;
+  const target = [];
+  for (let index = 0; index < options.length && options[index] !== '--'; index += 1) {
+    if (!['--dir', '--branch', '--remote'].includes(options[index])) continue;
+    target.push(...options.slice(index, index + 2));
+    index += 1;
+  }
+  return target;
+}
+
 /** Mirrors runtime-worktree.sh worktree_exists for its default RUNTIME_DIR (../cat-cafe-runtime). */
 function existingRuntimeWorktree() {
   const runtimeDir = resolve(projectRoot, '..', 'cat-cafe-runtime');
@@ -117,7 +133,7 @@ if (mode === 'status') {
     runWindowsStatus({ projectRoot });
   } else {
     let cmd = resolve(__dirname, 'runtime-worktree.sh');
-    let args = ['daemon-status'];
+    let args = ['daemon-status', ...runtimeTargetArgs(rest)];
     if (startsInPlaceByDefault(rest)) {
       // Report the daemon `pnpm start` launched in place, the same one `pnpm stop` stops.
       cmd = resolve(__dirname, 'start-dev.sh');
