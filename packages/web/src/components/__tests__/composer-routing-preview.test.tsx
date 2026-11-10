@@ -160,6 +160,23 @@ function RoutedRecipientProbe() {
 }
 
 describe('server-backed composer routing preview', () => {
+  it('names an unavailable plugin without claiming its input was redirected to the named member', async () => {
+    api.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.includes('addressed-targets')
+          ? {
+              targets: [],
+              knownTargets: [{ id: 'pi_dot', alias: 'dot', displayName: 'Dot', kind: 'plugin', enabled: false }],
+            }
+          : { targetCats: ['codex'], reason: { kind: 'current_message_mentions' }, unavailableTargets: ['pi_dot'] },
+    }));
+    await act(async () => root.render(<RoutedRecipientProbe />));
+    await act(async () => vi.advanceTimersByTimeAsync(180));
+    expect(host.textContent).toContain('dot 当前无法接收');
+    expect(host.textContent).not.toContain('改发给');
+  });
+
   it('shows a server-confirmed unavailable recipient and replacement without opening a tooltip', async () => {
     api.mockResolvedValue({
       ok: true,

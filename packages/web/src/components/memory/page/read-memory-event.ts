@@ -3,13 +3,24 @@ import { apiFetch } from '@/utils/api-client';
 import { eventCorrectionProjection, hasValidEventCorrections } from './event-correction-read';
 import { isMemoryEvent, type MemoryEvent, memoryObject } from './owner-memory-read';
 
-export async function readEvent(id: string, signal: AbortSignal, afterCurrentGet = false): Promise<MemoryEvent> {
+export async function readEvent(
+  id: string,
+  signal: AbortSignal,
+  afterCurrentGet = false,
+  expectedRevision?: string,
+): Promise<MemoryEvent> {
   signal.throwIfAborted();
   const path = `/api/memory/events/${encodeURIComponent(id)}`;
-  const response = await apiFetch(path, { signal }, { afterCurrentGet });
-  if (!response.ok) throw new Error('Event unavailable');
+  const response = await apiFetch(
+    expectedRevision ? `${path}?revision=${encodeURIComponent(expectedRevision)}` : path,
+    { signal },
+    { afterCurrentGet },
+  );
+  if (!response.ok) throw new Error(response.status === 409 ? 'memory_revision_changed' : 'Event unavailable');
   const body: unknown = await response.json();
   signal.throwIfAborted();
+  if (expectedRevision && memoryObject(body) && body.revision !== expectedRevision)
+    throw new Error('memory_revision_changed');
   if (isMemoryEvent(body) && body.eventId === id) return body;
   if (
     !memoryObject(body) ||

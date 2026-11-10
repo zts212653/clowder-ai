@@ -259,7 +259,7 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     type: 'python',
     port: 9880,
     features: ['memory-semantic-search'],
-    envVars: ['EMBED_URL', 'EMBED_PORT'],
+    envVars: ['EMBED_URL', 'EMBED_PORT', 'EMBED_G0_URL'],
     endpointEnvVars: ['EMBED_URL'],
     portFallback: { envVar: 'EMBED_PORT', host: 'http://127.0.0.1' },
     defaultEndpoint: 'http://127.0.0.1:9880',

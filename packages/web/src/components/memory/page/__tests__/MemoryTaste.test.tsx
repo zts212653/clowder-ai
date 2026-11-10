@@ -105,7 +105,7 @@ it.each([
   );
   await render();
   await select();
-  expect(host.textContent).toContain(status === 'not_recorded' ? '原始对话没有记录下来' : '暂时读不到出处对话');
+  expect(host.textContent).toContain(status === 'not_recorded' ? '来源没有记录下来' : '来源暂时读不到');
   expect(host.textContent).not.toContain('查看原消息');
 });
 it('partial statistics stay unknown, absent channels are not zero, IDs are never rendered', async () => {
@@ -120,7 +120,7 @@ it('partial statistics stay unknown, absent channels are not zero, IDs are never
   await render();
   await select();
   expect(host.textContent).toContain('部分读到');
-  expect(host.textContent).toContain('暂时读不到被想起记录');
+  expect(host.textContent).toContain('使用次数还没接进来');
   expect(host.textContent).not.toContain('检索命中 0');
   expect(host.textContent).not.toContain('taste-abcdef');
   expect(host.textContent).not.toContain('sha256:');
@@ -173,12 +173,12 @@ it('a malformed source can be retried and cannot create a navigation action', as
   );
   await render();
   await select();
-  expect(host.textContent).toContain('暂时读不到出处');
+  expect(host.textContent).toContain('来源暂时读不到');
   expect(host.textContent).not.toContain('查看原消息');
   fetchMock.mockImplementation(() =>
     ok({ status: 'ready', canOpen: true, title: '设计讨论', threadId: 'thread-owner', messageId: 'm-owner' }),
   );
-  await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '重读出处')?.click());
+  await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '重读来源')?.click());
   expect(host.textContent).toContain('查看原消息');
 });
 it('a source response lacking an exact message coordinate never displays an open action', async () => {
@@ -295,4 +295,22 @@ it('a date-only legacy record has no invented local proposal instant', async () 
   await render();
   expect(host.querySelector('time')?.textContent).toContain('记录日期');
   expect(host.querySelector('time')?.textContent).toContain('提出时间没有记录下来');
+});
+
+it('lets an owner edit a legacy taste whose source was never recorded', async () => {
+  const legacy = { ...entry, status: 'active' };
+  fetchMock.mockImplementation((url: string) =>
+    url === '/api/memory/taste'
+      ? ok({ readStatus: 'ready', entries: [legacy], coverage: { unverified: 0 } })
+      : url.includes('/source?')
+        ? ok({ status: 'not_recorded', canOpen: false, title: null })
+        : ok(legacy),
+  );
+  await render();
+  await select();
+  const edit = [...host.querySelectorAll('button')].find((b) => b.textContent === '编辑');
+  expect(edit).toBeDefined();
+  expect(edit?.disabled).toBe(false);
+  expect(host.textContent).toContain('来源没有记录下来');
+  expect(host.textContent).not.toContain('来源读不到，暂时不能编辑');
 });

@@ -1,7 +1,14 @@
+import { isAbsolute } from 'node:path';
 import { executedInvocations } from './lib/shell-invocation.mjs';
-import { constrainedGhApiOperation, constrainedGhPullRequestOperation } from './native-effect-github-classifier.mjs';
+import {
+  constrainedGhApiOperation,
+  constrainedGhPullRequestOperation,
+  managedGhOperation,
+} from './native-effect-github-classifier.mjs';
 import { withoutInterpreterSource } from './native-effect-interpreter-source.mjs';
 import { proveProgramSelection } from './native-effect-program-selection.mjs';
+import { expandSegmentBindings } from './native-effect-shell-expansion.mjs';
+import { shellInvocation, shellWords } from './native-effect-shell-tokenizer.mjs';
 
 const quote = (word) => (/^[A-Za-z0-9_./:=,+@%-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 
@@ -16,6 +23,40 @@ const LOAD_ENV = [
   'BASH_ENV',
   'ENV',
 ];
+
+/** Even an uncertain launcher still identifies its literal environment prefix.
+ * Remove only PATH assignment words before its program, never data/code operands,
+ * execution evidence, another env setting, or the working-directory boundary. */
+export function withoutPathTargets(raw, cwd) {
+  if (!raw.includes('PATH=')) return raw;
+  const calls = executedInvocations(raw, { cwd }).directInvocations;
+  if (calls?.length !== 1 || !calls[0].environment?.some((word) => word.startsWith('PATH='))) return raw;
+  const words = shellWords(raw, { prefixOnly: true }) ?? [];
+  const programIndex = words.findIndex((word) => word.value === calls[0].program);
+  if (programIndex < 0) return raw;
+  const assignments = words.slice(0, programIndex).filter((word) => word.value.startsWith('PATH='));
+  for (const word of assignments.reverse()) raw = raw.slice(0, word.start) + raw.slice(word.end);
+  return raw;
+}
+
+/** A literal bound Git directory is a coordinate, not generated control argv.
+ * The root pass defers this one shape to its contextual pass; every other
+ * variable/code operand keeps the original execution evidence. */
+export function boundGitDirectoryView(call, bindings) {
+  if (call.program !== 'git' || call.wrappers?.length || call.environment?.length) return null;
+  const prefix = call.text.match(
+    /^git\s+-C\s+((?:\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*)|"\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_]\w*)"))\s+/,
+  );
+  if (!prefix || /[$`]/.test(call.text.slice(prefix[0].length))) return null;
+  const result = { defer: true };
+  const name = prefix[1].match(/[A-Za-z_]\w*/)[0];
+  if (!bindings?.has(name)) return result;
+  const variants = expandSegmentBindings(prefix[1], bindings);
+  if (variants.length !== 1 || !variants[0].argvPreserved) return result;
+  const parsed = shellInvocation(variants[0].text);
+  if (!parsed.complete || parsed.words.length !== 1 || !isAbsolute(parsed.words[0].value)) return result;
+  return { ...result, text: call.text.replace(prefix[1], variants[0].text) };
+}
 
 /** New read semantics retain program identity and the original environment boundary. */
 export function observedReadProgram(command, cwd, namespaceStable) {
@@ -39,7 +80,9 @@ export function observedReadProgram(command, cwd, namespaceStable) {
   if (call.redirections?.length || selection?.kind !== 'repository_gh_wrapper') return { unproved: true };
   const named = ['gh', ...call.programOperands].map(quote).join(' ');
   const operation = constrainedGhApiOperation(named) ?? constrainedGhPullRequestOperation(named);
-  return operation?.effect === 'read' ? { command: named, unproved: false } : {};
+  return operation?.effect === 'read' || managedGhOperation(call.programOperands)
+    ? { command: named, unproved: false }
+    : {};
 }
 
 /** Project argv roles without certifying the selected executable. PATH and the
@@ -48,7 +91,7 @@ export function observedReadProgram(command, cwd, namespaceStable) {
  */
 export function invocationTargetView(command, cwd) {
   const reader = executedInvocations(command, { cwd });
-  const call = completeDirectInvocation(reader);
+  const call = completeDirectInvocation(reader, true);
   if (!call) return null;
   const operands = ['echo', 'printf'].includes(call.name) ? [] : call.programOperands;
   // Empty argv slots are real slots: dropping an empty -e value could promote
@@ -65,11 +108,11 @@ export function invocationTargetView(command, cwd) {
   return { text: targets.join(' '), call, programSelection };
 }
 
-function completeDirectInvocation(reader) {
+function completeDirectInvocation(reader, targetOnly = false) {
   const calls = reader.directInvocations;
   if (!reader.complete || calls?.length !== 1) return null;
   const call = calls[0];
-  if (!call.argvComplete || !call.coordinateKnown || call.delegated || call.generatedCode) return null;
+  if (!call.argvComplete || !call.coordinateKnown || (!targetOnly && call.delegated) || call.generatedCode) return null;
   if (typeof call.program !== 'string' || !call.program) return null;
   // Generated argv and code remain on the conservative original-source path.
   if (call.argumentEvidence?.length || call.unprovedCodeEvidence?.length) return null;

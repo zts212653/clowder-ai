@@ -161,14 +161,7 @@ export function MemberEditorPage({
               <fieldset className="member-editor-fields" disabled={e.saving}>
                 {!cat && identitySection}
                 <div id={sectionId('model')}>
-                  {cat?.id === 'gpt-dot' ? (
-                    <p className="member-helper">
-                      砚砚 · dot 身份独立，沿用 ChatGPT 已连接的猫咖插件。
-                      <a className="underline" href="/settings?s=plugins#chatgpt-dot">
-                        在插件集成中管理连接 ›
-                      </a>
-                    </p>
-                  ) : cat && e.protectedCloudIdentity ? (
+                  {cat && e.protectedCloudIdentity ? (
                     <ProtectedCloudIdentitySection
                       protection={e.protectedCloudIdentity}
                       restoring={e.restoringCloudIdentity}

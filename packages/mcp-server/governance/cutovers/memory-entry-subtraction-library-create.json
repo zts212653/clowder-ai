@@ -1,0 +1,52 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "library"
+  },
+  "retiredNames": ["cat_cafe_library_create", "cat_cafe_library_dry_run"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "53fde30358c5c27e50b6f0eb12932f2fc2fa6a99",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/library-lifecycle-tools.ts",
+        "packages/mcp-server/src/tools/index.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "L0 and prompt templates never named these tools; the owner library page calls the same POST /api/library/bind-dry-run and /api/library/register routes, now including exclude.",
+      "absenceEvidence": ["cat_cafe_library_create", "cat_cafe_library_dry_run"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/capability-wakeup-index.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/library-lifecycle-tools.test.js",
+        "packages/mcp-server/test/library-lifecycle-owner.test.js",
+        "packages/mcp-server/test/server-toolsets-annotations.test.ts",
+        "packages/api/test/memory-library-mcp-writes.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval consumes these tools; the register and dry-run routes are unchanged.",
+      "absenceEvidence": ["cat_cafe_library_create", "cat_cafe_library_dry_run"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No telemetry classifies these tool names.",
+      "absenceEvidence": ["cat_cafe_library_create", "cat_cafe_library_dry_run"]
+    }
+  }
+}

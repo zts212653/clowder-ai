@@ -11,6 +11,7 @@ import {
   type PersonMemoryOwnerSourceReaderDeps,
 } from './PersonMemoryOwnerSourceReader.js';
 import type { PersonMemoryStore } from './PersonMemoryStore.js';
+import { personDeliveryRevision, readPersonDelivery } from './person-memory-owner-delivery.js';
 import { readPersonMemoryProposals } from './person-memory-owner-proposals.js';
 import {
   personAggregateOwnerRevision,
@@ -122,10 +123,15 @@ export class PersonMemoryOwnerReadService {
     };
   }
 
-  async readDetail(ownerUserId: string, personId: PersonIdentity['personId']) {
+  async readDetail(ownerUserId: string, personId: PersonIdentity['personId'], deliveryRevision?: string) {
     const loaded = await this.loadOwnedPerson(ownerUserId, personId);
     if (!loaded) return { status: 'not_available' as const };
     const { person, claims, relationships, events } = loaded;
+    if (deliveryRevision !== undefined) {
+      const current = personDeliveryRevision(loaded);
+      if (!current) return { status: 'not_available' as const };
+      if (current !== deliveryRevision) return { status: 'version_changed' as const };
+    }
     const proposalProjection = await readPersonMemoryProposals(this.deps.store, ownerUserId, person, MAX_DETAIL_ITEMS);
     return {
       status: 'ready' as const,
@@ -202,6 +208,9 @@ export class PersonMemoryOwnerReadService {
       },
     };
   }
+
+  readDelivery = (owner: string, id: string, revision: string) =>
+    readPersonDelivery(owner, id, revision, (owner, id) => this.loadOwnedPerson(owner, id), this.sourceReader);
 
   async readSource(ownerUserId: string, personId: PersonIdentity['personId'], selector: PersonMemorySourceSelector) {
     const person = await this.deps.store.getPerson(ownerUserId, personId);

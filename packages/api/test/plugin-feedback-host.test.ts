@@ -27,7 +27,7 @@ test('two ordinary packages discover their declared HTML resources through the s
             kind: 'slot-item',
             label: 'Other',
             command: 'open',
-            group: 'composer.actions',
+            group: 'composer.quick-phrases',
           },
         ],
       },
@@ -46,4 +46,16 @@ test('two ordinary packages discover their declared HTML resources through the s
       ['second', 'panel'],
     ],
   );
+  assert.deepEqual(ui.list('composer.quick-phrases'), []);
+  ui.activate({
+    ...admission,
+    instance: { ...admission.instance, pluginInstanceId: 'phrases' },
+    packageRecord: { ...admission.packageRecord, pluginId: 'official.quick-phrases' },
+  });
+  assert.deepEqual(
+    ui.list('composer.quick-phrases').map(({ instanceId, resourcePath }) => [instanceId, resourcePath]),
+    [['phrases', 'panel']],
+  );
+  ui.deactivate('phrases');
+  assert.deepEqual(ui.list('composer.quick-phrases'), []);
 });

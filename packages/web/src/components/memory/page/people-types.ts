@@ -54,7 +54,15 @@ export interface PeoplePage {
   meta: { count: number; limit: number; offset: number; hasMore: boolean; nextOffset?: number };
 }
 export type PersonSource =
-  | { kind: 'message'; title: string | null; threadId: string; messageId: string; canOpen: true }
+  | {
+      kind: 'message';
+      title: string | null;
+      threadId: string;
+      messageId: string;
+      canOpen: true;
+      occurredAt?: number;
+      speaker?: string;
+    }
   | { kind: 'owner_action'; label: string; occurredAt: number; canOpen: false };
 export interface PersonSources {
   status: 'ready' | 'unavailable';

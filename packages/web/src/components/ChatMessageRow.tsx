@@ -8,6 +8,7 @@ import { ChatMessage } from './ChatMessage';
 import { MessageActions } from './MessageActions';
 import { MessageViewportBoundary } from './MessageViewportBoundary';
 import type { MessagePartSelection } from './message-part-selection';
+import { CausalReplyContinuations } from './reply-layers/CausalReplyBody';
 import type { CardConfirmationEntry } from './rich/CardBlock';
 import { WatcherNudgeMessage } from './watcher/WatcherNudgeMessage';
 
@@ -118,6 +119,15 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           />
         )}
       </MessageActions>
+      {!selectionMode ? (
+        <CausalReplyContinuations
+          inputMessageId={message.id}
+          threadId={threadId}
+          getCatById={getCatById}
+          forwardingDisabled={forwardingDisabled}
+          compact={compact}
+        />
+      ) : null}
     </MessageViewportBoundary>
   );
 });

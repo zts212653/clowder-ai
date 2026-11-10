@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { shellWords } from './native-effect-shell-tokenizer.mjs';
+import { shellInvocation, shellWords } from './native-effect-shell-tokenizer.mjs';
 
 /**
  * What a shell word can expand to under a path's bindings (moved out of
@@ -33,6 +33,22 @@ export function isShellBinding(text) {
   const assignments = words[0] === 'export' ? words.slice(1) : words;
   return assignments.length > 0 && assignments.every((word) => /^[A-Za-z_]\w*=/.test(word));
 }
+
+/** Only local literal bindings may preserve an observation of the program's
+ * inherited environment. Export and known consumer variables affect later calls. */
+export function isLocalProgramBinding(text, env = process.env) {
+  const parsed = shellInvocation(text);
+  const words = parsed.words;
+  if (!parsed.complete || parsed.redirections.length || !words.length || !words.every((word) => word.literal))
+    return false;
+  return words.every(({ value }) => {
+    const name = value.match(/^([A-Za-z_]\w*)=/)?.[1];
+    return Boolean(name && !Object.hasOwn(env, name) && !PROGRAM_ENVIRONMENT.test(name));
+  });
+}
+
+const PROGRAM_ENVIRONMENT =
+  /^(?:PATH|CDPATH|IFS|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|GLOBIGNORE|HOME|USERPROFILE|NODE.*|LD_.*|DYLD_.*|PYTHON.*|PERL.*|RUBY.*|GIT_.*|GH_.*|GITHUB_.*|CAT_CAFE_.*|XDG_.*|SSL_.*|CURL_.*|.*PROXY)$/i;
 
 /**
  * Expand known bindings for target attribution, without evaluating or rescanning inserted text.

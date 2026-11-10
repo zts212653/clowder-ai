@@ -4,6 +4,7 @@ import {
   getMessageTimelineCursorTime,
   getMessageTimelineOrderTime,
   getOrderedMessageTimeline,
+  isBeforeHistoryPageCursor,
 } from '../message-timeline';
 
 describe('getMessageTimelineOrderTime', () => {
@@ -208,5 +209,28 @@ describe('presentation timeline view', () => {
 
     expect(getOrderedMessageTimeline(messages)[0]?.id).toBe('inserted-first');
     expect(findEarliestMessageByCursor(messages)?.id).toBe('storage-oldest');
+  });
+});
+
+describe('isBeforeHistoryPageCursor', () => {
+  const at = (id: string, timestamp: number, timelineOrderAt?: number) => ({
+    id,
+    timestamp,
+    ...(timelineOrderAt === undefined ? {} : { timelineOrderAt }),
+  });
+
+  it('compares by the storage score, not by the display timestamp', () => {
+    expect(isBeforeHistoryPageCursor(at('a', 9_000, 1_000), '2000:b')).toBe(true);
+    expect(isBeforeHistoryPageCursor(at('a', 1_000, 3_000), '2000:b')).toBe(false);
+  });
+
+  it('breaks a score tie by id, and a record at the cursor itself is not before it', () => {
+    expect(isBeforeHistoryPageCursor(at('a', 2_000), '2000:b')).toBe(true);
+    expect(isBeforeHistoryPageCursor(at('c', 2_000), '2000:b')).toBe(false);
+    expect(isBeforeHistoryPageCursor(at('b', 2_000), '2000:b')).toBe(false);
+  });
+
+  it('reads the id after the first colon only', () => {
+    expect(isBeforeHistoryPageCursor(at('0001-a', 2_000), '2000:0001-b:tail')).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { initializeVectorBackend } from '../../dist/domains/memory/embedding-lifecycle-backend.js';
 
 async function createLifecycleHarness(options) {
   const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
@@ -183,7 +184,7 @@ The local embedding service can become ready after API startup.
     };
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => makeEmbeddingService(async () => true),
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
+
       getDependentStores: () => [dependentStore],
     });
     try {
@@ -203,12 +204,11 @@ The local embedding service can become ready after API startup.
       await new Promise((resolve) => setTimeout(resolve, 10));
       return true;
     });
-    const backend = { vectorStore: {}, passageVectorStore: {} };
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => service,
-      initializeVectorBackend: async () => {
+      initializeVectorBackend: async (...args) => {
         backendCount += 1;
-        return backend;
+        return initializeVectorBackend(...args);
       },
     });
     try {
@@ -269,7 +269,6 @@ The local embedding service can become ready after API startup.
     });
     const harness = await createLifecycleHarness({
       createEmbeddingService: () => service,
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
     });
     try {
       assert.deepEqual(await harness.lifecycle.activate('on'), {
@@ -320,7 +319,6 @@ The local embedding service can become ready after API startup.
           return true;
         });
       },
-      initializeVectorBackend: async () => ({ vectorStore: {}, passageVectorStore: {} }),
     });
     try {
       const obsolete = harness.lifecycle.activate('on');

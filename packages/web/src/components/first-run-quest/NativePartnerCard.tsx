@@ -111,6 +111,11 @@ export function NativePartnerCard({
                 : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
       </p>
       {!available && <NativeInstallHelp runtime={runtime} />}
+      {partner.identityConflict && !created && (
+        <p role="status" className="mt-3 text-sm text-cafe-secondary">
+          存在同名伙伴，请调整昵称或取消选择。
+        </p>
+      )}
       {partner.missingExisting && !created && (
         <p className="mt-3 text-sm text-cafe-secondary">原伙伴已不在当前名单中。确认创建后，会按保留的配置重新添加。</p>
       )}

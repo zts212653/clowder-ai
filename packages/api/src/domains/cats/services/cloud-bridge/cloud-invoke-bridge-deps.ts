@@ -17,7 +17,6 @@ export interface BridgeLogger {
 }
 
 export interface CloudInvokeBridgeDeps {
-  readonly dispatchDot?: (params: CloudInvokeDispatchParams) => Promise<BridgeDispatchOutcome>;
   readonly hostAdapter?: IConversationHostAdapter | null;
   readonly emitFallback: EmitFallbackFn;
   readonly threadStore: IThreadStore;

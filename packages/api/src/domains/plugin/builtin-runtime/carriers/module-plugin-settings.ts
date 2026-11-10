@@ -23,6 +23,10 @@ import { snapshotModuleAuthority } from './module-authority-snapshot.js';
 /** The original loaded-plugin settings surface; it does not start subscriptions or an adapter. */
 export interface ModulePluginSettingsHost {
   readonly pluginInstanceId: string;
+  readonly external: {
+    readonly endpoint: string;
+    readonly token: string;
+  };
   readonly dataPath: string;
   readonly config: { get(key: string): Promise<unknown> };
   readonly secrets: { get(key: string): Promise<string | undefined> };
@@ -68,18 +72,31 @@ export function assertModuleSettingsDeclaration(record: ExecutablePluginPackageR
 
 export async function invokeModuleSettings(
   input: PluginSettingsInvocationInput,
-  options: {
-    executionWorker: ModuleExecutionWorker;
-    located: VerifiedPluginPackage;
+  options: (
+    | {
+        executionWorker: ModuleExecutionWorker;
+        located: VerifiedPluginPackage;
+        definition?: never;
+        execution?: never;
+      }
+    | {
+        definition: ModulePluginSettingsFactory;
+        execution: ModuleExecutionLease;
+        executionWorker?: never;
+        located?: never;
+      }
+  ) & {
     configuration: PluginRuntimeConfigurationPort;
     storage?: PluginPrivateStoragePort;
     dataDirectoryParent?: string;
     log: ModulePluginSettingsHost['log'];
+    externalAccess?: (pluginInstanceId: string) => Promise<{ readonly endpoint: string; readonly token: string }>;
   },
 ): Promise<PluginSettingsInvocationResult> {
   const record = snapshotModuleAuthority(input.packageRecord);
   let settings: ModulePluginSettingsDefinition | undefined;
   let execution: ModuleExecutionLease | undefined;
+  let ownsExecution = false;
   let disposed = false;
   const current = async () => {
     if (disposed) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Settings request has ended');
@@ -88,16 +105,23 @@ export async function invokeModuleSettings(
   try {
     assertModuleSettingsDeclaration(record, input.method);
     await current();
-    const { entrypoint } = await verifyPackageEntrypoint(record, options.located);
-    await options.located.verifyIntegrity();
-    const loaded = await loadExecutionDefinition<ModulePluginSettingsFactory>(
-      options.executionWorker,
-      input.pluginInstanceId,
-      entrypoint,
-      record.manifest,
-    );
-    execution = loaded.lease;
-    const definition = loaded.definition;
+    let definition: ModulePluginSettingsFactory;
+    if (options.definition) {
+      definition = options.definition;
+      execution = options.execution;
+    } else {
+      const { entrypoint } = await verifyPackageEntrypoint(record, options.located);
+      await options.located.verifyIntegrity();
+      const loaded = await loadExecutionDefinition<ModulePluginSettingsFactory>(
+        options.executionWorker,
+        input.pluginInstanceId,
+        entrypoint,
+        record.manifest,
+      );
+      execution = loaded.lease;
+      ownsExecution = true;
+      definition = loaded.definition;
+    }
     if (typeof definition?.settings !== 'function') return { handled: false };
     const host = await createModuleSettingsHost(input, options, current);
     settings = await definition.settings(execution.retain(host) as unknown as ModulePluginSettingsHost);
@@ -122,9 +146,9 @@ export async function invokeModuleSettings(
       await settings?.dispose?.();
     } finally {
       try {
-        await execution?.close();
+        if (ownsExecution) await execution?.close();
       } finally {
-        await options.located.release();
+        await options.located?.release();
       }
     }
   }
@@ -147,6 +171,7 @@ export async function createModuleSettingsHost(
      * pass-through so owners can always reach every declared field.
      */
     variantMode?: 'runtime' | 'management';
+    externalAccess?: (pluginInstanceId: string) => Promise<{ readonly endpoint: string; readonly token: string }>;
   },
   current: () => Promise<void>,
 ): Promise<ModulePluginSettingsHost> {
@@ -222,8 +247,11 @@ export async function createModuleSettingsHost(
     manifest: record.manifest,
   });
   await current();
+  const external =
+    (await options.externalAccess?.(input.pluginInstanceId)) ?? Object.freeze({ endpoint: '', token: '' });
   return {
     pluginInstanceId: input.pluginInstanceId,
+    external,
     dataPath,
     config: { get: (key: string) => read(key, false) },
     secrets: {

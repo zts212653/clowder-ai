@@ -25,6 +25,7 @@ import type {
   CustodyOfferV1,
   EntrustedWorkHumanTerminalReceiptV1,
   EvolutionPreparationSubmissionV1,
+  LifecycleAppendBoundaryInput,
   LifecycleDeliveryFailureReason,
   LifecycleDispatchRef,
   LifecycleInputReadReceipt,
@@ -43,9 +44,11 @@ import {
   entrustedWorkHumanTerminalReceiptV1Schema,
   evolutionPreparationSubmissionV1Schema,
   isCrossThreadProvenance,
+  isLifecycleAppendBoundaryInput,
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  MAX_LIFECYCLE_APPEND_BOUNDARIES,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
@@ -331,6 +334,16 @@ export interface StoredMessage {
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
+    /** Durable reply outcome, distinct from the transport receipt below. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    /** Host receipt: input acceptance only, never a model response. */
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
@@ -1084,6 +1097,8 @@ export interface LifecycleAppendAdmissionInput {
     requiresCompletion?: boolean;
     /** Exact time this source was admitted to the target response. */
     dispatchedAt: number;
+    /** Admission-time body cut for this target's response; absent for legacy callers. */
+    appendBoundary?: LifecycleAppendBoundaryInput;
   }[];
 }
 
@@ -1410,12 +1425,27 @@ export function advanceLifecycleInputDispatchMetadata(
   };
 }
 
+/** The one normalization used by both the API cut and its consumers. */
+export function computeAppendBoundary(content: string): LifecycleAppendBoundaryInput {
+  const normalized = content.trimStart();
+  return {
+    contentOffset: normalized.length,
+    prefixSha256: createHash('sha256').update(normalized, 'utf8').digest('hex'),
+  };
+}
+
+/** Read the exact live body at adoption; no getter means no cut, never a guessed zero. */
+export function boundaryFromLiveBody(getter: (() => string) | undefined): LifecycleAppendBoundaryInput | undefined {
+  return getter ? computeAppendBoundary(getter()) : undefined;
+}
+
 function appendLifecycleResponseInputsMetadata(
   current: LifecycleStoredMessageMetadata | undefined,
   input: Pick<LifecycleAppendAdmissionInput, 'entryId' | 'inputMessageIds'> & {
     targetId: string;
     invocationId: string;
     latestInputTimelineOrderAt: number;
+    appendBoundary?: LifecycleAppendBoundaryInput;
   },
 ): { kind: 'applied'; lifecycle: LifecycleStoredMessageMetadata } | { kind: 'replayed' } | { kind: 'conflict' } {
   if (
@@ -1440,13 +1470,41 @@ function appendLifecycleResponseInputsMetadata(
     (current.latestInputTimelineOrderAt ?? 0) >= input.latestInputTimelineOrderAt
   )
     return { kind: 'replayed' };
+  const existingBoundaries = current.appendBoundaries ?? [];
+  const existingBoundaryInputIds = new Set(existingBoundaries.map((boundary) => boundary.inputMessageId));
+  const boundary = input.appendBoundary;
+  const appendedBoundaries = boundary
+    ? [...new Set(input.inputMessageIds)]
+        .filter((inputMessageId) => !existingBoundaryInputIds.has(inputMessageId))
+        .map((inputMessageId) => ({
+          inputMessageId,
+          contentOffset: boundary.contentOffset,
+          prefixSha256: boundary.prefixSha256,
+        }))
+    : [];
+  // Keep admission order. Equal offsets are distinct causal events; sorting by
+  // offset or id would silently reassign one input's tail to another.
+  const mergedBoundaries = [...existingBoundaries, ...appendedBoundaries];
+  const hasPublicInput = input.inputMessageIds.length > 0;
+  // A new public admission without a trustworthy cut, or a cap overflow, must
+  // clear older cuts instead of leaving a stale cut that would claim this tail.
+  const verifiedBoundaries =
+    (hasPublicInput && !boundary) || mergedBoundaries.length > MAX_LIFECYCLE_APPEND_BOUNDARIES
+      ? undefined
+      : mergedBoundaries.length > 0
+        ? mergedBoundaries
+        : undefined;
+  // Drop an older partial proof instead of persisting an explicit undefined.
+  const { appendBoundaries: _previousBoundaries, ...currentWithoutBoundaries } = current;
+  void _previousBoundaries;
   return {
     kind: 'applied',
     lifecycle: {
-      ...current,
+      ...currentWithoutBoundaries,
       inputEntryIds: input.inputMessageIds.length ? [...current.inputEntryIds, input.entryId] : current.inputEntryIds,
       inputMessageIds: [...current.inputMessageIds, ...input.inputMessageIds],
       latestInputTimelineOrderAt: Math.max(current.latestInputTimelineOrderAt ?? 0, input.latestInputTimelineOrderAt),
+      ...(verifiedBoundaries ? { appendBoundaries: verifiedBoundaries } : {}),
     },
   };
 }
@@ -1464,7 +1522,12 @@ export function prepareLifecycleAppendAdmission(
     new Set(input.inputMessageIds).size !== input.inputMessageIds.length ||
     input.runs.length === 0 ||
     input.runs.some(
-      (run) => !run.targetId || !run.invocationId || !run.responseMessageId || !Number.isFinite(run.dispatchedAt),
+      (run) =>
+        !run.targetId ||
+        !run.invocationId ||
+        !run.responseMessageId ||
+        !Number.isFinite(run.dispatchedAt) ||
+        (run.appendBoundary !== undefined && !isLifecycleAppendBoundaryInput(run.appendBoundary)),
     ) ||
     new Set(input.runs.map((run) => run.targetId)).size !== input.runs.length ||
     new Set(input.runs.map((run) => run.responseMessageId)).size !== input.runs.length ||
@@ -1539,6 +1602,7 @@ export function prepareLifecycleAppendAdmission(
       targetId: run.targetId,
       invocationId: run.invocationId,
       latestInputTimelineOrderAt: Math.max(run.dispatchedAt, ...publicInputs.map(getTimelineOrderTime)),
+      ...(run.appendBoundary ? { appendBoundary: run.appendBoundary } : {}),
     });
     if (transition.kind === 'conflict') return { kind: 'conflict', reason: 'response_lifecycle_conflict' };
     if (transition.kind === 'applied') replayed = false;
@@ -2306,7 +2370,13 @@ export interface IMessageStore {
     input: CompanionDeliveryAcceptance,
   ): StoredMessage | null | Promise<StoredMessage | null>;
 
-  /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
+  /** Atomically advance the existing target carrier without racing generic metadata writers. */
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F096: Update generic extra data; protected outcome fields keep their dedicated authority. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
   /** F310: atomically fence source body and prior custody state before changing the source-owned carrier. */
   compareAndTransitionCustodyOffer(
@@ -3827,10 +3897,40 @@ export class MessageStore {
     return structuredClone(msg);
   }
 
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null {
+    const message = this.messages.find((row) => row.id === id);
+    if (!message || message.recall || message._tombstone) return null;
+    const prior = message.extra?.targetResponse;
+    if (!prior) {
+      const receipt = message.extra?.pluginAddressedReceipt;
+      if (
+        expectedRevision !== 0 ||
+        next.revision !== 1 ||
+        receipt?.targetId !== next.targetId ||
+        receipt.inputMessageId !== next.inputMessageId
+      )
+        return null;
+    } else if (
+      prior.revision !== expectedRevision ||
+      next.revision !== expectedRevision + 1 ||
+      next.targetId !== prior.targetId ||
+      next.inputMessageId !== prior.inputMessageId ||
+      next.execution.id !== prior.execution.id
+    )
+      return null;
+    message.extra = { ...message.extra, targetResponse: structuredClone(next) };
+    return structuredClone(message);
+  }
+
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg || msg.recall || msg._tombstone) return null;
     const {
+      targetResponse: _stripTargetResponse,
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,

@@ -3,14 +3,18 @@
 import { getLifecycleAppendOutcome, isAppendRepeatSource } from '@cat-cafe/shared';
 
 import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
+import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
 import { dispatchReadText, dispatchReceiptDisplay, dispatchReceiptLabel } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
 import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } from './cloud-dispatch-receipt';
 import { HistoryAppendActions } from './HistoryAppendActions';
-import type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
+import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
+import { PluginTargetIcon } from './PluginTargetIcon';
+import { focusCausalContinuation, useCausalReplies } from './reply-layers/CausalReplyContext';
 import { useShellPresentation } from './shell/shell-presentation';
+import { projectTargetReply } from './target-response-projection';
 import { useCloudReply } from './useCloudReply';
 
 interface RecipientProps {
@@ -46,12 +50,26 @@ export function MessageDispatchRecipient({
   recipientCount,
   threadId,
 }: RecipientProps) {
+  const causalReplies = useCausalReplies();
   const navigateToMessage = useMessageNavigation();
   const shell = useShellPresentation();
+  const { knownTargets } = usePluginTargets();
   const cloud = shell === 'v2' ? cloudDispatchReceipt(message, projection.targetId, timelineMessages) : undefined;
   const logical = useCloudReply(cloud?.identity, threadId, timelineMessages, { readDotEvent: shell === 'v2' });
-  const label = getCatLabel(projection.targetId);
   const ref = message.lifecycle?.dispatchRefs?.find((candidate) => candidate.targetId === projection.targetId);
+  const linkedMessage = timelineMessages.find(
+    (candidate) => candidate.id === (projection.statusMessageId ?? ref?.statusMessageId),
+  );
+  const pluginReceipt = pluginDeliveryReceipt(linkedMessage);
+  const targetReply = linkedMessage ? projectTargetReply(linkedMessage, timelineMessages) : undefined;
+  const resultMessageId = targetReply?.resultMessageId;
+  const pluginReply =
+    pluginReceipt && targetReply?.hasBody && resultMessageId
+      ? timelineMessages.find((row) => row.id === resultMessageId)
+      : undefined;
+  const pluginTarget = knownTargets.find((candidate) => candidate.id === projection.targetId);
+  const pluginRecipient = pluginTarget !== undefined || pluginReceipt !== undefined;
+  const label = pluginTarget?.alias ?? (pluginRecipient ? '插件' : getCatLabel(projection.targetId));
   const failure = message.lifecycle?.appendFailures?.find(
     (candidate) => candidate.targetId === projection.targetId && candidate.responseMessageId === ref?.statusMessageId,
   );
@@ -61,9 +79,6 @@ export function MessageDispatchRecipient({
   const processing = projection.phase === 'processing' && !uncertain && failure?.acceptance !== 'incomplete';
   const notAccepted = appendOutcome === 'not_accepted';
   const incomplete = appendOutcome === 'incomplete';
-  const linkedMessage = timelineMessages.find(
-    (candidate) => candidate.id === (projection.statusMessageId ?? ref?.statusMessageId),
-  );
   const linked = linkedMessage?.lifecycle;
   const response = linked?.kind === 'response' ? linked : undefined;
   const appended =
@@ -71,15 +86,25 @@ export function MessageDispatchRecipient({
   const running = response ? response.status === 'processing' : ref?.phase !== 'settled';
   const receipt = dispatchReceiptDisplay(ref, running, message.lifecycle);
   const audit = cloud ? cloudDispatchAudit(cloud, logical.state === 'source_replied') : undefined;
-  const title = [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
+  const title = pluginReply
+    ? '插件的回复已到达'
+    : pluginReceipt?.phase === 'sending'
+      ? '正在向插件投递，尚未确认接收'
+      : pluginReceipt
+        ? pluginReceipt.accepted
+          ? '插件确认收到了这条消息；如果它回复，会作为新消息出现'
+          : '插件没有确认收到，请检查插件状态后重新发送'
+        : [dispatchReceiptLabel(receipt, label, 'recipient'), audit].filter(Boolean).join('\n');
   const awaitingCloudReply =
     cloud && linkedMessage && !hasAssistantBody(linkedMessage) && response?.status === 'completed';
   const replyMessageId =
-    logical.state !== 'unverified'
+    resultMessageId ??
+    pluginReply?.id ??
+    (logical.state !== 'unverified'
       ? logical.replyMessageId
       : awaitingCloudReply
         ? undefined
-        : projection.statusMessageId;
+        : (projection.statusMessageId ?? ref?.statusMessageId));
   const failedDelivery = linked?.kind === 'delivery_failure';
   const notSent =
     cloud?.receipt?.status === 'failed' &&
@@ -87,7 +112,7 @@ export function MessageDispatchRecipient({
     cloud.receipt.idempotency.disposition === 'not_attempted';
   const outcome = response && response.status !== 'processing' ? responseOutcome[response.status] : undefined;
   const pendingCloud = cloud ? pendingCloudDeliveryLabel(cloud) : undefined;
-  const progress = notAccepted
+  const memberProgress = notAccepted
     ? '未并进上一轮（未接收）'
     : incomplete
       ? '追加未完成'
@@ -116,6 +141,22 @@ export function MessageDispatchRecipient({
                           : outcome
                             ? `收到，${outcome}`
                             : '收到，回复状态待核对';
+  const progress =
+    pluginReceipt && targetReply?.terminal
+      ? targetReply.status === 'completed'
+        ? '收到，已回复'
+        : `收到，${responseOutcome[targetReply.status as keyof typeof responseOutcome]}`
+      : pluginReceipt && targetReply?.status === 'processing'
+        ? '收到，正在回…'
+        : pluginReply
+          ? '已有回复内容'
+          : pluginReceipt?.phase === 'sending'
+            ? '正在投递…'
+            : pluginReceipt
+              ? pluginReceipt.accepted
+                ? '已接收'
+                : '未确认接收 · 请检查插件后重新发送'
+              : memberProgress;
   const late = projection.dispatchedAt !== undefined && projection.dispatchedAt - message.timestamp > 60_000;
   return (
     <li
@@ -130,7 +171,11 @@ export function MessageDispatchRecipient({
       ) : whisper ? (
         <span>悄悄话，只有</span>
       ) : null}
-      <CatAvatar catId={projection.targetId} size={16} status={processing ? 'streaming' : undefined} />
+      {pluginRecipient ? (
+        <PluginTargetIcon icon={pluginTarget?.icon} />
+      ) : (
+        <CatAvatar catId={projection.targetId} size={16} status={processing ? 'streaming' : undefined} />
+      )}
       {!checking ? <span className="font-medium text-cafe-secondary">{label}</span> : null}
       <span>
         {late ? `${formatTime(projection.dispatchedAt!)} ` : ''}
@@ -152,18 +197,35 @@ export function MessageDispatchRecipient({
           repeatKind={notAccepted ? 'not_accepted' : incomplete ? 'incomplete' : 'unknown'}
         />
       ) : null}
-      {!checking && replyMessageId && (response || logical.state !== 'unverified') ? (
+      {replyMessageId &&
+      (resultMessageId || pluginReply || causalReplies || response || logical.state !== 'unverified') ? (
         <button
           type="button"
           aria-label={`看${label}的回复`}
+          data-reading-disclosure
           className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
           onClick={() => {
             if (!replyMessageId) return;
+            if (
+              causalReplies?.continuations.get(message.id)?.some((slice) => slice.response.id === replyMessageId) &&
+              focusCausalContinuation(message.id, replyMessageId)
+            )
+              return;
+            if (causalReplies && threadId) {
+              causalReplies.openReference({
+                anchorMessageId: message.id,
+                targetMessageId: replyMessageId,
+                targetCatId: projection.targetId,
+                kind: 'reply',
+              });
+              return;
+            }
             if (logical.state !== 'unverified') navigateToMessage(replyMessageId, { loadIfNeeded: true });
+            else if (pluginReceipt) navigateToMessage(replyMessageId, { loadIfNeeded: true });
             else navigateToMessage(replyMessageId);
           }}
         >
-          · 看回复 ↓
+          · 看回复
         </button>
       ) : null}
     </li>

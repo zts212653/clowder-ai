@@ -39,9 +39,13 @@ export function createSearchEmbeddingCapability(
     embed,
     async embedQueries(texts, signal) {
       assertCurrent();
-      const modelId = embedding.getModelInfo().modelId;
+      const model = embedding.getModelInfo();
       return embed(
-        texts.map((text) => queryEmbeddingInput(text, modelId)),
+        texts.map((text) =>
+          model.queryInstruction !== undefined
+            ? model.queryInstruction + text
+            : queryEmbeddingInput(text, model.modelId),
+        ),
         signal,
       );
     },

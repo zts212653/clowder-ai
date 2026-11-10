@@ -159,7 +159,7 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 2. **发送**：`node <cat-cafe 主仓>/scripts/platform-request.mjs --request <绝对路径>.json`（或主仓里 `pnpm platform:request --request …`）。stdout 一行收据：`callId`、HTTP 状态、`usage`、`responseFile`。
 3. **解码**：从 `responseFile` 读 `data[0].b64_json`，写成 `.png` / `.gif`。
 4. **发布**：`cat_cafe_publish_image`。文件要在允许的文件根里：放在 scratchpad（`/private/tmp/...`）会被拒（`outside allowed file roots`）；放回同一个 `packages/api/uploads/platform-calls/<callId>/` 再发（该目录已 gitignore，原件和收据也在那里）。
-5. **报用量**：一句话报 `usage` 的 token 数；收据没返回 cost 就写「未返回」，别换算成金额，也别写成免费。
+5. **不报用量**：不向 You 报 token 数或费用，也不为了报去查消耗（You 11-09：「我们的 api 费用花不完，而且还有期限，别查了别查了」）。收据留在 `platform-calls/<callId>/receipt.json`，要对账时再看。
 
 **家里实测过的请求形状**（2026-11-09，F336 与 opus55 的贴贴图；参数以官方文档为准，不外推成功率）：
 

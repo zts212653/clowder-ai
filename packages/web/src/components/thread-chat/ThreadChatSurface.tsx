@@ -32,6 +32,7 @@ import { MessageSelectionToolbar } from '../MessageSelectionToolbar';
 import { messageMountPolicy } from '../message-mount-policy';
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-selection';
 import { ImportedSessionNotice } from '../new-conversation/ImportedSessionNotice';
+import { CausalReplyProvider } from '../reply-layers/CausalReplyContext';
 import { ReplyRecallRuntimeProvider } from '../reply-layers/ReplyRecallRuntimeProvider';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
 import { conversationViewCopy } from '../shell/conversation-view.shell-copy';
@@ -174,6 +175,22 @@ export function ThreadChatSurface({
     [jumpToMessage, navigateToMessage],
   );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
+  const revealCausalReference = useCallback(
+    (element: HTMLElement) => {
+      const viewport = scrollContainerRef.current;
+      if (!viewport) return;
+      const area = viewport.getBoundingClientRect(),
+        target = element.getBoundingClientRect();
+      if (target.top < area.top || target.bottom > area.bottom) {
+        const gesture = beginUserScroll();
+        if (!gesture) return;
+        gesture.scrollTo(viewport.scrollTop + target.top - area.top);
+        gesture.end();
+      }
+      element.focus({ preventScroll: true });
+    },
+    [beginUserScroll, scrollContainerRef],
+  );
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
   const { getCatById } = useCatData();
@@ -505,7 +522,15 @@ export function ThreadChatSurface({
           conversationView={conversationViewController}
           enabled={composerPresentation === 'v2'}
         >
-          {surface}
+          <CausalReplyProvider
+            threadId={threadId}
+            messages={selection.selectionMode ? [] : visibleMessages}
+            socketConnected={socketConnected}
+            catStatuses={catStatuses}
+            revealReference={revealCausalReference}
+          >
+            {surface}
+          </CausalReplyProvider>
         </CatProfileCardScope>
       </ChatReferenceScope>
     </MessageNavigationProvider>

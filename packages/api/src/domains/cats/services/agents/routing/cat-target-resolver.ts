@@ -2,6 +2,18 @@ import type { CatAlternative, CatId, CatRoutingError } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getRoster, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
 
+/** Legacy route carriers use string/CatId arrays; plugin identity remains outside catRegistry. */
+export function resolveMessageTarget(
+  input: string,
+  plugins: readonly { id: string; alias: string }[] = [],
+): ReturnType<typeof resolveCatTarget> {
+  const member = resolveCatTarget(input);
+  if ('ok' in member || member.error.kind !== 'cat_not_found') return member;
+  const normalized = input.normalize('NFKC').replace(/^@/, '').toLowerCase();
+  const plugin = plugins.find((p) => p.id === input) ?? plugins.find((p) => p.alias === normalized);
+  return plugin ? { ok: plugin.id as CatId } : member;
+}
+
 function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternative[] {
   const roster = getRoster();
   const configs = catRegistry.getAllConfigs();

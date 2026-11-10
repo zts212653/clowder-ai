@@ -5,7 +5,7 @@ import { MemoryProfileUsage } from './MemoryProfileUsage';
 export function MemoryProfileSource({ endpoint, opening = false }: { endpoint: string; opening?: boolean }) {
   return (
     <section className="space-y-3 border-t border-cafe-subtle pt-3 text-compact">
-      <h4 className="text-xs font-medium text-cafe-muted">{opening ? '什么时候带上 · 出处' : '使用记录 · 出处'}</h4>
+      <h4 className="text-xs font-medium text-cafe-muted">{opening ? '什么时候带上 · 来源' : '使用记录 · 来源'}</h4>
       {opening && <p className="text-cafe-muted">每场新对话开始时带上这段；已经开始的对话不会重新加入。</p>}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-cafe-muted">
         <MemoryProfileUsage endpoint={endpoint.replace('/source?', '/usage?')} />

@@ -116,7 +116,7 @@ import {
 } from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
-import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
@@ -199,6 +199,7 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  const outputCursorReleases: Array<() => void> = [];
   // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
   // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
   const routeResponseProducers = responseProducers.openRouteScope();
@@ -211,9 +212,13 @@ export async function* routeParallel(
       threadId,
       options,
       invocationServices,
+      outputCursorReleases,
       routeResponseProducers,
     );
   } finally {
+    outputCursorReleases.forEach((release) => {
+      release();
+    });
     // However the route exits, it commits no R after this.
     routeResponseProducers.leaveAll();
     await invocationServices.dispose();
@@ -228,6 +233,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  outputCursorReleases: Array<() => void>,
   routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
@@ -376,13 +382,6 @@ async function* routeParallelPrepared(
     return;
   }
   const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
-  const triggerMessageId = currentUserMessageId ?? options.a2aTriggerMessageId;
-  const collectiveBoundTurn =
-    Boolean(deps.dotReplyTarget) &&
-    isCollectiveBoundResponse(
-      options.executionScope,
-      triggerMessageId ? await deps.messageStore.getById(triggerMessageId) : null,
-    );
   const thinkingMode = options.thinkingMode ?? 'play';
   const turnExecutionKind = 'ordinary';
   const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
@@ -1394,6 +1393,15 @@ async function* routeParallelPrepared(
                 messageId: effectiveMsg.lifecycleResponseMessageId,
                 priorFrontierMessageId: effectiveMsg.lifecyclePriorFrontierMessageId,
               });
+              const catId = effectiveMsg.catId;
+              const release = options.onLifecycleOutputCursorReady?.({
+                threadId,
+                catId,
+                invocationId: parsed.invocationId,
+                responseMessageId: effectiveMsg.lifecycleResponseMessageId,
+                getContent: () => catText.get(catId) ?? '',
+              });
+              if (release) outputCursorReleases.push(release);
             }
             if (deps.invocationDeps.turnExecutionStore) {
               turnExecutionProjectionByInvocation.set(parsed.invocationId, {
@@ -1898,25 +1906,6 @@ async function* routeParallelPrepared(
         : lifecycleResponse && providerFailureText
           ? providerFailureText
           : undefined;
-      const completedDotReturnCommit =
-        lifecycleResponse?.status === 'completed' && ownInvId && !collectiveBoundTurn && deps.dotReplyTarget
-          ? (message: AppendMessageInput) =>
-              commitCompletedRouteResponse(deps, {
-                responseMessageId: lifecycleResponse.messageId,
-                invocationId: ownInvId,
-                terminal: { status: 'completed', completedAt: lifecycleResponse.completedAt },
-                message,
-                targetCats: [],
-                allowDotReturn: true,
-                triggerMessageId,
-                admitWake: options.commitCompletedA2AWake,
-                userId,
-                ownerAuthProvenance,
-                threadId,
-                callerCatId: msg.catId as CatId,
-                ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
-              })
-          : undefined;
       const failedA2AReportCommit =
         lifecycleResponse?.status === 'failed' &&
         (options.commitFailedA2AReport ||
@@ -2194,7 +2183,7 @@ async function* routeParallelPrepared(
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
             },
           };
-          const terminalCommit = completedDotReturnCommit ?? failedA2AReportCommit;
+          const terminalCommit = failedA2AReportCommit;
           let storedMsg = null;
           if (deps.freshnessOutputCommitCoordinator && ownInvId) {
             outputCommitDecision = await deps.freshnessOutputCommitCoordinator.commit({
@@ -2359,8 +2348,7 @@ async function* routeParallelPrepared(
             };
             const answerBearingNoText =
               hasRichBlocks || Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
-            const terminalCommit =
-              (answerBearingNoText ? completedDotReturnCommit : undefined) ?? failedA2AReportCommit;
+            const terminalCommit = failedA2AReportCommit;
             let storedNoText = null;
             let noTextOutputCommitDecision: OutputCommitDecision | undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvId) {
@@ -2676,7 +2664,7 @@ async function* routeParallelPrepared(
             'conciergeConfig' in conciergeCtx && conciergeContextForCat(conciergeCtx, cid as string)?.conciergeConfig
               ? stripTriagePlanMarkers(text)
               : text;
-          const ms = parseA2AMentions(visibleText, cid as CatId);
+          const ms = parseA2AMentions(visibleText, cid as CatId, await deps.addressedPlugins?.list());
           if (ms.length > 0) {
             log.info(
               { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },

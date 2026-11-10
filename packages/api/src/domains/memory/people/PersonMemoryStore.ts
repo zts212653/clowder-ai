@@ -223,14 +223,20 @@ export interface HardForgetPersonMemoryProposalInput {
   proposalId: CaptureCandidateId;
   requestId: string;
   requestedAt: number;
+  /** Browser confirmation is bound to the entire previewed lineage. */
+  expectedRevision?: string;
 }
+
+export type PersonMemoryProposalForgetPreview =
+  | { outcome: 'eligible'; count: number; revision: string; proposalIds: CaptureCandidateId[] }
+  | { outcome: 'absent' | 'person_bound' | 'conflict' };
 
 export type PersonMemoryProposalForgetResult =
   | {
       outcome: 'purged' | 'already_absent';
       receipt: PersonMemoryDeletionReceipt;
     }
-  | { outcome: 'person_bound' | 'conflict' };
+  | { outcome: 'person_bound' | 'conflict' | 'stale_revision' };
 
 export type PersonAliasResolution =
   | { status: 'resolved'; person: PersonIdentity }
@@ -277,5 +283,9 @@ export interface PersonMemoryStore extends OwnerMemoryActionStore {
   amendInteractionEvent(input: AmendPersonInteractionInput): Promise<PersonMemoryAmendmentResult>;
   redactItem(input: RedactPersonMemoryItemInput): Promise<PersonMemoryRedactionResult>;
   hardForget(input: HardForgetPersonInput): Promise<PersonMemoryDeletionReceipt>;
+  inspectProposalForget(
+    ownerUserId: string,
+    proposalId: CaptureCandidateId,
+  ): Promise<PersonMemoryProposalForgetPreview>;
   hardForgetProposal(input: HardForgetPersonMemoryProposalInput): Promise<PersonMemoryProposalForgetResult>;
 }

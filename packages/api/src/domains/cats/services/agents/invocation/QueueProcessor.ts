@@ -14,6 +14,7 @@ import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type {
   CatId,
   LifecycleActiveRun,
+  LifecycleAppendBoundaryInput,
   LifecycleAppendFailure,
   MessageContent,
   MessageFrom,
@@ -75,6 +76,7 @@ import type {
 import { classifyInvocationRecoveryStatus } from '../../stores/ports/invocation-state-machine.js';
 import {
   type AdvanceLifecycleInputDispatchResult,
+  boundaryFromLiveBody,
   hydrateReplyPreview,
   type IMessageStore,
   isTimelinePublished,
@@ -141,7 +143,7 @@ import {
   type ExecutionOwnerMatch,
 } from './InvocationTracker.js';
 import { projectLifecycleAppendAction } from './lifecycle-append-projection.js';
-import { emitLifecycleMessageUpdated } from './lifecycle-message-update.js';
+import { emitLifecycleMessageUpdated, emitStoredMessageUpdated } from './lifecycle-message-update.js';
 import {
   appendLifecycleResponseWithReadBack,
   LifecycleResponseAdmissionUnknownError,
@@ -277,6 +279,17 @@ interface TrackerLike {
   ): (() => void) | null;
   getAgentClientActiveRunDispatcher?(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined;
   getActiveSlots?(threadId: string): Array<{ catId: string; startedAt: number; activeRun?: LifecycleActiveRun }>;
+  bindLifecycleOutputCursor?(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    getter: () => string,
+  ): (() => void) | null;
+  getLifecycleOutputCursor?(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+  ): (() => string) | undefined;
   appendLifecycleActiveRunInputs?(
     threadId: string,
     catId: string,
@@ -672,6 +685,8 @@ interface QueueAdmissionAttempt {
 }
 
 export class QueueProcessor {
+  /** Composed after Plugin Manager startup; plugins never enter member execution. */
+  addressedDelivery?: import('../../../../plugin/manager/addressing/addressed-plugin-queue-delivery.js').AddressedPluginQueueDelivery;
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
    *  F118 D4: startedAt supports bounded zombie detection.
@@ -1220,13 +1235,17 @@ export class QueueProcessor {
         threadId: input.threadId,
         entryId: input.entryId,
         inputMessageIds,
-        runs: input.expectedRuns.map((run, index) => ({
-          ...run,
-          dispatchedAt: seenAt,
-          awaitingAcceptance: true,
-          ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
-          ...(dispatchers[index]?.capabilities.inputReadReceipt ? { inputReadSupported: true } : {}),
-        })),
+        runs: input.expectedRuns.map((run, index) => {
+          const appendBoundary = this.appendBoundaryForRun(input.threadId, run);
+          return {
+            ...run,
+            dispatchedAt: seenAt,
+            awaitingAcceptance: true,
+            ...(dispatchers[index]?.capabilities.inputCompletionReceipt ? { requiresCompletion: true } : {}),
+            ...(dispatchers[index]?.capabilities.inputReadReceipt ? { inputReadSupported: true } : {}),
+            ...(appendBoundary ? { appendBoundary } : {}),
+          };
+        }),
       });
       if (admission.kind !== 'applied' && admission.kind !== 'replayed') {
         throw new Error(
@@ -1572,6 +1591,11 @@ export class QueueProcessor {
     }
 
     try {
+      const appendBoundary = this.appendBoundaryForRun(input.threadId, {
+        targetId: input.catId,
+        invocationId: activeRun.invocationId,
+        responseMessageId: activeRun.responseMessageId,
+      });
       const result = await queue.commitProjectedWakeCoverage(messageStore, {
         threadId: input.threadId,
         userId: input.userId,
@@ -1580,6 +1604,7 @@ export class QueueProcessor {
         responseMessageId: activeRun.responseMessageId,
         entries: input.entries,
         at: input.seenAt ?? Date.now(),
+        ...(appendBoundary ? { appendBoundary } : {}),
       });
       if (result.kind !== 'applied' && result.kind !== 'replayed')
         return { outcome: 'rejected', reason: 'lifecycle_conflict' };
@@ -1725,6 +1750,17 @@ export class QueueProcessor {
     return { outcome: 'adopted', adoptedEntryIds };
   }
 
+  private appendBoundaryForRun(
+    threadId: string,
+    run: { targetId: string; invocationId: string; responseMessageId: string },
+  ): LifecycleAppendBoundaryInput | undefined {
+    const getter = this.deps.invocationTracker.getLifecycleOutputCursor?.(threadId, run.targetId, {
+      invocationId: run.invocationId,
+      responseMessageId: run.responseMessageId,
+    });
+    return boundaryFromLiveBody(getter);
+  }
+
   private async adoptExposedQueuedEntry(input: {
     threadId: string;
     userId: string;
@@ -1779,11 +1815,12 @@ export class QueueProcessor {
         return { outcome: 'rejected', reason: 'persistence_unavailable', entryId: claimed.id };
       }
 
+      const appendBoundary = this.appendBoundaryForRun(input.threadId, input.run);
       const admission = await messageStore.commitLifecycleAppendAdmission({
         threadId: input.threadId,
         entryId: claimed.id,
         inputMessageIds: messageIds,
-        runs: [{ ...input.run, dispatchedAt: seenAt }],
+        runs: [{ ...input.run, dispatchedAt: seenAt, ...(appendBoundary ? { appendBoundary } : {}) }],
       });
       if (admission.kind !== 'applied' && admission.kind !== 'replayed') {
         invocationTracker.detachLifecycleActiveRunInputs?.(
@@ -4561,7 +4598,11 @@ export class QueueProcessor {
           ? 'no_available_target'
           : 'invalid_explicit_target';
       const failedTargets = [...queueEntryTargetCats(claimed)];
-      const wakeTargetLabel = failedTargets.length > 0 ? failedTargets.join('、') : '处理成员';
+      const knownPlugins = (await this.addressedDelivery?.options.targets.known()) ?? [];
+      const wakeTargetLabel =
+        failedTargets.length > 0
+          ? failedTargets.map((id) => knownPlugins.find((p) => p.id === id)?.alias ?? id).join('、')
+          : '处理成员';
       const content = claimed.execution.liveSessionId
         ? '语音交流未投递：成员或语音窗口当前不可用。'
         : reason === 'no_available_target'
@@ -4760,6 +4801,73 @@ export class QueueProcessor {
     routingOwnerRetryTarget?: string,
   ): Promise<QueueExecutionResult> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
+    const selectedTargets = executionTargetCats ?? queueEntryTargetCats(entry);
+    const pluginTargets = this.addressedDelivery
+      ? (
+          await Promise.all(
+            selectedTargets.map(async (id) => ((await this.addressedDelivery!.handles(id)) ? id : undefined)),
+          )
+        ).filter((id): id is string => id !== undefined)
+      : [];
+    if (pluginTargets.length > 0) {
+      const entries = [entry, ...exactBatchEntries];
+      try {
+        for (const source of entries) {
+          for (const target of pluginTargets) {
+            if (source.targets.includes(target)) {
+              const receipt = await this.addressedDelivery!.deliver(source, target, (message) => {
+                emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), message);
+              });
+              emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), receipt);
+              if (source.payload.messageId) {
+                const settledSource = await messageStore.getById(source.payload.messageId);
+                if (settledSource) {
+                  this.callerDispatchObservations.registerPersistedSource(settledSource, [target]);
+                  this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), settledSource);
+                }
+                await this.markDeliveredAndEmit(
+                  queueEntryOwnerId(source),
+                  source.threadId,
+                  [source.payload.messageId],
+                  receipt.timestamp,
+                  new Set([source.payload.messageId]),
+                );
+              }
+            }
+          }
+        }
+        // A mixed source keeps its member recipients in the ordinary Queue. They
+        // start on the next drain, through precisely the existing member path.
+        await queue.restoreClaimedEntries(
+          entry.threadId,
+          entries.map((e) => e.id),
+        );
+        await emitQueueUpdated(
+          socketManager,
+          queueEntryOwnerId(entry),
+          entry.threadId,
+          queue.list(entry.threadId, queueEntryOwnerId(entry)),
+          'completed',
+        );
+        return {
+          status: 'succeeded',
+          attemptedQueueEntryIds: entries.map((e) => e.id),
+          terminalInvocationIdByCatId: {},
+        };
+      } catch (error) {
+        await queue.restoreClaimedEntries(
+          entry.threadId,
+          entries.map((e) => e.id),
+        );
+        log.error({ error, entryId: entry.id }, 'Addressed plugin delivery failed');
+        return {
+          status: 'failed',
+          primarySettlementIncomplete: true,
+          attemptedQueueEntryIds: entries.map((e) => e.id),
+          terminalInvocationIdByCatId: {},
+        };
+      }
+    }
     const threadId = entry.threadId;
     const userId = queueEntryOwnerId(entry);
     const intent = entry.execution.intent;
@@ -5908,6 +6016,18 @@ export class QueueProcessor {
             lifecycleQueueTargetsRetired = targetCats.every((target) => lifecycleRetiredTargets.has(target));
             void this.requestDrain(threadId);
             return true;
+          },
+          onLifecycleOutputCursorReady: (input) => {
+            const tracker = this.deps.invocationTracker;
+            if (!tracker.bindLifecycleOutputCursor) return undefined;
+            return (
+              tracker.bindLifecycleOutputCursor(
+                input.threadId,
+                input.catId,
+                { invocationId: input.invocationId, responseMessageId: input.responseMessageId },
+                input.getContent,
+              ) ?? undefined
+            );
           },
           onLifecycleInvocationStarted: async (
             input: Parameters<NonNullable<RouteOptions['onLifecycleInvocationStarted']>>[0],

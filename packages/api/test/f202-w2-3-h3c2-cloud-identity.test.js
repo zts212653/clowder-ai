@@ -108,15 +108,3 @@ test("a principal stands inside the cloud boundary, outside it, or refused — b
   assert.equal(cloudPrincipalStanding(two, key('cloud-beta', 'user-bound')), 'refused', 'ambiguity refuses every key');
   assert.equal(cloudPrincipalStanding(two, key('codex', 'user-bound')), 'ordinary', 'other cats are unaffected');
 });
-
-test('main Dot facade stays separate from the package cloud-conversation provider', () => {
-  const source = configs([
-    ['cloud-alt', 'openai-chatgpt-pro'],
-    ['gpt-dot', 'openai-chatgpt-pro'],
-  ]);
-  assert.deepEqual(resolveCloudConversationCat(source, 'chatgpt'), { status: 'resolved', catId: 'cloud-alt' });
-  assert.equal(cloudConversationProviderOf(source, 'gpt-dot'), undefined);
-  assert.equal(cloudPrincipalStanding(source, { catId: 'gpt-dot', scope: 'user-bound' }), 'ordinary');
-  assert.equal(cloudPrincipalStanding(source, { catId: 'gpt-dot', scope: 'cloud-conversation' }), 'refused');
-  assert.equal(cloudPrincipalStanding(source, { catId: 'cloud-alt', scope: 'user-bound' }), 'refused');
-});

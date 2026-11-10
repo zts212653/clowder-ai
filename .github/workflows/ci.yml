@@ -208,6 +208,15 @@ jobs:
           src/hooks/__tests__/useMessageDispositionPreference-settlement.test.tsx
       - name: Personal first-run lifecycle with production API handlers
         run: pnpm --filter @cat-cafe/web test:first-run-entry:api
+      - name: Causal reply reading and action scope regressions
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/MessageActions-overlay.test.tsx
+          src/components/__tests__/message-dispatch-avatars.test.tsx
+          src/components/reply-layers/__tests__/causal-reply-reference.test.tsx
+          src/components/reply-layers/__tests__/causal-reply-reading.test.tsx
+          src/components/reply-layers/__tests__/causal-reply-projection.test.ts
+          src/components/reply-layers/__tests__/causal-reply-navigation.test.tsx
       - run: pnpm --filter @cat-cafe/web build
       - name: Production first-run pages with real receipt and guide routes
         env:
@@ -227,6 +236,19 @@ jobs:
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
           --env FEEDBACK_PLAYWRIGHT_MODULE=${{ github.workspace }}/packages/web/node_modules/playwright
           node --import tsx test/plugin-html-origin.journey.mts
+      - name: Causal reply recovery through real History handlers
+        env:
+          ISSUE1890_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/issue1890-ci
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
+          node --test test/browser/issue1890-causal-replies.test.mjs
+      - name: Preserve causal reply reading evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: causal-reply-reading
+          path: .tmp/issue1890-ci/
+          if-no-files-found: ignore
       - name: Preserve first-run browser evidence
         if: always()
         uses: actions/upload-artifact@v4

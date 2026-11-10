@@ -1,4 +1,24 @@
+import { ghOperation, ghOptionPolicy } from './lib/secret-gh-options.mjs';
 import { shellInvocation, tokenizeSimpleShellCommand } from './native-effect-shell-tokenizer.mjs';
+
+/** Only reviewed built-ins may use the managed-wrapper carrier. Upload/API mutations
+ * retain their existing native boundary; the wrapper still scans outbound bodies. */
+export function managedGhOperation(args) {
+  const operation = ghOperation(args);
+  if (operation.group === 'api') {
+    const command = ['gh', ...args].map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(' ');
+    const help = args.length === 2 && args[0] === 'api' && ['--help', '-h'].includes(args[1]);
+    return help || Boolean(constrainedGhApiOperation(command, { payloadFree: true }));
+  }
+  try {
+    if (ghOptionPolicy(operation).passthrough) return true;
+    return (
+      ['pr', 'issue'].includes(operation.group) && ['create', 'edit', 'review', 'comment'].includes(operation.action)
+    );
+  } catch {
+    return false;
+  }
+}
 
 const API_VALUES = new Map([
   ['--method', 'method'],

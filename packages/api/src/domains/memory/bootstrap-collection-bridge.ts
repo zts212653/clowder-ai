@@ -1,15 +1,19 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import { type CollectionEmbedDeps, CollectionIndexBuilder } from './CollectionIndexBuilder.js';
+import { CollectionIndexBuilder, type CollectionRebuildResult } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
-import { getExternalCollection, resolveCollectionStorePath, saveExternalCollection } from './external-collections.js';
+import { prepareCollectionVectorBinding } from './collection-vector-binding.js';
+import {
+  getExternalCollection,
+  resolveCollectionStorePath,
+  saveExternalCollection,
+  updateExternalCollection,
+} from './external-collections.js';
 import type { IEmbeddingService, IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { resolveCollectionScanner } from './scanner-resolver.js';
-import { ensureVectorTable } from './schema.js';
-import { VectorStore } from './VectorStore.js';
 
 export function deriveProjectCollectionId(projectPath: string): string {
   let name = basename(projectPath)
@@ -85,32 +89,35 @@ export async function ensureProjectCollection(
   if (!catalog.get(collectionId)) catalog.register(manifest);
   store.setSourceRoot(manifest.root, manifest.id);
 
-  let embedDeps: CollectionEmbedDeps | undefined;
-  const embeddingService = getEmbeddingService?.();
-  if (embeddingService) {
-    try {
-      const db = store.getDb();
-      const sqliteVecMod = await import('sqlite-vec');
-      sqliteVecMod.load(db);
-      const dim = embeddingService.getModelInfo().dim;
-      if (ensureVectorTable(db, dim)) {
-        embedDeps = {
-          getEmbeddingService: () => (getEmbeddingService?.() === embeddingService ? embeddingService : undefined),
-          vectorStore: new VectorStore(db, dim),
-        };
-      }
-    } catch {
-      // fail-open: sqlite-vec not available → FTS-only
-    }
+  if (manifest.status === 'archived') throw new Error('project_collection_archived');
+  let prepared: Awaited<ReturnType<typeof prepareCollectionVectorBinding>>;
+  let vectorAttempted = false;
+  const setStatus = (status: 'indexing' | 'blocked' | 'stale' | 'active') => {
+    catalog.setStatus(collectionId, status);
+    updateExternalCollection(dataDir, collectionId, { status });
+  };
+  store.setEmbedDeps(undefined);
+  setStatus('indexing');
+  let result: CollectionRebuildResult;
+  try {
+    const currentStore = store;
+    const scanner = resolveCollectionScanner(manifest);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, async () => {
+      if (!getEmbeddingService?.()?.isReady()) return;
+      vectorAttempted = true;
+      prepared = await prepareCollectionVectorBinding(currentStore, () => getEmbeddingService?.());
+      return prepared?.deps;
+    });
+    result = await builder.rebuild();
+    const published = !result.blocked && prepared?.publish();
+    setStatus(result.blocked ? 'blocked' : vectorAttempted && !published ? 'stale' : 'active');
+  } catch (error) {
+    store.setEmbedDeps(undefined);
+    setStatus('blocked');
+    throw error;
   }
-
-  const scanner = resolveCollectionScanner(manifest);
-  const builder = new CollectionIndexBuilder(store, manifest, scanner, embedDeps);
-  const result = await builder.rebuild();
-
-  if (result.blocked) {
+  if (result.blocked)
     throw new Error(`Collection ${collectionId} blocked: ${result.secretFindings.length} secret(s) detected — purged`);
-  }
 
   return { docsIndexed: result.indexed + result.skipped, durationMs: Date.now() - startMs };
 }

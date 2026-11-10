@@ -13,6 +13,7 @@ import type {
   CollectionStatus,
 } from '../domains/memory/collection-types.js';
 import { COLLECTION_SENSITIVITY_ORDER, validateManifestInput } from '../domains/memory/collection-types.js';
+import { prepareCollectionVectorBinding } from '../domains/memory/collection-vector-binding.js';
 import {
   resolveCollectionStorePath,
   saveExternalCollection,
@@ -26,9 +27,7 @@ import { RecentBrowseResolver } from '../domains/memory/RecentBrowseResolver.js'
 import { getRecallStats24h } from '../domains/memory/recall-stats.js';
 import { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
 import { resolveCollectionScanner } from '../domains/memory/scanner-resolver.js';
-import { ensureVectorTable } from '../domains/memory/schema.js';
 import { computeFromThreads } from '../domains/memory/ToolUsageMetricsAggregator.js';
-import { VectorStore } from '../domains/memory/VectorStore.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromRecentAnchor } from './cross-thread-affordance.js';
 import { memoryWriteOwner } from './memory-write-owner.js';
@@ -315,43 +314,34 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
 
     const scanner = resolveCollectionScanner(manifest);
 
-    let embedDeps: CollectionEmbedDeps | undefined;
-    const db = (store as StoreWithDb).getDb?.();
+    let prepared: Awaited<ReturnType<typeof prepareCollectionVectorBinding>>;
     const resolveEmbeddingService = () =>
       opts.getEmbeddingService ? opts.getEmbeddingService() : opts.embeddingService;
     const resolveEmbedMode = () => (opts.getEmbedMode ? opts.getEmbedMode() : (opts.embedMode ?? 'shadow'));
-    const embeddingService = resolveEmbeddingService();
-    if (embeddingService && db) {
-      try {
-        const sqliteVecMod = await import('sqlite-vec');
-        sqliteVecMod.load(db);
-        const dim = embeddingService.getModelInfo().dim;
-        if (ensureVectorTable(db, dim)) {
-          const vectorStore = new VectorStore(db, dim);
-          embedDeps = {
-            getEmbeddingService: () => {
-              const current = resolveEmbeddingService();
-              return current === embeddingService && resolveEmbedMode() ? current : undefined;
-            },
-            vectorStore,
-          };
-          const mode = resolveEmbedMode() ?? 'shadow';
-          (store as SqliteEvidenceStore).setEmbedDeps({ embedding: embeddingService, vectorStore, mode });
-        }
-      } catch {
-        // fail-open: sqlite-vec not available → FTS-only
-      }
-    }
-
+    let vectorAttempted = false;
+    const prepareVectors = async () => {
+      if (!(store instanceof SqliteEvidenceStore) || !resolveEmbeddingService()?.isReady() || !resolveEmbedMode())
+        return;
+      vectorAttempted = true;
+      prepared = await prepareCollectionVectorBinding(store, resolveEmbeddingService, resolveEmbedMode);
+      return prepared?.deps;
+    };
+    if (store instanceof SqliteEvidenceStore) store.setEmbedDeps(undefined);
     setCollectionStatusBestEffort(opts.catalog, manifest.id, 'indexing');
-
-    const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, embedDeps);
-    const result = await builder.rebuild({ force });
-
-    const finalStatus = result.blocked ? 'blocked' : 'active';
-    setCollectionStatusBestEffort(opts.catalog, manifest.id, finalStatus);
-    persistCollectionStatusBestEffort(opts.dataDir, manifest.id, finalStatus);
-    return result;
+    try {
+      const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, prepareVectors);
+      const result = await builder.rebuild({ force });
+      const published = !result.blocked && prepared?.publish();
+      const finalStatus = result.blocked ? 'blocked' : vectorAttempted && !published ? 'stale' : 'active';
+      setCollectionStatusBestEffort(opts.catalog, manifest.id, finalStatus);
+      persistCollectionStatusBestEffort(opts.dataDir, manifest.id, finalStatus);
+      return result;
+    } catch (error) {
+      if (store instanceof SqliteEvidenceStore) store.setEmbedDeps(undefined);
+      setCollectionStatusBestEffort(opts.catalog, manifest.id, 'blocked');
+      persistCollectionStatusBestEffort(opts.dataDir, manifest.id, 'blocked');
+      throw error;
+    }
   });
 
   app.post('/api/library/bind-dry-run', async (request, reply) => {

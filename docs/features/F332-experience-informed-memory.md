@@ -18,7 +18,7 @@ mcp_admission_claims:
     decision: accepted
 created: 2026-10-23
 updated: 2026-11-10
-tips_exempt: "Renewed 2026-11-10 for public/source partitioning: preserve prior public guidance and accepted person-revision/document-verification contracts; move operational evidence into Internal Notes. No new human control, enabled watcher or shipped follow-up is introduced."
+tips_exempt: "Renewed 2026-11-10: existing owner-memory wrappers were retired after the owner journeys were verified. The existing exact-proposal tip now points to Handled and its guide; retained memory-page, capsule and watcher controls keep their current tips. This is delivery truth, not a new capability entry."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra

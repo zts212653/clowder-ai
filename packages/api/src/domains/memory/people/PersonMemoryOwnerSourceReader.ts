@@ -7,7 +7,8 @@ import type {
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread } from '../../guides/guide-state-access.js';
-import { ownerActionDisplayVerb, verifyOwnerMemoryActionEvidence } from './OwnerMemoryActionEvidenceIssuer.js';
+import { memorySourceSpeaker } from '../memory-source-speaker.js';
+import { verifyOwnerMemoryActionEvidence } from './OwnerMemoryActionEvidenceIssuer.js';
 import type { OwnerPrivateArtifactResolver } from './PersonMemorySourceBundleResolver.js';
 import { eligibleOwnerMessage, PersonMemorySourceBundleResolver } from './PersonMemorySourceBundleResolver.js';
 
@@ -57,11 +58,16 @@ export class PersonMemoryOwnerSourceReader {
     for (const ref of refs) {
       const thread = await this.visibleThread(ownerUserId, ref.threadId);
       if (!thread) return { status: 'unavailable' as const };
+      const message = await this.deps.messageStore.getById(ref.messageId);
+      if (!eligibleOwnerMessage(message, { ownerUserId }) || message.threadId !== ref.threadId)
+        return { status: 'unavailable' as const };
       sources.push({
         kind: 'message' as const,
         threadId: ref.threadId,
         messageId: ref.messageId,
         title: thread.title?.trim() || null,
+        occurredAt: message.timestamp,
+        speaker: memorySourceSpeaker(message),
         canOpen: true as const,
       });
     }
@@ -79,13 +85,12 @@ export class PersonMemoryOwnerSourceReader {
     if (!expectedItemId || evidence.target.itemId !== expectedItemId) {
       return { status: 'unavailable' as const };
     }
-    const verb = ownerActionDisplayVerb(evidence.action);
     return {
       status: 'ready' as const,
       sources: [
         {
           kind: 'owner_action' as const,
-          label: `主人在记忆页操作 · ${verb} · ${new Date(evidence.issuedAt).toISOString()}`,
+          label: '你在记忆页修改',
           occurredAt: evidence.issuedAt,
           canOpen: false as const,
         },
