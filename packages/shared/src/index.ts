@@ -81,6 +81,7 @@ export type {
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
+export { DEFAULT_MESSAGE_SEARCH_SORT } from './message-search.js';
 export * from './message-search-answer.js';
 export * from './message-search-notice.js';
 export * from './message-search-selection.js';

@@ -25,6 +25,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
+const undoShortcut = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../../../..');
 const BASE = (process.env.PRODUCT_BASE_URL ?? 'http://127.0.0.1:4218').replace(/\/$/, '');
@@ -357,7 +359,7 @@ try {
     );
     ok(!spaced.some((mark) => mark.text === LINK_TEXT), 'the old URL+Chinese range should be gone after the space');
 
-    await c.textarea.press('Control+z');
+    await c.textarea.press(undoShortcut);
     await page.waitForTimeout(250);
     const undone = await marks();
     ok(
@@ -398,7 +400,7 @@ try {
       (await marks()).some((mark) => mark.text === LINK),
       'existing-thread boundary edit shrinks the blue range',
     );
-    await c.textarea.press('Control+z');
+    await c.textarea.press(undoShortcut);
     eq(await c.textarea.inputValue(), LINK_TEXT + ' 第二次', 'existing-thread undo preserves the exact source');
     const sent = await sendAndWait(c.textarea);
     await page.waitForTimeout(1000);

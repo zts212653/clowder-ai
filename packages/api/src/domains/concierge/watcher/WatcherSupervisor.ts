@@ -16,7 +16,7 @@ import { finalizeWatcherWake, finishIdleWatcherWake } from './watcher-finalizati
 import { runWatcherInvocation } from './watcher-invocation.js';
 import type { WatcherInvocationOwners } from './watcher-invocation-contract.js';
 import { reconcileWatcherRecovery } from './watcher-recovery.js';
-import { reserveWatcherRecovery } from './watcher-retry.js';
+import { reserveWatcherRecovery, watcherRecoveryFinalizationDue } from './watcher-retry.js';
 import { recordWatcherSourceFailure, watcherSourceFinished } from './watcher-source-result.js';
 
 interface Options extends WatcherInvocationOwners {
@@ -125,6 +125,7 @@ export class WatcherSupervisor {
               }
               const activation = `${preferences.config.activationRevision ?? 0}:${thread.watcher?.activationRevision ?? 0}`;
               const recoveryOnly =
+                watcherRecoveryFinalizationDue(state, this.deps.now?.() ?? Date.now()) ||
                 preferences.config.memberCatId !== session.catId ||
                 !effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled ||
                 state.activationCut !== activation;
@@ -293,7 +294,10 @@ export class WatcherSupervisor {
       try {
         const prior = state.attempt ? await read(this.deps.executions.get(state.attempt.invocationId)) : null;
         const recoveryOnly =
-          !!state.attempt && (state.activationCut !== activationCut || (prior !== null && prior.status !== 'running'));
+          !!state.attempt &&
+          (watcherRecoveryFinalizationDue(state, this.deps.now?.() ?? Date.now()) ||
+            state.activationCut !== activationCut ||
+            (prior !== null && prior.status !== 'running'));
         if (
           state.attempt &&
           !(await reserveWatcherRecovery(

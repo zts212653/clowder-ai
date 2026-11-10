@@ -130,6 +130,7 @@ interface ChatInputProps {
     messageDisposition?: MessageWorkDisposition,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  sendBlocked?: boolean;
   hasActiveInvocation?: boolean;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
@@ -204,6 +205,7 @@ export function ChatInput({
   threadId,
   onSend,
   disabled,
+  sendBlocked = false,
   hasActiveInvocation: unscopedHasActiveInvocation,
   uploadStatus = 'idle',
   uploadError = null,
@@ -403,7 +405,7 @@ export function ChatInput({
     setIsPreparingImages,
   });
   const v2UnrestoredImageCount = shellV2 ? unrestoredImageCount : 0;
-  const sendTemporarilyDisabled = isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
+  const sendTemporarilyDisabled = sendBlocked || isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
 
   const handleTranscript = useCallback(
     (text: string) => {

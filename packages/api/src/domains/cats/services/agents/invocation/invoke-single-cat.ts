@@ -1163,6 +1163,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
+  readonly ownerAskCorrectionDeliver?: (
+    opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
+  ) => Promise<string>;
   readonly ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
   readonly resolveInvocationPluginMcpView?: () => Promise<
     import('../../../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined

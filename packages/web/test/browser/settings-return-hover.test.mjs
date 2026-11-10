@@ -4,6 +4,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { registerShortSettingsReturnCase } from './settings-short-return.case.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const origin = 'https://settings-return-hover.test';
@@ -40,23 +41,35 @@ before(async () => {
   browser = await chromium.launch({ headless: true });
 });
 after(async () => browser?.close());
+registerShortSettingsReturnCase({ browser: () => browser, bundle: () => bundle, origin });
 
-for (const input of ['hover', 'click']) {
+for (const input of ['hover', 'click', 'timeout', 'timeout-click']) {
   test(`Settings return with native ${input} while history is pending`, { timeout: 15000 }, async () => {
     const page = await browser.newPage();
     const errors = [];
+    const reports = [];
     let holdHistory = false;
     let pendingHistory;
+    let historyAttempts = 0;
+    let retryArrived;
+    const retryReady = new Promise((resolve) => {
+      retryArrived = resolve;
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
       assert.equal(url.origin, origin, 'no live service access');
       if (url.pathname === '/proof.js') return route.fulfill({ contentType: 'text/javascript', body: bundle });
       if (url.pathname === '/api/messages' && holdHistory) {
+        historyAttempts++;
+        if (historyAttempts === 2) retryArrived();
         pendingHistory = route;
         return;
       }
-      if (url.pathname === '/api/diagnostics/connection') return route.fulfill({ status: 204 });
+      if (url.pathname === '/api/diagnostics/connection') {
+        reports.push(...route.request().postDataJSON().events);
+        return route.fulfill({ status: 204 });
+      }
       if (url.pathname.startsWith('/api/')) {
         const body =
           url.pathname === '/api/evidence/navigation-source'
@@ -92,17 +105,28 @@ for (const input of ['hover', 'click']) {
       await page.getByRole('button', { name: 'Open Settings' }).click();
       assert.equal(await page.getByTestId('return-state').getAttribute('data-source'), 'true');
       holdHistory = true;
+      if (input.startsWith('timeout')) await page.clock.install();
       const requested = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/messages');
       await page.getByRole('button', { name: 'Return to conversation' }).click();
       await requested;
       await reading.waitFor();
+      if (input.startsWith('timeout')) {
+        const retry = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/messages');
+        await page.clock.fastForward(30_020);
+        await retry;
+        await retryReady;
+        assert.equal(historyAttempts, 2, 'exactly one retry follows the real browser timeout');
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-returning'), 'true');
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-notice'), '');
+      }
       const box = await reading.boundingBox();
       assert.ok(box);
       await page.mouse.move(box.x + 100, box.y + 80);
       await page.mouse.move(box.x + 100, box.y + 140);
-      if (input === 'click') await page.mouse.click(box.x + 100, box.y + 160);
+      const clicks = input === 'click' || input === 'timeout-click';
+      if (clicks) await page.mouse.click(box.x + 100, box.y + 160);
       assert.ok(pendingHistory, 'the real history request must be held before native input');
-      if (input === 'click') {
+      if (clicks) {
         await page.waitForFunction(
           () => document.querySelector('[data-testid="return-state"]')?.dataset.returning === 'false',
         );
@@ -120,7 +144,18 @@ for (const input of ['hover', 'click']) {
         () => document.querySelector('[data-testid="return-state"]')?.dataset.returning === 'false',
       );
       const state = await page.getByTestId('return-state').evaluate((el) => ({ ...el.dataset }));
-      if (input === 'click') {
+      const retained = await page.evaluate(() =>
+        JSON.parse(localStorage.getItem('cat-cafe:connection-diagnostics:v1') ?? '[]'),
+      );
+      const readingRecords = [...new Map([...reports, ...retained].map((r) => [r.eventId, r])).values()].filter(
+        (r) => r.kind === 'reading_restore',
+      );
+      assert.equal(new Set(readingRecords.map((r) => r.operationId)).size, 1);
+      if (clicks)
+        assert.ok(
+          readingRecords.some((r) => r.phase === 'cancel' && r.cancelSource === 'native_input' && r.inputTrusted),
+        );
+      if (clicks) {
         assert.equal(state.notice, 'interrupted');
         assert.equal(state.source, 'true');
       } else {

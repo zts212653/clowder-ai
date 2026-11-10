@@ -16,6 +16,7 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { resolveInvocationEnv } from './invocation-auth.js';
+import { libraryVerificationTool } from './library-verification-tool.js';
 
 const defineTool = defineMcpMigrationFactory('library-lifecycle-tools.ts', undefined, {
   resourceFamily: 'library',
@@ -248,70 +249,6 @@ function formatRebuild(id: string, data: Record<string, unknown>): string {
   return lines.join('\n');
 }
 
-// --- library_archive ---
-
-export const libraryArchiveInputSchema = {
-  collectionId: z.string().describe('Collection ID to archive (e.g. "domain:finance").'),
-};
-
-export async function handleLibraryArchive(input: { collectionId: string }): Promise<ToolResult> {
-  try {
-    const response = await invocationFetch(`${resolveApiUrl()}/api/library/${input.collectionId}/archive`, {
-      method: 'POST',
-      headers: libraryAuthHeaders(),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      return errorResult(`library_archive failed (${response.status}): ${text}`);
-    }
-    const data = (await response.json()) as { manifest: Record<string, unknown> };
-    return successResult(`Collection ${data.manifest.id} archived (status: ${data.manifest.status}).`);
-  } catch (err) {
-    return errorResult(`library_archive error: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// --- library_verify ---
-
-export const libraryVerifyInputSchema = {
-  anchor: z.string().min(1).describe('The document anchor to act on (e.g. F188, LL-029).'),
-  action: z
-    .enum(['confirm', 'mark_stale', 'escalate', 'dismiss_review'])
-    .describe(
-      'confirm: mark as reviewed (needs_review→reviewed). mark_stale: reset to needs_review. escalate: flag for human attention. dismiss_review: clear review_status.',
-    ),
-  actor: z.string().min(1).describe('Who is performing this action (cat ID or human identifier).'),
-};
-
-export async function handleLibraryVerify(input: {
-  anchor: string;
-  action: string;
-  actor: string;
-}): Promise<ToolResult> {
-  try {
-    const response = await invocationFetch(`${resolveApiUrl()}/api/f163/verification/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    const data = (await response.json()) as {
-      ok?: boolean;
-      error?: string;
-      previousStatus?: string;
-      newStatus?: string;
-    };
-    if (!response.ok) {
-      return errorResult(`library_verify failed (${response.status}): ${data.error ?? 'unknown'}`);
-    }
-    return successResult(
-      `✅ Verification action applied: ${input.anchor} — ${input.action}\n` +
-        `  Previous: ${data.previousStatus ?? 'null'} → New: ${data.newStatus ?? 'null'}`,
-    );
-  } catch (err) {
-    return errorResult(`library_verify error: ${(err as Error).message}`);
-  }
-}
-
 // --- exports ---
 
 export const libraryLifecycleTools = [
@@ -386,37 +323,5 @@ export const libraryLifecycleTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
-    name: 'cat_cafe_library_archive',
-    description: [
-      'Archive a collection — removes it from search/routing but preserves data.',
-      'Archived collections are excluded from getRoutable and search results.',
-      'Can be unarchived later via the REST API (POST /api/library/:id/unarchive).',
-    ].join('\n'),
-    inputSchema: libraryArchiveInputSchema,
-    handler: handleLibraryArchive,
-    governance: {
-      implementationExport: 'handleLibraryArchive',
-      action: 'command',
-      risk: { level: 'destructive', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_library_verify',
-    description: [
-      'Execute a verification action on a document: confirm, mark_stale, escalate, or dismiss_review.',
-      'Use when: reviewing documents flagged by the verification migration or health report.',
-      'Preconditions enforced: e.g. confirm only works on needs_review docs.',
-    ].join('\n'),
-    inputSchema: libraryVerifyInputSchema,
-    handler: handleLibraryVerify,
-    governance: {
-      implementationExport: 'handleLibraryVerify',
-      action: 'command',
-      risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full'],
-      targetExposure: 'lazy-discoverable',
-    },
-  }),
+  libraryVerificationTool,
 ] as const;

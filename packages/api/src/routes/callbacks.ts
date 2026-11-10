@@ -89,6 +89,8 @@ import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/serv
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { buildCallbackPostMessageIdempotencyKey } from '../domains/cats/services/agents/routing/callback-message-idempotency.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import { ownerAskRejection } from '../domains/cats/services/agents/routing/owner-ask-correction.js';
+import { detectUnaddressedOwnerAsk } from '../domains/cats/services/agents/routing/owner-ask-detect.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { resolveRichMediaBlocks } from '../domains/cats/services/agents/routing/rich-media-urls.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
@@ -147,7 +149,7 @@ import {
   hasConciergeNavigationMarker,
   projectConciergeStoredContent,
 } from '../domains/concierge/concierge-reply-validator.js';
-import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import type { IEvidenceStore, IReflectionService } from '../domains/memory/interfaces.js';
 import {
   type EngagementPolicyReader,
   notificationDeliveryReceipt,
@@ -959,7 +961,6 @@ export interface CallbackRoutesOptions {
   messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
   matterMemoryService?: import('../domains/memory/matters/MatterMemoryService.js').MatterMemoryService;
   messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
-  markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   /** F254 Phase B: Raw Redis client for freshness notice event log + state store */
   redis?: any;
@@ -1654,6 +1655,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }
       const mentionsUser = detectUserMention(storedContent);
+      // Only an explicit mention reaches the owner's mailbox; an ask without one is sent back to the cat.
+      const unaddressedOwnerAsk = mentionsUser
+        ? null
+        : detectUnaddressedOwnerAsk({ text: storedContent, routedToCat: mentions.length > 0, blocks: richBlocks });
+      if (unaddressedOwnerAsk) {
+        reply.status(422);
+        return ownerAskRejection(unaddressedOwnerAsk);
+      }
       const persistedContent = contentProjection.content;
 
       let validatedReplyTo: string | undefined;
@@ -3275,6 +3284,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       const mentionsUser = detectUserMention(storedContent);
+      // Only an explicit mention reaches the owner's mailbox; an ask without one is sent back to the cat.
+      const unaddressedOwnerAsk = mentionsUser
+        ? null
+        : detectUnaddressedOwnerAsk({ text: storedContent, routedToCat: mentions.length > 0, blocks: richBlocks });
+      if (unaddressedOwnerAsk) {
+        reply.status(422);
+        return ownerAskRejection(unaddressedOwnerAsk);
+      }
       const persistedContent = contentProjection.content;
       const crossPostExtra = isCrossThread
         ? {
@@ -6198,7 +6215,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     matterMemoryService: opts.matterMemoryService,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
-    markerQueue: opts.markerQueue,
     reflectionService: opts.reflectionService,
   });
 

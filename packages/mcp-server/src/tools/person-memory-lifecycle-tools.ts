@@ -1,16 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import {
-  candidateInteractionDraftSchema,
-  captureCandidateIdSchema,
-  interactionEventIdSchema,
-  materializableClaimPayloadSchema,
-  personClaimIdSchema,
-  personIdSchema,
-} from '@cat-cafe/shared';
+import { captureCandidateIdSchema, personIdSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
+import { createPersonMemoryRevisionTool } from './person-memory-revision-tool.js';
 
 const defineTool = defineMcpMigrationFactory('person-memory-lifecycle-tools.ts', './tools/callback-tools.js', {
   resourceFamily: 'person-memory',
@@ -36,17 +30,6 @@ const agentKeyCatIdSchema = z
     'Persistent-agent identity selector. Required for shared Antigravity MCP when CAT_CAFE_AGENT_KEY_FILES is configured; ignored when invocation credentials are present.',
   );
 const agentKeyOptions = (input: { agentKeyCatId?: string }) => ({ agentKeyCatId: input.agentKeyCatId });
-const exactSourceMutationSchema = {
-  personId: personIdSchema,
-  sourceMessageId: z
-    .string()
-    .trim()
-    .min(1)
-    .max(240)
-    .optional()
-    .describe('Optional assertion; when supplied it must equal the authenticated invocation origin.'),
-  clientRequestId: z.string().trim().min(1).max(200).optional(),
-};
 
 export const recallPersonRelationshipInputSchema = {
   alias: z.string().trim().min(1).max(160).describe('Exact private alias mentioned in the current owner context.'),
@@ -68,24 +51,6 @@ export const drillPersonMemoryInputSchema = {
     .describe('Required inclusive recorded-at window in epoch milliseconds.'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
-export const correctPersonClaimInputSchema = {
-  ...exactSourceMutationSchema,
-  expectedCurrentClaimId: personClaimIdSchema.describe('Exact current claim anchor; stale anchors fail closed.'),
-  payload: materializableClaimPayloadSchema.describe(
-    'Replacement owner fact or assessment. Agent inference is rejected.',
-  ),
-};
-export const retirePersonClaimInputSchema = {
-  ...exactSourceMutationSchema,
-  expectedCurrentClaimId: personClaimIdSchema.describe('Exact current claim anchor; stale anchors fail closed.'),
-};
-export const amendPersonInteractionInputSchema = {
-  ...exactSourceMutationSchema,
-  expectedEventId: interactionEventIdSchema.describe('Exact source event anchor; the original is never overwritten.'),
-  payload: candidateInteractionDraftSchema.shape.payload.describe(
-    'Replacement bounded event projection with typed approximate or conflicting time preserved.',
-  ),
-};
 export const redactPersonMemoryItemInputSchema = {
   personId: personIdSchema.describe('Exact active private person ID containing the item.'),
   item: z
@@ -105,13 +70,8 @@ export const forgetPersonMemoryProposalInputSchema = {
   clientRequestId: z.string().trim().min(1).max(140).optional(),
 };
 
-type ExactSourceInput = {
-  personId: z.infer<typeof personIdSchema>;
-  sourceMessageId?: string;
-  clientRequestId?: string;
-};
-
 export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, callbackGet: CallbackGet) {
+  const revision = createPersonMemoryRevisionTool(callbackPost);
   const handleGetPersonMemoryProposalStatus = (input: {
     proposalId: z.infer<typeof captureCandidateIdSchema>;
     agentKeyCatId?: string;
@@ -136,44 +96,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
       { personId: input.personId, item: input.item, timeWindow: input.timeWindow },
       agentKeyOptions(input),
     );
-
-  const handleCorrectPersonClaim = (
-    input: ExactSourceInput & {
-      expectedCurrentClaimId: z.infer<typeof personClaimIdSchema>;
-      payload: z.infer<typeof materializableClaimPayloadSchema>;
-    },
-  ) =>
-    callbackPost('/api/callbacks/person-memory/correct-claim', {
-      personId: input.personId,
-      expectedCurrentClaimId: input.expectedCurrentClaimId,
-      payload: input.payload,
-      ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-      requestId: input.clientRequestId ?? `correction_${randomUUID()}`,
-    });
-
-  const handleRetirePersonClaim = (
-    input: ExactSourceInput & { expectedCurrentClaimId: z.infer<typeof personClaimIdSchema> },
-  ) =>
-    callbackPost('/api/callbacks/person-memory/retire-claim', {
-      personId: input.personId,
-      expectedCurrentClaimId: input.expectedCurrentClaimId,
-      ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-      requestId: input.clientRequestId ?? `retirement_${randomUUID()}`,
-    });
-
-  const handleAmendPersonInteraction = (
-    input: ExactSourceInput & {
-      expectedEventId: z.infer<typeof interactionEventIdSchema>;
-      payload: z.infer<typeof candidateInteractionDraftSchema.shape.payload>;
-    },
-  ) =>
-    callbackPost('/api/callbacks/person-memory/amend-event', {
-      personId: input.personId,
-      expectedEventId: input.expectedEventId,
-      payload: input.payload,
-      ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-      requestId: input.clientRequestId ?? `amendment_${randomUUID()}`,
-    });
 
   const handleRedactPersonMemoryItem = (input: {
     personId: z.infer<typeof personIdSchema>;
@@ -205,9 +127,7 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
     handleGetPersonMemoryProposalStatus,
     handleRecallPersonRelationship,
     handleDrillPersonMemory,
-    handleCorrectPersonClaim,
-    handleRetirePersonClaim,
-    handleAmendPersonInteraction,
+    handleRevisePersonMemory: revision.handleRevisePersonMemory,
     handleRedactPersonMemoryItem,
     handleForgetPerson,
     handleForgetPersonMemoryProposal,
@@ -251,45 +171,7 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           runtimeProfiles: ['full', 'agent-key', 'desktop:live-companion'],
         },
       }),
-      defineTool({
-        name: 'cat_cafe_correct_person_claim',
-        description:
-          'Append an owner-authorized replacement for one exact current claim and supersede the anchored version atomically. Stale anchors and agent inference fail closed.',
-        inputSchema: correctPersonClaimInputSchema,
-        handler: handleCorrectPersonClaim,
-        governance: {
-          implementationExport: 'handleCorrectPersonClaim',
-          action: 'update',
-          risk: { level: 'write', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
-      defineTool({
-        name: 'cat_cafe_retire_person_claim',
-        description:
-          'Retire one exact current F276 claim from an authenticated owner source. Appends a retirement version; stale anchors fail closed.',
-        inputSchema: retirePersonClaimInputSchema,
-        handler: handleRetirePersonClaim,
-        governance: {
-          implementationExport: 'handleRetirePersonClaim',
-          action: 'close',
-          risk: { level: 'write', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
-      defineTool({
-        name: 'cat_cafe_amend_person_interaction',
-        description:
-          'Amend one exact interaction event without overwriting it. The new event links to the source and preserves approximate or conflicting time.',
-        inputSchema: amendPersonInteractionInputSchema,
-        handler: handleAmendPersonInteraction,
-        governance: {
-          implementationExport: 'handleAmendPersonInteraction',
-          action: 'update',
-          risk: { level: 'write', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
+      revision.tool,
       defineTool({
         name: 'cat_cafe_redact_person_memory_item',
         description:
