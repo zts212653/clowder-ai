@@ -8,10 +8,12 @@ pnpm start
 
 This is the main entry point. It automatically:
 
-1. Creates a runtime worktree (for safe auto-updates)
+1. Runs from your current checkout, using its `.env` (no extra worktree, no switch to `origin/main`)
 2. Starts Redis (unless `--memory` is used)
 3. Builds and starts the API server and frontend
 4. Opens the Hub at **http://localhost:3003**
+
+If this checkout already has a `../cat-cafe-runtime` worktree from an earlier version, `pnpm start` keeps using it so its settings stay in effect; stop it with `pnpm runtime:stop`, or use `pnpm start:direct` to start this checkout instead (see SETUP.md).
 
 ## Startup Flags
 
@@ -43,11 +45,19 @@ pnpm start --daemon
 
 ### `pnpm start:direct`
 
-Run directly from the current checkout without creating an auto-update worktree. Use this to pin to the exact version you have checked out.
+Always run directly from the current checkout, even if a runtime worktree exists. Use this to pin to the exact version you have checked out.
 
 ```bash
 # 直接运行当前版本，不自动更新
 pnpm start:direct
+```
+
+### `pnpm runtime:start` (optional)
+
+Start from an isolated runtime worktree (`../cat-cafe-runtime`) that tracks `origin/main` and syncs on each start. Manage it with `pnpm runtime:status`, `pnpm runtime:restart` and `pnpm runtime:stop`.
+
+```bash
+pnpm runtime:start
 ```
 
 ## Service Management
@@ -55,7 +65,7 @@ pnpm start:direct
 | Command             | Description                        |
 |---------------------|------------------------------------|
 | `pnpm start:status` | Check whether services are running |
-| `pnpm stop`         | Stop all running services          |
+| `pnpm stop`         | Stop services started from this checkout (`pnpm runtime:stop` for a runtime worktree) |
 
 ## Development
 

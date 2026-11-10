@@ -8,10 +8,12 @@ pnpm start
 
 这是主入口。它会自动完成以下操作：
 
-1. 创建一个运行时 worktree（用于安全的自动更新）
+1. 从你当前检出的目录运行，使用这里的 `.env`（不另建 worktree，不切换到 `origin/main`）
 2. 启动 Redis（除非使用 `--memory`）
 3. 构建并启动 API 服务器和前端
 4. 在 **http://localhost:3003** 打开 Hub
+
+如果这个目录里已经有旧版本留下的 `../cat-cafe-runtime` worktree，`pnpm start` 会继续使用它，让那里的设置保持生效；停止它请用 `pnpm runtime:stop`，或用 `pnpm start:direct` 改为从当前目录启动（见 SETUP.zh-CN.md）。
 
 ## 启动标志
 
@@ -43,11 +45,19 @@ pnpm start --daemon
 
 ### `pnpm start:direct`
 
-直接从当前检出的代码运行，不创建自动更新 worktree。使用它可将版本固定在你已检出的确切版本上。
+始终直接从当前检出的目录运行，即使已有运行时 worktree。使用它可将版本固定在你已检出的确切版本上。
 
 ```bash
 # 直接运行当前版本，不自动更新
 pnpm start:direct
+```
+
+### `pnpm runtime:start`（可选）
+
+从独立的运行时 worktree（`../cat-cafe-runtime`）启动，它跟踪 `origin/main`，每次启动都会同步。用 `pnpm runtime:status`、`pnpm runtime:restart` 和 `pnpm runtime:stop` 管理。
+
+```bash
+pnpm runtime:start
 ```
 
 ## 服务管理
@@ -55,7 +65,7 @@ pnpm start:direct
 | 命令                | 说明                               |
 |---------------------|------------------------------------|
 | `pnpm start:status` | 检查服务是否正在运行               |
-| `pnpm stop`         | 停止所有正在运行的服务             |
+| `pnpm stop`         | 停止从当前目录启动的服务（运行时 worktree 用 `pnpm runtime:stop`） |
 
 ## 开发
 

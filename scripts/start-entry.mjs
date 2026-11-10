@@ -10,8 +10,15 @@
  *   pnpm start              → start-entry.mjs start [--debug] [--quick] [--memory]
  *   pnpm start:direct       → start-entry.mjs start:direct [--debug] [--quick] [--memory]
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
+ *
+ * On Unix, `start` and `status` in an open-source git checkout run in place
+ * (start-dev.sh, same as start:direct). Release archives, other distributions,
+ * explicit runtime settings (runtime options or CAT_CAFE_RUNTIME_* variables) and
+ * checkouts that already have a runtime worktree keep the runtime entry; the
+ * isolated runtime worktree stays available as `pnpm runtime:start`.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runWindowsStatus } from './lib/platform-status.mjs';
@@ -23,12 +30,115 @@ const IS_WINDOWS = process.platform === 'win32';
 // First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
 
+function realpathOrNull(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+// runtime-worktree.sh settings that start-dev.sh would silently ignore. Its parser
+// consumes one leading `--` forwarded by pnpm and hands everything after the next
+// `--` to start-dev.sh, so only options before that separator count.
+const RUNTIME_OPTIONS = new Set([
+  '--dir',
+  '--branch',
+  '--remote',
+  '--expected-target-sha',
+  '--sync',
+  '--no-sync',
+  '--no-install',
+  '--force',
+  '--help',
+  '-h',
+]);
+const RUNTIME_ENV = ['CAT_CAFE_RUNTIME_DIR', 'CAT_CAFE_RUNTIME_BRANCH', 'CAT_CAFE_RUNTIME_REMOTE'];
+
+function requestsRuntime(args) {
+  if (RUNTIME_ENV.some((key) => process.env[key])) return true;
+  const options = args[0] === '--' ? args.slice(1) : args;
+  for (const arg of options) {
+    if (arg === '--') return false;
+    if (RUNTIME_OPTIONS.has(arg) || arg.startsWith('--expected-target-sha=')) return true;
+  }
+  return false;
+}
+
+/**
+ * Runtime target options for `daemon-status`. runtime-worktree.sh consumes the
+ * leading `--` only for start/restart, so drop pnpm's separator here and pass
+ * just the options that select which runtime to read.
+ */
+function runtimeTargetArgs(args) {
+  const options = args[0] === '--' ? args.slice(1) : args;
+  const target = [];
+  for (let index = 0; index < options.length && options[index] !== '--'; index += 1) {
+    if (!['--dir', '--branch', '--remote'].includes(options[index])) continue;
+    target.push(...options.slice(index, index + 2));
+    index += 1;
+  }
+  return target;
+}
+
+/** Mirrors runtime-worktree.sh worktree_exists for its default RUNTIME_DIR (../cat-cafe-runtime). */
+function existingRuntimeWorktree() {
+  const runtimeDir = resolve(projectRoot, '..', 'cat-cafe-runtime');
+  const target = realpathOrNull(runtimeDir);
+  if (!target) return null;
+  const listed = spawnSync('git', ['-C', projectRoot, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  if (listed.status !== 0) return null;
+  const registered = listed.stdout
+    .split('\n')
+    .some((line) => line.startsWith('worktree ') && realpathOrNull(line.slice('worktree '.length)) === target);
+  return registered ? runtimeDir : null;
+}
+
+/**
+ * #50: a git clone of the open-source distribution starts from the checkout the
+ * user is editing, with their own .env. Mirrors runtime-worktree.sh is_git_repo:
+ * only the project's own .git counts, so an archive unpacked inside another
+ * checkout keeps the in-place runtime entry. Explicit runtime settings keep
+ * runtime-worktree.sh semantics, and a checkout that already has a runtime
+ * worktree keeps using it: state written there (members and co-creator profile
+ * in .cat-cafe/cat-catalog.json, .env, uploads, data/) must not silently drop out.
+ */
+function startsInPlaceByDefault(args, { explain = false } = {}) {
+  let activeProfile;
+  try {
+    const profilesPath = resolve(projectRoot, 'packages/shared/src/deployment-profiles.json');
+    activeProfile = JSON.parse(readFileSync(profilesPath, 'utf8')).activeProfile;
+  } catch {
+    return false;
+  }
+  if (activeProfile !== 'opensource' || !existsSync(resolve(projectRoot, '.git'))) return false;
+  if (spawnSync('git', ['-C', projectRoot, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' }).status !== 0)
+    return false;
+  if (requestsRuntime(args)) return false;
+  const runtimeDir = existingRuntimeWorktree();
+  if (runtimeDir) {
+    if (explain) {
+      console.error(
+        `[start] Keeping the existing runtime worktree ${runtimeDir} so its settings stay in effect. ` +
+          'To start this checkout in place instead, run `pnpm start:direct` (see SETUP.md).',
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
 if (mode === 'status') {
   if (IS_WINDOWS) {
     runWindowsStatus({ projectRoot });
   } else {
-    const cmd = resolve(__dirname, 'runtime-worktree.sh');
-    const args = ['daemon-status'];
+    let cmd = resolve(__dirname, 'runtime-worktree.sh');
+    let args = ['daemon-status', ...runtimeTargetArgs(rest)];
+    if (startsInPlaceByDefault(rest)) {
+      // Report the daemon `pnpm start` launched in place, the same one `pnpm stop` stops.
+      cmd = resolve(__dirname, 'start-dev.sh');
+      args = ['--status'];
+    }
     const child = spawn('bash', [cmd, ...args], {
       cwd: projectRoot,
       stdio: 'inherit',
@@ -60,7 +170,17 @@ if (mode === 'status') {
   // Unix: dispatch based on mode
   const hasProfile = rest.some((a) => a.startsWith('--profile'));
   let cmd, args, env;
-  if (mode === 'start') {
+  if (mode === 'start' && startsInPlaceByDefault(rest, { explain: true })) {
+    // Same launch as start:direct: the user's checkout and .env, no runtime worktree.
+    cmd = resolve(__dirname, 'start-dev.sh');
+    args = ['--prod-web', '--profile=opensource', ...rest];
+    env = {
+      ...process.env,
+      CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+      CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
+      CAT_CAFE_DIRECT_NO_WATCH: '1',
+    };
+  } else if (mode === 'start') {
     cmd = resolve(__dirname, 'runtime-worktree.sh');
     args = ['start', ...rest];
     env = {

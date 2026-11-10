@@ -45,53 +45,63 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
 
-# 5. 启动
+# 5. 启动（从当前目录启动，读取上面的 .env）
 pnpm start
-# 如果报 "target path exists" 错误，改用：
-#   pnpm start:direct
 ```
 
 如果要给记忆系统开启本地语义 rerank，请在 Console 设置里安装并启用 **Embedding** 服务。安装器会在 `~/.cat-cafe/embed-venv` 创建与你平台匹配的后端（Apple Silicon 用 MLX，其它平台用 fastembed/ONNX 或 `sentence-transformers`）。在 Windows 上，当 Console 记录该服务已安装且已启用后，`pnpm start` / `pnpm start:direct` 会自动拉起 `scripts/services/embed-server.ps1`；如果你在 Console 里卸载或禁用该服务，就不会自动启动。
 
-`pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
+在全新 clone 中，`pnpm start` 直接在当前目录启动，读取这里的 `.env`：构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。它运行的就是你检出的代码 —— 不会切换到 `origin/main`，也不会另建 worktree。（如果这个目录已经有旧版本的运行时 worktree，请看[启动命令](#启动命令)下方的升级说明。）
 
-> **提示：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。
+> **可选：** 如果你想要一个始终跟踪 `origin/main` 的独立运行实例，用 `pnpm runtime:start` —— 见[可选：独立运行时 Worktree](#可选独立运行时-worktreepnpm-runtimestart)。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
 > **替代方案 — 一键安装（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
-## `pnpm start` 的工作原理（运行时 Worktree）
+## 启动命令
 
-Clowder 使用**运行时 worktree** 保持开发目录干净：
+| 命令 | 作用 |
+|------|------|
+| `pnpm start` | 构建 → 从当前目录启动 Redis + API + 前端（读取这里的 `.env`） |
+| `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
+| `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
+| `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
+| `pnpm start:status` | 查看 `pnpm start` 所用的后台 daemon |
+| `pnpm stop` | 停止从当前目录启动的后台 daemon（运行时 worktree 用 `pnpm runtime:stop` 停止） |
+| `pnpm start:direct` | 始终直接从当前目录启动，即使已有运行时 worktree —— 固定版本时用它 |
+
+没有自带 `.git` 的发布包（例如解压后的离线包）仍按运行时入口原地启动。
+
+> **从旧版本升级？** 如果这个目录已经有 `../cat-cafe-runtime` worktree，`pnpm start` 和 `pnpm start:status` 会继续使用它，你在那里配置的成员和设置保持生效；停止它请用 `pnpm runtime:stop`。运行时参数（`--dir`、`--branch`、`--remote`、`--sync`、`--no-sync`、`--no-install`、`--expected-target-sha`）以及 `CAT_CAFE_RUNTIME_DIR` / `CAT_CAFE_RUNTIME_BRANCH` / `CAT_CAFE_RUNTIME_REMOTE` 环境变量，同样会让 `pnpm start` 继续走运行时。`pnpm start:direct` 则改为从当前目录启动，使用这里自己的 `.cat-cafe/`、`.env` / `.env.local`、`packages/api/uploads` 和 `data/` —— 不会从运行时复制任何东西。
+
+## 可选：独立运行时 Worktree（`pnpm runtime:start`）
+
+如果你希望运行实例和你编辑的目录分开，可以选择使用**运行时 worktree**：
 
 ```
 your-projects/
 ├── clowder-ai/             # 你的开发目录（feature 分支、编辑）
-└── cat-cafe-runtime/       # 自动创建的运行时 worktree（跟踪 origin/main）
+└── cat-cafe-runtime/       # 由 pnpm runtime:start 创建（跟踪 origin/main）
 ```
 
 | 命令 | 作用 |
 |------|------|
-| `pnpm start` | 初始化（首次）→ 同步到 origin/main → 构建 → 启动 Redis + API + 前端 |
-| `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
-| `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
-| `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
-| `pnpm start:direct` | 跳过 worktree — 从当前 checkout 启动，不自动更新（[详情](#运行指定版本不自动更新)） |
-| `pnpm stop` | 停止后台 daemon |
-| `pnpm start:status` | 查看 daemon 是否在运行 |
-| `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
+| `pnpm runtime:start` | 初始化（首次）→ 同步到 origin/main → 构建 → 从 `../cat-cafe-runtime` 启动 Redis + API + 前端 |
+| `pnpm runtime:restart` | 同步到最新的 origin/main 并重启运行时 |
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
+| `pnpm runtime:stop` | 停止运行时 daemon |
+| `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
 
-> 运行时契约（ADR-039 被动冻结）：`pnpm start` 是单一入口，sync+build+restart 一次完成。已移除独立 sync 命令以防止 stale-dist 崩溃（详见 ADR-039）。
+运行时 worktree 运行的是 `origin/main`，而不是你的本地分支。它读取 `../cat-cafe-runtime` 里自己的 `.env`；创建时只会从你的目录复制 `.cat-cafe/cat-catalog.json`、`accounts.json` 和 `credentials.json`。
 
-首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
+> 运行时契约（ADR-039 被动冻结）：`pnpm runtime:start` 是单一入口，sync+build+restart 一次完成。已移除独立 sync 命令以防止 stale-dist 崩溃（详见 ADR-039）。
 
-> **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+> **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm runtime:start`
 
 ## 运行指定版本（不自动更新）
 
-默认情况下，`pnpm start` 会自动同步到最新的 `origin/main`。如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 请使用 `pnpm start:direct`。
+如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — checkout 过去后用 `pnpm start:direct` 启动：它始终运行检出的那个 commit，从不自动更新。（在全新 clone 中 `pnpm start` 也是如此；但如果目录里还留着运行时 worktree，`pnpm start` 会继续运行那个跟随 `origin/main` 的运行时。）
 
 ### 方式一：Checkout 到某个 Release Tag
 
@@ -112,7 +122,7 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过 UI 添加）
 cp .env.example .env
 
-# 5. 直接启动（跳过 worktree，不会自动更新）
+# 5. 启动检出的版本（不会自动更新）
 pnpm start:direct
 
 # 不需要 Redis？用内存模式
@@ -121,19 +131,20 @@ pnpm start:direct -- --memory
 
 ### 方式二：停留在当前 commit
 
-如果你已经 clone 好了并且对当前版本满意，只需用 `pnpm start:direct` 代替 `pnpm start`：
+如果你已经 clone 好了并且对当前版本满意，用 `pnpm start:direct` —— 它始终运行你当前的 checkout：
 
 ```bash
 pnpm start:direct            # 从当前 checkout 启动，不同步
 pnpm start:direct -- --quick # 也跳过重编译
 ```
 
-### 为什么用 `pnpm start:direct`？
+### `pnpm start`、`pnpm start:direct` 和 `pnpm runtime:start` 的区别
 
 | 命令 | 自动同步到最新？ | 创建 worktree？ | 适用场景 |
 |------|----------------|----------------|---------|
-| `pnpm start` | **是** — 同步到 `origin/main` | 是 | 始终运行最新版本 |
-| `pnpm start:direct` | **否** — 从当前 checkout 运行 | 否 | 固定在特定版本或分支 |
+| `pnpm start` | 全新 clone 中**否**（运行你的 checkout）；已有运行时 worktree 则继续用它 | 否 | 日常使用 |
+| `pnpm start:direct` | **否** — 始终运行你当前的 checkout | 否 | 固定在特定版本或分支 |
+| `pnpm runtime:start` | **是** — 同步到 `origin/main` | 是（`../cat-cafe-runtime`） | 始终运行最新 main 的独立实例 |
 
 > **后续更新：** 准备好更新时，执行 `git fetch && git checkout v0.5.0`（或者新版本 tag），然后 `pnpm install && pnpm build && pnpm start:direct` 即可。
 
@@ -160,6 +171,8 @@ pnpm stop
 ```
 
 Daemon 模式将日志输出到项目根目录（或运行时 worktree 根目录）的 `cat-cafe-daemon.log`。PID 文件（`~/.cat-cafe/daemon.pid`）用于追踪运行中的进程。
+
+`pnpm start:status` 显示 `pnpm start` 所用的 daemon。`pnpm stop` 停止从当前目录启动的 daemon；如果 `pnpm start` 正在使用已有的运行时 worktree，请用 `pnpm runtime:stop` 停止。
 
 > **其他后台运行方式**（如果你不想用 `--daemon`）：
 > - **tmux / screen**：`tmux new -s cat-cafe` → `pnpm start` → 按 `Ctrl+B D` 脱离
@@ -474,21 +487,22 @@ Windows 通过 PowerShell 脚本完整支持。
 
 ```bash
 # === 启动 ===
-pnpm start              # 启动全部（Redis + API + 前端），通过运行时 worktree
+pnpm start              # 从当前目录启动全部（Redis + API + 前端）
 pnpm start --memory     # 无 Redis，纯内存模式
 pnpm start --quick      # 跳过重编译，用已有 dist/
 pnpm start --daemon     # 后台运行（daemon 模式）
-pnpm start:direct       # 直接启动 dev server（跳过 worktree）
+pnpm start:direct       # 始终直接从当前目录启动（即使已有运行时 worktree）
 
 # === Daemon 管理 ===
-pnpm stop               # 停止后台 daemon
-pnpm start:status       # 查看 daemon 是否在运行
+pnpm stop               # 停止从当前目录启动的后台 daemon
+pnpm start:status       # 查看 pnpm start 所用的 daemon
                         # 查看日志: tail -f cat-cafe-daemon.log
 
-# === 运行时 Worktree (ADR-039 被动冻结) ===
+# === 运行时 Worktree（可选，ADR-039 被动冻结） ===
 pnpm runtime:init       # 创建运行时 worktree（仅首次）
 pnpm runtime:start      # 单一入口：sync + build + start（无独立 sync）
 pnpm runtime:status     # 查看 worktree 状态
+pnpm runtime:stop       # 停止运行时 daemon
 
 # === 构建和测试 ===
 pnpm build              # 构建所有包
@@ -587,10 +601,10 @@ CORS_ALLOW_PRIVATE_NETWORK=true
 
 ## 常见问题
 
-**`pnpm start` 报 "target path exists" 错误？**
+**`pnpm runtime:start` 报 "target path exists" 错误？**
 - 运行时 worktree 路径 `../cat-cafe-runtime` 已被其他项目或目录占用
-- **快速解决：** 改用 `pnpm start:direct`，跳过 worktree 直接在当前目录启动
-- **替代方案：** 自定义运行时路径：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+- **快速解决：** 改用 `pnpm start:direct`，不使用运行时 worktree，直接在当前目录启动
+- **替代方案：** 自定义运行时路径：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm runtime:start`
 - 不需要 Redis 的话：`pnpm start:direct -- --memory`
 
 **Redis 启动不了？**
