@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mock, test } from 'node:test';
-import { AcpClient } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
+import { AcpClient, AcpProtocolError } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { testDshConnection } from '../src/routes/dsh-setup-service.js';
 
 test('explicit DSH verification applies the selected route/effort and closes on success or failure', async (t) => {
@@ -55,6 +55,10 @@ test('explicit DSH verification applies the selected route/effort and closes on 
     throw Error('401 secret-private-key');
   });
   await assert.rejects(testDshConnection(launch), /^Error: dsh_setup_test_failed$/);
+  prompt.mock.mockImplementation(async () => {
+    throw new AcpProtocolError(-32603, 'Internal error', { details: 'Credential store modify failed for fixture' });
+  });
+  await assert.rejects(testDshConnection(launch), /^Error: dsh_setup_auth_refresh_required$/);
   mock.method(AcpClient.prototype, 'initialize', async () => {
     throw Error('process exited');
   });

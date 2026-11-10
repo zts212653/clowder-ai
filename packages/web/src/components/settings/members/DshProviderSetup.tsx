@@ -3,65 +3,75 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { SelectField } from '../../hub-cat-editor-fields';
 
-interface ConfigInfo {
+interface Inspection {
+  revision: string;
   provider?: string;
   model?: string;
-  providers: { id: string; models: { id: string; label: string }[] }[];
+  providers: {
+    id: string;
+    credential: 'configured' | 'missing' | 'native_auth';
+    models: { id: string; label: string }[];
+  }[];
 }
-interface Inspection {
-  profiles: string[];
-  sourceProfile: string;
-  revision: string;
-  active: ConfigInfo;
-  source: ConfigInfo;
+export interface PreparedDshConnection {
+  id: string;
+  command: string;
+  startupArgs: string[];
+  env: Record<string, string>;
+  provider: string;
+  model: string;
 }
 const errors: Record<string, [string, string]> = {
+  dsh_setup_changed: ['配置已变化，请重新读取后确认。', 'Configuration changed. Read it again.'],
   dsh_config_manual: [
-    '配置包含自定义 header、未支持字段或内联认证，无法安全自动复制。请保留原配置，按指南在 DSH 手动配置 ACP。',
-    'Custom headers, unsupported fields or inline authentication cannot be copied safely. Preserve the configuration and set up ACP manually using the DSH guide.',
-  ],
-  dsh_setup_changed: ['配置已变化，请重新读取后确认。', 'Configuration changed. Read it again before confirming.'],
-  dsh_setup_profile_required: [
-    '请选择已有的完整 DSH profile；先在 DSH 完成配置，再读取。',
-    'Choose an existing complete DSH profile. Configure it in DSH first.',
-  ],
-  dsh_setup_custom_startup: [
-    '此启动入口暂不支持自动复制配置。当前模型请查看下方客户端回报；修改配置请按指南检查实际 HOME、profile 和 --patch。',
-    'This launcher does not support automatic configuration copying. See the client-reported model below; follow the guide to check the actual HOME, profile and --patch before making changes.',
+    '此配置暂不支持自动接入，请先在 Desktop 使用凭据引用和受支持的配置。',
+    'Use supported settings and credential references in Desktop before retrying.',
   ],
   dsh_inline_credential: [
-    '配置包含内联认证。请先在 DSH 改用 apiKeyEnv 凭据引用，再重试。',
-    'Inline authentication detected. Use a DSH apiKeyEnv reference before retrying.',
+    '请先在 Desktop 改用凭据引用，再重试。',
+    'Use a credential reference in Desktop, then retry.',
   ],
   dsh_config_expression: [
-    '配置包含表达式，无法安全复用；请在 DSH 中手动配置 ACP。',
-    'Expressions cannot be safely copied. Configure ACP in DSH manually.',
+    '此配置包含表达式，暂不支持自动接入。',
+    'This configuration uses expressions and cannot be reused automatically.',
   ],
-  dsh_setup_expired: [
-    '验证凭据已过期，请重新读取和选择配置。',
-    'The test receipt expired. Read and prepare the configuration again.',
+  dsh_setup_profile_required: ['请先在 DSH Desktop 完成模型配置。', 'Configure a model in DSH Desktop first.'],
+  dsh_setup_custom_startup: [
+    '未找到受支持的 DSH Desktop 安装。',
+    'A supported DSH Desktop installation was not found.',
   ],
-  dsh_setup_start_failed: [
-    'DSH 未能启动 ACP，请检查启动入口和 profile 配置。',
-    'DSH could not start ACP. Check the launcher and profile configuration.',
+  dsh_setup_desktop_ambiguous: [
+    '发现多套 Desktop，请确认要使用的安装位置。',
+    'Several Desktop installations were found. Confirm which installation to use.',
   ],
   dsh_setup_credential_missing: [
-    '当前路由缺少凭据引用，请在 DSH 配置对应认证后重试。',
-    'The selected route has a missing credential reference. Configure its authentication in DSH, then retry.',
+    '此路线未配置认证，请先在 Desktop 配置后重试。',
+    'Configure authentication for this route in Desktop first.',
+  ],
+  dsh_setup_credential_invalid: [
+    'Desktop 凭据文件无法读取，请先在 Desktop 检查认证。',
+    'The Desktop credential file could not be read. Check authentication in Desktop.',
+  ],
+  dsh_setup_auth_refresh_required: [
+    '请先在 DSH Desktop 更新登录认证，再重新验证。',
+    'Update your authentication in DSH Desktop, then verify again.',
+  ],
+  dsh_setup_start_failed: [
+    'DSH Desktop 未能启动接入，请检查安装后重试。',
+    'Desktop could not start the connection. Check the installation and retry.',
   ],
   dsh_setup_test_failed: [
-    'ACP 已启动，但当前模型请求未通过。请检查接口、模型、额度和网络后重试。',
-    'ACP started, but the selected model request failed. Check the endpoint, model, quota and network, then retry.',
+    '模型请求未通过，请检查接口、模型、额度和网络后重试。',
+    'The model request failed. Check the endpoint, model, quota and network.',
   ],
 };
+
 export function DshProviderSetup({
   runtimeId,
   configurationKey,
   verificationKey,
   selectedModel,
   effort,
-  canVerifyCurrent = true,
-  onVerified,
   onPrepared,
   t,
 }: {
@@ -70,259 +80,173 @@ export function DshProviderSetup({
   verificationKey?: string;
   selectedModel?: string;
   effort?: string;
-  canVerifyCurrent?: boolean;
-  onVerified?: () => void;
-  onPrepared: (command: string, args: string[]) => void;
+  onPrepared: (value: PreparedDshConnection) => string | void;
   t: (zh: string, en: string) => string;
 }) {
   const [inspection, setInspection] = useState<Inspection>();
-  const [profiles, setProfiles] = useState(['acp', 'desktop', 'web']);
-  const [sourceProfile, setSourceProfile] = useState('acp');
   const [provider, setProvider] = useState(''),
     [model, setModel] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const [receipt, setReceipt] = useState(''),
-    [tested, setTested] = useState(false);
+  const [testedKey, setTestedKey] = useState<string>();
   const generation = useRef(0);
-  const currentVerification = verificationKey ?? JSON.stringify([runtimeId, configurationKey, selectedModel, effort]);
-  const verification = useRef(currentVerification);
-  verification.current = currentVerification;
-  useEffect(() => setTested(false), [currentVerification]);
+  const key = verificationKey ?? JSON.stringify([runtimeId, configurationKey, selectedModel, effort]);
+  const currentKey = useRef(key);
+  currentKey.current = key;
   useEffect(() => {
-    // Invalidate late responses when the runtime or its launch configuration changes.
-    if (!runtimeId) return;
     setInspection(undefined);
-    setReceipt('');
     setError('');
-    setTested(false);
+    setTestedKey(undefined);
     setBusy(false);
     return () => {
       generation.current += 1;
     };
   }, [runtimeId, configurationKey]);
-  async function request(action: string, body: Record<string, unknown>) {
+  async function request<T>(action: string, body: Record<string, unknown>): Promise<T> {
     const response = await apiFetch(`/api/cats/dsh-setup/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) {
-      if (Array.isArray(data.profiles) && data.profiles.length) setProfiles(data.profiles);
-      throw Error(data.error || 'dsh_setup_unavailable');
-    }
+    if (!response.ok) throw Error(data.error || 'dsh_setup_unavailable');
     return data;
   }
-  async function run(action: 'inspect' | 'prepare' | 'test' | 'verify') {
-    const active = generation.current;
-    const checked = verification.current;
+  async function run(action: 'inspect' | 'connect') {
+    const active = generation.current,
+      checked = currentKey.current;
     setBusy(true);
     setError('');
-    setTested(false);
+    setTestedKey(undefined);
     try {
       if (action === 'inspect') {
-        const data: Inspection = await request(action, { runtimeId, sourceProfile });
+        const data = await request<Inspection>('inspect', { runtimeId });
         if (active !== generation.current) return;
+        const explicit = data.providers
+          .flatMap((route) =>
+            route.credential === 'missing'
+              ? []
+              : route.models.map((model) => ({ provider: route.id, model: model.id })),
+          )
+          .find((selection) => JSON.stringify([selection.provider, selection.model]) === selectedModel);
         setInspection(data);
-        setProfiles(data.profiles);
-        setReceipt('');
-        const route = data.source.providers.find((p) => p.id === data.active.provider) ?? data.source.providers[0];
-        setProvider(route?.id ?? '');
-        setModel(route?.models.find((m) => m.id === data.active.model)?.id ?? route?.models[0]?.id ?? '');
-      } else if (action === 'prepare' && inspection) {
-        const data: { id: string; command: string; startupArgs: string[] } = await request(action, {
+        setProvider(explicit?.provider ?? data.provider ?? '');
+        setModel(explicit?.model ?? data.model ?? '');
+      } else if (inspection) {
+        const value = await request<PreparedDshConnection>('prepare', {
           runtimeId,
-          sourceProfile,
           revision: inspection.revision,
           provider,
           model,
         });
-        if (active !== generation.current) return;
-        onPrepared(data.command, data.startupArgs);
-        setReceipt(data.id);
-      } else if (action === 'test' || action === 'verify') {
-        await request(action, {
-          ...(action === 'test' ? { id: receipt } : { runtimeId }),
-          ...(selectedModel ? { model: selectedModel } : {}),
+        if (active !== generation.current || checked !== currentKey.current) return;
+        await request('test', {
+          id: value.id,
+          model: JSON.stringify([provider, model]),
           ...(effort ? { effort } : {}),
         });
-        if (active !== generation.current || checked !== verification.current) return;
-        setTested(true);
-        onVerified?.();
+        if (active !== generation.current || checked !== currentKey.current) return;
+        const appliedKey = onPrepared(value);
+        setTestedKey(appliedKey ?? checked);
       }
     } catch (cause) {
-      if (active !== generation.current) return;
-      setError(cause instanceof Error ? cause.message : 'dsh_setup_unavailable');
+      if (active === generation.current) setError(cause instanceof Error ? cause.message : 'dsh_setup_unavailable');
     } finally {
       if (active === generation.current) setBusy(false);
     }
   }
-  const routes = inspection?.source.providers ?? [];
-  const models = routes.find((p) => p.id === provider)?.models ?? [];
+  const routes = inspection?.providers ?? [];
+  const route = routes.find((item) => item.id === provider);
   return (
-    <>
-      <p className="text-sm text-cafe-secondary">
+    <div className="space-y-3 text-sm">
+      <p className="text-cafe-secondary">
         {t(
-          '此处用于复用其他配置，当前模型以客户端回报为准。首次使用自定义接口时，请在下方选择路由并保存成员。检测到 DSH 不代表 ACP 已切换到该接口。',
-          'This section copies another configuration; the current model is reported by the client. Before first use, choose your custom provider below and save the teammate. Detecting DSH does not switch its ACP provider.',
+          '复用 DSH Desktop 的模型与认证。官方认证已配置时默认官方；缺失时使用已有自定义路线。原配置与历史保留。',
+          'Reuse Desktop models and authentication. Prefer configured official authentication; otherwise use an existing custom route. Native configuration and history are preserved.',
         )}
       </p>
-      <details className="rounded-xl border border-[var(--console-border-soft)] p-4 text-sm">
-        <summary className="cursor-pointer font-medium">{t('DSH 自定义 LLM', 'DSH custom LLM')}</summary>
-        <p className="my-3 text-cafe-secondary">
-          {t(
-            '复用 DSH 已配置的接口，只为此成员生成专用配置。原生配置、认证和历史保留；无需配置官方供应商。',
-            'Reuse a configured DSH provider for this teammate. Native configuration, credentials and history are preserved. No official provider is required.',
-          )}
-        </p>
-        <a
-          className="inline-flex min-h-10 items-center text-cafe-accent"
-          href="https://github.com/zts212653/clowder-ai/blob/main/docs/ops/dsh-custom-llm-acp.md"
-          target="_blank"
-          rel="noreferrer"
+      <fieldset disabled={busy} className="min-w-0 space-y-3">
+        <button
+          type="button"
+          onClick={() => void run('inspect')}
+          className="min-h-10 text-cafe-accent disabled:opacity-50"
         >
-          {t('查看 DSH 配置指南', 'DSH configuration guide')}
-        </a>
-        <fieldset disabled={busy} className="min-w-0">
-          <SelectField
-            label={t('读取配置来源', 'Read configuration from')}
-            value={sourceProfile}
-            options={profiles.map((value) => ({ value, label: value }))}
-            onChange={(value) => {
-              setSourceProfile(value);
-              setInspection(undefined);
-              setReceipt('');
-              setError('');
-              setTested(false);
-            }}
-          />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void run('inspect')}
-            className="my-2 min-h-10 text-cafe-accent disabled:opacity-50"
-          >
-            {busy ? t('处理中…', 'Working…') : t('读取 DSH 配置', 'Read DSH configuration')}
-          </button>
-          {inspection && (
-            <div className="space-y-3">
-              <p>
-                {t('当前 ACP 选择', 'Current ACP selection')}：{inspection.active.provider ?? '—'} /{' '}
-                {inspection.active.model ?? '—'}
-              </p>
-              {routes.length ? (
-                <>
-                  <SelectField
-                    label={t('供应商路由', 'Provider route')}
-                    value={provider}
-                    options={routes.map((p) => ({ value: p.id, label: p.id }))}
-                    onChange={(value) => {
-                      setProvider(value);
-                      setModel(routes.find((p) => p.id === value)?.models[0]?.id ?? '');
-                      setReceipt('');
-                      setTested(false);
-                    }}
-                  />
-                  <SelectField
-                    label={t('DSH 模型', 'DSH model')}
-                    value={model}
-                    options={models.map((m) => ({ value: m.id, label: m.label }))}
-                    onChange={(value) => {
-                      setModel(value);
-                      setReceipt('');
-                      setTested(false);
-                    }}
-                  />
-                  {!models.length && (
-                    <p className="text-cafe-secondary">
-                      {t(
-                        '此路由没有显式模型清单，请先在 DSH 配置模型。',
-                        'Configure an explicit model list in DSH first.',
-                      )}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy || !model}
-                    onClick={() => void run('prepare')}
-                    className="min-h-10 text-cafe-accent disabled:opacity-50"
-                  >
-                    {t('使用此配置', 'Use this configuration')}
-                  </button>
-                </>
-              ) : (
-                <p className="text-cafe-secondary">
-                  {t(
-                    '此来源没有可复用的自定义接口。请选择 Desktop/Web 使用的 profile；如尚未配置，请先在 DSH 添加接口和凭据。',
-                    'No reusable custom providers here. Choose your Desktop/Web profile, or configure a provider and credential in DSH first.',
-                  )}
-                </p>
-              )}
-            </div>
-          )}
-          {receipt && (
-            <div role="status" className="mt-3 space-y-2 text-cafe-secondary">
-              <p>
+          {busy ? t('处理中…', 'Working…') : t('读取 Desktop 配置', 'Read Desktop configuration')}
+        </button>
+        {inspection && (
+          <>
+            <SelectField
+              label={t('供应商路线', 'Provider route')}
+              value={provider}
+              options={[
+                { value: '', label: t('选择路线', 'Choose a route') },
+                ...routes.map((item) => ({
+                  value: item.id,
+                  label:
+                    item.credential === 'missing'
+                      ? `${item.id} · ${t('未配置认证', 'Authentication missing')}`
+                      : item.id,
+                  disabled: item.credential === 'missing',
+                })),
+              ]}
+              onChange={(value) => {
+                setProvider(value);
+                setModel(routes.find((item) => item.id === value)?.models[0]?.id ?? '');
+                setTestedKey(undefined);
+              }}
+            />
+            <SelectField
+              label={t('DSH 模型', 'DSH model')}
+              value={model}
+              options={(route?.models ?? []).map((item) => ({ value: item.id, label: item.label }))}
+              onChange={(value) => {
+                setModel(value);
+                setTestedKey(undefined);
+              }}
+            />
+            {!route?.models.length && (
+              <p className="text-cafe-secondary">
                 {t(
-                  '已加入草稿，请保存成员后使用。此配置只保留凭据引用，仍由原有 DSH 解析认证。',
-                  'Added to the draft. Save the teammate to apply. Credentials remain resolved by DSH.',
+                  '请在 Desktop 配置可用路线及模型后重新读取。',
+                  'Configure a usable route and model in Desktop, then read again.',
                 )}
               </p>
-              <p>
-                {t(
-                  '可选验证会向模型发送一次请求，可能产生费用，并保留 DSH 测试会话。',
-                  'Optional verification sends one model request, may incur a charge, and retains a DSH test session.',
-                )}
-              </p>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void run('test')}
-                className="min-h-10 text-cafe-accent disabled:opacity-50"
-              >
-                {t('发送一次请求验证此配置', 'Send one request to test this configuration')}
-              </button>
-            </div>
-          )}
-        </fieldset>
-      </details>
-      {!receipt && (
-        <div className="space-y-2 text-sm text-cafe-secondary">
-          <p>
-            {t(
-              '验证会发送一次模型请求，可能产生费用，并保留 DSH 测试会话。',
-              'Verification sends one model request, may incur a charge, and retains a DSH test session.',
             )}
-          </p>
-          <button
-            type="button"
-            disabled={busy || !canVerifyCurrent}
-            onClick={() => void run('verify')}
-            className="min-h-10 text-cafe-accent disabled:opacity-50"
-          >
-            {busy ? t('验证中…', 'Verifying…') : t('验证当前配置', 'Verify current configuration')}
-          </button>
-        </div>
-      )}
-      {tested && (
-        <p role="status" className="mt-2 text-cafe-secondary">
+            <p className="text-cafe-secondary">
+              {t(
+                '验证会发送一次模型请求，可能产生费用。通过后加入成员草稿。',
+                'Verification sends one model request and may incur a charge. Success adds the connection to your member draft.',
+              )}
+            </p>
+            <button
+              type="button"
+              disabled={!model || !provider || route?.credential === 'missing'}
+              onClick={() => void run('connect')}
+              className="min-h-10 text-cafe-accent disabled:opacity-50"
+            >
+              {t('验证并使用此模型', 'Verify and use this model')}
+            </button>
+          </>
+        )}
+      </fieldset>
+      {testedKey === key && (
+        <p role="status" className="text-cafe-secondary">
           {t(
-            '当前配置已收到模型文本回复。修改启动配置、模型或思考强度后需重新验证。',
-            'The current configuration received model text. Verify again after changing the launch, model or effort.',
+            '此配置已收到模型回复，请保存成员。修改模型、思考强度或启动配置后需重新验证。',
+            'The model replied. Save the teammate. Verify again after changing the model, effort or launch settings.',
           )}
         </p>
       )}
       {error && (
-        <p role="alert" className="mt-3 text-conn-red-text">
+        <p role="alert" className="text-conn-red-text">
           {errors[error]
             ? t(...errors[error])
             : t(
-                '无法完成 DSH 配置或验证。请检查实际启动入口、profile、凭据引用与 ACP 引导目录权限，再重新读取。原配置已保留。',
-                'DSH setup or verification failed. Check the launcher, profile, credential reference and ACP bootstrap permissions, then retry. Existing configuration is preserved.',
+                '无法完成 Desktop 接入，请检查 Desktop 配置后重新读取。原配置已保留。',
+                'Desktop connection failed. Check Desktop settings and read again. Existing configuration is preserved.',
               )}
         </p>
       )}
-    </>
+    </div>
   );
 }

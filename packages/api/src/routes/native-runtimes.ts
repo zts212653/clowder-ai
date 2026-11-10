@@ -7,7 +7,7 @@ import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { resolveDshSetupLaunch } from './dsh-setup-launch.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
-import { discoverDshRuntime } from './native-dsh-discovery.js';
+import { discoverDshRuntimes } from './native-dsh-discovery.js';
 import { dshLauncherProfileState } from './native-dsh-profile.js';
 import { nativeRuntimeReadiness } from './native-runtime-readiness.js';
 
@@ -39,7 +39,7 @@ export function safeNativeStartup(command: string, startupArgs: readonly string[
   );
 }
 /** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
-export function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
+export async function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
   const home = homedir();
   const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
   const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
@@ -81,22 +81,22 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';
     const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
     const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
-    const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot);
+    const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot, cat.env?.DSH_HOME);
     const dshSetupSupported =
       installed &&
       config.transport !== 'httpstream' &&
       supportsDshSetup(config.command, config.startupArgs, projectRoot);
+    const dsh =
+      isDshLauncher(config.command, config.startupArgs) ||
+      dshSetupSupported ||
+      (profileState !== undefined && profileState !== 'custom_startup');
     const selectable = safeNativeStartup(config.command, config.startupArgs) && profileState !== 'acp_profile_invalid';
     return [
       {
         id: `acp:${cat.id}`,
-        label: agy
-          ? 'AGY 官方 ACP'
-          : dshSetupSupported ||
-              isDshLauncher(config.command, config.startupArgs) ||
-              (profileState !== undefined && profileState !== 'custom_startup')
-            ? 'DSH'
-            : cat.displayName,
+        label: agy ? 'AGY 官方 ACP' : dsh ? 'DSH' : cat.displayName,
+        ...(dsh ? { onboardingEligible: false } : {}),
+        ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
         clientId: agy ? 'google' : 'acp',
         ...(agy ? { agyCarrier: 'acp' as const } : {}),
         installed,
@@ -117,16 +117,7 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
       },
     ];
   });
-  const discoveredDsh = discoverDshRuntime();
-  const dsh = acp.some(
-    (runtime) =>
-      discoveredDsh.acp !== undefined &&
-      runtime.acp !== undefined &&
-      runtime.acp.command === discoveredDsh.acp.command &&
-      JSON.stringify(runtime.acp.startupArgs) === JSON.stringify(discoveredDsh.acp.startupArgs),
-  )
-    ? []
-    : [discoveredDsh];
+  const dsh = await discoverDshRuntimes();
   const agyModels = Object.values(catRegistry.getAllConfigs())
     .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
     .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
@@ -159,7 +150,7 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
 
 /** Bounded native login checks, without prompts, model requests, or refreshing credentials. */
 export async function discoverNativeRuntimesWithReadiness(root: string, refresh = false) {
-  const found = discoverNativeRuntimes(root);
+  const found = await discoverNativeRuntimes(root);
   const runtimes = await Promise.all(
     found.runtimes.map(async (runtime) => ({
       ...runtime,

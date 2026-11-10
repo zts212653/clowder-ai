@@ -56,6 +56,7 @@ export function dshLauncherProfileState(
   command: string,
   args: readonly string[],
   cwd: string,
+  home?: string,
 ): DshProfileState | 'custom_startup' | undefined {
   let cliArgs = args;
   const unrecognized = /dsh|deepseek/i.test([command, ...args].join(' ')) ? 'custom_startup' : undefined;
@@ -70,6 +71,6 @@ export function dshLauncherProfileState(
   // arbitrary CLI patches, commands or environment-changing wrappers.
   const profile = cliArgs.length === 2 && cliArgs[0] === '--profile' ? cliArgs[1] : undefined;
   if (!profile || /[/\\]/.test(profile) || ['.', '..', 'node_modules'].includes(profile)) return 'custom_startup';
-  const state = dshProfileState(undefined, profile);
+  const state = dshProfileState(home, profile);
   return profile !== 'acp' && state === 'acp_profile_missing' ? 'custom_startup' : state;
 }

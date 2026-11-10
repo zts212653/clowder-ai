@@ -98,7 +98,7 @@ it.each([
     );
     const trigger = host.querySelector<HTMLButtonElement>('[role=combobox]');
     expect(patch).not.toHaveBeenCalled();
-    expect(host.textContent?.includes('DSH 自定义 LLM')).toBe(expectedDsh);
+    expect(host.textContent?.includes('复用 DSH Desktop')).toBe(expectedDsh);
     const summary = host.querySelector('[data-testid=shared-summary]')?.textContent;
     if (!expectedDsh) {
       expect(summary).not.toContain('DeepSeek Flash');
@@ -130,7 +130,7 @@ it.each([
   const args = [entry, '--profile', 'acp'];
   const generated = [...args, '--patch', '/fixture/host/custom.yml'];
   const runtime = {
-    id: 'acp:native-panel',
+    id: 'dsh',
     label: 'DSH',
     clientId: 'acp' as const,
     installed: true,
@@ -146,14 +146,22 @@ it.each([
             ? { runtimes: [runtime] }
             : path.endsWith('/inspect')
               ? {
-                  profiles: ['acp'],
-                  sourceProfile: 'acp',
                   revision: 'a'.repeat(64),
-                  active: { providers: [] },
-                  source: { providers: [{ id: 'custom', models: [{ id: 'custom-model', label: 'Custom' }] }] },
+                  provider: 'custom',
+                  model: 'custom-model',
+                  providers: [
+                    { id: 'custom', credential: 'configured', models: [{ id: 'custom-model', label: 'Custom' }] },
+                  ],
                 }
               : path.endsWith('/prepare')
-                ? { id: 'receipt', command: 'node', startupArgs: generated }
+                ? {
+                    id: 'receipt',
+                    command: 'node',
+                    startupArgs: generated,
+                    env: { DSH_HOME: '/host/private' },
+                    provider: 'custom',
+                    model: 'custom-model',
+                  }
                 : path.endsWith('/test')
                   ? { ok: true }
                   : { status: 'live', models: [], effortOptions: [] },
@@ -197,15 +205,13 @@ it.each([
     await act(async () => root.render(<Card />));
     expect(apiFetch).not.toHaveBeenCalled();
     await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
-    await click('读取 DSH 配置');
-    await click('使用此配置');
+    await click('读取 Desktop 配置');
+    await click('验证并使用此模型');
     const reads = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes').length;
     await click('收起');
     await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
-    expect(host.textContent).toContain('DSH 自定义 LLM');
-    expect(host.textContent).toContain('已加入草稿，请保存成员后使用');
-    await click('发送一次请求验证此配置');
-    expect(host.textContent).toContain('已收到模型文本回复');
+    expect(host.textContent).toContain('复用 DSH Desktop');
+    expect(host.textContent).toContain('此配置已收到模型回复');
     expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes')).toHaveLength(reads);
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {

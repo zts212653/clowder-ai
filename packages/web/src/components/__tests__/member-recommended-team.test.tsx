@@ -30,7 +30,23 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/session') return json({ userId: 'first-team-owner' });
     if (path === '/api/config/onboarding/entry') return json({ status: 'pending' });
-    if (path === '/api/cats/dsh-setup/verify') return json({ ok: true });
+    if (path === '/api/cats/dsh-setup/inspect')
+      return json({
+        revision: 'a'.repeat(64),
+        provider: 'custom',
+        model: 'fixture',
+        providers: [{ id: 'custom', credential: 'configured', models: [{ id: 'fixture', label: 'Fixture' }] }],
+      });
+    if (path === '/api/cats/dsh-setup/prepare')
+      return json({
+        id: 'receipt',
+        command: 'dsh',
+        startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'],
+        env: { DSH_HOME: '/host/private' },
+        provider: 'custom',
+        model: 'fixture',
+      });
+    if (path === '/api/cats/dsh-setup/test') return json({ ok: true });
     if (path === '/api/cats/runtime-models') return json({ status: 'live', models: [], effortOptions: [] });
     if (path === '/api/cat-templates')
       return json({
@@ -125,7 +141,8 @@ it('preselects native clients, verifies DSH and creates the complete team with i
   const dsh = host.querySelector<HTMLInputElement>('input[aria-label="加入 DSH 伙伴"]')!;
   expect(dsh.disabled).toBe(true);
   await act(async () => button('配置与验证').click());
-  await act(async () => button('验证当前配置').click());
+  await act(async () => button('读取 Desktop 配置').click());
+  await act(async () => button('验证并使用此模型').click());
   expect(dsh.disabled).toBe(false);
   await act(async () => dsh.click());
   await act(async () => button('一键创建 3 位伙伴').click());
@@ -134,8 +151,14 @@ it('preselects native clients, verifies DSH and creates the complete team with i
     .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(posts).toHaveLength(3);
   expect(posts.every(([path]) => path === '/api/cats')).toBe(true);
-  for (const [, init] of posts)
-    expect(JSON.parse(String(init?.body))).toMatchObject({ configurationSource: 'native_tool', defaultModel: '' });
+  for (const [, init] of posts) {
+    const payload = JSON.parse(String(init?.body));
+    expect(payload).toMatchObject({
+      configurationSource: 'native_tool',
+      defaultModel: payload.clientId === 'acp' ? '["custom","fixture"]' : '',
+    });
+    if (payload.clientId === 'acp') expect(payload.env).toEqual({ DSH_HOME: '/host/private' });
+  }
   expect(created).toHaveBeenCalledOnce();
 });
 

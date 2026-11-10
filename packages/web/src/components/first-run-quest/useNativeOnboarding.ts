@@ -111,18 +111,28 @@ export function useNativeOnboarding(
         const currentCats = roster.cats;
         const partners = recommendNativePartners(discovered.runtimes, templates.templates, currentCats, journeyId).map(
           (partner) => {
-            const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
+            const previous = saved?.partners.find(
+              (p) =>
+                p.form &&
+                (matchesRuntime(p.form, partner.runtime) ||
+                  (partner.runtime.dshDesktop &&
+                    p.runtime?.id === partner.runtime.id &&
+                    p.runtime.acp?.command === partner.runtime.acp?.command)),
+            );
             if (!previous?.form) return partner;
+            // A prepared Desktop keeps its private HOME/patch across reopening this saved draft.
+            const runtime =
+              partner.runtime.dshDesktop && previous.runtime
+                ? { ...previous.runtime, installed: partner.runtime.installed }
+                : partner.runtime;
             const savedMember = currentCats.find(
-              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), partner.runtime),
+              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), runtime),
             );
             const acknowledged = saved?.created[partner.id] ?? saved?.created[previous.id];
             const confirmed = Boolean(previous.existingId || (acknowledged && savedMember?.id === acknowledged.id));
             const receiptMismatch =
               acknowledged &&
-              currentCats.some(
-                (cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), partner.runtime),
-              );
+              currentCats.some((cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), runtime));
             const restoredForm = confirmed && savedMember ? initialState(savedMember) : previous.form;
             // Repair a pre-identity default even when the draft is not confirmed:
             // a draft whose member is no longer in the roster (for example, a
@@ -131,13 +141,12 @@ export function useNativeOnboarding(
             // exists may be the exact body of a lost-response retry, so leave
             // that wire shape untouched.
             const identityRepair =
-              confirmed || !savedMember
-                ? repairLegacyNativeIdentityFields(restoredForm, partner.form, partner.runtime)
-                : {};
+              confirmed || !savedMember ? repairLegacyNativeIdentityFields(restoredForm, partner.form, runtime) : {};
             const identityChanged = Object.keys(identityRepair).length > 0;
             const form = identityChanged ? { ...restoredForm, ...identityRepair } : restoredForm;
             return {
               ...partner,
+              runtime,
               // A repaired form is a new request: its old key may belong to a
               // different payload. A true lost-response retry keeps its key.
               creationRequestKey: receiptMismatch
@@ -153,8 +162,7 @@ export function useNativeOnboarding(
               ...(!confirmed && savedMember && !saved?.idScheme
                 ? { recoverable: { id: savedMember.id, form: initialState(savedMember) } }
                 : {}),
-              selected:
-                nativeRuntimeSelectable(partner.runtime, form) && (!previous.runtime?.installed || previous.selected),
+              selected: nativeRuntimeSelectable(runtime, form) && (!previous.runtime?.installed || previous.selected),
               form,
             };
           },

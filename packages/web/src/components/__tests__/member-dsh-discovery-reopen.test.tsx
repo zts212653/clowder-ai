@@ -94,7 +94,7 @@ it.each([
   try {
     await act(async () => root.render(editor));
     expect(host.querySelector('[role=combobox]')?.textContent).toContain('DeepSeek Flash · 跟随 DSH 设置');
-    expect(host.textContent).toContain('DSH 自定义 LLM');
+    expect(host.textContent).toContain('复用 DSH Desktop');
     if (scenario === 'reopen') {
       await act(async () => root.unmount());
       failDiscovery = true;
@@ -104,7 +104,7 @@ it.each([
       expect(host.querySelector('[data-testid=shared-summary]')?.textContent).toContain('DSH · DeepSeek Flash');
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
       expect(host.querySelector('[role=alert]')?.textContent).toContain('工具列表读取失败');
-      expect(host.textContent).toContain('DSH 自定义 LLM');
+      expect(host.textContent).toContain('复用 DSH Desktop');
       if (entry === '/some/install/dsh/lib/bin.js') {
         failDiscovery = false;
         removedRuntime = true;
@@ -112,7 +112,7 @@ it.each([
         expect(refresh).toBeDefined();
         await act(async () => refresh?.click());
         expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('ACP');
-        expect(host.textContent).not.toContain('DSH 自定义 LLM');
+        expect(host.textContent).not.toContain('复用 DSH Desktop');
       }
     } else {
       const advanced = [...host.querySelectorAll('button')].find((button) => button.textContent === '高级接入');
@@ -127,14 +127,14 @@ it.each([
       const runtime = [...host.querySelectorAll('button')].find((button) => button.textContent === '模型与工具');
       await act(async () => runtime?.click());
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('ACP');
-      expect(host.textContent).not.toContain('DSH 自定义 LLM');
+      expect(host.textContent).not.toContain('复用 DSH Desktop');
       expect(host.querySelector('[role=combobox]')?.textContent).not.toContain('DeepSeek Flash');
       const discard = [...host.querySelectorAll('button')].find((button) => button.textContent === '放弃修改');
       expect(discard).toBeDefined();
       await act(async () => discard?.click());
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
       expect(host.querySelector('[role=combobox]')?.textContent).toContain('DeepSeek Flash');
-      expect(host.textContent).toContain('DSH 自定义 LLM');
+      expect(host.textContent).toContain('复用 DSH Desktop');
     }
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {

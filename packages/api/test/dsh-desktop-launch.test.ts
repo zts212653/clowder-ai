@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { resolveDshSetupLaunch } from '../src/routes/dsh-setup-launch.js';
-import { discoverDshRuntime } from '../src/routes/native-dsh-discovery.js';
+import { discoverDshRuntimes } from '../src/routes/native-dsh-discovery.js';
 import { invalidateCliCommand } from '../src/utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../src/utils/cli-spawn-win.js';
 
-test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', (t) => {
+test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-launch-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const resources = join(root, 'resources');
@@ -35,12 +35,11 @@ test('the installed Desktop launcher preserves its Electron CLI and environment 
     join(profile, 'package.json'),
     JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } } }),
   );
-  const discovered = discoverDshRuntime({
-    dshHome: root,
-    resolveCommand: () => null,
-    npmCaches: [],
-    desktopRoots: [root],
-  });
+  const discovered = (
+    await discoverDshRuntimes({
+      desktopRoots: [root],
+    })
+  )[0]!;
   assert.equal(discovered.installed, true, 'Desktop needs neither a PATH entry nor an npm installation');
   assert.equal(discovered.label, 'DSH Desktop');
   assert.deepEqual(discovered.acp, { command, startupArgs: ['--profile', 'acp'], transport: 'stdio' });

@@ -74,6 +74,7 @@ export function recommendNativePartners(
   const reservedIds = new Set(cats.map((cat) => cat.id.toLowerCase()));
   const reservedAliases = new Set(cats.flatMap((cat) => cat.mentionPatterns.map((alias) => alias.toLowerCase())));
   return runtimes.flatMap((runtime) => {
+    if (runtime.onboardingEligible === false) return [];
     // Keep existing/manual OpenCode members, but do not recommend new ones during the compatibility pause.
     if (runtime.clientId === 'opencode') return [];
     const descriptor = JSON.stringify([

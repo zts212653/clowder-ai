@@ -15,6 +15,9 @@ export interface RuntimeChoice {
   discoveryStatus?: 'configured' | 'acp_profile_missing' | 'acp_profile_invalid' | 'adapter_missing' | 'not_installed';
   /** Existing backend setup validator accepted this exact native descriptor; display only. */
   dshSetupSupported?: boolean;
+  dshDesktop?: boolean;
+  onboardingEligible?: boolean;
+  env?: Record<string, string>;
   connectionVerification?: { key: string; checkedAt: number };
   models: string[];
   configuredModel?: string;
@@ -25,7 +28,10 @@ export interface RuntimeChoice {
 }
 
 export function dshConnectionKey(
-  form: Pick<HubCatEditorFormState, 'acpCommand' | 'acpStartupArgs' | 'acpTransport' | 'defaultModel' | 'cliEffort'>,
+  form: Pick<
+    HubCatEditorFormState,
+    'acpCommand' | 'acpStartupArgs' | 'acpTransport' | 'defaultModel' | 'cliEffort' | 'env'
+  >,
 ) {
   return JSON.stringify([
     form.acpCommand,
@@ -33,6 +39,7 @@ export function dshConnectionKey(
     form.acpTransport,
     form.defaultModel,
     form.cliEffort,
+    Object.entries(form.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
   ]);
 }
 
@@ -51,6 +58,7 @@ const runtimeFields = [
   'acpCommand',
   'acpAgentProvider',
   'acpStartupArgs',
+  'env',
   'acpTransport',
   'acpMaxLiveProcesses',
   'acpIdleTtlMinutes',
@@ -69,7 +77,13 @@ function runtimeKey(form: RuntimeFields): string {
   return JSON.stringify([
     form.clientId,
     resolveDraftCarrier(form) === 'acp'
-      ? [form.acpAgentProvider ?? '', form.acpCommand, splitCommandArgs(form.acpStartupArgs), form.acpTransport]
+      ? [
+          form.acpAgentProvider ?? '',
+          form.acpCommand,
+          splitCommandArgs(form.acpStartupArgs),
+          form.acpTransport,
+          Object.entries(form.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+        ]
       : null,
   ]);
 }
@@ -93,6 +107,7 @@ export function rememberedRuntimes(drafts: RuntimeDrafts = {}): RuntimeChoice[] 
     clientId: form.clientId,
     installed: false,
     models: [],
+    env: form.env,
     ...(usesAgyNative(form)
       ? { agyCarrier: 'native' as const }
       : usesAgyAcp(form)
@@ -126,6 +141,7 @@ export function runtimeDefaults(next: RuntimeChoice): RuntimeFields {
     provider: '',
     carrier: next.acp ? 'acp' : next.clientId === 'openai' ? 'app_server' : 'cli',
     acpCommand: next.acp?.command ?? '',
+    env: next.env,
     acpAgentProvider: next.acp?.agentProvider ?? null,
     acpStartupArgs: next.acp ? serializeCommandArgs(next.acp.startupArgs) : '',
     acpTransport: next.acp?.transport ?? 'stdio',

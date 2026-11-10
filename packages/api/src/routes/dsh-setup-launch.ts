@@ -21,6 +21,7 @@ export interface DshSetupLaunch {
   args: string[];
   cwd: string;
   profileIndex: number;
+  env?: Record<string, string>;
 }
 
 /** Unknown wrappers can change HOME or run arbitrary commands: keep them manual. */
@@ -63,7 +64,7 @@ function assertDshEntry(entry: string): void {
   if (pkg.name !== '@deepseek-ai/dsh') throw Error('dsh_setup_custom_startup');
 }
 
-export function dshSetupBootstrap(launch: Pick<DshSetupLaunch, 'command' | 'args' | 'cwd'>) {
+export function dshSetupBootstrap(launch: Pick<DshSetupLaunch, 'command' | 'args' | 'cwd' | 'env'>) {
   return verifyAcpBootstrap(
     resolveAcpBootstrap(
       launch.cwd,
@@ -75,6 +76,8 @@ export function dshSetupBootstrap(launch: Pick<DshSetupLaunch, 'command' | 'args
       '',
     ),
     'dsh-setup',
+    undefined,
+    launch.env,
   );
 }
 

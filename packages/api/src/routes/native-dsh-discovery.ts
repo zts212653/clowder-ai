@@ -1,68 +1,30 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { resolveCliCommand } from '../utils/cli-resolve.js';
-import { findSystemNode } from '../utils/cli-spawn-win.js';
-import { findDshDesktopCommand, resolveDshDesktopLaunch } from '../utils/dsh-desktop-launch.js';
-import { dshProfileState } from './native-dsh-profile.js';
+import { createHash } from 'node:crypto';
+import { dirname, resolve } from 'node:path';
+import { findDshDesktopCommands } from '../utils/dsh-desktop-launch.js';
 
 interface DiscoveryOptions {
-  dshHome?: string;
-  npmCaches?: string[];
-  resolveCommand?: (command: string) => string | null;
   desktopRoots?: string[];
 }
 
-/** Read installed package metadata only; never execute npx or install a profile during discovery. */
-function cachedEntry(caches: string[]): string | undefined {
-  const entries: { file: string; modified: number }[] = [];
-  for (const cache of caches) {
-    const root = join(cache, '_npx');
-    try {
-      for (const directory of readdirSync(root, { withFileTypes: true })) {
-        if (!directory.isDirectory()) continue;
-        const pkg = join(root, directory.name, 'node_modules/@deepseek-ai/dsh');
-        try {
-          const manifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
-          const bin = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.dsh;
-          if (manifest.name !== '@deepseek-ai/dsh' || typeof bin !== 'string') continue;
-          const entry = resolve(pkg, bin);
-          if (!entry.startsWith(resolve(pkg) + '/') && !entry.startsWith(resolve(pkg) + '\\')) continue;
-          if (existsSync(entry)) entries.push({ file: entry, modified: statSync(entry).mtimeMs });
-        } catch {
-          /* An incomplete npm cache entry is not an installation. */
-        }
-      }
-    } catch {
-      /* npm is optional. */
-    }
-  }
-  return entries.sort((a, b) => b.modified - a.modified)[0]?.file;
-}
-
-export function discoverDshRuntime(options: DiscoveryOptions = {}) {
-  const home = homedir();
-  const command = (options.resolveCommand ?? resolveCliCommand)('dsh') ?? findDshDesktopCommand(options.desktopRoots);
-  const caches = options.npmCaches ?? [
-    ...(process.env.npm_config_cache ? [process.env.npm_config_cache] : []),
-    join(process.env.LOCALAPPDATA || join(home, 'AppData/Local'), 'npm-cache'),
-    join(home, '.npm'),
-  ];
-  const entry = command ? undefined : cachedEntry(caches);
-  const executable = command ?? (entry ? (findSystemNode() ?? undefined) : undefined);
-  const profileState = dshProfileState(options.dshHome);
-  const available = Boolean(executable && profileState !== 'acp_profile_invalid');
-  const startupArgs = [...(entry ? [entry] : []), '--profile', 'acp'];
-  return {
-    id: 'dsh',
-    label: command && resolveDshDesktopLaunch(command, []) ? 'DSH Desktop' : 'DSH',
+/** Automatic onboarding supports Desktop only. Its Host ACP home is prepared explicitly later. */
+export async function discoverDshRuntimes(options: DiscoveryOptions = {}) {
+  const commands = await findDshDesktopCommands(options.desktopRoots);
+  return (commands.length ? commands : [undefined]).map((command) => ({
+    id:
+      commands.length > 1 && command
+        ? `dsh:${createHash('sha256').update(command.toLowerCase()).digest('hex').slice(0, 16)}`
+        : 'dsh',
+    label: commands.length > 1 && command ? `DSH Desktop · ${resolve(dirname(command), '../../../..')}` : 'DSH Desktop',
     clientId: 'acp' as const,
-    installed: Boolean(executable),
-    command: executable,
-    ...(available && executable ? { acp: { command: executable, startupArgs, transport: 'stdio' as const } } : {}),
+    installed: Boolean(command),
+    command,
+    dshDesktop: true,
+    ...(command
+      ? { dshSetupSupported: true, acp: { command, startupArgs: ['--profile', 'acp'], transport: 'stdio' as const } }
+      : {}),
     models: [] as string[],
     defaultsStatus: 'session_only',
     transport: 'acp',
-    discoveryStatus: executable ? profileState : 'not_installed',
-  };
+    ...(!command ? { discoveryStatus: 'not_installed' as const } : {}),
+  }));
 }

@@ -9,13 +9,19 @@ import { record } from './runtime-model-catalog.js';
 
 /** Bounded discovery connection. No prompts, terminal/file access, or approvals. */
 // ACP initialization and session creation share this budget; Windows cold starts can exceed 20 seconds.
-export function catalogRpc(command: string, args: string[], cwd: string, timeoutMs = 45_000) {
+export function catalogRpc(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs = 45_000,
+  env?: Record<string, string>,
+) {
   const plan = process.platform === 'win32' ? resolveWindowsSpawnPlan(command, args) : { command, args };
   const ownerId = randomUUID();
   const child = spawn(plan.command, plan.args, {
     cwd,
     env: {
-      ...buildChildEnv(undefined, { workingDirectory: cwd }),
+      ...buildChildEnv(env, { workingDirectory: cwd }),
       ...('env' in plan ? plan.env : {}),
       [CLI_PROCESS_OWNER_ENV]: ownerId,
     },

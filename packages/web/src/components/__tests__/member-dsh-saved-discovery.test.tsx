@@ -45,7 +45,7 @@ it.each([
   let pendingDiscovery: Promise<Response> | undefined;
   let finishDiscovery: ((response: Response) => void) | undefined;
   const runtime = {
-    id: 'acp:source',
+    id: 'dsh',
     label: 'DSH',
     clientId: 'acp',
     installed: true,
@@ -73,13 +73,21 @@ it.each([
       );
     if (url.endsWith('/inspect'))
       return Response.json({
-        profiles: ['acp'],
-        sourceProfile: 'acp',
         revision: 'a'.repeat(64),
-        active: { providers: [] },
-        source: { providers: [{ id: 'fixture', models: [{ id: 'flash', label: 'Flash' }] }] },
+        provider: 'fixture',
+        model: 'flash',
+        providers: [{ id: 'fixture', credential: 'configured', models: [{ id: 'flash', label: 'Flash' }] }],
       });
-    if (url.endsWith('/prepare')) return Response.json({ id: 'receipt', command: 'node', startupArgs: generated });
+    if (url.endsWith('/prepare'))
+      return Response.json({
+        id: 'receipt',
+        command: 'node',
+        startupArgs: generated,
+        env: { DSH_HOME: '/host/private' },
+        provider: 'fixture',
+        model: 'flash',
+      });
+    if (url.endsWith('/test')) return Response.json({ ok: true });
     switch (url) {
       case '/api/accounts':
         return Response.json({ providers: [], projectPath: '/fixture' });
@@ -119,8 +127,8 @@ it.each([
   try {
     await act(async () => root.render(editor(cat)));
     expect(writes).toBe(0);
-    await click('读取 DSH 配置');
-    await click('使用此配置');
+    await click('读取 Desktop 配置');
+    await click('验证并使用此模型');
     expect(writes).toBe(0);
     if (result === 'earlier-refresh') {
       pendingDiscovery = new Promise((resolve) => {
@@ -143,17 +151,18 @@ it.each([
       return;
     }
     expect(saved?.acp?.startupArgs).toEqual(generated);
-    expect(saved?.defaultModel).toBe('');
-    expect(host.textContent).toContain('DSH · DeepSeek Flash');
+    expect(saved?.defaultModel).toBe('["fixture","flash"]');
+    expect(saved?.env).toEqual({ DSH_HOME: '/host/private' });
+    expect(host.textContent).toContain('DSH · fixture / flash');
     // Saving another descriptor must preserve the original discovered tool too.
-    expect(useMemberModelCatalogs.getState().runtimes.some((item) => item.id === 'acp:source')).toBe(true);
+    expect(useMemberModelCatalogs.getState().runtimes.some((item) => item.id === 'dsh')).toBe(true);
     for (const changed of [
       { ...saved, agentProvider: 'plugin:fixture/tool' },
       { ...saved, acp: { ...saved?.acp, transport: 'httpstream' } },
       { ...saved, acp: { ...saved?.acp, startupArgs: [...generated, '--manual'] } },
     ]) {
       await act(async () => root.render(<MemberRuntimeSummary cat={changed as CatData} />));
-      expect(host.textContent).not.toContain('DSH · DeepSeek Flash');
+      expect(host.textContent).not.toContain('DSH · fixture / flash');
     }
     failDiscovery = true;
     await act(async () => root.render(editor(saved as CatData)));

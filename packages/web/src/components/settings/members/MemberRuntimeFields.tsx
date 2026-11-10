@@ -133,6 +133,7 @@ export function MemberRuntimeFields({
     acp: { command: form.acpCommand, startupArgs: splitCommandArgs(form.acpStartupArgs), transport: form.acpTransport },
     accountRef: form.accountRef,
     cliConfigArgs: form.cliConfigArgs,
+    env: form.env,
   };
   const dsh = isDshMember(displayMember, runtimeEvidence);
   const english = t('zh', 'en') === 'en';
@@ -142,8 +143,8 @@ export function MemberRuntimeFields({
   const needsLogin = defaultIdentity && selected?.readiness?.status === 'login_required';
   const catalogNotImplemented = !!(selected?.id.startsWith('draft:') || selected?.id.startsWith('manual:'));
   const { catalog, loading: catalogLoading } = useRuntimeCatalog(
-    needsLogin || catalogNotImplemented ? undefined : selected?.id,
-    editing ? form.catId : undefined,
+    needsLogin || catalogNotImplemented || selected?.dshDesktop ? undefined : selected?.id,
+    editing && !selected?.dshDesktop ? form.catId : undefined,
     form.accountRef,
     form.defaultModel,
     refresh,
@@ -306,21 +307,17 @@ export function MemberRuntimeFields({
           runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
           t={t}
           patch={patch}
-          canVerifyCurrent={selected !== undefined && !form.commandArgs.trim() && !form.cliConfigArgs.length}
-          onVerified={() => {
-            if (selected)
-              setPreparedRuntime({
-                ...selected,
-                connectionVerification: { key: dshConnectionKey(form), checkedAt: Date.now() },
-              });
-          }}
-          onPrepared={(command, args, runtimeId) => {
+          onPrepared={(value, runtimeId, nextForm) => {
             const source = runtimes.find((runtime) => runtime.id === runtimeId);
             if (source?.acp)
               setPreparedRuntime({
                 ...source,
                 dshSetupSupported: true,
-                acp: { ...source.acp, command, startupArgs: args },
+                env: value.env,
+                models: [nextForm.defaultModel],
+                configuredModel: nextForm.defaultModel,
+                connectionVerification: { key: dshConnectionKey(nextForm), checkedAt: Date.now() },
+                acp: { ...source.acp, command: value.command, startupArgs: value.startupArgs },
               });
           }}
         />

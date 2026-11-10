@@ -811,6 +811,8 @@ async function toCatResponse(
         accountRef: effectiveAccountRef,
         accountBindingMode: cat.accountBindingMode,
         configurationSource: cat.configurationSource,
+        // Only the non-secret Desktop HOME binding is needed by the member draft.
+        ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
         agentProvider: cat.agentProvider,
         configurationRevision: memberConfigurationRevision(projectRoot, cat.id),
         clientId: cat.clientId,

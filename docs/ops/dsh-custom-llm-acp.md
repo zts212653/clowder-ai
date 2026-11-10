@@ -6,81 +6,62 @@ created: 2026-10-22
 tips_exempt: "DSH 成员配置入口直接提供复用步骤与主动验证费用提示，无需额外弹出提示。"
 ---
 
-# DSH ACP 使用自定义 LLM
+# DSH Desktop 接入与模型验证
 
-适用情形：DSH Desktop/Web 的自定义模型能够使用，但从 Clowder 启动 DSH ACP 时，
-却要求 `deepseek-official` 的 API key。先检查 ACP 实际选中的 provider，
-不要因此给自定义接口补配官方 DeepSeek key。
+一键检测和添加 DSH 成员使用 **DSH Desktop** 的配置。无需区分 desktop、web 或 acp，
+也不需要另装 npm CLI、修改 PATH 或修复一份没有使用的原生 ACP profile。
+当前已实测 Windows Desktop 0.2.2-rc.1；自定义源码 wrapper 不作为自动发现入口。
+已有手工成员保持原配置，不会被发现操作自动迁移。
 
-本文对应 DSH 源码 `687f282e8625c6b8d11ff58211a90524be2e4317`（包版本 `0.2.1-rc.2`），
-Windows 官方 Desktop 入口另已核对 `0.2.2-rc.1`。
-该版本的 ACP bundle 默认选择 `deepseek-official / deepseek-v4-flash`；
-Desktop、Web 和 ACP 各自的 profile 配置不会自动相互复制；home 层配置则由这些 profile 共享。
-同一 `DSH_HOME` 的凭据引用可被这些 profile 使用，但有凭据并不等于 ACP 已配置并选中对应路由。
+## 一键添加或成员设置
 
-## 在成员设置中一次配置
+1. 一键添加页打开 DSH 的“配置与验证”，或在成员设置中选择 DSH Desktop。
+2. 点击“读取 Desktop 配置”。读取不调用模型，也不会登录、迁移或改写原凭据文件。
+3. 确认供应商路线和模型，点击“验证并使用此模型”。这会发送一次请求，可能产生费用，
+   并在专用运行目录保留测试会话。请求成功后才把配置加入成员草稿。
+4. 勾选伙伴并创建，或保存成员。未验证的 DSH 无法从一键添加页提交。
 
-Windows 安装版会从安装元数据发现 **DSH Desktop**，不要求额外安装 npm CLI 或加入 PATH。
-使用安装目录下的 `resources/runtime/cli/bin/dsh.cmd`；Clowder 保留 Desktop 自带的
-Electron 运行时和启动环境。自行编写的源码 wrapper 仍不能自动复制配置。
+确认新的 Desktop 连接会替换该成员的启动参数、模型与运行环境绑定，使保存后使用的配置与
+探针一致。未选择并保存新连接的现有成员保持原样；原生 Desktop 配置和认证不会被替换。
 
-“已安装”只说明找到了程序。静态检测会拒绝非法的 ACP/home patch（包括只有注释、
-解析为 null 的文件）；这类配置请先在 DSH 修复为顶层 YAML 数组，保留原有条目。
-Clowder 不会自动改写原生文件。安装、模型清单或凭据引用存在均不能证明真实请求成功。
+默认选择依据 DSH 的原生认证解析结果：官方认证已配置时默认官方；确实缺少官方认证时，
+使用该 Desktop 已有的自定义配置。原生凭据库中存在官方 key 时，即使终端没有对应环境变量，
+也不会误判缺失。多条路线需要选择时，页面展示实际供应商及模型；已有显式模型偏好保留。
+显式指定的凭据引用缺失会提示补齐，不会借另一家的 key，更不会把自定义 key 填给官方供应商。
+认证已配置只证明有认证材料；收到真实模型回复才表示本次验证通过。
 
-已有配置可直接点击 **验证当前配置**，不必先复制其他 profile。一键添加页点击
-**配置与验证** 进入同一入口，收到真实模型回复后才允许选择 DSH 伙伴。
-验证只覆盖当时的启动参数、模型与思考强度；修改任一项后需重新验证。
-验证不会在扫描工具或读取模型清单时自动执行，也不承诺后续网络、额度或服务持续可用。
+验证绑定启动命令、参数、运行 HOME、模型和思考强度。修改这些内容后需要重新验证。
+扫描工具、读取模型清单不会隐式发送 prompt。验证结果不承诺网络、额度或服务持续可用。
+安装了多套 Desktop 时，优先匹配正在运行的官方 Host；无法唯一确定时，在工具列表确认安装位置。
 
-已在 DSH 配置自定义 `llm-pi-ai` 接口时，可在“设置 → 成员 → 模型与工具”使用
-**DSH 自定义 LLM**，无需配置官方供应商或改绑 Host 账号：
+## 配置、认证与历史保留
 
-**首次接入必须确认 ACP 的实际路由，并保存所需的切换。** 安装、发现工具或导入成员不会
-自动把 Desktop/Web 的接口应用到 ACP；没有完成选择与保存时，ACP 仍可能使用官方默认。
-即使进程环境没有 `DEEPSEEK_API_KEY`，也不能据此断言官方认证不可用或自动切换供应商，
-因为 DSH 还可能从原生 credentials service 等来源解析认证。
+Clowder 读取 Desktop 的实际 HOME 和环境来源，为成员创建稳定的专用 ACP 运行 HOME，
+位于 Host 持久配置根的 .cat-cafe/dsh-desktop/。该运行目录与所选 Desktop 的原生 HOME 分开，
+不会加载原生 ACP 的坏 patch，也不会改写原 Desktop、认证或历史。
+原生 ACP patch 只有注释、解析为 null 时，不需要用户先为自动接入修复它。
 
-1. 成员使用原生工具配置、无单独账号绑定；展开 DSH 自定义 LLM。
-2. 选择实际保存接口的 profile（例如 `desktop`、`web` 或 `acp`），点击“读取 DSH 配置”。
-   页面展示 ACP 当前路由和模型，以及来源显式声明的路由/模型；读取不会调用 LLM。
-3. 选择目标路由和模型，点击“使用此配置”，再通过成员页面的“保存”应用草稿。
-   原来的模型和思考强度覆盖会清除，成员跟随专用 patch 的选择，避免旧强度与新模型不兼容。
-4. 可主动点击“发送一次请求验证此配置”。这会产生一次模型 prompt，可能收费并保留
-   DSH 测试会话；它不启用 MCP，拒绝向 Host 申请的工具权限。成功只证明收到模型文本，
-   保存后的实际聊天、续聊和角色协作仍需各自验证。
+专用配置只保存所选路线、模型元数据及来源路径，不复制密钥正文。
+只读凭据插件复用 Desktop 随包解析器读取原生引用和认证记录；旧 flat 凭据格式仅在内存解析，
+不会迁移原文件。认证按原生的 stored → process → project .env → HOME .env 顺序解析，
+保留空值的遮蔽规则。每次启动重新载入原环境来源，运行中的引用及记录从原凭据文件读取。
+需要登录或刷新 OAuth 时，请回到 Desktop 更新认证，再验证；Clowder 不执行刷新回调后丢弃令牌，
+也不因认证失败静默切换供应商。
 
-Clowder 在 Host 持久配置根的 `.cat-cafe/dsh-acp/` 保存专用配置快照，并在原有
-`--patch` 之后加载。它完整保留所选 provider 的模型元数据和兼容项，以及当前 ACP 的
-其他配置和 provider 条目。新路径让已有连接池识别变更，正在运行的回合可正常排空；
-旧会话和原生配置不被清空。回退可恢复成员原来的启动参数和模型选择，旧 patch 保留。
-源 profile 后续改动不会自动覆盖此快照，需要重新读取、选择和保存。
+源模型配置后续变化不会自动覆盖已准备的路线快照，需要重新读取、验证和保存。
+改变路线会生成新的运行目录；旧目录和会话保留。相同配置保存后的重启继续使用同一 HOME。
+回退时可恢复成员原来的启动参数、模型和运行目录绑定，保留现有目录以便恢复。
 
-配置读取在私有临时副本中运行 DSH 的 `--dump-config`，防止诊断重写原生 `cordis.yml`。
-Desktop 在部分 CLI 版本中保留给 Electron，因此来源只读解析 profile/home patch 显式保存
-的 provider 声明；home 层仍按完整 config 替换。若 ACP profile 尚不存在，读取不会在原生
-HOME 初始化它；首次实际连接由 DSH 正常初始化。认证仍从原有 HOME 或继承环境解析，
-不迁移凭据文件，不为自定义网关补官方 key，也不会自行猜测或提高模型上下文上限。
+自动复用支持已识别的 provider/model 字段、凭据引用和兼容选项。
+表达式、内联密钥、非空自定义 headers 或无法保真复制的字段会明确拒绝，原配置保持原样。
+凭据文件无法解析或无读取权限会作为读取失败报告，不会当作“缺 key”继续猜测供应商。
+此入口只接受直接本机的已登录 owner 操作。
 
-自动复制只支持明确的字段及类型，验证通过后完整保留，不静默丢弃不支持的字段：
+## 已有手工 ACP 接入的排查
 
-- provider：`apiKeyEnv`（POSIX 环境变量名形式的原生凭据引用）、`displayName`、`api`、
-  不含 userinfo/query/fragment 的 HTTP(S) `baseURL`、`models`、`modelOverrides`、`compat`，
-  `defaultContextWindow/defaultMaxTokens/defaultInput`、`reasoning/thinkingBudgets`、
-  `cacheRetention/transport`、各 timeout/图像预算字段及 `retryPolicy`。
-- model 与 override：`id`（仅 models）、`name`、`contextWindow/maxTokens`、`input`、
-  `reasoningEfforts`、`compat`。兼容项限已识别的布尔开关、协议枚举与数值；
-  自由字典 `chatTemplateKwargs/chatTemplateArgs` 不自动复制。
-- ACP：`provider/model/sessionListPageSize`；LLM 插件配置只复制 `providers`。
-  每个保留的 active provider 同样经过检查，不能因本次未选中而绕过。
-
-非空自定义 `headers`、内联 key、未知字段、错误字段类型、带查询参数或片段的 endpoint
-均拒绝整个自动准备操作，原生配置保持原样，按手动路径接入；空 `headers: {}` 可以保留。
-检查发生在长期 patch 写入之前，错误只返回固定代码，不回传字段值。
-
-复杂补丁、表达式、仅来自 bundle 的隐式模型、自定义启动 wrapper、非绝对 `DSH_HOME`
-也不自动迁移。仅安装了 Host、尚未在 DSH 配置接口和凭据时，
-先完成 DSH 原生配置，再读取复用。此入口只接受直接本机的已登录 owner 操作。
+以下步骤面向既有手工 CLI/profile 配置，依据 DSH 源码 687f282e（0.2.1-rc.2）。
+自动 Desktop 接入不需要执行这些步骤。该版本 ACP bundle 的默认模型是
+deepseek-official / deepseek-v4-flash；Desktop、Web 与 ACP 的 profile 不会自动互相复制。
 
 ## 1. 确定实际的启动入口和配置根
 

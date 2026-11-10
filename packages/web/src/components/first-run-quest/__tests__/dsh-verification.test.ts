@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { initialState } from '../../hub-cat-editor.model';
-import { runtimeDefaults } from '../../settings/members/member-runtime-draft';
-import { nativeRuntimeSelectable } from '../native-onboarding';
+import { dshConnectionKey, runtimeDefaults } from '../../settings/members/member-runtime-draft';
+import { nativeRuntimeSelectable, recommendNativePartners } from '../native-onboarding';
 
 it('DSH one-click creation requires a real check for the same launch and model', () => {
   const runtime = {
@@ -17,7 +17,7 @@ it('DSH one-click creation requires a real check for the same launch and model',
   const verified = {
     ...runtime,
     connectionVerification: {
-      key: JSON.stringify(['dsh', ['--profile', 'acp'], 'stdio', '', '']),
+      key: dshConnectionKey(form),
       checkedAt: Date.now(),
     },
   };
@@ -27,4 +27,18 @@ it('DSH one-click creation requires a real check for the same launch and model',
   expect(nativeRuntimeSelectable(verified, { ...form, acpCommand: 'another-dsh' })).toBe(false);
   expect(nativeRuntimeSelectable(verified, { ...form, commandArgs: '--custom-startup' })).toBe(false);
   expect(nativeRuntimeSelectable(verified, { ...form, accountRef: 'another-identity' })).toBe(false);
+  expect(nativeRuntimeSelectable(verified, { ...form, env: { DSH_HOME: '/different/home' } })).toBe(false);
+});
+
+it('does not recommend saved manual DSH entries as new automatic Desktop members', () => {
+  const manual = {
+    id: 'acp:legacy',
+    label: 'DSH',
+    clientId: 'acp' as const,
+    installed: true,
+    models: [],
+    onboardingEligible: false,
+    acp: { command: 'dsh', startupArgs: ['--profile', 'acp'] },
+  };
+  expect(recommendNativePartners([manual], [], [], 'journey')).toEqual([]);
 });

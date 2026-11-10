@@ -56,7 +56,7 @@ test('source discovery never initializes or advertises partial profiles', () => 
 test('configuration and model-test endpoints require a direct authenticated owner, never header identity', async () => {
   const app = Fastify();
   registerDshSetupRoutes(app);
-  for (const action of ['inspect', 'prepare', 'test', 'verify']) {
+  for (const action of ['inspect', 'prepare', 'test']) {
     const unauthenticated = await app.inject({
       method: 'POST',
       url: `/api/cats/dsh-setup/${action}`,
@@ -75,14 +75,14 @@ test('configuration and model-test endpoints require a direct authenticated owne
   await app.close();
 });
 
-test('current verification accepts runtime IDs, never client-supplied executables or environment', async () => {
+test('Desktop inspection accepts runtime IDs, never client-supplied executables or environment', async () => {
   const app = Fastify();
   app.decorateRequest('sessionUserId', 'fixture-owner');
   registerDshSetupRoutes(app, { audit: async () => {} });
   for (const extra of [{ command: 'arbitrary' }, { args: ['--eval', 'code'] }, { env: { DSH_HOME: 'untrusted' } }]) {
     const result = await app.inject({
       method: 'POST',
-      url: '/api/cats/dsh-setup/verify',
+      url: '/api/cats/dsh-setup/inspect',
       payload: { runtimeId: 'dsh', ...extra },
     });
     assert.equal(result.statusCode, 400);

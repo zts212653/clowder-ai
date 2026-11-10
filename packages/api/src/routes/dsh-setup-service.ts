@@ -2,10 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capability-root.js';
-import { AcpClient } from '../domains/cats/services/agents/providers/acp/AcpClient.js';
+import { AcpClient, AcpProtocolError } from '../domains/cats/services/agents/providers/acp/AcpClient.js';
 import { extractMissingCredential } from '../domains/cats/services/agents/providers/acp/dsh/credential-error.js';
 import { applySessionConfiguration } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
 import { prepareDshSecretPatch } from '../domains/cats/services/agents/providers/dsh-secret-patch.js';
+import { type prepareDshDesktopSetup, readDshDesktopSetup } from './dsh-desktop-setup.js';
 import { buildDshPatch, canonicalDshConfig, composeDshProviderSource, inspectDshConfig } from './dsh-setup-config.js';
 import { type DshSetupLaunch, dshSetupBootstrap, dumpDshConfig } from './dsh-setup-launch.js';
 import { resolveDshHome } from './native-dsh-home.js';
@@ -108,15 +109,24 @@ export async function prepareDshSetup(
     throw Error('dsh_setup_not_applied');
   return { id, path, patchHash: digest(patch), launch: prepared, provider, model };
 }
-export type PreparedDshSetup = Awaited<ReturnType<typeof prepareDshSetup>>;
+export type PreparedDshSetup = Awaited<ReturnType<typeof prepareDshSetup | typeof prepareDshDesktopSetup>>;
 
 export async function testDshSetup(prepared: PreparedDshSetup, preferences: { model?: string; effort?: string } = {}) {
   if (digest(readFileSync(prepared.path, 'utf8')) !== prepared.patchHash) throw Error('dsh_setup_changed');
+  if ('desktop' in prepared) {
+    const current = await readDshDesktopSetup(prepared.desktop);
+    const route = current.state.providers.find((item) => item.id === prepared.provider);
+    if (!route || route.credential === 'missing') throw Error('dsh_setup_credential_missing');
+    const selected = JSON.stringify([prepared.provider, prepared.model]);
+    if (preferences.model && preferences.model !== selected && preferences.model !== prepared.model)
+      throw Error('dsh_setup_changed');
+    return testDshConnection(prepared.launch, { ...preferences, model: selected });
+  }
   return testDshConnection(prepared.launch, preferences);
 }
 
 export async function testDshConnection(
-  launch: Pick<DshSetupLaunch, 'command' | 'args' | 'cwd'>,
+  launch: Pick<DshSetupLaunch, 'command' | 'args' | 'cwd' | 'env'>,
   preferences: { model?: string; effort?: string } = {},
 ): Promise<{ sessionId: string }> {
   // Exactly the same bootstrap authority and cwd checks used by normal ACP calls.
@@ -126,6 +136,7 @@ export async function testDshConnection(
     command: target.command,
     args: target.args,
     cwd: target.verifyCwd(),
+    env: launch.env,
     ...(process.platform === 'win32' ? { verifyBootstrapCwd: target.verifyCwd } : {}),
     permissionHandler: (_request, respond) => respond({ cancelled: true }),
   });
@@ -154,6 +165,10 @@ export async function testDshConnection(
     if (result.stopReason !== 'end_turn' || !text.includes('DSH_CONNECTION_OK')) throw Error('dsh_setup_test_failed');
     return { sessionId: session.sessionId };
   } catch (error) {
+    const detail =
+      error instanceof AcpProtocolError ? JSON.stringify(error.data) : error instanceof Error ? error.message : '';
+    if (/dsh_desktop_auth_read_only|Credential store modify failed/.test(detail))
+      throw Error('dsh_setup_auth_refresh_required');
     if (error instanceof Error && extractMissingCredential(error.message)) throw Error('dsh_setup_credential_missing');
     throw Error(initialized ? 'dsh_setup_test_failed' : 'dsh_setup_start_failed');
   } finally {
