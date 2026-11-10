@@ -41,7 +41,10 @@ export async function finalOutcomeAfterCleanup(
     return { kind: 'final', result };
   }
   context.capture(Buffer.from('durable managed attempt cleanup could not be proven before terminal publication\n'));
-  return { kind: 'final', result: { code: 70, signal: null } };
+  // SQLite publication is fenced on cleanupProven by the worker. Preserve the
+  // child's result for pendingResult; the worker itself still exits 70 until
+  // cleanup is proved. Legacy callers have no durable pending-result fence.
+  return { kind: 'final', result: context.job.recordStorage === 'sqlite_v1' ? result : { code: 70, signal: null } };
 }
 
 export async function selfRecoveryOutcome(

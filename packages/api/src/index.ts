@@ -161,6 +161,7 @@ import {
   responseOutcomeForEndedTurn,
   settleResponseFromDraft,
 } from './domains/cats/services/agents/invocation/response-draft-settlement.js';
+import { continueRestartInterruptedCats } from './domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
 import { sharedMcpDeploymentId } from './domains/cats/services/agents/invocation/shared-mcp-launch.js';
@@ -2925,6 +2926,7 @@ async function main(): Promise<void> {
     : undefined;
   router = new AgentRouter({
     ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
+    ownerAskCorrectionDeliver: schedulerDeliver,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -5125,7 +5127,6 @@ async function main(): Promise<void> {
     messageSearchAnswerService,
     messageSearchService,
     evidenceStore: memoryServices.evidenceStore,
-    markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,
@@ -5786,6 +5787,16 @@ async function main(): Promise<void> {
     sources: { messageStore },
     apiBaseUrl: `http://127.0.0.1:${PORT}`,
     deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
+  });
+  // F333: one shared, thread-scoped browser instead of a Playwright process per cat session.
+  const { registerBrowserMcpRoutes } = await import('./routes/browser-mcp.js');
+  const { BrowserProcess } = await import('./domains/browser/BrowserProcess.js');
+  const sharedBrowser = new BrowserProcess();
+  app.addHook('onClose', async () => sharedBrowser.stop());
+  registerBrowserMcpRoutes(app, {
+    registry,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
+    browser: sharedBrowser,
   });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
   // Discovery/downloads are optional startup work. Like desktop window
@@ -8012,11 +8023,23 @@ async function main(): Promise<void> {
             );
           }
         }
+        // F048 Phase C: after the Queue resumed, wake each cat this restart cut off, once, in its thread.
+        const restartContinuation = await continueRestartInterruptedCats(
+          {
+            turns: turnExecutionStore,
+            messages: messageStore,
+            queue: invocationQueue,
+            deliver: schedulerDeliver,
+            log: app.log,
+          },
+          childRecovery.invocationIds,
+        );
         app.log.info(
           {
             authRecovery,
             childRecovery,
             startupRecovery,
+            restartContinuation,
             windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
           },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',

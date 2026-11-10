@@ -231,7 +231,7 @@ export class D8Resolver implements HookResolver {
 
 export class D9Resolver implements HookResolver {
   resolve(input: AssemblerInput): ResolveResult {
-    if (input.mentionRoutingItems.length === 0 && !input.voidHoldFeedback) {
+    if (input.mentionRoutingItems.length === 0 && !input.voidHoldFeedback && !input.ownerAskFeedback) {
       return skip('no_routing_feedback', 'No unrouted mention feedback');
     }
     const items = input.mentionRoutingItems.slice(0, 2);
@@ -243,6 +243,11 @@ export class D9Resolver implements HookResolver {
     }
     if (input.voidHoldFeedback) {
       facts.push('[等待对账] 上轮末段声明了继续行动或等待；该轮未记录等待工具、有效事件回调或向队友传球。');
+    }
+    if (input.ownerAskFeedback) {
+      facts.push(
+        '[掉球提醒] 上轮末段在等co-creator决定或动手，但没有行首 @ 他：他看不到，也不会进他的小信箱。先过决策漏斗：可回滚、翻代码能定的自己定；确实要他，就行首独立一行 @ 他，写清要他做什么。',
+      );
     }
     return { status: 'fired', vars: { ROUTING_FEEDBACK: facts.join('\n') } };
   }

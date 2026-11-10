@@ -277,7 +277,9 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
       );
       if (message.type === 'error') throw new Error(message.error ?? message.content ?? 'watcher_provider_failed');
     }
-    if (!run.committed) throw new Error('watcher_checkpoint_not_committed');
+    // A native-only probe can prove an old failure terminal without producing a checkpoint.
+    if (!run.committed && !(input.recoveryOnly && run.recoveredIdle && !run.state.attempt))
+      throw new Error('watcher_checkpoint_not_committed');
   } catch (error) {
     throw await failWatcherAttempt(owners, run, auth.invocationId, error, signal);
   } finally {

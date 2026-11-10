@@ -42,7 +42,7 @@ describe('common human message query adapter', () => {
   async function mount(threadId = 'original') {
     await act(async () => root.render(<Host threadId={threadId} />));
   }
-  it('uses the same message service, hybrid strategy and chronological current-thread default', async () => {
+  it('uses the same message service, hybrid strategy and relevance current-thread default', async () => {
     vi.mocked(apiFetch).mockResolvedValue(ok('琴键 & 回来'));
     await mount();
     await act(async () => hook.search('琴键 & 回来'));
@@ -53,7 +53,7 @@ describe('common human message query adapter', () => {
       resultUnit: 'message',
       q: '琴键 & 回来',
       threadId: 'original',
-      messageSort: 'time',
+      messageSort: 'relevance',
       mode: 'hybrid',
     });
     expect(hook.status).toBe('ready');
@@ -67,6 +67,18 @@ describe('common human message query adapter', () => {
     expect(url.searchParams.has('threadId')).toBe(false);
     expect(url.searchParams.get('messageSort')).toBe('relevance');
     expect(url.searchParams.get('mode')).toBe('hybrid');
+  });
+  it('retries the explicitly selected time order instead of resolving the new default again', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(ok('琴键'));
+    await mount();
+    await act(async () => hook.search('琴键', 'global', 'time'));
+    await act(async () => hook.retry());
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    for (const [request] of vi.mocked(apiFetch).mock.calls) {
+      const url = new URL(request, 'https://example.test');
+      expect(url.searchParams.get('messageSort')).toBe('time');
+      expect(url.searchParams.has('threadId')).toBe(false);
+    }
   });
   it('a late response cannot replace a newer query', async () => {
     const old = deferred();

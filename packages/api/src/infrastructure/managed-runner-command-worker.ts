@@ -39,6 +39,7 @@ export async function runManagedCommandWorker(input: {
     beforeSpawn: (attemptToken) => {
       recordManagedJobAttempt(job, attemptToken);
     },
+    yieldToApi: true,
   });
   let nextHeartbeat = Date.now() + 5000;
   let terminal: 'cancelled' | 'timed_out' | null = null;

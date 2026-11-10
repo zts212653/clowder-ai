@@ -253,7 +253,6 @@ it('does not mark a cancelled persistIntent as a local save failure', async () =
   const readBytes = vi
     .fn()
     .mockResolvedValueOnce(bytes)
-    .mockResolvedValueOnce(bytes)
     .mockImplementation(() => gate.promise);
   Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
   act(() => {
@@ -270,9 +269,10 @@ it('does not mark a cancelled persistIntent as a local save failure', async () =
       sending = latest.send({ content: 'cancel before creation', images: [file] });
     });
     void sending.then((value) => (result = value));
-    // Autosave and the preflight save finished. The third read is the real
-    // persistIntent wrapper storing the composer admission ticket.
-    await waitForAct(() => expect(readBytes).toHaveBeenCalledTimes(3));
+    // The autosave already stored this exact draft, so the preflight save does not
+    // read it again. The second read is the real persistIntent wrapper storing the
+    // composer admission ticket.
+    await waitForAct(() => expect(readBytes).toHaveBeenCalledTimes(2));
     const cancel = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
     if (!cancel) throw new Error('Missing cancellation action');
     act(() => cancel.click());

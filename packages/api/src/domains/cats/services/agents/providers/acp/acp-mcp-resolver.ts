@@ -36,6 +36,7 @@ import {
   isRetiredGithubMcpConfigEntry,
 } from '../../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../../browser/shared-browser-descriptor.js';
 import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
 
 const log = createModuleLogger('acp-mcp-resolver');
@@ -363,6 +364,12 @@ export async function resolveAcpMcpServers(
           : (cap.globalEnabled ?? cap.enabled ?? true);
         if (!isEnabled) {
           log.info({ name }, 'Skipping globally disabled external server');
+          continue;
+        }
+        if (cap.mcpServer.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; the ACP session env nominates it to the shared HTTP route.
+          const pinned = sharedBrowserStdioServer();
+          servers.push({ name, command: pinned.command, args: pinned.args, env: [] });
           continue;
         }
         if (cap.mcpServer.resolver === 'pencil') {

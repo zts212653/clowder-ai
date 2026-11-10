@@ -285,7 +285,7 @@
     {
       "id": "F048",
       "name": "Restart Recovery — 重启自愈（Invocation/Queue 恢复）",
-      "status": "Phase A done / Phase A+ done / Phase B idea | **Owner**: Ragdoll → 金渐层（Phase A+）",
+      "status": "Phase A done / Phase A+ done / Phase B idea / Phase C in progress | **Owner**: Ragdoll → 金渐层（Phase A+）→ Ragdoll（@opus55，Phase C）",
       "file": "F048-restart-recovery.md"
     },
     {

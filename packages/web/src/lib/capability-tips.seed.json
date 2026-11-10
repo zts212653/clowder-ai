@@ -3797,5 +3797,33 @@
       }
     },
     "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f048-restart-continue",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F048-restart-recovery.md",
+      "anchor": "重启后继续原工作"
+    },
+    "structureSource": {
+      "path": "packages/api/src/domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.ts",
+      "anchor": "continueRestartInterruptedCats"
+    },
+    "bodySource": {
+      "path": "docs/features/F048-restart-recovery.md",
+      "anchor": "重启后继续原工作"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "更新并重启后，系统尝试在原对话叫回被中断的猫；主动停止、已排队或连续中断的自动续做不重复叫回，也不复活旧授权。首次实际重启验收仍待确认；没有消息时先核对原任务。",
+    "action": {
+      "type": "open_source",
+      "label": "了解重启后怎样继续原工作",
+      "sourceRef": {
+        "path": "docs/features/F048-restart-recovery.md",
+        "anchor": "重启后继续原工作"
+      }
+    },
+    "owner": "codex61-sol"
   }
 ]

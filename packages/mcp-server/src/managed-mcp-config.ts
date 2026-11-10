@@ -13,6 +13,8 @@ const CALLBACK_KEYS = [
   'ALLOWED_WORKSPACE_DIRS',
 ] as const;
 const CALLBACK_KEY_SET = new Set<string>(CALLBACK_KEYS);
+/** F333: the Host-owned shared browser route; nominated by the API only for its pinned launch. */
+const SHARED_BROWSER_HTTP_PATH = '/api/browser-mcp/mcp';
 type Server = Record<string, unknown>;
 
 function environment(value: unknown): Record<string, string> {
@@ -111,6 +113,7 @@ export function materializeNativeMcpHttp(
       credentials ??= launchCredentials(callback, server);
       if (
         pluginPath !== undefined &&
+        pluginPath !== SHARED_BROWSER_HTTP_PATH &&
         !/^\/api\/plugin-mcp\/[^/?#]+\/[^/?#]+\?shared=1&activation=[A-Za-z0-9-]+$/.test(pluginPath)
       )
         throw new Error('shared_plugin_mcp_path_invalid');

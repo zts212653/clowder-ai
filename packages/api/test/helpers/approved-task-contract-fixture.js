@@ -24,7 +24,7 @@ export const USER = 'approval-contract-user';
 export const OWNER = 'codex';
 export const TARGET = 'codex-sol';
 
-export async function approvedTaskFixture(t, { legacy = true, governed = false } = {}) {
+export async function approvedTaskFixture(t, { legacy = true, governed = false, projectPath } = {}) {
   assertRedisIsolationOrThrow(process.env.REDIS_URL, 'approved Task contract journey');
   const redis = new Redis(process.env.REDIS_URL, { keyPrefix: `approved-task-${randomUUID()}:` });
   const proposals = new RedisProposalStore(redis);
@@ -125,6 +125,7 @@ export async function approvedTaskFixture(t, { legacy = true, governed = false }
       initialMessage: 'Implement A/B/C and return tested code. Preserve the original Task.',
       reportingMode: 'final-only',
       declaredWorkMode: 'parallel',
+      ...(projectPath ? { projectPath } : {}),
     },
   });
   assert.equal(proposed.statusCode, 200, proposed.body);
