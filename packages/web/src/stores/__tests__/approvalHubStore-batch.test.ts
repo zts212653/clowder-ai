@@ -8,6 +8,7 @@
 import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
+import { apiFetch } from '@/utils/api-client';
 
 // Mock apiFetch for batch operation tests (batchApprove/batchReject call it)
 vi.mock('@/utils/api-client', () => ({
@@ -36,6 +37,8 @@ function makeItem(overrides: Partial<ApprovalHubItem> & { proposalId: string }):
 
 describe('approvalHubStore — batch operations', () => {
   beforeEach(() => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({}) } as Response);
     // Reset store to known state
     useApprovalHubStore.setState({
       items: [
@@ -48,7 +51,48 @@ describe('approvalHubStore — batch operations', () => {
       batchResults: [],
       deciding: {},
       error: null,
+      scheduleDriftBlocked: {},
     });
+  });
+  it.each([
+    'single',
+    'batch',
+  ])('remembers typed schedule drift from %s across entry points while allowing rejection', async (entry) => {
+    const item = makeItem({ proposalId: 'schedule-drift', sourceFeatureId: 'F139' });
+    useApprovalHubStore.setState({ items: [item], count: 1, selectedIds: new Set([item.proposalId]) });
+    vi.mocked(apiFetch).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: 'SCHEDULE_TASK_DRIFT', error: 'Task changed' }),
+    } as Response);
+    if (entry === 'single') await useApprovalHubStore.getState().approveProposal(item.proposalId);
+    else {
+      const failed = await useApprovalHubStore.getState().batchApprove();
+      expect(failed).toEqual([
+        { proposalId: item.proposalId, success: false, code: 'SCHEDULE_TASK_DRIFT', error: 'Task changed' },
+      ]);
+    }
+    useApprovalHubStore.setState({ selectedIds: new Set([item.proposalId]) });
+    expect(await useApprovalHubStore.getState().batchApprove()).toEqual([]);
+    await useApprovalHubStore.getState().approveProposal(item.proposalId);
+    expect(useApprovalHubStore.getState().error).toBeNull();
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+    await useApprovalHubStore.getState().batchReject();
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)?.[0]).toBe('/api/schedule-proposals/schedule-drift/reject');
+  });
+  it('does not apply a witnessed schedule conflict to another owner, version or producer', async () => {
+    const item = makeItem({ proposalId: 'shared-id', sourceFeatureId: 'F139' });
+    useApprovalHubStore.getState().rememberScheduleDrift(item);
+    for (const other of [
+      { ...item, ownerUserId: 'other' },
+      { ...item, createdAt: item.createdAt + 1 },
+      { ...item, sourceFeatureId: 'F193' as const },
+    ]) {
+      useApprovalHubStore.setState({ items: [other], selectedIds: new Set([other.proposalId]) });
+      expect((await useApprovalHubStore.getState().batchApprove())[0]?.success).toBe(true);
+    }
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(3);
   });
 
   it('toggleSelection: selects an inlineApprovable item', () => {

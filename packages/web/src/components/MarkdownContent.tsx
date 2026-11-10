@@ -14,12 +14,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type Components, defaultUrlTransform } from 'react-markdown';
+import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import remarkParse from 'remark-parse';
-import { unified } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { hexToRgba } from '@/lib/color-utils';
@@ -32,93 +28,19 @@ import {
   isCanonicalOnlyMentionAlias,
 } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
+import { chatMarkdownPlugins, prepareChatMarkdown, transformChatMarkdownUrl } from './chat-markdown';
+
+export { normalizeMathDelimiters, transformChatMarkdownUrl } from './chat-markdown';
+
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
 import { ChatReference } from './chat-references/ChatReference';
 import { ChatReferenceGroup } from './chat-references/ChatReferenceGroup';
 import { useChatReferenceThread } from './chat-references/ChatReferenceScope';
-import { remarkChatReferences } from './chat-references/remark-chat-references';
 import { ChatReferenceDemand, useChatReferenceDemand } from './chat-references/useChatReferenceDemand';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
 import { ProviderCitationContext, projectProviderCitations } from './markdown-provider-citations';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
-
-const BARE_MARKDOWN_LINE_HREF_RE = /^[^/:\\?#]+\.mdx?:\d+$/i;
-const WINDOWS_ABSOLUTE_PATH_HREF_RE = /^[a-z]:[\\/].*$/i;
-const WINDOWS_UNC_PATH_HREF_RE = /^\\\\[^\\]+\\[^\\]+/;
-
-/** Preserve safe file-like forms that react-markdown mistakes for custom URI schemes. */
-export function transformChatMarkdownUrl(url: string): string {
-  const transformed = defaultUrlTransform(url);
-  if (transformed) return transformed;
-  if (
-    BARE_MARKDOWN_LINE_HREF_RE.test(url) ||
-    WINDOWS_ABSOLUTE_PATH_HREF_RE.test(url) ||
-    WINDOWS_UNC_PATH_HREF_RE.test(url)
-  ) {
-    return url;
-  }
-  return transformed;
-}
-
-/* ── LaTeX delimiter normalization ─────────────────────────── */
-
-/**
- * Parse with the real Markdown parser so code fences (``` and ~~~), indented
- * code blocks, and code spans (any backtick run length) are located by their
- * AST positions instead of a hand-rolled regex. Delimiter rewriting must never
- * touch these ranges.
- */
-const mdRangeParser = unified().use(remarkParse).use(remarkGfm);
-
-type OffsetRange = [start: number, end: number];
-
-function collectLiteralRanges(md: string): OffsetRange[] {
-  const ranges: OffsetRange[] = [];
-  const walk = (node: {
-    type: string;
-    position?: { start: { offset?: number }; end: { offset?: number } };
-    children?: unknown[];
-  }) => {
-    if (node.type === 'code' || node.type === 'inlineCode') {
-      const start = node.position?.start.offset;
-      const end = node.position?.end.offset;
-      if (start != null && end != null) ranges.push([start, end]);
-      return;
-    }
-    for (const child of node.children ?? []) walk(child as typeof node);
-  };
-  walk(mdRangeParser.parse(md) as Parameters<typeof walk>[0]);
-  return ranges;
-}
-
-/** Matches \[...\] (group 1) or \(...\) (group 2). */
-const BACKSLASH_MATH_RE = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)/g;
-
-/**
- * remark-math only parses $/$$ delimiters; LLMs frequently emit \[...\] and
- * \(...\) instead. Rewrite those to $$...$$ (inline $$ renders as inline math
- * when singleDollarTextMath is off) outside code ranges so KaTeX can render
- * them.
- */
-export function normalizeMathDelimiters(md: string): string {
-  BACKSLASH_MATH_RE.lastIndex = 0;
-  if (!BACKSLASH_MATH_RE.test(md)) return md;
-  BACKSLASH_MATH_RE.lastIndex = 0;
-
-  const ranges = collectLiteralRanges(md);
-  let out = '';
-  let last = 0;
-  for (const m of md.matchAll(BACKSLASH_MATH_RE)) {
-    const start = m.index;
-    const end = start + m[0].length;
-    if (ranges.some(([s, e]) => start < e && end > s)) continue;
-    out += md.slice(last, start);
-    out += `$${'$'}${m[1] ?? m[2]}$${'$'}`;
-    last = end;
-  }
-  return out + md.slice(last);
-}
 
 /* ── @mention highlighting ─────────────────────────────────── */
 
@@ -513,7 +435,6 @@ export const MarkdownContent = memo(function MarkdownContent({
   const referenceThreadId = basePath == null ? (sourceThreadId ?? currentThreadId) : undefined;
   const referenceAnchor = useRef<HTMLDivElement>(null);
   const referenceDemand = useChatReferenceDemand(referenceAnchor, !!referenceThreadId);
-  const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const inheritedCitations = useContext(ProviderCitationContext);
   const citationDisplay = useMemo(
     () =>
@@ -522,9 +443,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         : { markdown: content, unresolved: 0 },
     [content, inheritedCitations, providerCitations],
   );
-  const md = normalizeMathDelimiters(
-    cmdMatch ? citationDisplay.markdown.slice(cmdMatch[1].length) : citationDisplay.markdown,
-  );
+  const { cmdMatch, md } = prepareChatMarkdown(citationDisplay.markdown, disableCommandPrefix);
 
   const listen = useMemo(
     () =>
@@ -564,8 +483,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
         <MarkdownSurface
           remarkPlugins={[
-            ...(referenceThreadId ? [remarkChatReferences] : []),
-            [remarkMath, { singleDollarTextMath: false }],
+            ...chatMarkdownPlugins(!!referenceThreadId),
             ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
           ]}
           rehypePlugins={[rehypeKatex]}

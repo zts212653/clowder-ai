@@ -17,7 +17,7 @@ export { ChoiceOptionContent } from './ChoiceOptionContent';
 export { collectiveText } from './collective-copy';
 export type { DiffHunk, DiffLine, DiffViewerLabels, FileDiff } from './DiffViewer';
 export { DiffViewer, parseUnifiedDiff } from './DiffViewer';
-export { MarkdownSurface, markdownImageReferences } from './MarkdownSurface';
+export { createMarkdownProcessor, MarkdownSurface, markdownImageReferences } from './MarkdownSurface';
 export { type MessageMediaItem, MessageMediaViewer } from './MediaViewer';
 export { MeowClubMark } from './MeowClubMark';
 export { Nameplate } from './Nameplate';

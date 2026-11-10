@@ -119,6 +119,7 @@ describe('F117 Phase G: managed hold stays out of ordinary Ball custody', () => 
       parent.invocationId,
     );
 
+    const slaUntilMs = Date.now() + 3_600_000;
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
@@ -131,7 +132,7 @@ describe('F117 Phase G: managed hold stays out of ordinary Ball custody', () => 
           kind: 'github_issue',
           value: 'test/ball-custody#12',
           expectedSignal: 'ci_complete',
-          slaUntilMs: 3_600_000,
+          slaUntilMs,
         },
       },
     });
@@ -147,7 +148,7 @@ describe('F117 Phase G: managed hold stays out of ordinary Ball custody', () => 
         kind: 'github_issue',
         value: 'test/ball-custody#12',
         expectedSignal: 'ci_complete',
-        slaUntilMs: 3_600_000,
+        slaUntilMs,
       },
       subjectKey: 'test/ball-custody#12',
       expectedSignalKey: 'ci_complete',
@@ -169,7 +170,7 @@ describe('F117 Phase G: managed hold stays out of ordinary Ball custody', () => 
           then: 'check status',
         },
         autoRenew: false,
-        expiresAt: 3_600_000,
+        expiresAt: slaUntilMs,
         createdAt: awaitState.createdAt,
         provenance: 'explicit_registration',
       },

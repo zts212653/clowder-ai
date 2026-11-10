@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1318,7 +1318,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -1438,223 +1438,6 @@
       },
       "implementationRef": "module:./tools/capability-evolution-change-tools.js#handleAdvanceEvolutionProgramChange",
       "protectedImplementationDigest": "sha256:8b64299e073e6d04a4b296f0b16dfb20c821703eb2a52bd0ced3f9253d1a1f73"
-    },
-    {
-      "name": "cat_cafe_amend_person_interaction",
-      "serverFamily": "collab",
-      "resourceFamily": "person-memory",
-      "actions": [
-        "update"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Amend one exact interaction event without overwriting it. The new event links to the source and preserves approximate or conflicting time.",
-      "descriptionDigest": "sha256:fa6281e76d110c3bef89e98fff2c785a4926bfe506f8287e7c6d9266a5a2d096",
-      "descriptionCharacters": 138,
-      "descriptionTokensCl100kBase": 25,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "expectedEventId": {
-            "description": "Exact source event anchor; the original is never overwritten.",
-            "maxLength": 160,
-            "minLength": 14,
-            "pattern": "^person_event_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": false,
-            "description": "Replacement bounded event projection with typed approximate or conflicting time preserved.",
-            "properties": {
-              "duration": {
-                "$ref": "#/properties/payload/properties/occurredAt"
-              },
-              "eventKind": {
-                "enum": [
-                  "conversation",
-                  "meeting",
-                  "message",
-                  "milestone",
-                  "other"
-                ],
-                "type": "string"
-              },
-              "headline": {
-                "maxLength": 240,
-                "minLength": 1,
-                "type": "string"
-              },
-              "importanceOrTopic": {
-                "maxLength": 400,
-                "minLength": 1,
-                "type": "string"
-              },
-              "occurredAt": {
-                "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "const": "exact",
-                        "type": "string"
-                      },
-                      "value": {
-                        "maxLength": 160,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "earliest": {
-                        "maxLength": 160,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "approximate",
-                        "type": "string"
-                      },
-                      "latest": {
-                        "maxLength": 160,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "qualifier": {
-                        "enum": [
-                          "about",
-                          "before",
-                          "after",
-                          "range",
-                          "unknown"
-                        ],
-                        "type": "string"
-                      },
-                      "raw": {
-                        "maxLength": 240,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "raw",
-                      "qualifier"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "alternatives": {
-                        "items": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "label": {
-                              "maxLength": 80,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "value": {
-                              "maxLength": 160,
-                              "minLength": 1,
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "label",
-                            "value"
-                          ],
-                          "type": "object"
-                        },
-                        "maxItems": 4,
-                        "minItems": 2,
-                        "type": "array"
-                      },
-                      "kind": {
-                        "const": "conflict",
-                        "type": "string"
-                      },
-                      "raw": {
-                        "maxLength": 240,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "raw",
-                      "alternatives"
-                    ],
-                    "type": "object"
-                  }
-                ]
-              },
-              "uncertaintyNotes": {
-                "items": {
-                  "maxLength": 240,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "maxItems": 4,
-                "type": "array"
-              }
-            },
-            "required": [
-              "eventKind",
-              "headline",
-              "importanceOrTopic",
-              "uncertaintyNotes"
-            ],
-            "type": "object"
-          },
-          "personId": {
-            "maxLength": 160,
-            "minLength": 8,
-            "pattern": "^person_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "sourceMessageId": {
-            "description": "Optional assertion; when supplied it must equal the authenticated invocation origin.",
-            "maxLength": 240,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "personId",
-          "expectedEventId",
-          "payload"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:614946fa4d084719f77c42c44e467edadb52174d43b17613f7900b9edc28da97",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -2403,7 +2186,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -3154,7 +2937,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3372,135 +3155,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
-    },
-    {
-      "name": "cat_cafe_correct_person_claim",
-      "serverFamily": "collab",
-      "resourceFamily": "person-memory",
-      "actions": [
-        "update"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Append an owner-authorized replacement for one exact current claim and supersede the anchored version atomically. Stale anchors and agent inference fail closed.",
-      "descriptionDigest": "sha256:61e3c3646292c5f80b8c21915fb4527516ad9737b3867e07e7959fa7f3760ce7",
-      "descriptionCharacters": 160,
-      "descriptionTokensCl100kBase": 29,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "expectedCurrentClaimId": {
-            "description": "Exact current claim anchor; stale anchors fail closed.",
-            "maxLength": 160,
-            "minLength": 14,
-            "pattern": "^person_claim_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "payload": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "assertedBy": {
-                    "const": "owner",
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "reported_fact",
-                    "type": "string"
-                  },
-                  "predicate": {
-                    "maxLength": 160,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "value": {}
-                },
-                "required": [
-                  "kind",
-                  "predicate",
-                  "value",
-                  "assertedBy"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "assertedBy": {
-                    "const": "owner",
-                    "type": "string"
-                  },
-                  "kind": {
-                    "const": "user_assessment",
-                    "type": "string"
-                  },
-                  "stance": {
-                    "enum": [
-                      "endorsed",
-                      "rejected",
-                      "uncertain"
-                    ],
-                    "type": "string"
-                  },
-                  "statement": {
-                    "maxLength": 800,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "statement",
-                  "assertedBy",
-                  "stance"
-                ],
-                "type": "object"
-              }
-            ],
-            "description": "Replacement owner fact or assessment. Agent inference is rejected."
-          },
-          "personId": {
-            "maxLength": 160,
-            "minLength": 8,
-            "pattern": "^person_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "sourceMessageId": {
-            "description": "Optional assertion; when supplied it must equal the authenticated invocation origin.",
-            "maxLength": 240,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "personId",
-          "expectedCurrentClaimId",
-          "payload"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:a473030a4ceb5292b6e1ab886873eb98d7d9faccd5aa41c08d64e655c3f8167f",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3630,7 +3285,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3724,7 +3379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -4060,7 +3715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -4240,7 +3895,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4911,7 +4566,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -4980,7 +4635,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -5077,7 +4732,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -5267,7 +4922,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -5407,7 +5062,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -5457,7 +5112,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -5507,7 +5162,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -5567,7 +5222,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -5603,7 +5258,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -5654,7 +5309,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5793,7 +5448,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5859,7 +5514,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5908,7 +5563,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5955,7 +5610,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -6006,7 +5661,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -6132,7 +5787,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -6189,7 +5844,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -6295,7 +5950,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -6329,7 +5984,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -6378,7 +6033,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -6492,7 +6147,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -6548,7 +6203,7 @@
                 "type": "string"
               },
               "slaUntilMs": {
-                "description": "SLA deadline in ms from epoch. Must be ≤ now + 3_600_000 (1h). No SLA = no hold.",
+                "description": "SLA deadline in ms from epoch. Must be later than the server-computed wakeAt; leave execution margin. Must be ≤ now + 3_600_000 (1h). No SLA = no hold.",
                 "exclusiveMinimum": 0,
                 "type": "integer"
               },
@@ -6626,7 +6281,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:536f5a74bbdd5d1cff1a1d5ffd6793a9e49d0099fff9fb9a7ebeed7c5b036b49",
+      "inputSchemaDigest": "sha256:0c4a31494ed24dcc1606fba9a38c1f4446d9d9ff6befcea478cfd79d0f91fa97",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -6640,7 +6295,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_home_action",
@@ -6869,48 +6524,6 @@
       "protectedImplementationDigest": "sha256:47814637dbd122c183ac0a7b6759f5e07963fedd738aee8959e0e501ab99c99f"
     },
     {
-      "name": "cat_cafe_library_archive",
-      "serverFamily": "memory",
-      "resourceFamily": "library",
-      "actions": [
-        "command"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Archive a collection — removes it from search/routing but preserves data.\nArchived collections are excluded from getRoutable and search results.\nCan be unarchived later via the REST API (POST /api/library/:id/unarchive).",
-      "descriptionDigest": "sha256:a86dcc75e6c28ee963270734833086766615f94ee913c90dc0ce9bf473b7633d",
-      "descriptionCharacters": 220,
-      "descriptionTokensCl100kBase": 48,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "collectionId": {
-            "description": "Collection ID to archive (e.g. \"domain:finance\").",
-            "type": "string"
-          }
-        },
-        "required": [
-          "collectionId"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:5aa1deee2a59d4033967af7fde051e0f4d3112be11730670272d34add01e38aa",
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/library-lifecycle-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryArchive",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
-    },
-    {
       "name": "cat_cafe_library_create",
       "serverFamily": "memory",
       "resourceFamily": "library",
@@ -6989,7 +6602,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryCreate",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
+      "protectedImplementationDigest": "sha256:7b5c821050d49195e49a7e484512d84266a9660fe321c5f5585fb442513cd8f9"
     },
     {
       "name": "cat_cafe_library_dry_run",
@@ -7039,7 +6652,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryDryRun",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
+      "protectedImplementationDigest": "sha256:7b5c821050d49195e49a7e484512d84266a9660fe321c5f5585fb442513cd8f9"
     },
     {
       "name": "cat_cafe_library_list",
@@ -7087,7 +6700,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryList",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
+      "protectedImplementationDigest": "sha256:7b5c821050d49195e49a7e484512d84266a9660fe321c5f5585fb442513cd8f9"
     },
     {
       "name": "cat_cafe_library_rebuild",
@@ -7133,68 +6746,70 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryRebuild",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
+      "protectedImplementationDigest": "sha256:7b5c821050d49195e49a7e484512d84266a9660fe321c5f5585fb442513cd8f9"
     },
     {
       "name": "cat_cafe_library_verify",
       "serverFamily": "memory",
       "resourceFamily": "library",
       "actions": [
-        "command"
+        "confirm",
+        "dismiss_review",
+        "escalate",
+        "mark_stale"
       ],
-      "activeState": "migration-candidate",
-      "description": "Execute a verification action on a document: confirm, mark_stale, escalate, or dismiss_review.\nUse when: reviewing documents flagged by the verification migration or health report.\nPreconditions enforced: e.g. confirm only works on needs_review docs.",
-      "descriptionDigest": "sha256:e3a4a284486bd035f1083c26a98cbc102e30fd6a20d6202011523a8981bdbbf0",
-      "descriptionCharacters": 250,
-      "descriptionTokensCl100kBase": 49,
+      "activeState": "canonical",
+      "description": "Record a document review decision. Use when: reviewing a flagged document. NOT for: automatic fact checking or collection maintenance. Output: updates review status and audit log. GOTCHA: writes data; confirm requires needs_review.",
+      "descriptionDigest": "sha256:064be77efa55dbfe44894ede4e9a0f6f399336e7eb5cec5a9a6c7fc91d37fcf5",
+      "descriptionCharacters": 231,
+      "descriptionTokensCl100kBase": 44,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
           "action": {
-            "description": "confirm: mark as reviewed (needs_review→reviewed). mark_stale: reset to needs_review. escalate: flag for human attention. dismiss_review: clear review_status.",
             "enum": [
               "confirm",
-              "mark_stale",
+              "dismiss_review",
               "escalate",
-              "dismiss_review"
+              "mark_stale"
             ],
             "type": "string"
           },
           "actor": {
-            "description": "Who is performing this action (cat ID or human identifier).",
+            "description": "Cat ID or human identifier recorded in the verification audit log.",
             "minLength": 1,
             "type": "string"
           },
           "anchor": {
-            "description": "The document anchor to act on (e.g. F188, LL-029).",
+            "description": "Exact document anchor to act on, e.g. F188 or LL-029.",
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "anchor",
           "action",
-          "actor"
+          "actor",
+          "anchor"
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:68eb2a04d5f01b20049b14bf5d70ce7207006c0521b8b7a525fb9858bb465f05",
+      "inputSchemaDigest": "sha256:b053348ea033192076c0246c2595fb6795502fcea202d46665238e6e7a771225",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": false
       },
       "runtimeProfiles": [
         "full"
       ],
       "schemaDelivery": {
         "candidate": "discoverable",
-        "evidenceRef": "file:packages/mcp-server/src/tools/library-lifecycle-tools.ts",
+        "evidenceRef": "file:packages/mcp-server/src/tools/library-verification-tool.ts",
         "policy": "host-default"
       },
-      "implementationRef": "module:./tools/library-lifecycle-tools.js#handleLibraryVerify",
-      "protectedImplementationDigest": "sha256:920f20c41c1c282d2644b4257159eded7fd0074cc73f795e58be3a1d90b00ecc"
+      "implementationRef": "module:./tools/library-verification-tool.js#handleLibraryVerify",
+      "protectedImplementationDigest": "sha256:72d28a7063d5e603aee7d100247b21972bd6f068ed72ff43aa8056b5cbc0e944"
     },
     {
       "name": "cat_cafe_link_evolution_program_observation",
@@ -7722,7 +7337,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_list_memory_matters",
@@ -8123,7 +7738,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -8201,7 +7816,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -8318,55 +7933,6 @@
       },
       "implementationRef": "module:./tools/runtime-interaction-tools.js#handleManageConversationDecision",
       "protectedImplementationDigest": "sha256:a1804eac66fc4b33836df16bf88c6179b0d751d8ccd1890247b914b2bb76eb91"
-    },
-    {
-      "name": "cat_cafe_mark_generalizable",
-      "serverFamily": "memory",
-      "resourceFamily": "distillation",
-      "actions": [
-        "create"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Mark an evidence item (lesson/decision) as generalizable for cross-project reflow, or as project-private. Items marked generalizable=true become candidates for distillation to the global knowledge layer.",
-      "descriptionDigest": "sha256:52065da74e9f1d701278a590011ba591975e1e81e71f4963eed8ac7c22db4f61",
-      "descriptionCharacters": 203,
-      "descriptionTokensCl100kBase": 39,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "anchor": {
-            "description": "Evidence anchor to mark",
-            "minLength": 1,
-            "type": "string"
-          },
-          "generalizable": {
-            "description": "true = candidate for global reflow, false = project-private",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "anchor",
-          "generalizable"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:dbfbeed129a7efc5ff89dbdb0d9a2ee3fe4bcb7c937999944480f5c8db2c2e37",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "candidate": "discoverable",
-        "evidenceRef": "file:packages/mcp-server/src/tools/distillation-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/distillation-tools.js#handleMarkGeneralizable",
-      "protectedImplementationDigest": "sha256:6d488531011b745cce05a1a0ad34137ec47bab5ab342a0d74825d0f3169f8fd1"
     },
     {
       "name": "cat_cafe_meeting_attach",
@@ -8809,64 +8375,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
-    },
-    {
-      "name": "cat_cafe_nominate_for_global",
-      "serverFamily": "memory",
-      "resourceFamily": "distillation",
-      "actions": [
-        "create"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Nominate a generalizable evidence item for distillation to global knowledge. The item must have generalizable=true. Creates a deidentified candidate for review.",
-      "descriptionDigest": "sha256:ab271fc8d6b183c1281066335b2f82a4df2280a2af4cd7d0da0a187983752991",
-      "descriptionCharacters": 160,
-      "descriptionTokensCl100kBase": 30,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "anchor": {
-            "description": "Evidence anchor to nominate",
-            "minLength": 1,
-            "type": "string"
-          },
-          "personNames": {
-            "description": "Person names to sanitize (blocklist)",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "projectPath": {
-            "description": "Absolute path to project root",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "anchor",
-          "projectPath"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:06b46fd731600e2a4d4ce621f0f3efbf67bdb44bdc995fccc1fcbcad530d71fa",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "candidate": "discoverable",
-        "evidenceRef": "file:packages/mcp-server/src/tools/distillation-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/distillation-tools.js#handleNominateForGlobal",
-      "protectedImplementationDigest": "sha256:6d488531011b745cce05a1a0ad34137ec47bab5ab342a0d74825d0f3169f8fd1"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_offer_custody",
@@ -8926,7 +8435,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -10933,7 +10442,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -11069,7 +10578,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePrepareMemoryContext",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_prepare_message_search_answer",
@@ -11270,7 +10779,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/message-search-answer-tool.js#handlePrepareMessageSearchAnswer",
-      "protectedImplementationDigest": "sha256:23d315bf8f2a73be2b8aec7c895265ae15cc5c398a9c02d679de38b39767c542"
+      "protectedImplementationDigest": "sha256:1115f35de0da080bccac04661691b4e61e7ea5a81817987b068297aaa0ffe141"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -11905,7 +11414,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_eval_repair",
@@ -12081,7 +11590,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEventMemoryCorrection",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -12991,7 +12500,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -13071,7 +12580,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -13148,7 +12657,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -13336,7 +12845,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -13462,7 +12971,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -15243,7 +14752,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -15650,7 +15159,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -16174,7 +15683,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -16248,7 +15757,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -16706,7 +16215,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_register_deployment_wait",
@@ -16818,7 +16327,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17700,127 +17209,6 @@
       "protectedImplementationDigest": "sha256:563c0db89d27e667d6c99cfdf7875050f310ca36d79ecff4e0e234f245168176"
     },
     {
-      "name": "cat_cafe_retain_memory_callback",
-      "serverFamily": "memory",
-      "resourceFamily": "memory-write",
-      "actions": [
-        "create"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Retain a durable memory item through Clowder AI callback endpoint. Use when you discover an important insight, decision, or lesson that should persist across sessions. Examples: architectural decisions made during discussion, gotchas discovered while debugging, cross-cat agreements. NOT for transient notes — only for knowledge worth remembering long-term. TIP: Add descriptive tags (e.g. [\"redis\", \"pitfall\"]) so future search_evidence queries can find it.",
-      "descriptionDigest": "sha256:29759a1327409bd02b74c57f2f329462d439b127777548d7e12c5b8e1e18b0b2",
-      "descriptionCharacters": 458,
-      "descriptionTokensCl100kBase": 90,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "description": "Memory content to retain",
-            "minLength": 1,
-            "type": "string"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Optional metadata (string values only)",
-            "type": "object"
-          },
-          "tags": {
-            "description": "Optional memory tags",
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "content"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:99beb9f9e7734398baa2bd0a86d4d6555b8098d2afc8cf655546f56e1047f7a0",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/callback-memory-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/callback-memory-tools.js#handleCallbackRetainMemory",
-      "protectedImplementationDigest": "sha256:2e7248094355d428d5f0da8c97dfa7f0af2bb964cc2a86826a267b6a8708fe58"
-    },
-    {
-      "name": "cat_cafe_retire_person_claim",
-      "serverFamily": "collab",
-      "resourceFamily": "person-memory",
-      "actions": [
-        "close"
-      ],
-      "activeState": "migration-candidate",
-      "description": "Retire one exact current F276 claim from an authenticated owner source. Appends a retirement version; stale anchors fail closed.",
-      "descriptionDigest": "sha256:4e7d389b83637eeaca625fcb12dd3569a3a4c15dc9e12708e23ded16ea8f6987",
-      "descriptionCharacters": 128,
-      "descriptionTokensCl100kBase": 25,
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "expectedCurrentClaimId": {
-            "description": "Exact current claim anchor; stale anchors fail closed.",
-            "maxLength": 160,
-            "minLength": 14,
-            "pattern": "^person_claim_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "personId": {
-            "maxLength": 160,
-            "minLength": 8,
-            "pattern": "^person_[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "type": "string"
-          },
-          "sourceMessageId": {
-            "description": "Optional assertion; when supplied it must equal the authenticated invocation origin.",
-            "maxLength": 240,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "personId",
-          "expectedCurrentClaimId"
-        ],
-        "type": "object"
-      },
-      "inputSchemaDigest": "sha256:2a49b7afa777f6abe38a231909605dd547155b7ce1494e161431bbdc8acb2bfa",
-      "annotations": {
-        "destructiveHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "runtimeProfiles": [
-        "full"
-      ],
-      "schemaDelivery": {
-        "evidenceRef": "file:packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
-        "policy": "host-default"
-      },
-      "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
-    },
-    {
       "name": "cat_cafe_retry_custody_admission",
       "serverFamily": "collab",
       "resourceFamily": "source-custody",
@@ -17964,51 +17352,296 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
-      "name": "cat_cafe_review_distillation",
-      "serverFamily": "memory",
-      "resourceFamily": "distillation",
+      "name": "cat_cafe_revise_person_memory",
+      "serverFamily": "collab",
+      "resourceFamily": "person-memory",
       "actions": [
-        "command"
+        "amend_event",
+        "correct_claim",
+        "retire_claim"
       ],
-      "activeState": "migration-candidate",
-      "description": "Approve or reject a distillation candidate. Approved candidates are written to the global knowledge layer with project-specific identifiers removed. Rejected candidates are discarded.",
-      "descriptionDigest": "sha256:3842a7f25c28b2fd65e326e23ef44b74b31926862ccaa4d53d055526816e38d0",
-      "descriptionCharacters": 183,
-      "descriptionTokensCl100kBase": 30,
+      "activeState": "canonical",
+      "description": "Revise one owner-private claim or interaction. Use when: the owner corrects a fact (correct_claim), retires a claim (retire_claim), or amends an event (amend_event). NOT for: new proposals, recall, or permanent forgetting. Output: an append-only revision and lifecycle result. GOTCHA: pass the exact current anchor; the server verifies owner source and rejects stale anchors.",
+      "descriptionDigest": "sha256:bb4c8a6cff7c337a92f2d4b76aaa50bf085008b834616bb2c24ce36fbbb36522",
+      "descriptionCharacters": 375,
+      "descriptionTokensCl100kBase": 82,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
-          "candidateId": {
-            "description": "Distillation candidate ID",
-            "minLength": 1,
-            "type": "string"
-          },
-          "decision": {
-            "description": "Review decision",
+          "action": {
             "enum": [
-              "approve",
-              "reject"
+              "amend_event",
+              "correct_claim",
+              "retire_claim"
             ],
             "type": "string"
           },
-          "reviewerId": {
-            "description": "Cat ID performing the review (e.g. \"codex\", \"opus\")",
+          "clientRequestId": {
+            "description": "Stable request key; reuse it when retrying.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedCurrentClaimId": {
+            "description": "Exact current claim anchor; stale anchors are rejected.",
+            "maxLength": 160,
+            "minLength": 14,
+            "pattern": "^person_claim_[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "expectedEventId": {
+            "description": "Exact source event anchor; the original is never overwritten.",
+            "maxLength": 160,
+            "minLength": 14,
+            "pattern": "^person_event_[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "assertedBy": {
+                        "const": "owner",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "reported_fact",
+                        "type": "string"
+                      },
+                      "predicate": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "value": {}
+                    },
+                    "required": [
+                      "kind",
+                      "predicate",
+                      "value",
+                      "assertedBy"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "assertedBy": {
+                        "const": "owner",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "user_assessment",
+                        "type": "string"
+                      },
+                      "stance": {
+                        "enum": [
+                          "endorsed",
+                          "rejected",
+                          "uncertain"
+                        ],
+                        "type": "string"
+                      },
+                      "statement": {
+                        "maxLength": 800,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "statement",
+                      "assertedBy",
+                      "stance"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "description": "Replacement owner fact or assessment; agent inference is rejected."
+              },
+              {
+                "additionalProperties": false,
+                "description": "Replacement event projection; preserve approximate or conflicting time.",
+                "properties": {
+                  "duration": {
+                    "$ref": "#/properties/payload/anyOf/1/properties/occurredAt"
+                  },
+                  "eventKind": {
+                    "enum": [
+                      "conversation",
+                      "meeting",
+                      "message",
+                      "milestone",
+                      "other"
+                    ],
+                    "type": "string"
+                  },
+                  "headline": {
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "importanceOrTopic": {
+                    "maxLength": 400,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "occurredAt": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "const": "exact",
+                            "type": "string"
+                          },
+                          "value": {
+                            "maxLength": 160,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "value"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "earliest": {
+                            "maxLength": 160,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "approximate",
+                            "type": "string"
+                          },
+                          "latest": {
+                            "maxLength": 160,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "qualifier": {
+                            "enum": [
+                              "about",
+                              "before",
+                              "after",
+                              "range",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          },
+                          "raw": {
+                            "maxLength": 240,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "raw",
+                          "qualifier"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "alternatives": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "label": {
+                                  "maxLength": 80,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "maxLength": 160,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "value"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 4,
+                            "minItems": 2,
+                            "type": "array"
+                          },
+                          "kind": {
+                            "const": "conflict",
+                            "type": "string"
+                          },
+                          "raw": {
+                            "maxLength": 240,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "raw",
+                          "alternatives"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "uncertaintyNotes": {
+                    "items": {
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 4,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "eventKind",
+                  "headline",
+                  "importanceOrTopic",
+                  "uncertaintyNotes"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "personId": {
+            "description": "Exact active private person ID from an authorized relationship card.",
+            "maxLength": 160,
+            "minLength": 8,
+            "pattern": "^person_[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "description": "Optional assertion; when supplied it must equal the authenticated invocation origin.",
+            "maxLength": 240,
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "candidateId",
-          "decision",
-          "reviewerId"
+          "action",
+          "personId"
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:37b7d2864206e6ff6fa5af4cd88637ea82cc19edd8b711fc7788ccb826b96d97",
+      "inputSchemaDigest": "sha256:e0b3a96cab16755732164117e1c26813365b67ede0afa000aefb9822741794cd",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -18018,12 +17651,11 @@
         "full"
       ],
       "schemaDelivery": {
-        "candidate": "discoverable",
-        "evidenceRef": "file:packages/mcp-server/src/tools/distillation-tools.ts",
+        "evidenceRef": "file:packages/mcp-server/src/tools/person-memory-revision-tool.ts",
         "policy": "host-default"
       },
-      "implementationRef": "module:./tools/distillation-tools.js#handleReviewDistillation",
-      "protectedImplementationDigest": "sha256:6d488531011b745cce05a1a0ad34137ec47bab5ab342a0d74825d0f3169f8fd1"
+      "implementationRef": "module:./tools/callback-tools.js#handleRevisePersonMemory",
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_run_perspective",
@@ -18146,10 +17778,10 @@
           ]
         }
       ],
-      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To prepare an answer card, explicitly use cat_cafe_prepare_message_search_answer with your chosen sources, exact quotations and selection reasons; Host verifies provenance while your reasons remain your judgment. New cards require selections. Only saved legacy query-only operations accept retries without selections, using their original arguments without new search or qualification. Ordinary recall never publishes a card or launches a generative judge. MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=time (default) orders the first 32 admitted relevance sources by canonical time; relevance stops at the admitted page plus one witness. Incomplete windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
-      "descriptionDigest": "sha256:81760642a4a12a3b35280348bd225f17e541aa12527a7e41698395b174f8db43",
-      "descriptionCharacters": 6394,
-      "descriptionTokensCl100kBase": 1350,
+      "description": "Search project knowledge or distinct readable messages from earlier conversations. Use when: finding an earlier discussion (\"以前聊过 / 找回旧消息\", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. To prepare an answer card, explicitly use cat_cafe_prepare_message_search_answer with your chosen sources, exact quotations and selection reasons; Host verifies provenance while your reasons remain your judgment. New cards require selections. Only saved legacy query-only operations accept retries without selections, using their original arguments without new search or qualification. Ordinary recall never publishes a card or launches a generative judge. MESSAGE CONTRACT: resultUnit=message returns sources for the reader to judge, with matched query terms or semantic-retrieval evidence, not supported verdicts. messageSort=relevance (default) returns a relevance-ranked page and stops at the admitted page plus one witness; explicit messageSort=time orders the first 32 admitted relevance sources by canonical time. Incomplete time windows report actual coverage. It supports mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. GOTCHA: rank/matchRank are position only, never relevance or trust; relevance states observed exact-anchor/title/phrase evidence or unknown; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. SCOPE STRATEGY (decide first!): docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). threads = 讨论过程 (who said what, original context). all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. Rule of thumb: \"要结论 → docs, 要过程 → threads, 要全貌 → both separately\". MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. TIP: When unsure, use mode=hybrid. For broad surveys, add one semantic query as blind-spot insurance (hybrid misses cross-language synonyms). QUERY TIPS: Feature IDs (F102, F163) are strong anchors — use them when available. Mix Chinese + English keywords for better recall (记忆 + memory). Split broad topics into 2-3 targeted queries from different angles (e.g. \"how it was built\" vs \"how it is governed\"). Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks \"哪些 / 所有 / 历史上 / 提过 / 沉淀\", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. READING RESULTS: rank = position; matchRank is its legacy bucket. relevance = observed textual support, never confidence; unknown keeps alternate-entry hints. retrievalScore = method-specific score, authority = document reliability. sourceProjection reports the observed/indexed publication versions and pending/degraded state; do not infer absence from a stale index. Follow the returned drillDown path to read the same source hash; changed/forgotten sources are refused, never replaced by another quote. RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. F188 PHASE F 7-TOOL FAMILY (cross-reference, choose by scenario): precise anchor + relations → cat_cafe_graph_resolve; zero-prior / scan recent → cat_cafe_list_recent; this tool (search_evidence) = semantic/fuzzy find; session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. When this tool returns no results or no text-supported document candidates, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).",
+      "descriptionDigest": "sha256:fda9f9ea8a2a40b8e8c60020f356d86c5058145ffa8ee0b1ff30f1edc3973da0",
+      "descriptionCharacters": 6456,
+      "descriptionTokensCl100kBase": 1361,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -18225,7 +17857,7 @@
             "type": "integer"
           },
           "messageSort": {
-            "description": "Message mode only: time (default) orders the first 32 admitted relevance sources by canonical time; relevance returns a relevance-ranked page. A partial window reports its actual size. Neither proves the earliest occurrence in all history.",
+            "description": "Message mode only: relevance (default) returns a relevance-ranked page; explicit time orders the first 32 admitted relevance sources by canonical time. A partial time window reports its actual size. Neither proves the earliest occurrence in all history.",
             "enum": [
               "time",
               "relevance"
@@ -18276,7 +17908,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:09a73ff450ceb0db48aaf181e0f660f76f5a29bfe334fd13f1fb28436a603b1c",
+      "inputSchemaDigest": "sha256:28ad31c50d81b5693498fcf845e5ace301e1d0d0f703300c82c2f51db8ec8023",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
@@ -18294,7 +17926,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/evidence-tools.js#handleSearchEvidence",
-      "protectedImplementationDigest": "sha256:5c531dd40d46368a2580957ec95f7b76af0acc9e7413e1e53c422dcc76f8ba48"
+      "protectedImplementationDigest": "sha256:1ed2b0e5c6753c6da8e26a37c5e4e9b8121317443d35c4c43eddd8a4396b6845"
     },
     {
       "name": "cat_cafe_set_read_mode",
@@ -18341,7 +17973,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -18586,7 +18218,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -19288,7 +18920,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -19366,7 +18998,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -21104,7 +20736,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -21289,7 +20921,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21636,7 +21268,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_update_scheduled_task_params",
@@ -21789,7 +21421,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21939,7 +21571,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22659,7 +22291,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -22703,7 +22335,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:0d8b6a95b4fcb06c222da40431456b8b15d0707733ff9f6bbe0333d02e52f5f4"
+      "protectedImplementationDigest": "sha256:905583e52e2674e41b58a714c47b75b967445ab8cd06147c4ca2fc92e435df58"
     },
     {
       "name": "cat_cafe_work",

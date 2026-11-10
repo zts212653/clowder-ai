@@ -87,6 +87,7 @@ vi.mock('@/stores/approvalHubStore', () => ({
       batchReject: mockBatchReject,
       toggleSelection: mockToggleSelection,
       batchResults: mockBatchResults,
+      scheduleDriftBlocked: {},
     }),
 }));
 

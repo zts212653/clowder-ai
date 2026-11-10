@@ -3,6 +3,39 @@ import {
   bindManagedMcpStdioConfig,
   materializeNativeMcpHttp,
 } from '../../../../../config/capabilities/managed-mcp-config.js';
+import { isSharedBrowserStdioServer } from '../../../../browser/shared-browser-descriptor.js';
+
+/**
+ * Codex deep-merges thread config over its own config files, and those may already hold a stdio
+ * table of the same name (the account `~/.codex/config.toml` had `[mcp_servers.playwright]`).
+ * Adding `url` to it makes Codex refuse to load (2026-11-09 incident), and a key cannot be removed
+ * by an override. So the shared browser gets its own name, and the original name stays a complete
+ * stdio table with `enabled = false`: valid whether or not Codex already has that table.
+ */
+export const CODEX_SHARED_BROWSER_SUFFIX = '_shared';
+
+export function codexSharedBrowserServerName(name: string): string {
+  return `${name}${CODEX_SHARED_BROWSER_SUFFIX}`;
+}
+
+/**
+ * The server names Codex actually registers from `threadConfig`: a shared-browser name whose original
+ * table was disabled is replaced by its `_shared` name. Request evidence and schema delivery must
+ * name the server that provides the tools, never the disabled stub (Sol5.6 #6888 R1).
+ */
+export function codexDeclaredServerNames(
+  names: readonly string[],
+  threadConfig: Record<string, unknown> | undefined,
+): string[] {
+  const servers = isCodexConfigObject(threadConfig?.mcp_servers) ? threadConfig.mcp_servers : {};
+  const effective = names.map((name) => {
+    const original = servers[name];
+    const renamed = codexSharedBrowserServerName(name);
+    const shared = servers[renamed];
+    return isCodexConfigObject(original) && original.enabled === false && isCodexConfigObject(shared) ? renamed : name;
+  });
+  return [...new Set(effective)].sort();
+}
 
 /** Native headers belong to the private thread RPC, never the CLI assignment. */
 export function codexNativeMcpThreadConfig(
@@ -16,13 +49,20 @@ export function codexNativeMcpThreadConfig(
     Object.entries(servers).filter(([, server]) => isCodexConfigObject(server)),
   ) as Record<string, Record<string, unknown>>;
   // Raw plugin launches stay off argv and still pass the existing exact Host matcher.
-  const native = materializeNativeMcpHttp({ ...records, ...privateServers }, callback);
+  const sources = { ...records, ...privateServers };
+  const native = materializeNativeMcpHttp(sources, callback);
   return {
     mcp_servers: Object.fromEntries(
-      Object.entries(native).map(([name, server]) => {
-        if (server.type !== 'http') return [name, server];
+      Object.entries(native).flatMap(([name, server]) => {
+        if (server.type !== 'http') return [[name, server]];
         const { type: _type, headers, ...rest } = server;
-        return [name, { ...rest, ...(headers ? { http_headers: headers } : {}) }];
+        const http = { ...rest, ...(headers ? { http_headers: headers } : {}) };
+        const source = sources[name];
+        if (!source || !isSharedBrowserStdioServer(source)) return [[name, http]];
+        return [
+          [name, { command: source.command, args: source.args, enabled: false }],
+          [codexSharedBrowserServerName(name), http],
+        ];
       }),
     ),
   };

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  handleLibraryArchive,
   handleLibraryCreate,
   handleLibraryDryRun,
   handleLibraryRebuild,
@@ -20,8 +19,7 @@ test('each library writer carries the configured local user, including the post-
     await handleLibraryDryRun({ root: '/isolated/docs' });
     await handleLibraryCreate({ kind: 'domain', name: 'notes', displayName: 'Notes' });
     await handleLibraryRebuild({ collectionId: 'domain:notes' });
-    await handleLibraryArchive({ collectionId: 'domain:notes' });
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 4);
     for (const { init } of requests) {
       const headers = new Headers(init.headers);
       assert.equal(headers.get('x-cat-cafe-user'), 'owner');
@@ -30,7 +28,7 @@ test('each library writer carries the configured local user, including the post-
     }
     delete process.env.CAT_CAFE_USER_ID;
     requests.length = 0;
-    await handleLibraryArchive({ collectionId: 'domain:notes' });
+    await handleLibraryRebuild({ collectionId: 'domain:notes' });
     assert.equal(new Headers(requests[0].init.headers).get('x-cat-cafe-user'), 'default-user');
   } finally {
     globalThis.fetch = previousFetch;

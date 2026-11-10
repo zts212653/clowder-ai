@@ -1,6 +1,7 @@
 /** Exact PR truth through the repository's canonical gh transport. No branch-name inference. */
 import { execFileSync } from 'node:child_process';
 import { validateOrigin } from './worktree-origin.mjs';
+import { git } from './worktree-reaper-probes.mjs';
 import { retentionStatus } from './worktree-retention.mjs';
 
 const PR_SOURCE = /^pr:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9]\d*)$/;
@@ -8,6 +9,12 @@ export function parsePrSource(sourceRef) {
   const match = PR_SOURCE.exec(sourceRef ?? '');
   if (!match) throw new Error('expected pr:owner/repository#number');
   return { repository: match[1], number: match[2] };
+}
+
+export function prBaseTrackingRef(repo, truth) {
+  if (typeof truth.baseRef !== 'string' || !git(repo, ['check-ref-format', `refs/heads/${truth.baseRef}`]).ok)
+    throw new Error('PR base ref unavailable or invalid');
+  return `refs/remotes/origin/${truth.baseRef}`;
 }
 
 /** PR membership is content evidence. Only worktree-local intent establishes responsibility. */
@@ -63,11 +70,22 @@ export function readPrTruth(
     .filter(Boolean);
   if (
     !['OPEN', 'CLOSED', 'MERGED'].includes(pr.state) ||
+    typeof raw.base.ref !== 'string' ||
+    !raw.base.ref ||
     !commits.length ||
     commits.length !== raw.commits ||
     ![pr.headRefOid, ...commits].every((sha) => /^[0-9a-f]{40}$/.test(sha)) ||
+    !commits.includes(pr.headRefOid) ||
     (pr.state === 'MERGED' && !/^[0-9a-f]{40}$/.test(pr.mergeCommit?.oid ?? ''))
   )
     throw new Error('incomplete PR truth');
-  return { sourceRef, state: pr.state, head: pr.headRefOid, mergedAt: pr.mergeCommit?.oid, url: pr.url, commits };
+  return {
+    sourceRef,
+    state: pr.state,
+    head: pr.headRefOid,
+    mergedAt: pr.mergeCommit?.oid,
+    baseRef: raw.base.ref,
+    url: pr.url,
+    commits,
+  };
 }

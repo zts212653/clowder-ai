@@ -18,7 +18,7 @@ import { ShellGlyph } from '../shell/ShellIcons';
 import { useShellCopy } from '../shell/shell-copy';
 import { getProjectPaths } from '../ThreadSidebar/thread-utils';
 import { ThreadComposerHost } from '../thread-chat/ThreadComposerHost';
-import { LocalDraftSaveNotice } from './LocalDraftSaveNotice';
+import { LocalDraftSaveNotice, useLingeringSave } from './LocalDraftSaveNotice';
 import { NewConversationComposerContext } from './NewConversationComposerContext';
 import { newConversationCopy } from './new-conversation.shell-copy';
 import { queueWorkDiscussion } from './queue-work-discussion';
@@ -132,6 +132,7 @@ function AdmissionNotice({
 }) {
   const copy = useShellCopy(newConversationCopy);
   const message = admissionMessage(phase, localSaveFailed, copy);
+  const lingeringSave = useLingeringSave(localSaveState === 'saving');
   if (loadFailed) {
     return (
       <div
@@ -145,7 +146,7 @@ function AdmissionNotice({
       </div>
     );
   }
-  if (localSaveState !== 'idle' || preparingSend) {
+  if (lingeringSave || localSaveState === 'failed' || localSaveState === 'cancelled' || preparingSend) {
     return (
       <LocalDraftSaveNotice
         state={localSaveState === 'idle' ? 'saving' : localSaveState}

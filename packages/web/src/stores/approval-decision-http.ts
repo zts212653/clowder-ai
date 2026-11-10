@@ -30,6 +30,7 @@ export function resolveEndpoint(
 }
 
 export interface DecisionErrorBody {
+  code?: string;
   error?: string;
   detail?: string;
   message?: string;
