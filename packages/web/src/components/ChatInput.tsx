@@ -57,6 +57,7 @@ import { composerAttachments } from './composer-queue';
 import { composerWebLinks } from './composer-web-links';
 import { HistorySearchModal } from './HistorySearchModal';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { QuickPhrasesControl } from './plugins/QuickPhrasesControl';
 import { projectScreeningComposerConflict } from './project-screening-composer-group';
 import { conversationDecisionCopy } from './rich/conversation-decision.shell-copy';
 import { submitConversationAnswer } from './rich/runtime-conversation-model';
@@ -1211,6 +1212,13 @@ export function ChatInput({
         )}
         <div className={shellV2 ? `col-start-3 ${controlsRow} flex shrink-0 items-center gap-1` : 'contents'}>
           {shellV2 ? <GalleryDraftSummary attachments={shownContextAttachments} /> : null}
+          <QuickPhrasesControl
+            key={effectiveThreadId}
+            draft={input}
+            disabled={disabled}
+            onSelect={handleHistorySelect}
+            presentation={shellV2 ? 'v2' : 'classic'}
+          />
           <ChatInputActionButton
             onTranscript={handleTranscript}
             onSend={handleSend}
