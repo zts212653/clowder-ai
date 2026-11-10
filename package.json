@@ -124,7 +124,7 @@
     "check:skills:manifest": "node scripts/check-skills-manifest.mjs",
     "check:skills:references": "node --test scripts/check-skill-reference-integrity.test.mjs && node scripts/check-skill-reference-integrity.mjs",
     "check:skills:surfaces": "node --test scripts/check-skill-first-party-surfaces.test.mjs && node scripts/check-skill-first-party-surfaces.mjs",
-    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/pre-merge-gate-guard.alpha.test.mjs scripts/lib/alpha-redis-leases.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/gate-command-clock.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs scripts/lib/gate-continuity-claim.test.mjs scripts/lib/gate-continuity-secret.test.mjs scripts/run-preserving-signal-exit.test.mjs",
+    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/pre-merge-gate-guard.alpha.test.mjs scripts/lib/alpha-redis-leases.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/gate-command-clock.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs scripts/lib/gate-continuity-claim.test.mjs scripts/lib/gate-continuity-secret.test.mjs scripts/run-preserving-signal-exit.test.mjs scripts/start-entry-signal.test.mjs",
     "check:eval-metric-glossary": "pnpm --filter @cat-cafe/api build && pnpm check:eval-metric-glossary:prepared",
     "check:eval-metric-glossary:prepared": "node --test packages/api/test/harness-eval/eval-hub-metric-glossary-coverage.test.js",
     "check:vendor-stylesheets": "node --test scripts/vendor-stylesheets.test.mjs",
@@ -179,11 +179,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@clowder-ai/plugin-sdk@0.3.0-beta.2-candidate.0>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz"
-    },
-    "patchedDependencies": {
-      "@clowder-ai/plugin-contract@0.3.1-candidate.0": "patches/@clowder-ai__plugin-contract@0.3.1-candidate.0.patch",
-      "@clowder-ai/plugin-contract@0.3.2-candidate.0": "patches/@clowder-ai__plugin-contract@0.3.2-candidate.0.patch"
+      "@clowder-ai/plugin-sdk@0.3.0-beta.2-candidate.12>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz"
     }
   }
 }

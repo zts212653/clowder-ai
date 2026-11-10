@@ -27,6 +27,7 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
+import { refreshPluginMentionTargets, usePluginMentionTargets } from '@/hooks/usePluginMentionTargets';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
@@ -57,6 +58,7 @@ import { composerAttachments } from './composer-queue';
 import { composerWebLinks } from './composer-web-links';
 import { HistorySearchModal } from './HistorySearchModal';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { QuickPhrasesControl } from './plugins/QuickPhrasesControl';
 import { projectScreeningComposerConflict } from './project-screening-composer-group';
 import { conversationDecisionCopy } from './rich/conversation-decision.shell-copy';
 import { submitConversationAnswer } from './rich/runtime-conversation-model';
@@ -215,9 +217,10 @@ export function ChatInput({
 }: ChatInputProps) {
   const v2Copy = useShellCopy(chatComposerCopy);
   const { cats } = useCatData();
+  const pluginTargets = usePluginMentionTargets();
   const ime = useIMEGuard();
   const [routingCompositionActive, setRoutingCompositionActive] = useState(false);
-  const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
+  const catOptions = useMemo(() => buildCatOptions(cats, pluginTargets), [cats, pluginTargets]);
   // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
   const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
 
@@ -416,16 +419,20 @@ export function ChatInput({
     [setInput],
   );
 
+  useEffect(() => {
+    if (showMentions) void refreshPluginMentionTargets();
+  }, [showMentions]);
   const filteredCatOptions = useMemo(() => {
-    if (!mentionFilter) return catOptions;
+    const choices = whisperMode ? catOptions.filter((option) => !option.isPlugin) : catOptions;
+    if (!mentionFilter) return choices;
     const lower = mentionFilter.toLowerCase();
-    return catOptions.filter(
+    return choices.filter(
       (opt) =>
         opt.label.toLowerCase().includes(lower) ||
         opt.insert.toLowerCase().includes(lower) ||
-        opt.id.toLowerCase().includes(lower),
+        (opt.isPlugin ? opt.desc.toLowerCase().includes(lower) : opt.id.toLowerCase().includes(lower)),
     );
-  }, [catOptions, mentionFilter]);
+  }, [catOptions, mentionFilter, whisperMode]);
 
   const activeMenu = showMentions ? 'mention' : null;
   const activeOptions = filteredCatOptions;
@@ -1211,6 +1218,13 @@ export function ChatInput({
         )}
         <div className={shellV2 ? `col-start-3 ${controlsRow} flex shrink-0 items-center gap-1` : 'contents'}>
           {shellV2 ? <GalleryDraftSummary attachments={shownContextAttachments} /> : null}
+          <QuickPhrasesControl
+            key={effectiveThreadId}
+            draft={input}
+            disabled={disabled}
+            onSelect={handleHistorySelect}
+            presentation={shellV2 ? 'v2' : 'classic'}
+          />
           <ChatInputActionButton
             onTranscript={handleTranscript}
             onSend={handleSend}

@@ -128,6 +128,8 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     if (url.pathname === '/api/session') return reply({ userId: 'owner-proof', csrfToken: 'fixture-only' });
     if (url.pathname === '/api/config/chat-background' && method === 'GET') return reply({ threads: {} });
     if (url.pathname === '/api/plugin-ui' && method === 'GET') return reply({ entries: [] });
+    if (url.pathname === '/api/plugin-manager/addressed-targets' && method === 'GET')
+      return reply({ targets: [], knownTargets: [] });
     const suggestionThread =
       method === 'GET' && threads.find((thread) => url.pathname === `/api/threads/${thread.id}/suggestions`);
     if (suggestionThread) return reply({ threadId: suggestionThread.id, suggestions: [] });

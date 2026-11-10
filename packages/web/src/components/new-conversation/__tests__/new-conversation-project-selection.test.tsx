@@ -95,7 +95,16 @@ describe('new conversation project selection through the real directory browser'
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(<NewConversationPage onNavigate={vi.fn()} />);
+      root.render(
+        <NewConversationPage
+          onNavigate={vi.fn()}
+          sidebarOpen={false}
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+        />,
+      );
     });
   });
   afterEach(async () => {

@@ -2,6 +2,7 @@ import EventEmitter from 'node:events';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { pluginReplyFor } from '@/components/plugin-reply-state';
 import { QueuePanel } from '@/components/QueuePanel';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -228,5 +229,144 @@ describe('dispatch receipt Queue publication', () => {
     expect(
       useChatStore.getState().messages.find((message) => message.id === source.id)?.extra ?? {},
     ).not.toHaveProperty('queueReceipt');
+  });
+  it.each([
+    THREAD_ID,
+    'thread-background',
+  ])('upserts lifecycle-free stored snapshots in their exact thread: %s', async (threadId) => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const receipt = {
+      id: 'plugin-receipt',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: '插件投递与接收状态。',
+      timestamp: Date.now(),
+      extra: {
+        pluginAddressedReceipt: { inputMessageId: 'source', targetId: 'pi_helper', accepted: false, phase: 'sending' },
+      },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: receipt }));
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.find((message) => message.id === receipt.id)?.extra?.pluginAddressedReceipt?.phase,
+    ).toBe('sending');
+    const accepted = {
+      ...receipt,
+      extra: { pluginAddressedReceipt: { ...receipt.extra.pluginAddressedReceipt, phase: 'accepted', accepted: true } },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: accepted }));
+    const rows = useChatStore
+      .getState()
+      .getThreadState(threadId)
+      .messages.filter((message) => message.id === receipt.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.extra?.pluginAddressedReceipt?.accepted).toBe(true);
+    expect(rows[0]?.lifecycle).toBeUndefined();
+    expect(rows[0]?.type).toBe('system');
+    const reply = {
+      id: 'plugin-reply',
+      from: { kind: 'plugin', instanceId: 'pi_helper' },
+      catId: null,
+      content: '',
+      timestamp: Date.now(),
+      replyTo: 'source',
+      contentBlocks: [{ type: 'image', url: '/uploads/fixture.png' }],
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId, message: reply }));
+    const visible = useChatStore
+      .getState()
+      .getThreadState(threadId)
+      .messages.find((message) => message.id === reply.id);
+    expect(visible?.from).toEqual(reply.from);
+    expect(visible?.replyTo).toBe('source');
+    expect(visible?.contentBlocks).toEqual(reply.contentBlocks);
+    expect(visible?.lifecycle).toBeUndefined();
+
+    if (threadId !== THREAD_ID) expect(useChatStore.getState().messages).toHaveLength(0);
+    expect(useChatStore.getState().catInvocations).toEqual({});
+  });
+
+  it('keeps lifecycle-only events strict and rejects invalid snapshot lifecycle or missing canonical sender', async () => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const message = {
+      id: 'bad',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: 'state',
+      timestamp: Date.now(),
+    };
+    act(() => {
+      emitServerEvent('message_lifecycle_updated', { threadId: THREAD_ID, message });
+      emitServerEvent('message_snapshot_updated', {
+        threadId: THREAD_ID,
+        message: { ...message, lifecycle: { kind: 'pretend' } },
+      });
+      emitServerEvent('message_snapshot_updated', { threadId: THREAD_ID, message: { ...message, from: undefined } });
+    });
+    expect(useChatStore.getState().messages).toHaveLength(0);
+  });
+
+  it.each([
+    THREAD_ID,
+    'thread-background',
+  ])('recognizes plugin replies on the production connector event immediately in their exact thread: %s', async (threadId) => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const reply = {
+      id: 'connector-reply',
+      type: 'connector',
+      from: { kind: 'plugin', instanceId: 'pi_helper' },
+      content: '',
+      timestamp: Date.now(),
+      replyTo: 'source',
+      contentBlocks: [{ type: 'image', url: '/uploads/fixture.png' }],
+    };
+    act(() => emitServerEvent('connector_message', { threadId, message: reply }));
+    const messages = useChatStore.getState().getThreadState(threadId).messages;
+    const received = messages.find((message) => message.id === reply.id);
+    expect(received?.replyTo).toBe('source');
+    expect(received?.contentBlocks).toEqual(reply.contentBlocks);
+    expect(pluginReplyFor('source', 'pi_helper', messages)?.id).toBe(reply.id);
+    expect(pluginReplyFor('source', 'pi_other', messages)).toBeUndefined();
+    expect(pluginReplyFor('other-source', 'pi_helper', messages)).toBeUndefined();
+    if (threadId !== THREAD_ID) expect(useChatStore.getState().messages).toHaveLength(0);
+  });
+  it('keeps a persisted terminal target response when its earlier acceptance snapshot arrives late', async () => {
+    serverQueue = [];
+    await act(async () => root.render(<Host />));
+    const state = {
+      v: 1,
+      revision: 3,
+      inputMessageId: 'source',
+      targetId: 'pi_helper',
+      execution: { kind: 'plugin', id: 'ad_deliver' },
+      status: 'completed',
+      startedAt: 1,
+      updatedAt: 3,
+      resultMessageId: 'reply',
+    };
+    const message = {
+      id: 'carrier',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      catId: null,
+      content: 'delivery',
+      timestamp: 1,
+      extra: { targetResponse: state },
+    };
+    act(() => emitServerEvent('message_snapshot_updated', { threadId: THREAD_ID, message }));
+    act(() =>
+      emitServerEvent('message_snapshot_updated', {
+        threadId: THREAD_ID,
+        message: {
+          ...message,
+          extra: { targetResponse: { ...state, revision: 2, status: 'waiting', resultMessageId: undefined } },
+        },
+      }),
+    );
+    expect(useChatStore.getState().messages[0]?.extra?.targetResponse?.status).toBe('completed');
   });
 });

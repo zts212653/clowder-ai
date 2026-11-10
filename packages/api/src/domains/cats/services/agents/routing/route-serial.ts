@@ -211,7 +211,7 @@ import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistr
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
 import { stripTrailingCatSignatures } from './cat-signature-strip.js';
-import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { readDurableA2ALineage } from './durable-a2a-lineage.js';
 import { finalRoutingSlot, validateRoutingSyntax } from './final-routing-slot.js';
@@ -970,7 +970,6 @@ export async function* routeSerial(
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
       const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
-      const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
@@ -1776,7 +1775,6 @@ export async function* routeSerial(
         message: AppendMessageInput,
         terminal: { status: 'completed'; completedAt: number },
         targets: readonly CatId[],
-        allowDotReturn: boolean,
       ): Promise<StoredMessage> => {
         if (!ownInvocationId || !lifecycleResponseMessageId) throw new Error('canonical response identity missing');
         return commitCompletedRouteResponse(deps, {
@@ -1785,8 +1783,6 @@ export async function* routeSerial(
           message,
           terminal,
           targetCats: [...targets],
-          allowDotReturn,
-          triggerMessageId: turnTriggerMessageId,
           admitWake: commitCompletedA2AWake,
           userId,
           ownerAuthProvenance,
@@ -2767,7 +2763,7 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId);
+        a2aMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -3235,14 +3231,12 @@ export async function* routeSerial(
                 }
               : undefined;
           const completedA2AWakeCommit =
-            lifecycleResponse?.status === 'completed' &&
-            (a2aMentions.length > 0 || (!collectiveBoundTurn && deps.dotReplyTarget))
+            lifecycleResponse?.status === 'completed' && a2aMentions.length > 0
               ? (message: AppendMessageInput) =>
                   commitCompletedResponse(
                     message,
                     { status: 'completed', completedAt: lifecycleResponse.completedAt },
                     a2aMentions,
-                    !collectiveBoundTurn,
                   )
               : undefined;
           const failedA2AReportCommit =
@@ -3558,19 +3552,6 @@ export async function* routeSerial(
                 : undefined;
             const answerBearingNoText =
               hasRichBlocks || Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
-            const completedNoTextCommit =
-              answerBearingNoText &&
-              lifecycleResponse?.status === 'completed' &&
-              !collectiveBoundTurn &&
-              deps.dotReplyTarget
-                ? (message: AppendMessageInput) =>
-                    commitCompletedResponse(
-                      message,
-                      { status: 'completed', completedAt: lifecycleResponse.completedAt },
-                      [],
-                      true,
-                    )
-                : undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvocationId) {
               const decision = await deps.freshnessOutputCommitCoordinator.commit({
                 userId,
@@ -3581,7 +3562,6 @@ export async function* routeSerial(
                 originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
                 message: noTextMessageInput,
                 ...(lifecycleResponse ? { lifecycleResponse } : {}),
-                ...(completedNoTextCommit ? { commitLifecycleResponse: completedNoTextCommit } : {}),
               });
               outputCommitDecision = decision;
               if (options.persistenceContext) {
@@ -3592,15 +3572,13 @@ export async function* routeSerial(
               }
               storedNoText = await deps.messageStore.getById(decision.messageId);
             } else if (lifecycleResponse && ownInvocationId) {
-              storedNoText = completedNoTextCommit
-                ? await completedNoTextCommit(noTextMessageInput)
-                : await commitLifecycleResponseFromAppendInput(
-                    deps.messageStore,
-                    lifecycleResponse.messageId,
-                    ownInvocationId,
-                    lifecycleResponse,
-                    noTextMessageInput,
-                  );
+              storedNoText = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponse.messageId,
+                ownInvocationId,
+                lifecycleResponse,
+                noTextMessageInput,
+              );
             } else {
               // A tool-only record is audit output, not answer content: no frontier-annotated
               // commit, because there is no bubble whose position anyone reads. The replay-unsafe

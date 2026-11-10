@@ -334,6 +334,16 @@ export interface StoredMessage {
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
+    /** Durable reply outcome, distinct from the transport receipt below. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    /** Host receipt: input acceptance only, never a model response. */
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
@@ -2360,7 +2370,13 @@ export interface IMessageStore {
     input: CompanionDeliveryAcceptance,
   ): StoredMessage | null | Promise<StoredMessage | null>;
 
-  /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
+  /** Atomically advance the existing target carrier without racing generic metadata writers. */
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F096: Update generic extra data; protected outcome fields keep their dedicated authority. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
   /** F310: atomically fence source body and prior custody state before changing the source-owned carrier. */
   compareAndTransitionCustodyOffer(
@@ -3881,10 +3897,40 @@ export class MessageStore {
     return structuredClone(msg);
   }
 
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null {
+    const message = this.messages.find((row) => row.id === id);
+    if (!message || message.recall || message._tombstone) return null;
+    const prior = message.extra?.targetResponse;
+    if (!prior) {
+      const receipt = message.extra?.pluginAddressedReceipt;
+      if (
+        expectedRevision !== 0 ||
+        next.revision !== 1 ||
+        receipt?.targetId !== next.targetId ||
+        receipt.inputMessageId !== next.inputMessageId
+      )
+        return null;
+    } else if (
+      prior.revision !== expectedRevision ||
+      next.revision !== expectedRevision + 1 ||
+      next.targetId !== prior.targetId ||
+      next.inputMessageId !== prior.inputMessageId ||
+      next.execution.id !== prior.execution.id
+    )
+      return null;
+    message.extra = { ...message.extra, targetResponse: structuredClone(next) };
+    return structuredClone(message);
+  }
+
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg || msg.recall || msg._tombstone) return null;
     const {
+      targetResponse: _stripTargetResponse,
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,

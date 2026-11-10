@@ -16,6 +16,9 @@ export function manageExecutionActivation(
     ownsExecution: () => owned,
     candidate: {
       ...activation,
+      ...(activation.deliver ? { deliver: activation.deliver } : {}),
+      ...(activation.handle ? { handle: activation.handle } : {}),
+      ...(activation.webhook ? { webhook: activation.webhook } : {}),
       ...(activation.preStop
         ? {
             preStop: async (context: { reason: string; deadline: number }) => {

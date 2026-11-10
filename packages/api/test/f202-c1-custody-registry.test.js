@@ -9,6 +9,7 @@ import { createModuleHostInvocation } from '../dist/domains/plugin/builtin-runti
 import { currentPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
 import { NativePluginActions } from '../dist/domains/plugin/declared/native-plugin-actions.js';
 import { createDormantPluginRuntimeComposition } from '../dist/domains/plugin/runtime-composition.js';
+import { readPluginNativeToken } from './helpers/plugin-native-credential.js';
 
 async function composition(t, owner) {
   const projectRoot = await mkdtemp(join(tmpdir(), 'f202-custody-registry-'));
@@ -94,14 +95,14 @@ function nativeFixture() {
         if (!callerCurrent) throw Error('invocation expired');
       },
     },
-    token: () => actions.environment('instance', 'native').CLOWDER_PLUGIN_ACTION_TOKEN,
+    token: () => readPluginNativeToken(actions.environment('instance', 'native')),
   };
 }
 
 test('native invocation-only authority never reenters inventory and expires with the call', async () => {
   const f = nativeFixture();
   let saved;
-  f.actions.activate(f.admission, 0, async () => {
+  await f.actions.activate(f.admission, 0, async () => {
     saved = currentPluginCallContext('instance');
     assert.equal(typeof saved?.assertInvocationCurrent, 'function', 'invocation-only authority missing');
     assert.notEqual(
@@ -115,20 +116,20 @@ test('native invocation-only authority never reenters inventory and expires with
     f.expireCaller();
     await assert.rejects(() => saved.assertInvocationCurrent(), /invocation expired/);
   });
-  await assert.rejects(f.actions.call(f.token(), 'review.submit', {}, f.caller), /invocation expired/);
+  await assert.rejects(f.actions.call(await f.token(), 'review.submit', {}, f.caller), /invocation expired/);
   await assert.rejects(() => saved.assertInvocationCurrent());
 });
 
 test('invocation-only authority rejects stop and cannot be revived by a new activation', async () => {
   const f = nativeFixture();
-  f.actions.activate(f.admission, 0, async () => {
+  await f.actions.activate(f.admission, 0, async () => {
     const context = currentPluginCallContext('instance');
     assert.equal(typeof context?.assertInvocationCurrent, 'function', 'invocation-only authority missing');
     f.actions.deactivate('instance');
-    f.actions.activate(f.admission, f.actions.generation('instance'), async () => {});
+    await f.actions.activate(f.admission, f.actions.generation('instance'), async () => {});
     await assert.rejects(() => context.assertInvocationCurrent(), /no longer current/);
   });
-  await assert.rejects(f.actions.call(f.token(), 'review.submit', {}, f.caller), /no longer current/);
+  await assert.rejects(f.actions.call(await f.token(), 'review.submit', {}, f.caller), /no longer current/);
 });
 
 test('ordinary module action receives no internal inventory-safe authority function', async () => {
@@ -146,6 +147,6 @@ test('ordinary module action receives no internal inventory-safe authority funct
       }),
     },
   });
-  f.actions.activate(f.admission, 0, (method, input) => module.invoke('instance', method, input));
-  assert.equal(await f.actions.call(f.token(), 'review.submit', {}, f.caller), 'ok');
+  await f.actions.activate(f.admission, 0, (method, input) => module.invoke('instance', method, input));
+  assert.equal(await f.actions.call(await f.token(), 'review.submit', {}, f.caller), 'ok');
 });

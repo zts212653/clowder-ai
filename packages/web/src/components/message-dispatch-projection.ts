@@ -1,5 +1,6 @@
 import {
   hasExactLifecycleProcessingDispatch,
+  isTargetResponseTerminal,
   type LifecycleActiveRun,
   type LifecycleDispatchRef,
   type LifecycleStoredMessageMetadata,
@@ -32,7 +33,7 @@ function deliveredProjection(ref: LifecycleDispatchRef): MessageDispatchAvatarPr
 
 function linkedProjection(
   ref: LifecycleDispatchRef,
-  phase: 'processing' | 'settled',
+  phase: 'delivered' | 'processing' | 'settled',
   linkedAt: number,
 ): MessageDispatchAvatarProjection {
   return {
@@ -82,6 +83,25 @@ function projectDispatchRef(
     : null;
 }
 
+/** The Host alone writes this system carrier; its exact source/ref is the receipt. */
+export function pluginDeliveryReceipt(message: ChatMessage | undefined) {
+  if (message?.from?.kind !== 'system' || message.from.service !== 'plugin_delivery') return undefined;
+  const receipt = message.extra?.pluginAddressedReceipt as
+    | { targetId?: unknown; inputMessageId?: unknown; accepted?: unknown; phase?: unknown }
+    | undefined;
+  return receipt &&
+    typeof receipt.targetId === 'string' &&
+    typeof receipt.inputMessageId === 'string' &&
+    typeof receipt.accepted === 'boolean'
+    ? (receipt as {
+        targetId: string;
+        inputMessageId: string;
+        accepted: boolean;
+        phase?: 'sending' | 'accepted' | 'unconfirmed';
+      })
+    : undefined;
+}
+
 /**
  * The only live dispatch projection. It consumes exact source/ref/response/run
  * identities and fails closed whenever those records disagree or are ambiguous.
@@ -98,6 +118,19 @@ export function projectMessageDispatchAvatars(
   return refs.flatMap((ref): MessageDispatchAvatarProjection[] => {
     if (targetCounts.get(ref.targetId) !== 1) return [];
     const statusMessage = exactMessageById(timelineMessages, ref.statusMessageId);
+    const receipt = pluginDeliveryReceipt(statusMessage);
+    if (receipt?.inputMessageId === message.id && receipt.targetId === ref.targetId)
+      return [
+        linkedProjection(
+          ref,
+          statusMessage?.extra?.targetResponse && isTargetResponseTerminal(statusMessage.extra.targetResponse.status)
+            ? 'settled'
+            : statusMessage?.extra?.targetResponse?.status === 'processing'
+              ? 'processing'
+              : 'delivered',
+          statusMessage!.timestamp,
+        ),
+      ];
     const statusLifecycle = statusMessage?.lifecycle;
     if (!statusLifecycle) return [deliveredProjection(ref)];
     const linked = projectDispatchRef(message.id, refs, ref, statusLifecycle, activeRuns);
@@ -110,6 +143,13 @@ export function isLinkedDeliveryFailureCarrier(
   message: ChatMessage,
   timelineMessages: readonly ChatMessage[],
 ): boolean {
+  const receipt = pluginDeliveryReceipt(message);
+  if (receipt)
+    return (
+      exactMessageById(timelineMessages, receipt.inputMessageId)?.lifecycle?.dispatchRefs?.some(
+        (ref) => ref.targetId === receipt.targetId && ref.statusMessageId === message.id,
+      ) ?? false
+    );
   const lifecycle = message.lifecycle;
   if (lifecycle?.kind !== 'delivery_failure') return false;
   // A targetless origin failure has no source/member settlement to absorb it.

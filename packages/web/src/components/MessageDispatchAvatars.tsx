@@ -1,10 +1,12 @@
 'use client';
 
 import type { LifecycleActiveRun } from '@cat-cafe/shared';
+import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
 import { MessageDispatchRecipient } from './MessageDispatchRecipient';
-import { projectMessageDispatchAvatars } from './message-dispatch-projection';
+import { pluginDeliveryReceipt, projectMessageDispatchAvatars } from './message-dispatch-projection';
+import { PluginTargetIcon } from './PluginTargetIcon';
 import { QueueTargetRetryButton } from './QueueTargetRetryButton';
 
 export type { MessageDispatchAvatarProjection } from './message-dispatch-projection';
@@ -30,6 +32,21 @@ export function MessageDispatchAvatars({
   inline = false,
   threadId,
 }: MessageDispatchAvatarsProps) {
+  const { knownTargets } = usePluginTargets();
+  const pluginReceiptTargets = new Set(
+    timelineMessages.flatMap((item) => {
+      const receipt = pluginDeliveryReceipt(item);
+      return receipt?.inputMessageId === message.id ? [receipt.targetId] : [];
+    }),
+  );
+  const labelFor = (id: string) =>
+    knownTargets.find((p) => p.id === id)?.alias ?? (pluginReceiptTargets.has(id) ? '插件' : getCatLabel(id));
+  const avatarFor = (id: string, processing = false) =>
+    pluginReceiptTargets.has(id) || knownTargets.some((p) => p.id === id) ? (
+      <PluginTargetIcon icon={knownTargets.find((p) => p.id === id)?.icon} />
+    ) : (
+      <CatAvatar catId={id} size={16} status={processing ? 'streaming' : undefined} />
+    );
   const projections = projectMessageDispatchAvatars(message, timelineMessages, activeRuns);
   const pending = queue.filter((entry) => entry.messageId === message.id);
   if (projections.length === 0 && pending.length === 0) return null;
@@ -70,8 +87,8 @@ export function MessageDispatchAvatars({
             ? [
                 <li key={action.id} className="inline-flex items-center gap-1 text-conn-red-text">
                   <span>没送到</span>
-                  <CatAvatar catId={action.targetCatId} size={16} />
-                  <span>{getCatLabel(action.targetCatId)}</span>
+                  {avatarFor(action.targetCatId)}
+                  <span>{labelFor(action.targetCatId)}</span>
                   <QueueTargetRetryButton entry={entry} action={action} label="重新发送" />
                 </li>,
               ]
@@ -112,8 +129,8 @@ export function MessageDispatchAvatars({
             </span>
             {targets.map((target) => (
               <span key={target} className="inline-flex items-center gap-1">
-                <CatAvatar catId={target} size={16} />
-                {getCatLabel(target)}
+                {avatarFor(target)}
+                {labelFor(target)}
               </span>
             ))}
             <span>
