@@ -2,9 +2,12 @@ import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { NativePartnerCard } from '../../first-run-quest/NativePartnerCard';
+import type { NativePartner } from '../../first-run-quest/native-onboarding';
 import { type HubCatEditorFormState, initialState } from '../../hub-cat-editor.model';
 import { buildCatPayload } from '../../hub-cat-editor.payload';
 import { MemberRuntimeFields } from '../members/MemberRuntimeFields';
+import { runtimeDefaults } from '../members/member-runtime-draft';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 const host = document.createElement('div');
@@ -16,6 +19,72 @@ afterEach(async () => {
 });
 const args = ['/fixture/node_modules/@deepseek-ai/dsh/lib/bin.js', '--profile', 'acp'];
 const generated = [...args, '--patch', '/fixture/host/custom.yml'];
+
+it('one-click DSH remains unavailable until its current configuration is verified and invalidates after a model edit', async () => {
+  const runtime = {
+    id: 'dsh',
+    label: 'DSH Desktop',
+    clientId: 'acp' as const,
+    installed: true,
+    models: [],
+    acp: { command: 'node', startupArgs: args, transport: 'stdio' as const },
+  };
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path.endsWith('/verify')) {
+      expect(JSON.parse(init!.body as string)).toEqual({ runtimeId: 'dsh' });
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    return new Response(
+      JSON.stringify(
+        path.startsWith('/api/cats/native-runtimes')
+          ? { runtimes: [runtime] }
+          : { status: 'live', models: [], effortOptions: [] },
+      ),
+    );
+  });
+  function WizardCard() {
+    const [partner, setPartner] = useState<NativePartner>({
+      id: 'dsh-card',
+      runtime,
+      form: { ...initialState(), ...runtimeDefaults(runtime), name: 'DSH', displayName: 'DSH' },
+      selected: false,
+    });
+    return (
+      <>
+        <NativePartnerCard
+          partner={partner}
+          created={false}
+          patch={(value) => setPartner((old) => ({ ...old, ...value }))}
+          onValidityChange={() => {}}
+        />
+        <button
+          type="button"
+          onClick={() => setPartner((old) => ({ ...old, form: { ...old.form, defaultModel: 'another-model' } }))}
+        >
+          Change model
+        </button>
+      </>
+    );
+  }
+  await act(async () => root.render(<WizardCard />));
+  expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')?.disabled).toBe(true);
+  await act(async () =>
+    [...host.querySelectorAll('button')].find((button) => button.textContent === '配置与验证')!.click(),
+  );
+  await act(async () =>
+    [...host.querySelectorAll('button')].find((button) => button.textContent === '验证当前配置')!.click(),
+  );
+  const checkbox = host.querySelector<HTMLInputElement>('input[type=checkbox]')!;
+  expect(checkbox.disabled).toBe(false);
+  await act(async () => checkbox.click());
+  expect(checkbox.checked).toBe(true);
+  await act(async () =>
+    [...host.querySelectorAll('button')].find((button) => button.textContent === 'Change model')!.click(),
+  );
+  expect(checkbox.disabled).toBe(true);
+  expect(checkbox.checked).toBe(false);
+});
+
 async function prepare(runtimeId = 'acp:existing-dsh', launchArgs = args) {
   let currentArgs = launchArgs;
   let reopened = false;
