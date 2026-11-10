@@ -1,6 +1,27 @@
+import { useEffect, useState } from 'react';
 import { useShellCopy } from '../shell/shell-copy';
 import { newConversationCopy } from './new-conversation.shell-copy';
 import type { NewConversationAdmission } from './useNewConversationAdmission';
+
+/**
+ * A routine autosave settles within a frame or two. Mounting the in-flow notice for it
+ * pushes the page down and back on every keystroke, so a save only earns the notice
+ * (and its cancel action) once it is still running after this long.
+ */
+export const SAVE_NOTICE_DELAY_MS = 300;
+
+export function useLingeringSave(saving: boolean): boolean {
+  const [lingering, setLingering] = useState(false);
+  useEffect(() => {
+    if (!saving) {
+      setLingering(false);
+      return;
+    }
+    const timer = setTimeout(() => setLingering(true), SAVE_NOTICE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [saving]);
+  return saving && lingering;
+}
 
 export function LocalDraftSaveNotice({
   state,

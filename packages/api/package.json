@@ -93,6 +93,7 @@
     "@opentelemetry/sdk-node": "^0.214.0",
     "@opentelemetry/sdk-trace-node": "^2.6.1",
     "@opentelemetry/semantic-conventions": "^1.40.0",
+    "@playwright/mcp": "0.0.84",
     "@vscode/ripgrep": "1.18.0",
     "ajv": "^8.17.1",
     "ajv-formats": "3.0.1",

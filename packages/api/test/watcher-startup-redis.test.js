@@ -12,7 +12,10 @@ import { RedisSessionChainStore } from '../dist/domains/cats/services/stores/red
 import { RedisTurnExecutionStore } from '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js';
 import { saveWatcherState } from '../dist/domains/concierge/watcher/watcher-checkpoint.js';
 import { reconcileWatcherRecovery } from '../dist/domains/concierge/watcher/watcher-recovery.js';
-import { reserveWatcherRecovery } from '../dist/domains/concierge/watcher/watcher-retry.js';
+import {
+  reserveWatcherRecovery,
+  watcherRecoveryFinalizationDue,
+} from '../dist/domains/concierge/watcher/watcher-retry.js';
 import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
@@ -158,6 +161,13 @@ test(
     assert.equal(await reserve(5100), true);
     assert.equal(await reserve(25100), true);
     assert.equal(await reserve(999999), false);
+    const capped = parseWatcherSessionState((await new RedisSessionChainStore(redis).get(session.id)).watcherState);
+    assert.equal(watcherRecoveryFinalizationDue(capped, 25101), false, 'the last backoff still applies');
+    assert.equal(
+      watcherRecoveryFinalizationDue(capped, 999999),
+      true,
+      'a capped model budget still owes native settlement',
+    );
     const restarted = await promisify(execFile)(
       process.execPath,
       ['test/helpers/watcher-retry-process.mjs', namespace, session.id, '999999'],

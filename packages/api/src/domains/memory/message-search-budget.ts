@@ -1,4 +1,9 @@
-import { type MessageSearchInput, type MessageSearchResponse, messageSearchNotice } from '@cat-cafe/shared';
+import {
+  DEFAULT_MESSAGE_SEARCH_SORT,
+  type MessageSearchInput,
+  type MessageSearchResponse,
+  messageSearchNotice,
+} from '@cat-cafe/shared';
 import type { MessagePassageSearchExecution } from './message-passage-search-types.js';
 
 export const MESSAGE_SEARCH_RESPONSE_BUDGET = 24_000;
@@ -49,7 +54,7 @@ export function messageSearchMeta(
   return {
     scope: input.threadId ? 'thread' : 'global',
     ...(input.threadId ? { threadId: input.threadId } : {}),
-    sort: input.sort ?? 'time',
+    sort: input.sort ?? DEFAULT_MESSAGE_SEARCH_SORT,
     requestedMode: input.mode ?? 'hybrid',
     effectiveMode: execution.meta.effectiveMode,
     degraded: execution.meta.degraded,

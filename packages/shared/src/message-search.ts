@@ -11,6 +11,9 @@ export interface MessageSearchInput {
   dateTo?: string;
 }
 
+/** Ordinary query recall only; saved answer-operation identities retain their original arguments. */
+export const DEFAULT_MESSAGE_SEARCH_SORT: NonNullable<MessageSearchInput['sort']> = 'relevance';
+
 /** Coordinates and optional revision evidence; never a permission grant. */
 export interface MessageNavigationReference {
   threadId: string;
