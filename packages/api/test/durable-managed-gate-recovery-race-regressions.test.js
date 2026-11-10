@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import { initializeDurableManagedGateJob } from '../dist/domains/ball-custody/durable-managed-gate-job.js';
-import { parseMacPowerLog } from '../dist/domains/ball-custody/durable-managed-gate-power-evidence.js';
 import {
   acknowledgeDurableGateSelfRecovery,
   evaluateDurableGateMutation,
@@ -13,6 +12,7 @@ import {
   synchronizeDurableGateFrozenIdentity,
 } from '../dist/domains/ball-custody/durable-managed-gate-recovery.js';
 import { ManagedRunner } from '../dist/infrastructure/managed-runner.js';
+import { parseNativePowerLog } from './helpers/native-power-evidence.js';
 
 const OWNER = { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' };
 const FROZEN_IDENTITY = {
@@ -249,10 +249,10 @@ describe('durable managed gate recovery race regressions', () => {
   });
 
   test('DarkWake followed by FullWake authorizes recovery without counting awake time as sleep', () => {
-    const parsed = parseMacPowerLog(
-      '2026-09-24 04:25:11 -0700 Sleep Entering Sleep state\n' +
-        '2026-09-24 04:39:42 -0700 DarkWake DarkWake from Deep Idle\n' +
-        '2026-09-24 04:40:00 -0700 Wake DarkWake to FullWake from Deep Idle\n',
+    const parsed = parseNativePowerLog(
+      '1790249111\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n' +
+        '1790249982\t0\tDarkWake\t9F57E25A-E878-465F-8324-A260A01592E0\n' +
+        '1790250000\t0\tWake\t9F57E25A-E878-465F-8324-A260A01592E0\n',
     );
     assert.deepEqual(
       parsed.map(({ startedAt, endedAt, wakeKind }) => ({ startedAt, endedAt, wakeKind })),

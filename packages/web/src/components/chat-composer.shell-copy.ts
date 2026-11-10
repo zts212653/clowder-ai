@@ -3,6 +3,8 @@ import { defineShellCopy } from './shell/shell-copy';
 export const chatComposerCopy = defineShellCopy({
   zh: {
     message: '消息输入框',
+    unmarkedLinks: '有链接未能标出',
+    viewLinkTargets: '查看这份草稿的链接目标',
     placeholder: '输入消息…（@ 召唤猫猫 · /thread 引用对话）',
     whisperPlaceholder: '悄悄话…',
     continuePlaceholder: '接着当前工作补充…',
@@ -33,6 +35,8 @@ export const chatComposerCopy = defineShellCopy({
   },
   en: {
     message: 'Message',
+    unmarkedLinks: 'Some links could not be marked',
+    viewLinkTargets: 'View this draft’s link targets',
     placeholder: 'Message… (@ a cat · /thread to reference a conversation)',
     whisperPlaceholder: 'Whisper…',
     continuePlaceholder: 'Add to the current work…',

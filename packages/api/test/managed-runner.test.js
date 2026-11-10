@@ -725,3 +725,17 @@ test('durable managed job keeps restart-safe logs within the configured bound', 
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('priority: managed shell invocation lowers CPU and disk priority only on macOS', async () => {
+  const { managedShellInvocation } = await import('../dist/infrastructure/managed-runner-environment.js');
+  assert.deepStrictEqual(managedShellInvocation('make all && echo ok', 'darwin'), {
+    file: '/usr/sbin/taskpolicy',
+    args: ['-d', 'utility', '/usr/bin/nice', '-n', '10', '/bin/sh', '-c', 'make all && echo ok'],
+    shell: false,
+  });
+  assert.deepStrictEqual(managedShellInvocation('make all && echo ok', 'linux'), {
+    file: 'make all && echo ok',
+    args: [],
+    shell: true,
+  });
+});

@@ -10,7 +10,8 @@ import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { MessageSearchAnswerPublicationService } from '../dist/domains/memory/MessageSearchAnswerPublicationService.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
-import { fixture, human } from './helpers/message-search-answer-fixture.js';
+import { toMessageSearchInput } from '../dist/routes/message-search-handler.js';
+import { fixture, human, seedHistoricalAnswer } from './helpers/message-search-answer-fixture.js';
 
 async function harness(t, transport, cloud = false) {
   const f = fixture();
@@ -50,7 +51,7 @@ async function harness(t, transport, cloud = false) {
   const producer =
     transport === 'invocation'
       ? { kind: 'invocation', id: auth.invocationId, catId: 'opus' }
-      : { kind: 'agent_key', id: key.id, catId: 'opus' };
+      : { kind: 'agent_key', id: key.agentKeyId, catId: 'opus' };
   const service = new MessageSearchAnswerPublicationService(f.store, f.search, f.messages, threadStore);
   const app = Fastify();
   t.after(() => app.close());
@@ -107,6 +108,32 @@ async function harness(t, transport, cloud = false) {
 }
 
 for (const transport of ['invocation', 'agent-key']) {
+  test(`${transport}: omitted sort retries a saved time-ordered answer without changing its identity or snapshot`, async (t) => {
+    const h = await harness(t, transport);
+    const captured = await seedHistoricalAnswer({
+      ...h,
+      request: {
+        ...h.request,
+        operationId: 'same-answer',
+        producer: h.producer,
+        targetThreadId: h.origin.id,
+        input: toMessageSearchInput({ q: 'piano', mode: 'lexical', messageSort: 'time' }),
+      },
+    });
+    const savedSnapshot = h.store.get(captured.publicationRef).response_json;
+    const retried = await h.prepare(null);
+    assert.equal(retried.statusCode, 200, retried.body);
+    assert.equal(retried.json().publicationRef, captured.publicationRef);
+    assert.deepEqual(retried.json().response.results, captured.response.results);
+    assert.deepEqual(
+      { ...retried.json().response.meta, response: undefined },
+      { ...captured.response.meta, response: undefined },
+    );
+    assert.equal(h.store.get(captured.publicationRef).response_json, savedSnapshot);
+    assert.equal(retried.json().response.meta.sort, 'time');
+    assert.equal(h.searches(), 0);
+    assert.equal(h.calls(), 0);
+  });
   test(`${transport}: a new query-only card is rejected before claim and can be corrected with selected sources`, async (t) => {
     const h = await harness(t, transport);
     const missing = await h.prepare(null);

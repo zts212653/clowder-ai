@@ -63,6 +63,22 @@ describe('HTTP/callback common message search contract', () => {
 
   afterEach(() => app.close());
 
+  it('defaults ordinary human and authenticated cat omission to relevance while preserving explicit time', async () => {
+    for (const [path, auth] of [
+      ['/api/evidence/search', { 'x-cat-cafe-user': 'owner' }],
+      ['/api/callbacks/search-evidence', headers],
+    ]) {
+      for (const [suffix, expected] of [
+        ['', 'relevance'],
+        ['&messageSort=time', 'time'],
+      ]) {
+        const res = await app.inject({ url: `${path}?q=piano&resultUnit=message${suffix}`, headers: auth });
+        assert.equal(res.statusCode, 200);
+        assert.equal(calls.at(-1).input.sort, expected);
+      }
+    }
+  });
+
   it('requires identity for message mode while preserving public document searches', async () => {
     const res = await app.inject('/api/evidence/search?q=piano&resultUnit=message');
     assert.equal(res.statusCode, 401);

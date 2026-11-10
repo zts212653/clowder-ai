@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { build } from 'vite';
 import { registerSelectedAnswerCases } from './f322-selected-answer.cases.mjs';
+import { registerShortReadingReturnCases } from './message-reading-short-return.cases.mjs';
 import { registerMessageReadingVisibilityCases } from './message-reading-visibility.cases.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -112,6 +113,7 @@ async function open(
   pendingRestore = false,
   longMessage = false,
   workspace = false,
+  shortPage = false,
 ) {
   const page = await browser.newPage({ viewport });
   const errors = [];
@@ -153,11 +155,15 @@ async function open(
         };
       if (url.pathname === '/api/messages') {
         body = {
-          messages: longMessage
-            ? records.map((record, index) =>
-                index === 0 ? { ...record, content: '长消息开头。\n\n' + '琴键长消息正文。\n\n'.repeat(180) } : record,
-              )
-            : records,
+          messages: shortPage
+            ? [records[0], records[3]]
+            : longMessage
+              ? records.map((record, index) =>
+                  index === 0
+                    ? { ...record, content: '长消息开头。\n\n' + '琴键长消息正文。\n\n'.repeat(180) }
+                    : record,
+                )
+              : records,
           hasMore: false,
         };
         if (pendingRestore && url.searchParams.get('threadId') === 'recall-controlled' && ++originReads > 1) {
@@ -222,13 +228,15 @@ async function open(
 }
 
 registerMessageReadingVisibilityCases({ open, evidence });
+registerShortReadingReturnCases({ open, evidence });
 
 for (const width of [1440, 390]) {
   test(`search trip leaves the Workspace return clickable and resumes in Chat at ${width}px`, async () => {
-    const { page, errors } = await open({ width, height: 900 }, false, false, false, false, true);
+    const { page, errors, queries } = await open({ width, height: 900 }, false, false, false, false, true);
     try {
       await page.getByText('找到 2 处可打开的原文，请结合内容和上下文判断。', { exact: true }).waitFor();
-      await page.getByText(/本次核完 2 条来源，未读满 32 条相关窗口/).waitFor();
+      assert.equal(queries.at(-1).messageSort, 'relevance');
+      await page.getByText(/按相关度列出本次可得的部分来源/).waitFor();
       const resultText = await page.getByRole('region', { name: '消息检索结果', exact: true }).innerText();
       assert(!resultText.includes('尚未评估') && !resultText.includes('资格核对'));
       await page
@@ -527,6 +535,25 @@ test('a cold origin returns exactly through two slow history pages after a real 
     await page.close();
   }
 });
+test('default relevance and an explicit time choice use the real panel and honest window labels', async () => {
+  const { page, errors, queries } = await open();
+  try {
+    assert.equal(queries[0].messageSort, 'relevance');
+    assert.equal(await page.getByRole('button', { name: '按相关', exact: true }).getAttribute('aria-pressed'), 'true');
+    await page.getByText(/按相关度列出本次可得的部分来源/).waitFor();
+    assert.equal(await page.getByText(/未读满 32 条相关窗口/).count(), 0);
+    await page.screenshot({ path: path.join(evidence, 'default-relevance.png') });
+    await page.getByRole('button', { name: '按时间', exact: true }).click();
+    await page.getByText(/本次核完 2 条来源，未读满 32 条相关窗口/).waitFor();
+    assert.equal(queries.at(-1).messageSort, 'time');
+    assert.equal(await page.getByRole('button', { name: '按时间', exact: true }).getAttribute('aria-pressed'), 'true');
+    await page.screenshot({ path: path.join(evidence, 'explicit-time.png') });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
 test('global provenance, sorting and narrow dark layout keep real text and controls reachable', async () => {
   const { page, errors, queries } = await open({ width: 400, height: 900 }, true);
   try {

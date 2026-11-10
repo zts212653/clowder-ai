@@ -35,6 +35,13 @@ status: v0.4
 
 下表 counts 是 2026-08-15 runtime/file snapshot；current topology 仍以各 feature truth 为准。
 
+> **2026-11-09 入口减法**（You `[thread-id]#private-source-id`；
+> 调用量证据 *(internal reference removed)*）：F152 的 `mark_generalizable` /
+> `nominate_for_global` / `review_distillation` 与 F102 marker 的猫侧写入口 `retain_memory_callback`
+> 已从猫的工具面撤下，`POST /api/callbacks/retain-memory` 一并删除。F152 服务端 producer、retained
+> artifacts、MarkerQueue 及已有 marker 文件不动（只停写、不删）。下面 F152 行与 Lessons 行的 B 路径
+> 据此读作「已无猫侧入口」。
+
 | Lane | 感知 / trigger | 提案与裁决 | 消费 | v0.3 判读 |
 |---|---|---|---|---|
 | **Entity / F260** | input nudge 运行中；历史 snapshot `entity_nudge_events=1568` | doc alias 可机械分层；concept 走 Hub | 解引用、entity mention/revision reader | ✅ 健康；无需为协议整齐重做 |

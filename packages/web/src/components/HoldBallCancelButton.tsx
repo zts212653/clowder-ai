@@ -6,7 +6,14 @@ import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { apiFetch } from '@/utils/api-client';
 import { ExecutionCancelButton } from './ExecutionCancelButton';
 
-type HoldTerminalStatus = 'retired_by_event' | 'fired' | 'escalated' | 'ended' | null;
+type HoldTerminalStatus =
+  | 'retired_by_event'
+  | 'retired_expired'
+  | 'retired_invalid'
+  | 'fired'
+  | 'escalated'
+  | 'ended'
+  | null;
 
 /**
  * One label per probe-reported terminal. Exhaustive by construction: a new
@@ -15,6 +22,8 @@ type HoldTerminalStatus = 'retired_by_event' | 'fired' | 'escalated' | 'ended' |
  */
 const HOLD_TERMINAL_LABELS: Record<Exclude<HoldTerminalStatus, null>, string> = {
   retired_by_event: '已被事件唤醒',
+  retired_expired: '已超过等待截止，未唤醒。原任务未完成，请在当前对话重新安排跟进。',
+  retired_invalid: '等待窗口无效，未唤醒。原任务未完成，请在当前对话重新安排跟进。',
   fired: '已完成',
   escalated: '已升级处理',
   ended: '已结束',
@@ -23,6 +32,8 @@ const HOLD_TERMINAL_LABELS: Record<Exclude<HoldTerminalStatus, null>, string> = 
 function projectHoldTerminalStatus(body: { status?: unknown; cancelable?: unknown } | null): HoldTerminalStatus {
   if (body?.cancelable !== false) return null;
   if (body.status === 'retired_by_event') return 'retired_by_event';
+  if (body.status === 'retired_expired') return 'retired_expired';
+  if (body.status === 'retired_invalid') return 'retired_invalid';
   if (body.status === 'fired') return 'fired';
   if (body.status === 'escalated') return 'escalated';
   return 'ended';

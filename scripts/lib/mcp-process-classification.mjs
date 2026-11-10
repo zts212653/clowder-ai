@@ -81,7 +81,10 @@ export function classifyMcpProcess(command, managedPackages) {
     ['node_repl', /node[_-]repl/i],
     ['MCP_DOCKER', /docker[^\n]*mcp[^\n]*gateway/i],
     ['claude-in-chrome', /claude[^ ]*(?:in-chrome|chrome-mcp)/i],
-    ['playwright', /(?:playwright\/cli\.js|server-playwright)/i],
+    [
+      'playwright',
+      /(?:playwright\/cli\.js|server-playwright|@playwright\/mcp|playwright-mcp|browser-process-entry\.[jt]s)/i,
+    ],
     ['mcp-remote', /mcp-remote/i],
     ['chrome-devtools', /chrome-devtools-mcp/i],
   ].find(([, pattern]) => pattern.test(command));

@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { initializeDurableManagedGateJob } from '../dist/domains/ball-custody/durable-managed-gate-job.js';
-import {
-  parseMacPowerLog,
-  readDurableGatePowerEvidence,
-} from '../dist/domains/ball-custody/durable-managed-gate-power-evidence.js';
+import { readDurableGatePowerEvidence } from '../dist/domains/ball-custody/durable-managed-gate-power-evidence.js';
 import {
   acknowledgeDurableGateSelfRecovery,
   DURABLE_MANAGED_GATE_RECOVERY_PROTOCOL_VERSION,
@@ -18,6 +15,7 @@ import {
 } from '../dist/domains/ball-custody/durable-managed-gate-recovery.js';
 import { ManagedRunner } from '../dist/infrastructure/managed-runner.js';
 import { createDurableManagedGateAttempt } from '../dist/infrastructure/managed-runner-durable-attempt.js';
+import { parseNativePowerLog } from './helpers/native-power-evidence.js';
 
 const OWNER = { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' };
 const FROZEN_IDENTITY = {
@@ -117,16 +115,21 @@ describe('durable managed gate recovery fence', () => {
       { from, to },
       {
         platform: 'darwin',
+        exists: () => true,
+        now: () => 0,
         execFileSync(file, args, options) {
-          assert.equal(file, '/usr/bin/pmset');
-          assert.deepEqual(args, ['-g', 'log']);
+          assert.equal(file, '/usr/bin/syslog');
+          assert.ok(args.includes('-f'));
+          assert.ok(args.includes('^(Sleep|DarkWake|Wake)$'));
+          assert.ok(args.some((arg) => arg.endsWith('2026.09.24.asl')));
           assert.deepEqual(options, {
             encoding: 'utf8',
             killSignal: 'SIGKILL',
-            maxBuffer: 64 * 1024 * 1024,
+            maxBuffer: 1024 * 1024,
+            stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 5_000,
           });
-          return '2026-09-24 04:25:11 -0700 Sleep Entering Sleep state\n2026-09-24 04:39:42 -0700 Wake Wake from Deep Idle\n';
+          return '1790249111\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n1790249982\t0\tWake\t9F57E25A-E878-465F-8324-A260A01592E0\n';
         },
       },
     );
@@ -134,7 +137,7 @@ describe('durable managed gate recovery fence', () => {
       status: 'available',
       confirmedSleep: [
         {
-          evidenceId: `pmset:${Date.parse('2026-09-24T04:25:11-07:00')}:${Date.parse('2026-09-24T04:39:42-07:00')}:full`,
+          evidenceId: `mac-power:9F57E25A-E878-465F-8324-A260A01592E0:${Date.parse('2026-09-24T04:25:11-07:00')}:${Date.parse('2026-09-24T04:39:42-07:00')}`,
           startedAt: Date.parse('2026-09-24T04:25:11-07:00'),
           endedAt: Date.parse('2026-09-24T04:39:42-07:00'),
           wakeKind: 'full',
@@ -149,14 +152,16 @@ describe('durable managed gate recovery fence', () => {
       { from: 0, to: 1 },
       {
         platform: 'darwin',
+        exists: () => true,
+        now: () => 0,
         execFileSync() {
-          throw new Error('spawnSync /usr/bin/pmset ETIMEDOUT');
+          throw new Error('spawnSync /usr/bin/syslog ETIMEDOUT');
         },
       },
     );
     assert.deepEqual(evidence, {
       status: 'unavailable',
-      reason: 'spawnSync /usr/bin/pmset ETIMEDOUT',
+      reason: 'power log read failed: spawnSync /usr/bin/syslog ETIMEDOUT',
     });
   });
 
@@ -170,7 +175,7 @@ describe('durable managed gate recovery fence', () => {
         { from: now - 7 * 24 * 60 * 60_000, to: now },
       );
       if (evidence.status === 'unavailable') {
-        assert.match(evidence.reason, /ETIMEDOUT/u);
+        assert.match(evidence.reason, /power log|power read|power event/u);
         return;
       }
       for (const interval of evidence.confirmedSleep) {
@@ -187,18 +192,18 @@ describe('durable managed gate recovery fence', () => {
 
   test('the macOS adapter treats DarkWake as a sleep boundary without calling it a full wake', () => {
     assert.deepEqual(
-      parseMacPowerLog(
-        `2026-09-24 04:25:11 -0700 Sleep               Entering Sleep state\n2026-09-24 04:39:42 -0700 DarkWake            DarkWake from Deep Idle\n2026-09-24 04:40:27 -0700 Sleep               Entering Maintenance Sleep\n2026-09-24 04:55:02 -0700 Wake                Wake from Deep Idle\n`,
+      parseNativePowerLog(
+        `1790249111\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n1790249982\t0\tDarkWake\t9F57E25A-E878-465F-8324-A260A01592E0\n1790250027\t0\tSleep\t9F57E25A-E878-465F-8324-A260A01592E0\n1790250902\t0\tWake\t9F57E25A-E878-465F-8324-A260A01592E0\n`,
       ),
       [
         {
-          evidenceId: `pmset:${Date.parse('2026-09-24T04:25:11-07:00')}:${Date.parse('2026-09-24T04:39:42-07:00')}:dark`,
+          evidenceId: `mac-power:9F57E25A-E878-465F-8324-A260A01592E0:${Date.parse('2026-09-24T04:25:11-07:00')}:${Date.parse('2026-09-24T04:39:42-07:00')}`,
           startedAt: Date.parse('2026-09-24T04:25:11-07:00'),
           endedAt: Date.parse('2026-09-24T04:39:42-07:00'),
           wakeKind: 'dark',
         },
         {
-          evidenceId: `pmset:${Date.parse('2026-09-24T04:40:27-07:00')}:${Date.parse('2026-09-24T04:55:02-07:00')}:full`,
+          evidenceId: `mac-power:9F57E25A-E878-465F-8324-A260A01592E0:${Date.parse('2026-09-24T04:40:27-07:00')}:${Date.parse('2026-09-24T04:55:02-07:00')}`,
           startedAt: Date.parse('2026-09-24T04:40:27-07:00'),
           endedAt: Date.parse('2026-09-24T04:55:02-07:00'),
           wakeKind: 'full',

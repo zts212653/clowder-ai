@@ -18,6 +18,7 @@ import {
 import { bindCodexAccountConfiguration } from './codex-app-server-account-configuration.js';
 import {
   codexConfigObjectFromArgs,
+  codexDeclaredServerNames,
   codexMcpConfigArgs,
   codexNativeMcpThreadConfig,
   isCodexConfigObject,
@@ -1730,7 +1731,7 @@ export class CodexAgentService implements AgentService {
     const {
       args: catCafeMcpArgs,
       bearerEnv: mcpBearerEnv,
-      declaredServerNames: declaredMcpServerNames,
+      declaredServerNames: requestedMcpServerNames,
       privateServers: privateMcpServers,
     } = native
       ? { args: [], bearerEnv: {}, declaredServerNames: [native.serverName], privateServers: undefined }
@@ -2095,6 +2096,11 @@ export class CodexAgentService implements AgentService {
             codexConfigObjectFromArgs(desktopIsolationArgs),
           )
         : undefined;
+    // What the carrier actually registers: a shared browser renamed in the thread config, not its stub.
+    const declaredMcpServerNames =
+      requestedMcpServerNames && appServerThreadConfig
+        ? codexDeclaredServerNames(requestedMcpServerNames, appServerThreadConfig)
+        : requestedMcpServerNames;
 
     const metadata: MessageMetadata = {
       provider: 'openai',

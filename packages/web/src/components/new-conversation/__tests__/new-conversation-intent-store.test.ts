@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetNewConversationIntentDbForTests,
   clearNewConversationIntent,
+  getNewConversationIntentSaveState,
   loadNewConversationIntent,
   saveNewConversationIntent,
+  subscribeNewConversationIntentSaveState,
 } from '../new-conversation-intent-store';
 
 const ALICE = 'owner-alice';
@@ -95,5 +97,51 @@ describe('F322 persistent pre-thread intent', () => {
     expect(await loadNewConversationIntent('owner-bob')).toMatchObject({
       intent: { createdThreadId: 'thread-bob' },
     });
+  });
+});
+
+describe('unchanged new-conversation autosave', () => {
+  const draft = (title: string, files: File[] = []) => ({
+    ownerUserId: ALICE,
+    intent: {
+      v: 1 as const,
+      createIdempotencyKey: '11111111-1111-4111-8111-111111111111',
+      messageIdempotencyKey: '22222222-2222-4222-8222-222222222222',
+      preferredCats: [],
+      title,
+      creationStarted: false,
+    },
+    files,
+    contextAttachments: [],
+    updatedAt: Date.now(),
+  });
+
+  it('skips the save, its file reads and its saving state when the stored draft is unchanged', async () => {
+    const file = new File(['image'], 'photo.png', { type: 'image/png' });
+    const readBytes = vi.fn(() => Promise.resolve(new TextEncoder().encode('image').buffer));
+    Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+    await saveNewConversationIntent(draft('计划', [file]));
+    expect(readBytes).toHaveBeenCalledOnce();
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeNewConversationIntentSaveState(ALICE, listener);
+    // A composer keystroke changes only the text, which this record does not store.
+    await saveNewConversationIntent({ ...draft('计划', [file]), updatedAt: Date.now() + 1 });
+    unsubscribe();
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(getNewConversationIntentSaveState(ALICE)).toBe('idle');
+    expect(readBytes).toHaveBeenCalledOnce();
+  });
+
+  it('still writes a changed draft, and writes the same draft again after a clear', async () => {
+    await saveNewConversationIntent(draft('first'));
+    await saveNewConversationIntent(draft('second'));
+    expect((await loadNewConversationIntent(ALICE))?.intent.title).toBe('second');
+
+    await clearNewConversationIntent(ALICE);
+    await saveNewConversationIntent(draft('second'));
+    _resetNewConversationIntentDbForTests();
+    expect((await loadNewConversationIntent(ALICE))?.intent.title).toBe('second');
   });
 });

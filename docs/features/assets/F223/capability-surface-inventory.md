@@ -64,7 +64,7 @@ created: 2026-06-03
 | 16 | `video-forge` / `ppt-forge` / `tech-writing` | Tier 2 skills | Skill pipelines + document/image/video tools | Generated artifact and review proof | Task-outcome/eval if adopted | content pipeline owners | Keep as skill pipelines; registry can link artifact proof. |
 | 17 | `hyperfocus-brake` | Tier 2 skill + hook | Hook + `cat_cafe_create_rich_block` | Check-in card rendered | Health/reminder metrics | hyperfocus-brake | Existing forcing function; no F223 change. |
 | 18 | `deep-research` | Tier 2 skill | Web research + synthesis pipeline | Source ledger / research doc | Source-audit/F218 signals | research harness | Keep as skill; no MCP. |
-| 19 | Global lesson nomination | Tier 2 ref | MCP `cat_cafe_mark_generalizable`, `cat_cafe_nominate_for_global`, `cat_cafe_review_distillation` | Distillation candidate / review result | Knowledge-evolution metrics | `memory` | Improve trigger; no new surface. |
+| 19 | Global lesson nomination | Retired 2026-11-09 | None for cats; the three distillation MCP tools were removed (memory entry subtraction, atomic cutover `memory-entry-subtraction-f152-distillation.json`) | Server producer and retained artifacts kept as forensic evidence per the 2026-08-29 operator surface sunset | None | `memory` | Do not teach or re-add; any revival needs a new operator decision. |
 | 20 | F210 AGY sticky behavior | Tier 2 ref | Docs/probes/runtime config checks | Sticky behavior proof logs | F210 reliability signals | `identity-session` / carrier owner | Keep Tier 2. |
 | 21 | `enterprise-workflow` | Tier 2 skill family | Lark/WeCom skills + ActionService / CLI | External resource handle / permission/audit proof | Task outcome + action metrics | `action-plane` | Stays in action-plane; not a Hub action surface. |
 
@@ -76,7 +76,7 @@ created: 2026-06-03
 | `cat_cafe_multi_mention` | collaborative-thinking, L0 quick index | Routed responses and callback aggregation | collaboration | Phase C done: trigger retained; MCP description locks `searchEvidenceRefs` hard check. |
 | `cat_cafe_generate_document` | writing-skills, document generation requests | Uploaded document + file rich block + IM delivery | document generation | Phase C done: trigger retained; MCP description locks no-manual-pandoc path. |
 | `cat_cafe_run_perspective` | memory/navigation advanced route | Candidate anchors + typed reader route hints | `memory` | Keep advanced/niche; not Tier 1 unless eval shows miss. |
-| `cat_cafe_review_distillation` | knowledge-evolution / review close-out | Distillation review result | `memory` | Pair with global nomination triggers. |
+| `cat_cafe_review_distillation` | Retired 2026-11-09 (memory entry subtraction) | None | `memory` | Removed from the cat tool surface; do not teach. |
 
 ## Phase D Action Tracking
 
@@ -107,14 +107,14 @@ Every inventory row has an explicit follow-up state. States are intentionally co
 | `video-forge` / `ppt-forge` / `tech-writing` | keep_observe | Generated artifact and review proof | Keep as skill pipelines. |
 | `hyperfocus-brake` | keep_observe | Check-in rich block + reminder metrics | Existing forcing function; no F223 build. |
 | `deep-research` | keep_observe | Source ledger + synthesis artifact | Keep as skill pipeline. |
-| Global lesson nomination | keep_observe | Distillation candidate/review result | Improve trigger only if nomination misses recur. |
+| Global lesson nomination | delete_sunset | Cat-facing tools removed 2026-11-09; server producer kept per 2026-08-29 operator sunset | None; revival needs a new operator decision. |
 | F210 AGY sticky behavior | keep_observe | Sticky behavior logs/probes | Tier 2 only. |
 | `enterprise-workflow` | keep_observe | External resource handle + permission/audit proof | Action-plane owner; outside Hub action surface. |
 | `cat_cafe_start_vote` | fix | Vote record and result message | Phase C normalized Use when + Output. |
 | `cat_cafe_multi_mention` | keep_observe | Routed responses and callback aggregation | Existing description already has `searchEvidenceRefs` hard check. |
 | `cat_cafe_generate_document` | keep_observe | Uploaded document + file rich block + IM delivery | Existing description already blocks manual pandoc path. |
 | `cat_cafe_run_perspective` | keep_observe | Candidate anchors + typed reader route hints | Keep advanced/niche. |
-| `cat_cafe_review_distillation` | keep_observe | Distillation review result | Pair with global nomination trigger improvements if needed. |
+| `cat_cafe_review_distillation` | delete_sunset | Removed from the cat tool surface 2026-11-09 | None. |
 
 ## ADR-029 Compatibility
 

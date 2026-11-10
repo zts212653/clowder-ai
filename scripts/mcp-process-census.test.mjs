@@ -149,6 +149,31 @@ test('browser helpers and unrelated processes are mutually exclusive', () => {
   assert.equal(census.totals.rssKiB, 60);
 });
 
+test('current Playwright MCP launch names are counted as the playwright family', () => {
+  // 2026-11-09 baseline: npx launches were classified other/unknown_node, hiding 32 processes.
+  const commands = [
+    'npm exec @playwright/mcp@latest --headless',
+    'node /home/user/.npm/_npx/9833c18b2d85bc59/node_modules/.bin/playwright-mcp --headless',
+    'node /work/runtime/node_modules/@playwright/mcp/cli.js --headless',
+    // F333 after-state: the one shared browser process forked by the API.
+    'node /work/runtime/packages/api/dist/domains/browser/browser-process-entry.js',
+  ];
+  const census = projectProcessCensus(
+    commands.map((command, index) => ({
+      pid: index + 1,
+      ppid: 0,
+      rssKiB: 10,
+      cpuPercent: 0,
+      elapsed: '00:01',
+      command,
+    })),
+  );
+  assert.deepEqual(
+    census.processes.map((p) => [p.category, p.family]),
+    commands.map(() => ['external_mcp', 'playwright']),
+  );
+});
+
 test('existing shared Cloud Pro and dot entrypoints remain first-party MCP resources', () => {
   const census = projectProcessCensus(
     ['remote-spike', 'dot-remote-proxy'].map((entry, index) => ({
