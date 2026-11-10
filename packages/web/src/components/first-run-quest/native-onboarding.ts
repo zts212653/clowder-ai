@@ -42,7 +42,7 @@ export const newNativeRequestKey = () =>
 export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEditorFormState): boolean {
   if (!runtime.installed || (runtime.clientId === 'acp' && !runtime.acp)) return false;
   if (runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs)) {
-    const current = form ?? runtimeDefaults(runtime);
+    const current = form ?? { ...initialState(), ...runtimeDefaults(runtime) };
     return (
       usesDetectedRuntimeConfiguration(current, runtime) &&
       runtime.connectionVerification?.key === dshConnectionKey(current)
