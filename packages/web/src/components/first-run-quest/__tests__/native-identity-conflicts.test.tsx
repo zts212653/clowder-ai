@@ -3,10 +3,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
+import { NativePartnerCard } from '../NativePartnerCard';
 import { useNativeOnboarding } from '../useNativeOnboarding';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ refresh: vi.fn() }) }));
+vi.mock('../../settings/members/MemberRuntimeFields', () => ({ MemberRuntimeFields: () => null }));
 
 const acp = { command: 'codeagent', startupArgs: ['--acp'], transport: 'stdio' };
 const existing = {
@@ -37,7 +39,20 @@ const onCreated = vi.fn();
 
 function Harness() {
   setup = useNativeOnboarding(true, onCreated, 'members');
-  return <p>{setup.error}</p>;
+  return (
+    <>
+      <p>{setup.error}</p>
+      {setup.draft?.partners.map((partner) => (
+        <NativePartnerCard
+          key={partner.id}
+          partner={partner}
+          created={Boolean(partner.existingId || setup.draft?.created[partner.id])}
+          patch={(change) => setup.patchPartner(partner.id, change)}
+          onValidityChange={() => {}}
+        />
+      ))}
+    </>
+  );
 }
 
 beforeEach(() => {
@@ -82,7 +97,7 @@ it('deselects conflicts restored from a saved draft and rejects explicit reselec
   expect(onCreated).not.toHaveBeenCalled();
 });
 
-it('rejects same-batch names introduced by editing two new recommendations before writing', async () => {
+it('labels same-batch name conflicts, blocks writes, and clears the labels after renaming', async () => {
   const original = vi.mocked(apiFetch).getMockImplementation()!;
   vi.mocked(apiFetch).mockImplementation(async (path, init) =>
     path === '/api/cats' && !init?.method ? response({ cats: [] }) : original(path, init),
@@ -90,10 +105,25 @@ it('rejects same-batch names introduced by editing two new recommendations befor
   await act(async () => root.render(<Harness />));
   const partner = setup.draft!.partners.find((partner) => partner.id === 'claude')!;
   await act(async () => setup.patchPartner(partner.id, { form: { ...partner.form, nickname: 'CodeAgent' } }));
+  expect(
+    setup.draft?.partners.filter((partner) => partner.identityConflict).map((partner) => partner.runtime.id),
+  ).toEqual(['codeagent', 'claude']);
+  expect(
+    Array.from(container.querySelectorAll('[role="status"]')).filter((element) =>
+      element.textContent?.includes('同名伙伴'),
+    ),
+  ).toHaveLength(2);
   await act(async () => setup.start());
   expect(setup.error).toContain('同名');
   expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   expect(onCreated).not.toHaveBeenCalled();
+  await act(async () => setup.patchPartner(partner.id, { form: { ...partner.form, nickname: '独立伙伴' } }));
+  expect(setup.draft?.partners.some((partner) => partner.identityConflict)).toBe(false);
+  expect(
+    Array.from(container.querySelectorAll('[role="status"]')).filter((element) =>
+      element.textContent?.includes('同名伙伴'),
+    ),
+  ).toHaveLength(0);
 });
 
 it('allows creation after changing the new nickname and preserves the existing member', async () => {

@@ -113,7 +113,7 @@ export function NativePartnerCard({
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.identityConflict && !created && (
         <p role="status" className="mt-3 text-sm text-cafe-secondary">
-          团队中已有同名伙伴，请调整昵称或取消选择。
+          存在同名伙伴，请调整昵称或取消选择。
         </p>
       )}
       {partner.missingExisting && !created && (

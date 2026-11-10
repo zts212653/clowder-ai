@@ -74,11 +74,12 @@ export function useNativeOnboarding(
   const latest = useRef(draft);
   latest.current = draft;
   const persist = useCallback((next: SetupDraft) => {
+    const selected = next.partners.filter((partner) => partner.selected);
     next = {
       ...next,
       partners: next.partners.map((partner) => ({
         ...partner,
-        identityConflict: hasNativeIdentityConflict(partner, rosterCats.current),
+        identityConflict: hasNativeIdentityConflict(partner, rosterCats.current, selected),
       })),
     };
     latest.current = next;
@@ -236,15 +237,7 @@ export function useNativeOnboarding(
       setErrorStage('save');
       return;
     }
-    const identities = [
-      ...rosterCats.current,
-      ...selected.map((p) => ({
-        id: p.existingId ?? p.form.catId,
-        nickname: p.form.nickname,
-        displayName: p.form.displayName,
-      })),
-    ];
-    if (selected.some((p) => !current.created[p.id] && hasNativeIdentityConflict(p, identities))) {
+    if (selected.some((p) => !current.created[p.id] && hasNativeIdentityConflict(p, rosterCats.current, selected))) {
       setError('存在同名伙伴，请调整新伙伴的昵称或取消选择后再创建。');
       setErrorStage('save');
       return;

@@ -47,6 +47,7 @@ export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEdi
 export function hasNativeIdentityConflict(
   partner: Pick<NativePartner, 'form' | 'existingId' | 'legacySharedRequestKey'>,
   cats: Pick<CatData, 'id' | 'nickname' | 'displayName'>[],
+  selected: NativePartner[] = [],
 ) {
   // Legacy shared-key requests must replay unchanged before their ownership is known.
   if (partner.existingId || partner.legacySharedRequestKey) return false;
@@ -56,7 +57,10 @@ export function hasNativeIdentityConflict(
   return (
     key !== '' &&
     // Existing receipt handling owns same-ID retries, including old shared ACP keys.
-    cats.some((cat) => cat.id !== partner.form.catId && identity(cat) === key)
+    (cats.some((cat) => cat.id !== partner.form.catId && identity(cat) === key) ||
+      selected.some(
+        (peer) => (peer.existingId ?? peer.form.catId) !== partner.form.catId && identity(peer.form) === key,
+      ))
   );
 }
 
