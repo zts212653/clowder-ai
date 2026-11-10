@@ -114,7 +114,6 @@ describe('workspace git probe failures', () => {
     registerWorktrees([{ id: 'probe-broken-config', root: plain, branch: '', head: '' }]);
     const originalConfig = process.env.GIT_CONFIG_GLOBAL;
     const originalCwd = process.cwd();
-    process.chdir(plain);
     process.env.GIT_CONFIG_GLOBAL = config;
     try {
       for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
@@ -122,9 +121,20 @@ describe('workspace git probe failures', () => {
           method: 'GET',
           url: `/api/workspace/${endpoint}?worktreeId=probe-broken-config`,
         });
-        assert.equal(response.statusCode, 503, endpoint);
-        assert.equal(JSON.parse(response.payload).code, 'git_unavailable', endpoint);
-        assert.notEqual(JSON.parse(response.payload).isGitRepository, false, endpoint);
+        assert.equal(response.statusCode, 503, `${endpoint} from API cwd`);
+        assert.equal(JSON.parse(response.payload).code, 'git_unavailable', `${endpoint} from API cwd`);
+        assert.notEqual(JSON.parse(response.payload).isGitRepository, false, `${endpoint} from API cwd`);
+      }
+
+      process.chdir(plain);
+      for (const endpoint of ['git-status', 'git-log', 'git-health', 'diff']) {
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/workspace/${endpoint}?worktreeId=probe-broken-config`,
+        });
+        assert.equal(response.statusCode, 503, `${endpoint} from plain cwd`);
+        assert.equal(JSON.parse(response.payload).code, 'git_unavailable', `${endpoint} from plain cwd`);
+        assert.notEqual(JSON.parse(response.payload).isGitRepository, false, `${endpoint} from plain cwd`);
       }
     } finally {
       process.chdir(originalCwd);
