@@ -45,53 +45,61 @@ pnpm build
 # 4. Configure infrastructure (API keys are added via UI after launch)
 cp .env.example .env
 
-# 5. Run
+# 5. Run (from this checkout, using the .env above)
 pnpm start
-# If this fails with "target path exists", use:
-#   pnpm start:direct
 ```
 
 To enable local semantic rerank for the memory system, install the **Embedding** service from Console settings — the installer creates `~/.cat-cafe/embed-venv` with the right backend for your platform (MLX on Apple Silicon, fastembed/ONNX or sentence-transformers elsewhere). On Windows, `pnpm start` / `pnpm start:direct` then auto-launches `scripts/services/embed-server.ps1` when Console reports the service as installed + enabled. Uninstalling or disabling via Console will skip the autostart.
 
-`pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
+`pnpm start` runs from your current checkout and reads its `.env`: it builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). It runs exactly the code you have checked out — it does not switch to `origin/main` or create another worktree.
 
-> **Tip:** If `pnpm start` fails because `../cat-cafe-runtime` already exists, use `pnpm start:direct` instead — it runs directly in your current checkout without creating a worktree. You can also set a custom path: `CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`.
+> **Optional:** if you want a separate runtime that always tracks `origin/main`, use `pnpm runtime:start` — see [Optional: Isolated Runtime Worktree](#optional-isolated-runtime-worktree-pnpm-runtimestart).
 
 Open `http://localhost:3003` and start talking to your team.
 
 > **Alternative — One-line installer (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
-## How `pnpm start` Works (Runtime Worktree)
+## Start Commands
 
-Clowder uses a **runtime worktree** to keep your dev checkout clean:
+| Command | What it does |
+|---------|-------------|
+| `pnpm start` | Build → start Redis + API + Frontend from the current checkout (reads its `.env`) |
+| `pnpm start --memory` | Same, but skip Redis (in-memory store, data lost on restart) |
+| `pnpm start --quick` | Same, but skip rebuild (use existing `dist/`) |
+| `pnpm start --daemon` | Same, but run in background (logs to `cat-cafe-daemon.log`) |
+| `pnpm start:status` | Check if the background daemon is running |
+| `pnpm stop` | Stop the background daemon |
+| `pnpm start:direct` | Same as `pnpm start` in a git checkout; always starts the current directory directly |
+
+A release archive without its own `.git` (for example an unpacked offline bundle) keeps starting in place through the runtime entry.
+
+## Optional: Isolated Runtime Worktree (`pnpm runtime:start`)
+
+If you want the running instance to stay separate from the checkout you edit, opt into a **runtime worktree**:
 
 ```
 your-projects/
 ├── clowder-ai/             # Your development checkout (feature branches, edits)
-└── cat-cafe-runtime/       # Auto-created runtime worktree (tracks origin/main)
+└── cat-cafe-runtime/       # Created by pnpm runtime:start (tracks origin/main)
 ```
 
 | Command | What it does |
 |---------|-------------|
-| `pnpm start` | Init (first time) → sync to origin/main → build → start Redis + API + Frontend |
-| `pnpm start --memory` | Same, but skip Redis (in-memory store, data lost on restart) |
-| `pnpm start --quick` | Same, but skip rebuild (use existing `dist/`) |
-| `pnpm start --daemon` | Same, but run in background (logs to `cat-cafe-daemon.log`) |
-| `pnpm start:direct` | Bypass worktree — start from current checkout without auto-update ([details](#running-a-specific-version-without-auto-update)) |
-| `pnpm stop` | Stop background daemon |
-| `pnpm start:status` | Check if daemon is running |
-| `pnpm runtime:init` | Only create the runtime worktree (no start) |
+| `pnpm runtime:start` | Init (first time) → sync to origin/main → build → start Redis + API + Frontend from `../cat-cafe-runtime` |
+| `pnpm runtime:restart` | Sync to the latest origin/main and restart the runtime |
 | `pnpm runtime:status` | Show worktree path, branch, HEAD, ahead/behind |
+| `pnpm runtime:stop` | Stop the runtime daemon |
+| `pnpm runtime:init` | Only create the runtime worktree (no start) |
 
-> Runtime contract (ADR-039 passive frozen): `pnpm start` is the single entry; sync+build+restart are folded into one command. There is no standalone sync — that was removed to prevent stale-dist crashes (see ADR-039).
+The runtime worktree runs `origin/main`, not your local branch. It reads its own `.env` inside `../cat-cafe-runtime`; only `.cat-cafe/cat-catalog.json`, `accounts.json` and `credentials.json` are copied from your checkout when the worktree is created.
 
-First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
+> Runtime contract (ADR-039 passive frozen): `pnpm runtime:start` is the single entry; sync+build+restart are folded into one command. There is no standalone sync — that was removed to prevent stale-dist crashes (see ADR-039).
 
-> **Custom runtime path:** Set `CAT_CAFE_RUNTIME_DIR` to use a different location: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+> **Custom runtime path:** Set `CAT_CAFE_RUNTIME_DIR` to use a different location: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm runtime:start`
 
 ## Running a Specific Version (Without Auto-Update)
 
-By default, `pnpm start` auto-syncs to the latest `origin/main`. If you want to **stay on a specific release** — for stability, reproducibility, or because you're not ready to update — use `pnpm start:direct` instead.
+`pnpm start` runs exactly the commit you have checked out and never auto-updates, so **staying on a specific release** — for stability, reproducibility, or because you're not ready to update — only needs a checkout. (Only the optional `pnpm runtime:start` follows `origin/main`.)
 
 ### Option 1: Checkout a Release Tag
 
@@ -112,30 +120,30 @@ pnpm build
 # 4. Configure infrastructure (API keys are added via UI after launch)
 cp .env.example .env
 
-# 5. Start directly (bypasses worktree, won't auto-update)
-pnpm start:direct
+# 5. Start the checked-out version (no auto-update)
+pnpm start
 
 # No Redis? Use in-memory mode
-pnpm start:direct -- --memory
+pnpm start --memory
 ```
 
 ### Option 2: Stay on Your Current Commit
 
-If you've already cloned and are happy with the current version, just use `pnpm start:direct` instead of `pnpm start`:
+If you've already cloned and are happy with the current version, just run `pnpm start` — it uses your current checkout:
 
 ```bash
-pnpm start:direct            # Runs from current checkout, no sync
-pnpm start:direct -- --quick # Skip rebuild too
+pnpm start            # Runs from current checkout, no sync
+pnpm start --quick    # Skip rebuild too
 ```
 
-### Why `pnpm start:direct`?
+### `pnpm start` vs `pnpm runtime:start`
 
 | Command | Auto-syncs to latest? | Creates worktree? | Use case |
 |---------|----------------------|-------------------|----------|
-| `pnpm start` | **Yes** — syncs to `origin/main` | Yes | Always run the latest version |
-| `pnpm start:direct` | **No** — runs from current checkout | No | Pin to a specific version or branch |
+| `pnpm start` | **No** — runs your current checkout | No | Everyday use; pin a version or branch |
+| `pnpm runtime:start` | **Yes** — syncs to `origin/main` | Yes (`../cat-cafe-runtime`) | A separate runtime that always runs the latest main |
 
-> **Updating later:** When you're ready to update, simply `git fetch && git checkout v0.5.0` (or whichever new tag), then `pnpm install && pnpm build && pnpm start:direct`.
+> **Updating later:** When you're ready to update, simply `git fetch && git checkout v0.5.0` (or whichever new tag), then `pnpm install && pnpm build && pnpm start`.
 
 ## Background / Daemon Mode
 

@@ -8,7 +8,7 @@ pnpm start
 
 This is the main entry point. It automatically:
 
-1. Creates a runtime worktree (for safe auto-updates)
+1. Runs from your current checkout, using its `.env` (no extra worktree, no switch to `origin/main`)
 2. Starts Redis (unless `--memory` is used)
 3. Builds and starts the API server and frontend
 4. Opens the Hub at **http://localhost:3003**
@@ -43,11 +43,19 @@ pnpm start --daemon
 
 ### `pnpm start:direct`
 
-Run directly from the current checkout without creating an auto-update worktree. Use this to pin to the exact version you have checked out.
+Same as `pnpm start` in a git checkout: always run directly from the current directory.
 
 ```bash
 # 直接运行当前版本，不自动更新
 pnpm start:direct
+```
+
+### `pnpm runtime:start` (optional)
+
+Start from an isolated runtime worktree (`../cat-cafe-runtime`) that tracks `origin/main` and syncs on each start. Manage it with `pnpm runtime:status`, `pnpm runtime:restart` and `pnpm runtime:stop`.
+
+```bash
+pnpm runtime:start
 ```
 
 ## Service Management

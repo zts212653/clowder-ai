@@ -45,53 +45,61 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
 
-# 5. 启动
+# 5. 启动（从当前目录启动，读取上面的 .env）
 pnpm start
-# 如果报 "target path exists" 错误，改用：
-#   pnpm start:direct
 ```
 
 如果要给记忆系统开启本地语义 rerank，请在 Console 设置里安装并启用 **Embedding** 服务。安装器会在 `~/.cat-cafe/embed-venv` 创建与你平台匹配的后端（Apple Silicon 用 MLX，其它平台用 fastembed/ONNX 或 `sentence-transformers`）。在 Windows 上，当 Console 记录该服务已安装且已启用后，`pnpm start` / `pnpm start:direct` 会自动拉起 `scripts/services/embed-server.ps1`；如果你在 Console 里卸载或禁用该服务，就不会自动启动。
 
-`pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
+`pnpm start` 直接在当前目录启动，读取这里的 `.env`：构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。它运行的就是你检出的代码 —— 不会切换到 `origin/main`，也不会另建 worktree。
 
-> **提示：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。
+> **可选：** 如果你想要一个始终跟踪 `origin/main` 的独立运行实例，用 `pnpm runtime:start` —— 见[可选：独立运行时 Worktree](#可选独立运行时-worktreepnpm-runtimestart)。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
 > **替代方案 — 一键安装（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
-## `pnpm start` 的工作原理（运行时 Worktree）
+## 启动命令
 
-Clowder 使用**运行时 worktree** 保持开发目录干净：
+| 命令 | 作用 |
+|------|------|
+| `pnpm start` | 构建 → 从当前目录启动 Redis + API + 前端（读取这里的 `.env`） |
+| `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
+| `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
+| `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
+| `pnpm start:status` | 查看后台 daemon 是否在运行 |
+| `pnpm stop` | 停止后台 daemon |
+| `pnpm start:direct` | 在 git 检出中与 `pnpm start` 相同；始终直接从当前目录启动 |
+
+没有自带 `.git` 的发布包（例如解压后的离线包）仍按运行时入口原地启动。
+
+## 可选：独立运行时 Worktree（`pnpm runtime:start`）
+
+如果你希望运行实例和你编辑的目录分开，可以选择使用**运行时 worktree**：
 
 ```
 your-projects/
 ├── clowder-ai/             # 你的开发目录（feature 分支、编辑）
-└── cat-cafe-runtime/       # 自动创建的运行时 worktree（跟踪 origin/main）
+└── cat-cafe-runtime/       # 由 pnpm runtime:start 创建（跟踪 origin/main）
 ```
 
 | 命令 | 作用 |
 |------|------|
-| `pnpm start` | 初始化（首次）→ 同步到 origin/main → 构建 → 启动 Redis + API + 前端 |
-| `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
-| `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
-| `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
-| `pnpm start:direct` | 跳过 worktree — 从当前 checkout 启动，不自动更新（[详情](#运行指定版本不自动更新)） |
-| `pnpm stop` | 停止后台 daemon |
-| `pnpm start:status` | 查看 daemon 是否在运行 |
-| `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
+| `pnpm runtime:start` | 初始化（首次）→ 同步到 origin/main → 构建 → 从 `../cat-cafe-runtime` 启动 Redis + API + 前端 |
+| `pnpm runtime:restart` | 同步到最新的 origin/main 并重启运行时 |
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
+| `pnpm runtime:stop` | 停止运行时 daemon |
+| `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
 
-> 运行时契约（ADR-039 被动冻结）：`pnpm start` 是单一入口，sync+build+restart 一次完成。已移除独立 sync 命令以防止 stale-dist 崩溃（详见 ADR-039）。
+运行时 worktree 运行的是 `origin/main`，而不是你的本地分支。它读取 `../cat-cafe-runtime` 里自己的 `.env`；创建时只会从你的目录复制 `.cat-cafe/cat-catalog.json`、`accounts.json` 和 `credentials.json`。
 
-首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
+> 运行时契约（ADR-039 被动冻结）：`pnpm runtime:start` 是单一入口，sync+build+restart 一次完成。已移除独立 sync 命令以防止 stale-dist 崩溃（详见 ADR-039）。
 
-> **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+> **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm runtime:start`
 
 ## 运行指定版本（不自动更新）
 
-默认情况下，`pnpm start` 会自动同步到最新的 `origin/main`。如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 请使用 `pnpm start:direct`。
+`pnpm start` 运行的就是你检出的那个 commit，从不自动更新。所以如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 只需要 checkout 过去。（只有可选的 `pnpm runtime:start` 会跟随 `origin/main`。）
 
 ### 方式一：Checkout 到某个 Release Tag
 
@@ -112,30 +120,30 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过 UI 添加）
 cp .env.example .env
 
-# 5. 直接启动（跳过 worktree，不会自动更新）
-pnpm start:direct
+# 5. 启动检出的版本（不会自动更新）
+pnpm start
 
 # 不需要 Redis？用内存模式
-pnpm start:direct -- --memory
+pnpm start --memory
 ```
 
 ### 方式二：停留在当前 commit
 
-如果你已经 clone 好了并且对当前版本满意，只需用 `pnpm start:direct` 代替 `pnpm start`：
+如果你已经 clone 好了并且对当前版本满意，直接运行 `pnpm start` 即可 —— 它使用你当前的 checkout：
 
 ```bash
-pnpm start:direct            # 从当前 checkout 启动，不同步
-pnpm start:direct -- --quick # 也跳过重编译
+pnpm start            # 从当前 checkout 启动，不同步
+pnpm start --quick    # 也跳过重编译
 ```
 
-### 为什么用 `pnpm start:direct`？
+### `pnpm start` 和 `pnpm runtime:start` 的区别
 
 | 命令 | 自动同步到最新？ | 创建 worktree？ | 适用场景 |
 |------|----------------|----------------|---------|
-| `pnpm start` | **是** — 同步到 `origin/main` | 是 | 始终运行最新版本 |
-| `pnpm start:direct` | **否** — 从当前 checkout 运行 | 否 | 固定在特定版本或分支 |
+| `pnpm start` | **否** — 运行你当前的 checkout | 否 | 日常使用；固定在特定版本或分支 |
+| `pnpm runtime:start` | **是** — 同步到 `origin/main` | 是（`../cat-cafe-runtime`） | 始终运行最新 main 的独立实例 |
 
-> **后续更新：** 准备好更新时，执行 `git fetch && git checkout v0.5.0`（或者新版本 tag），然后 `pnpm install && pnpm build && pnpm start:direct` 即可。
+> **后续更新：** 准备好更新时，执行 `git fetch && git checkout v0.5.0`（或者新版本 tag），然后 `pnpm install && pnpm build && pnpm start` 即可。
 
 ## 后台 / Daemon 模式
 

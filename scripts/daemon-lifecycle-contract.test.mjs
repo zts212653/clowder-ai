@@ -51,7 +51,17 @@ test('package scripts expose unambiguous stop commands', () => {
   assert.equal(pkg.scripts['alpha:stop'], './scripts/alpha-worktree.sh stop');
 });
 
-test('start:status reads the official runtime namespace', () => {
-  assert.match(startEntry, /args = \['daemon-status'\]/);
-  assert.match(startEntry, /cmd = resolve\(__dirname, 'runtime-worktree\.sh'\)/);
+test('start:status reads the official runtime namespace unless an open-source checkout starts in place (#50)', () => {
+  const statusBlock = startEntry.slice(
+    startEntry.indexOf("if (mode === 'status')"),
+    startEntry.indexOf('} else if (IS_WINDOWS)'),
+  );
+  assert.match(statusBlock, /args = \['daemon-status'\]/);
+  assert.match(statusBlock, /cmd = resolve\(__dirname, 'runtime-worktree\.sh'\)/);
+  // In-place starts use start-dev.sh's namespace, so start, start:status and stop agree.
+  assert.match(
+    statusBlock,
+    /if \(startsInPlaceByDefault\(\)\) \{\s*(?:\/\/[^\n]*\s*)?cmd = resolve\(__dirname, 'start-dev\.sh'\);\s*args = \['--status'\];/,
+  );
+  assert.equal(pkg.scripts.stop, './scripts/start-dev.sh --stop');
 });

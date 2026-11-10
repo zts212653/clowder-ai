@@ -10,8 +10,13 @@
  *   pnpm start              → start-entry.mjs start [--debug] [--quick] [--memory]
  *   pnpm start:direct       → start-entry.mjs start:direct [--debug] [--quick] [--memory]
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
+ *
+ * On Unix, `start` and `status` in an open-source git checkout run in place
+ * (start-dev.sh, same as start:direct). Release archives and other distributions
+ * keep the runtime entry; the isolated runtime worktree stays `pnpm runtime:start`.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runWindowsStatus } from './lib/platform-status.mjs';
@@ -23,12 +28,35 @@ const IS_WINDOWS = process.platform === 'win32';
 // First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
 
+/**
+ * #50: a git clone of the open-source distribution starts from the checkout the
+ * user is editing, with their own .env. Mirrors runtime-worktree.sh is_git_repo:
+ * only the project's own .git counts, so an archive unpacked inside another
+ * checkout keeps the in-place runtime entry.
+ */
+function startsInPlaceByDefault() {
+  let activeProfile;
+  try {
+    const profilesPath = resolve(projectRoot, 'packages/shared/src/deployment-profiles.json');
+    activeProfile = JSON.parse(readFileSync(profilesPath, 'utf8')).activeProfile;
+  } catch {
+    return false;
+  }
+  if (activeProfile !== 'opensource' || !existsSync(resolve(projectRoot, '.git'))) return false;
+  return spawnSync('git', ['-C', projectRoot, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' }).status === 0;
+}
+
 if (mode === 'status') {
   if (IS_WINDOWS) {
     runWindowsStatus({ projectRoot });
   } else {
-    const cmd = resolve(__dirname, 'runtime-worktree.sh');
-    const args = ['daemon-status'];
+    let cmd = resolve(__dirname, 'runtime-worktree.sh');
+    let args = ['daemon-status'];
+    if (startsInPlaceByDefault()) {
+      // Report the daemon `pnpm start` launched in place, the same one `pnpm stop` stops.
+      cmd = resolve(__dirname, 'start-dev.sh');
+      args = ['--status'];
+    }
     const child = spawn('bash', [cmd, ...args], {
       cwd: projectRoot,
       stdio: 'inherit',
@@ -60,7 +88,17 @@ if (mode === 'status') {
   // Unix: dispatch based on mode
   const hasProfile = rest.some((a) => a.startsWith('--profile'));
   let cmd, args, env;
-  if (mode === 'start') {
+  if (mode === 'start' && startsInPlaceByDefault()) {
+    // Same launch as start:direct: the user's checkout and .env, no runtime worktree.
+    cmd = resolve(__dirname, 'start-dev.sh');
+    args = ['--prod-web', '--profile=opensource', ...rest];
+    env = {
+      ...process.env,
+      CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+      CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
+      CAT_CAFE_DIRECT_NO_WATCH: '1',
+    };
+  } else if (mode === 'start') {
     cmd = resolve(__dirname, 'runtime-worktree.sh');
     args = ['start', ...rest];
     env = {

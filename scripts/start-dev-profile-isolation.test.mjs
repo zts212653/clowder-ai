@@ -1101,6 +1101,118 @@ guard_fn=guard_port_kill_ownership
   });
 });
 
+describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
+  // start-entry.mjs hands Unix starts to bash launchers; Windows always starts in place.
+  const unixIt = process.platform === 'win32' ? it.skip : it;
+  const recordedEnv = ['CAT_CAFE_DIRECT_NO_WATCH', 'CAT_CAFE_RESPECT_DOTENV_PORTS', 'CAT_CAFE_STRICT_PROFILE_DEFAULTS'];
+
+  function createStartEntryFixture({ activeProfile = 'opensource', ownGit = true } = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'start-entry-issue50-'));
+    const project = join(root, 'project');
+    for (const path of [
+      'scripts/start-entry.mjs',
+      'scripts/lib/platform-status.mjs',
+      'packages/shared/src/deployment-defaults.ts',
+    ]) {
+      mkdirSync(dirname(join(project, path)), { recursive: true });
+      cpSync(resolve(ROOT, path), join(project, path));
+    }
+    const profiles = JSON.parse(readFileSync(resolve(ROOT, 'packages/shared/src/deployment-profiles.json'), 'utf8'));
+    profiles.profiles[activeProfile] ??= profiles.profiles.opensource;
+    profiles.activeProfile = activeProfile;
+    writeFileSync(join(project, 'packages/shared/src/deployment-profiles.json'), JSON.stringify(profiles));
+    // Stub launchers only record which entry ran, its arguments and startup env; nothing is started.
+    for (const launcher of ['start-dev.sh', 'runtime-worktree.sh']) {
+      writeFileSync(
+        join(project, 'scripts', launcher),
+        [
+          '#!/bin/bash',
+          `{ printf '%s' '${launcher}'; printf ' %s' "$@"; printf '\\n'; env | grep -E '^(${recordedEnv.join('|')})=' | sort; } >> "$START_ENTRY_RECORD"`,
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+    }
+    if (ownGit === 'parent') {
+      // A release archive unpacked inside another checkout: only the parent directory has .git.
+      spawnSync('git', ['init', '-q'], { cwd: root });
+    } else if (ownGit) {
+      spawnSync('git', ['init', '-q'], { cwd: project });
+    }
+    return { root, project };
+  }
+
+  function runStartEntry(project, args) {
+    const record = join(project, 'start-entry-record.txt');
+    rmSync(record, { force: true });
+    const env = { ...process.env, START_ENTRY_RECORD: record };
+    for (const key of [...recordedEnv, 'CAT_CAFE_PROFILE']) delete env[key];
+    const result = spawnSync(process.execPath, ['scripts/start-entry.mjs', ...args], {
+      cwd: project,
+      encoding: 'utf8',
+      env,
+      timeout: 20_000,
+    });
+    assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
+    return existsSync(record) ? readFileSync(record, 'utf8').trim().split('\n') : [];
+  }
+
+  function withFixture(options, check) {
+    const { root, project } = createStartEntryFixture(options);
+    try {
+      check(project);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  unixIt('open-source git checkout: pnpm start launches start-dev.sh in the checkout, not a runtime worktree', () => {
+    withFixture({}, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start']), [
+        'start-dev.sh --prod-web --profile=opensource',
+        'CAT_CAFE_DIRECT_NO_WATCH=1',
+        'CAT_CAFE_RESPECT_DOTENV_PORTS=1',
+        'CAT_CAFE_STRICT_PROFILE_DEFAULTS=1',
+      ]);
+    });
+  });
+
+  unixIt('open-source git checkout: pnpm start forwards startup flags to start-dev.sh', () => {
+    withFixture({}, (project) => {
+      assert.equal(
+        runStartEntry(project, ['start', '--daemon', '--quick'])[0],
+        'start-dev.sh --prod-web --profile=opensource --daemon --quick',
+      );
+    });
+  });
+
+  unixIt('open-source git checkout: pnpm start:status reports the in-place daemon', () => {
+    withFixture({}, (project) => {
+      assert.deepEqual(runStartEntry(project, ['status']), ['start-dev.sh --status']);
+    });
+  });
+
+  unixIt('release archive without its own .git keeps the in-place runtime entry', () => {
+    withFixture({ ownGit: false }, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start']), ['runtime-worktree.sh start', 'CAT_CAFE_DIRECT_NO_WATCH=1']);
+      assert.deepEqual(runStartEntry(project, ['status']), ['runtime-worktree.sh daemon-status']);
+    });
+  });
+
+  unixIt('release archive inside another checkout is not treated as its own git checkout', () => {
+    withFixture({ ownGit: 'parent' }, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start']), ['runtime-worktree.sh start', 'CAT_CAFE_DIRECT_NO_WATCH=1']);
+    });
+  });
+
+  unixIt('a non-open-source distribution keeps pnpm start on the runtime worktree entry', () => {
+    withFixture({ activeProfile: 'home' }, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start']), ['runtime-worktree.sh start', 'CAT_CAFE_DIRECT_NO_WATCH=1']);
+      assert.deepEqual(runStartEntry(project, ['status']), ['runtime-worktree.sh daemon-status']);
+    });
+  });
+});
+
 describe('embedding sidecar startup guards', () => {
   it('does not silently fall back to sentence-transformers on Apple Silicon', () => {
     const apiScript = readFileSync(resolve(ROOT, 'scripts/services/embed-api.py'), 'utf8');

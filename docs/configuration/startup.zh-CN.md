@@ -8,7 +8,7 @@ pnpm start
 
 这是主入口。它会自动完成以下操作：
 
-1. 创建一个运行时 worktree（用于安全的自动更新）
+1. 从你当前检出的目录运行，使用这里的 `.env`（不另建 worktree，不切换到 `origin/main`）
 2. 启动 Redis（除非使用 `--memory`）
 3. 构建并启动 API 服务器和前端
 4. 在 **http://localhost:3003** 打开 Hub
@@ -43,11 +43,19 @@ pnpm start --daemon
 
 ### `pnpm start:direct`
 
-直接从当前检出的代码运行，不创建自动更新 worktree。使用它可将版本固定在你已检出的确切版本上。
+在 git 检出中与 `pnpm start` 相同：始终直接从当前目录运行。
 
 ```bash
 # 直接运行当前版本，不自动更新
 pnpm start:direct
+```
+
+### `pnpm runtime:start`（可选）
+
+从独立的运行时 worktree（`../cat-cafe-runtime`）启动，它跟踪 `origin/main`，每次启动都会同步。用 `pnpm runtime:status`、`pnpm runtime:restart` 和 `pnpm runtime:stop` 管理。
+
+```bash
+pnpm runtime:start
 ```
 
 ## 服务管理
