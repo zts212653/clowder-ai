@@ -53,7 +53,9 @@ test('DSH discovery, creation and both model catalog paths never initialize an a
     spawns++;
     throw Error('Unexpected process launch');
   });
-  mock.method(childProcess, 'execFile', () => {
+  mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
+    const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+    if (script.includes('Get-ItemProperty')) return callback(null, '[]', '');
     spawns++;
     throw Error('Unexpected process launch');
   });

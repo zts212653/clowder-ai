@@ -77,7 +77,10 @@ test('registered DSH profile status verifies package identity outside node_modul
       writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: member.packageName }));
       const entry = join(pkg, 'lib', 'bin.js');
       writeFileSync(entry, '');
-      return { ...member, acp: { command: 'node', startupArgs: [entry, '--profile', 'acp', ...member.extra] } };
+      return {
+        ...member,
+        acp: { command: process.execPath, startupArgs: [entry, '--profile', 'acp', ...member.extra] },
+      };
     });
     const templatePath = join(root, 'cat-template.json');
     writeFileSync(
@@ -110,7 +113,7 @@ test('registered DSH profile status verifies package identity outside node_modul
     assert.equal(official?.dshSetupSupported, true);
     assert.deepEqual(official?.acp?.startupArgs, members[0].acp.startupArgs);
     assert.equal(
-      resolveDshSetupLaunch('node', members[0].acp.startupArgs, root).args[0],
+      resolveDshSetupLaunch(process.execPath, members[0].acp.startupArgs, root).args[0],
       members[0].acp.startupArgs[0],
     );
     assert.equal(lookalike?.label, 'DSH');
@@ -121,7 +124,10 @@ test('registered DSH profile status verifies package identity outside node_modul
     assert.equal(patched?.dshSetupSupported, true);
     assert.equal(patched?.label, 'DSH');
     assert.deepEqual(patched?.acp?.startupArgs, members[2].acp.startupArgs);
-    assert.deepEqual(resolveDshSetupLaunch('node', members[2].acp.startupArgs, root).args, members[2].acp.startupArgs);
+    assert.deepEqual(
+      resolveDshSetupLaunch(process.execPath, members[2].acp.startupArgs, root).args,
+      members[2].acp.startupArgs,
+    );
     assert.equal(runtimes.find((runtime) => runtime.id === `acp:${members[3].id}`)?.dshSetupSupported, undefined);
   } finally {
     if (savedHome === undefined) delete process.env.DSH_HOME;

@@ -53,7 +53,11 @@ test('configured official ACP remains a Google binding with its exact startup an
   writeFileSync(command, '#!/bin/sh\nexit 97\n');
   const acp = { command, startupArgs: ['--profile', 'argon-personal'], transport: 'stdio' };
   const agyProfile = { enabled: true, carrier: 'acp', profileId: 'argon-personal', autoApprove: false };
-  catRegistry.register('agy-acp-fixture', { id: 'agy-acp-fixture', clientId: 'google', agyProfile });
+  catRegistry.register(
+    'agy-acp-fixture',
+    { id: 'agy-acp-fixture', clientId: 'google', agyProfile },
+    { configurationTemplatePath: join(root, 'cat-template.json') },
+  );
   writeFileSync(
     join(root, 'cat-template.json'),
     JSON.stringify({
