@@ -1152,7 +1152,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.configurationSource === 'native_tool' &&
               'acp' in body &&
               body.acp &&
-              dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot) === 'acp_profile_invalid'
+              dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot, body.env?.DSH_HOME) ===
+                'acp_profile_invalid'
             )
               throw new InvalidDshProfile('DSH 的现有 ACP profile 无效，请先在客户端修复配置。');
           }),
@@ -1650,6 +1651,29 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       reply.status(400);
       return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
     }
+
+    const effectiveEnvironment = body.env ?? currentCat.env;
+    const launchChanged =
+      effectiveAcpConfig?.command !== currentAcpConfig?.command ||
+      JSON.stringify(effectiveAcpConfig?.startupArgs) !== JSON.stringify(currentAcpConfig?.startupArgs) ||
+      effectiveAcpConfig?.transport !== currentAcpConfig?.transport ||
+      JSON.stringify(effectiveEnvironment) !== JSON.stringify(currentCat.env);
+    if (
+      usesAcpTransport &&
+      effectiveAcpConfig &&
+      launchChanged &&
+      (body.configurationSource ?? currentCat.configurationSource) === 'native_tool' &&
+      dshLauncherProfileState(
+        effectiveAcpConfig.command,
+        effectiveAcpConfig.startupArgs,
+        projectRoot,
+        effectiveEnvironment?.DSH_HOME,
+      ) === 'acp_profile_invalid'
+    )
+      return reply.code(400).send({
+        code: 'acp_profile_invalid',
+        error: 'DSH 的现有 ACP profile 无效，请先在客户端修复配置。',
+      });
 
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     try {

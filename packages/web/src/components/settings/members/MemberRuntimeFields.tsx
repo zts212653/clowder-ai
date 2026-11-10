@@ -195,10 +195,12 @@ export function MemberRuntimeFields({
     !!form.cliEffort &&
     !efforts.some((item) => item.value === form.cliEffort);
   const invalidRuntime = selected?.discoveryStatus === 'acp_profile_invalid';
+  const invalidDesktopConnection =
+    !!selected?.dshDesktop && selected.connectionVerification?.key !== dshConnectionKey(form);
   const invalidDefaultModel = native && !form.defaultModel && catalog?.defaultModelStatus === 'unavailable';
   useEffect(
-    () => onValidityChange?.(!invalidEffort && !invalidRuntime && !invalidDefaultModel),
-    [invalidEffort, invalidRuntime, invalidDefaultModel, onValidityChange],
+    () => onValidityChange?.(!invalidEffort && !invalidRuntime && !invalidDesktopConnection && !invalidDefaultModel),
+    [invalidEffort, invalidRuntime, invalidDesktopConnection, invalidDefaultModel, onValidityChange],
   );
   const follow = t(native ? `跟随 ${tool} 设置` : '跟随连接设置', `Follow ${native ? tool : 'connection'} settings`);
   const accountOptions = [
@@ -321,6 +323,14 @@ export function MemberRuntimeFields({
               });
           }}
         />
+      )}
+      {invalidDesktopConnection && (
+        <p role="status" className="text-sm text-cafe-secondary">
+          {t(
+            '请先点击“验证并使用此模型”，再保存新的 Desktop 连接。',
+            'Verify and use this model before saving a new Desktop connection.',
+          )}
+        </p>
       )}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <MemberChoicePicker

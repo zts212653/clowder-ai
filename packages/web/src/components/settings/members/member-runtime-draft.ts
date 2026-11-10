@@ -152,7 +152,7 @@ export function runtimeDefaults(next: RuntimeChoice): RuntimeFields {
   };
 }
 
-function pickRuntime(form: RuntimeFields): RuntimeFields {
+export function pickRuntime(form: RuntimeFields): RuntimeFields {
   return {
     ...Object.fromEntries(runtimeFields.map((key) => [key, form[key]])),
     carrier: resolveDraftCarrier(form),

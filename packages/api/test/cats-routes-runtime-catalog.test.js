@@ -144,6 +144,66 @@ function seedCatalogFromTemplate(projectRoot, templateObj) {
 }
 
 describe('cats routes read runtime catalog', { concurrency: false }, () => {
+  it('DSH launch updates reject a known invalid profile while preserving metadata edits', async () => {
+    const catalog = makeCatalog('dsh-save-guard', 'Whale', 'acp', '');
+    const projectRoot = createRuntimeCatalogProject(catalog);
+    const invalidHome = join(projectRoot, 'native-invalid');
+    const validHome = join(projectRoot, 'native-valid');
+    for (const home of [invalidHome, validHome]) {
+      mkdirSync(join(home, 'profiles/acp'), { recursive: true });
+      writeFileSync(
+        join(home, 'profiles/acp/package.json'),
+        JSON.stringify({
+          dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } },
+        }),
+      );
+      writeFileSync(join(home, 'profiles/acp/cordis.patch.yml'), home === invalidHome ? '# no array\n' : '[]\n');
+    }
+    const original = { command: join(projectRoot, 'old/dsh.cmd'), startupArgs: ['--profile', 'acp'] };
+    Object.assign(catalog.breeds[0].variants[0], {
+      carrier: 'acp',
+      configurationSource: 'native_tool',
+      acp: original,
+      env: { DSH_HOME: invalidHome },
+    });
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const patch = async (payload) => {
+      const headers = { 'x-cat-cafe-user': 'fixture-owner' };
+      const response = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      const cat = response.json().cats.find((cat) => cat.id === 'dsh-save-guard');
+      return app.inject({
+        method: 'PATCH',
+        url: '/api/cats/dsh-save-guard',
+        headers,
+        payload: { ...payload, expectedRevision: cat.configurationRevision },
+      });
+    };
+    try {
+      const metadata = await patch({ displayName: 'Renamed Whale', acp: original });
+      assert.equal(metadata.statusCode, 200, metadata.body);
+      const replacement = { ...original, command: join(projectRoot, 'desktop/dsh.cmd') };
+      const rejected = await patch({ acp: replacement });
+      assert.equal(rejected.statusCode, 400, rejected.body);
+      assert.equal(rejected.json().code, 'acp_profile_invalid');
+      const accepted = await patch({ acp: replacement, env: { DSH_HOME: validHome } });
+      assert.equal(accepted.statusCode, 200, accepted.body);
+      const rejectedHome = await patch({ env: { DSH_HOME: invalidHome } });
+      assert.equal(rejectedHome.statusCode, 400, rejectedHome.body);
+      assert.equal(rejectedHome.json().code, 'acp_profile_invalid');
+      const persisted = JSON.parse(readFileSync(catalogPath, 'utf8')).breeds[0].variants[0];
+      assert.equal(persisted.env.DSH_HOME, validHome);
+      assert.equal(readFileSync(join(invalidHome, 'profiles/acp/cordis.patch.yml'), 'utf8'), '# no array\n');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('CLI login checks require a session before starting any credential-reading process', async (t) => {
     const projectRoot = createRuntimeCatalogProject(makeCatalog('auth-probe-cat', '登录检测猫'));
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
