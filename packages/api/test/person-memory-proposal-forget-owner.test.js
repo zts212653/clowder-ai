@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
-import { F276ApprovalAdapter } from '../src/domains/approval-hub/adapters/F276ApprovalAdapter.ts';
-import { FINISH_HARD_FORGET_LUA } from '../src/domains/memory/people/person-memory-forget-lua.ts';
-import { PersonMemoryKeys } from '../src/domains/memory/people/person-memory-keys.ts';
-import { RedisPersonMemoryStore } from '../src/domains/memory/people/RedisPersonMemoryStore.ts';
-import { personMemoryOwnerReadRoutes } from '../src/routes/person-memory-owner-read.ts';
+import { F276ApprovalAdapter } from '../dist/domains/approval-hub/adapters/F276ApprovalAdapter.js';
+import { FINISH_HARD_FORGET_LUA } from '../dist/domains/memory/people/person-memory-forget-lua.js';
+import { PersonMemoryKeys } from '../dist/domains/memory/people/person-memory-keys.js';
+import { RedisPersonMemoryStore } from '../dist/domains/memory/people/RedisPersonMemoryStore.js';
+import { personMemoryOwnerReadRoutes } from '../dist/routes/person-memory-owner-read.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,

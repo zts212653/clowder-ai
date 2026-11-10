@@ -30,6 +30,19 @@ function admission(command) {
   }
 }
 
+test('ambient program loaders still invalidate the ordinary managed fixture', () => {
+  const command = `${wrapper} pr comment 1 --repo o/r --body ok`;
+  assert.equal(secretShellDenial(command, ordinary), null);
+  process.env.NODE_OPTIONS = `--import=${root}/untrusted.mjs`;
+  try {
+    assert.equal(secretShellDenial(command, ordinary), 'secret_send_requires_managed_command');
+    admission(command);
+  } finally {
+    delete process.env.NODE_OPTIONS;
+  }
+  assert.equal(secretShellDenial(command, ordinary), null);
+});
+
 test('earlier exported or selection-sensitive bindings do not preserve managed sender identity', () => {
   const prefixes = [
     `export NODE_OPTIONS=--import=${root}/untrusted.mjs`,
