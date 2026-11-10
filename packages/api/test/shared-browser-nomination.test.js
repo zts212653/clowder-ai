@@ -66,10 +66,10 @@ test('outside the shared transport the pinned launch stays an isolated stdio fal
 });
 
 test('workspace profile matches the directory upstream derives today, so logins carry over', () => {
-  // sha256('/home/user/cat-cafe').slice(0, 7) === '2308099' (11-09 live profile).
+  // Fixed upstream SHA-256 vector for a synthetic workspace; portable through the public sanitizer.
   assert.match(
-    workspaceProfileDir('/home/user/cat-cafe', 'darwin'),
-    /\/Library\/Caches\/ms-playwright-mcp\/mcp-chrome-2308099$/,
+    workspaceProfileDir('/example/shared-browser-workspace', 'darwin'),
+    /\/Library\/Caches\/ms-playwright-mcp\/mcp-chrome-d5a082a$/,
   );
   assert.equal(workspaceProfileDir('/w', 'linux', { XDG_CACHE_HOME: '/c' }), '/c/ms-playwright-mcp/mcp-chrome-d1bb8ca');
 });

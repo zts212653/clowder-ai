@@ -145,3 +145,54 @@ for (const stop of ['cancelled', 'timed_out']) {
     assert.equal(f.tasks.size, 1);
   });
 }
+
+// These two original reconnect journeys require the private Alpha execution fixture.
+{
+  const owner = { userId: 'owner', threadId: 'alpha-thread', catId: 'codex-astra' };
+  const next = { ...owner, catId: 'codex61-sol' };
+
+  test(
+    'a queued real Alpha starts once under its original owner after guardian handoff',
+    { timeout: 30000 },
+    async (t) => {
+      const f = await alphaManagedFixture(t, { guardianCatId: next.catId });
+      await f.run();
+      assert.equal(f.service.list().length, 1);
+      assert.equal(f.service.get(f.principal, f.managed.jobId).state, 'succeeded');
+      assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
+      assert.deepEqual(f.service.resolve(f.managed.jobId).definition.principal, f.principal);
+    },
+  );
+
+  test('a new guardian reattaches the same live Alpha after its old transport exits', { timeout: 35000 }, async (t) => {
+    const f = await alphaManagedFixture(t, {
+      guardianCatId: next.catId,
+      observeTransport: true,
+      sources(root) {
+        return {
+          'waiting.test.mjs': `import test from 'node:test'; import {appendFileSync,existsSync} from 'node:fs'; import {setTimeout} from 'node:timers/promises'; test('waiting', async()=>{appendFileSync(${JSON.stringify(join(root, 'executions.log'))},'once\\n'); while(!existsSync(${JSON.stringify(join(root, 'release'))})) await setTimeout(20);});`,
+        };
+      },
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    t.after(() => clearTimeout(timer));
+    const first = f.run(controller.signal, f.principal.catId).then(
+      () => null,
+      (e) => e,
+    );
+    await until(() => existsSync(f.marker), 'original command started');
+    const before = f.service.get(f.principal, f.managed.jobId);
+    process.kill(Number(readFileSync(f.transportPid, 'utf8')), 'SIGTERM');
+    assert.match((await first)?.message ?? '', /without a clean result/);
+    const resumed = f.run(controller.signal);
+    writeFileSync(join(f.parent, 'release'), 'release');
+    await resumed;
+    const after = f.service.get(f.principal, f.managed.jobId);
+    assert.equal(f.service.list().length, 1);
+    assert.equal(after.attemptToken, before.attemptToken);
+    assert.deepEqual(after.ownerIdentity, before.ownerIdentity);
+    assert.equal(after.cleanupProven, true);
+    assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
+  });
+}
