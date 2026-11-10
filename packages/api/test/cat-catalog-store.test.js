@@ -1470,6 +1470,35 @@ describe('cat-catalog-store', () => {
     assert.equal(migrated.defaultModel, 'Gemini 3.1 Pro (High)');
   });
 
+  it('preserves explicit AGY model tiers across catalog save and reload', () => {
+    for (const [catId, defaultModel] of [
+      ['gemini38', 'Gemini 3.8 Flash (Low)'],
+      ['gemini', 'Gemini 3.1 Pro (Low)'],
+    ]) {
+      const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+      const templatePath = join(projectRoot, 'cat-template.json');
+      const template = makeF127BootstrapTemplate();
+      writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+      const catalog = makeF127BootstrapTemplate();
+      const variant = catalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+      variant.catId = catId;
+      variant.clientId = 'google';
+      variant.defaultModel = defaultModel;
+      variant.cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+      delete variant.provider;
+      writeCatCatalog(projectRoot, catalog);
+
+      bootstrapCatCatalog(projectRoot, templatePath);
+      const first = readFileSync(resolveCatCatalogPath(projectRoot), 'utf8');
+      const afterFirst = JSON.parse(first).breeds.find((breed) => breed.id === 'siamese').variants[0];
+      assert.equal(afterFirst.defaultModel, defaultModel, `${catId} explicit tier`);
+
+      bootstrapCatCatalog(projectRoot, templatePath);
+      assert.equal(readFileSync(resolveCatCatalogPath(projectRoot), 'utf8'), first, `${catId} repeated read stable`);
+    }
+  });
+
   it('preserves built-in Gemini fallback model ids when custom CLI args prevent carrier migration', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');
