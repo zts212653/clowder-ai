@@ -12,6 +12,7 @@ import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } f
 import { HistoryAppendActions } from './HistoryAppendActions';
 import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
 import { PluginTargetIcon } from './PluginTargetIcon';
+import { focusCausalContinuation, useCausalReplies } from './reply-layers/CausalReplyContext';
 import { useShellPresentation } from './shell/shell-presentation';
 import { projectTargetReply } from './target-response-projection';
 import { useCloudReply } from './useCloudReply';
@@ -49,6 +50,7 @@ export function MessageDispatchRecipient({
   recipientCount,
   threadId,
 }: RecipientProps) {
+  const causalReplies = useCausalReplies();
   const navigateToMessage = useMessageNavigation();
   const shell = useShellPresentation();
   const { knownTargets } = usePluginTargets();
@@ -102,7 +104,7 @@ export function MessageDispatchRecipient({
       ? logical.replyMessageId
       : awaitingCloudReply
         ? undefined
-        : projection.statusMessageId);
+        : (projection.statusMessageId ?? ref?.statusMessageId));
   const failedDelivery = linked?.kind === 'delivery_failure';
   const notSent =
     cloud?.receipt?.status === 'failed' &&
@@ -195,19 +197,35 @@ export function MessageDispatchRecipient({
           repeatKind={notAccepted ? 'not_accepted' : incomplete ? 'incomplete' : 'unknown'}
         />
       ) : null}
-      {!checking && replyMessageId && (resultMessageId || pluginReply || response || logical.state !== 'unverified') ? (
+      {replyMessageId &&
+      (resultMessageId || pluginReply || causalReplies || response || logical.state !== 'unverified') ? (
         <button
           type="button"
           aria-label={`看${label}的回复`}
+          data-reading-disclosure
           className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
           onClick={() => {
             if (!replyMessageId) return;
+            if (
+              causalReplies?.continuations.get(message.id)?.some((slice) => slice.response.id === replyMessageId) &&
+              focusCausalContinuation(message.id, replyMessageId)
+            )
+              return;
+            if (causalReplies && threadId) {
+              causalReplies.openReference({
+                anchorMessageId: message.id,
+                targetMessageId: replyMessageId,
+                targetCatId: projection.targetId,
+                kind: 'reply',
+              });
+              return;
+            }
             if (logical.state !== 'unverified') navigateToMessage(replyMessageId, { loadIfNeeded: true });
             else if (pluginReceipt) navigateToMessage(replyMessageId, { loadIfNeeded: true });
             else navigateToMessage(replyMessageId);
           }}
         >
-          · 看回复 ↓
+          · 看回复
         </button>
       ) : null}
     </li>

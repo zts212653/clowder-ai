@@ -12,6 +12,8 @@ export interface ReplyOutputText {
   text: string;
   start: number;
   end: number;
+  /** Exact source slice crossing Markdown syntax; render it literally. */
+  literal?: boolean;
 }
 export interface ReplyOutputTool {
   kind: 'tool';

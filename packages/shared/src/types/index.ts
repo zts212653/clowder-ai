@@ -1073,6 +1073,8 @@ export {
 export type {
   LifecycleActiveRun,
   LifecycleAppendAction,
+  LifecycleAppendBoundary,
+  LifecycleAppendBoundaryInput,
   LifecycleAppendCapability,
   LifecycleAppendExpectedRun,
   LifecycleAppendFailure,
@@ -1099,10 +1101,13 @@ export {
   getLifecycleAppendOutcome,
   hasExactLifecycleProcessingDispatch,
   isAppendRepeatSource,
+  isLifecycleAppendBoundary,
+  isLifecycleAppendBoundaryInput,
   isLifecycleAppendFailure,
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  MAX_LIFECYCLE_APPEND_BOUNDARIES,
   timelineMessageKind,
 } from './message-lifecycle.js';
 // Mount Rules types (F228 Skill 挂载规则解耦)

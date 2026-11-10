@@ -73,6 +73,7 @@ import { isLastOfOwnRun } from './own-message-run';
 import { PawFeelDispositionDock } from './paw-feel/PawFeelDispositionDock';
 import { ReplyPill } from './ReplyPill';
 import { RoutingWarningNotice } from './RoutingWarningNotice';
+import { CausalReplyOriginal } from './reply-layers/CausalReplyBody';
 import { MatterRecallLine } from './reply-layers/MatterRecallLine';
 import { ReplyLayers } from './reply-layers/ReplyLayers';
 import { ReplyOutputBody } from './reply-layers/ReplyOutputBody';
@@ -1095,7 +1096,7 @@ function ChatMessageContent({
     />
   ) : null;
 
-  const assistantBody = isLayeredReply ? (
+  const ordinaryAssistantBody = isLayeredReply ? (
     <>
       {renderThreadId &&
         replyRecall?.events
@@ -1119,6 +1120,15 @@ function ChatMessageContent({
   ) : message.isStreaming ? (
     <span className="text-xs text-cafe-secondary">Thinking...</span>
   ) : null;
+
+  const assistantBody =
+    message.lifecycle?.kind === 'response' ? (
+      <CausalReplyOriginal response={message} layered={isLayeredReply}>
+        {ordinaryAssistantBody}
+      </CausalReplyOriginal>
+    ) : (
+      ordinaryAssistantBody
+    );
 
   return (
     <MessageBubble

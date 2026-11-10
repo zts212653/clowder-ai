@@ -1,0 +1,99 @@
+{
+  "results": [
+    {
+      "stage": "streaming",
+      "order": ["R", "S", "continuation"]
+    },
+    {
+      "stage": "reload-reading-input",
+      "inputId": "S",
+      "continuationRestored": true
+    },
+    {
+      "stage": "quote",
+      "messageId": "R",
+      "start": 13,
+      "end": 31
+    },
+    {
+      "stage": "reload-reading-original",
+      "canonicalCount": 1
+    },
+    {
+      "stage": "reload",
+      "viewportWidth": 1100,
+      "width": 720,
+      "scroll": 720
+    },
+    {
+      "stage": "reload",
+      "viewportWidth": 390,
+      "width": 334,
+      "scroll": 334
+    },
+    {
+      "stage": "classic",
+      "canonicalCount": 1
+    },
+    {
+      "stage": "native-append",
+      "pendingContinuationCount": 0,
+      "writtenContinuationCount": 1
+    },
+    {
+      "stage": "recalled",
+      "continuationCount": 0
+    },
+    {
+      "stage": "native-output",
+      "processInOriginalRecord": true,
+      "finalInContinuation": true
+    },
+    {
+      "stage": "native-full-original",
+      "includesProcessAndFinal": true,
+      "prefixCount": 1
+    },
+    {
+      "stage": "equal-cut-navigation",
+      "from": "S",
+      "focused": "S2"
+    },
+    {
+      "stage": "reference-loading",
+      "readyAfterRelease": true
+    },
+    {
+      "stage": "missing-page-reference",
+      "anchorReads": 2,
+      "canonicalRCount": 0,
+      "historyCount": 50,
+      "hasMore": true
+    },
+    {
+      "stage": "recovered-reference-unavailable",
+      "anchorReads": 4
+    },
+    {
+      "stage": "late-proof-reading",
+      "drift": 0
+    },
+    {
+      "stage": "verified-ranges-after-reading",
+      "continuationCount": 1
+    },
+    {
+      "stage": "compiled-admission-store-http-browser",
+      "backend": "memory",
+      "anchorReads": 2,
+      "reload": true,
+      "canonicalRCount": 0
+    },
+    {
+      "stage": "already-visible-reference",
+      "scrollTop": 0,
+      "openingReading": "offset"
+    }
+  ],
+  "errors": []
+}

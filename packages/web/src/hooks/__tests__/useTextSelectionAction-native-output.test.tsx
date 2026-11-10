@@ -8,10 +8,12 @@ function Host({
   source,
   display,
   excludedRecord = false,
+  literal = false,
 }: {
   source: string;
   display: string;
   excludedRecord?: boolean;
+  literal?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const action = useTextSelectionAction(ref, true, source, 'viewport');
@@ -30,6 +32,7 @@ function Host({
                 text: source,
                 start: 120,
                 end: 120 + source.length,
+                literal,
               });
           }}
         >
@@ -81,6 +84,10 @@ describe('native reply selection binds the original whole content, not display o
   it('maps a Markdown answer selection through the original source span', async () => {
     await act(async () => root.render(<Host source="**答案段**" display="答案段" />));
     expect(container.querySelector('output')?.textContent).toBe('122:125');
+  });
+  it('maps a literal continuation across Markdown syntax without treating delimiters as hidden text', async () => {
+    await act(async () => root.render(<Host source="**答案段**" display="**答案段**" literal />));
+    expect(container.querySelector('output')?.textContent).toBe('120:127');
   });
   it('keeps transformed/generated or repeated text on the existing whole-message quote path', async () => {
     for (const [source, display] of [

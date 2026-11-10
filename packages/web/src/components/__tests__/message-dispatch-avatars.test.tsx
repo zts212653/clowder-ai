@@ -9,6 +9,8 @@ import {
   MessageDispatchAvatars,
   projectMessageDispatchAvatars,
 } from '../MessageDispatchAvatars';
+import { CausalReplyContinuations } from '../reply-layers/CausalReplyBody';
+import { CausalReplyProvider } from '../reply-layers/CausalReplyContext';
 
 vi.mock('../CatAvatar', () => ({
   CatAvatar: ({ catId, status, size }: { catId: string; status?: string; size?: number }) => (
@@ -236,8 +238,97 @@ describe('isLinkedDeliveryFailureCarrier', () => {
 });
 
 describe('MessageDispatchAvatars', () => {
+  it('keeps the exact reply readable when R is outside the loaded page and reports a bounded miss', async () => {
+    const request = vi.fn(async (input: string | URL | Request) =>
+      String(input).endsWith('/api/session')
+        ? new Response(JSON.stringify({ userId: 'reference-test-owner' }))
+        : new Response('{}', { status: 404 }),
+    );
+    vi.stubGlobal('fetch', request);
+    act(() =>
+      root.render(
+        <CausalReplyProvider threadId="thread-1" messages={[source('settled')]}>
+          <MessageDispatchAvatars
+            message={source('settled')}
+            timelineMessages={[]}
+            activeRuns={[]}
+            threadId="thread-1"
+            getCatLabel={() => '宪宪'}
+          />
+          <CausalReplyContinuations
+            inputMessageId="source-1"
+            threadId="thread-1"
+            getCatById={() => undefined}
+            forwardingDisabled={false}
+          />
+        </CausalReplyProvider>,
+      ),
+    );
+    const link = container.querySelector<HTMLButtonElement>('button[aria-label="看宪宪的回复"]');
+    expect(link).not.toBeNull();
+    await act(async () => link?.click());
+    const historyRequests = request.mock.calls.filter(([url]) => String(url).includes('/api/messages?'));
+    expect(historyRequests).toHaveLength(1);
+    expect(String(historyRequests[0]?.[0])).toContain('anchorMessageId=response-1');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('消息暂不可用');
+    vi.unstubAllGlobals();
+  });
   let container: HTMLDivElement;
   let root: Root;
+
+  it.each([
+    'no cut',
+    'changed prefix',
+    'missing middle',
+  ] as const)('keeps whole-R reading when precise ranges are unavailable: %s', async (reason) => {
+    const input = { ...source('settled'), timestamp: 115 };
+    const canonical = response('completed', reason === 'missing middle' ? ['middle', input.id] : [input.id]);
+    if (reason !== 'no cut' && canonical.lifecycle?.kind === 'response') {
+      canonical.lifecycle = {
+        ...canonical.lifecycle,
+        appendBoundaries: [
+          ...(reason === 'missing middle'
+            ? [{ inputMessageId: 'middle', contentOffset: 0, prefixSha256: 'e'.repeat(64) }]
+            : []),
+          { inputMessageId: input.id, contentOffset: 3, prefixSha256: 'e'.repeat(64) },
+        ],
+      };
+    }
+    const request = vi.fn(
+      async (url: string | URL | Request) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes('/api/session')
+              ? { userId: 'isolated-owner' }
+              : { messages: [canonical], hasMore: true },
+          ),
+        ),
+    );
+    vi.stubGlobal('fetch', request);
+    await act(async () =>
+      root.render(
+        <CausalReplyProvider threadId="thread-1" messages={[canonical, input]}>
+          <MessageDispatchAvatars
+            message={input}
+            timelineMessages={[canonical]}
+            activeRuns={[]}
+            threadId="thread-1"
+            getCatLabel={() => '宪宪'}
+          />
+          <CausalReplyContinuations
+            inputMessageId={input.id}
+            threadId="thread-1"
+            getCatById={() => undefined}
+            forwardingDisabled={false}
+          />
+        </CausalReplyProvider>,
+      ),
+    );
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="看宪宪的回复"]')?.click());
+    expect(request.mock.calls.filter(([url]) => String(url).includes('/api/messages?'))).toHaveLength(1);
+    expect(container.querySelector('[data-causal-read-reference="response-1"]')?.textContent).toContain('terminal');
+    expect(container.querySelector('[data-causal-continuation]')).toBeNull();
+  });
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -258,6 +349,7 @@ describe('MessageDispatchAvatars', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('shows actual delivery time and jumps only to an exact linked response', () => {

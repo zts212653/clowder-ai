@@ -199,6 +199,7 @@ export async function* routeParallel(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  const outputCursorReleases: Array<() => void> = [];
   // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
   // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
   const routeResponseProducers = responseProducers.openRouteScope();
@@ -211,9 +212,13 @@ export async function* routeParallel(
       threadId,
       options,
       invocationServices,
+      outputCursorReleases,
       routeResponseProducers,
     );
   } finally {
+    outputCursorReleases.forEach((release) => {
+      release();
+    });
     // However the route exits, it commits no R after this.
     routeResponseProducers.leaveAll();
     await invocationServices.dispose();
@@ -228,6 +233,7 @@ async function* routeParallelPrepared(
   threadId: string,
   options: RouteOptions,
   invocationServices: InvocationServiceScope,
+  outputCursorReleases: Array<() => void>,
   routeResponseProducers: RouteResponseProducers,
 ): AsyncIterable<AgentMessage> {
   const {
@@ -1387,6 +1393,15 @@ async function* routeParallelPrepared(
                 messageId: effectiveMsg.lifecycleResponseMessageId,
                 priorFrontierMessageId: effectiveMsg.lifecyclePriorFrontierMessageId,
               });
+              const catId = effectiveMsg.catId;
+              const release = options.onLifecycleOutputCursorReady?.({
+                threadId,
+                catId,
+                invocationId: parsed.invocationId,
+                responseMessageId: effectiveMsg.lifecycleResponseMessageId,
+                getContent: () => catText.get(catId) ?? '',
+              });
+              if (release) outputCursorReleases.push(release);
             }
             if (deps.invocationDeps.turnExecutionStore) {
               turnExecutionProjectionByInvocation.set(parsed.invocationId, {
