@@ -56,6 +56,8 @@ import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/servic
 import {
   getTimelineOrderTime,
   isInternalNonQuotableParent,
+  isSystemUserMessage,
+  resolveThreadMessageVisibility,
   resolveVisibleReplyParent,
 } from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -264,6 +266,8 @@ const getMessagesSchema = z.object({
     .refine((value) => !value || Number.isSafeInteger(Number(value.slice(3, 19))))
     .optional(),
   threadId: z.string().min(1).max(100).optional(),
+  /** Exact visible message id; returns the bounded history window ending at it. */
+  anchorMessageId: z.string().min(1).max(200).optional(),
 });
 
 const cloudDeliveryRetrySchema = z.object({
@@ -1051,12 +1055,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
   });
 
   // GET /api/messages - 获取历史消息
-  app.get('/api/messages', async (request) => {
+  app.get('/api/messages', async (request, reply) => {
     const parseResult = getMessagesSchema.safeParse(request.query);
     if (!parseResult.success) {
+      const rawAnchor = (request.query as Record<string, unknown> | undefined)?.anchorMessageId;
+      if (typeof rawAnchor === 'string') {
+        return reply.status(400).send({ error: 'Invalid anchor query', code: 'ANCHOR_QUERY_INVALID' });
+      }
       return { messages: [], hasMore: false };
     }
-    const { limit, before, threadId, afterVisibility } = parseResult.data;
+    const { limit, before, threadId, anchorMessageId, afterVisibility } = parseResult.data;
+    if (anchorMessageId && before) {
+      return reply
+        .status(400)
+        .send({ error: 'anchorMessageId and before are mutually exclusive', code: 'ANCHOR_BEFORE_CONFLICT' });
+    }
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       return { messages: [], hasMore: false };
@@ -1083,14 +1096,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Capture before reading: a commit during hydration must remain discoverable on the next probe.
     const changes =
-      !before && afterVisibility !== undefined
+      !before && !anchorMessageId && afterVisibility !== undefined
         ? await readBrowserChanges(resolvedThreadId, userId, afterVisibility || null)
         : undefined;
-    const historyWatermark = before
-      ? undefined
-      : changes
-        ? changes.watermark
-        : await readBrowserWatermark(resolvedThreadId, userId).catch(() => undefined);
+    const historyWatermark =
+      before || anchorMessageId
+        ? undefined
+        : changes
+          ? changes.watermark
+          : await readBrowserWatermark(resolvedThreadId, userId).catch(() => undefined);
 
     // Loop-scan: iteratively fetch batches from the store, filtering out
     // internal system messages, until we have `limit + 1` visible items
@@ -1113,50 +1127,97 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       includeRecalledUserMessages: true,
     } as const;
 
+    // Exact anchor reads are bounded to one historical window ending at the
+    // anchor. They never hydrate the newest page and never issue a cursor.
+    let anchor: StoredMessage | null = null;
+    if (anchorMessageId) {
+      if (opts.threadStore) {
+        const thread = await opts.threadStore.get(resolvedThreadId);
+        if (!thread || (thread.createdBy !== userId && thread.createdBy !== 'system')) {
+          return reply.status(404).send({ error: 'Anchor message unavailable', code: 'ANCHOR_UNAVAILABLE' });
+        }
+      }
+      const candidate = await opts.messageStore.getById(anchorMessageId);
+      if (
+        !candidate ||
+        candidate.threadId !== resolvedThreadId ||
+        candidate.deletedAt ||
+        candidate._tombstone ||
+        candidate.source?.connector === 'routing-guard-failure' ||
+        (candidate.userId !== userId && !(opts.threadStore && isSystemUserMessage(candidate)))
+      ) {
+        return reply.status(404).send({ error: 'Anchor message unavailable', code: 'ANCHOR_UNAVAILABLE' });
+      }
+      if (candidate.recall) {
+        return reply.status(410).send({ error: 'Anchor message was recalled', code: 'ANCHOR_RECALLED' });
+      }
+      if (!resolveThreadMessageVisibility(browserTimelineRead, userId)(candidate)) {
+        return reply.status(404).send({ error: 'Anchor message unavailable', code: 'ANCHOR_UNAVAILABLE' });
+      }
+      anchor = candidate;
+    }
+
     type StoredMsg = Awaited<ReturnType<typeof opts.messageStore.getByThread>>[number];
     const allVisible: StoredMsg[] = [];
     let cursorTs = beforeTs;
     let cursorId = beforeId;
     let storeExhausted = false;
 
-    while (allVisible.length < needed && !storeExhausted) {
-      const rawBatch =
-        cursorTs != null
-          ? await opts.messageStore.getByThreadBefore(
-              resolvedThreadId,
-              cursorTs,
-              BATCH_SIZE,
-              cursorId,
-              userId,
-              browserTimelineRead,
-            )
-          : await opts.messageStore.getByThread(resolvedThreadId, BATCH_SIZE, userId, browserTimelineRead);
+    if (anchor) {
+      // Bounded exact-anchor read: one older batch, never a full-history scan.
+      // Internal rows inside that batch are filtered; hasMore honestly says
+      // older candidates may remain when the batch was full.
+      const rawBatch = await opts.messageStore.getByThreadBefore(
+        resolvedThreadId,
+        getTimelineOrderTime(anchor),
+        BATCH_SIZE,
+        anchor.id,
+        userId,
+        browserTimelineRead,
+      );
+      storeExhausted = rawBatch.length < BATCH_SIZE;
+      allVisible.push(...rawBatch.filter((m) => m.source?.connector !== 'routing-guard-failure'));
+      allVisible.push(anchor);
+    } else {
+      while (allVisible.length < needed && !storeExhausted) {
+        const rawBatch =
+          cursorTs != null
+            ? await opts.messageStore.getByThreadBefore(
+                resolvedThreadId,
+                cursorTs,
+                BATCH_SIZE,
+                cursorId,
+                userId,
+                browserTimelineRead,
+              )
+            : await opts.messageStore.getByThread(resolvedThreadId, BATCH_SIZE, userId, browserTimelineRead);
 
-      if (rawBatch.length < BATCH_SIZE) {
-        storeExhausted = true;
-      }
+        if (rawBatch.length < BATCH_SIZE) {
+          storeExhausted = true;
+        }
 
-      // Filter only internal route-guard diagnostics. F148 ContextBriefing is a
-      // contracted user-visible transparency card; its non-routing guarantee is
-      // enforced by incremental-context assembly, not timeline hydration.
-      // `routing-guard-failure` is a retired producer. Keep this read-boundary
-      // exclusion only so rows written by older releases never reappear after
-      // upgrade; current runtime code must not append or broadcast new rows.
-      const batchVisible = rawBatch.filter((m) => m.source?.connector !== 'routing-guard-failure');
+        // Filter only internal route-guard diagnostics. F148 ContextBriefing is a
+        // contracted user-visible transparency card; its non-routing guarantee is
+        // enforced by incremental-context assembly, not timeline hydration.
+        // `routing-guard-failure` is a retired producer. Keep this read-boundary
+        // exclusion only so rows written by older releases never reappear after
+        // upgrade; current runtime code must not append or broadcast new rows.
+        const batchVisible = rawBatch.filter((m) => m.source?.connector !== 'routing-guard-failure');
 
-      // Prepend: each subsequent batch is chronologically older
-      allVisible.unshift(...batchVisible);
+        // Prepend: each subsequent batch is chronologically older
+        allVisible.unshift(...batchVisible);
 
-      // Advance cursor to the oldest message in this batch for next iteration.
-      // Store returns oldest-first (after internal .reverse()), so [0] is oldest.
-      // Defensive: if cursor didn't advance, break to prevent infinite loop.
-      if (rawBatch.length > 0) {
-        const oldest = rawBatch[0]!;
-        const nextTs = getTimelineOrderTime(oldest);
-        const nextId = oldest.id;
-        if (nextTs === cursorTs && nextId === cursorId) break; // cursor stuck — store bug
-        cursorTs = nextTs;
-        cursorId = nextId;
+        // Advance cursor to the oldest message in this batch for next iteration.
+        // Store returns oldest-first (after internal .reverse()), so [0] is oldest.
+        // Defensive: if cursor didn't advance, break to prevent infinite loop.
+        if (rawBatch.length > 0) {
+          const oldest = rawBatch[0]!;
+          const nextTs = getTimelineOrderTime(oldest);
+          const nextId = oldest.id;
+          if (nextTs === cursorTs && nextId === cursorId) break; // cursor stuck — store bug
+          cursorTs = nextTs;
+          cursorId = nextId;
+        }
       }
     }
 
@@ -1357,7 +1418,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     return normalizeJsonUnicode({
       messages: chatItems,
       hasMore,
-      historyPageCursor,
+      ...(!anchorMessageId ? { historyPageCursor } : {}),
       ...(historyWatermark !== undefined ? { historyWatermark } : {}),
     });
   });
