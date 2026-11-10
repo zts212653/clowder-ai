@@ -1,5 +1,5 @@
-import { isDshLauncher } from '@cat-cafe/shared';
 import type { AgentClientLibrary } from '@/hooks/useAgentClientLibraries';
+import { isDshMember } from '@/lib/member-model-display';
 import { type HubCatEditorFormState, splitCommandArgs } from '../../hub-cat-editor.model';
 import type { MemberText } from './MemberRuntimeFields';
 import { MANUAL_RUNTIME_CHOICES } from './manual-runtime-choices';
@@ -42,16 +42,27 @@ export function memberRuntimeTools(
     !!item.dshDesktop ||
     item.dshSetupSupported === true ||
     (item.id.startsWith('acp:') && item.onboardingEligible === false) ||
-    (!!item.acp && isDshLauncher(item.acp.command, item.acp.startupArgs));
+    isDshMember({ clientId: item.clientId, acp: item.acp }, runtimes);
+  const dshBinding = (draft: ReturnType<typeof runtimeDefaults>) =>
+    draft.carrier === 'acp' &&
+    isDshMember(
+      {
+        clientId: draft.clientId,
+        agentProvider: draft.acpAgentProvider,
+        acp: {
+          command: draft.acpCommand,
+          startupArgs: splitCommandArgs(draft.acpStartupArgs),
+          transport: draft.acpTransport,
+        },
+      },
+      runtimes,
+    );
   const binding =
-    form?.carrier === 'acp' && isDshLauncher(form.acpCommand, splitCommandArgs(form.acpStartupArgs))
+    form && dshBinding(form)
       ? form
       : Object.values(runtimeDrafts ?? {})
           .reverse()
-          .find(
-            (draft) =>
-              draft.carrier === 'acp' && isDshLauncher(draft.acpCommand, splitCommandArgs(draft.acpStartupArgs)),
-          );
+          .find(dshBinding);
   const source = runtimes.find((item) => item.dshDesktop);
   const dsh: RuntimeChoice | undefined = binding
     ? {

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
-import { captureAcpMcpSources } from '../src/domains/cats/services/agents/providers/acp/acp-mcp-source.js';
+import { captureAcpMcpSources } from '../src/domains/cats/services/agents/providers/acp/configuration/acp-mcp-source.js';
 import { RedisDshMemberConnectionCheckStore } from '../src/domains/cats/services/stores/redis/RedisDshMemberConnectionCheckStore.js';
 import { dshDefinitionOnlyServers, readDshToolManifest } from '../src/routes/dsh-tool-manifest.js';
 import { registerDshMemberConnectionChecks } from '../src/routes/member-connection-check.js';

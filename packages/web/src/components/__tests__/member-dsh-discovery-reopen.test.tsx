@@ -94,7 +94,7 @@ it.each([
   try {
     await act(async () => root.render(editor));
     expect(host.querySelector('[role=combobox]')?.textContent).toContain('DeepSeek Flash · 跟随 DSH 设置');
-    expect(host.textContent).toContain('复用 DSH Desktop');
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value).toBe('dsh');
     if (scenario === 'reopen') {
       await act(async () => root.unmount());
       failDiscovery = true;
@@ -104,7 +104,7 @@ it.each([
       expect(host.querySelector('[data-testid=shared-summary]')?.textContent).toContain('DSH · DeepSeek Flash');
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
       expect(host.querySelector('[role=alert]')?.textContent).toContain('工具列表读取失败');
-      expect(host.textContent).toContain('复用 DSH Desktop');
+      expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value).toBe('dsh');
       if (entry === '/some/install/dsh/lib/bin.js') {
         failDiscovery = false;
         removedRuntime = true;
@@ -134,7 +134,7 @@ it.each([
       await act(async () => discard?.click());
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
       expect(host.querySelector('[role=combobox]')?.textContent).toContain('DeepSeek Flash');
-      expect(host.textContent).toContain('复用 DSH Desktop');
+      expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value).toBe('dsh');
     }
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {

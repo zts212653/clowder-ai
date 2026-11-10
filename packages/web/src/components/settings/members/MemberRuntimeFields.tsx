@@ -128,7 +128,11 @@ export function MemberRuntimeFields({
     env: form.env,
   };
   const dsh = isDshMember(displayMember, runtimeEvidence);
-  const automaticDsh = native && !form.accountRef && dsh;
+  const automaticDsh =
+    native &&
+    !form.accountRef &&
+    dsh &&
+    runtimes.some((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
   const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
     identity = availableAccounts.find((item) => item.id === form.accountRef);

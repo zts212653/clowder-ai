@@ -110,8 +110,8 @@ it.each([
     expect(host.textContent).toContain('修复现有 ACP 配置');
     expect(host.textContent).toContain('不会自动覆盖');
   } else {
-    expect(host.textContent).toContain('当前启动配置已保留');
-    expect(host.textContent).toContain('仅修改名字或职责可直接保存');
+    expect(host.textContent).toContain('浏览和创建伙伴不会初始化');
+    expect(host.textContent).toContain('实际连接时由 DSH 准备');
   }
   expect(host.textContent).not.toContain('已检测登录');
   expect(patch).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ it.each([
   expect(new Set(vi.mocked(apiFetch).mock.calls.map(([path]) => path))).toEqual(
     new Set([
       '/api/cats/native-runtimes',
-      ...(invalid ? ['/api/cats/runtime-models'] : []),
+      '/api/cats/runtime-models',
       ...(!nativeSetup ? ['/api/agent-providers'] : []),
     ]),
   );

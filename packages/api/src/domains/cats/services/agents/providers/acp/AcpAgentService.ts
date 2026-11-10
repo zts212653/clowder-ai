@@ -56,7 +56,6 @@ import {
 } from './acp-credential-file.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
-import { captureAcpMcpSources } from './acp-mcp-source.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
@@ -66,6 +65,7 @@ import {
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
+import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';

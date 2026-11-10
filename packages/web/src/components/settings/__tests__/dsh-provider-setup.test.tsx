@@ -13,8 +13,9 @@ afterEach(async () => {
 });
 it('automatically reads metadata, keeps explicit preferences and never prepares or tests on opening', async () => {
   const select = vi.fn();
-  const fetch = vi.fn(async (_path: string) =>
-    Response.json({
+  const fetch = vi.fn(async (path: string) => {
+    expect(path).toContain('/inspect');
+    return Response.json({
       revision: 'r',
       provider: 'official',
       model: 'default',
@@ -22,8 +23,8 @@ it('automatically reads metadata, keeps explicit preferences and never prepares 
         { id: 'official', credential: 'configured', models: [{ id: 'default', label: 'Default' }] },
         { id: 'custom', credential: 'configured', models: [{ id: 'chosen', label: 'Chosen' }] },
       ],
-    }),
-  );
+    });
+  });
   vi.stubGlobal('fetch', fetch);
   await act(async () =>
     root.render(

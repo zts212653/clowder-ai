@@ -98,7 +98,8 @@ it.each([
     );
     const trigger = host.querySelector<HTMLButtonElement>('[role=combobox]');
     expect(patch).not.toHaveBeenCalled();
-    expect(host.textContent?.includes('复用 DSH Desktop')).toBe(expectedDsh);
+    expect(host.textContent).not.toContain('复用 DSH Desktop');
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value === 'dsh').toBe(expectedDsh);
     const summary = host.querySelector('[data-testid=shared-summary]')?.textContent;
     if (!expectedDsh) {
       expect(summary).not.toContain('DeepSeek Flash');
@@ -124,49 +125,41 @@ it.each([
 });
 
 it.each([
-  '/fixture/node_modules/@deepseek-ai/dsh/lib/bin.js',
-  '/fixture/installed/dsh/lib/bin.js',
-])('keeps a visited native panel and its receipt while collapsed for %s', async (entry) => {
-  const args = [entry, '--profile', 'acp'];
-  const generated = [...args, '--patch', '/fixture/host/custom.yml'];
+  '/fixture/desktop-a/dsh.cmd',
+  '/fixture/desktop-b/dsh.cmd',
+])('keeps a visited Desktop panel and its selection while collapsed for %s', async (command) => {
+  const args = ['--profile', 'acp'];
   const runtime = {
     id: 'dsh',
     label: 'DSH',
     clientId: 'acp' as const,
     installed: true,
-    discoveryStatus: 'configured' as const,
+    dshDesktop: true,
     models: [],
-    acp: { command: 'node', startupArgs: args, transport: 'stdio' as const },
+    acp: { command, startupArgs: args, transport: 'stdio' as const },
   };
-  vi.mocked(apiFetch).mockImplementation(
-    async (path) =>
-      new Response(
-        JSON.stringify(
-          path === '/api/cats/native-runtimes'
-            ? { runtimes: [runtime] }
-            : path.endsWith('/inspect')
-              ? {
-                  revision: 'a'.repeat(64),
-                  provider: 'custom',
-                  model: 'custom-model',
-                  providers: [
-                    { id: 'custom', credential: 'configured', models: [{ id: 'custom-model', label: 'Custom' }] },
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    Response.json(
+      path === '/api/cats/native-runtimes'
+        ? { runtimes: [runtime] }
+        : path.endsWith('/inspect')
+          ? {
+              revision: 'a'.repeat(64),
+              provider: 'custom',
+              model: 'custom-model',
+              providers: [
+                {
+                  id: 'custom',
+                  credential: 'configured',
+                  models: [
+                    { id: 'custom-model', label: 'Custom' },
+                    { id: 'other-model', label: 'Other' },
                   ],
-                }
-              : path.endsWith('/prepare')
-                ? {
-                    id: 'receipt',
-                    command: 'node',
-                    startupArgs: generated,
-                    env: { DSH_HOME: '/host/private' },
-                    provider: 'custom',
-                    model: 'custom-model',
-                  }
-                : path.endsWith('/test')
-                  ? { ok: true }
-                  : { status: 'live', models: [], effortOptions: [] },
-        ),
-      ),
+                },
+              ],
+            }
+          : { status: 'live', models: [], effortOptions: [] },
+    ),
   );
   const valid = () => {};
   function Card() {
@@ -181,7 +174,7 @@ it.each([
         clientId: 'acp',
         carrier: 'acp',
         configurationSource: 'native_tool',
-        acpCommand: 'node',
+        acpCommand: command,
         acpStartupArgs: args.join(' '),
       },
     });
@@ -204,15 +197,22 @@ it.each([
   try {
     await act(async () => root.render(<Card />));
     expect(apiFetch).not.toHaveBeenCalled();
-    await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
-    await click('读取 Desktop 配置');
-    await click('验证并使用此模型');
-    const reads = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes').length;
+    await click('调整');
+    const chooser = host.querySelector<HTMLSelectElement>('select[aria-label="DSH 模型"]')!;
+    await act(async () => {
+      chooser.value = '["custom","other-model"]';
+      chooser.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const reads = vi.mocked(apiFetch).mock.calls.length;
     await click('收起');
-    await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
-    expect(host.textContent).toContain('复用 DSH Desktop');
-    expect(host.textContent).toContain('此配置已收到模型回复');
-    expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes')).toHaveLength(reads);
+    await click('调整');
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="DSH 模型"]')?.value).toBe(
+      '["custom","other-model"]',
+    );
+    expect(vi.mocked(apiFetch).mock.calls).toHaveLength(reads);
+    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/prepare') || path.endsWith('/test'))).toBe(
+      false,
+    );
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {
     await act(async () => root.unmount());

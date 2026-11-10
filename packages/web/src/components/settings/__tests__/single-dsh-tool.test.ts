@@ -61,3 +61,23 @@ it('returns to the retained complete binding and works without Desktop discovery
   expect(memberRuntimeTools([], [], undefined, form).filter((item) => item.id === 'dsh')).toHaveLength(1);
   expect(tools.some((item) => item.id.startsWith('manual:') && item.acp?.command === '')).toBe(true);
 });
+it('keeps a backend-verified SDK binding unique when switching away and back without Desktop', () => {
+  const sdkForm = { ...form, acpCommand: 'node', acpStartupArgs: '/installed/dsh/lib/bin.js --profile acp' };
+  const sdk: RuntimeChoice = {
+    ...discovery,
+    id: 'acp:own',
+    dshDesktop: undefined,
+    dshSetupSupported: true,
+    env: sdkForm.env,
+    acp: { command: 'node', startupArgs: ['/installed/dsh/lib/bin.js', '--profile', 'acp'] },
+  };
+  const away = switchMemberRuntime(
+    { version: 1, form: sdkForm, baseline: null, section: 'runtime', templateId: null },
+    { id: 'codex', label: 'Codex', clientId: 'openai', installed: true, models: [] },
+  );
+  const tools = memberRuntimeTools([sdk], [], away.runtimeDrafts, away.form);
+  const dsh = tools.find((item) => item.id === 'dsh')!;
+  expect(dsh).toBeDefined();
+  expect(tools.some((item) => item.id.startsWith('draft:') && item.acp?.command === 'node')).toBe(false);
+  expect(switchMemberRuntime(away, dsh).form).toMatchObject(pickRuntime(sdkForm));
+});

@@ -76,8 +76,8 @@ it.each([
       otherMounted = false;
     }
     await act(async () => finish(Response.json({ runtimes: [runtime] })));
-    if (newer === 'success') expect(host.textContent).not.toContain('复用 DSH Desktop');
-    else expect(host.textContent).toContain('复用 DSH Desktop');
+    expect(host.querySelector('select[aria-label="使用工具"] option[value=dsh]') !== null).toBe(newer !== 'success');
+    expect(host.textContent).not.toContain('复用 DSH Desktop');
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {
     await act(async () => {

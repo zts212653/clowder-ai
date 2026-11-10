@@ -45,7 +45,7 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
     import('../config/cat-config-loader.js'),
     import('../config/member-environment.js'),
     import('../config/member-config-revision.js'),
-    import('../domains/cats/services/agents/providers/acp/acp-mcp-source.js'),
+    import('../domains/cats/services/agents/providers/acp/configuration/acp-mcp-source.js'),
     import('../domains/cats/services/agents/providers/acp/acp-session-env.js'),
     import('./dsh-check-launch.js'),
     import('./dsh-desktop-setup.js'),

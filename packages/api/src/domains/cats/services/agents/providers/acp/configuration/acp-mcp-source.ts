@@ -1,12 +1,12 @@
-import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
+import { resolveBinaryRoot } from '../../../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
   resolveInvokeCapabilityRoot,
-} from '../../../../../../config/capabilities/invoke-capability-root.js';
-import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
-import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
-import { captureSessionMcpServers } from './acp-session-env.js';
-import type { AcpMcpServer } from './types.js';
+} from '../../../../../../../config/capabilities/invoke-capability-root.js';
+import { readInvocationMcpConfig } from '../../../../../../../config/capabilities/invoke-mcp-config.js';
+import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from '../acp-mcp-resolver.js';
+import { captureSessionMcpServers } from '../acp-session-env.js';
+import type { AcpMcpServer } from '../types.js';
 
 /** Share source admission between normal turns and the definition-only check. */
 export async function captureAcpMcpSources(input: {
