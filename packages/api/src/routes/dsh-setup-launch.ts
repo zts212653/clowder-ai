@@ -26,7 +26,7 @@ export interface DshSetupLaunch {
 /** Unknown wrappers can change HOME or run arbitrary commands: keep them manual. */
 export function resolveDshSetupLaunch(command: string, args: string[], cwd: string): DshSetupLaunch {
   resolveDshHome();
-  const desktop = process.platform === 'win32' && resolveDshDesktopLaunch(command, args);
+  const desktop = process.platform === 'win32' && resolveDshDesktopLaunch(resolveCliCommandOrBare(command), args);
   const plan = desktop
     ? { command, args }
     : process.platform === 'win32'

@@ -9,6 +9,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, win32 } from 'node:path';
+import { resolveCliCommandOrBare } from './cli-resolve.js';
 import { resolveDshDesktopLaunch } from './dsh-desktop-launch.js';
 
 /**
@@ -309,7 +310,10 @@ export function resolveWindowsSpawnPlan(
   args: readonly string[],
   options: { refresh?: boolean } = {},
 ): WindowsSpawnPlan {
-  const desktop = resolveDshDesktopLaunch(command, args);
+  const desktop = resolveDshDesktopLaunch(
+    /^dsh(?:\.cmd)?$/i.test(command) ? resolveCliCommandOrBare(command) : command,
+    args,
+  );
   if (desktop) return { ...desktop, mode: 'shim' };
   if (options.refresh) {
     resolvedShimCache.delete(buildShimCacheKey(command));

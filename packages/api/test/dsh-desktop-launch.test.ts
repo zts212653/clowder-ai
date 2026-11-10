@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { resolveDshSetupLaunch } from '../src/routes/dsh-setup-launch.js';
 import { discoverDshRuntime } from '../src/routes/native-dsh-discovery.js';
+import { invalidateCliCommand } from '../src/utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../src/utils/cli-spawn-win.js';
 
 test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', (t) => {
@@ -56,12 +57,20 @@ test('the installed Desktop launcher preserves its Electron CLI and environment 
   });
   if (process.platform === 'win32') {
     const previous = process.env.DSH_HOME;
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin};${previousPath}`;
+    invalidateCliCommand('dsh');
     process.env.DSH_HOME = root;
     t.after(() => {
       if (previous === undefined) delete process.env.DSH_HOME;
       else process.env.DSH_HOME = previous;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      invalidateCliCommand('dsh');
     });
     assert.deepEqual(resolveDshSetupLaunch(command, args, root), { command, args, cwd: root, profileIndex: 1 });
+    assert.equal(resolveWindowsSpawnPlan('dsh', args).command, join(root, 'DeepSeek Harness.exe'));
+    assert.deepEqual(resolveDshSetupLaunch('dsh', args, root), { command: 'dsh', args, cwd: root, profileIndex: 1 });
   }
   writeFileSync(command, script.replace('setlocal DisableDelayedExpansion', 'set DSH_HOME=C:\\other-home'));
   assert.equal(resolveWindowsSpawnPlan(command, args, { refresh: true }).env, undefined);
