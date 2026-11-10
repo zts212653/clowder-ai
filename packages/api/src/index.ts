@@ -3572,6 +3572,8 @@ async function main(): Promise<void> {
     | import('./domains/collaborative-content/asset-canon/member-service.js').MemberCanonService
     | undefined;
   await app.register(catsRoutes, {
+    ...(redis ? { connectionCheckRedis: redis } : {}),
+    resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),

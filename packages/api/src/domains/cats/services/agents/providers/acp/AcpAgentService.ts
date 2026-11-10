@@ -23,12 +23,6 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
-import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
-import {
-  assertMappedCapabilitySource,
-  resolveInvokeCapabilityRoot,
-} from '../../../../../../config/capabilities/invoke-capability-root.js';
-import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
@@ -62,11 +56,10 @@ import {
 } from './acp-credential-file.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
-import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
+import { captureAcpMcpSources } from './acp-mcp-source.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
-  captureSessionMcpServers,
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
@@ -300,40 +293,16 @@ export class AcpAgentService implements AgentService {
 
   /** Resolve the same existing MCP sources before admission can wait for a process. */
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
-    const userProjectRoot = input.workingDirectory;
-    const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
-    const mcpWhitelist = input.mcpWhitelist ?? this.mcpWhitelist;
-    let baseMcpServers: AcpMcpServer[];
-    if (!mcpSupport) {
-      baseMcpServers = [];
-    } else if (mcpWhitelist !== null) {
-      const binaryRoot = resolveBinaryRoot(this.projectRoot);
-      const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-      const {
-        config: capConfig,
-        configSourceRoot,
-        accessScope,
-      } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
-      assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
-      const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, [...mcpWhitelist], undefined, {
-        mcpSupport,
-        disabledServerIds: disabled,
+    return {
+      frozenAcpMcpServers: await captureAcpMcpSources({
+        projectRoot: this.projectRoot,
         catId: this.catId as string,
-        capabilitiesConfig: capConfig,
-        configSourceRoot,
-        accessScope,
-      });
-    } else {
-      baseMcpServers = this.mcpServers;
-    }
-    let invokeServers = baseMcpServers;
-    if (mcpSupport && userProjectRoot && userProjectRoot !== this.projectRoot) {
-      const baseNames = new Set(baseMcpServers.map((s) => s.name));
-      const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
-      if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
-    }
-    return { frozenAcpMcpServers: captureSessionMcpServers(invokeServers) };
+        mcpSupport: input.mcpSupport ?? this.mcpSupportEnabled,
+        mcpWhitelist: input.mcpWhitelist ?? this.mcpWhitelist,
+        userProjectRoot: input.workingDirectory,
+        legacyServers: this.mcpServers,
+      }),
+    };
   }
 
   /**

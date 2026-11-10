@@ -1,7 +1,9 @@
+import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
+import { registerDshMemberConnectionChecks } from './member-connection-check.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
 import { discoverNativeRuntimesWithReadiness } from './native-runtimes.js';
 import { registerRuntimeCatalogRoute } from './runtime-catalog-route.js';
@@ -33,6 +35,7 @@ import {
   getDefaultCliEffortForProvider,
   hasBuiltinGptProCanonicalMention,
   isBuiltinGptProIdentity,
+  isDshLauncher,
   normalizeCliEffortForProvider,
   projectBuiltinCloudIdentityProtection,
   type RosterEntry,
@@ -960,6 +963,10 @@ async function cleanupBlockedMcpForAllProjects(projectRoot: string, deletedCatId
 }
 
 interface CatsRoutesOptions {
+  connectionCheckRedis?: RedisClient;
+  resolvePluginMcpView?: () => Promise<
+    import('../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
+  >;
   memberAssets?: () => MemberCanonService | undefined;
   addressedPlugins?: () =>
     | import('../domains/plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets
@@ -974,6 +981,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
   registerRuntimeCatalogRoute(app);
   registerDshSetupRoutes(app);
+  registerDshMemberConnectionChecks(app, {
+    redis: opts.connectionCheckRedis,
+    resolvePluginMcpView: opts.resolvePluginMcpView,
+  });
   app.get('/api/cats/native-runtimes', async (request, reply) => {
     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后检查本机工具' });
     return (opts.nativeRuntimeDiscovery ?? discoverNativeRuntimesWithReadiness)(
@@ -1660,7 +1671,21 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
       }
 
-      const effectiveEnvironment = body.env ?? currentCat.env;
+      // The public Desktop binding exposes only DSH_HOME. Preparing a new HOME
+      // must preserve other owner overrides which the editor cannot read back.
+      const nativeDsh =
+        usesAcpTransport &&
+        (body.configurationSource ?? currentCat.configurationSource) === 'native_tool' &&
+        effectiveAcpConfig &&
+        isDshLauncher(effectiveAcpConfig.command, effectiveAcpConfig.startupArgs);
+      const effectiveEnvironment =
+        body.env === null
+          ? undefined
+          : body.env === undefined
+            ? currentCat.env
+            : nativeDsh
+              ? { ...currentCat.env, ...body.env }
+              : body.env;
       const launchChanged =
         effectiveAcpConfig?.command !== currentAcpConfig?.command ||
         JSON.stringify(effectiveAcpConfig?.startupArgs) !== JSON.stringify(currentAcpConfig?.startupArgs) ||
@@ -1746,7 +1771,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           ...(body.banner !== undefined ? { banner: body.banner } : {}),
           ...(body.color !== undefined ? { color: body.color } : {}),
           ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
-          ...(body.env !== undefined ? { env: body.env } : {}),
+          ...(body.env !== undefined ? { env: body.env === null ? null : effectiveEnvironment } : {}),
           ...(body.configurationSource !== undefined ? { configurationSource: body.configurationSource } : {}),
           ...(body.agentProvider !== undefined ? { agentProvider: body.agentProvider } : {}),
           ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),

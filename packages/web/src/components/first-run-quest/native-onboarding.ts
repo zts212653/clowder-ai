@@ -20,6 +20,8 @@ export interface NativePartner {
   selected: boolean;
   /** Persisted before POST; independent of descriptor-based UI identity and member ID. */
   creationRequestKey?: string;
+  /** Exact prepared write intent retained across an uncertain POST response. */
+  creationForm?: HubCatEditorFormState;
   /** Upgrade-only marker: several old descriptors shared this pending request key. */
   legacySharedRequestKey?: string;
   existingId?: string;
@@ -43,6 +45,7 @@ export const newNativeRequestKey = () =>
 export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEditorFormState): boolean {
   if (!runtime.installed || (runtime.clientId === 'acp' && !runtime.acp)) return false;
   if (runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs)) {
+    if (runtime.dshDesktop) return true; // Desktop is prepared automatically before writing.
     const current = form ?? { ...initialState(), ...runtimeDefaults(runtime) };
     return (
       usesDetectedRuntimeConfiguration(current, runtime) &&
@@ -107,7 +110,7 @@ export function recommendNativePartners(
     ]);
     // Full descriptor equality prevents short-hash collisions in the local partner index.
     const key = runtime.acp ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
-    const discoveryIdentity = runtime.acp ? descriptor : runtime.id;
+    const discoveryIdentity = runtime.dshDesktop ? 'dsh' : runtime.acp ? descriptor : runtime.id;
     if (seen.has(discoveryIdentity)) return [];
     seen.add(discoveryIdentity);
     const form = nativePartnerIdentity(runtime, templates, cats);

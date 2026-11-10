@@ -12,6 +12,8 @@ import { memberSaveCopy } from '../../members/member-save.shell-copy';
 import { useShellCopy } from '../../shell/shell-copy';
 import { useShellLanguage } from '../../shell/shell-language';
 import { settingsDetailCopy } from '../settings-detail.shell-copy';
+import { DshConnectionStatus } from './DshConnectionStatus';
+import { DSH_CHECK_FEE_MESSAGE } from './dsh-connection-check-client';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
@@ -19,6 +21,7 @@ import { MemberCodexOptions } from './MemberCodexOptions';
 import { MemberDeleteButton } from './MemberDeleteButton';
 import { MemberRuntimeFields } from './MemberRuntimeFields';
 import { pickRuntime } from './member-runtime-draft';
+import { needsDshPreparation } from './prepare-native-member';
 import { useMemberEditor } from './useMemberEditor';
 
 const sections = [
@@ -240,6 +243,13 @@ export function MemberSettingsPage({
                     editing={Boolean(cat)}
                     onValidityChange={setRuntimeValid}
                   />
+                  {baseline && dshMember(baseline) && (
+                    <DshConnectionStatus
+                      key={baseline.configurationRevision}
+                      member={baseline}
+                      result={editor.connectionCheck}
+                    />
+                  )}
                 </div>
               )}
               {section === 'runtime' ? (
@@ -307,6 +317,9 @@ export function MemberSettingsPage({
                 {editor.error}
               </div>
             )}
+            {!draft.pendingWrite && needsDshPreparation(form, baseline) && (
+              <p className="w-full text-sm text-cafe-secondary">{t(...DSH_CHECK_FEE_MESSAGE)}</p>
+            )}
             {draft.pendingWrite ? (
               <span className="text-sm" role="status">
                 {t(
@@ -353,7 +366,9 @@ export function MemberSettingsPage({
                 className="min-h-11 rounded-lg bg-cafe-accent px-5 text-sm font-semibold text-[var(--cafe-surface)] disabled:opacity-50"
               >
                 {saving
-                  ? t('保存中…', 'Saving…')
+                  ? editor.connectionCheck?.state === 'checking'
+                    ? t('已保存，正在检查…', 'Saved, checking…')
+                    : t('保存中…', 'Saving…')
                   : draft.pendingWrite
                     ? t('核对上次保存', 'Reconcile previous save')
                     : cat

@@ -2,9 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import { initialState } from '../hub-cat-editor.model';
+import { initialState, splitCommandArgs } from '../hub-cat-editor.model';
+import { checkSavedDshMember, showDshConnectionCheckResult } from '../settings/members/dsh-connection-check-client';
 import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
 import { matchesRuntime } from '../settings/members/member-runtime-draft';
+import { needsDshPreparation, prepareNativeMember } from '../settings/members/prepare-native-member';
 import { syncDraftToStorage } from '../thread-drafts';
 import { legacyCreationKey, legacySharedKey } from './legacy-creation-key';
 import { buildNativeCreationPayload } from './native-creation-payload';
@@ -168,6 +170,7 @@ export function useNativeOnboarding(
                     ? legacyCreationKey(previous, saved.partners)
                     : (previous.creationRequestKey ?? partner.creationRequestKey),
               legacySharedRequestKey: saved?.idScheme ? legacySharedKey(previous, saved.partners) : undefined,
+              creationForm: previous.creationForm,
               existingId: confirmed && savedMember ? savedMember.id : undefined,
               missingExisting: Boolean(previous.existingId && !savedMember),
               ...(!confirmed && savedMember && !saved?.idScheme
@@ -261,9 +264,35 @@ export function useNativeOnboarding(
         await prepareFirstRunEntry();
       }
       for (const selection of selected) {
-        const partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
+        let partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
         const id = partner.id;
         if (progress.created[id]) continue;
+        const checkAfterSaving =
+          !!partner.runtime.dshDesktop && !partner.existingId && needsDshPreparation(partner.form);
+        if (checkAfterSaving && !partner.creationForm) {
+          setBusy(`正在准备 ${partner.form.displayName} 的 Desktop 配置…`);
+          const form = await prepareNativeMember(partner.form);
+          partner = {
+            ...partner,
+            form,
+            creationForm: form,
+            runtime: {
+              ...partner.runtime,
+              env: form.env,
+              configuredModel: form.defaultModel,
+              acp: {
+                command: form.acpCommand,
+                startupArgs: splitCommandArgs(form.acpStartupArgs),
+                transport: form.acpTransport,
+              },
+            },
+          };
+          progress = { ...progress, partners: progress.partners.map((p) => (p.id === id ? partner : p)) };
+          persist(progress); // Stable complete request body is recoverable before POST.
+        }
+        if (partner.creationForm && JSON.stringify(partner.creationForm) !== JSON.stringify(partner.form)) {
+          throw Error('上次创建结果待核对。请先恢复上次提交的草稿，避免用同一请求覆盖不同配置。');
+        }
         setBusy(`正在添加 ${partner.form.displayName}…`);
         pendingPartner = partner;
         const result = partner.existingId
@@ -274,7 +303,9 @@ export function useNativeOnboarding(
                 mentionPatterns: partner.form.mentionPatterns.split(/[\s,]+/).filter(Boolean),
               },
             }
-          : await readJson<{ cat: { id: string; displayName: string; mentionPatterns: string[] } }>('/api/cats', {
+          : await readJson<{
+              cat: { id: string; displayName: string; mentionPatterns: string[]; configurationRevision?: string };
+            }>('/api/cats', {
               method: 'POST',
               headers: {
                 ...headers,
@@ -305,6 +336,11 @@ export function useNativeOnboarding(
           },
         };
         persist(progress);
+        if (checkAfterSaving) {
+          setBusy(`已添加 ${result.cat.displayName}，正在检查连接…`);
+          const checked = await checkSavedDshMember(result.cat);
+          showDshConnectionCheckResult(result.cat.displayName, checked);
+        }
       }
       const lead = progress.created[selected.find((p) => p.id === current.lead)?.id ?? selected[0].id];
       if (mode === 'members') {

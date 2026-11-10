@@ -1,4 +1,6 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import type { AgentClientLibrary } from '@/hooks/useAgentClientLibraries';
+import { type HubCatEditorFormState, splitCommandArgs } from '../../hub-cat-editor.model';
 import type { MemberText } from './MemberRuntimeFields';
 import { MANUAL_RUNTIME_CHOICES } from './manual-runtime-choices';
 import {
@@ -14,6 +16,7 @@ export function memberRuntimeTools(
   runtimes: RuntimeChoice[],
   libraries: AgentClientLibrary[],
   runtimeDrafts?: RuntimeDrafts,
+  form?: HubCatEditorFormState,
 ): RuntimeChoice[] {
   const pluginTools: RuntimeChoice[] = libraries.flatMap((library) =>
     library.clients.map((client) => ({
@@ -25,7 +28,7 @@ export function memberRuntimeTools(
       acp: { agentProvider: client.ref, command: 'plugin-agent', startupArgs: [] },
     })),
   );
-  return [
+  const tools = [
     ...runtimes,
     ...pluginTools,
     ...rememberedRuntimes(runtimeDrafts).filter(
@@ -35,6 +38,42 @@ export function memberRuntimeTools(
       (item) => item.clientId === 'acp' || !runtimes.some((runtime) => runtime.clientId === item.clientId),
     ),
   ];
+  const dshChoice = (item: RuntimeChoice) =>
+    !!item.dshDesktop ||
+    item.dshSetupSupported === true ||
+    (item.id.startsWith('acp:') && item.onboardingEligible === false) ||
+    (!!item.acp && isDshLauncher(item.acp.command, item.acp.startupArgs));
+  const binding =
+    form?.carrier === 'acp' && isDshLauncher(form.acpCommand, splitCommandArgs(form.acpStartupArgs))
+      ? form
+      : Object.values(runtimeDrafts ?? {})
+          .reverse()
+          .find(
+            (draft) =>
+              draft.carrier === 'acp' && isDshLauncher(draft.acpCommand, splitCommandArgs(draft.acpStartupArgs)),
+          );
+  const source = runtimes.find((item) => item.dshDesktop);
+  const dsh: RuntimeChoice | undefined = binding
+    ? {
+        id: 'dsh',
+        label: 'DSH',
+        clientId: 'acp',
+        installed:
+          source?.installed ?? runtimes.find((runtime) => runtime.id === `acp:${form?.catId}`)?.installed ?? false,
+        models: [],
+        env: binding.env,
+        configuredModel: binding.defaultModel,
+        configuredEffort: binding.cliEffort,
+        acp: {
+          command: binding.acpCommand,
+          startupArgs: splitCommandArgs(binding.acpStartupArgs),
+          transport: binding.acpTransport,
+        },
+      }
+    : source
+      ? { ...source, id: 'dsh', label: 'DSH', discoveryStatus: undefined }
+      : undefined;
+  return [...tools.filter((item) => !dshChoice(item)), ...(dsh ? [dsh] : [])];
 }
 
 function runtimeStatus(item: RuntimeChoice, t: MemberText) {

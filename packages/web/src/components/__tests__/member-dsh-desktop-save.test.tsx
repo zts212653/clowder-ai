@@ -10,7 +10,12 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'isolated-desktop-save' }));
 vi.mock('../members/MemberCurrentStatus', () => ({ MemberCurrentStatus: () => null }));
 
-it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through the %s path', async (mode) => {
+it.each([
+  'connect',
+  'check-failed',
+  'prepare-failed',
+  'metadata',
+])('automatically saves Desktop configuration through the %s path', async (mode) => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   sessionStorage.clear();
   useMemberModelCatalogs.setState(useMemberModelCatalogs.getInitialState());
@@ -25,7 +30,7 @@ it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through 
     mentionPatterns: ['@whale'],
     color: { primary: '#123456', secondary: '#abcdef' },
     acp: {
-      command: mode === 'metadata' ? '/desktop/dsh.cmd' : '/old/dsh.cmd',
+      command: mode === 'metadata' ? '/desktop/dsh.cmd' : '/old/agent.cmd',
       startupArgs: ['--profile', 'acp'],
       transport: 'stdio',
     },
@@ -41,9 +46,12 @@ it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through 
     acp: { command: '/desktop/dsh.cmd', startupArgs: ['--profile', 'acp'], transport: 'stdio' },
   };
   let savedPayload: Record<string, unknown> | undefined;
+  const onSaved = vi.fn();
+  const order: string[] = [];
   vi.mocked(apiFetch).mockImplementation(async (url, request) => {
     if (url === `/api/cats/${cat.id}` && request?.method === 'PATCH') {
       savedPayload = JSON.parse(String(request.body));
+      order.push('saved');
       return Response.json({ cat: { ...cat, ...savedPayload } });
     }
     if (url.startsWith('/api/cats/native-runtimes')) return Response.json({ runtimes: [runtime] });
@@ -55,15 +63,22 @@ it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through 
         providers: [{ id: 'custom', credential: 'configured', models: [{ id: 'flash', label: 'Flash' }] }],
       });
     if (url.endsWith('/prepare'))
+      if (mode === 'prepare-failed') return Response.json({ error: 'dsh_setup_credential_missing' }, { status: 422 });
+      else
+        return Response.json({
+          id: 'receipt',
+          command: runtime.acp.command,
+          startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'],
+          env: { DSH_HOME: '/host/private-home' },
+          provider: 'custom',
+          model: 'flash',
+        });
+    if (url.endsWith('/connection-check')) {
+      if (request?.method === 'POST') order.push('checked');
       return Response.json({
-        id: 'receipt',
-        command: runtime.acp.command,
-        startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'],
-        env: { DSH_HOME: '/host/private-home' },
-        provider: 'custom',
-        model: 'flash',
+        state: request?.method === 'POST' ? (mode === 'check-failed' ? 'failed' : 'passed') : 'unchecked',
       });
-    if (url.endsWith('/test')) return Response.json({ ok: true });
+    }
     if (url === '/api/accounts') return Response.json({ providers: [], projectPath: '/fixture' });
     if (url === '/api/session') return Response.json({ userId: 'fixture' });
     if (url === '/api/cat-templates') return Response.json({ templates: [] });
@@ -76,17 +91,17 @@ it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through 
   const click = async (name: string) => {
     const button = [...host.querySelectorAll('button')].find((item) => item.textContent === name);
     expect(button, name).toBeDefined();
-    await act(async () => button!.click());
+    await act(async () => button?.click());
   };
   try {
     await act(async () =>
-      root.render(<MemberSettingsPage cat={cat} cats={[cat]} onBack={vi.fn()} onSaved={vi.fn()} />),
+      root.render(<MemberSettingsPage cat={cat} cats={[cat]} onBack={vi.fn()} onSaved={onSaved} />),
     );
     if (mode === 'metadata') {
       await click('身份与职责');
       const input = [...host.querySelectorAll('input')].find((input) => input.value === 'Whale')!;
       await act(async () => {
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Renamed Whale');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'Renamed Whale');
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
     } else {
@@ -95,23 +110,29 @@ it.each(['inspect', 'verify', 'metadata'])('saves Desktop configuration through 
         selector.value = 'dsh';
         selector.dispatchEvent(new Event('change', { bubbles: true }));
       });
-      await click('读取 Desktop 配置');
-      if (mode === 'verify') await click('验证并使用此模型');
+      expect(host.textContent).not.toContain('验证并使用此模型');
+      expect(host.textContent).not.toContain('读取 Desktop 配置');
     }
     await click('保存');
-    if (mode === 'inspect') {
-      expect(savedPayload, 'Reading Desktop metadata must not persist a bare native ACP launch').toBeUndefined();
-    } else if (mode === 'verify') {
+    if (mode === 'prepare-failed') {
+      expect(savedPayload).toBeUndefined();
+      expect(onSaved).not.toHaveBeenCalled();
+    } else if (mode !== 'metadata') {
       expect(savedPayload).toMatchObject({
         defaultModel: '["custom","flash"]',
         env: { DSH_HOME: '/host/private-home' },
         acp: { command: runtime.acp.command, startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'] },
       });
+      expect(order).toEqual(['saved', 'checked']);
+      expect(onSaved).toHaveBeenCalledOnce();
     } else {
       expect(savedPayload).toMatchObject({ displayName: 'Renamed Whale' });
       expect(savedPayload?.acp).toBeUndefined();
       expect(savedPayload?.env).toBeUndefined();
+      expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url.endsWith('/prepare'))).toBe(false);
+      expect(order).toEqual(['saved']);
     }
+    expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url.endsWith('/test'))).toBe(false);
   } finally {
     await act(async () => root.unmount());
     host.remove();

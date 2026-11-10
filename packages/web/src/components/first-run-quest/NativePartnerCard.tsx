@@ -36,8 +36,8 @@ export function NativePartnerCard({
     form.defaultModel || (detectedConfiguration ? runtime.configuredModel : undefined),
   );
   const effort = form.cliEffort || (detectedConfiguration ? runtime.configuredEffort : undefined);
-  const profileLabel = nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
-  const profileMessage = nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
+  const profileLabel = runtime.dshDesktop ? undefined : nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
+  const profileMessage = runtime.dshDesktop ? undefined : nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
   return (
     <article
       className={`rounded-xl border p-4 ${partner.selected && selectable ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
@@ -76,9 +76,7 @@ export function NativePartnerCard({
                   ? '已安装 · 登录校验未通过'
                   : available
                     ? dsh
-                      ? selectable
-                        ? '已验证当前配置'
-                        : '已安装 · 待验证当前配置'
+                      ? '已安装 · 添加时自动配置'
                       : '已安装'
                     : runtime.discoveryStatus === 'adapter_missing'
                       ? '已安装 · 待接入适配器'
@@ -96,7 +94,7 @@ export function NativePartnerCard({
             aria-expanded={expanded}
             className="min-h-10 shrink-0 text-sm text-cafe-accent"
           >
-            {expanded ? '收起' : dsh && !selectable ? '配置与验证' : '调整'}
+            {expanded ? '收起' : '调整'}
           </button>
         )}
       </div>
@@ -116,6 +114,11 @@ export function NativePartnerCard({
                 ? '安装 DSH 后重新检测；首次连接时由 DSH 准备 ACP。'
                 : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
       </p>
+      {runtime.dshDesktop && !partner.existingId && !created && (
+        <p className="mt-2 text-sm text-cafe-secondary">
+          添加后自动检查连接，费用取决于模型和工具定义规模。检查失败保留成员，不自动重试。
+        </p>
+      )}
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.identityConflict && !created && (
         <p role="status" className="mt-3 text-sm text-cafe-secondary">

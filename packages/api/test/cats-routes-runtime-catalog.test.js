@@ -164,7 +164,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       carrier: 'acp',
       configurationSource: 'native_tool',
       acp: original,
-      env: { DSH_HOME: invalidHome },
+      env: { DSH_HOME: invalidHome, HTTPS_PROXY: 'http://proxy.fixture' },
     });
     const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
     writeFileSync(catalogPath, JSON.stringify(catalog));
@@ -173,6 +173,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const { catsRoutes } = await import('../dist/routes/cats.js');
     const app = Fastify();
     await app.register(catsRoutes);
+    const previousDshHome = process.env.DSH_HOME;
     const patch = async (payload) => {
       const headers = { 'x-cat-cafe-user': 'fixture-owner' };
       const response = await app.inject({ method: 'GET', url: '/api/cats', headers });
@@ -198,8 +199,29 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       assert.equal(rejectedHome.json().code, 'acp_profile_invalid');
       const persisted = JSON.parse(readFileSync(catalogPath, 'utf8')).breeds[0].variants[0];
       assert.equal(persisted.env.DSH_HOME, validHome);
+      assert.equal(
+        persisted.env.HTTPS_PROXY,
+        'http://proxy.fixture',
+        'preparing a new HOME preserves overrides hidden from the UI',
+      );
+      process.env.DSH_HOME = invalidHome;
+      assert.equal(
+        (await patch({ env: null })).statusCode,
+        400,
+        'clearing HOME validates the actual fallback rather than the old HOME',
+      );
+      process.env.DSH_HOME = validHome;
+      const cleared = await patch({ env: null });
+      assert.equal(cleared.statusCode, 200, cleared.body);
+      assert.equal(
+        JSON.parse(readFileSync(catalogPath, 'utf8')).breeds[0].variants[0].env,
+        undefined,
+        'explicit null still clears owner overrides',
+      );
       assert.equal(readFileSync(join(invalidHome, 'profiles/acp/cordis.patch.yml'), 'utf8'), '# no array\n');
     } finally {
+      if (previousDshHome === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = previousDshHome;
       await app.close();
     }
   });

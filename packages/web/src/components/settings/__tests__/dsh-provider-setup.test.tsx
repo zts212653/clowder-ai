@@ -11,67 +11,54 @@ afterEach(async () => {
   await act(async () => root.render(null));
   vi.unstubAllGlobals();
 });
-const inspection = {
-  revision: 'a'.repeat(64),
-  provider: 'custom',
-  model: 'custom-model',
-  providers: [{ id: 'custom', credential: 'configured', models: [{ id: 'custom-model', label: 'Custom' }] }],
-};
-const connection = {
-  id: 'receipt',
-  command: 'dsh.cmd',
-  startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'],
-  env: { DSH_HOME: '/host/home' },
-  provider: 'custom',
-  model: 'custom-model',
-};
-async function click(label: string) {
-  const button = [...host.querySelectorAll('button')].find((b) => b.textContent === label)!;
-  await act(async () => button.click());
-}
-
-it.each([
-  ['dsh_setup_changed', '配置已变化'],
-  ['dsh_setup_credential_missing', '未配置认证'],
-  ['dsh_setup_auth_refresh_required', '更新登录认证'],
-])('preserves the member draft when verification fails with %s', async (error, message) => {
-  const prepared = vi.fn();
-  const fetch = vi.fn(
-    async (path: string) =>
-      new Response(
-        JSON.stringify(path.endsWith('inspect') ? inspection : path.endsWith('prepare') ? connection : { error }),
-        { status: path.endsWith('test') ? 422 : 200 },
-      ),
+it('automatically reads metadata, keeps explicit preferences and never prepares or tests on opening', async () => {
+  const select = vi.fn();
+  const fetch = vi.fn(async (_path: string) =>
+    Response.json({
+      revision: 'r',
+      provider: 'official',
+      model: 'default',
+      providers: [
+        { id: 'official', credential: 'configured', models: [{ id: 'default', label: 'Default' }] },
+        { id: 'custom', credential: 'configured', models: [{ id: 'chosen', label: 'Chosen' }] },
+      ],
+    }),
   );
   vi.stubGlobal('fetch', fetch);
-  await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
-  expect(fetch).not.toHaveBeenCalled();
-  await click('读取 Desktop 配置');
-  await click('验证并使用此模型');
-  expect(host.textContent).toContain(message);
-  expect(prepared).not.toHaveBeenCalled();
-});
-
-it.each(['prepare', 'test'])('ignores a late %s response after the launch or preferences change', async (stage) => {
-  const prepared = vi.fn();
-  let accept: ((response: Response) => void) | undefined;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((path: string) =>
-      path.endsWith(stage)
-        ? new Promise<Response>((resolve) => {
-            accept = resolve;
-          })
-        : Promise.resolve(new Response(JSON.stringify(path.endsWith('inspect') ? inspection : connection))),
+  await act(async () =>
+    root.render(
+      <DshProviderSetup runtimeId="dsh" selectedModel='["custom","chosen"]' onSelection={select} t={(zh) => zh} />,
     ),
   );
-  const render = (key: string) =>
-    root.render(<DshProviderSetup runtimeId="dsh" verificationKey={key} onPrepared={prepared} t={(zh) => zh} />);
-  await act(async () => render('old'));
-  await click('读取 Desktop 配置');
-  await click('验证并使用此模型');
-  await act(async () => render('changed'));
-  await act(async () => accept!(new Response(JSON.stringify(stage === 'prepare' ? connection : { ok: true }))));
-  expect(prepared).not.toHaveBeenCalled();
-  expect(host.textContent).not.toContain('此配置已收到模型回复');
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toContain('/inspect');
+  expect(host.textContent).toContain('Chosen');
+  expect(select).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain('验证并使用');
+  expect(host.textContent).not.toContain('客户端未上报');
+});
+it('ignores an old installation response after changing sources', async () => {
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_url, init: RequestInit) =>
+      JSON.parse(String(init.body)).runtimeId === 'old'
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(Response.json({ providers: [], revision: 'new' })),
+    ),
+  );
+  await act(async () => root.render(<DshProviderSetup runtimeId="old" onSelection={vi.fn()} t={(zh) => zh} />));
+  await act(async () => root.render(<DshProviderSetup runtimeId="new" onSelection={vi.fn()} t={(zh) => zh} />));
+  await act(async () =>
+    finish(
+      Response.json({
+        provider: 'old',
+        model: 'old',
+        providers: [{ id: 'old', credential: 'configured', models: [{ id: 'old', label: 'Old result' }] }],
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain('Old result');
 });

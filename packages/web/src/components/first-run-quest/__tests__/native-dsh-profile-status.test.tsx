@@ -105,19 +105,21 @@ it.each([
     ),
   );
   if (nativeSetup) expect(host.querySelector('option[value=dsh]')).toBeNull();
-  else
-    expect(host.querySelector('option[value=dsh]')?.textContent).toContain(
-      invalid ? '已安装 · ACP 配置异常' : '已安装 · 首次连接初始化 ACP',
-    );
-  expect(host.textContent).toContain(invalid ? '修复现有 ACP 配置' : '实际连接时由 DSH 准备');
-  expect(host.textContent).toContain(invalid ? '不会自动覆盖' : '浏览和创建伙伴不会初始化');
+  else if (invalid) expect(host.querySelector('option[value=dsh]')?.textContent).toContain('已安装 · ACP 配置异常');
+  if (invalid) {
+    expect(host.textContent).toContain('修复现有 ACP 配置');
+    expect(host.textContent).toContain('不会自动覆盖');
+  } else {
+    expect(host.textContent).toContain('当前启动配置已保留');
+    expect(host.textContent).toContain('仅修改名字或职责可直接保存');
+  }
   expect(host.textContent).not.toContain('已检测登录');
   expect(patch).not.toHaveBeenCalled();
   expect(validity).toHaveBeenLastCalledWith(!invalid);
   expect(new Set(vi.mocked(apiFetch).mock.calls.map(([path]) => path))).toEqual(
     new Set([
       '/api/cats/native-runtimes',
-      '/api/cats/runtime-models',
+      ...(invalid ? ['/api/cats/runtime-models'] : []),
       ...(!nativeSetup ? ['/api/agent-providers'] : []),
     ]),
   );
