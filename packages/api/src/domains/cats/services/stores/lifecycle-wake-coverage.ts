@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import type { LifecycleAppendBoundaryInput } from '@cat-cafe/shared';
 import { isTaskHandoffSource } from '../../../ball-custody/task-handoff-source.js';
 import type { QueueLedgerEntry } from '../agents/invocation/queue-ledger/QueueLedger.js';
 import { prepareLifecycleAppendAdmission, type StoredMessage } from './ports/MessageStore.js';
@@ -12,6 +13,8 @@ export interface LifecycleWakeCoverageInput {
   responseMessageId: string;
   entries: readonly { entryId: string; messageId: string }[];
   at: number;
+  /** Admission-time body cut for this target's response; absent means no trusted cut. */
+  appendBoundary?: LifecycleAppendBoundaryInput;
 }
 
 export type LifecycleWakeCoverageResult =
@@ -121,6 +124,7 @@ export function prepareLifecycleWakeCoverage(
           invocationId: input.invocationId,
           responseMessageId: response.id,
           dispatchedAt: input.at,
+          ...(input.appendBoundary ? { appendBoundary: input.appendBoundary } : {}),
         },
       ],
     });

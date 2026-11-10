@@ -205,6 +205,7 @@ import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackImageRoutes } from './callback-image-routes.js';
+import { projectCallbackLifecycleCorrelation } from './callback-lifecycle-correlation.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
@@ -4719,6 +4720,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             }
           : {};
         const projectedBody = projectCallbackMessageBody(item);
+        const lifecycleCorrelation = projectCallbackLifecycleCorrelation(item, principalCatId);
         const anchorProjection: Record<string, unknown> = {
           ...anchored,
           from: messageFrom(item),
@@ -4739,6 +4741,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ...(imagePaths.length > 0 ? { imagePaths } : {}),
           ...(imageUrls.length > 0 ? { imageUrls } : {}),
           ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+          ...lifecycleCorrelation,
         };
         const oversizedProjection: Record<string, unknown> = {
           id: item.id,
@@ -4753,6 +4756,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ...queuedProjection,
           ...localReviewProjection,
           ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+          ...lifecycleCorrelation,
         };
         return {
           id: item.id,

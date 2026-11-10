@@ -66,6 +66,8 @@ interface MessageActionsProps {
   onToggleSelection?: (messageId: string) => void;
   /** Blocks network forwarding while this browser document is not admitted to write. */
   forwardingDisabled?: boolean;
+  /** A reference to part of a message keeps quote actions, never whole-message tools. */
+  selectionOnly?: boolean;
 }
 
 const COMPACT_ACTIONS_QUERY = '(max-width: 767px), (hover: none) and (pointer: coarse)';
@@ -178,6 +180,7 @@ export function MessageActions({
   onEnterSelection,
   onToggleSelection,
   forwardingDisabled = false,
+  selectionOnly = false,
 }: MessageActionsProps) {
   const presentation = useShellPresentation();
   const words = useShellCopy(messageActionsCopy);
@@ -245,7 +248,7 @@ export function MessageActions({
   const invocationTrajectory = describeMessageInvocationTrajectory(message);
   const canAct = (isUser || isAssistant) && !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
-  const canReply = !message.isStreaming && !message.queuedEntryId && !isRecalled;
+  const canReply = !selectionOnly && !message.isStreaming && !message.queuedEntryId && !isRecalled;
   // A processing lifecycle can exist before its assistant bubble has any body.
   // In that state MessageActionSlot has not mounted, so the legacy fallback dock
   // would float over the author row. Wait for the real bubble-owned slot instead.
