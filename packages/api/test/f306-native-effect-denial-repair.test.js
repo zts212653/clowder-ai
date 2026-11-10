@@ -18,10 +18,11 @@ import ts from 'typescript';
 import { gateBackgroundDecision } from '../../../scripts/gate-background-decision.mjs';
 import { GH_COHORT_FILES } from '../../../scripts/native-effect-gh-cohort.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
-import { copyManagedGhCohort } from './helpers/managed-gh-cohort.js';
+import { copyManagedGhCohort, isolateManagedGhProgramFixture } from './helpers/managed-gh-cohort.js';
 import { nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
 // Human276 / census271: only the policy runs. None of these command strings execute.
+isolateManagedGhProgramFixture();
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-denial-repair-')));
 const main = join(root, 'projects/relay-station/cat-cafe');
 const runtime = join(root, 'projects/relay-station/cat-cafe-runtime');

@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { explicitCopyRoles, isExactNonRecursiveCopy } from '../../../scripts/native-effect-media-classifier.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
 import { secretShellDenial } from '../../../scripts/native-secret-shell.mjs';
-import { copyManagedGhCohort } from './helpers/managed-gh-cohort.js';
+import { copyManagedGhCohort, isolateManagedGhProgramFixture } from './helpers/managed-gh-cohort.js';
 
+isolateManagedGhProgramFixture();
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-review591-')));
 const runtime = join(root, 'cat-cafe-runtime');
 const ordinary = join(root, 'ordinary');

@@ -740,6 +740,7 @@ export class IndexBuilder implements IIndexBuilder {
     const claims = await this.loadDocumentSourceClaims();
     const affectedAnchors = new Set<string>();
     const documentPassageSources: DocumentPassageSource[] = [];
+    const documentEmbeddingAnchors: string[] = [];
 
     const published = this.publishedSnapshot
       ? await this.publishedSnapshot.scan(changedPaths.map((path) => relative(this.scanRoot, path)))
@@ -833,18 +834,19 @@ export class IndexBuilder implements IIndexBuilder {
           ...(isPublicTasteVignettePath(parsed.sourcePath ?? '') ? { document: parsed } : {}),
         });
       }
-      // Taste is published by the passage transaction below. Its pending vector
-      // uses embedMissingDocumentVectors after that lifecycle fence has accepted it.
-      if (!isPublicTasteVignettePath(parsed.sourcePath ?? '') && this.embedDeps?.embedding.isReady()) {
-        try {
-          await this.embedCurrentDocument(parsed.anchor);
-        } catch {
-          // fail-open: skip embedding on error
-        }
-      }
+      if (!isPublicTasteVignettePath(parsed.sourcePath ?? '')) documentEmbeddingAnchors.push(parsed.anchor);
     }
 
     await this.indexDocumentPassages(documentPassageSources);
+    // Passage publication finalizes the document source and invalidates prior vectors.
+    // Taste still waits for embedMissingDocumentVectors after its lifecycle fence.
+    for (const anchor of documentEmbeddingAnchors) {
+      try {
+        await this.embedCurrentDocument(anchor);
+      } catch {
+        // fail-open: skip embedding on error
+      }
+    }
     await this.refreshIncrementalDocumentEdges(toUpsert, pathLinkDependents, claims);
 
     await publishDocumentSourceClaims(this.store, claims);

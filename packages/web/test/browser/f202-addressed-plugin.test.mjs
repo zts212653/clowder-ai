@@ -8,9 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { build } from 'vite';
 
-const { chromium } = await import(
-  process.env.F202_PLAYWRIGHT_MODULE ?? '../../../ppt-forge/node_modules/playwright/index.mjs'
-);
+const { chromium } = await import(process.env.F202_PLAYWRIGHT_MODULE ?? 'playwright');
 
 import { createHash } from 'node:crypto';
 import { MemoryPluginInventoryStore } from '../../../api/dist/domains/plugin/host-inventory/stores.js';

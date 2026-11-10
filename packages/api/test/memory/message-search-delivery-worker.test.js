@@ -38,6 +38,8 @@ test('ordinary cat and human searches consume the same real worker queue for bot
   sqliteVec.load(db);
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
+  const vectorStore = new VectorStore(db, 4);
+  vectorStore.initMeta({ modelId: 'controlled-delivery', modelRev: '1', dim: 4 });
   const vectors = new PassageVectorStore(db, 4);
   const insert = db.prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES (?,?,?,?)');
   const messages = new Map();
@@ -60,7 +62,7 @@ test('ordinary cat and human searches consume the same real worker queue for bot
   }
   store.setEmbedDeps({
     mode: 'on',
-    vectorStore: new VectorStore(db, 4),
+    vectorStore,
     passageVectorStore: vectors,
     embedding: {
       load: async () => {},
