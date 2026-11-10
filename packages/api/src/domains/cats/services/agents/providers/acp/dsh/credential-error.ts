@@ -1,4 +1,4 @@
-import { excerptSanitizedStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
+import { excerptSanitizedStderr } from '../../../../../../../utils/sanitize-cli-stderr.js';
 
 /** Issue #1798. DSH reports a missing credential reference as -32603 whose only
  *  payload is prose. Source evidence for "no structured payload": fixed DSH

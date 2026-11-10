@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSyn
 import { join } from 'node:path';
 import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capability-root.js';
 import { AcpClient } from '../domains/cats/services/agents/providers/acp/AcpClient.js';
-import { extractMissingCredential } from '../domains/cats/services/agents/providers/acp/acp-credential-error.js';
+import { extractMissingCredential } from '../domains/cats/services/agents/providers/acp/dsh/credential-error.js';
 import { applySessionConfiguration } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
 import { prepareDshSecretPatch } from '../domains/cats/services/agents/providers/dsh-secret-patch.js';
 import { buildDshPatch, canonicalDshConfig, composeDshProviderSource, inspectDshConfig } from './dsh-setup-config.js';

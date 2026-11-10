@@ -196,12 +196,12 @@ it.each([
   try {
     await act(async () => root.render(<Card />));
     expect(apiFetch).not.toHaveBeenCalled();
-    await click('调整');
+    await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
     await click('读取 DSH 配置');
     await click('使用此配置');
     const reads = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes').length;
     await click('收起');
-    await click('调整');
+    await click(host.textContent?.includes('配置与验证') ? '配置与验证' : '调整');
     expect(host.textContent).toContain('DSH 自定义 LLM');
     expect(host.textContent).toContain('已加入草稿，请保存成员后使用');
     await click('发送一次请求验证此配置');

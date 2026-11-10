@@ -30,6 +30,8 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/session') return json({ userId: 'first-team-owner' });
     if (path === '/api/config/onboarding/entry') return json({ status: 'pending' });
+    if (path === '/api/cats/dsh-setup/verify') return json({ ok: true });
+    if (path === '/api/cats/runtime-models') return json({ status: 'live', models: [], effortOptions: [] });
     if (path === '/api/cat-templates')
       return json({
         templates: [
@@ -106,22 +108,30 @@ it('blocks the default logged-out partner while keeping connection adjustment an
   );
   expect(adjust).toBeDefined();
   expect(adjust?.disabled).toBe(false);
-  expect(host.querySelectorAll('input:checked')).toHaveLength(2);
+  expect(host.querySelectorAll('input:checked')).toHaveLength(1);
   await act(async () => button('一键创建').click());
   const writes = vi
     .mocked(apiFetch)
     .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
-  expect(writes).toHaveLength(2);
-  expect(writes.map(([, init]) => JSON.parse(String(init?.body)).clientId)).toEqual(['openai', 'acp']);
+  expect(writes).toHaveLength(1);
+  expect(writes.map(([, init]) => JSON.parse(String(init?.body)).clientId)).toEqual(['openai']);
 });
 
-it('detects and preselects a complete team, and creates it in one click with inherited defaults', async () => {
+it('preselects native clients, verifies DSH and creates the complete team with inherited defaults', async () => {
   await mount();
-  expect(host.querySelectorAll('input:checked')).toHaveLength(3);
+  expect(host.querySelectorAll('input:checked')).toHaveLength(2);
   expect(host.textContent).toContain('负责方案和审查');
   expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method)).toBe(false);
+  const dsh = host.querySelector<HTMLInputElement>('input[aria-label="加入 DSH 伙伴"]')!;
+  expect(dsh.disabled).toBe(true);
+  await act(async () => button('配置与验证').click());
+  await act(async () => button('验证当前配置').click());
+  expect(dsh.disabled).toBe(false);
+  await act(async () => dsh.click());
   await act(async () => button('一键创建 3 位伙伴').click());
-  const posts = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
+  const posts = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([path, init]) => path === '/api/cats' && init?.method === 'POST');
   expect(posts).toHaveLength(3);
   expect(posts.every(([path]) => path === '/api/cats')).toBe(true);
   for (const [, init] of posts)
@@ -150,7 +160,7 @@ it('distinguishes discovery failure from no tools and recovers through detection
   expect(manual).toHaveBeenCalledOnce();
   failed = false;
   await act(async () => button('重新检测').click());
-  expect(button('一键创建 3 位伙伴').disabled).toBe(false);
+  expect(button('一键创建 2 位伙伴').disabled).toBe(false);
 });
 
 it('allows one selected partner and ignores the unselected partners', async () => {
@@ -196,9 +206,9 @@ it('reads the real roster before recommending and does not overwrite an existing
   ];
   await mount();
   expect(host.textContent).toContain('我的架构师');
-  await act(async () => button('一键创建 2 位伙伴').click());
+  await act(async () => button('一键创建 1 位伙伴').click());
   const posts = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
-  expect(posts).toHaveLength(2);
+  expect(posts).toHaveLength(1);
   expect(posts.some(([, init]) => String(init?.body).includes('owned-claude'))).toBe(false);
   expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/config/onboarding/entry')).toBe(false);
   expect(created).toHaveBeenCalledOnce();

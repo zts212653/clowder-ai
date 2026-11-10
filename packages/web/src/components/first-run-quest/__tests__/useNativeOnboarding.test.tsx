@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
+import { dshConnectionKey } from '../../settings/members/member-runtime-draft';
 import { getThreadDraft } from '../../thread-drafts';
 import { useNativeOnboarding } from '../useNativeOnboarding';
 
@@ -90,6 +91,17 @@ it('creates both colliding ACP profiles and restores each exact draft after redi
   await act(async () => setup.reload());
   expect(setup.draft!.partners.map((p) => p.form.catId)).toEqual(ids);
   expect(setup.draft!.partners[0].form.nickname).toBe('profile one');
+  await act(async () =>
+    setup.draft!.partners.forEach((partner) =>
+      setup.patchPartner(partner.id, {
+        selected: true,
+        runtime: {
+          ...partner.runtime,
+          connectionVerification: { key: dshConnectionKey(partner.form), checkedAt: Date.now() },
+        },
+      }),
+    ),
+  );
   await act(async () => setup.start());
   const writes = vi
     .mocked(apiFetch)

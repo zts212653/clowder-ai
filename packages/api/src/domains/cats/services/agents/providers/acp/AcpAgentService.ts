@@ -1,7 +1,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { buildCliDiagnosticContext } from '../../../../../../utils/cli-diagnostics.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
-import { extractMissingCredential } from './acp-credential-error.js';
+import { extractMissingCredential } from './dsh/credential-error.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
