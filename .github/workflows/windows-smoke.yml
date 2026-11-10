@@ -237,6 +237,7 @@ jobs:
           packages/api/test/plugin-package-staging-diagnostics.test.js
           packages/api/test/plugin-external-runtime-package.test.js
           packages/api/test/plugin-official-package-installer.test.js
+          packages/api/test/f202-dot-delivery-archive.test.js
           packages/api/test/plugin-companion-registry.smoke.mjs
         env:
           NODE_ENV: test

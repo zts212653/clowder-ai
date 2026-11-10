@@ -1358,6 +1358,7 @@ export type {
   PluginManagerUninstallRequest,
   PluginManifest,
   PluginMarketplaceSelection,
+  PluginMentionTarget,
   PluginOperationRow,
   PluginOperationRowAction,
   PluginOperationRows,

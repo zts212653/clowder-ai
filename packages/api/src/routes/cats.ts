@@ -1,4 +1,5 @@
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
+import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
 import { registerMemberCanonResponse } from './member-canon-response.js';
 import { dshLauncherProfileState, InvalidDshProfile } from './native-dsh-profile.js';
@@ -958,6 +959,9 @@ async function cleanupBlockedMcpForAllProjects(projectRoot: string, deletedCatId
 
 interface CatsRoutesOptions {
   memberAssets?: () => MemberCanonService | undefined;
+  addressedPlugins?: () =>
+    | import('../domains/plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets
+    | undefined;
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
   nativeRuntimeDiscovery?: typeof discoverNativeRuntimesWithReadiness;
@@ -1040,767 +1044,320 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     };
   });
 
-  app.post('/api/cats', async (request, reply) => {
-    const operator = resolveHeaderUserId(request);
-    if (!operator) {
-      reply.status(400);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
-    }
-
-    if (request.body != null && typeof request.body === 'object' && Object.hasOwn(request.body, 'sessionChain')) {
-      reply.status(400);
-      return { error: 'Legacy sessionChain writes are not accepted; configure session strategy intent instead' };
-    }
-    const parsed = createCatSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request', details: parsed.error.issues };
-    }
-
-    const body = parsed.data;
-
-    const createViolationFields = builtinCloudIdentityCreateViolationFields(body);
-    if (
-      body.catId === 'gpt-dot' ||
-      body.mentionPatterns?.some((pattern) => pattern.trim().toLowerCase().replace(/^@/, '') === 'dot')
-    ) {
-      return reply
-        .code(409)
-        .send({ code: 'BUILTIN_CLOUD_HANDLE_RESERVED', error: '请在 ChatGPT 云端插件中接入这只独立云端成员。' });
-    }
-    if (createViolationFields.length > 0) {
-      reply.status(409);
-      return {
-        code: isBuiltinGptProIdentity(body.catId)
-          ? 'BUILTIN_CLOUD_IDENTITY_PROTECTED'
-          : 'BUILTIN_CLOUD_HANDLE_RESERVED',
-        error: isBuiltinGptProIdentity(body.catId)
-          ? BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR
-          : BUILTIN_CLOUD_HANDLE_RESERVED_ERROR,
-        protectedFields: createViolationFields,
-      };
-    }
-
-    const projectRoot = resolveProjectRoot();
-    const managedIdsBefore = getManagedCatalogIds(projectRoot);
-    let requestedCarrier: CatCarrier;
-    try {
-      requestedCarrier = resolveRequestedCarrier(
-        body.clientId,
-        resolveCatCarrier(
-          {
-            clientId: body.clientId,
-            carrier: body.carrier,
-            configurationSource: body.configurationSource,
-            acp: 'acp' in body ? body.acp : undefined,
-            cli: 'cli' in body ? { carrier: body.cli?.carrier ?? undefined } : undefined,
-          },
-          '',
-        ),
-      );
-      if (requestedCarrier === 'acp' && !('acp' in body && body.acp)) {
-        throw new Error('carrier "acp" requires an acp config (command + startupArgs)');
+  app.post('/api/cats', async (request, reply) =>
+    withTargetAliasMutation(async () => {
+      const operator = resolveHeaderUserId(request);
+      if (!operator) {
+        reply.status(400);
+        return { error: 'Identity required (X-Cat-Cafe-User header)' };
       }
-    } catch (err) {
-      reply.status(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
 
-    let receipt: ReturnType<typeof memberCreationReceipt>;
-    try {
-      receipt = memberCreationReceipt(
-        operator,
-        request.headers['x-cat-cafe-onboarding-journey'],
-        request.headers['idempotency-key'],
-        body,
-      );
-    } catch (error) {
-      return reply.code(409).send({
-        code: 'member_creation_conflict',
-        error: error instanceof Error ? error.message : 'Creation conflict',
-      });
-    }
-    let replayed = false;
-    if (!receipt && (managedIdsBefore.has(body.catId) || catRegistry.tryGet(body.catId)))
-      return reply.code(409).send({
-        code: 'member_creation_conflict',
-        error: `Member ID "${body.catId}" is occupied; choose another ID or explicitly edit that member`,
-      });
+      if (request.body != null && typeof request.body === 'object' && Object.hasOwn(request.body, 'sessionChain')) {
+        reply.status(400);
+        return { error: 'Legacy sessionChain writes are not accepted; configure session strategy intent instead' };
+      }
+      const parsed = createCatSchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Invalid request', details: parsed.error.issues };
+      }
 
-    // Validate alias uniqueness across all existing members
-    if (!receipt && body.mentionPatterns?.length) {
-      const allConfigs = catRegistry.getAllConfigs();
-      for (const pattern of body.mentionPatterns) {
-        const normalized = pattern.toLowerCase();
-        for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
-          if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
-            reply.status(400);
-            return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
+      const body = parsed.data;
+
+      const createViolationFields = builtinCloudIdentityCreateViolationFields(body);
+      if (createViolationFields.length > 0) {
+        reply.status(409);
+        return {
+          code: isBuiltinGptProIdentity(body.catId)
+            ? 'BUILTIN_CLOUD_IDENTITY_PROTECTED'
+            : 'BUILTIN_CLOUD_HANDLE_RESERVED',
+          error: isBuiltinGptProIdentity(body.catId)
+            ? BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR
+            : BUILTIN_CLOUD_HANDLE_RESERVED_ERROR,
+          protectedFields: createViolationFields,
+        };
+      }
+
+      const projectRoot = resolveProjectRoot();
+      const managedIdsBefore = getManagedCatalogIds(projectRoot);
+      let requestedCarrier: CatCarrier;
+      try {
+        requestedCarrier = resolveRequestedCarrier(
+          body.clientId,
+          resolveCatCarrier(
+            {
+              clientId: body.clientId,
+              carrier: body.carrier,
+              configurationSource: body.configurationSource,
+              acp: 'acp' in body ? body.acp : undefined,
+              cli: 'cli' in body ? { carrier: body.cli?.carrier ?? undefined } : undefined,
+            },
+            '',
+          ),
+        );
+        if (requestedCarrier === 'acp' && !('acp' in body && body.acp)) {
+          throw new Error('carrier "acp" requires an acp config (command + startupArgs)');
+        }
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+
+      let receipt: ReturnType<typeof memberCreationReceipt>;
+      try {
+        receipt = memberCreationReceipt(
+          operator,
+          request.headers['x-cat-cafe-onboarding-journey'],
+          request.headers['idempotency-key'],
+          body,
+        );
+      } catch (error) {
+        return reply.code(409).send({
+          code: 'member_creation_conflict',
+          error: error instanceof Error ? error.message : 'Creation conflict',
+        });
+      }
+      let replayed = false;
+      if (!receipt && (managedIdsBefore.has(body.catId) || catRegistry.tryGet(body.catId)))
+        return reply.code(409).send({
+          code: 'member_creation_conflict',
+          error: `Member ID "${body.catId}" is occupied; choose another ID or explicitly edit that member`,
+        });
+
+      if (!receipt) {
+        for (const alias of [body.catId, ...(body.mentionPatterns ?? [])]) {
+          if (alias && (await opts.addressedPlugins?.()?.aliasInUse(alias, undefined, false))) {
+            return reply.code(400).send({ error: `别名 "${alias}" 已被插件使用` });
           }
         }
       }
-    }
 
-    const accountRef = resolveAccountRef(body);
-    try {
-      const createRuntimeCatSerialized = async (input: Parameters<typeof createRuntimeCat>[1]) => {
-        const result = await withRuntimeCatMutationLock(projectRoot, () =>
-          createOwnedRuntimeCat(projectRoot, { ...input, agentProvider: body.agentProvider }, receipt, () => {
-            if (
-              body.configurationSource === 'native_tool' &&
-              'acp' in body &&
-              body.acp &&
-              dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot) === 'acp_profile_invalid'
-            )
-              throw new InvalidDshProfile('DSH 的现有 ACP profile 无效，请先在客户端修复配置。');
-          }),
-        );
-        body.catId = result.id;
-        replayed = result.replayed;
-        managedIdsBefore.delete(result.id);
-      };
-      /* Infer provider for opencode API-key accounts from the model name when no
+      // Validate alias uniqueness across all existing members
+      if (!receipt && body.mentionPatterns?.length) {
+        const allConfigs = catRegistry.getAllConfigs();
+        for (const pattern of body.mentionPatterns) {
+          const normalized = pattern.toLowerCase();
+          for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
+            if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
+              reply.status(400);
+              return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
+            }
+          }
+        }
+      }
+
+      const accountRef = resolveAccountRef(body);
+      try {
+        const createRuntimeCatSerialized = async (input: Parameters<typeof createRuntimeCat>[1]) => {
+          const result = await withRuntimeCatMutationLock(projectRoot, () =>
+            createOwnedRuntimeCat(projectRoot, { ...input, agentProvider: body.agentProvider }, receipt, () => {
+              if (
+                body.configurationSource === 'native_tool' &&
+                'acp' in body &&
+                body.acp &&
+                dshLauncherProfileState(body.acp.command, body.acp.startupArgs, projectRoot) === 'acp_profile_invalid'
+              )
+                throw new InvalidDshProfile('DSH 的现有 ACP profile 无效，请先在客户端修复配置。');
+            }),
+          );
+          body.catId = result.id;
+          replayed = result.replayed;
+          managedIdsBefore.delete(result.id);
+        };
+        /* Infer provider for opencode API-key accounts from the model name when no
          explicit provider is given. This avoids hard-coding 'openai' for all bare
          models — Anthropic/Google accounts get the correct adapter.
          Unknown model prefixes → undefined → validation error preserved. */
-      const explicitProvider = 'provider' in body ? body.provider : undefined;
-      const providerNameForValidation =
-        explicitProvider ??
-        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
-          ? inferOpenCodeProviderFromModelName(body.defaultModel)
-          : undefined);
-      await validateAccountBindingOrThrow(
-        projectRoot,
-        body.clientId,
-        accountRef,
-        body.defaultModel,
-        providerNameForValidation,
-        { nativeTool: body.configurationSource === 'native_tool' },
-      );
-      validateServiceTierMutationOrThrow(
-        projectRoot,
-        body.clientId,
-        accountRef ?? undefined,
-        body.defaultModel,
-        'cli' in body ? body.cli?.serviceTier : undefined,
-        'cli' in body && body.cli !== undefined && Object.hasOwn(body.cli, 'serviceTier'),
-      );
-      const resolvedAvatar = resolveNativeAvatar(body.clientId, body.avatar, 'acp' in body ? body.acp : undefined);
-      if (body.clientId === 'antigravity') {
-        await createRuntimeCatSerialized({
-          catId: body.catId,
-          ...(body.env ? { env: body.env } : {}),
-          configurationSource: body.configurationSource,
-          breedId: body.breedId,
-          name: body.name,
-          displayName: body.displayName,
-          variantLabel: body.variantLabel,
-          nickname: body.nickname,
-          avatar: resolvedAvatar,
-          ...(body.banner ? { banner: body.banner } : {}),
-          color: body.color,
-          mentionPatterns: body.mentionPatterns,
-          ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextWindow: body.contextWindow,
-          roleDescription: body.roleDescription,
-          personality: body.personality,
-          teamStrengths: body.teamStrengths,
-          caution: body.caution,
-          strengths: body.strengths,
-          clientId: 'antigravity',
-          carrier: requestedCarrier,
-          defaultModel: body.defaultModel,
-          mcpSupport: body.mcpSupport ?? true,
-          cli: {
-            ...defaultCliForClient('antigravity'),
-            ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
-          },
-          commandArgs: body.commandArgs,
-          ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
-        });
-      } else if (body.clientId === 'acp') {
-        // F161: Generic ACP client — no CLI config, ACP section is the transport.
-        await createRuntimeCatSerialized({
-          catId: body.catId,
-          ...(body.env ? { env: body.env } : {}),
-          configurationSource: body.configurationSource,
-          breedId: body.breedId,
-          name: body.name,
-          displayName: body.displayName,
-          variantLabel: body.variantLabel,
-          nickname: body.nickname,
-          avatar: resolvedAvatar,
-          ...(body.banner ? { banner: body.banner } : {}),
-          color: body.color,
-          mentionPatterns: body.mentionPatterns,
-          ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextWindow: body.contextWindow,
-          roleDescription: body.roleDescription,
-          personality: body.personality,
-          teamStrengths: body.teamStrengths,
-          caution: body.caution,
-          strengths: body.strengths,
-          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
-          clientId: 'acp',
-          carrier: 'acp',
-          defaultModel: body.defaultModel,
-          mcpSupport: resolveGenericAcpMcpSupport(body.mcpSupport, body.acp) ?? false,
-          cli:
-            body.configurationSource === 'native_tool'
-              ? buildResolvedCliConfig('acp', body.defaultModel, defaultCliForClient('acp'), body.cli, true)
-              : defaultCliForClient('acp'),
-          // F161 AC-A5 / KD-1: generic ACP never carries provider (already stripped by schema).
-          ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
-          acp: body.acp,
-        });
-      } else {
-        // F247 KD-17: cloud-only providers (Remote MCP) skip local CLI dispatch.
-        const agyProfile = resolveAgyNativeMemberPatch({
-          projectRoot,
-          requested: body.agyProfile,
-          clientId: body.clientId,
-          carrier: requestedCarrier,
-          acp: body.acp,
-          model: body.defaultModel,
-          accountRef: accountRef ?? undefined,
-          cliConfigArgs: body.cliConfigArgs,
-        });
-        // Caller signals cloud-only via provider="openai-chatgpt-pro" (future: more cloud markers).
-        const explicitProviderForCloud = 'provider' in body ? body.provider : undefined;
-        const isCloudOnlyProvider = explicitProviderForCloud === 'openai-chatgpt-pro';
-        const usesAcpTransport = requestedCarrier === 'acp';
-        const resolvedCli = isCloudOnlyProvider
-          ? undefined
-          : (() => {
-              const cli = buildResolvedCliConfig(
-                body.clientId,
-                body.defaultModel,
-                defaultCliForClient(body.clientId),
-                body.cli,
-                body.configurationSource === 'native_tool',
-              );
-              return usesAcpTransport && body.configurationSource !== 'native_tool'
-                ? stripCliTransportExtensions(cli)
-                : cli;
-            })();
-        await createRuntimeCatSerialized({
-          catId: body.catId,
-          configurationSource: body.configurationSource,
-          breedId: body.breedId,
-          name: body.name,
-          displayName: body.displayName,
-          variantLabel: body.variantLabel,
-          nickname: body.nickname,
-          avatar: resolvedAvatar,
-          ...(body.banner ? { banner: body.banner } : {}),
-          color: body.color,
-          mentionPatterns: body.mentionPatterns,
-          ...(body.env ? { env: body.env } : {}),
-          ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextWindow: body.contextWindow,
-          roleDescription: body.roleDescription,
-          personality: body.personality,
-          teamStrengths: body.teamStrengths,
-          caution: body.caution,
-          strengths: body.strengths,
-          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
-          clientId: body.clientId,
-          carrier: requestedCarrier,
-          defaultModel: body.defaultModel,
-          mcpSupport:
-            body.mcpSupport ??
-            (body.clientId === 'anthropic' ||
-              body.clientId === 'openai' ||
-              body.clientId === 'google' ||
-              body.clientId === 'kimi' ||
-              body.clientId === 'opencode'),
-          // F247 KD-17: cli omitted when cloud-only (Remote MCP) provider.
-          ...(resolvedCli ? { cli: resolvedCli } : {}),
-          ...(!usesAcpTransport && body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
-          ...(body.provider || providerNameForValidation
-            ? { provider: body.provider ?? providerNameForValidation }
-            : {}),
-          ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
-          ...(body.acp ? { acp: body.acp } : {}),
-          ...(agyProfile ? { agyProfile } : {}),
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (err instanceof MemberCreateConflict)
-        return reply.code(409).send({ code: 'member_creation_conflict', error: message });
-      if (err instanceof InvalidDshProfile)
-        return reply.code(400).send({ code: 'acp_profile_invalid', error: message });
-      reply.status(400);
-      return { error: message };
-    }
-
-    await inheritFullyBlockedMcpCapabilitiesForNewCat(projectRoot, body.catId, managedIdsBefore);
-    // #712: Also inherit fully-blocked MCP state for all governance-registered projects.
-    // Without this, only the active project's capabilities.json gets the new cat added
-    // to blockedCats — other projects' fully-disabled MCPs silently become enabled for
-    // the new member.
-    await inheritBlockedMcpForAllProjects(projectRoot, body.catId, managedIdsBefore);
-    const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
-    await configEventBus.emitChangeAsync({
-      source: 'cat-config',
-      scope: 'domain',
-      changedKeys: [body.catId],
-      changeSetId: createChangeSetId(),
-      timestamp: Date.now(),
-    });
-    const cat = resolved[body.catId];
-    const metadata = buildCatResponseMetadataResolver(projectRoot);
-    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
-    reply.status(replayed ? 200 : 201);
-    return {
-      cat: await toCatResponse(
-        cat,
-        projectRoot,
-        metadata(cat.id),
-        resolveEffectiveAccountRef,
-        opts.resolveContextCapacitySnapshot,
-      ),
-      updatedBy: operator,
-      ...(replayed ? { idempotent: true } : {}),
-    };
-  });
-
-  app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
-    const operator = resolveHeaderUserId(request);
-    if (!operator) {
-      reply.status(400);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
-    }
-
-    if (request.body != null && typeof request.body === 'object' && Object.hasOwn(request.body, 'sessionChain')) {
-      reply.status(400);
-      return { error: 'Legacy sessionChain writes are not accepted; configure session strategy intent instead' };
-    }
-    const parsed = updateCatSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request', details: parsed.error.issues };
-    }
-
-    const body = parsed.data;
-    if (body.avatar !== undefined && opts.memberAssets?.()?.binding(request.params.id)) {
-      const mixed = Object.keys(body).some((key) => key !== 'avatar' && key !== 'expectedRevision');
-      return reply.code(409).send({
-        error: mixed ? 'canon_avatar_mixed_patch' : 'canon_avatar_selection_required',
-        message: '头像已关联正典，请在外观里单独选择并保存头像。',
-      });
-    }
-    const restoringBuiltinCloudIdentity = body.restoreBuiltinCloudIdentity === true;
-    if (request.params.id === 'gpt-dot') {
-      const fields = [...BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS, 'mentionPatterns', 'restoreBuiltinCloudIdentity'];
-      if (fields.some((field) => Object.hasOwn(body, field)))
-        return reply.code(409).send({
-          code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
-          error: 'dot 的身份与连接在插件集成中管理。',
-        });
-    }
-    const patchViolationFields = isBuiltinGptProIdentity(request.params.id)
-      ? builtinCloudIdentityPatchViolationFields(body)
-      : [];
-
-    // Reject an explicitly unsafe built-in identity mutation before resolving or
-    // bootstrapping the runtime catalog. A rejected write must be side-effect free.
-    if (!restoringBuiltinCloudIdentity && patchViolationFields.length > 0) {
-      reply.status(409);
-      return {
-        code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
-        error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR,
-        protectedFields: patchViolationFields,
-      };
-    }
-    if (
-      !isBuiltinGptProIdentity(request.params.id) &&
-      body.mentionPatterns !== undefined &&
-      hasBuiltinGptProCanonicalMention(body.mentionPatterns)
-    ) {
-      reply.status(409);
-      return {
-        code: 'BUILTIN_CLOUD_HANDLE_RESERVED',
-        error: BUILTIN_CLOUD_HANDLE_RESERVED_ERROR,
-        protectedFields: ['mentionPatterns'],
-      };
-    }
-
-    const projectRoot = resolveProjectRoot();
-
-    // Validate alias uniqueness when mentionPatterns are being updated
-    if (body.mentionPatterns?.length) {
-      const allConfigs = catRegistry.getAllConfigs();
-      for (const pattern of body.mentionPatterns) {
-        const normalized = pattern.toLowerCase();
-        for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
-          if (existingId === request.params.id) continue; // skip self
-          if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
-            reply.status(400);
-            return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
-          }
-        }
-      }
-    }
-
-    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
-    const currentCat = getResolvedCats(projectRoot)[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
-    if (!currentCat) {
-      reply.status(404);
-      return { error: `Cat "${request.params.id}" not found` };
-    }
-    const currentEffectiveAccountRef = await saveSpan('member.account', () => resolveEffectiveAccountRef(currentCat));
-    const currentAcpConfig = getAcpConfig(request.params.id as string, projectRoot);
-    const persistedIdentityCat = persistedBuiltinCloudIdentityCat(projectRoot, currentCat);
-    const currentIdentityProtection = projectBuiltinCloudIdentityProtection(
-      builtinCloudIdentityCandidate({
-        cat: persistedIdentityCat,
-        accountRef: currentEffectiveAccountRef,
-        acp: currentAcpConfig,
-      }),
-    );
-    const protectedIdentityFields = builtinCloudIdentityPatchFields(body);
-
-    if (restoringBuiltinCloudIdentity && !isBuiltinGptProIdentity(request.params.id)) {
-      reply.status(400);
-      return {
-        code: 'BUILTIN_CLOUD_IDENTITY_RESTORE_UNAVAILABLE',
-        error: '这个成员不是内置云端身份，不能使用“恢复云端身份”。',
-      };
-    }
-    if (
-      restoringBuiltinCloudIdentity &&
-      Object.keys(body).some((field) => field !== 'restoreBuiltinCloudIdentity' && field !== 'expectedRevision')
-    ) {
-      reply.status(400);
-      return {
-        code: 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH',
-        error: '“恢复云端身份”必须单独执行，不能同时修改 Client、模型或传输配置。',
-      };
-    }
-    if (currentIdentityProtection && !restoringBuiltinCloudIdentity && protectedIdentityFields.length > 0) {
-      if (currentIdentityProtection.state === 'drifted') {
-        reply.status(409);
-        return {
-          code: 'BUILTIN_CLOUD_IDENTITY_REPAIR_REQUIRED',
-          error: BUILTIN_CLOUD_IDENTITY_REPAIR_ERROR,
-          driftedFields: currentIdentityProtection.driftedFields,
-        };
-      }
-      const projectedIdentity = projectedBuiltinCloudIdentityAfterPatch({
-        current: persistedIdentityCat,
-        currentAccountRef: currentEffectiveAccountRef,
-        currentAcp: currentAcpConfig,
-        body,
-      });
-      if (projectedIdentity?.state === 'drifted') {
-        reply.status(409);
-        return {
-          code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
-          error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR,
-          protectedFields: protectedIdentityFields,
-        };
-      }
-    }
-
-    if (currentIdentityProtection && body.configurationSource !== undefined) {
-      reply.status(409);
-      return { code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED', error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR };
-    }
-    const effectiveSource =
-      body.configurationSource === undefined ? currentCat.configurationSource : body.configurationSource;
-    const nativeTool = effectiveSource === 'native_tool';
-    const effectiveClient = restoringBuiltinCloudIdentity
-      ? BUILTIN_GPT_PRO_IDENTITY.clientId
-      : patchOrCurrent(body.clientId, currentCat.clientId);
-    let effectiveCarrier: CatCarrier;
-    try {
-      effectiveCarrier = resolveRequestedCarrier(
-        effectiveClient,
-        restoringBuiltinCloudIdentity
-          ? undefined
-          : (body.carrier ?? (body.clientId !== undefined ? undefined : currentCat.carrier)),
-      );
-    } catch (err) {
-      reply.status(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-    let targetAccountRef = restoringBuiltinCloudIdentity ? null : resolveAccountRef(body);
-    let effectiveAccountRef = restoringBuiltinCloudIdentity
-      ? BUILTIN_GPT_PRO_IDENTITY.builtinAccountRef
-      : targetAccountRef !== undefined
-        ? targetAccountRef === null
-          ? undefined
-          : targetAccountRef
-        : currentEffectiveAccountRef;
-    const effectiveDefaultModel = restoringBuiltinCloudIdentity
-      ? BUILTIN_GPT_PRO_IDENTITY.defaultModel
-      : patchOrCurrent(body.defaultModel, currentCat.defaultModel);
-
-    // Auto-rebase builtin binding when switching client families.
-    // When the editor sends the old client's builtin accountRef during a provider switch,
-    // rebase to the new client's builtin so validation doesn't reject the stale ref.
-    const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
-    if (
-      body.available === true &&
-      body.accountRef === undefined &&
-      body.accountBindingMode === undefined &&
-      currentCat.accountBindingMode === 'follow' &&
-      effectiveClient === 'openai'
-    ) {
-      const selected = readLocalAccountSelection(readRuntimeAccountMembers(projectRoot), 'openai').accountRef;
-      if (selected) {
-        effectiveAccountRef = selected;
-        targetAccountRef = selected;
-      }
-    }
-    if (isClientSwitch && effectiveAccountRef) {
-      const oldBuiltin = resolveBuiltinClientForProvider(currentCat.clientId);
-      if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
-        const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
-        if (newBuiltin) {
-          effectiveAccountRef = builtinAccountIdForClient(newBuiltin) ?? undefined;
-          targetAccountRef = effectiveAccountRef;
-        }
-      }
-    }
-    const providerConfigTouched =
-      body.agentProvider !== undefined ||
-      body.configurationSource !== undefined ||
-      body.clientId !== undefined ||
-      body.defaultModel !== undefined ||
-      targetAccountRef !== undefined ||
-      body.accountBindingMode !== undefined ||
-      body.provider !== undefined;
-
-    if (providerConfigTouched && !restoringBuiltinCloudIdentity) {
-      try {
-        // F161 AC-A5 / KD-1: generic ACP carries no provider — exclude it from binding validation.
-        const effectiveProviderName =
-          effectiveClient === 'acp' ? undefined : body.provider !== undefined ? body.provider : currentCat.provider;
-        // Legacy compat: existing opencode+api_key members without provider name
-        // can still be edited for non-binding changes (name, model, etc.).
-        // NOT allowed when: switching accountRef, or switching clientId to opencode
-        // from another client — both create a new binding that must have provider name.
-        // Compare against current binding — editor always sends accountRef even when unchanged.
-        const isBindingChange =
-          targetAccountRef !== undefined && (targetAccountRef ?? undefined) !== currentEffectiveAccountRef;
-        const isExistingOpencode = currentCat.clientId === 'opencode';
-        const legacyCompat =
-          body.provider === undefined &&
-          !currentCat.provider &&
-          !isBindingChange &&
-          !isClientSwitch &&
-          isExistingOpencode;
+        const explicitProvider = 'provider' in body ? body.provider : undefined;
+        const providerNameForValidation =
+          explicitProvider ??
+          (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
+            ? inferOpenCodeProviderFromModelName(body.defaultModel)
+            : undefined);
         await validateAccountBindingOrThrow(
           projectRoot,
-          effectiveClient,
-          effectiveAccountRef,
-          effectiveDefaultModel,
-          effectiveProviderName,
-          { legacyCompat, nativeTool },
+          body.clientId,
+          accountRef,
+          body.defaultModel,
+          providerNameForValidation,
+          { nativeTool: body.configurationSource === 'native_tool' },
         );
+        validateServiceTierMutationOrThrow(
+          projectRoot,
+          body.clientId,
+          accountRef ?? undefined,
+          body.defaultModel,
+          'cli' in body ? body.cli?.serviceTier : undefined,
+          'cli' in body && body.cli !== undefined && Object.hasOwn(body.cli, 'serviceTier'),
+        );
+        const resolvedAvatar = resolveNativeAvatar(body.clientId, body.avatar, 'acp' in body ? body.acp : undefined);
+        if (body.clientId === 'antigravity') {
+          await createRuntimeCatSerialized({
+            catId: body.catId,
+            ...(body.env ? { env: body.env } : {}),
+            configurationSource: body.configurationSource,
+            breedId: body.breedId,
+            name: body.name,
+            displayName: body.displayName,
+            variantLabel: body.variantLabel,
+            nickname: body.nickname,
+            avatar: resolvedAvatar,
+            ...(body.banner ? { banner: body.banner } : {}),
+            color: body.color,
+            mentionPatterns: body.mentionPatterns,
+            ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
+            contextWindow: body.contextWindow,
+            roleDescription: body.roleDescription,
+            personality: body.personality,
+            teamStrengths: body.teamStrengths,
+            caution: body.caution,
+            strengths: body.strengths,
+            clientId: 'antigravity',
+            carrier: requestedCarrier,
+            defaultModel: body.defaultModel,
+            mcpSupport: body.mcpSupport ?? true,
+            cli: {
+              ...defaultCliForClient('antigravity'),
+              ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
+            },
+            commandArgs: body.commandArgs,
+            ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
+          });
+        } else if (body.clientId === 'acp') {
+          // F161: Generic ACP client — no CLI config, ACP section is the transport.
+          await createRuntimeCatSerialized({
+            catId: body.catId,
+            ...(body.env ? { env: body.env } : {}),
+            configurationSource: body.configurationSource,
+            breedId: body.breedId,
+            name: body.name,
+            displayName: body.displayName,
+            variantLabel: body.variantLabel,
+            nickname: body.nickname,
+            avatar: resolvedAvatar,
+            ...(body.banner ? { banner: body.banner } : {}),
+            color: body.color,
+            mentionPatterns: body.mentionPatterns,
+            ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
+            contextWindow: body.contextWindow,
+            roleDescription: body.roleDescription,
+            personality: body.personality,
+            teamStrengths: body.teamStrengths,
+            caution: body.caution,
+            strengths: body.strengths,
+            ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
+            clientId: 'acp',
+            carrier: 'acp',
+            defaultModel: body.defaultModel,
+            mcpSupport: resolveGenericAcpMcpSupport(body.mcpSupport, body.acp) ?? false,
+            cli:
+              body.configurationSource === 'native_tool'
+                ? buildResolvedCliConfig('acp', body.defaultModel, defaultCliForClient('acp'), body.cli, true)
+                : defaultCliForClient('acp'),
+            // F161 AC-A5 / KD-1: generic ACP never carries provider (already stripped by schema).
+            ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
+            acp: body.acp,
+          });
+        } else {
+          // F247 KD-17: cloud-only providers (Remote MCP) skip local CLI dispatch.
+          const agyProfile = resolveAgyNativeMemberPatch({
+            projectRoot,
+            requested: body.agyProfile,
+            clientId: body.clientId,
+            carrier: requestedCarrier,
+            acp: body.acp,
+            model: body.defaultModel,
+            accountRef: accountRef ?? undefined,
+            cliConfigArgs: body.cliConfigArgs,
+          });
+          // Caller signals cloud-only via provider="openai-chatgpt-pro" (future: more cloud markers).
+          const explicitProviderForCloud = 'provider' in body ? body.provider : undefined;
+          const isCloudOnlyProvider = explicitProviderForCloud === 'openai-chatgpt-pro';
+          const usesAcpTransport = requestedCarrier === 'acp';
+          const resolvedCli = isCloudOnlyProvider
+            ? undefined
+            : (() => {
+                const cli = buildResolvedCliConfig(
+                  body.clientId,
+                  body.defaultModel,
+                  defaultCliForClient(body.clientId),
+                  body.cli,
+                  body.configurationSource === 'native_tool',
+                );
+                return usesAcpTransport && body.configurationSource !== 'native_tool'
+                  ? stripCliTransportExtensions(cli)
+                  : cli;
+              })();
+          await createRuntimeCatSerialized({
+            catId: body.catId,
+            configurationSource: body.configurationSource,
+            breedId: body.breedId,
+            name: body.name,
+            displayName: body.displayName,
+            variantLabel: body.variantLabel,
+            nickname: body.nickname,
+            avatar: resolvedAvatar,
+            ...(body.banner ? { banner: body.banner } : {}),
+            color: body.color,
+            mentionPatterns: body.mentionPatterns,
+            ...(body.env ? { env: body.env } : {}),
+            ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
+            contextWindow: body.contextWindow,
+            roleDescription: body.roleDescription,
+            personality: body.personality,
+            teamStrengths: body.teamStrengths,
+            caution: body.caution,
+            strengths: body.strengths,
+            ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
+            clientId: body.clientId,
+            carrier: requestedCarrier,
+            defaultModel: body.defaultModel,
+            mcpSupport:
+              body.mcpSupport ??
+              (body.clientId === 'anthropic' ||
+                body.clientId === 'openai' ||
+                body.clientId === 'google' ||
+                body.clientId === 'kimi' ||
+                body.clientId === 'opencode'),
+            // F247 KD-17: cli omitted when cloud-only (Remote MCP) provider.
+            ...(resolvedCli ? { cli: resolvedCli } : {}),
+            ...(!usesAcpTransport && body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
+            ...(body.provider || providerNameForValidation
+              ? { provider: body.provider ?? providerNameForValidation }
+              : {}),
+            ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
+            ...(body.acp ? { acp: body.acp } : {}),
+            ...(agyProfile ? { agyProfile } : {}),
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof MemberCreateConflict)
+          return reply.code(409).send({ code: 'member_creation_conflict', error: message });
+        if (err instanceof InvalidDshProfile)
+          return reply.code(400).send({ code: 'acp_profile_invalid', error: message });
         reply.status(400);
         return { error: message };
       }
-    }
 
-    try {
-      validateServiceTierMutationOrThrow(
-        projectRoot,
-        effectiveClient,
-        effectiveAccountRef,
-        effectiveDefaultModel,
-        body.cli?.serviceTier,
-        body.cli != null && Object.hasOwn(body.cli, 'serviceTier'),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      reply.status(400);
-      return { error: message };
-    }
-
-    // F161 invariant: clientId 'acp' must have an effective acp config.
-    // Prevents persisting an unroutable ACP member (no command/startupArgs).
-    if (effectiveClient === 'acp') {
-      const effectiveAcpConfig = body.acp !== undefined ? body.acp : currentAcpConfig;
-      if (!effectiveAcpConfig) {
-        reply.status(400);
-        return { error: 'clientId "acp" requires an acp transport config (command + startupArgs)' };
-      }
-    }
-
-    const shouldClearAcpOnClientSwitch =
-      restoringBuiltinCloudIdentity ||
-      (isClientSwitch && effectiveClient !== 'acp' && body.acp === undefined && currentAcpConfig !== undefined);
-    const effectiveAcpConfig = restoringBuiltinCloudIdentity
-      ? null
-      : body.acp !== undefined
-        ? body.acp
-        : shouldClearAcpOnClientSwitch
-          ? null
-          : currentAcpConfig;
-    const usesAcpTransport = effectiveCarrier === 'acp';
-    if (usesAcpTransport && !effectiveAcpConfig) {
-      reply.status(400);
-      return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
-    }
-
-    const managedIdsBefore = getManagedCatalogIds(projectRoot);
-    try {
-      const agyProfilePatch = resolveAgyNativeMemberPatch({
-        projectRoot,
-        requested: body.agyProfile,
-        current: currentCat.agyProfile,
-        clientId: effectiveClient,
-        carrier: effectiveCarrier,
-        acp: effectiveAcpConfig,
-        model: effectiveDefaultModel,
-        accountRef: effectiveAccountRef,
-        previousAccountRef: currentEffectiveAccountRef,
-        cliConfigArgs: body.cliConfigArgs ?? currentCat.cliConfigArgs,
-      });
-      const hasCommandArgsPatch = body.commandArgs !== undefined;
-      const nextCommandArgs = body.commandArgs ?? [];
-      const nextCli = resolveNextCli({
-        body,
-        currentCat,
-        effectiveClient,
-        effectiveDefaultModel,
-        hasCommandArgsPatch,
-        nextCommandArgs,
-      });
-      const nextGenericAcpMcpSupport =
-        effectiveClient === 'acp'
-          ? resolveGenericAcpMcpSupportForPatch(body.mcpSupport, body.acp, isClientSwitch)
-          : body.mcpSupport;
-      // #1208 P2: canonicalize legacy cli.contextWindow to top-level on every save.
-      const canonicalContextWindow = canonicalizeContextWindow(currentCat, body.contextWindow);
-      const leavesGenericAcpClient =
-        body.acp === undefined && currentCat.clientId === 'acp' && effectiveClient !== 'acp';
-
-      // #1208 Item 5 fix: force-strip legacy cli.contextWindow / cli.autoCompactTokenLimit
-      // on every save. When nextCli is undefined (no cli patch), the old cli object persists
-      // with its legacy fields. This breaks clear-to-Auto: user sends {contextWindow:null}
-      // but the old cli.contextWindow survives and the compat-read picks it up.
-      const effectiveCli = (() => {
-        if (nextCli === null) return null;
-        const cli = nextCli ?? currentCat.cli;
-        if (!cli) return undefined; // no cli to strip
-        const raw = cli as unknown as Record<string, unknown>;
-        const hasLegacyWindowFields = raw.contextWindow != null || raw.autoCompactTokenLimit != null;
-        const hasCliOnlyFields = usesAcpTransport && (raw.effort != null || raw.carrier != null);
-        if (nextCli === undefined && !hasLegacyWindowFields && !hasCliOnlyFields) {
-          return undefined; // nothing to strip
-        }
-        if (usesAcpTransport && !nativeTool) return stripCliTransportExtensions(cli);
-        const { contextWindow: _cw, autoCompactTokenLimit: _acl, ...base } = raw;
-        return base as unknown as CliConfig;
-      })();
-
-      await updateMemberWithRevision(projectRoot, request.params.id, body.expectedRevision, {
-        ...(agyProfilePatch !== undefined ? { agyProfile: agyProfilePatch } : {}),
-        ...(body.breedId !== undefined ? { breedId: body.breedId } : {}),
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
-        ...(body.variantLabel !== undefined ? { variantLabel: body.variantLabel } : {}),
-        ...(body.nickname !== undefined ? { nickname: body.nickname } : {}),
-        ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
-        ...(body.banner !== undefined ? { banner: body.banner } : {}),
-        ...(body.color !== undefined ? { color: body.color } : {}),
-        ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
-        ...(body.env !== undefined ? { env: body.env } : {}),
-        ...(body.configurationSource !== undefined ? { configurationSource: body.configurationSource } : {}),
-        ...(body.agentProvider !== undefined ? { agentProvider: body.agentProvider } : {}),
-        ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
-        ...(body.accountBindingMode !== undefined ? { accountBindingMode: body.accountBindingMode } : {}),
-        ...(canonicalContextWindow !== undefined ? { contextWindow: canonicalContextWindow } : {}),
-        ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
-        ...(body.personality !== undefined ? { personality: body.personality } : {}),
-        ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
-        ...(body.caution !== undefined ? { caution: body.caution } : {}),
-        ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
-        ...(body.executionApproval !== undefined ? { executionApproval: body.executionApproval } : {}),
-        ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
-        // Always write the resolved value so any legacy transport/cli.carrier
-        // selection converges to the canonical field on the next edit.
-        carrier: effectiveCarrier,
-        ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
-        ...(nextGenericAcpMcpSupport !== undefined ? { mcpSupport: nextGenericAcpMcpSupport } : {}),
-        ...(hasCommandArgsPatch
-          ? {
-              commandArgs: body.commandArgs,
-            }
-          : {}),
-        ...(effectiveCli !== undefined ? { cli: effectiveCli } : {}),
-        ...(body.available !== undefined ? { available: body.available } : {}),
-        ...(usesAcpTransport
-          ? currentCat.cliConfigArgs?.length || body.cliConfigArgs?.length
-            ? { cliConfigArgs: [] }
-            : {}
-          : body.cliConfigArgs !== undefined
-            ? { cliConfigArgs: body.cliConfigArgs }
-            : {}),
-        // F161 AC-A5 / KD-1: generic ACP never carries provider — clear any stale value and
-        // ignore incoming provider; other clients keep the explicit set/clear semantics.
-        ...(effectiveClient === 'acp'
-          ? currentCat.provider != null
-            ? { provider: null }
-            : {}
-          : body.provider !== undefined
-            ? body.provider === null
-              ? { provider: null }
-              : { provider: body.provider }
-            : {}),
-        ...(body.voiceConfig !== undefined
-          ? body.voiceConfig === null
-            ? { voiceConfig: null }
-            : { voiceConfig: body.voiceConfig }
-          : {}),
-        ...(leavesGenericAcpClient
-          ? { acp: null }
-          : body.acp !== undefined
-            ? body.acp === null
-              ? { acp: null }
-              : { acp: body.acp }
-            : {}),
-        ...(restoringBuiltinCloudIdentity
-          ? {
-              breedId: BUILTIN_GPT_PRO_IDENTITY.breedId,
-              clientId: BUILTIN_GPT_PRO_IDENTITY.clientId,
-              defaultModel: BUILTIN_GPT_PRO_IDENTITY.defaultModel,
-              provider: BUILTIN_GPT_PRO_IDENTITY.provider,
-              mcpSupport: BUILTIN_GPT_PRO_IDENTITY.mcpSupport,
-              accountRef: null,
-              cli: null,
-              commandArgs: [],
-              cliConfigArgs: [],
-              acp: null,
-              agentProvider: null,
-              mentionPatterns: Array.from(
-                new Set([
-                  BUILTIN_GPT_PRO_CANONICAL_MENTION,
-                  ...currentCat.mentionPatterns.filter(
-                    (pattern) => pattern.trim().toLowerCase() !== BUILTIN_GPT_PRO_CANONICAL_MENTION,
-                  ),
-                ]),
-              ),
-            }
-          : {}),
-      });
+      await inheritFullyBlockedMcpCapabilitiesForNewCat(projectRoot, body.catId, managedIdsBefore);
+      // #712: Also inherit fully-blocked MCP state for all governance-registered projects.
+      // Without this, only the active project's capabilities.json gets the new cat added
+      // to blockedCats — other projects' fully-disabled MCPs silently become enabled for
+      // the new member.
+      await inheritBlockedMcpForAllProjects(projectRoot, body.catId, managedIdsBefore);
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
       await configEventBus.emitChangeAsync({
         source: 'cat-config',
         scope: 'domain',
-        changedKeys: [request.params.id],
+        changedKeys: [body.catId],
         changeSetId: createChangeSetId(),
         timestamp: Date.now(),
       });
-      const cat = resolved[request.params.id];
+      const cat = resolved[body.catId];
       const metadata = buildCatResponseMetadataResolver(projectRoot);
+      const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+      reply.status(replayed ? 200 : 201);
       return {
         cat: await toCatResponse(
           cat,
@@ -1810,19 +1367,471 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           opts.resolveContextCapacitySnapshot,
         ),
         updatedBy: operator,
+        ...(replayed ? { idempotent: true } : {}),
       };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
-        reply.status(err.statusCode);
-      } else if (/not found/i.test(message)) {
-        reply.status(404);
-      } else {
+    }),
+  );
+
+  app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) =>
+    withTargetAliasMutation(async () => {
+      const operator = resolveHeaderUserId(request);
+      if (!operator) {
         reply.status(400);
+        return { error: 'Identity required (X-Cat-Cafe-User header)' };
       }
-      return { error: message };
-    }
-  });
+
+      if (request.body != null && typeof request.body === 'object' && Object.hasOwn(request.body, 'sessionChain')) {
+        reply.status(400);
+        return { error: 'Legacy sessionChain writes are not accepted; configure session strategy intent instead' };
+      }
+      const parsed = updateCatSchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Invalid request', details: parsed.error.issues };
+      }
+
+      const body = parsed.data;
+      if (body.avatar !== undefined && opts.memberAssets?.()?.binding(request.params.id)) {
+        const mixed = Object.keys(body).some((key) => key !== 'avatar' && key !== 'expectedRevision');
+        return reply.code(409).send({
+          error: mixed ? 'canon_avatar_mixed_patch' : 'canon_avatar_selection_required',
+          message: '头像已关联正典，请在外观里单独选择并保存头像。',
+        });
+      }
+      const restoringBuiltinCloudIdentity = body.restoreBuiltinCloudIdentity === true;
+      const patchViolationFields = isBuiltinGptProIdentity(request.params.id)
+        ? builtinCloudIdentityPatchViolationFields(body)
+        : [];
+
+      // Reject an explicitly unsafe built-in identity mutation before resolving or
+      // bootstrapping the runtime catalog. A rejected write must be side-effect free.
+      if (!restoringBuiltinCloudIdentity && patchViolationFields.length > 0) {
+        reply.status(409);
+        return {
+          code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
+          error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR,
+          protectedFields: patchViolationFields,
+        };
+      }
+      if (
+        !isBuiltinGptProIdentity(request.params.id) &&
+        body.mentionPatterns !== undefined &&
+        hasBuiltinGptProCanonicalMention(body.mentionPatterns)
+      ) {
+        reply.status(409);
+        return {
+          code: 'BUILTIN_CLOUD_HANDLE_RESERVED',
+          error: BUILTIN_CLOUD_HANDLE_RESERVED_ERROR,
+          protectedFields: ['mentionPatterns'],
+        };
+      }
+
+      const projectRoot = resolveProjectRoot();
+
+      if (body.mentionPatterns?.length) {
+        for (const alias of body.mentionPatterns) {
+          if (await opts.addressedPlugins?.()?.aliasInUse(alias, undefined, false)) {
+            return reply.code(400).send({ error: `别名 "${alias}" 已被插件使用` });
+          }
+        }
+      }
+
+      // Validate alias uniqueness when mentionPatterns are being updated
+      if (body.mentionPatterns?.length) {
+        const allConfigs = catRegistry.getAllConfigs();
+        for (const pattern of body.mentionPatterns) {
+          const normalized = pattern.toLowerCase();
+          for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
+            if (existingId === request.params.id) continue; // skip self
+            if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
+              reply.status(400);
+              return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
+            }
+          }
+        }
+      }
+
+      const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+      const currentCat =
+        getResolvedCats(projectRoot)[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
+      if (!currentCat) {
+        reply.status(404);
+        return { error: `Cat "${request.params.id}" not found` };
+      }
+      const currentEffectiveAccountRef = await saveSpan('member.account', () => resolveEffectiveAccountRef(currentCat));
+      const currentAcpConfig = getAcpConfig(request.params.id as string, projectRoot);
+      const persistedIdentityCat = persistedBuiltinCloudIdentityCat(projectRoot, currentCat);
+      const currentIdentityProtection = projectBuiltinCloudIdentityProtection(
+        builtinCloudIdentityCandidate({
+          cat: persistedIdentityCat,
+          accountRef: currentEffectiveAccountRef,
+          acp: currentAcpConfig,
+        }),
+      );
+      const protectedIdentityFields = builtinCloudIdentityPatchFields(body);
+
+      if (restoringBuiltinCloudIdentity && !isBuiltinGptProIdentity(request.params.id)) {
+        reply.status(400);
+        return {
+          code: 'BUILTIN_CLOUD_IDENTITY_RESTORE_UNAVAILABLE',
+          error: '这个成员不是内置云端身份，不能使用“恢复云端身份”。',
+        };
+      }
+      if (
+        restoringBuiltinCloudIdentity &&
+        Object.keys(body).some((field) => field !== 'restoreBuiltinCloudIdentity' && field !== 'expectedRevision')
+      ) {
+        reply.status(400);
+        return {
+          code: 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH',
+          error: '“恢复云端身份”必须单独执行，不能同时修改 Client、模型或传输配置。',
+        };
+      }
+      if (currentIdentityProtection && !restoringBuiltinCloudIdentity && protectedIdentityFields.length > 0) {
+        if (currentIdentityProtection.state === 'drifted') {
+          reply.status(409);
+          return {
+            code: 'BUILTIN_CLOUD_IDENTITY_REPAIR_REQUIRED',
+            error: BUILTIN_CLOUD_IDENTITY_REPAIR_ERROR,
+            driftedFields: currentIdentityProtection.driftedFields,
+          };
+        }
+        const projectedIdentity = projectedBuiltinCloudIdentityAfterPatch({
+          current: persistedIdentityCat,
+          currentAccountRef: currentEffectiveAccountRef,
+          currentAcp: currentAcpConfig,
+          body,
+        });
+        if (projectedIdentity?.state === 'drifted') {
+          reply.status(409);
+          return {
+            code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',
+            error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR,
+            protectedFields: protectedIdentityFields,
+          };
+        }
+      }
+
+      if (currentIdentityProtection && body.configurationSource !== undefined) {
+        reply.status(409);
+        return { code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED', error: BUILTIN_CLOUD_IDENTITY_PROTECTED_ERROR };
+      }
+      const effectiveSource =
+        body.configurationSource === undefined ? currentCat.configurationSource : body.configurationSource;
+      const nativeTool = effectiveSource === 'native_tool';
+      const effectiveClient = restoringBuiltinCloudIdentity
+        ? BUILTIN_GPT_PRO_IDENTITY.clientId
+        : patchOrCurrent(body.clientId, currentCat.clientId);
+      let effectiveCarrier: CatCarrier;
+      try {
+        effectiveCarrier = resolveRequestedCarrier(
+          effectiveClient,
+          restoringBuiltinCloudIdentity
+            ? undefined
+            : (body.carrier ?? (body.clientId !== undefined ? undefined : currentCat.carrier)),
+        );
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+      let targetAccountRef = restoringBuiltinCloudIdentity ? null : resolveAccountRef(body);
+      let effectiveAccountRef = restoringBuiltinCloudIdentity
+        ? BUILTIN_GPT_PRO_IDENTITY.builtinAccountRef
+        : targetAccountRef !== undefined
+          ? targetAccountRef === null
+            ? undefined
+            : targetAccountRef
+          : currentEffectiveAccountRef;
+      const effectiveDefaultModel = restoringBuiltinCloudIdentity
+        ? BUILTIN_GPT_PRO_IDENTITY.defaultModel
+        : patchOrCurrent(body.defaultModel, currentCat.defaultModel);
+
+      // Auto-rebase builtin binding when switching client families.
+      // When the editor sends the old client's builtin accountRef during a provider switch,
+      // rebase to the new client's builtin so validation doesn't reject the stale ref.
+      const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
+      if (
+        body.available === true &&
+        body.accountRef === undefined &&
+        body.accountBindingMode === undefined &&
+        currentCat.accountBindingMode === 'follow' &&
+        effectiveClient === 'openai'
+      ) {
+        const selected = readLocalAccountSelection(readRuntimeAccountMembers(projectRoot), 'openai').accountRef;
+        if (selected) {
+          effectiveAccountRef = selected;
+          targetAccountRef = selected;
+        }
+      }
+      if (isClientSwitch && effectiveAccountRef) {
+        const oldBuiltin = resolveBuiltinClientForProvider(currentCat.clientId);
+        if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
+          const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
+          if (newBuiltin) {
+            effectiveAccountRef = builtinAccountIdForClient(newBuiltin) ?? undefined;
+            targetAccountRef = effectiveAccountRef;
+          }
+        }
+      }
+      const providerConfigTouched =
+        body.agentProvider !== undefined ||
+        body.configurationSource !== undefined ||
+        body.clientId !== undefined ||
+        body.defaultModel !== undefined ||
+        targetAccountRef !== undefined ||
+        body.accountBindingMode !== undefined ||
+        body.provider !== undefined;
+
+      if (providerConfigTouched && !restoringBuiltinCloudIdentity) {
+        try {
+          // F161 AC-A5 / KD-1: generic ACP carries no provider — exclude it from binding validation.
+          const effectiveProviderName =
+            effectiveClient === 'acp' ? undefined : body.provider !== undefined ? body.provider : currentCat.provider;
+          // Legacy compat: existing opencode+api_key members without provider name
+          // can still be edited for non-binding changes (name, model, etc.).
+          // NOT allowed when: switching accountRef, or switching clientId to opencode
+          // from another client — both create a new binding that must have provider name.
+          // Compare against current binding — editor always sends accountRef even when unchanged.
+          const isBindingChange =
+            targetAccountRef !== undefined && (targetAccountRef ?? undefined) !== currentEffectiveAccountRef;
+          const isExistingOpencode = currentCat.clientId === 'opencode';
+          const legacyCompat =
+            body.provider === undefined &&
+            !currentCat.provider &&
+            !isBindingChange &&
+            !isClientSwitch &&
+            isExistingOpencode;
+          await validateAccountBindingOrThrow(
+            projectRoot,
+            effectiveClient,
+            effectiveAccountRef,
+            effectiveDefaultModel,
+            effectiveProviderName,
+            { legacyCompat, nativeTool },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          reply.status(400);
+          return { error: message };
+        }
+      }
+
+      try {
+        validateServiceTierMutationOrThrow(
+          projectRoot,
+          effectiveClient,
+          effectiveAccountRef,
+          effectiveDefaultModel,
+          body.cli?.serviceTier,
+          body.cli != null && Object.hasOwn(body.cli, 'serviceTier'),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        reply.status(400);
+        return { error: message };
+      }
+
+      // F161 invariant: clientId 'acp' must have an effective acp config.
+      // Prevents persisting an unroutable ACP member (no command/startupArgs).
+      if (effectiveClient === 'acp') {
+        const effectiveAcpConfig = body.acp !== undefined ? body.acp : currentAcpConfig;
+        if (!effectiveAcpConfig) {
+          reply.status(400);
+          return { error: 'clientId "acp" requires an acp transport config (command + startupArgs)' };
+        }
+      }
+
+      const shouldClearAcpOnClientSwitch =
+        restoringBuiltinCloudIdentity ||
+        (isClientSwitch && effectiveClient !== 'acp' && body.acp === undefined && currentAcpConfig !== undefined);
+      const effectiveAcpConfig = restoringBuiltinCloudIdentity
+        ? null
+        : body.acp !== undefined
+          ? body.acp
+          : shouldClearAcpOnClientSwitch
+            ? null
+            : currentAcpConfig;
+      const usesAcpTransport = effectiveCarrier === 'acp';
+      if (usesAcpTransport && !effectiveAcpConfig) {
+        reply.status(400);
+        return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
+      }
+
+      const managedIdsBefore = getManagedCatalogIds(projectRoot);
+      try {
+        const agyProfilePatch = resolveAgyNativeMemberPatch({
+          projectRoot,
+          requested: body.agyProfile,
+          current: currentCat.agyProfile,
+          clientId: effectiveClient,
+          carrier: effectiveCarrier,
+          acp: effectiveAcpConfig,
+          model: effectiveDefaultModel,
+          accountRef: effectiveAccountRef,
+          previousAccountRef: currentEffectiveAccountRef,
+          cliConfigArgs: body.cliConfigArgs ?? currentCat.cliConfigArgs,
+        });
+        const hasCommandArgsPatch = body.commandArgs !== undefined;
+        const nextCommandArgs = body.commandArgs ?? [];
+        const nextCli = resolveNextCli({
+          body,
+          currentCat,
+          effectiveClient,
+          effectiveDefaultModel,
+          hasCommandArgsPatch,
+          nextCommandArgs,
+        });
+        const nextGenericAcpMcpSupport =
+          effectiveClient === 'acp'
+            ? resolveGenericAcpMcpSupportForPatch(body.mcpSupport, body.acp, isClientSwitch)
+            : body.mcpSupport;
+        // #1208 P2: canonicalize legacy cli.contextWindow to top-level on every save.
+        const canonicalContextWindow = canonicalizeContextWindow(currentCat, body.contextWindow);
+        const leavesGenericAcpClient =
+          body.acp === undefined && currentCat.clientId === 'acp' && effectiveClient !== 'acp';
+
+        // #1208 Item 5 fix: force-strip legacy cli.contextWindow / cli.autoCompactTokenLimit
+        // on every save. When nextCli is undefined (no cli patch), the old cli object persists
+        // with its legacy fields. This breaks clear-to-Auto: user sends {contextWindow:null}
+        // but the old cli.contextWindow survives and the compat-read picks it up.
+        const effectiveCli = (() => {
+          if (nextCli === null) return null;
+          const cli = nextCli ?? currentCat.cli;
+          if (!cli) return undefined; // no cli to strip
+          const raw = cli as unknown as Record<string, unknown>;
+          const hasLegacyWindowFields = raw.contextWindow != null || raw.autoCompactTokenLimit != null;
+          const hasCliOnlyFields = usesAcpTransport && (raw.effort != null || raw.carrier != null);
+          if (nextCli === undefined && !hasLegacyWindowFields && !hasCliOnlyFields) {
+            return undefined; // nothing to strip
+          }
+          if (usesAcpTransport && !nativeTool) return stripCliTransportExtensions(cli);
+          const { contextWindow: _cw, autoCompactTokenLimit: _acl, ...base } = raw;
+          return base as unknown as CliConfig;
+        })();
+
+        await updateMemberWithRevision(projectRoot, request.params.id, body.expectedRevision, {
+          ...(agyProfilePatch !== undefined ? { agyProfile: agyProfilePatch } : {}),
+          ...(body.breedId !== undefined ? { breedId: body.breedId } : {}),
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
+          ...(body.variantLabel !== undefined ? { variantLabel: body.variantLabel } : {}),
+          ...(body.nickname !== undefined ? { nickname: body.nickname } : {}),
+          ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+          ...(body.banner !== undefined ? { banner: body.banner } : {}),
+          ...(body.color !== undefined ? { color: body.color } : {}),
+          ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
+          ...(body.env !== undefined ? { env: body.env } : {}),
+          ...(body.configurationSource !== undefined ? { configurationSource: body.configurationSource } : {}),
+          ...(body.agentProvider !== undefined ? { agentProvider: body.agentProvider } : {}),
+          ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
+          ...(body.accountBindingMode !== undefined ? { accountBindingMode: body.accountBindingMode } : {}),
+          ...(canonicalContextWindow !== undefined ? { contextWindow: canonicalContextWindow } : {}),
+          ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
+          ...(body.personality !== undefined ? { personality: body.personality } : {}),
+          ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
+          ...(body.caution !== undefined ? { caution: body.caution } : {}),
+          ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
+          ...(body.executionApproval !== undefined ? { executionApproval: body.executionApproval } : {}),
+          ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
+          // Always write the resolved value so any legacy transport/cli.carrier
+          // selection converges to the canonical field on the next edit.
+          carrier: effectiveCarrier,
+          ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
+          ...(nextGenericAcpMcpSupport !== undefined ? { mcpSupport: nextGenericAcpMcpSupport } : {}),
+          ...(hasCommandArgsPatch
+            ? {
+                commandArgs: body.commandArgs,
+              }
+            : {}),
+          ...(effectiveCli !== undefined ? { cli: effectiveCli } : {}),
+          ...(body.available !== undefined ? { available: body.available } : {}),
+          ...(usesAcpTransport
+            ? currentCat.cliConfigArgs?.length || body.cliConfigArgs?.length
+              ? { cliConfigArgs: [] }
+              : {}
+            : body.cliConfigArgs !== undefined
+              ? { cliConfigArgs: body.cliConfigArgs }
+              : {}),
+          // F161 AC-A5 / KD-1: generic ACP never carries provider — clear any stale value and
+          // ignore incoming provider; other clients keep the explicit set/clear semantics.
+          ...(effectiveClient === 'acp'
+            ? currentCat.provider != null
+              ? { provider: null }
+              : {}
+            : body.provider !== undefined
+              ? body.provider === null
+                ? { provider: null }
+                : { provider: body.provider }
+              : {}),
+          ...(body.voiceConfig !== undefined
+            ? body.voiceConfig === null
+              ? { voiceConfig: null }
+              : { voiceConfig: body.voiceConfig }
+            : {}),
+          ...(leavesGenericAcpClient
+            ? { acp: null }
+            : body.acp !== undefined
+              ? body.acp === null
+                ? { acp: null }
+                : { acp: body.acp }
+              : {}),
+          ...(restoringBuiltinCloudIdentity
+            ? {
+                breedId: BUILTIN_GPT_PRO_IDENTITY.breedId,
+                clientId: BUILTIN_GPT_PRO_IDENTITY.clientId,
+                defaultModel: BUILTIN_GPT_PRO_IDENTITY.defaultModel,
+                provider: BUILTIN_GPT_PRO_IDENTITY.provider,
+                mcpSupport: BUILTIN_GPT_PRO_IDENTITY.mcpSupport,
+                accountRef: null,
+                cli: null,
+                commandArgs: [],
+                cliConfigArgs: [],
+                acp: null,
+                agentProvider: null,
+                mentionPatterns: Array.from(
+                  new Set([
+                    BUILTIN_GPT_PRO_CANONICAL_MENTION,
+                    ...currentCat.mentionPatterns.filter(
+                      (pattern) => pattern.trim().toLowerCase() !== BUILTIN_GPT_PRO_CANONICAL_MENTION,
+                    ),
+                  ]),
+                ),
+              }
+            : {}),
+        });
+        const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
+        await configEventBus.emitChangeAsync({
+          source: 'cat-config',
+          scope: 'domain',
+          changedKeys: [request.params.id],
+          changeSetId: createChangeSetId(),
+          timestamp: Date.now(),
+        });
+        const cat = resolved[request.params.id];
+        const metadata = buildCatResponseMetadataResolver(projectRoot);
+        return {
+          cat: await toCatResponse(
+            cat,
+            projectRoot,
+            metadata(cat.id),
+            resolveEffectiveAccountRef,
+            opts.resolveContextCapacitySnapshot,
+          ),
+          updatedBy: operator,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof MemberConfigurationConflict || err instanceof MemberConfigurationRevisionRequired) {
+          reply.status(err.statusCode);
+        } else if (/not found/i.test(message)) {
+          reply.status(404);
+        } else {
+          reply.status(400);
+        }
+        return { error: message };
+      }
+    }),
+  );
 
   app.delete<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
     const operator = resolveHeaderUserId(request);
@@ -1837,7 +1846,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
     }
-    if (isBuiltinGptProIdentity(request.params.id) || request.params.id === 'gpt-dot') {
+    if (isBuiltinGptProIdentity(request.params.id)) {
       reply.status(409);
       return {
         code: 'BUILTIN_CLOUD_IDENTITY_PROTECTED',

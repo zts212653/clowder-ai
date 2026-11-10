@@ -72,6 +72,8 @@ export interface SubscriptionDeliveryDeps {
   readonly resolveInvocationId?: (messageId: string) => Promise<string | undefined>;
   /** A grant or action failure is operationally visible without logging envelope contents. */
   readonly onError?: (fields: { subscriberId: string; threadId: string; errorKind: string }) => void;
+  /** Begin consuming existing pending inputs only after receiver initialization succeeds. */
+  readonly onReady?: (threadId: string) => void;
   /** Events per read page. */
   readonly readLimit?: number;
   /**
@@ -213,18 +215,21 @@ async function invokeDelivery(
 ): Promise<void> {
   const input: PluginMessageDelivery = {
     kind: 'message',
+    reason: 'subscription',
     deliveryId,
     threadId: event.envelope.threadId,
     envelope: event.envelope,
     ...(lifecycleId === undefined ? {} : { executionId: lifecycleId }),
     ...(presentation === undefined ? {} : { presentation }),
   };
-  if (registration.method !== undefined && !delivery.invoke)
-    throw new Error('subscription delivery invocation port is unavailable');
-  const receipt =
-    registration.method !== undefined
-      ? await delivery.invoke!(registration.subscriberId, registration.method, input)
-      : await delivery.deliver(registration.subscriberId, input);
+  let receipt: unknown;
+  if (registration.method !== undefined) {
+    const invoke = delivery.invoke;
+    if (!invoke) throw new Error('Legacy subscription action transport is unavailable');
+    receipt = await invoke(registration.subscriberId, registration.method, input);
+  } else {
+    receipt = await delivery.deliver(registration.subscriberId, input);
+  }
   if (!isPluginDeliveryReceipt(receipt) || receipt.deliveryId !== deliveryId) {
     throw new Error(`delivery receipt mismatch for ${deliveryId}`);
   }
@@ -308,6 +313,7 @@ export class SubscriptionDelivery {
   private readonly drainTails = new Map<string, Promise<void>>();
   private readonly active = new Map<string, Set<{ controller: AbortController; done: Promise<void> }>>();
   private readonly stopped = new Set<string>();
+  private readonly starting = new Set<string>();
 
   constructor(deps: SubscriptionDeliveryDeps) {
     this.deps = deps;
@@ -336,6 +342,20 @@ export class SubscriptionDelivery {
     this.byThread.set(declaration.threadId, existing);
   }
 
+  /** Registration during start records intent without attempting delivery. */
+  beginInstance(subscriberId: string): void {
+    this.stopped.delete(subscriberId);
+    this.starting.add(subscriberId);
+  }
+
+  activateInstance(subscriberId: string): void {
+    if (!this.starting.delete(subscriberId) || this.stopped.has(subscriberId)) return;
+    for (const [threadId, registrations] of this.byThread) {
+      if (registrations.some((registration) => registration.subscriberId === subscriberId))
+        this.deps.onReady?.(threadId);
+    }
+  }
+
   unregister(subscriberId: string, threadId: string): void {
     const remaining = (this.byThread.get(threadId) ?? []).filter((entry) => entry.subscriberId !== subscriberId);
     if (remaining.length === 0) this.byThread.delete(threadId);
@@ -348,6 +368,7 @@ export class SubscriptionDelivery {
     reason: 'instance_stopped' | 'instance_uninstalled' = 'instance_stopped',
   ): Promise<void> {
     this.stopped.add(subscriberId);
+    this.starting.delete(subscriberId);
     for (const [threadId, registrations] of this.byThread) {
       const remaining = registrations.filter((registration) => registration.subscriberId !== subscriberId);
       if (remaining.length === 0) this.byThread.delete(threadId);
@@ -412,7 +433,7 @@ export class SubscriptionDelivery {
   }
 
   private async drainOne(registration: Registration): Promise<void> {
-    if (this.stopped.has(registration.subscriberId)) return;
+    if (this.stopped.has(registration.subscriberId) || this.starting.has(registration.subscriberId)) return;
     const ctx = { pluginInstanceId: registration.subscriberId };
     const maxPages = this.deps.maxPagesPerDrain ?? DEFAULT_MAX_PAGES;
 
@@ -428,7 +449,7 @@ export class SubscriptionDelivery {
       // event is still covered by that ack: skipping is a decision about this subscriber, not a
       // failure, and leaving it unacked would replay it forever.
       for (const event of result.events) {
-        if (this.stopped.has(registration.subscriberId)) return;
+        if (this.stopped.has(registration.subscriberId) || this.starting.has(registration.subscriberId)) return;
         await this.deliverOne(registration, event);
       }
       await this.deps.messaging.ack(ctx, registration.subscriptionId, result.ackToken);

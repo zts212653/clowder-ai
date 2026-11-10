@@ -5,6 +5,7 @@ import { ComposerPopover } from './ComposerPopover';
 import type { CatOption } from './chat-input-options';
 import { composerRoutingCopy } from './composer-routing.shell-copy';
 import type { ComposerRecipientIdentity } from './composer-routing-presentation';
+import { PluginTargetIcon } from './PluginTargetIcon';
 import { ShellCatAvatar } from './shell/ShellCatAvatar';
 
 type ComposerRoutingWords = typeof composerRoutingCopy.zh;
@@ -48,9 +49,15 @@ export function ComposerRecipientMenu({
                 anchor.current?.focus();
               }}
             >
-              <ShellCatAvatar catId={option.id} size={22} />
+              {option.isPlugin ? (
+                <PluginTargetIcon icon={option.pluginIcon} size={22} />
+              ) : (
+                <ShellCatAvatar catId={option.id} size={22} />
+              )}
               <span className="min-w-0 flex-1 truncate">{name}</span>
-              <span className="text-xs text-cafe-muted">{insert?.trim() ?? copy.recipientUnavailable}</span>
+              <span className="text-xs text-cafe-muted">
+                {option.isPlugin ? '插件' : (insert?.trim() ?? copy.recipientUnavailable)}
+              </span>
             </button>
           );
         })}

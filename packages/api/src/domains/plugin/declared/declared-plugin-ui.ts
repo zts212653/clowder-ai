@@ -72,6 +72,7 @@ export class DeclaredPluginUi {
                 (resource) =>
                   resource.methods.includes('GET') &&
                   !resource.path.includes(':') &&
+                  resource.action !== undefined &&
                   resource.action.method === command.action.method &&
                   isDeepStrictEqual(resource.action.params ?? {}, command.action.params ?? {}),
               );

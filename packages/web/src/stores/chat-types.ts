@@ -212,6 +212,15 @@ export interface ChatMessage {
   /** F22+F52+F098-C1: Rich blocks + cross-thread origin + explicit targets */
   extra?: {
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
+    /** Host receipt: input acceptance only, never a model response. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     runtimeInteractionCard?: {
       version: 1;
       interactionId: string;

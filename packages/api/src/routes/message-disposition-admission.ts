@@ -47,6 +47,8 @@ export function resolveMessageDispositionForAdmission(input: {
 
 export interface QueueAdmissionPolicyContext {
   projectRoot?: string;
+  /** Server-owned classification for this admission only; never supplied by the producer. */
+  resolveTargetKinds?: (requested: readonly string[]) => Promise<ReadonlyMap<string, 'member' | 'plugin'>>;
   /** Synchronous catalog validation shared by every first-write Queue admission. */
   resolvePreResolvedTargets?: (requested: readonly string[], implicit: boolean) => string[];
   resolveTargets?: (

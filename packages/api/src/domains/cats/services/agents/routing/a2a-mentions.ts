@@ -56,11 +56,16 @@ export interface InlineActionMention {
  *
  * Line-start @mention = always actionable. No keyword gate.
  */
-export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[] {
-  return analyzeA2AMentions(text, currentCatId).mentions;
+type PluginMention = { readonly id: string; readonly alias: string };
+export function parseA2AMentions(text: string, currentCatId?: CatId, plugins: readonly PluginMention[] = []): CatId[] {
+  return analyzeA2AMentions(text, currentCatId, plugins).mentions;
 }
 
-export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMentionAnalysis {
+export function analyzeA2AMentions(
+  text: string,
+  currentCatId?: CatId,
+  plugins: readonly PluginMention[] = [],
+): A2AMentionAnalysis {
   // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
   const allConfigs = catRegistry.getAllConfigs();
 
@@ -74,6 +79,9 @@ export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMenti
     }
   }
 
+  for (const plugin of plugins) {
+    if (plugin.id !== currentCatId) handles.push({ catId: plugin.id as CatId, pattern: `@${plugin.alias}` });
+  }
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
@@ -82,7 +90,7 @@ export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMenti
     if (seen.has(catId)) continue;
     seen.add(catId);
     // F182 KD-10: resolver check at match-time (not at pattern-build time)
-    const resolved = resolveCatTarget(catId);
+    const resolved = plugins.some((plugin) => plugin.id === catId) ? { ok: catId } : resolveCatTarget(catId);
     if ('error' in resolved) routing_warnings.push(resolved.error);
     else found.push(catId);
   }

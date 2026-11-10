@@ -54,6 +54,53 @@ describe('GET /api/messages', () => {
     if (app) await app.close();
   });
 
+  for (const status of [
+    'delivering',
+    'waiting',
+    'processing',
+    'unconfirmed',
+    'failed',
+    'canceled',
+    'interrupted',
+    'completed',
+  ]) {
+    it(`hydrates persisted target reply ${status} independently of an acceptance receipt`, async () => {
+      const targetResponse = {
+        v: 1,
+        revision: 3,
+        inputMessageId: 'input',
+        targetId: 'pi_dot',
+        execution: { kind: 'plugin', id: 'delivery' },
+        status,
+        startedAt: 1000,
+        updatedAt: 2000,
+      };
+      const carrier = messageStore.append({
+        userId: 'default-user',
+        from: { kind: 'system', service: 'plugin_delivery' },
+        content: 'reply carrier',
+        mentions: [],
+        timestamp: 1000,
+        extra: { targetResponse },
+      });
+      const targetResponseResult = { carrierMessageId: carrier.id, deliveryId: 'delivery', status: 'completed' };
+      const result = messageStore.append({
+        userId: 'default-user',
+        from: { kind: 'plugin', instanceId: 'pi_dot' },
+        content: 'reply',
+        mentions: [],
+        timestamp: 2000,
+        replyTo: 'input',
+        extra: { targetResponseResult, pluginMessage: { instanceId: 'pi_dot' } },
+      });
+      const response = await app.inject({ method: 'GET', url: '/api/messages' });
+      assert.equal(response.statusCode, 200);
+      const rows = response.json().messages;
+      assert.deepEqual(rows.find((row) => row.id === carrier.id).extra?.targetResponse, targetResponse);
+      assert.deepEqual(rows.find((row) => row.id === result.id).extra?.targetResponseResult, targetResponseResult);
+    });
+  }
+
   it('returns empty array when no messages', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -80,6 +127,23 @@ describe('GET /api/messages', () => {
     const response = await app.inject({ method: 'GET', url: '/api/messages' });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json().messages[0].extra, { cloudBridgeReturn: proof });
+  });
+
+  it('hydrates the exact plugin acceptance receipt as a system row without a response lifecycle', async () => {
+    const pluginAddressedReceipt = { inputMessageId: 'input', targetId: 'pi_dot', accepted: true };
+    messageStore.append({
+      userId: 'default-user',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: '插件已接收消息。',
+      mentions: [],
+      timestamp: 1000,
+      extra: { pluginAddressedReceipt },
+    });
+    const response = await app.inject({ method: 'GET', url: '/api/messages' });
+    const row = response.json().messages[0];
+    assert.deepEqual(row.extra?.pluginAddressedReceipt, pluginAddressedReceipt);
+    assert.equal(row.from?.kind, 'system');
+    assert.equal(row.lifecycle?.kind === 'response', false);
   });
 
   it('projects the modification source carrier in real history without requiring another extra field', async () => {

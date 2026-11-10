@@ -191,8 +191,10 @@ describe('F202 C1 — caller-bound Host messaging subscriptions', () => {
       'envelope',
       'executionId',
       'kind',
+      'reason',
       'threadId',
     ]);
+    assert.equal(h.calls[0].params.reason, 'subscription');
     assert.equal(h.calls[0].params.threadId, thread.id);
     assert.equal(h.calls[0].params.envelope.payload.elements[0].payload.text, 'hello');
   });

@@ -1,3 +1,4 @@
+import type { PluginDeliveryInput, PluginDeliveryReceipt } from '@clowder-ai/plugin-contract';
 import {
   attemptPluginAction,
   invocationNotStarted,
@@ -35,6 +36,13 @@ export interface BundledPluginRuntime {
     reference: string,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<Uint8Array>;
+  deliver?(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt>;
+  handle?(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown>;
+  handleWebhook?(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   configRefresh?(pluginInstanceId: string): Promise<void>;
   uninstall?(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void>;
@@ -280,6 +288,43 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       await this.stop(pluginInstanceId, 'configuration_refresh_failed');
       throw error;
     }
+  }
+
+  async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.deliver) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active call delivery surface');
+    }
+    const receipt = await active.runtime.deliver(pluginInstanceId, input);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin call was stopped');
+    return receipt;
+  }
+
+  async handle(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.handle) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active request handler');
+    }
+    const result = await active.runtime.handle(pluginInstanceId, request);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin request handler was stopped');
+    return result;
+  }
+
+  async handleWebhook(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.handleWebhook) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active webhook surface');
+    }
+    const result = await active.runtime.handleWebhook(pluginInstanceId, contributionId, request);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin webhook was stopped');
+    return result;
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {

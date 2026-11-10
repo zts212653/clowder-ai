@@ -34,7 +34,12 @@ export function tarArchive(files) {
 export async function generateBundledPluginArtifacts(
   pluginRoot,
   definitions,
-  { check = false, sourceRoot = pluginRoot } = {},
+  {
+    check = false,
+    sourceRoot = pluginRoot,
+    formatManifest = (text) => text,
+    validatePrebuiltArchive = async () => {},
+  } = {},
 ) {
   const outputRoot = fileURLToPath(new URL('bundled-packages', pluginRoot));
   const output = new Map();
@@ -47,10 +52,48 @@ export async function generateBundledPluginArtifacts(
   }
 
   const records = [];
-  for (const { catalogId, manifest, agentProvider, files = [] } of definitions) {
+  for (const { catalogId, manifest, agentProvider, files = [], prebuilt } of definitions) {
     assert.ok(/^[a-z][a-z0-9-]*$/.test(catalogId), 'invalid bundled catalog id');
-    assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
+    assert.ok(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version));
     const relativeRoot = `bundled-packages/${catalogId}/${manifest.version}/`;
+    const manifestBytes = Buffer.from(formatManifest(`${JSON.stringify(manifest, null, 2)}\n`));
+    if (prebuilt) {
+      const archivePath = `${catalogId}/${manifest.version}/package.tgz`;
+      const sourceArchiveUrl = new URL(`bundled-packages/${archivePath}`, sourceRoot);
+      const rootPath = await realpath(sourceRoot);
+      const sourcePath = fileURLToPath(sourceArchiveUrl);
+      const actualPath = await realpath(sourceArchiveUrl);
+      const inside = relative(rootPath, actualPath);
+      assert.ok(
+        inside && !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`),
+        'prebuilt archive must remain inside the source root',
+      );
+      const components = relative(fileURLToPath(sourceRoot), sourcePath).split(sep);
+      let current = rootPath;
+      for (const [index, component] of components.entries()) {
+        current = join(current, component);
+        const stat = await lstat(current);
+        assert.ok(!stat.isSymbolicLink(), 'prebuilt archive must not contain links/junctions');
+        assert.ok(
+          index === components.length - 1 ? stat.isFile() : stat.isDirectory(),
+          'prebuilt archive must be a regular file with directory ancestors',
+        );
+      }
+      const bytes = await readFile(sourceArchiveUrl);
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), prebuilt.sha256, 'prebuilt archive SHA256 drift');
+      await validatePrebuiltArchive(sourcePath);
+      recordFile(new URL(`${relativeRoot}manifest.json`, pluginRoot), manifestBytes);
+      recordFile(new URL(`${relativeRoot}package.tgz`, pluginRoot), bytes);
+      records.push({
+        catalogId,
+        pluginId: manifest.pluginId,
+        version: manifest.version,
+        archiveUrl: `builtin://${catalogId}/${manifest.version}`,
+        packageDigest: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
+        archivePath,
+      });
+      continue;
+    }
     const sourceFiles = [...new Set([...(manifest.icon?.src ? [manifest.icon.src] : []), ...files])];
     if (manifest.runtime?.entrypoint)
       assert.ok(sourceFiles.includes(manifest.runtime.entrypoint), 'bundle must include its runtime entrypoint');
@@ -89,7 +132,6 @@ export async function generateBundledPluginArtifacts(
       }
       packageFiles.push({ name: `package/${name}`, bytes: await readFile(sourceUrl) });
     }
-    const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
     const providerBytes =
       agentProvider === undefined ? undefined : Buffer.from(`${JSON.stringify(agentProvider, null, 2)}\n`);
     const tarBytes = tarArchive([

@@ -10,6 +10,7 @@ import { MessageStore } from '../../dist/domains/cats/services/stores/ports/Mess
 import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { createDormantPluginRuntimeComposition } from '../../dist/domains/plugin/runtime-composition.js';
 import { pluginWebhookForwardingRoutes } from '../../dist/routes/plugin/plugin-webhook-forwarding-routes.js';
+import { readPluginNativeToken } from './plugin-native-credential.js';
 
 export async function neutralFixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'f202-neutral-host-'));
@@ -148,10 +149,9 @@ export async function neutralFixture(t, options = {}) {
     webhooks: runtime.supervisor,
     timeoutMs: options.timeoutMs ?? 1000,
   });
-  const token = runtime.supervisor.nativeActions.environment(
-    installed.pluginInstanceId,
-    'native',
-  ).CLOWDER_PLUGIN_ACTION_TOKEN;
+  const token = await readPluginNativeToken(
+    runtime.supervisor.nativeActions.environment(installed.pluginInstanceId, 'native'),
+  );
   assert.ok(token);
   return {
     root,

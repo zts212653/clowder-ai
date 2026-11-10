@@ -1,4 +1,10 @@
-import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import {
+  isPluginDeliveryInput,
+  isPluginDeliveryReceipt,
+  type PluginDeliveryInput,
+  type PluginDeliveryReceipt,
+  type PluginManifest,
+} from '@clowder-ai/plugin-contract';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
@@ -51,7 +57,7 @@ import {
 } from '../../manifest-configuration-projection.js';
 import type { BundledPluginRuntime } from './bundled-runtime-carrier.js';
 import { snapshotModuleAuthority } from './module-authority-snapshot.js';
-import { createModuleHostInvocation, exposesModuleAction } from './module-host-invocation.js';
+import { createModuleHostInvocation, exposesModuleAction, projectOwnerHttpContext } from './module-host-invocation.js';
 import {
   assertModuleSettingsDeclaration,
   createModuleSettingsHost,
@@ -95,6 +101,8 @@ export interface ModulePluginHostShape {
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;
+  /** One Host-owned access identity for this installation. The plugin cannot rotate or retarget it. */
+  readonly external: { readonly endpoint: string; readonly token: string };
   /** Stable Host-assigned directory; the plugin owns its contents. */
   readonly dataPath: string;
   readonly log: (level: ModulePluginLogLevel, message: string, fields?: Readonly<Record<string, unknown>>) => void;
@@ -102,6 +110,14 @@ export interface ModulePluginHostShape {
 
 export interface PluginModuleActivationShape {
   readonly actions: Readonly<Record<string, unknown>>;
+  deliver?(input: PluginDeliveryInput): unknown | Promise<unknown>;
+  handle?(request: Readonly<Record<string, unknown>>): unknown | Promise<unknown>;
+  readonly webhook?: {
+    handle(
+      input: { readonly contributionId: string; readonly request: unknown },
+      context?: ReturnType<typeof projectOwnerHttpContext>,
+    ): unknown | Promise<unknown>;
+  };
   readonly streams?: PluginStreams;
   configRefresh?(): void | Promise<void>;
   preStop?(context: { reason: string; deadline: number }): void | Promise<void>;
@@ -151,6 +167,10 @@ export interface ModulePluginRuntimeOptions {
     readonly ownerUserId: string;
   };
   readonly media?: PluginMediaReadService;
+  readonly externalAccess?: (
+    pluginInstanceId: string,
+  ) => Promise<{ readonly endpoint: string; readonly token: string }>;
+
   /** Parent of module data directories (`<projectRoot>/.cat-cafe/plugin-host`); none without it. */
   readonly dataDirectoryParent?: string;
   readonly log: ModulePluginHostShape['log'];
@@ -162,6 +182,8 @@ interface LoadedModule {
   readonly manifest: PluginManifest;
   /** Hook shape is stable for this verified definition’s loaded generation. */
   readonly hasSettings: boolean;
+  /** Exact definition whose start() produced this activation; settings may close over its state. */
+  readonly definition: PluginModuleDefinitionShape;
   readonly located: VerifiedPluginPackage;
   readonly activation: PluginModuleActivationShape;
   readonly publicActions: Readonly<Record<string, unknown>>;
@@ -254,6 +276,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       packageDigest: packageRecord.packageDigest,
       packageName,
       sourceKind: provenance.kind,
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     });
   }
 
@@ -398,6 +421,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         threads,
         messaging,
         streams,
+        external: settingsHost.external,
         dataPath: settingsHost.dataPath,
         log: (level, message, fields) =>
           this.options.log(level, message, { ...fields, pluginId: packageRecord.pluginId, pluginInstanceId }),
@@ -410,6 +434,8 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       const candidate = managed.candidate as PluginModuleActivationShape;
       const stop = (candidate as Partial<PluginModuleActivationShape> | undefined)?.stop;
       const actions = (candidate as Partial<PluginModuleActivationShape> | undefined)?.actions;
+      const deliver = (candidate as Partial<PluginModuleActivationShape> | undefined)?.deliver;
+      const webhook = (candidate as Partial<PluginModuleActivationShape> | undefined)?.webhook;
       if (
         !candidate ||
         (typeof candidate !== 'object' && typeof candidate !== 'function') ||
@@ -425,11 +451,33 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} start() must return an actions table and stop()`,
         );
       }
+      if (packageRecord.manifest.call !== undefined && typeof deliver !== 'function') {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          `${packageRecord.pluginId} declares call without deliver()`,
+        );
+      }
+      const fixedWebhooks = (packageRecord.manifest.contributions ?? []).filter(
+        (contribution) => contribution.type === 'webhook' && contribution.action === undefined,
+      );
+      if (fixedWebhooks.length > 0 && typeof webhook?.handle !== 'function') {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          `${packageRecord.pluginId} declares fixed webhooks without webhook.handle()`,
+        );
+      }
+      if (fixedWebhooks.length === 0 && webhook !== undefined) {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          `${packageRecord.pluginId} exposes webhook without a fixed webhook declaration`,
+        );
+      }
       activation = candidate;
       assertActivation();
       this.#loaded.set(pluginInstanceId, {
         packageRecord,
         located,
+        definition: plugin,
         activation,
         publicActions: actions,
         hasSettings,
@@ -532,6 +580,67 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     return work.promise;
   }
 
+  async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    const activation = this.#operationActivations.get(pluginInstanceId);
+    if (!loaded?.activation.deliver || !activation || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module has no active delivery surface');
+    }
+    if (!isPluginDeliveryInput(input)) {
+      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Plugin delivery input is invalid');
+    }
+    const result = await loaded.activation.deliver(structuredClone(input));
+    if (this.#loaded.get(pluginInstanceId) !== loaded || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module delivery activation changed');
+    }
+    if (!isPluginDeliveryReceipt(result) || result.deliveryId !== input.deliveryId) {
+      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Module returned an invalid delivery receipt');
+    }
+    return structuredClone(result);
+  }
+
+  async handle(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    const activation = this.#operationActivations.get(pluginInstanceId);
+    if (!loaded?.activation.handle || !activation || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module has no active request handler');
+    }
+    const result = await loaded.activation.handle(structuredClone(request));
+    if (this.#loaded.get(pluginInstanceId) !== loaded || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module request-handler activation changed');
+    }
+    return result;
+  }
+
+  async handleWebhook(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    const activation = this.#operationActivations.get(pluginInstanceId);
+    if (!loaded?.activation.webhook || !activation || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module has no active webhook surface');
+    }
+    const contribution = (loaded.manifest.contributions ?? []).find(
+      (candidate) => candidate.type === 'webhook' && candidate.id === contributionId && candidate.action === undefined,
+    );
+    if (!contribution) {
+      throw new ExternalPluginRuntimeError(
+        'PROTOCOL_VIOLATION',
+        `${contributionId} is not a fixed webhook contribution`,
+      );
+    }
+    const result = await loaded.activation.webhook.handle(
+      { contributionId, request: structuredClone(request) },
+      projectOwnerHttpContext(pluginInstanceId),
+    );
+    if (this.#loaded.get(pluginInstanceId) !== loaded || activation.signal.aborted) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Module webhook activation changed');
+    }
+    return result;
+  }
+
   async uninstall(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void> {
     const located = await this.#resolvePackage(pluginInstanceId, packageRecord);
     let execution: ModuleExecutionLease | undefined;
@@ -572,27 +681,39 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     const loaded = this.#loaded.get(id);
     const activation = this.#neutralActivations.get(id);
     const operation = this.#operationActivations.get(id);
-    if (
-      loaded?.hasSettings === false &&
-      loaded.packageDigest === admitted.packageRecord.packageDigest &&
-      activation !== undefined &&
-      operation !== undefined &&
-      !operation.signal.aborted
-    ) {
-      assertModuleSettingsDeclaration(admitted.packageRecord, admitted.method);
-      await admitted.assertCurrent();
-      // Same digest does not mean same activation: a stop/restart may have completed
-      // while the owner fence yielded. Never let that old probe select a new runtime.
-      if (
-        this.#loaded.get(id) !== loaded ||
-        this.#neutralActivations.get(id) !== activation ||
-        this.#operationActivations.get(id) !== operation ||
-        operation.signal.aborted ||
-        loaded.packageDigest !== admitted.packageRecord.packageDigest
-      ) {
-        throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Settings probe activation changed');
+    if (loaded?.packageDigest === admitted.packageRecord.packageDigest) {
+      const assertLoadedCurrent = async () => {
+        await admitted.assertCurrent();
+        if (
+          activation === undefined ||
+          operation === undefined ||
+          this.#loaded.get(id) !== loaded ||
+          this.#neutralActivations.get(id) !== activation ||
+          this.#operationActivations.get(id) !== operation ||
+          operation.signal.aborted
+        ) {
+          throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Settings probe activation changed');
+        }
+      };
+      if (!loaded.hasSettings) {
+        assertModuleSettingsDeclaration(admitted.packageRecord, admitted.method);
+        await assertLoadedCurrent();
+        return { handled: false };
       }
-      return { handled: false };
+      return invokeModuleSettings(
+        { ...admitted, assertCurrent: assertLoadedCurrent },
+        {
+          definition: loaded.definition,
+          execution: loaded.execution,
+          configuration: this.options.configuration,
+          ...(this.options.dataDirectoryParent === undefined
+            ? {}
+            : { dataDirectoryParent: this.options.dataDirectoryParent }),
+          ...(this.options.storage ? { storage: this.options.storage } : {}),
+          ...(this.options.externalAccess ? { externalAccess: this.options.externalAccess } : {}),
+          log: this.options.log,
+        },
+      );
     }
     const located = await this.#resolvePackage(id, admitted.packageRecord);
     return invokeModuleSettings(admitted, {
@@ -603,6 +724,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         ? {}
         : { dataDirectoryParent: this.options.dataDirectoryParent }),
       ...(this.options.storage ? { storage: this.options.storage } : {}),
+      ...(this.options.externalAccess ? { externalAccess: this.options.externalAccess } : {}),
       log: this.options.log,
     });
   };
