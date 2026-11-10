@@ -365,3 +365,14 @@ Host fb3b76e7的CI 42692687559中，Lint失败于start-entry-signal.test.mjs的n
 - 修正exit观察的时机，在发信号前登记exit promise，避免短进程已退出后才监听。信号只发向直接创建的隔离fixture进程组，不运行真实启动脚本、不操作运行实例。
 - 定向启动与信号检查7/7（/tmp/f202-r14-signal-green.log）；完整check:pre-merge-gate为173通过、47个既有跳过、0失败（/tmp/f202-r14-gate-scripts.log），RED在/tmp/f202-r14-signal-red.log；Linux原失败在/tmp/f202-r14-lint.log，Redis成功在/tmp/f202-r14-lane4.log。未改变start-entry.mjs/start-dev.sh或任何产品、插件包、CI边界。
 - 当前诊断CI仍有未结束分片，不立刻push触发concurrency取消；先保留PNG/worker诊断结果，再按已有PR回调接续提交。本节不宣称Linux PNG已解决或全套已绿。
+
+### R15/R16：Linux归档已通过；区分pnpm外壳与实际包装器的信号契约
+
+已回读fb3b76e7完整CI 42692687559：六个distributable、serial-shared、Public汇总、Build、Windows与macOS均成功。lane5在Linux Node24.20.0真实加载隔离安装目录内sharp-wasm32，默认和强制WASM消费者均完成worker online、PNG编码及metadata，归档检查约5.6秒；原始inline eval的底层停滞原因未独立复现，不外推新的实机Work结论。日志/tmp/f202-r15-lane5-green.log。c7ea4526已于operator询问进度后推送，产品与alpha.51仍未改。
+
+新CI 42746818457的Lint在pnpm清理分支失败，直接node包装器分支已绿（/tmp/f202-r16-lint.log）。R14修复Bash夹具不足以约束pnpm的信号策略：pnpm9.15.4第二次SIGINT会调用procKill向其生命周期shell发送SIGTERM；有中间shell时，pnpm退出不等于Node包装器退出。以显式保留shell的隔离脚本复现，外层已退出时仅有cleanup-start，稍后实际包装器完成cleanup-done。证据/tmp/f202-r16-pnpm-shell-join.log；未运行真实启动脚本。
+
+- 检查契约改为实际修改的Node包装器：直接启动仍承受两次进程组SIGINT；经pnpm启动时，从自己创建的Bash夹具记录其父包装器PID，向该包装器发送两次SIGINT。显式保留生命周期shell，避免Darwin尾调用优化隐藏中间层。
+- 两条路径都仍在外层进程退出时立即核对cleanup-done，退出码进一步收紧为130且signal=null；不再接受pnpm消费信号后返回0。没有用等待cleanup-done之后再检查的循环来掩盖提前退出，也没有给产品增加信号绕行或改运行配置。此检查不宣称pnpm自己收到进程组中断也承诺等待所有后代。
+- 同型审视：run-preserving-signal-exit检查已经向受测包装器发信号，不把其调用者退出当成包装器退出；保留原测试。最终显式shell的定向启动/信号7/7（/tmp/f202-r16-shell-green-final.log）；同轮完整脚本门禁173通过、47既有跳过、0失败（/tmp/f202-r16-gate-scripts.log），其后仅增强隔离夹具的显式shell，7项最终检查覆盖该增量。所有临时进程/信号只属于隔离fixture。
+- 本轮仍只有测试与说明；没有修改start-entry.mjs/start-dev.sh、Host产品、SDK、插件或alpha.51。PR现有CI回调继续跟踪新提交，不以先前通过项冒充当前HEAD全绿；未合并、发布、安装或重启。

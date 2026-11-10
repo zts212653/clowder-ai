@@ -22,25 +22,32 @@ function waitFor(predicate, timeoutMs = 5_000) {
 
 for (const viaPnpm of [false, true])
   test(
-    `start:direct waits for SIGINT cleanup (${viaPnpm ? 'pnpm' : 'node wrapper'})`,
+    viaPnpm
+      ? 'the start wrapper joins cleanup and preserves SIGINT status when launched by pnpm'
+      : 'start:direct waits for repeated process-group SIGINT cleanup (node wrapper)',
     { timeout: 10_000, skip: process.platform === 'win32' },
     async () => {
       const fixture = mkdtempSync(join(tmpdir(), 'cat-cafe-start-entry-signal-'));
       const scripts = join(fixture, 'scripts');
       const marker = join(fixture, 'cleanup.log');
+      const wrapperPidFile = join(fixture, 'wrapper.pid');
       mkdirSync(join(scripts, 'lib'), { recursive: true });
       cpSync(join(ROOT, 'scripts', 'start-entry.mjs'), join(scripts, 'start-entry.mjs'));
       writeFileSync(join(scripts, 'lib', 'platform-status.mjs'), 'export function runWindowsStatus() {}\n', 'utf8');
       writeFileSync(
         join(scripts, 'start-dev.sh'),
-        `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap "" INT TERM; cleanup; exit 130' INT\ntrap 'trap "" INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
+        `#!/usr/bin/env bash\nmarker=${JSON.stringify(marker)}\nprintf '%s\\n' "$PPID" > ${JSON.stringify(wrapperPidFile)}\ncleanup() { printf 'cleanup-start\\n' >> "$marker"; sleep 0.4; printf 'cleanup-done\\n' >> "$marker"; }\ntrap 'trap "" INT TERM; cleanup; exit 130' INT\ntrap 'trap "" INT TERM; cleanup; exit 143' TERM\nprintf 'launcher-ready\\n'\nwhile :; do sleep 1; done\n`,
         { mode: 0o755 },
       );
       writeFileSync(
         join(fixture, 'package.json'),
         JSON.stringify({
           private: true,
-          scripts: { 'start:direct': 'node ./scripts/start-entry.mjs start:direct --profile=opensource' },
+          scripts: {
+            // Retain the lifecycle shell instead of relying on platform-specific tail exec.
+            'start:direct':
+              'node ./scripts/start-entry.mjs start:direct --profile=opensource; result=$?; exit "$result"',
+          },
         }),
         'utf8',
       );
@@ -68,19 +75,19 @@ for (const viaPnpm of [false, true])
           command.once('error', reject);
           command.once('exit', (code, signal) => resolveExit({ code, signal }));
         });
-        // Like start-dev.sh finish_launcher, the fixture ignores repeated signals during cleanup.
-        process.kill(-command.pid, 'SIGINT');
+        // pnpm owns its own shell/signal policy. Test our wrapper through pnpm,
+        // and exercise terminal process-group signals directly on the wrapper.
+        const wrapperPid = Number(readFileSync(wrapperPidFile, 'utf8').trim());
+        assert.ok(Number.isSafeInteger(wrapperPid) && wrapperPid > 0 && wrapperPid !== process.pid);
+        const signalTarget = viaPnpm ? wrapperPid : -command.pid;
+        process.kill(signalTarget, 'SIGINT');
         await waitFor(() => existsSync(marker) && readFileSync(marker, 'utf8').includes('cleanup-start'));
-        process.kill(-command.pid, 'SIGINT');
+        process.kill(signalTarget, 'SIGINT');
         const exit = await exited;
         const cleanup = readFileSync(marker, 'utf8');
         assert.match(cleanup, /cleanup-done/, `wrapper exited before cleanup completed\n${output}`);
-        // pnpm may consume SIGINT and return zero after its child has finished.
-        // The wrapper itself must preserve the signal status; both paths await cleanup.
-        assert.ok(
-          exit.code === 130 || exit.signal === 'SIGINT' || (viaPnpm && exit.code === 0),
-          JSON.stringify({ exit, output }),
-        );
+        assert.equal(exit.code, 130, JSON.stringify({ exit, output }));
+        assert.equal(exit.signal, null, JSON.stringify({ exit, output }));
       } finally {
         if (command.exitCode === null && command.signalCode === null) {
           try {
