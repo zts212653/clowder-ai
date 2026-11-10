@@ -177,7 +177,8 @@ async function productionSubscriptionScenario(recovering) {
     });
     try {
       await waitFor(() => startingPaused, 'package did not pause after restoring its subscription', 10_000);
-      await waitFor(() => failures.length > 0, 'the initial drain must encounter the not-yet-loaded module');
+      await runtime.subscriptionDelivery.drain(thread.id);
+      assert.equal(failures.length, 0, 'initialization must defer delivery, not fail then retry');
       assert.equal(observation.read().calls.length, 0);
     } finally {
       startupGate.resolve();

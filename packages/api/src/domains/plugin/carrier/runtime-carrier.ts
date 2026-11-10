@@ -108,6 +108,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
     private readonly projectOutputs?: PluginProjectOutputs,
     private readonly afterStart?: (instanceId: string) => void,
+    private readonly beforeStart?: (instanceId: string) => void,
   ) {
     this.nativeActions = new NativePluginActions((id) => this.#admission(id));
     this.#nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
@@ -135,6 +136,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const admission = await this.#admission(pluginInstanceId);
     const carrier = this.#selectAdmission(admission);
     const previousSkillPolicy = await captureDeclaredSkillPolicy(admission.packageRecord.pluginId, this.resources);
+    this.beforeStart?.(pluginInstanceId);
     let admitted: Promise<void> | undefined;
     const admitContributions = () =>
       (admitted ??= (async () => {
@@ -174,7 +176,10 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       }
       return result;
     } catch (error) {
-      if (!admitted) throw error;
+      if (!admitted) {
+        await this.beforeStop?.(pluginInstanceId, 'start_failed');
+        throw error;
+      }
       await this.#rollbackStartedRuntime(error, carrier, admission, previousSkillPolicy);
     }
   }
@@ -454,6 +459,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     this.nativeActions.deactivate(admission.instance.pluginInstanceId);
     const rollbackErrors: unknown[] = [];
     try {
+      await this.beforeStop?.(admission.instance.pluginInstanceId, 'start_failed');
       await carrier.stop(admission.instance.pluginInstanceId, 'start_failed');
     } catch (error) {
       rollbackErrors.push(error);

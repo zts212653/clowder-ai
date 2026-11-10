@@ -455,7 +455,7 @@ export function createDormantPluginRuntimeComposition(
   };
   const subscriptionDelivery = createSubscriptionDelivery({
     messaging,
-    onRegistered: options.onMessagePublished,
+    onReady: options.onMessagePublished,
     presentation:
       options.deliveryPresentation ??
       ((threadId, actor) => Promise.resolve(buildDeliveryPresentation(threadId, actor))),
@@ -682,7 +682,8 @@ export function createDormantPluginRuntimeComposition(
       ledger: mediaLedger,
       ...(options.threadStore ? { threads: options.threadStore } : {}),
     }),
-    (instanceId) => subscriptionDelivery.resumeInstance(instanceId),
+    (instanceId) => subscriptionDelivery.activateInstance(instanceId),
+    (instanceId) => subscriptionDelivery.beginInstance(instanceId),
   );
   deliveryTarget.current = supervisor;
   supervisor.register(

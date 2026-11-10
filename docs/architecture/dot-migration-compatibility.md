@@ -12,7 +12,7 @@ A completed import audit records history, not current permission. Legacy adoptio
 
 ## Review cuts
 
-The original integration reference cut is Host `1b8f0c8268b79cbaba96ee58cf1d9e4360a1b46c` against public base `50e5695607a42d5bdbe6e95703e83b038287f290`, paired with plugin `4e2dc4e50b02954a52de982d28c9907bbef18361`. Subsequent Host revisions synchronize the upstream base and correct legacy authorization revalidation. Read the PR's current exact HEAD for those changes; original-cut test results do not certify new authorization checks. The alpha.51 archive remains unchanged.
+The original integration reference cut is Host `1b8f0c8268b79cbaba96ee58cf1d9e4360a1b46c` against public base `50e5695607a42d5bdbe6e95703e83b038287f290`, paired with plugin `4e2dc4e50b02954a52de982d28c9907bbef18361`. Subsequent Host revisions synchronize the upstream base and correct legacy authorization revalidation. Read the PR's current exact HEAD for those changes; original-cut test results do not certify new authorization checks. The subsequent alpha.52 candidate simplifies early reply association and gates initial subscription consumption until runtime initialization completes.
 
 The following are bounded review units over that integration cut. They are not claimed to be four independently deployable intermediate commits.
 
@@ -29,12 +29,12 @@ Each cut can be inspected with `git diff 50e5695607a42d5bdbe6e95703e83b038287f29
 
 | Host / consumer | Data or plugin input | Supported result |
 | --- | --- | --- |
-| Paired Host / Dot alpha.51, SDK candidate.12 | Current addressed or subscription delivery | Fixed delivery entrypoint; actual source and instance validation; only addressed results settle a carrier |
+| Paired Host / Dot alpha.52, SDK candidate.12 | Current addressed or subscription delivery | Fixed delivery entrypoint; actual source and instance validation; only addressed results settle a carrier |
 | Current Dot consumer | Anonymized retained ordinary dispatches from earlier plugin installations | Read after restart, retained completed reply, no second send, stale-source rejection; three cases in `historical-replay.test.mjs` |
 | Current Host compatibility adapter | Original opaque credential, dispatch/image records and original PNG bytes | Owner-checked idempotent import; same-instance legacy connection; no key resurrection after replacement installation |
 | Superagent SDK `0.3.0-beta.2-candidate.11` / current contract | Retained pre-`reason` inbox rows | Inspect/retry/route old rows; live ingress still rejects a missing or invalid reason |
 | Existing approved shared connection / current Host | Same owner, lineage and unchanged approved surface | Existing route remains usable; revoked, replaced or expanded authority is rejected |
-| Older Host without this capability set / alpha.51 | New `call`, result and migration boundaries | Not a supported pairing. Keep the original installation before cutover, or return to the paired Host without deleting migrated state |
+| Older Host without this capability set / alpha.52 | New `call`, result and migration boundaries | Not a supported pairing. Keep the original installation before cutover, or return to the paired Host without deleting migrated state |
 
 This matrix does not claim that an old Host binary can consume every new message, image or target-result state written after activation.
 
@@ -70,10 +70,16 @@ pnpm --filter @clowder-ai/superagent test
 pnpm --filter @clowder-ai/superagent typecheck
 ```
 
-The original-image and frozen-package checks use the exact alpha.51 archive, SHA-256 `6214d9b5717900bde17691ff255d148df90423b46fe7820476f6bc1ce3c4283e`. Tests and developer-guide changes do not alter its runtime/assets/manifest/README closure.
+The current original-image and frozen-package checks use alpha.52, SHA-256 `4c31b455e4243bf93d7d8d6edddd28a68f62144fa6ecfae75870545847bef0c9`. Its dependency closure is retained from the previously verified alpha.51; only Dot runtime, version and guides change.
 
 ## Historical use evidence and limits
 
 A read-only inspection of retained worktree request and message records linked seven complete receive/read/reply chains: three ordinary addressed conversations and four connection checks. Replies reference their exact source in the same thread. One earlier connection-check attempt remained incomplete. Private bodies, credentials, endpoints, identities and original database/log records are not published.
 
 The retained installation history ends with alpha.38. This is real-use evidence for earlier installed revisions, not a final alpha.51 or final-source observation certificate. Public anonymous fixtures substitute identities, content, revisions and digests while retaining record shape and event ordering; fixture replay is reported separately from real external use. Elapsed calendar time alone does not demonstrate a restart, mixed-version read or rollback.
+
+## Reply association and initialization
+
+Dot subscribes to a thread once before sending its question. If a reply arrives before its local send receipt is saved, Dot verifies the parent with the existing Host own-send lookup (`messaging.findSent`), including the thread and admitted recipient. No receipt-pending exception or second subscription is used to force a replay. This requires the paired Host’s own-send lookup.
+
+The Host records subscription intent during initialization without invoking an unavailable receiver. Successful initialization begins consuming the existing pending cursor; failed/canceled initialization removes its live registrations. Re-registration alone does not schedule retries, and a repeated readiness callback does not restart delivery. Addressed A2A task failure/terminal handling is unchanged. The pre-existing subscription delivery read/ack guarantee remains separate from A2A task execution.

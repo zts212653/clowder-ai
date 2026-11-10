@@ -289,7 +289,7 @@ describe('F202 C1 — Host-driven subscription delivery', () => {
   });
 });
 
-test('re-registering a ready subscriber schedules its unacked input without another publication', async () => {
+test('re-registration alone does not retry a failed delivery', async () => {
   const { SubscriptionDrainScheduler } = await import('../dist/domains/messaging/subscription-drain-scheduler.js');
   let ready = false;
   const rejected = Promise.withResolvers();
@@ -298,7 +298,7 @@ test('re-registering a ready subscriber schedules its unacked input without anot
   const driver = createSubscriptionDelivery({
     messaging,
     presentation: async (_thread, actor) => ({ actor: { displayName: actor.id }, thread: { shortId: THREAD_ID } }),
-    onRegistered: scheduler.schedule,
+    onReady: scheduler.schedule,
     delivery: {
       async deliver(_subscriber, input) {
         if (!ready) throw new Error('receipt_pending');
@@ -316,13 +316,44 @@ test('re-registering a ready subscriber schedules its unacked input without anot
   await rejected.promise;
   ready = true;
   await driver.register(declaration);
-  const timeout = setTimeout(
-    () => accepted.reject(new Error('ready registration did not resume the pending cursor')),
-    200,
-  );
-  try {
-    assert.equal((await accepted.promise).threadId, THREAD_ID);
-  } finally {
-    clearTimeout(timeout);
-  }
+  await driver.enqueueThread(THREAD_ID, async () => {});
+  let delivered = false;
+  accepted.promise.then(() => {
+    delivered = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(delivered, false, 're-registration must not implicitly retry a failure');
+  await driver.drain(THREAD_ID);
+  assert.equal((await accepted.promise).threadId, THREAD_ID);
+});
+
+test('startup registration neither executes nor revives a canceled activation', async () => {
+  const scheduled = [],
+    calls = [];
+  const driver = createSubscriptionDelivery({
+    messaging,
+    presentation: async () => ({}),
+    onReady: (threadId) => scheduled.push(threadId),
+    delivery: {
+      deliver: async (_id, input) => {
+        calls.push(input);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+  });
+  driver.beginInstance(SUBSCRIBER_A);
+  await driver.register({
+    subscriberId: SUBSCRIBER_A,
+    threadId: THREAD_ID,
+    handleId: await subscribeHandle(SUBSCRIBER_A),
+  });
+  await produce('pending initialization', 'startup-pending');
+  await driver.drain(THREAD_ID);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(scheduled, []);
+  await driver.cancelInstance(SUBSCRIBER_A);
+  driver.activateInstance(SUBSCRIBER_A);
+  await driver.drain(THREAD_ID);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(scheduled, []);
 });
