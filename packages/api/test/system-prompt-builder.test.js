@@ -1293,6 +1293,23 @@ describe('SystemPromptBuilder', () => {
     assert.doesNotMatch(ctx, /请.*hold_ball/);
   });
 
+  test('an owner ask without a mention is reported as mailbox delivery plus the decision funnel', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: true,
+      mentionRoutingFeedback: {
+        sourceTimestamp: Date.now(),
+        items: [{ targetCatId: 'codex', reason: 'owner_ask_unaddressed' }],
+      },
+    });
+    assert.match(ctx, /小信箱/);
+    assert.match(ctx, /决策漏斗/);
+    assert.doesNotMatch(ctx, /上次你提到了.*@codex/);
+  });
+
   test('buildInvocationContext does not contain static identity or MCP tools', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({

@@ -452,6 +452,8 @@ export interface AgentRouterOptions {
   messageStore: IMessageStore;
   /** F045 Gap #4: Redis-backed task progress snapshots */
   taskProgressStore?: TaskProgressStore;
+  /** Scheduler system delivery for the owner-ask correction wake. */
+  ownerAskCorrectionDeliver?: import('../invocation/invoke-single-cat.js').InvocationDeps['ownerAskCorrectionDeliver'];
   sessionStore?: SessionStore;
   deliveryCursorStore?: DeliveryCursorStore;
   threadStore?: IThreadStore;
@@ -598,6 +600,7 @@ export class AgentRouter {
   private sessionSealer: ISessionSealer | undefined;
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
+  private ownerAskCorrectionDeliver: import('../invocation/invoke-single-cat.js').InvocationDeps['ownerAskCorrectionDeliver'];
   private taskStore: ITaskStore | undefined;
   private ordinaryTaskHandoffs?: AgentRouterOptions['ordinaryTaskHandoffs'];
   private ownedWaitStatusReader:
@@ -714,6 +717,7 @@ export class AgentRouter {
     this.sessionSealer = options.sessionSealer;
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
+    this.ownerAskCorrectionDeliver = options.ownerAskCorrectionDeliver;
     this.taskStore = options.taskStore;
     this.ordinaryTaskHandoffs = options.ordinaryTaskHandoffs;
     this.ownedWaitStatusReader = options.ownedWaitStatusReader;
@@ -1416,6 +1420,7 @@ export class AgentRouter {
         apiUrl: `http://127.0.0.1:${apiPort}`,
         ...(this.turnExecutionStore ? { turnExecutionStore: this.turnExecutionStore } : {}),
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
+        ...(this.ownerAskCorrectionDeliver ? { ownerAskCorrectionDeliver: this.ownerAskCorrectionDeliver } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
         ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
         hookAuthenticationReady: this.hookAuthenticationReady,

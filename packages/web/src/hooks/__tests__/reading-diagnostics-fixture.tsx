@@ -104,10 +104,11 @@ export async function flush(n = 6) {
       await Promise.resolve();
     });
 }
-export async function open(cold: boolean) {
+export async function open(cold: boolean, messagesTransport?: typeof apiFetch) {
   const gate = new Promise<void>((r) => (release = r));
-  vi.mocked(apiFetch).mockImplementation(async (url) => {
+  vi.mocked(apiFetch).mockImplementation(async (url, init, options) => {
     if (url.startsWith('/api/messages')) await gate;
+    if (url.startsWith('/api/messages') && messagesTransport) return messagesTransport(url, init, options);
     return {
       ok: true,
       status: 200,
@@ -161,7 +162,7 @@ export async function open(cold: boolean) {
   await flush(2);
   return { el, receipt, result: () => result, top: () => top };
 }
-export async function beginBridge() {
+export async function beginBridge(messagesTransport?: typeof apiFetch) {
   syncDraftToStorage('origin', 'unsent original draft');
   syncDraftToStorage('other', 'a different thread draft');
   const draftMirror = sessionStorage.getItem('cat-cafe:thread-drafts');
@@ -170,7 +171,7 @@ export async function beginBridge() {
     expect(getThreadDraft('other')).toBe('a different thread draft');
     expect(sessionStorage.getItem('cat-cafe:thread-drafts')).toBe(draftMirror);
   };
-  const state = await open(false);
+  const state = await open(false, messagesTransport);
   const pushes: string[] = [];
   const bridge = new SettingsReadingBridge((path) => pushes.push(path), 'boot76-probe', true);
   bridge.setRoute('/thread/origin', true);

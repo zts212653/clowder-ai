@@ -26,6 +26,8 @@ interface MessageBubbleProps {
   children: ReactNode;
   /** Content below the bubble body (MetadataBadge, etc.). */
   footer?: ReactNode;
+  /** Human-message action anchor, beside the bubble regardless of header/footer width. */
+  bodyActionSlot?: ReactNode;
   /** left = cat/connector (default), right = co-creator. */
   align?: 'left' | 'right';
   /** Bubble corner radius class (default: 'rounded-2xl').
@@ -63,6 +65,7 @@ export function MessageBubble({
   header,
   children,
   footer,
+  bodyActionSlot,
   align = 'left',
   bubbleRadius = 'rounded-2xl',
   bubbleClassName = '',
@@ -117,13 +120,16 @@ export function MessageBubble({
       >
         <div className={`${maxWidth ?? 'max-w-[80%]'} min-w-0 flex flex-col items-end`}>
           {header}
-          <div
-            data-testid="message-bubble"
-            data-chat-background-surface="human"
-            className={`rounded-xl px-3.5 py-2 text-left min-w-0 max-w-full overflow-hidden ${bubbleClassName}`.trim()}
-            style={bubbleStyle}
-          >
-            {children}
+          <div className="relative min-w-0 max-w-full [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-5">
+            {bodyActionSlot}
+            <div
+              data-testid="message-bubble"
+              data-chat-background-surface="human"
+              className={`rounded-xl px-3.5 py-2 text-left min-w-0 max-w-full overflow-hidden ${bubbleClassName}`.trim()}
+              style={bubbleStyle}
+            >
+              {children}
+            </div>
           </div>
           {footer}
         </div>
