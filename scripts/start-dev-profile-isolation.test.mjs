@@ -1106,7 +1106,7 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
   const unixIt = process.platform === 'win32' ? it.skip : it;
   const recordedEnv = ['CAT_CAFE_DIRECT_NO_WATCH', 'CAT_CAFE_RESPECT_DOTENV_PORTS', 'CAT_CAFE_STRICT_PROFILE_DEFAULTS'];
 
-  function createStartEntryFixture({ activeProfile = 'opensource', ownGit = true } = {}) {
+  function createStartEntryFixture({ activeProfile = 'opensource', ownGit = true, runtimeWorktree, plainDir } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'start-entry-issue50-'));
     const project = join(root, 'project');
     for (const path of [
@@ -1139,14 +1139,28 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
     } else if (ownGit) {
       spawnSync('git', ['init', '-q'], { cwd: project });
     }
+    if (runtimeWorktree) {
+      // An earlier `pnpm start` / `pnpm runtime:start` already created the runtime worktree.
+      const git = (...args) =>
+        spawnSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', ...args], {
+          cwd: project,
+          encoding: 'utf8',
+        });
+      git('add', '-A');
+      git('commit', '-q', '-m', 'fixture');
+      const added = git('worktree', 'add', '-q', join(root, runtimeWorktree), '-b', 'runtime/main-sync');
+      assert.equal(added.status, 0, added.stderr);
+    }
+    if (plainDir) mkdirSync(join(root, plainDir), { recursive: true });
     return { root, project };
   }
 
-  function runStartEntry(project, args) {
+  function runStartEntry(project, args, extraEnv = {}) {
     const record = join(project, 'start-entry-record.txt');
     rmSync(record, { force: true });
     const env = { ...process.env, START_ENTRY_RECORD: record };
-    for (const key of [...recordedEnv, 'CAT_CAFE_PROFILE']) delete env[key];
+    for (const key of [...recordedEnv, 'CAT_CAFE_PROFILE', 'CAT_CAFE_RUNTIME_DIR']) delete env[key];
+    Object.assign(env, extraEnv);
     const result = spawnSync(process.execPath, ['scripts/start-entry.mjs', ...args], {
       cwd: project,
       encoding: 'utf8',
@@ -1202,6 +1216,35 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
   unixIt('release archive inside another checkout is not treated as its own git checkout', () => {
     withFixture({ ownGit: 'parent' }, (project) => {
       assert.deepEqual(runStartEntry(project, ['start']), ['runtime-worktree.sh start', 'CAT_CAFE_DIRECT_NO_WATCH=1']);
+    });
+  });
+
+  unixIt('a checkout that already has a runtime worktree keeps using it, so earlier Hub settings stay in place', () => {
+    withFixture({ runtimeWorktree: 'cat-cafe-runtime' }, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start']), ['runtime-worktree.sh start', 'CAT_CAFE_DIRECT_NO_WATCH=1']);
+      assert.deepEqual(runStartEntry(project, ['status']), ['runtime-worktree.sh daemon-status']);
+      const notice = spawnSync(process.execPath, ['scripts/start-entry.mjs', 'start'], {
+        cwd: project,
+        encoding: 'utf8',
+        env: { ...process.env, START_ENTRY_RECORD: join(project, 'notice-record.txt'), CAT_CAFE_RUNTIME_DIR: '' },
+      });
+      assert.match(notice.stderr, /existing runtime worktree .*cat-cafe-runtime[\s\S]*pnpm start:direct/);
+    });
+  });
+
+  unixIt('an existing runtime worktree at CAT_CAFE_RUNTIME_DIR is recognized like the default path', () => {
+    withFixture({ runtimeWorktree: 'my-runtime' }, (project) => {
+      assert.deepEqual(runStartEntry(project, ['start'], { CAT_CAFE_RUNTIME_DIR: '../my-runtime' }), [
+        'runtime-worktree.sh start',
+        'CAT_CAFE_DIRECT_NO_WATCH=1',
+      ]);
+      assert.equal(runStartEntry(project, ['start'])[0], 'start-dev.sh --prod-web --profile=opensource');
+    });
+  });
+
+  unixIt('an unrelated directory named cat-cafe-runtime does not turn a new checkout back to the runtime', () => {
+    withFixture({ plainDir: 'cat-cafe-runtime' }, (project) => {
+      assert.equal(runStartEntry(project, ['start'])[0], 'start-dev.sh --prod-web --profile=opensource');
     });
   });
 

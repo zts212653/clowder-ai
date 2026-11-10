@@ -73,6 +73,8 @@ pnpm start
 
 没有自带 `.git` 的发布包（例如解压后的离线包）仍按运行时入口原地启动。
 
+> **从旧版本升级？** 如果这个目录已经有 `../cat-cafe-runtime` worktree，`pnpm start` 会继续使用它，你在那里配置的成员和设置保持生效。`pnpm start:direct` 则改为从当前目录启动；运行时保存的设置仍在 `../cat-cafe-runtime/.cat-cafe/`。
+
 ## 可选：独立运行时 Worktree（`pnpm runtime:start`）
 
 如果你希望运行实例和你编辑的目录分开，可以选择使用**运行时 worktree**：

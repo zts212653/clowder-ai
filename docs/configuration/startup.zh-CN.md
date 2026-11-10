@@ -13,6 +13,8 @@ pnpm start
 3. 构建并启动 API 服务器和前端
 4. 在 **http://localhost:3003** 打开 Hub
 
+如果这个目录里已经有旧版本留下的 `../cat-cafe-runtime` worktree，`pnpm start` 会继续使用它，让那里的设置保持生效（见 SETUP.zh-CN.md）。
+
 ## 启动标志
 
 ### `pnpm start --quick`

@@ -73,6 +73,8 @@ Open `http://localhost:3003` and start talking to your team.
 
 A release archive without its own `.git` (for example an unpacked offline bundle) keeps starting in place through the runtime entry.
 
+> **Upgrading from an earlier version?** If this checkout already has a `../cat-cafe-runtime` worktree, `pnpm start` keeps using it, so the members and settings you configured there stay in effect. `pnpm start:direct` starts this checkout instead; settings saved by the runtime stay in `../cat-cafe-runtime/.cat-cafe/`.
+
 ## Optional: Isolated Runtime Worktree (`pnpm runtime:start`)
 
 If you want the running instance to stay separate from the checkout you edit, opt into a **runtime worktree**:
