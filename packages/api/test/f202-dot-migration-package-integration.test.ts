@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -115,6 +115,16 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
     writeFile(join(imagesPath, `${imageId}.json`), JSON.stringify(image)),
     writeFile(join(imageFilesPath, `${imageId}.png`), png),
   ]);
+  const legacyFiles = [
+    join(sourceRoot, 'dot-connection.json'),
+    join(dispatchesPath, `${eventId}.json`),
+    join(imagesPath, `${imageId}.json`),
+    join(imageFilesPath, `${imageId}.png`),
+  ];
+  const legacyBytes = await Promise.all(legacyFiles.map((file) => readFile(file)));
+  const assertLegacySourceUnchanged = async () => {
+    assert.deepEqual(await Promise.all(legacyFiles.map((file) => readFile(file))), legacyBytes);
+  };
 
   const storage = memoryPluginStorage();
   const sharedAgentKeys = new AgentKeyRegistry();
@@ -297,6 +307,7 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
   assert.equal(importedConnection?.pluginInstanceId, installed.pluginInstanceId);
   assert.equal((await stat(join(sourceRoot, 'dot-connection.json'))).isFile(), true);
   assert.equal((await stat(join(imageFilesPath, `${imageId}.png`))).isFile(), true);
+  await assertLegacySourceUnchanged();
 
   assert.equal(await migrate(), null);
   assert.equal(audits.length, 1);
@@ -380,6 +391,15 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
   const stopped = (await managerRuntime.manager.get(dot.pluginId)).plugin;
   assert.equal(stopped.intent, 'disabled');
   assert.ok(stopped.lifecycleRevision);
+  const offModeTools = await app.inject({
+    method: 'POST',
+    url: '/api/plugin-runtime/handle',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+    payload: { jsonrpc: '2.0', id: 10, method: 'tools/list' },
+  });
+  assert.equal(offModeTools.statusCode, 409, offModeTools.body);
+  assert.deepEqual(offModeTools.json(), { error: 'Plugin instance is not enabled' });
+  await assertLegacySourceUnchanged();
   const uninstalled = await app.inject({
     method: 'POST',
     url: `/api/plugin-manager/plugins/${dot.pluginId}/uninstall`,
@@ -446,4 +466,15 @@ test('legacy Dot updates through the owner journey, starts with its old credenti
     payload: { enabled: false, expectedRevision: finalRunning.lifecycleRevision },
   });
   assert.equal(finalStop.statusCode, 200, finalStop.body);
+  await assertLegacySourceUnchanged();
+  assert.deepEqual(
+    await new DotLegacySourceReader({
+      connection: legacyFiles[0],
+      dispatches: dispatchesPath,
+      images: imagesPath,
+      imageFiles: imageFilesPath,
+    }).connection(),
+    connection,
+    'the original pre-migration record remains readable with its original identity',
+  );
 });
