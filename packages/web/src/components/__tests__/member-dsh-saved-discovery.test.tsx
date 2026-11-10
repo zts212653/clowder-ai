@@ -36,7 +36,7 @@ it.each([
     defaultModel: '',
     mentionPatterns: ['@saved-dsh'],
     avatar: '',
-    roleDescription: 'Fixture member',
+    roleDescription: '',
     personality: '',
     acp: { command: '/old/agent.cmd', startupArgs: [], transport: 'stdio' },
     color: { primary: '#123456', secondary: '#abcdef' },
