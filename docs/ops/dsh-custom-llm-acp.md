@@ -12,12 +12,26 @@ tips_exempt: "DSH 成员配置入口直接提供复用步骤与主动验证费�
 却要求 `deepseek-official` 的 API key。先检查 ACP 实际选中的 provider，
 不要因此给自定义接口补配官方 DeepSeek key。
 
-本文对应 DSH 源码 `687f282e8625c6b8d11ff58211a90524be2e4317`（包版本 `0.2.1-rc.2`）。
+本文对应 DSH 源码 `687f282e8625c6b8d11ff58211a90524be2e4317`（包版本 `0.2.1-rc.2`），
+Windows 官方 Desktop 入口另已核对 `0.2.2-rc.1`。
 该版本的 ACP bundle 默认选择 `deepseek-official / deepseek-v4-flash`；
 Desktop、Web 和 ACP 各自的 profile 配置不会自动相互复制；home 层配置则由这些 profile 共享。
 同一 `DSH_HOME` 的凭据引用可被这些 profile 使用，但有凭据并不等于 ACP 已配置并选中对应路由。
 
 ## 在成员设置中一次配置
+
+Windows 安装版会从安装元数据发现 **DSH Desktop**，不要求额外安装 npm CLI 或加入 PATH。
+使用安装目录下的 `resources/runtime/cli/bin/dsh.cmd`；Clowder 保留 Desktop 自带的
+Electron 运行时和启动环境。自行编写的源码 wrapper 仍不能自动复制配置。
+
+“已安装”只说明找到了程序。静态检测会拒绝非法的 ACP/home patch（包括只有注释、
+解析为 null 的文件）；这类配置请先在 DSH 修复为顶层 YAML 数组，保留原有条目。
+Clowder 不会自动改写原生文件。安装、模型清单或凭据引用存在均不能证明真实请求成功。
+
+已有配置可直接点击 **验证当前配置**，不必先复制其他 profile。一键添加页点击
+**配置与验证** 进入同一入口，收到真实模型回复后才允许选择 DSH 伙伴。
+验证只覆盖当时的启动参数、模型与思考强度；修改任一项后需重新验证。
+验证不会在扫描工具或读取模型清单时自动执行，也不承诺后续网络、额度或服务持续可用。
 
 已在 DSH 配置自定义 `llm-pi-ai` 接口时，可在“设置 → 成员 → 模型与工具”使用
 **DSH 自定义 LLM**，无需配置官方供应商或改绑 Host 账号：

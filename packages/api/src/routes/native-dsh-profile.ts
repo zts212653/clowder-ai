@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { isSeq, parseDocument } from 'yaml';
 import { resolveDshHome } from './native-dsh-home.js';
 
 export type DshProfileState = 'configured' | 'acp_profile_missing' | 'acp_profile_invalid';
@@ -7,13 +8,20 @@ export class InvalidDshProfile extends Error {}
 
 /** Inspect only. DSH owns initialization on the first actual connection. */
 export function dshProfileState(home?: string, profile = 'acp'): DshProfileState {
-  let directory: string;
+  let directory: string, nativeHome: string;
   try {
-    directory = join(resolveDshHome(home), 'profiles', profile);
+    nativeHome = resolveDshHome(home);
+    directory = join(nativeHome, 'profiles', profile);
   } catch {
     return 'acp_profile_invalid';
   }
   try {
+    const patchesValid = [join(directory, 'cordis.patch.yml'), join(nativeHome, 'cordis.patch.yml')].every((path) => {
+      if (!existsSync(path)) return true;
+      const document = parseDocument(readFileSync(path, 'utf8'));
+      return document.errors.length === 0 && isSeq(document.contents);
+    });
+    if (!patchesValid) return 'acp_profile_invalid';
     const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     return Array.isArray(manifest?.dsh?.profile?.bundles) &&
       manifest.dsh.profile.bundles.includes('@deepseek-ai/dsh-acp-app')

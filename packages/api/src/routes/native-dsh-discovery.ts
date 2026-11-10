@@ -3,12 +3,14 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { findSystemNode } from '../utils/cli-spawn-win.js';
+import { findDshDesktopCommand, resolveDshDesktopLaunch } from '../utils/dsh-desktop-launch.js';
 import { dshProfileState } from './native-dsh-profile.js';
 
 interface DiscoveryOptions {
   dshHome?: string;
   npmCaches?: string[];
   resolveCommand?: (command: string) => string | null;
+  desktopRoots?: string[];
 }
 
 /** Read installed package metadata only; never execute npx or install a profile during discovery. */
@@ -40,7 +42,7 @@ function cachedEntry(caches: string[]): string | undefined {
 
 export function discoverDshRuntime(options: DiscoveryOptions = {}) {
   const home = homedir();
-  const command = (options.resolveCommand ?? resolveCliCommand)('dsh');
+  const command = (options.resolveCommand ?? resolveCliCommand)('dsh') ?? findDshDesktopCommand(options.desktopRoots);
   const caches = options.npmCaches ?? [
     ...(process.env.npm_config_cache ? [process.env.npm_config_cache] : []),
     join(process.env.LOCALAPPDATA || join(home, 'AppData/Local'), 'npm-cache'),
@@ -53,7 +55,7 @@ export function discoverDshRuntime(options: DiscoveryOptions = {}) {
   const startupArgs = [...(entry ? [entry] : []), '--profile', 'acp'];
   return {
     id: 'dsh',
-    label: 'DSH',
+    label: command && resolveDshDesktopLaunch(command, []) ? 'DSH Desktop' : 'DSH',
     clientId: 'acp' as const,
     installed: Boolean(executable),
     command: executable,

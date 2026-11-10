@@ -1,3 +1,4 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 import { nativeAcpProfileLabel, nativeAcpProfileMessage } from '../settings/members/native-acp-profile-status';
@@ -26,6 +27,7 @@ export function NativePartnerCard({
   const [opened, setOpened] = useState(false);
   const { runtime, form } = partner;
   const available = runtime.installed && (runtime.clientId !== 'acp' || Boolean(runtime.acp));
+  const dsh = runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs);
   const selectable = nativeRuntimeSelectable(runtime, form);
   const detectedConfiguration = usesDetectedRuntimeConfiguration(form, runtime);
   const defaultIdentity = usesDefaultNativeIdentity(form) && detectedConfiguration;
@@ -38,13 +40,13 @@ export function NativePartnerCard({
   const profileMessage = nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
   return (
     <article
-      className={`rounded-xl border p-4 ${partner.selected ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
+      className={`rounded-xl border p-4 ${partner.selected && selectable ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
     >
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
         <input
           type="checkbox"
           aria-label={`加入 ${runtime.label} 伙伴`}
-          checked={partner.selected}
+          checked={partner.selected && selectable}
           disabled={!selectable || disabled}
           onChange={(e) => patch({ selected: e.target.checked })}
           className="h-5 w-5 shrink-0 accent-[var(--color-cafe-accent)]"
@@ -73,7 +75,11 @@ export function NativePartnerCard({
                 : available && defaultIdentity && runtime.readiness?.status === 'login_required'
                   ? '已安装 · 登录校验未通过'
                   : available
-                    ? '已安装'
+                    ? dsh
+                      ? selectable
+                        ? '已验证当前配置'
+                        : '已安装 · 待验证当前配置'
+                      : '已安装'
                     : runtime.discoveryStatus === 'adapter_missing'
                       ? '已安装 · 待接入适配器'
                       : '未检测到'}
@@ -90,7 +96,7 @@ export function NativePartnerCard({
             aria-expanded={expanded}
             className="min-h-10 shrink-0 text-sm text-cafe-accent"
           >
-            {expanded ? '收起' : '调整'}
+            {expanded ? '收起' : dsh && !selectable ? '配置与验证' : '调整'}
           </button>
         )}
       </div>
@@ -148,7 +154,7 @@ export function NativePartnerCard({
       {available && defaultIdentity && runtime.readiness?.status === 'configured' && (
         <p className="mt-3 text-sm text-cafe-secondary">已检测登录 · 实际连接待验证</p>
       )}
-      {available && !defaultIdentity && (
+      {available && !defaultIdentity && !dsh && (
         <p className="mt-3 text-sm text-cafe-secondary">此连接的登录状态尚未检查 · 实际连接待验证</p>
       )}
       {available && runtime.clientId === 'opencode' && (
@@ -180,6 +186,8 @@ export function NativePartnerCard({
           </div>
           <MemberRuntimeFields
             nativeSetup
+            preparedRuntime={runtime}
+            onPreparedRuntime={(next) => patch({ runtime: next })}
             form={form}
             accounts={[]}
             patch={(change) => patch({ form: { ...form, ...change } })}

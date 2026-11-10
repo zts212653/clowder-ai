@@ -9,6 +9,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, win32 } from 'node:path';
+import { resolveDshDesktopLaunch } from './dsh-desktop-launch.js';
 
 /**
  * Cache for resolved shim scripts to avoid repeated filesystem lookups.
@@ -114,6 +115,7 @@ export interface WindowsSpawnPlan {
   args: string[];
   mode: WindowsSpawnMode;
   shell?: true | string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -307,6 +309,8 @@ export function resolveWindowsSpawnPlan(
   args: readonly string[],
   options: { refresh?: boolean } = {},
 ): WindowsSpawnPlan {
+  const desktop = resolveDshDesktopLaunch(command, args);
+  if (desktop) return { ...desktop, mode: 'shim' };
   if (options.refresh) {
     resolvedShimCache.delete(buildShimCacheKey(command));
     cachedSystemNodePath = undefined;

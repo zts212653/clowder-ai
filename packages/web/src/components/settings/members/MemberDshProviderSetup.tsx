@@ -3,18 +3,23 @@ import { useState } from 'react';
 import { serializeCommandArgs } from '../../hub-cat-editor.acp';
 import type { HubCatEditorFormState } from '../../hub-cat-editor.model';
 import { DshProviderSetup } from './DshProviderSetup';
+import { dshConnectionKey } from './member-runtime-draft';
 
 export function MemberDshProviderSetup({
   form,
   runtimeId,
   patch,
   onPrepared,
+  onVerified,
+  canVerifyCurrent,
   t,
 }: {
   form: HubCatEditorFormState;
   runtimeId: string;
   patch: (value: Partial<HubCatEditorFormState>) => void;
   onPrepared?: (command: string, args: string[], runtimeId: string) => void;
+  onVerified?: () => void;
+  canVerifyCurrent?: boolean;
   t: (zh: string, en: string) => string;
 }) {
   const [prepared, setPrepared] = useState<{
@@ -34,6 +39,11 @@ export function MemberDshProviderSetup({
     <DshProviderSetup
       runtimeId={source}
       configurationKey={configurationKey}
+      verificationKey={dshConnectionKey(form)}
+      selectedModel={form.defaultModel}
+      effort={form.cliEffort}
+      canVerifyCurrent={canVerifyCurrent}
+      onVerified={onVerified}
       t={t}
       onPrepared={(command, args) => {
         const startupArgs = serializeCommandArgs(args);

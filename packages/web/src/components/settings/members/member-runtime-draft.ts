@@ -15,12 +15,25 @@ export interface RuntimeChoice {
   discoveryStatus?: 'configured' | 'acp_profile_missing' | 'acp_profile_invalid' | 'adapter_missing' | 'not_installed';
   /** Existing backend setup validator accepted this exact native descriptor; display only. */
   dshSetupSupported?: boolean;
+  connectionVerification?: { key: string; checkedAt: number };
   models: string[];
   configuredModel?: string;
   modelSource?: 'tool_config' | 'tool_recent';
   defaultsStatus?: 'configured_only' | 'unconfigured' | 'session_only';
   configuredEffort?: string;
   acp?: { agentProvider?: string; command: string; startupArgs: string[]; transport?: 'stdio' | 'httpstream' };
+}
+
+export function dshConnectionKey(
+  form: Pick<HubCatEditorFormState, 'acpCommand' | 'acpStartupArgs' | 'acpTransport' | 'defaultModel' | 'cliEffort'>,
+) {
+  return JSON.stringify([
+    form.acpCommand,
+    splitCommandArgs(form.acpStartupArgs),
+    form.acpTransport,
+    form.defaultModel,
+    form.cliEffort,
+  ]);
 }
 
 const runtimeFields = [

@@ -117,9 +117,16 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
       },
     ];
   });
-  const dsh = acp.some((runtime) => runtime.label === 'DSH' && runtime.installed && runtime.acp)
+  const discoveredDsh = discoverDshRuntime();
+  const dsh = acp.some(
+    (runtime) =>
+      discoveredDsh.acp !== undefined &&
+      runtime.acp !== undefined &&
+      runtime.acp.command === discoveredDsh.acp.command &&
+      JSON.stringify(runtime.acp.startupArgs) === JSON.stringify(discoveredDsh.acp.startupArgs),
+  )
     ? []
-    : [discoverDshRuntime()];
+    : [discoveredDsh];
   const agyModels = Object.values(catRegistry.getAllConfigs())
     .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
     .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));

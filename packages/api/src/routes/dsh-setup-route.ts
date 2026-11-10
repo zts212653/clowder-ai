@@ -1,5 +1,7 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
@@ -10,6 +12,7 @@ import {
   type PreparedDshSetup,
   prepareDshSetup,
   readDshSetup,
+  testDshConnection,
   testDshSetup,
 } from './dsh-setup-service.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
@@ -30,7 +33,29 @@ const prepare = selection
     model: z.string().min(1).max(512),
   })
   .strict();
-const test = z.object({ id: z.string().uuid() }).strict();
+const preferences = z.object({
+  model: z.string().min(1).max(512).optional(),
+  effort: z.string().min(1).max(160).optional(),
+});
+const test = preferences.extend({ id: z.string().uuid() }).strict();
+const verify = preferences.extend({ runtimeId: z.string().min(1).max(160) }).strict();
+
+function verificationLaunchFor(id: string) {
+  const root = resolveActiveProjectRoot();
+  const runtime = discoverNativeRuntimes(root).runtimes.find((item) => item.id === id);
+  const acp = runtime && 'acp' in runtime ? runtime.acp : undefined;
+  const config = acp ?? (id.startsWith('acp:') ? getRegisteredAcpConfig(id.slice(4), root) : undefined);
+  if (
+    !runtime?.installed ||
+    !config ||
+    config.transport === 'httpstream' ||
+    !isDshLauncher(config.command, config.startupArgs)
+  )
+    throw Error('dsh_setup_custom_startup');
+  if ('discoveryStatus' in runtime && runtime.discoveryStatus === 'acp_profile_invalid')
+    throw Error('dsh_setup_profile_required');
+  return { command: config.command, args: config.startupArgs, cwd: root };
+}
 
 function launchFor(id: string) {
   const root = resolveActiveProjectRoot();
@@ -103,7 +128,13 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
     const receipt = receipts.get(data.id);
     if (!receipt || receipt.owner !== owner) throw Error('dsh_setup_expired');
     await audit('dsh-acp-connection-test', owner);
-    await testDshSetup(receipt.value);
+    await testDshSetup(receipt.value, { model: data.model, effort: data.effort });
+    return { ok: true };
+  });
+  route('verify', verify, async (data, owner) => {
+    const launch = verificationLaunchFor(data.runtimeId);
+    await audit('dsh-acp-connection-test', owner);
+    await testDshConnection(launch, { model: data.model, effort: data.effort });
     return { ok: true };
   });
 }

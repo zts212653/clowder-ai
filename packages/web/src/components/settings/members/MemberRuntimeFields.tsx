@@ -23,7 +23,13 @@ import { MemberChoicePicker } from './MemberChoicePicker';
 import { MemberConfigurationDetails } from './MemberConfigurationDetails';
 import { MemberDshProviderSetup } from './MemberDshProviderSetup';
 import { MemberModelSummary } from './MemberModelSummary';
-import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
+import {
+  dshConnectionKey,
+  matchesRuntime,
+  type RuntimeChoice,
+  type RuntimeDrafts,
+  runtimeDefaults,
+} from './member-runtime-draft';
 import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
 import { usesDefaultNativeIdentity } from './native-login-state';
 import { useRuntimeCatalog } from './useRuntimeCatalog';
@@ -300,6 +306,14 @@ export function MemberRuntimeFields({
           runtimeId={selected?.id ?? (editing ? `acp:${form.catId}` : 'dsh')}
           t={t}
           patch={patch}
+          canVerifyCurrent={selected !== undefined && !form.commandArgs.trim() && !form.cliConfigArgs.length}
+          onVerified={() => {
+            if (selected)
+              setPreparedRuntime({
+                ...selected,
+                connectionVerification: { key: dshConnectionKey(form), checkedAt: Date.now() },
+              });
+          }}
           onPrepared={(command, args, runtimeId) => {
             const source = runtimes.find((runtime) => runtime.id === runtimeId);
             if (source?.acp)

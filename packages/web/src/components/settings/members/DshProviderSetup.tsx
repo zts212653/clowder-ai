@@ -41,15 +41,37 @@ const errors: Record<string, [string, string]> = {
     '验证凭据已过期，请重新读取和选择配置。',
     'The test receipt expired. Read and prepare the configuration again.',
   ],
+  dsh_setup_start_failed: [
+    'DSH 未能启动 ACP，请检查启动入口和 profile 配置。',
+    'DSH could not start ACP. Check the launcher and profile configuration.',
+  ],
+  dsh_setup_credential_missing: [
+    '当前路由缺少凭据引用，请在 DSH 配置对应认证后重试。',
+    'The selected route has a missing credential reference. Configure its authentication in DSH, then retry.',
+  ],
+  dsh_setup_test_failed: [
+    'ACP 已启动，但当前模型请求未通过。请检查接口、模型、额度和网络后重试。',
+    'ACP started, but the selected model request failed. Check the endpoint, model, quota and network, then retry.',
+  ],
 };
 export function DshProviderSetup({
   runtimeId,
   configurationKey,
+  verificationKey,
+  selectedModel,
+  effort,
+  canVerifyCurrent = true,
+  onVerified,
   onPrepared,
   t,
 }: {
   runtimeId: string;
   configurationKey?: string;
+  verificationKey?: string;
+  selectedModel?: string;
+  effort?: string;
+  canVerifyCurrent?: boolean;
+  onVerified?: () => void;
   onPrepared: (command: string, args: string[]) => void;
   t: (zh: string, en: string) => string;
 }) {
@@ -63,6 +85,10 @@ export function DshProviderSetup({
   const [receipt, setReceipt] = useState(''),
     [tested, setTested] = useState(false);
   const generation = useRef(0);
+  const currentVerification = verificationKey ?? JSON.stringify([runtimeId, configurationKey, selectedModel, effort]);
+  const verification = useRef(currentVerification);
+  verification.current = currentVerification;
+  useEffect(() => setTested(false), [currentVerification]);
   useEffect(() => {
     // Invalidate late responses when the runtime or its launch configuration changes.
     if (!runtimeId) return;
@@ -88,8 +114,9 @@ export function DshProviderSetup({
     }
     return data;
   }
-  async function run(action: 'inspect' | 'prepare' | 'test') {
+  async function run(action: 'inspect' | 'prepare' | 'test' | 'verify') {
     const active = generation.current;
+    const checked = verification.current;
     setBusy(true);
     setError('');
     setTested(false);
@@ -114,10 +141,15 @@ export function DshProviderSetup({
         if (active !== generation.current) return;
         onPrepared(data.command, data.startupArgs);
         setReceipt(data.id);
-      } else if (action === 'test') {
-        await request(action, { id: receipt });
-        if (active !== generation.current) return;
+      } else if (action === 'test' || action === 'verify') {
+        await request(action, {
+          ...(action === 'test' ? { id: receipt } : { runtimeId }),
+          ...(selectedModel ? { model: selectedModel } : {}),
+          ...(effort ? { effort } : {}),
+        });
+        if (active !== generation.current || checked !== verification.current) return;
         setTested(true);
+        onVerified?.();
       }
     } catch (cause) {
       if (active !== generation.current) return;
@@ -253,26 +285,44 @@ export function DshProviderSetup({
               </button>
             </div>
           )}
-          {tested && (
-            <p role="status" className="mt-2 text-cafe-secondary">
-              {t(
-                '已收到模型文本回复。成员保存后的首轮和续聊仍请在聊天中确认。',
-                'Model text received. Confirm first turn and continuation in chat after saving.',
-              )}
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="mt-3 text-conn-red-text">
-              {errors[error]
-                ? t(...errors[error])
-                : t(
-                    '无法完成 DSH 配置或验证。请检查实际启动入口、profile、凭据引用与 ACP 引导目录权限，再重新读取。原配置已保留。',
-                    'DSH setup or verification failed. Check the launcher, profile, credential reference and ACP bootstrap permissions, then retry. Existing configuration is preserved.',
-                  )}
-            </p>
-          )}
         </fieldset>
       </details>
+      {!receipt && (
+        <div className="space-y-2 text-sm text-cafe-secondary">
+          <p>
+            {t(
+              '验证会发送一次模型请求，可能产生费用，并保留 DSH 测试会话。',
+              'Verification sends one model request, may incur a charge, and retains a DSH test session.',
+            )}
+          </p>
+          <button
+            type="button"
+            disabled={busy || !canVerifyCurrent}
+            onClick={() => void run('verify')}
+            className="min-h-10 text-cafe-accent disabled:opacity-50"
+          >
+            {busy ? t('验证中…', 'Verifying…') : t('验证当前配置', 'Verify current configuration')}
+          </button>
+        </div>
+      )}
+      {tested && (
+        <p role="status" className="mt-2 text-cafe-secondary">
+          {t(
+            '当前配置已收到模型文本回复。修改启动配置、模型或思考强度后需重新验证。',
+            'The current configuration received model text. Verify again after changing the launch, model or effort.',
+          )}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-conn-red-text">
+          {errors[error]
+            ? t(...errors[error])
+            : t(
+                '无法完成 DSH 配置或验证。请检查实际启动入口、profile、凭据引用与 ACP 引导目录权限，再重新读取。原配置已保留。',
+                'DSH setup or verification failed. Check the launcher, profile, credential reference and ACP bootstrap permissions, then retry. Existing configuration is preserved.',
+              )}
+        </p>
+      )}
     </>
   );
 }

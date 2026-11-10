@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,7 +27,7 @@ test('fresh catalog can discover an existing DSH npx installation and ACP profil
   mkdirSync(join(pkg, 'lib'), { recursive: true });
   writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', bin: { dsh: 'lib/bin.js' } }));
   writeFileSync(join(pkg, 'lib/bin.js'), '');
-  const options = { dshHome, npmCaches: [cache], resolveCommand: () => null };
+  const options = { dshHome, npmCaches: [cache], resolveCommand: () => null, desktopRoots: [] };
   const pending = discoverDshRuntime(options);
   assert.equal(pending.installed, true);
   assert.equal(pending.discoveryStatus, 'acp_profile_missing');
@@ -65,10 +65,39 @@ test('an ACP profile is not an executable installation', () => {
     join(root, 'profiles/acp/package.json'),
     JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } } }),
   );
-  const runtime = discoverDshRuntime({ dshHome: root, npmCaches: [], resolveCommand: () => null });
+  const runtime = discoverDshRuntime({ dshHome: root, npmCaches: [], resolveCommand: () => null, desktopRoots: [] });
   assert.equal(runtime.installed, false);
   assert.equal(runtime.discoveryStatus, 'not_installed');
   assert.equal(runtime.acp, undefined);
+});
+
+test('an installed ACP bundle does not make an unreadable patch configuration selectable', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-invalid-patch-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const profile = join(home, 'profiles/acp');
+  mkdirSync(profile, { recursive: true });
+  writeFileSync(
+    join(profile, 'package.json'),
+    JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-acp-app'] } } }),
+  );
+  const options = { dshHome: home, npmCaches: [], resolveCommand: () => process.execPath };
+  assert.equal(discoverDshRuntime(options).discoveryStatus, 'configured', 'missing optional patches remain valid');
+  [profile, home].forEach((directory) => {
+    const path = join(directory, 'cordis.patch.yml');
+    ['# no overrides remain\n', '', 'provider: custom\n', '- [broken\n'].forEach((patch) => {
+      writeFileSync(path, patch);
+      const runtime = discoverDshRuntime(options);
+      assert.equal(runtime.discoveryStatus, 'acp_profile_invalid', `invalid patch at ${path}`);
+      assert.equal(runtime.acp, undefined, 'a known invalid launch must not be offered for one-click creation');
+      assert.equal(readFileSync(path, 'utf8'), patch, 'detection must preserve the native file');
+    });
+    writeFileSync(path, '# no overrides remain\n[]\n');
+    assert.equal(discoverDshRuntime(options).discoveryStatus, 'configured');
+  });
+  rmSync(profile, { recursive: true });
+  assert.equal(discoverDshRuntime(options).discoveryStatus, 'acp_profile_missing');
+  writeFileSync(join(home, 'cordis.patch.yml'), '# shared patch cannot load\n');
+  assert.equal(discoverDshRuntime(options).discoveryStatus, 'acp_profile_invalid');
 });
 
 test('only the shipped ACP profile is advertised as safely initializable; partial configuration is preserved', () => {

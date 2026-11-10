@@ -91,6 +91,8 @@ for (const value of ['', '   ', 'absolute', 'relative', '~/relative'])
       env: {
         NODE_ENV: 'test',
         PATH: process.env.PATH,
+        ProgramData: process.env.ProgramData,
+        ALLUSERSPROFILE: process.env.ALLUSERSPROFILE,
         HOME: home,
         USERPROFILE: home,
         DSH_HOME: value === 'absolute' ? join(root, ' home with spaces ') : value,
