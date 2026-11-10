@@ -27,6 +27,7 @@ import {
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { resolveEnvReferences } from '../../../../../utils/env-references.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../browser/shared-browser-descriptor.js';
 
 export interface CodexMcpInputPlan {
   readonly available: boolean;
@@ -69,6 +70,19 @@ export async function captureCodexMcpInput(catId?: string, workingDirectory?: st
             enabled: Boolean(pencil),
             command: pencil?.command ?? 'echo',
             args: pencil?.args ?? ['disabled-shim'],
+            env: undefined,
+            headers: undefined,
+            catCafe: false,
+            plugin: false,
+          });
+          continue;
+        }
+        if (server.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; app-server shared mode nominates it to the shared HTTP route.
+          servers.push({
+            ...server,
+            ...sharedBrowserStdioServer(),
+            transport: 'stdio',
             env: undefined,
             headers: undefined,
             catCafe: false,

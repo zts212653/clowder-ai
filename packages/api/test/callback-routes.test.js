@@ -3942,7 +3942,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST retain-memory submits to marker queue', async () => {
+  test('POST retain-memory is gone (2026-11-09 memory entry subtraction)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const submitCalls = [];
@@ -3955,57 +3955,11 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/retain-memory',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'When storage is unavailable, fail-closed and surface explicit errors.',
-      },
+      payload: { content: 'should not be written' },
     });
 
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'ok');
-    assert.equal(submitCalls.length, 1);
-    assert.equal(submitCalls[0].content, 'When storage is unavailable, fail-closed and surface explicit errors.');
-    assert.equal(submitCalls[0].status, 'captured');
-    assert.ok(submitCalls[0].source.includes('codex'));
-    assert.ok(submitCalls[0].source.includes(invocationId));
-  });
-
-  test('POST retain-memory returns 401 for invalid callback token', async () => {
-    const app = await createApp();
-    const { invocationId } = await registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
-      payload: {
-        content: 'memory',
-      },
-    });
-
-    assert.equal(response.statusCode, 401);
-  });
-
-  test('POST retain-memory degrades when marker queue throws', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
-    markerQueue.submit = async () => {
-      throw new Error('queue error');
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'memory item',
-      },
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'degraded');
-    assert.equal(body.degradeReason, 'marker_queue_error');
+    assert.equal(response.statusCode, 404);
+    assert.equal(submitCalls.length, 0, 'retired route must not write markers');
   });
 
   // --- Exact-attempt callback lifecycle guard ---

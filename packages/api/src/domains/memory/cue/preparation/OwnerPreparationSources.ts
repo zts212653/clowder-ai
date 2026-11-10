@@ -58,7 +58,10 @@ export class OwnerPreparationSources implements WorkPreparationSources {
         ),
       );
     if (this.deps.messages) {
-      const messages = this.deps.messages.discoverySource({ query, mode: 'hybrid' }, principal, { signal });
+      const messages = this.deps.messages.discoverySource({ query, mode: 'hybrid' }, principal, {
+        signal,
+        onReadProgress: observations?.messageRead,
+      });
       sources.push(
         projectPreparationSource(
           messages,

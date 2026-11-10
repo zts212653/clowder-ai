@@ -36,13 +36,12 @@ export async function authorizeTaskHandoff(
     target.deletedAt ||
     home.createdBy !== task.userId ||
     source.createdBy !== task.userId ||
-    target.createdBy !== task.userId ||
-    source.projectPath !== home.projectPath ||
-    target.projectPath !== home.projectPath
+    target.createdBy !== task.userId
   )
     throw new OrdinaryTaskHandoffError('task_thread_authority_mismatch');
 
-  const previousId = task.lastAppliedHandoffMessageRef?.slice('message:'.length);
+  // Keep the predecessor stable after application, including replay/provider admission.
+  const previousId = request.expected.lastAppliedHandoffMessageRef?.slice('message:'.length);
   const previous = previousId ? await deps.messages.getById(previousId) : null;
   const previousRequest = previous?.extra?.taskHandoff;
   const assignedDelegate =
@@ -77,21 +76,30 @@ export async function authorizeTaskHandoff(
   const originalCoordinator = task.createdBy === request.issuer.catId;
   if (!owner && !collaborator && !originalCoordinator && !assignedDelegate)
     throw new OrdinaryTaskHandoffError('task_issuer_has_no_standing');
+  const delegates =
+    request.targetThreadId !== task.threadId || source.projectPath !== home.projectPath
+      ? await currentTaskDelegates(task, deps.delegates)
+      : [];
+  const isCurrentApprovedChild = (anchor: OrdinaryTaskHandoffRequest['approvedAnchor'], threadId: string) =>
+    anchor?.threadId === threadId &&
+    delegates.some(
+      (d) => d.catId === anchor.catId && d.threadId === anchor.threadId && d.evidenceRef === anchor.evidenceRef,
+    );
+  // Project differences require the exact live proposal/continuation proof for
+  // each child. Same-user or creator standing alone never grants this exception.
+  if (
+    (source.projectPath !== home.projectPath &&
+      (!assignedDelegate || !isCurrentApprovedChild(previousRequest?.approvedAnchor, source.id))) ||
+    (target.projectPath !== home.projectPath && !isCurrentApprovedChild(request.approvedAnchor, target.id))
+  )
+    throw new OrdinaryTaskHandoffError('task_thread_authority_mismatch');
   if (request.targetThreadId === task.threadId) {
     if (request.ownerCatId !== request.targetCatId) throw new OrdinaryTaskHandoffError('task_target_mismatch');
     return;
   }
   // The canonical Task remains at home. Exact approved targets govern initial child admission.
-  const delegates = await currentTaskDelegates(task, deps.delegates);
   const anchor = request.approvedAnchor;
-  if (
-    !anchor ||
-    request.ownerCatId !== task.ownerCatId ||
-    anchor.threadId !== request.targetThreadId ||
-    !delegates.some(
-      (d) => d.catId === anchor.catId && d.threadId === anchor.threadId && d.evidenceRef === anchor.evidenceRef,
-    )
-  )
+  if (!anchor || request.ownerCatId !== task.ownerCatId || !isCurrentApprovedChild(anchor, request.targetThreadId))
     throw new OrdinaryTaskHandoffError('task_approved_contract_unavailable');
   if (anchor.catId === request.targetCatId) return;
   // A later same-child successor inherits only an anchor already used by this exact Task assignment.

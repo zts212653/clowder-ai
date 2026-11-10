@@ -39,9 +39,8 @@ test('real MCP lifecycle writers reach owner-configured library routes without b
     assert.match(listed.content[0].text, /domain:mcp-test/);
     const rebuilt = await tools.handleLibraryRebuild({ collectionId: 'domain:mcp-test' });
     assert.notEqual(rebuilt.isError, true, JSON.stringify(rebuilt));
-    const archived = await tools.handleLibraryArchive({ collectionId: 'domain:mcp-test' });
-    assert.notEqual(archived.isError, true, JSON.stringify(archived));
-    assert.equal(catalog.get('domain:mcp-test').status, 'archived');
+    // Archiving moved to the owner library page (2026-11-09); the route itself is covered by library-lifecycle-routes.
+    assert.equal('handleLibraryArchive' in tools, false);
   } finally {
     for (const [key, value] of [
       ['CAT_CAFE_API_URL', previous.api],

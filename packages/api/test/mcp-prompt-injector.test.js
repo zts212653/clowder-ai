@@ -57,7 +57,7 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('create-rich-block'), 'should list create-rich-block');
     assert.ok(instructions.includes('search-evidence'), 'should list search-evidence');
     assert.ok(instructions.includes('reflect'), 'should list reflect');
-    assert.ok(instructions.includes('retain-memory'), 'should list retain-memory');
+    assert.ok(!instructions.includes('retain-memory'), 'should not advertise the retired retain-memory callback');
     assert.ok(!instructions.includes('request-permission'), 'should not advertise the sunset permission callback');
   });
 

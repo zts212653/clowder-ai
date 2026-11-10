@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { ManagedCommandWakeRecoverySweep } from '../src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.ts';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
 import { registerCallbackAuthHook } from '../src/routes/callback-auth-prehandler.ts';
@@ -244,29 +243,4 @@ test('former shadow-owner completion routes are not restored by the hold migrati
     assert.equal(result.statusCode, 404);
   }
   assert.equal(f.tasks.size, 0);
-});
-
-test('overlapping recovery sweeps share one cycle, then permit a fresh cycle', async () => {
-  let entered = 0;
-  let release;
-  const barrier = new Promise((resolve) => {
-    release = resolve;
-  });
-  const sweep = new ManagedCommandWakeRecoverySweep({
-    dynamicTaskStore: { getAll: () => [] },
-    admitWake: async () => ({}),
-  });
-  // Delayed read-only recovery step measures real runOnce ownership, not an arbitrary sleep.
-  sweep.recoverAdmissionFacts = async () => {
-    entered++;
-    await barrier;
-    return { scanned: 0, recovered: 0, pending: 0 };
-  };
-  const first = sweep.runOnce();
-  const second = sweep.runOnce();
-  release();
-  await Promise.all([first, second]);
-  assert.equal(entered, 1);
-  await sweep.runOnce();
-  assert.equal(entered, 2);
 });

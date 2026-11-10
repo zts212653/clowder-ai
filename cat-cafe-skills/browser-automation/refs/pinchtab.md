@@ -1,5 +1,7 @@
 # PinchTab Reference
 
+> **2026-11-09 起停用**：`pinchtab` MCP 已全局关闭。30 天里只有 2 个会话真用过，其余都是健康检查，却让每个猫会话都常驻一个进程。需要持久登录态或批量任务改用 Playwright MCP。重新启用前先读 `docs/bug-report/2026-11-09-browser-mcp-per-session-spawn/README.md`。
+
 ## 是什么
 
 - HTTP-first 的本地浏览器控制服务

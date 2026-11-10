@@ -1,6 +1,6 @@
 'use client';
 
-import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
+import { DEFAULT_MESSAGE_SEARCH_SORT, type MessageSearchResponse, type MessageSearchResult } from '@cat-cafe/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppTooltip } from '../AppTooltip';
 import { ShellGlyph } from '../shell/ShellIcons';
@@ -27,7 +27,7 @@ export function MessageSearchPanel({
   const journey6 = useShellPresentation() === 'v2';
   const [query, setQuery] = useState(initialState?.query ?? '');
   const [scope, setScope] = useState<'thread' | 'global'>(initialState?.scope ?? 'thread');
-  const [sort, setSort] = useState<'time' | 'relevance'>(initialState?.sort ?? 'time');
+  const [sort, setSort] = useState<'time' | 'relevance'>(initialState?.sort ?? DEFAULT_MESSAGE_SEARCH_SORT);
   const input = useRef<HTMLInputElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const composing = useRef(false);

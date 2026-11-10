@@ -210,14 +210,17 @@ import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions 
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
 import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { readDurableA2ALineage } from './durable-a2a-lineage.js';
-import { validateRoutingSyntax } from './final-routing-slot.js';
+import { finalRoutingSlot, validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { resolveEventBackedRoutingExit } from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { requestOwnerAskCorrection } from './owner-ask-correction.js';
+import { detectUnaddressedOwnerAsk, opensOwnerDecision } from './owner-ask-detect.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
 import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
@@ -1669,6 +1672,8 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      // Set when this turn put a decision in front of the owner (approval card, decision card, …).
+      let openedOwnerDecision = false;
       const pendingToolResults: PendingToolResult[] = [];
       const recordPersistedOutputMessageId = (messageId: string): void => {
         sameRouteOutputMessageIds.add(messageId);
@@ -2234,6 +2239,7 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
+            if (opensOwnerDecision(effectiveMsg.toolName, effectiveMsg.toolInput)) openedOwnerDecision = true;
             pendingToolResults.push({
               toolName: effectiveMsg.toolName,
               ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
@@ -2941,6 +2947,26 @@ export async function* routeSerial(
           pendingC2VoidHoldSampleTrigger = voidHoldFireAttr[TRIGGER] as string;
         }
 
+        // 2026-11-09 dropped-ball census: replies that wait for the owner without a line-start
+        // mention never reach the mailbox. Remind the cat next turn; after storage, wake it once
+        // to decide or mention the owner when he is away (see owner-ask-correction.ts).
+        const unaddressedOwnerAsk =
+          localCvoHasCoCreatorLineStartMention || detectUserMention(storedContent)
+            ? null
+            : detectUnaddressedOwnerAsk({
+                text: storedContent,
+                routedToCat: routingExitLineStartMentions.length > 0 || structuredTargetCats.size > 0,
+                blocks: allRichBlocks,
+                openedOwnerDecision,
+              });
+        if (unaddressedOwnerAsk) {
+          pendingRoutingFeedback.push({ targetCatId: catId, reason: 'owner_ask_unaddressed' });
+          log.info(
+            { catId: catId as string, threadId, kind: unaddressedOwnerAsk },
+            'Owner ask without a line-start mention',
+          );
+        }
+
         // One write preserves both inline-routing and wait facts instead of overwriting either.
         if (pendingRoutingFeedback.length > 0 && deps.invocationDeps.threadStore) {
           const hasInlineFeedback = pendingRoutingFeedback.some((item) => item.reason === 'inline_action');
@@ -3288,6 +3314,26 @@ export async function* routeSerial(
           storedMsgId = storedMsg?.id;
           turnStoredMessageId = storedMsgId;
           if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
+          const ownerAskCorrectionDeliver = deps.invocationDeps.ownerAskCorrectionDeliver;
+          if (unaddressedOwnerAsk && storedMsg && ownerAskCorrectionDeliver) {
+            try {
+              const correction = await requestOwnerAskCorrection(
+                { messages: deps.messageStore, deliver: ownerAskCorrectionDeliver },
+                {
+                  userId,
+                  threadId,
+                  catId: catId as string,
+                  askMessageId: storedMsg.id,
+                  answeredAt: Date.now(),
+                  ...(currentUserMessageId ? { triggerMessageId: currentUserMessageId } : {}),
+                  excerpt: finalRoutingSlot(stripTrailingCatSignatures(storedContent)),
+                },
+              );
+              log.info({ catId: catId as string, threadId, outcome: correction.outcome }, 'Owner ask correction');
+            } catch (err) {
+              log.warn({ catId: catId as string, threadId, err }, 'Owner ask correction was not delivered');
+            }
+          }
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
           if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
             try {
