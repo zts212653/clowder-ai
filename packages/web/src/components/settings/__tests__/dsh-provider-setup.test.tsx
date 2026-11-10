@@ -15,10 +15,9 @@ afterEach(async () => {
 
 it('checks the registered DSH launch without requiring configuration copying and does not verify a failed request', async () => {
   const verified = vi.fn();
-  const fetch = vi.fn(
-    async (_path: string, _init?: RequestInit) =>
-      new Response(JSON.stringify({ error: 'dsh_setup_credential_missing' }), { status: 422 }),
-  );
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(new Response(JSON.stringify({ error: 'dsh_setup_credential_missing' }), { status: 422 }));
   vi.stubGlobal('fetch', fetch);
   await act(async () =>
     root.render(<DshProviderSetup runtimeId="acp:dsh" onPrepared={vi.fn()} onVerified={verified} t={(zh) => zh} />),
