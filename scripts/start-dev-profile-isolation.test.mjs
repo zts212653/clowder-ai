@@ -1106,7 +1106,13 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
   const unixIt = process.platform === 'win32' ? it.skip : it;
   const recordedEnv = ['CAT_CAFE_DIRECT_NO_WATCH', 'CAT_CAFE_RESPECT_DOTENV_PORTS', 'CAT_CAFE_STRICT_PROFILE_DEFAULTS'];
 
-  function createStartEntryFixture({ activeProfile = 'opensource', ownGit = true, runtimeWorktree, plainDir } = {}) {
+  function createStartEntryFixture({
+    activeProfile = 'opensource',
+    ownGit = true,
+    runtimeWorktree,
+    plainDir,
+    packageScripts = false,
+  } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'start-entry-issue50-'));
     const project = join(root, 'project');
     for (const path of [
@@ -1121,6 +1127,14 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
     profiles.profiles[activeProfile] ??= profiles.profiles.opensource;
     profiles.activeProfile = activeProfile;
     writeFileSync(join(project, 'packages/shared/src/deployment-profiles.json'), JSON.stringify(profiles));
+    if (packageScripts) {
+      // The real public entries, so pnpm's own argument forwarding (its leading `--`) is exercised.
+      const { scripts } = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+      writeFileSync(
+        join(project, 'package.json'),
+        JSON.stringify({ private: true, scripts: { start: scripts.start, 'start:status': scripts['start:status'] } }),
+      );
+    }
     // Stub launchers only record which entry ran, its arguments and startup env; nothing is started.
     for (const launcher of ['start-dev.sh', 'runtime-worktree.sh']) {
       writeFileSync(
@@ -1155,13 +1169,16 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
     return { root, project };
   }
 
-  function runStartEntry(project, args, extraEnv = {}) {
+  const runtimeEnv = ['CAT_CAFE_RUNTIME_DIR', 'CAT_CAFE_RUNTIME_BRANCH', 'CAT_CAFE_RUNTIME_REMOTE'];
+
+  function runStartEntry(project, args, extraEnv = {}, { viaPnpm = false } = {}) {
     const record = join(project, 'start-entry-record.txt');
     rmSync(record, { force: true });
     const env = { ...process.env, START_ENTRY_RECORD: record };
-    for (const key of [...recordedEnv, 'CAT_CAFE_PROFILE', 'CAT_CAFE_RUNTIME_DIR']) delete env[key];
+    for (const key of [...recordedEnv, ...runtimeEnv, 'CAT_CAFE_PROFILE']) delete env[key];
     Object.assign(env, extraEnv);
-    const result = spawnSync(process.execPath, ['scripts/start-entry.mjs', ...args], {
+    const [command, commandArgs] = viaPnpm ? ['pnpm', args] : [process.execPath, ['scripts/start-entry.mjs', ...args]];
+    const result = spawnSync(command, commandArgs, {
       cwd: project,
       encoding: 'utf8',
       env,
@@ -1232,15 +1249,79 @@ describe('pnpm start runs in place for open-source git checkouts (#50)', () => {
     });
   });
 
-  unixIt('an existing runtime worktree at CAT_CAFE_RUNTIME_DIR is recognized like the default path', () => {
-    withFixture({ runtimeWorktree: 'my-runtime' }, (project) => {
-      assert.deepEqual(runStartEntry(project, ['start'], { CAT_CAFE_RUNTIME_DIR: '../my-runtime' }), [
-        'runtime-worktree.sh start',
-        'CAT_CAFE_DIRECT_NO_WATCH=1',
-      ]);
+  unixIt('runtime environment settings keep the runtime entry, even before the worktree exists', () => {
+    withFixture({}, (project) => {
+      for (const [key, value] of [
+        ['CAT_CAFE_RUNTIME_DIR', '../my-runtime'],
+        ['CAT_CAFE_RUNTIME_BRANCH', 'runtime/custom'],
+        ['CAT_CAFE_RUNTIME_REMOTE', 'upstream'],
+      ]) {
+        assert.deepEqual(runStartEntry(project, ['start'], { [key]: value }), [
+          'runtime-worktree.sh start',
+          'CAT_CAFE_DIRECT_NO_WATCH=1',
+        ]);
+        assert.deepEqual(runStartEntry(project, ['status'], { [key]: value }), ['runtime-worktree.sh daemon-status']);
+      }
       assert.equal(runStartEntry(project, ['start'])[0], 'start-dev.sh --prod-web --profile=opensource');
     });
   });
+
+  unixIt('runtime-only options keep their runtime meaning instead of reaching start-dev.sh', () => {
+    const sha = 'a'.repeat(40);
+    withFixture({}, (project) => {
+      for (const options of [
+        ['--dir', '../custom-runtime'],
+        ['--branch', 'runtime/custom'],
+        ['--remote', 'upstream'],
+        ['--sync'],
+        ['--no-sync'],
+        ['--no-install'],
+        ['--expected-target-sha', sha],
+        [`--expected-target-sha=${sha}`],
+        ['--force'],
+        ['--help'],
+        ['-h'],
+      ]) {
+        assert.equal(
+          runStartEntry(project, ['start', '--', '--daemon', ...options])[0],
+          `runtime-worktree.sh start -- --daemon ${options.join(' ')}`,
+        );
+      }
+      assert.deepEqual(runStartEntry(project, ['status', '--', '--dir', '../custom-runtime']), [
+        'runtime-worktree.sh daemon-status',
+      ]);
+    });
+  });
+
+  unixIt('arguments after the child separator belong to start-dev.sh and do not request the runtime', () => {
+    withFixture({}, (project) => {
+      assert.equal(
+        runStartEntry(project, ['start', '--', '--daemon', '--', '--no-sync'])[0],
+        'start-dev.sh --prod-web --profile=opensource -- --daemon -- --no-sync',
+      );
+    });
+  });
+
+  unixIt(
+    'real pnpm forwarding: an explicit --dir runtime stays on runtime-worktree.sh; plain flags start in place',
+    () => {
+      withFixture({ packageScripts: true, runtimeWorktree: 'custom-runtime' }, (project) => {
+        const customRuntime = join(dirname(project), 'custom-runtime');
+        assert.equal(
+          runStartEntry(project, ['start', '--', '--dir', customRuntime, '--no-sync'], {}, { viaPnpm: true })[0],
+          `runtime-worktree.sh start -- --dir ${customRuntime} --no-sync`,
+        );
+        assert.deepEqual(
+          runStartEntry(project, ['start:status', '--', '--dir', customRuntime], {}, { viaPnpm: true }),
+          ['runtime-worktree.sh daemon-status'],
+        );
+        assert.equal(
+          runStartEntry(project, ['start', '--', '--daemon'], {}, { viaPnpm: true })[0],
+          'start-dev.sh --prod-web --profile=opensource -- --daemon',
+        );
+      });
+    },
+  );
 
   unixIt('an unrelated directory named cat-cafe-runtime does not turn a new checkout back to the runtime', () => {
     withFixture({ plainDir: 'cat-cafe-runtime' }, (project) => {

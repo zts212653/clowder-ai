@@ -12,7 +12,8 @@
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
  *
  * On Unix, `start` and `status` in an open-source git checkout run in place
- * (start-dev.sh, same as start:direct). Release archives, other distributions and
+ * (start-dev.sh, same as start:direct). Release archives, other distributions,
+ * explicit runtime settings (runtime options or CAT_CAFE_RUNTIME_* variables) and
  * checkouts that already have a runtime worktree keep the runtime entry; the
  * isolated runtime worktree stays available as `pnpm runtime:start`.
  */
@@ -37,9 +38,36 @@ function realpathOrNull(path) {
   }
 }
 
-/** Mirrors runtime-worktree.sh worktree_exists for its RUNTIME_DIR (CAT_CAFE_RUNTIME_DIR or ../cat-cafe-runtime). */
+// runtime-worktree.sh settings that start-dev.sh would silently ignore. Its parser
+// consumes one leading `--` forwarded by pnpm and hands everything after the next
+// `--` to start-dev.sh, so only options before that separator count.
+const RUNTIME_OPTIONS = new Set([
+  '--dir',
+  '--branch',
+  '--remote',
+  '--expected-target-sha',
+  '--sync',
+  '--no-sync',
+  '--no-install',
+  '--force',
+  '--help',
+  '-h',
+]);
+const RUNTIME_ENV = ['CAT_CAFE_RUNTIME_DIR', 'CAT_CAFE_RUNTIME_BRANCH', 'CAT_CAFE_RUNTIME_REMOTE'];
+
+function requestsRuntime(args) {
+  if (RUNTIME_ENV.some((key) => process.env[key])) return true;
+  const options = args[0] === '--' ? args.slice(1) : args;
+  for (const arg of options) {
+    if (arg === '--') return false;
+    if (RUNTIME_OPTIONS.has(arg) || arg.startsWith('--expected-target-sha=')) return true;
+  }
+  return false;
+}
+
+/** Mirrors runtime-worktree.sh worktree_exists for its default RUNTIME_DIR (../cat-cafe-runtime). */
 function existingRuntimeWorktree() {
-  const runtimeDir = resolve(projectRoot, process.env.CAT_CAFE_RUNTIME_DIR || '../cat-cafe-runtime');
+  const runtimeDir = resolve(projectRoot, '..', 'cat-cafe-runtime');
   const target = realpathOrNull(runtimeDir);
   if (!target) return null;
   const listed = spawnSync('git', ['-C', projectRoot, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
@@ -54,11 +82,12 @@ function existingRuntimeWorktree() {
  * #50: a git clone of the open-source distribution starts from the checkout the
  * user is editing, with their own .env. Mirrors runtime-worktree.sh is_git_repo:
  * only the project's own .git counts, so an archive unpacked inside another
- * checkout keeps the in-place runtime entry. A checkout that already has a
- * runtime worktree keeps using it: Hub settings written there (members,
- * co-creator profile in .cat-cafe/cat-catalog.json) must not silently drop out.
+ * checkout keeps the in-place runtime entry. Explicit runtime settings keep
+ * runtime-worktree.sh semantics, and a checkout that already has a runtime
+ * worktree keeps using it: state written there (members and co-creator profile
+ * in .cat-cafe/cat-catalog.json, .env, uploads, data/) must not silently drop out.
  */
-function startsInPlaceByDefault({ explain = false } = {}) {
+function startsInPlaceByDefault(args, { explain = false } = {}) {
   let activeProfile;
   try {
     const profilesPath = resolve(projectRoot, 'packages/shared/src/deployment-profiles.json');
@@ -69,6 +98,7 @@ function startsInPlaceByDefault({ explain = false } = {}) {
   if (activeProfile !== 'opensource' || !existsSync(resolve(projectRoot, '.git'))) return false;
   if (spawnSync('git', ['-C', projectRoot, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' }).status !== 0)
     return false;
+  if (requestsRuntime(args)) return false;
   const runtimeDir = existingRuntimeWorktree();
   if (runtimeDir) {
     if (explain) {
@@ -88,7 +118,7 @@ if (mode === 'status') {
   } else {
     let cmd = resolve(__dirname, 'runtime-worktree.sh');
     let args = ['daemon-status'];
-    if (startsInPlaceByDefault()) {
+    if (startsInPlaceByDefault(rest)) {
       // Report the daemon `pnpm start` launched in place, the same one `pnpm stop` stops.
       cmd = resolve(__dirname, 'start-dev.sh');
       args = ['--status'];
@@ -124,7 +154,7 @@ if (mode === 'status') {
   // Unix: dispatch based on mode
   const hasProfile = rest.some((a) => a.startsWith('--profile'));
   let cmd, args, env;
-  if (mode === 'start' && startsInPlaceByDefault({ explain: true })) {
+  if (mode === 'start' && startsInPlaceByDefault(rest, { explain: true })) {
     // Same launch as start:direct: the user's checkout and .env, no runtime worktree.
     cmd = resolve(__dirname, 'start-dev.sh');
     args = ['--prod-web', '--profile=opensource', ...rest];

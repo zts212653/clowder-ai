@@ -61,7 +61,7 @@ test('start:status reads the official runtime namespace unless an open-source ch
   // In-place starts use start-dev.sh's namespace, so start, start:status and stop agree.
   assert.match(
     statusBlock,
-    /if \(startsInPlaceByDefault\(\)\) \{\s*(?:\/\/[^\n]*\s*)?cmd = resolve\(__dirname, 'start-dev\.sh'\);\s*args = \['--status'\];/,
+    /if \(startsInPlaceByDefault\(rest\)\) \{\s*(?:\/\/[^\n]*\s*)?cmd = resolve\(__dirname, 'start-dev\.sh'\);\s*args = \['--status'\];/,
   );
   assert.equal(pkg.scripts.stop, './scripts/start-dev.sh --stop');
 });

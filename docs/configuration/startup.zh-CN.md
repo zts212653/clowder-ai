@@ -13,7 +13,7 @@ pnpm start
 3. 构建并启动 API 服务器和前端
 4. 在 **http://localhost:3003** 打开 Hub
 
-如果这个目录里已经有旧版本留下的 `../cat-cafe-runtime` worktree，`pnpm start` 会继续使用它，让那里的设置保持生效（见 SETUP.zh-CN.md）。
+如果这个目录里已经有旧版本留下的 `../cat-cafe-runtime` worktree，`pnpm start` 会继续使用它，让那里的设置保持生效；停止它请用 `pnpm runtime:stop`，或用 `pnpm start:direct` 改为从当前目录启动（见 SETUP.zh-CN.md）。
 
 ## 启动标志
 
@@ -45,7 +45,7 @@ pnpm start --daemon
 
 ### `pnpm start:direct`
 
-在 git 检出中与 `pnpm start` 相同：始终直接从当前目录运行。
+始终直接从当前检出的目录运行，即使已有运行时 worktree。使用它可将版本固定在你已检出的确切版本上。
 
 ```bash
 # 直接运行当前版本，不自动更新
@@ -65,7 +65,7 @@ pnpm runtime:start
 | 命令                | 说明                               |
 |---------------------|------------------------------------|
 | `pnpm start:status` | 检查服务是否正在运行               |
-| `pnpm stop`         | 停止所有正在运行的服务             |
+| `pnpm stop`         | 停止从当前目录启动的服务（运行时 worktree 用 `pnpm runtime:stop`） |
 
 ## 开发
 
