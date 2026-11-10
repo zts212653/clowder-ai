@@ -10,6 +10,7 @@ import { legacyCreationKey, legacySharedKey } from './legacy-creation-key';
 import { buildNativeCreationPayload } from './native-creation-payload';
 import { repairLegacyNativeIdentityFields } from './native-identity-repair';
 import {
+  hasNativeIdentityConflict,
   type NativePartner,
   nativeRuntimeSelectable,
   newNativeRequestKey,
@@ -68,10 +69,18 @@ export function useNativeOnboarding(
   const [busy, setBusy] = useState('');
   const [reload, setReload] = useState(0);
   const key = useRef('');
+  const rosterCats = useRef<CatData[]>([]);
   const inFlight = useRef(false);
   const latest = useRef(draft);
   latest.current = draft;
   const persist = useCallback((next: SetupDraft) => {
+    next = {
+      ...next,
+      partners: next.partners.map((partner) => ({
+        ...partner,
+        identityConflict: hasNativeIdentityConflict(partner, rosterCats.current),
+      })),
+    };
     latest.current = next;
     setDraft(next);
     try {
@@ -109,6 +118,7 @@ export function useNativeOnboarding(
         }
         const journeyId = saved?.journeyId ?? newJourneyId();
         const currentCats = roster.cats;
+        rosterCats.current = currentCats;
         const partners = recommendNativePartners(discovered.runtimes, templates.templates, currentCats, journeyId).map(
           (partner) => {
             const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
@@ -136,7 +146,7 @@ export function useNativeOnboarding(
                 : {};
             const identityChanged = Object.keys(identityRepair).length > 0;
             const form = identityChanged ? { ...restoredForm, ...identityRepair } : restoredForm;
-            return {
+            const restored = {
               ...partner,
               // A repaired form is a new request: its old key may belong to a
               // different payload. A true lost-response retry keeps its key.
@@ -157,6 +167,7 @@ export function useNativeOnboarding(
                 nativeRuntimeSelectable(partner.runtime, form) && (!previous.runtime?.installed || previous.selected),
               form,
             };
+            return { ...restored, selected: restored.selected && !hasNativeIdentityConflict(restored, currentCats) };
           },
         );
         persist({
@@ -222,6 +233,19 @@ export function useNativeOnboarding(
     if (!selected.length) return;
     if (selected.some((p) => p.recoverable && !p.existingId)) {
       setError('旧草稿的成员已存在，请先明确选择复用现有伙伴，或取消选择。');
+      setErrorStage('save');
+      return;
+    }
+    const identities = [
+      ...rosterCats.current,
+      ...selected.map((p) => ({
+        id: p.existingId ?? p.form.catId,
+        nickname: p.form.nickname,
+        displayName: p.form.displayName,
+      })),
+    ];
+    if (selected.some((p) => !current.created[p.id] && hasNativeIdentityConflict(p, identities))) {
+      setError('存在同名伙伴，请调整新伙伴的昵称或取消选择后再创建。');
       setErrorStage('save');
       return;
     }

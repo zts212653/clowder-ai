@@ -17,6 +17,7 @@ export interface NativePartner {
   /** Upgrade-only marker: several old descriptors shared this pending request key. */
   legacySharedRequestKey?: string;
   existingId?: string;
+  identityConflict?: boolean;
   missingExisting?: boolean;
   recoverable?: { id: string; form: HubCatEditorFormState };
 }
@@ -40,6 +41,23 @@ export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEdi
     return runtime.readiness.status === 'configured';
   }
   return runtime.readiness?.status !== 'login_required';
+}
+
+/** Protect visible identities without inferring template ownership from a runtime. */
+export function hasNativeIdentityConflict(
+  partner: Pick<NativePartner, 'form' | 'existingId' | 'legacySharedRequestKey'>,
+  cats: Pick<CatData, 'id' | 'nickname' | 'displayName'>[],
+) {
+  // Legacy shared-key requests must replay unchanged before their ownership is known.
+  if (partner.existingId || partner.legacySharedRequestKey) return false;
+  const identity = (member: Pick<CatData, 'nickname' | 'displayName'>) =>
+    (member.nickname?.trim() || member.displayName.trim()).normalize('NFKC').toLowerCase();
+  const key = identity(partner.form);
+  return (
+    key !== '' &&
+    // Existing receipt handling owns same-ID retries, including old shared ACP keys.
+    cats.some((cat) => cat.id !== partner.form.catId && identity(cat) === key)
+  );
 }
 
 /** Registry-generated ACP ids change after creation; the launch descriptor does not. */
@@ -95,18 +113,18 @@ export function recommendNativePartners(
     reservedIds.add(catId.toLowerCase());
     const existingForm = existing ? initialState(existing) : undefined;
     const persistedForm = existingForm ? withLegacyNativeIdentityRepair(existingForm, form, runtime) : undefined;
-    return [
-      {
-        id: key,
-        creationRequestKey: runtime.acp ? newNativeRequestKey() : key,
-        runtime,
-        form: persistedForm
-          ? persistedForm
-          : { ...form, ...runtimeDefaults(runtime), catId, mentionPatterns: uniqueAlias },
-        selected: nativeRuntimeSelectable(runtime, persistedForm),
-        ...(existing ? { existingId: existing.id } : {}),
-      },
-    ];
+    const partner = {
+      id: key,
+      creationRequestKey: runtime.acp ? newNativeRequestKey() : key,
+      runtime,
+      form: persistedForm
+        ? persistedForm
+        : { ...form, ...runtimeDefaults(runtime), catId, mentionPatterns: uniqueAlias },
+      selected: nativeRuntimeSelectable(runtime, persistedForm),
+      ...(existing ? { existingId: existing.id } : {}),
+    };
+    const identityConflict = hasNativeIdentityConflict(partner, cats);
+    return [{ ...partner, identityConflict, selected: partner.selected && !identityConflict }];
   });
 }
 
