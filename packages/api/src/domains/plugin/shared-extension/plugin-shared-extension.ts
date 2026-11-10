@@ -117,7 +117,11 @@ const persistedState = z
 export interface PluginSharedExtensionStore {
   snapshot(): Promise<SharedExtensionState>;
   update<T>(
-    operation: (state: SharedExtensionState) => { readonly state: SharedExtensionState; readonly result: T },
+    operation: (
+      state: SharedExtensionState,
+    ) =>
+      | { readonly state: SharedExtensionState; readonly result: T }
+      | Promise<{ readonly state: SharedExtensionState; readonly result: T }>,
   ): Promise<T>;
 }
 
@@ -135,11 +139,15 @@ export class MemoryPluginSharedExtensionStore implements PluginSharedExtensionSt
   }
 
   update<T>(
-    operation: (state: SharedExtensionState) => { readonly state: SharedExtensionState; readonly result: T },
+    operation: (
+      state: SharedExtensionState,
+    ) =>
+      | { readonly state: SharedExtensionState; readonly result: T }
+      | Promise<{ readonly state: SharedExtensionState; readonly result: T }>,
   ): Promise<T> {
     let result!: T;
-    const run = this.queue.then(() => {
-      const next = operation(cloneState(this.state));
+    const run = this.queue.then(async () => {
+      const next = await operation(cloneState(this.state));
       this.state = cloneState(next.state);
       result = next.result;
     });
@@ -171,10 +179,14 @@ export class FilePluginSharedExtensionStore implements PluginSharedExtensionStor
   }
 
   update<T>(
-    operation: (state: SharedExtensionState) => { readonly state: SharedExtensionState; readonly result: T },
+    operation: (
+      state: SharedExtensionState,
+    ) =>
+      | { readonly state: SharedExtensionState; readonly result: T }
+      | Promise<{ readonly state: SharedExtensionState; readonly result: T }>,
   ): Promise<T> {
     return queueFile(this.path, async () => {
-      const next = operation(await this.read());
+      const next = await operation(await this.read());
       await this.write(next.state);
       return structuredClone(next.result);
     });
@@ -461,6 +473,7 @@ export class PluginSharedExtensionService {
     readonly ownerUserId: string;
     readonly evidenceRef: string;
     readonly assertCurrent?: () => void;
+    readonly assertLegacyAuthority?: () => Promise<void>;
   }): Promise<SharedConnectionView | null> {
     input.assertCurrent?.();
     if (!(await this.availablePrincipal(input.ownerUserId))) return null;
@@ -474,7 +487,8 @@ export class PluginSharedExtensionService {
     await this.basis(input.instanceId, basis.packageRecord.packageDigest, runtimeGeneration);
     if (!(await this.availablePrincipal(input.ownerUserId))) return null;
     const principal = { kind: 'cloud-cat' as const, logicalId: SHARED_CAT_ID };
-    const result = await this.options.store.update((state) => {
+    const result = await this.options.store.update(async (state) => {
+      await input.assertLegacyAuthority?.();
       input.assertCurrent?.();
       const existing = state.bindings.find((candidate) => recordKey(candidate) === key);
       if (observed ? !existing || !sameBinding(existing, observed) : existing) fail(409, 'shared_slot_changed');

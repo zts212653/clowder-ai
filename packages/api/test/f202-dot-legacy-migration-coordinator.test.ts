@@ -153,6 +153,7 @@ test('imports connection, bounded dispatch batches, then individual images and d
       },
     },
     externalAccess: {
+      revokeLegacy: async () => {},
       adopt: async (instanceId, token) => {
         adopted.push({ instanceId, token });
       },
@@ -209,6 +210,7 @@ test('imports connection, bounded dispatch batches, then individual images and d
       expectedPackageDigest: packageDigest,
       ownerUserId: 'owner-1',
       evidenceRef: 'legacy-dot:legacy-instance:ak_legacy',
+      assertLegacyAuthority: sharedAdopted[0]?.assertLegacyAuthority,
     },
   ]);
   assert.deepEqual(completionOrder, ['audit', 'shared']);

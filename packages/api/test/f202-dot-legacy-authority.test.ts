@@ -49,6 +49,21 @@ function key(overrides: Partial<AgentKeyRecord> = {}): AgentKeyRecord {
   };
 }
 
+test('authority expiry uses the time after the registry lookup completes', async () => {
+  let clock = now;
+  const checked = await auditLegacyDotCredential(connection(), {
+    now: () => clock,
+    keys: {
+      get: async () => {
+        clock += 1000;
+        return key({ expiresAt: now + 100 });
+      },
+    },
+  });
+  assert.equal(checked.authority.active, false);
+  assert.equal(checked.authority.reason, 'key_expired');
+});
+
 test('read-only authority audit preserves an exact active legacy credential', async () => {
   let reads = 0;
   const result = await auditLegacyDotCredential(connection(), {

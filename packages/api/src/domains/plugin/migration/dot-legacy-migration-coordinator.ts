@@ -81,7 +81,10 @@ export class DotLegacyMigrationCoordinator {
       readonly invoker: Pick<PluginMigrationInvoker, 'invoke'>;
       readonly media: Pick<FileMessagingMediaLedger, 'register'>;
       readonly audit: DotLegacyMigrationAuditPort;
-      readonly externalAccess?: { adopt(instanceId: string, token: string): Promise<void> };
+      readonly externalAccess?: {
+        adopt(instanceId: string, token: string, assertAuthority?: () => Promise<void>): Promise<void>;
+        revokeLegacy(instanceId: string, token: string): Promise<void>;
+      };
       readonly sharedExtension?: {
         adoptVerifiedLegacy(input: {
           readonly instanceId: string;
@@ -89,6 +92,7 @@ export class DotLegacyMigrationCoordinator {
           readonly ownerUserId: string;
           readonly evidenceRef: string;
           readonly assertCurrent?: () => void;
+          readonly assertLegacyAuthority?: () => Promise<void>;
         }): Promise<unknown>;
       };
       readonly now?: () => number;
@@ -99,12 +103,13 @@ export class DotLegacyMigrationCoordinator {
     readonly ownerUserId: string;
     readonly expectedPluginInstanceId: string;
     readonly expectedPackageDigest: string;
+    readonly assertCurrent?: () => void;
   }): Promise<DotLegacyMigrationAudit> {
     const sourceConnection = await this.options.source.connection();
     if (!sourceConnection) throw new Error('dot_legacy_connection_missing');
     if (sourceConnection.ownerUserId !== input.ownerUserId) throw new Error('dot_legacy_owner_mismatch');
     const sourceInstanceId = sourceConnection.pluginInstanceId;
-    const checked = await auditLegacyDotCredential(sourceConnection, {
+    let checked = await auditLegacyDotCredential(sourceConnection, {
       keys: this.options.keys,
       now: this.options.now,
     });
@@ -123,9 +128,6 @@ export class DotLegacyMigrationCoordinator {
         images: [],
       }),
     );
-    if (checked.authority.active) {
-      await this.options.externalAccess?.adopt(input.expectedPluginInstanceId, sourceConnection.credentialSecret);
-    }
     for (let offset = 0; offset < dispatches.length; offset += 100) {
       receipts.push(
         await this.invokeBatch(input, {
@@ -159,6 +161,44 @@ export class DotLegacyMigrationCoordinator {
       media.push({ metadata, hmrId });
     }
 
+    // Import and media I/O may outlive the original key. Re-read the source and
+    // registry at adoption, and monotonically retire an already imported copy.
+    const current = await this.currentSource(sourceConnection);
+    const refreshed = await auditLegacyDotCredential(current, { keys: this.options.keys, now: this.options.now });
+    input.assertCurrent?.();
+    if (checked.authority.active && !refreshed.authority.active) {
+      receipts.push(
+        await this.invokeBatch(input, {
+          version: 1,
+          ownerUserId: input.ownerUserId,
+          sourceInstanceId,
+          connection: { ...checked.connection, revokedAt: refreshed.connection.revokedAt },
+          dispatches: [],
+          images: [],
+        }),
+      );
+    }
+    // An initially inactive import is history, even if a later snapshot appears active.
+    if (checked.authority.active) checked = refreshed;
+    if (checked.authority.active) {
+      await this.options.externalAccess?.adopt(
+        input.expectedPluginInstanceId,
+        sourceConnection.credentialSecret,
+        async () => {
+          const current = await this.currentSource(sourceConnection);
+          const verified = await auditLegacyDotCredential(current, { keys: this.options.keys, now: this.options.now });
+          input.assertCurrent?.();
+          if (!verified.authority.active) throw new Error('dot_legacy_authority_changed');
+        },
+      );
+    } else {
+      input.assertCurrent?.();
+      await this.options.externalAccess?.revokeLegacy(
+        input.expectedPluginInstanceId,
+        sourceConnection.credentialSecret,
+      );
+    }
+
     const audit: DotLegacyMigrationAudit = {
       version: 1,
       ownerUserId: input.ownerUserId,
@@ -179,14 +219,51 @@ export class DotLegacyMigrationCoordinator {
     audit: DotLegacyMigrationAudit,
     current?: { readonly packageDigest: string; readonly assertCurrent: () => void },
   ): Promise<void> {
-    if (!audit.authority.active) return;
+    if (!(await this.revalidateLegacyAuthority(audit))) return;
+    current?.assertCurrent();
     await this.options.sharedExtension?.adoptVerifiedLegacy({
       instanceId: audit.pluginInstanceId,
       expectedPackageDigest: current ? current.packageDigest : audit.packageDigest,
       ownerUserId: audit.ownerUserId,
       evidenceRef: `legacy-dot:${audit.sourceInstanceId}:${audit.authority.agentKeyId}`,
+      assertLegacyAuthority: async () => {
+        if (!(await this.revalidateLegacyAuthority(audit))) throw new Error('dot_legacy_authority_changed');
+        current?.assertCurrent();
+      },
       ...(current ? { assertCurrent: current.assertCurrent } : {}),
     });
+  }
+
+  /** A completed import is historical evidence, not a current authorization grant. */
+  async revalidateLegacyAuthority(audit: DotLegacyMigrationAudit): Promise<boolean> {
+    if (!audit.authority.active) return false;
+    const source = await this.currentSource({
+      ownerUserId: audit.ownerUserId,
+      pluginInstanceId: audit.sourceInstanceId,
+      agentKeyId: audit.authority.agentKeyId,
+    });
+    const checked = await auditLegacyDotCredential(source, { keys: this.options.keys, now: this.options.now });
+    if (checked.authority.active) return true;
+    await this.options.externalAccess?.revokeLegacy(audit.pluginInstanceId, source.credentialSecret);
+    return false;
+  }
+
+  private async currentSource(
+    expected: Pick<LegacyDotConnectionState, 'ownerUserId' | 'pluginInstanceId' | 'agentKeyId'> &
+      Partial<Pick<LegacyDotConnectionState, 'credentialSecret' | 'attemptId'>>,
+  ): Promise<LegacyDotConnectionState> {
+    const current = await this.options.source.connection();
+    if (
+      !current ||
+      current.ownerUserId !== expected.ownerUserId ||
+      current.pluginInstanceId !== expected.pluginInstanceId ||
+      current.agentKeyId !== expected.agentKeyId ||
+      (expected.credentialSecret !== undefined && current.credentialSecret !== expected.credentialSecret) ||
+      (expected.attemptId !== undefined && current.attemptId !== expected.attemptId)
+    ) {
+      throw new Error('dot_legacy_source_changed');
+    }
+    return current;
   }
 
   private async invokeBatch(

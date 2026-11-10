@@ -8,9 +8,11 @@ The Host owns installation identity, ordinary addressed routing, visibility, que
 
 Existing shared `/mcp` compatibility is limited to the same owner, original installation lineage and originally approved tool/event surface. A same-instance package update may recover that unchanged approved surface. Expanded surfaces, replacement installations, revoked authority and stale requests do not acquire permission through migration. No general shared authorization or new Host credential issuer is introduced.
 
+A completed import audit records history, not current permission. Legacy adoption re-reads the original source and key registry after importer/media waits and at the credential/shared binding commit. Enable also revalidates an already imported credential. Revocation retires only the matching old bearer; retained history and independently replaced credentials are preserved.
+
 ## Review cuts
 
-The product-code reference cut is Host `1b8f0c8268b79cbaba96ee58cf1d9e4360a1b46c` against public base `50e5695607a42d5bdbe6e95703e83b038287f290`, paired with plugin `4e2dc4e50b02954a52de982d28c9907bbef18361`. Later test/document cleanup does not change these product trees or the alpha.51 archive.
+The original integration reference cut is Host `1b8f0c8268b79cbaba96ee58cf1d9e4360a1b46c` against public base `50e5695607a42d5bdbe6e95703e83b038287f290`, paired with plugin `4e2dc4e50b02954a52de982d28c9907bbef18361`. Subsequent Host revisions synchronize the upstream base and correct legacy authorization revalidation. Read the PR's current exact HEAD for those changes; original-cut test results do not certify new authorization checks. The alpha.51 archive remains unchanged.
 
 The following are bounded review units over that integration cut. They are not claimed to be four independently deployable intermediate commits.
 

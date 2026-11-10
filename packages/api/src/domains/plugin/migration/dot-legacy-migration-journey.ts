@@ -30,7 +30,7 @@ export class DotLegacyMigrationJourney {
     private readonly options: {
       readonly source: Pick<DotLegacySourceReader, 'connection'>;
       readonly coordinator: Pick<DotLegacyMigrationCoordinator, 'migrate'> &
-        Partial<Pick<DotLegacyMigrationCoordinator, 'reconcileShared'>>;
+        Partial<Pick<DotLegacyMigrationCoordinator, 'reconcileShared' | 'revalidateLegacyAuthority'>>;
       readonly audit: Pick<
         DotLegacyMigrationProgressPort,
         'findCompleted' | 'hasCompletedSource' | 'isSuperseded' | 'supersede'
@@ -63,7 +63,11 @@ export class DotLegacyMigrationJourney {
         pluginInstanceId: input.pluginInstanceId,
         packageDigest: input.packageDigest,
       });
-      if (completed) return null;
+      if (completed) {
+        await this.options.coordinator.revalidateLegacyAuthority?.(completed);
+        input.assertCurrent();
+        return null;
+      }
       // A successful import consumes the legacy source exactly once. A replacement
       // installation may recover package-owned state, but must never resurrect the
       // raw legacy bearer credential into a new installation identity.
@@ -85,6 +89,7 @@ export class DotLegacyMigrationJourney {
             ownerUserId: input.ownerUserId,
             expectedPluginInstanceId: input.pluginInstanceId,
             expectedPackageDigest: input.packageDigest,
+            assertCurrent: input.assertCurrent,
           }),
         ),
       );

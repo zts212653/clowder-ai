@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -129,6 +130,24 @@ test('verified legacy migration adopts the existing shared connection without ex
     (await f.service.handle('owner-key', { jsonrpc: '2.0', id: 10, method: 'tools/list' })).result.tools[0].name,
     'fixture_read',
   );
+});
+
+test('legacy authority revoked while describing the shared surface cannot be committed', async () => {
+  const f = fixture();
+  let active = true;
+  f.beforeReply(async () => {
+    active = false;
+  });
+  await assert.rejects(
+    f.service.adoptVerifiedLegacy({
+      ...adoption(f),
+      assertLegacyAuthority: async () => {
+        if (!active) throw new Error('dot_legacy_authority_changed');
+      },
+    }),
+    /dot_legacy_authority_changed/,
+  );
+  assert.deepEqual((await f.store.snapshot()).bindings, []);
 });
 
 test('a malformed persistent binding fails closed instead of becoming authorization', async (t) => {
@@ -278,14 +297,35 @@ test('durable legacy audit recovers shared MCP after a same-instance package upd
   const never = async () => {
     throw Error('must not reimport legacy keys');
   };
-  const source = { connection: async () => ({ ownerUserId: 'owner', pluginInstanceId: 'old-dot' }) };
+  const secret = 'a'.repeat(64);
+  const source = {
+    connection: async () => ({
+      ownerUserId: 'owner',
+      pluginInstanceId: 'old-dot',
+      agentKeyId: 'old-key',
+      credentialSecret: secret,
+      revokedAt: null,
+    }),
+  };
   const coordinator = new DotLegacyMigrationCoordinator({
     source,
-    keys: { get: never },
+    keys: {
+      get: async () => ({
+        agentKeyId: 'old-key',
+        catId: 'gpt-dot',
+        userId: 'owner',
+        secretHash: createHash('sha256')
+          .update(secret + 'salt')
+          .digest('hex'),
+        salt: 'salt',
+        scope: 'user-bound',
+        expiresAt: null,
+      }),
+    },
     invoker: { invoke: never },
     media: { register: never },
     audit,
-    externalAccess: { adopt: never },
+    externalAccess: { adopt: never, revokeLegacy: never },
     sharedExtension: f.service,
   });
   const journey = new DotLegacyMigrationJourney({ source, audit, coordinator });

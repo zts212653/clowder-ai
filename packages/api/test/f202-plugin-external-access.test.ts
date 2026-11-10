@@ -68,6 +68,29 @@ test('a verified legacy installation adopts its existing credential as the same 
   await assert.rejects(() => store.adopt('instance-b', 'a'.repeat(64)), /already belongs/);
 });
 
+for (const kind of ['memory', 'file'] as const) {
+  test(`${kind} legacy adoption rechecks authority inside its commit and retires only the expected token`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'legacy-authority-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const store =
+      kind === 'memory'
+        ? new MemoryPluginExternalAccessStore()
+        : new FilePluginExternalAccessStore(join(root, 'access.json'));
+    await assert.rejects(
+      store.adopt('instance-a', 'revoked-token', async () => {
+        throw new Error('revoked');
+      }),
+      /revoked/,
+    );
+    assert.equal(await store.resolve('revoked-token'), undefined);
+    await store.adopt('instance-a', 'replacement-token');
+    await store.revoke('instance-a', 'old-token');
+    assert.equal(await store.resolve('replacement-token'), 'instance-a');
+    await store.revoke('instance-a', 'replacement-token');
+    assert.equal(await store.resolve('replacement-token'), undefined);
+  });
+}
+
 test('ordinary module projection does not mint a new legacy raw credential', async () => {
   const store = new MemoryPluginExternalAccessStore();
   const service = new PluginExternalAccessService({

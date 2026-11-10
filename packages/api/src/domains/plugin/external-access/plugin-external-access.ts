@@ -10,9 +10,9 @@ export interface PluginExternalAccessRecord {
 
 export interface PluginExternalAccessStore {
   find(instanceId: string): Promise<PluginExternalAccessRecord | undefined>;
-  adopt(instanceId: string, token: string): Promise<PluginExternalAccessRecord>;
+  adopt(instanceId: string, token: string, assertAuthority?: () => Promise<void>): Promise<PluginExternalAccessRecord>;
   resolve(token: string): Promise<string | undefined>;
-  revoke(instanceId: string): Promise<void>;
+  revoke(instanceId: string, expectedToken?: string): Promise<void>;
 }
 
 function tokenDigest(token: string): Buffer {
@@ -31,8 +31,13 @@ export class MemoryPluginExternalAccessStore implements PluginExternalAccessStor
     return token === undefined ? undefined : { instanceId, token };
   }
 
-  async adopt(instanceId: string, token: string): Promise<PluginExternalAccessRecord> {
+  async adopt(
+    instanceId: string,
+    token: string,
+    assertAuthority?: () => Promise<void>,
+  ): Promise<PluginExternalAccessRecord> {
     assertToken(token);
+    await assertAuthority?.();
     const existing = this.records.get(instanceId);
     if (existing !== undefined && !tokenMatches(existing, token)) {
       throw new Error('Plugin instance already has an external access token');
@@ -53,7 +58,9 @@ export class MemoryPluginExternalAccessStore implements PluginExternalAccessStor
     return undefined;
   }
 
-  async revoke(instanceId: string): Promise<void> {
+  async revoke(instanceId: string, expectedToken?: string): Promise<void> {
+    const existing = this.records.get(instanceId);
+    if (expectedToken !== undefined && (existing === undefined || !tokenMatches(existing, expectedToken))) return;
     this.records.delete(instanceId);
   }
 }
@@ -89,10 +96,15 @@ export class FilePluginExternalAccessStore implements PluginExternalAccessStore 
     });
   }
 
-  async adopt(instanceId: string, token: string): Promise<PluginExternalAccessRecord> {
+  async adopt(
+    instanceId: string,
+    token: string,
+    assertAuthority?: () => Promise<void>,
+  ): Promise<PluginExternalAccessRecord> {
     assertToken(token);
     return queueFile(this.path, async () => {
       const records = await this.readRecords();
+      await assertAuthority?.();
       const existing = records.get(instanceId);
       if (existing !== undefined && !tokenMatches(existing, token)) {
         throw new Error('Plugin instance already has an external access token');
@@ -117,9 +129,11 @@ export class FilePluginExternalAccessStore implements PluginExternalAccessStore 
     });
   }
 
-  async revoke(instanceId: string): Promise<void> {
+  async revoke(instanceId: string, expectedToken?: string): Promise<void> {
     return queueFile(this.path, async () => {
       const records = await this.readRecords();
+      const existing = records.get(instanceId);
+      if (expectedToken !== undefined && (existing === undefined || !tokenMatches(existing, expectedToken))) return;
       if (!records.delete(instanceId)) return;
       await this.writeRecords(records);
     });
@@ -202,10 +216,15 @@ export class PluginExternalAccessService {
   }
 
   /** Internal migration seam: preserve one already-issued installation credential. */
-  async adopt(instanceId: string, token: string): Promise<void> {
+  async adopt(instanceId: string, token: string, assertAuthority?: () => Promise<void>): Promise<void> {
     const instance = await this.currentInstance(instanceId);
     if (instance === undefined) throw new PluginExternalAccessError(404, 'Plugin instance is not current');
-    await this.options.store.adopt(instanceId, token);
+    await this.options.store.adopt(instanceId, token, assertAuthority);
+  }
+
+  /** Retire only the old bearer being revalidated, never a replacement credential. */
+  async revokeLegacy(instanceId: string, token: string): Promise<void> {
+    await this.options.store.revoke(instanceId, token);
   }
 
   async handle(token: string, request: Readonly<Record<string, unknown>>): Promise<unknown> {

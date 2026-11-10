@@ -30,8 +30,8 @@ export async function auditLegacyDotCredential(
     readonly now?: () => number;
   },
 ): Promise<{ connection: LegacyDotConnectionState; authority: LegacyDotCredentialAuthorityAudit }> {
-  const observedAt = (options.now ?? Date.now)();
   const record = await options.keys.get(source.agentKeyId);
+  const observedAt = (options.now ?? Date.now)();
   const recordPresent = record !== null;
   const secretMatched = record ? secretMatches(source.credentialSecret, record) : false;
   const identityMatched = record

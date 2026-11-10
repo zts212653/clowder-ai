@@ -49,6 +49,12 @@ const png = Buffer.from(
 );
 
 test('legacy Dot updates through the owner journey, starts with its old credential, and does not resurrect it after reinstall', async (t) => {
+  const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+  process.env.DEFAULT_OWNER_USER_ID = ownerUserId;
+  t.after(() => {
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+  });
   const dot = OFFICIAL_PLUGIN_CATALOG.find((entry) => entry.pluginId === 'official.chatgpt-dot');
   const legacy = LEGACY_BUNDLED_MANIFESTS.find((entry) => entry.pluginId === 'official.chatgpt-dot');
   assert.ok(dot);
