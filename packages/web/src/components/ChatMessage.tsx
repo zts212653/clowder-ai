@@ -709,17 +709,20 @@ function ChatMessageContent({
      * action anchor, the whisper / reply marks, the copy-id control. The header is only as tall as the marks it holds, so a
      * plain message has no empty row above it; the copy-id control sits in the blank to the left of the block. */
     const humanPresentation = shellPresentation === 'v2' && !compact;
+    const recalledAfterExposure = message.extra?.recall?.exposure === 'seen';
+    const humanBubblePresentation = humanPresentation && (!message.extra?.messageBundle || recalledAfterExposure);
     const humanHasMarks = isWhisper || Boolean(message.replyTo && resolvedReplyPreview && !isSchedulerReply);
     // The human colour's light step. With no colour configured the role is the shared cocoa (shell-v2.css bakes its hue and
     // chroma, and CoCreatorHueInjector replaces them when the config has one), so there is no separate neutral fallback.
     const humanFill = 'var(--color-cocreator-surface)';
-    // The action plane measures this zero-size slot; keep it before the human block, outside its text.
+    // Forwarded cards keep their header anchor. A human bubble owns its own anchor so
+    // wider reply labels or dispatch receipts cannot pull its actions away from the text.
     const humanHeader = (
       <div
         data-testid="human-message-header"
         className={`relative flex w-full justify-end items-center gap-2 [&>[data-message-action-slot]]:absolute [&>[data-message-action-slot]]:-left-2 [&>[data-message-action-slot]]:top-1/2${humanHasMarks ? ' mb-1' : ''}`}
       >
-        <MessageActionSlot />
+        {!humanBubblePresentation && <MessageActionSlot />}
         {isWhisper && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
@@ -779,7 +782,6 @@ function ChatMessageContent({
     );
 
     const whisperActive = isWhisper && !isRevealed;
-    const recalledAfterExposure = message.extra?.recall?.exposure === 'seen';
 
     return (
       <MessageBubble
@@ -797,6 +799,7 @@ function ChatMessageContent({
         }
         avatar={userAvatar}
         header={userHeader}
+        bodyActionSlot={humanBubblePresentation ? <MessageActionSlot /> : undefined}
         footer={
           <>
             {renderThreadId ? <SuggestionRow threadId={renderThreadId} messageId={message.id} align="end" /> : null}

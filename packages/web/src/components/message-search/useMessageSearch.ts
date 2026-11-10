@@ -1,4 +1,4 @@
-import type { MessageSearchResponse } from '@cat-cafe/shared';
+import { DEFAULT_MESSAGE_SEARCH_SORT, type MessageSearchResponse } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { MessageFindState } from './message-find-state';
@@ -49,7 +49,7 @@ export function useMessageSearch(threadId: string, initialState?: MessageFindSta
   }, [threadId]);
 
   const search = useCallback(
-    async (query: string, scope: SearchScope = 'thread', sort: SearchSort = 'time') => {
+    async (query: string, scope: SearchScope = 'thread', sort: SearchSort = DEFAULT_MESSAGE_SEARCH_SORT) => {
       const text = query.trim();
       if (!text) return;
       controller.current?.abort();

@@ -269,7 +269,8 @@ function tryRestoreSavedScrollState(el: HTMLElement, saved: SavedScrollState): b
   const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
   const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
   el.scrollTop = targetTop;
-  const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
+  // A measured short page is already at bottom even when it cannot scroll.
+  const canSettle = saved.anchor === 'bottom' ? el.clientHeight > 0 : maxTop >= saved.top;
   return canSettle && Math.abs(el.scrollTop - targetTop) <= 1;
 }
 
@@ -284,7 +285,8 @@ function captureRestoreWritePosition(el: HTMLElement, messages: ChatMessageData[
 
 function readingSettlementStillMatches(el: HTMLElement, position: SavedScrollState): boolean {
   if (el.scrollTop !== position.top) return false;
-  if (position.anchor === 'bottom') return el.scrollTop === Math.max(0, el.scrollHeight - el.clientHeight);
+  if (position.anchor === 'bottom')
+    return el.clientHeight > 0 && el.scrollTop === Math.max(0, el.scrollHeight - el.clientHeight);
   if (!position.messageAnchor) return true;
   return matchesMessageScrollAnchor(el, position.messageAnchor);
 }
@@ -1719,6 +1721,9 @@ export function useChatHistory(threadId: string) {
       } catch (err) {
         // AbortError is expected during thread switch — ignore silently
         if (isAbortError(err)) return false;
+        // Preserve the bounded transport failure until the navigation owner can
+        // decide whether its still-current refresh may issue one more read.
+        if (err instanceof Error && err.name === 'TimeoutError') return 'timeout' as const;
         return false;
       } finally {
         // Do not let stale/aborted request clear loading state for a newer thread request.
@@ -1739,9 +1744,18 @@ export function useChatHistory(threadId: string) {
   );
 
   const fetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number; afterCurrentGet?: boolean }) => {
+    async (
+      cursor?: string,
+      options?: {
+        replace?: boolean;
+        freshnessToken?: number;
+        afterCurrentGet?: boolean;
+        retryTimeoutWhile?: () => boolean;
+      },
+    ) => {
       const freshnessKey = typeof options?.freshnessToken === 'number' ? `:fresh:${options.freshnessToken}` : '';
       const requestKey = `messages:${cursor ?? 'latest'}:${options?.replace ? 'replace' : 'prepend'}${freshnessKey}`;
+      let timeoutRetried = false;
       while (true) {
         const result = await historyAdmission.runRequest({
           threadId,
@@ -1752,7 +1766,12 @@ export function useChatHistory(threadId: string) {
           // this thread, instead of being turned away by this surface's `loadingRef` (contract 3.2).
           startWhenIdle: options?.afterCurrentGet === true,
         });
-        if (result.status === 'completed') return result.value;
+        if (result.status === 'completed') {
+          if (result.value !== 'timeout') return result.value;
+          if (timeoutRetried || !options?.retryTimeoutWhile?.()) return false;
+          timeoutRetried = true;
+          continue;
+        }
 
         // The shared request originated from a consumer that unmounted. Its
         // controller and stale guards belong to that departed surface, so the
@@ -1791,7 +1810,15 @@ export function useChatHistory(threadId: string) {
         };
         // History can be shared with another reader. Retire this navigation's
         // wait immediately without cancelling that shared fetch or its hydration.
-        void fetchHistory(undefined, { replace: true }).then(finish, () => finish(false));
+        void fetchHistory(undefined, {
+          replace: true,
+          retryTimeoutWhile: () =>
+            readingRefreshRef.current === operation &&
+            generation === restoreGenerationRef.current &&
+            threadIdRef.current === threadId &&
+            useChatStore.getState().currentThreadId === threadId &&
+            !signal?.aborted,
+        }).then(finish, () => finish(false));
       });
       const owned = readingRefreshRef.current;
       return bindReadingAbort(receipt, signal, () => {

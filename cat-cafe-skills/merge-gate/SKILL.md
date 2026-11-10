@@ -34,7 +34,7 @@ triggers:
 2. 新实质内容需要非作者内容 review；已有内容 verdict 或可证明机械合并用 continuityProof 复用，不为 SHA 字符串变化重开 reviewer。
 3. `cloudReview=required` 才触发 cloud；`skip` 时在 PR 留 classifier 原因。家规 / SOP / skill 纯文字通常由有状态 local reviewer 覆盖治理语义，不把“免 cloud”当需要申请的特权。
 4. `fullGate=required` 才跑 `pnpm gate`；`skip` 时 evidence manifest 记录 docs validation 命令。
-5. evidence 闭合后由在场 merge owner 执行 `gh pr merge --squash`；不再额外召唤一只猫只为按 merge 按钮。无 F 号时跳过 Feature Doc Truth post-merge sync。
+5. evidence 闭合后由在场 merge owner 执行 `gh pr merge --squash`；不再额外召唤一只猫只为按 merge 按钮。PR 标题、分支和正文都没有 F 号时跳过 Feature Doc Truth post-merge sync；有 F 号就按 Step 7.5b 写进文档，或留 `Doc-Sync: none — 原因`。
 
 任一 changed file 不匹配、classifier 缺失/失败或输出 `lane=regular_development` → 退出本节，走下方风险路由。行数不能作为 Lane 0 证据。
 
@@ -448,9 +448,10 @@ case "$CLASSIFY_RC" in
       exit 1 ;;
 esac
 
-# 7.5b Post-merge: 仅当本 PR 改变 feature truth 时同步状态 🔴
-#   Phase / AC / Status 有真实 delta → 同步 + Timeline provenance → commit → 复跑 check-feature-truth
-#   仅“发生了一次 merge”不是状态 delta；无 delta 则整段跳过，不制造 doc churn
+# 7.5b Post-merge: 本 PR 改变了读者该知道的事 → 写进 feature doc 🔴
+#   Phase / AC / Status / 首屏现状（能用什么、等哪个版本加载或验收、还差什么）有变化
+#     → 同步 + Timeline provenance → commit → 复跑 check-feature-truth
+#   没有变化 → 不改文档，在 PR 留一行 `Doc-Sync: none — <原因>`；不静默跳过
 # → 详见下方「Feature Doc Truth 核对（Step 7.5）」§ 7.5b
 ```
 
@@ -600,7 +601,7 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 
 merge 是把状态写进 main 的不可逆点（其他 session 立即读到）。合之前，拿**这个 PR 的代码现实**对账 feature doc 当前的声称，确认没有对 main 撒谎：
 
-1. **识别 Feature**：从 PR title/branch 提取 `F{NNN}`（无 Feature ID → 跳过，纯 TD/hotfix 不需要）。
+1. **识别 Feature**：从 PR title / branch / 正文提取 `F{NNN}`（都没有 → 跳过，纯 TD/hotfix 不需要）。
 2. **声称 vs 代码现实**（人工 — 语义层机器判不了）：
    - feature doc 里标 ✅ 的 Phase / 打勾的 `[x]` AC，**这个 PR（及历史）的代码真做了吗**？严防"doc 声称完成但代码是 stub / 没做"——糖衣包装"未做"（参 self-evolution「下次一定」）。
    - **Status 行**和真实开发阶段一致吗？（写 `spec`/`spike` 但代码已在跑 = 撒谎）
@@ -619,17 +620,20 @@ MAIN_WT="$(git worktree list --porcelain \
 cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync 落点切到 main
 ```
 
-然后先判断这个 PR 是否带来 **feature truth delta**：Phase 完成、AC 达成/删除/签字、Status 推进。**“PR merged”这个事实本身不是 feature truth delta**；若三者均无变化，整段 7.5b 留痕跳过，Timeline 也不追加。
+然后判断这个 PR 有没有改变**下一个读这份 feature doc 的人该知道的事**（feature truth delta）：Phase 完成、AC 达成/删除/签字、Status 推进，或**首屏现状**变了——现在能用什么、在等哪个版本加载或验收、还差什么（例：合入了一个要等下次 runtime 加载才生效的修复，文档原来只写着在等别的 PR）。**“PR merged”这个事实本身不算**；只是测试、内部重构、不改上述任何一项的 PR 也不算。
 
-仅在存在上述 truth delta 时，**在 main 上**把这个 PR 带来的增量写进 feature doc：
+- **没有变化**：不改文档，但在 PR 留一行 `Doc-Sync: none — <原因>`（合入前写进 PR 描述，或合入后 `gh pr comment <N> --body "Doc-Sync: none — <原因>"`）。不再静默跳过：每日文档守护（`docs/ops/daily-doc-sync.md`）每天用 `node scripts/doc-sync-candidates.mjs` 列出挂了 Feature、文档没动、也没有这一行的 PR，事后补齐。
+- **有变化**：**在 main 上**把这个 PR 带来的增量写进 feature doc：
 
 1. **更新 feature doc** `docs/features/F{NNN}-*.md`：
    - **Phase 状态**：本 PR 对应的 Phase 标记从 📋/🚧 → ✅
    - **AC 打勾**：本 PR 实际完成的 AC 项 `[ ]` → `[x]`（只勾代码真做了的 —— 7.5a 已核对）
    - **Timeline**：为这次 truth delta 加一行 provenance：`| {YYYY-MM-DD} | Phase {X} merged (PR #{N}) |`
    - **Status 行**：第一个 Phase 完成 `spec` → `in-progress`；最后一个 Phase 视情况推进（`done` 留给 completion 愿景守护）
+   - **首屏现状**：一两句改写现状段，带日期或版本（例「截至 11-09，#6843 已合入，等下次 runtime 加载」）；分清已合入 / 已加载 / 已验收。改动里写明 PR 号（`#N`）或合入提交号，每日文档守护靠它把这次文档改动和 PR 对上，没写会被当成漏记。测试、SHA、boot 回执放 `project-evidence/` 再链接，不往顶部堆流水账
+   - **BACKLOG**：Status 或现状摘要变了，同回合在 main 改对应行（BACKLOG 只在 main 改）
    - **不做**：不动 Dependencies/Risk/Links（kickoff/completion 的事）
-2. **Commit + push**：只有 Phase / AC / Status 至少一项真实变化才会进入本段；Timeline 是该变化的 provenance，**不能反过来把自己当成触发 commit 的理由**。本 PR 未改变 feature truth → 留痕跳过，不产出空 doc commit 刷 main（churn + index 竞态源，2026-07-15 修订）。派生 index 由生成器 / merge finalizer **机器独占维护**，不随手工 doc commit 顺手刷。message `docs(F{NNN}): sync phase progress after PR #{N} merge`（文档同步不需走 review）。
+2. **Commit + push**：只有 Phase / AC / Status / 首屏现状至少一项真实变化才会进入本段；Timeline 是该变化的 provenance，**不能反过来把自己当成触发 commit 的理由**。本 PR 未改变 feature truth → 留痕跳过，不产出空 doc commit 刷 main（churn + index 竞态源，2026-07-15 修订）。派生 index 由生成器 / merge finalizer **机器独占维护**，不随手工 doc commit 顺手刷。message `docs(F{NNN}): sync phase progress after PR #{N} merge`（文档同步不需走 review）。
 3. **复验**：再跑一次 `node scripts/check-feature-truth.mjs` —— 确认 post-merge 写入没引入新 drift（例如加了 merged Timeline 却忘把 `spec` 推进成 `in-progress`，lint 会抓）。
 
 > 落点说明：7.5b 切到持有 main 的 worktree（通常是主仓）做 doc-sync；Step 8 从目标之外调用 `worktree:finish`，不因主仓自身dirty跳过目标处置。只有主仓的单仓场景不调用工位释放；工具会拒绝main/保护目录。
@@ -637,9 +641,9 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 **检查清单**：
 - [ ] **(pre)** doc 标 ✅ 的 Phase / 打勾 AC 都有代码支撑（没撒谎）
 - [ ] **(pre)** `check-feature-truth` 绿（无 status↔timeline drift）
-- [ ] **(post, 有 truth delta 时)** Phase / AC / Status 与现实同步，Timeline 记录同一 delta
+- [ ] **(post, 有 truth delta 时)** Phase / AC / Status / 首屏现状与现实同步，Timeline 记录同一 delta，并写明 PR 号
 - [ ] **(post, 有 truth delta 时)** 复验 `check-feature-truth` 仍绿
-- [ ] **(post, 无 truth delta 时)** 已留痕跳过，未仅为 Timeline 制造 doc commit
+- [ ] **(post, 无 truth delta 时)** PR 已留 `Doc-Sync: none — 原因`，未仅为 Timeline 制造 doc commit
 
 ## Quick Reference
 
@@ -651,7 +655,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 | 选中 cloud 时通过？ | review body + inline comments + `gh pr checks {PR}`；未选 cloud 记录理由 |
 | Evidence validation 通过？(Step 6.9) | E1-E5 五项全绿（head 一致 + review 不 stale + provenance 闭合 + verdict passed + gate passed） |
 | Feature doc 说真话？(pre-merge) | doc 标 ✅/打勾 AC 有代码支撑 + `node scripts/check-feature-truth.mjs` 绿 |
-| 已合入状态记录？(post-merge) | 有 Phase/AC/Status truth delta → 同步并加 Timeline provenance；无 delta → 留痕跳过 |
+| 已合入状态记录？(post-merge) | 有 Phase/AC/Status/首屏现状变化 → 同步并加 Timeline provenance（写明 PR 号）；没有变化 → PR 留 `Doc-Sync: none — 原因` |
 | `route=targeted`（退出码 3）后能直接开 PR？ | 不能——3 = 已分类、零测试；按 `Still owed` 列表实跑受影响检查并写入 `gate_commands` 后才算 `gate_passed` |
 | 浏览器旅程要在 merge 前全跑？ | 不：核心 smoke（3 文件、执行预算 300000ms）+ 冻结 diff 选出的 `requiredUnitIds`（缺口退出码 3，不标绿）；全套只在显式 `test:browser` / Design Gate / alpha 逐 revision。改 `packages/web/src` 等共享运行时输入仍会选全部相关 journey；browser×browser 仍串行，smoke 可能等待其他 browser，跨任务等待改善看 receipt |
 
@@ -678,7 +682,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 | 把截图/录屏/.pen 直接 commit 到仓库根目录 | Step 0.5 Root Artifact Guard 先拦截；先归档再开 PR |
 | 跳过 evidence validation 直接 merge | Step 6.9 五项 E1-E5 全过才能进 Step 7；不组装 evidence = 不知道 review 是否 stale |
 | Merge **前**不核对 feature doc 说真话 | Step 7.5a：标 ✅/打勾 AC 必须有代码支撑，`check-feature-truth` 绿，再 merge |
-| Merge **后**无条件追加 Timeline | Step 7.5b：先判 Phase/AC/Status truth delta；有才同步并记 provenance，无则整段跳过 |
+| Merge **后**无条件追加 Timeline，或没变化就静默跳过 | Step 7.5b：先判 Phase/AC/Status/首屏现状有没有变化；有才同步并记 provenance（写明 PR 号），没有就在 PR 留 `Doc-Sync: none — 原因` |
 | Reviewer 等作者合入、作者又等 reviewer，沙盒无人收尾 | Reviewer 每轮 verdict 前 finish/check；作者 Step8.5 只读核本 target 的 owner/续留回执 |
 | 看见 `Gate route=targeted` 就当 gate 绿了开 PR / 合入 | targeted 退出码 3 = 分类完成、零测试；自己实跑 `Still owed` 的受影响检查并写进 evidence manifest（「targeted 终态语义」） |
 | 把「退出码 3 / ⚠️ 未验证」（或 runtime 未激活时的「❌ 退出码 3」）当普通失败去 debug 或重跑 full | 3 不是坏了，是已分类未验证；按 `Still owed` 补证据即可（「targeted 终态语义」） |

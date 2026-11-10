@@ -1,0 +1,52 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "distillation"
+  },
+  "retiredNames": ["cat_cafe_mark_generalizable", "cat_cafe_nominate_for_global", "cat_cafe_review_distillation"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "dd67783d18a4e38d80077415d5a3d2f3752fe50e",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/distillation-tools.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/tools/index.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "F152 global distillation tools were never named in L0 or prompt templates; operator sunset the surface 2026-08-29 and the local census saw zero calls.",
+      "absenceEvidence": ["cat_cafe_mark_generalizable", "cat_cafe_nominate_for_global", "cat_cafe_review_distillation"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/capability-wakeup-index.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/server-toolsets-annotations.test.ts"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval consumes these tools; the fixed-root scan verifies retirement. Server-side producer code and existing distilled data stay per the 2026-08-29 sunset decision.",
+      "absenceEvidence": ["cat_cafe_mark_generalizable", "cat_cafe_nominate_for_global", "cat_cafe_review_distillation"]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/infrastructure/telemetry/span-helpers.ts",
+        "packages/api/src/infrastructure/telemetry/tool-span-tracker.ts"
+      ]
+    }
+  }
+}

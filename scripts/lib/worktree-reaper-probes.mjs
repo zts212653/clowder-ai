@@ -55,13 +55,14 @@ export function lifecycleConfig(dir, scope, env = {}) {
     retention: 'retention',
     origin: 'origin',
     prsource: 'prSource',
+    prbindinghistory: 'prBindingHistory',
   };
   /** @type {Record<string, string>} */
   const out = {};
   for (const line of res.out.split('\n').filter(Boolean)) {
     const i = line.indexOf(' ');
     const key = names[line.slice('catcafe.lifecycle.'.length, i).toLowerCase()];
-    if (key === 'retention' || key === 'origin') {
+    if (key === 'retention' || key === 'origin' || key === 'prBindingHistory') {
       try {
         out[key] = JSON.parse(line.slice(i + 1));
       } catch {

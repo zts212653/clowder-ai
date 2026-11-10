@@ -1412,8 +1412,8 @@ skills:
   image-generation:
     category: "创作与媒体"
     description: >
-      AI 图片生成：优先原生 tool call，其他后端按 image-generation 正文选择。
-      Use when: 需要生成概念图、解释型漫画、UI 参考图、像素画素材、完整 PPT 页面、架构图或信息图。
+      AI 图片生成：优先原生 tool call；没有原生能力的猫走家里 OpenAI 平台账号的图片接口（能出 GIF 动图），其他后端按 image-generation 正文选择。
+      Use when: 需要生成概念图、解释型漫画、UI 参考图、像素画素材、动图/GIF、完整 PPT 页面、架构图或信息图。
       Not for: 已有图片的展示、硬要求可编辑/native text 的 PPT/图表、Pencil .pen 内的简单布局。
       Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
     triggers:
@@ -1424,6 +1424,8 @@ skills:
       - "AI 画图"
       - "画头像"
       - "画个"
+      - "做个动图"
+      - "生成 GIF"
     not_for:
       - "Pencil 内部设计"
       - "简单形状布局"
