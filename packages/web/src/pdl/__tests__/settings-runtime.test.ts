@@ -751,7 +751,7 @@ describe('r8 missing settings binding families', () => {
     }
   });
 
-  it('confirms a catalog installation, shows it in progress on the install button and applies only the acknowledged host push', async () => {
+  it('starts a catalog installation on the click, shows it in progress on the install button and applies only the acknowledged host push', async () => {
     const plugin = {
       pluginId: 'fixture.plugin',
       displayName: 'Fixture plugin',
@@ -787,10 +787,7 @@ describe('r8 missing settings binding families', () => {
     try {
       w.eval("go('extItem-fixture.plugin')");
       await w.__settled();
-      w.eval("A.install({k:'fixture.plugin'})");
-      expect(w.document.querySelector('.dialog').textContent).toContain('Fixture skill');
-      expect(action.mock.calls.filter(([name]) => name === 'settingsPluginInstall')).toHaveLength(0);
-      await w.eval('dialogSubmit()');
+      await w.eval("A.install({k:'fixture.plugin'})");
       expect(JSON.parse(action.mock.calls.find(([name]) => name === 'settingsPluginInstall')![1].value)).toEqual({
         source: { kind: 'catalog', catalogId: 'fixture.catalog' },
         expectedVersion: '1.2.3',
@@ -2012,7 +2009,7 @@ describe('r141 placement owners', () => {
     }
   });
 
-  it('keeps rejected permission drafts, strips backend-only group metadata and restarts an operation after acknowledgement', async () => {
+  it('keeps rejected permission drafts and strips backend-only group metadata', async () => {
     const { dom, w, port, action, errors } = await boot();
     const fields = [
       {
@@ -2069,15 +2066,6 @@ describe('r141 placement owners', () => {
         JSON.parse(action.mock.calls.find(([name]) => name === 'settingsPluginPermissionsSave')![1].value),
       ).toEqual({ expectedRevision: 7, allowedGroups: [{ externalChatId: 'group', label: 'Changed' }] });
       expect(w.eval("pcfState('plugin|permissions').draft")).toEqual({});
-      w.operationFields = fields;
-      w.eval(
-        "pcfModel('plugin',{plugin:'plugin',fields:operationFields,installed:true});pcfOpVM('plugin',operationFields[0]);pcfState('plugin').ops.login.phase='polling';pcfState('plugin').ops.login.epoch=3;globalThis.previousOp=pcfState('plugin').ops.login",
-      );
-      await w.eval("A.pcfReset({p:'plugin',f:'login'})");
-      expect(action).toHaveBeenLastCalledWith('settingsPcfReset', { id: 'plugin', field: 'login' });
-      expect(w.eval('previousOp.epoch')).toBe(4);
-      expect(w.eval("pcfState('plugin').ops.login")).toMatchObject({ cur: 'begin', phase: 'idle' });
-      expect(w.eval("pcfOpVM('plugin',operationFields[0]).actions[0].render")).toBe('button');
       expect(errors).not.toHaveBeenCalled();
     } finally {
       await w.__settled();

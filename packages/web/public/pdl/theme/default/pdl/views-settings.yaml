@@ -2464,14 +2464,6 @@ views:
     text:
       - {text: $.text}
     ok: t:control.enable
-  dlg.pluginUpdate:
-    title:
-      t: pluginPage.update.title
-      args: [$.name, $.version]
-    text:
-      t: settingsUi.plugin.updateText
-      args: [$.on]
-    ok: t:ext.needAct.update
   dlg.pluginDisconnect:
     title: t:placement.disconnect
     text:
@@ -3012,57 +3004,6 @@ views:
                         t: capabilities.notifications.importSummary
                         args: ["@found.length", "@added.length", "@skipped.length"]
                     w: auto
-  dlg.pluginInstall:
-    bare: true
-    title:
-      of: $.customLabel
-      map:
-        "true":
-          of: [0, 1, 2, 3]
-          item:
-            of: "@"
-            map: {"0": $.label, "1": " ", "2": $.name, "3": ？}
-          sep: ""
-        "false":
-          t: settingsUi.plugin.installTitle.false
-          args: [$.label, $.name]
-        _: $.customLabel
-    text:
-      - parts: [$.publisher, " · ", $.version]
-        sep: ""
-    ok:
-      of: $.customLabel
-      map:
-        "true": $.label
-        "false":
-          t: common.install
-          args: [$.label]
-        _: $.customLabel
-    blocks:
-      - type: component
-        use: bulletList
-        props:
-          title: t:capabilities.install.body
-          from: $.provides
-          item:
-            t: settingsUi.plugin.installContribution
-            args:
-              - t: settingsUi.contribution.kind
-                args: ["@kind"]
-              - parts: "@items"
-                sep: 、
-                each:
-                  text:
-                    of: "@titleMode"
-                    map:
-                      plain: "@title"
-                      entry:
-                        t: settingsUi.contribution.title.entry
-                        args: ["@title"]
-                      legacy:
-                        t: settingsUi.contribution.title.legacy
-                        args: ["@title"]
-                      _: "@titleMode"
   dlg.seg:
     title:
       of: [0, 1, 2]

@@ -1006,7 +1006,8 @@ button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身
 .vw-page-split, .page:has(> .vw-split), .page:has(> .frame.tall), .page:has(> .vw-widget[src].tall) { max-inline-size: none; margin: 0; padding: var(--sp-l) var(--g-pad) calc(30 * var(--unit)); }   /* 分栏是应用布局的两列，不是阅读页：铺满容器（列表从左边距开始，详情一直到右边距），不居中。页里是分栏就是这样（分栏组件自己的样子，视图不声明） */
 .page:is(:has(> .frame.tall), :has(> .vw-widget[src].tall)) { display: flex; flex-direction: column; min-block-size: 100%; padding-block-end: var(--sp-l); }   /* 整页的插件 / 内置空间：框占满这一层剩下的高度 */
 .page > :is(.frame.tall, .vw-widget[src].tall) { flex: 1; }
-.cover-in:has(> .vw-page-full) { display: flex; flex-direction: column; }   /* 铺满的页（page: full，比如猫猫星球）：返回那一行下面整块都是它，不留边距、不留圆角、不超出窗口 */
+.cover-in:has(> .vw-page-full) { display: flex; flex-direction: column; position: relative; }   /* 铺满的页（page: full，比如猫猫星球）：整块都是它，不留边距、不留圆角、不超出窗口 */
+.cover-in:has(> .vw-page-full) > .back-head { position: absolute; z-index: var(--z-raised); top: var(--page-gap); left: var(--page-gap); }   /* 它没有标题行：返回（图标 + 名字）浮在左上角，不另占一行 */
 .cover-in > .vw-page-full.page:has(> .vw-widget[src]) { flex: 1; min-block-size: 0; padding: 0; }
 .vw-page-full > .vw-widget[src] { border-radius: 0; }
 .page > .vw-split > .vw-split-r > * { max-inline-size: var(--g-w); }   /* 阅读宽度只限详情栏里的内容（靠左），不限分栏本身 */

@@ -615,9 +615,6 @@ function pcfOpVM(inst, f) {
     armId: sh.arm && sh.arm.id,
     revokeId: sh.revoke && sh.revoke.id,
     currentId: o.cur,
-    // a restart only when the host holds a half-way state (a sign-in in progress); a direct action is redone by clicking it
-    restartable:
-      sh.mode === 'seq' && !!f.operationState && !!sh.first && f.operationState.currentAction !== sh.first.id,
     phase: o.phase,
     last: o.last,
     seconds: Math.max(0, Math.ceil((o.until - Date.now()) / 1000)),
@@ -995,29 +992,6 @@ FORMS.pluginPermissions = async function (form) {
     return true;
   } catch (error) {
     state.saveError = error.message;
-    return false;
-  } finally {
-    render(true);
-  }
-};
-A.pcfReset = async function (d) {
-  const src = PCF_SRC[d.p],
-    state = pcfState(d.p),
-    old = state.ops[d.f];
-  try {
-    await chatPort.action('settingsPcfReset', { id: src.plugin, field: d.f });
-    old.epoch = (old.epoch || 0) + 1;
-    const fields = placementData().pluginDetails[src.plugin].configFields,
-      f = fields.find(function (field) {
-        return field.key === d.f;
-      }),
-      sh = pcfShape(f);
-    src.fields = fields;
-    delete state.ops[d.f];
-    if (sh.mode === 'seq') state.ops[d.f] = { mode: 'seq', err: '', cur: sh.first.id, phase: 'idle' };
-    return true;
-  } catch (error) {
-    old.err = error.message;
     return false;
   } finally {
     render(true);

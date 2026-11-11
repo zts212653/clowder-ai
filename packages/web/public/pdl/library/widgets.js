@@ -432,7 +432,7 @@ function pcfOpHtml(o) {
 }
 function pcfCtl(r, p) {
   const d = pcfData(p, r.key), label = r.label ? pv(r.label, r, r) : tc('pcf.fieldLabel', r.schemaKey || r.key);
-  if (r.kind === 'operation') return pcfOpHtml(r.operation) + (r.operation.restartable ? btn(tc('placement.restart'), { sm: true, act: 'pcfReset', data: argAttrs({ p: p, f: r.key }) }) : '');
+  if (r.kind === 'operation') return pcfOpHtml(r.operation);
   if (r.kind === 'select') {
     const options = r.options.map(function (x) { return { v: x.value, label: pv(x.label, x, x) }; });
     return sel(r.id, !r.record && r.value === '' ? [{ v: '', label: tc('pcf.choose') }].concat(options) : options, r.value, { change: r.record ? 'pcfRecSel' : 'pcfSel', data: d, invalid: !!r.err, label: label });

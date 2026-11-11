@@ -147,7 +147,7 @@ it('keeps page-action authority from the owner through page selection, inspectio
   expect(result.current.data.pageAction).toEqual(owner);
 });
 
-it('disconnects only the confirmed binding, saves permission CAS and resets the declared operation', async () => {
+it('disconnects only the confirmed binding and saves permission CAS', async () => {
   let revision = 4;
   const writes: { path: string; method: string; body: unknown }[] = [];
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
@@ -196,7 +196,6 @@ it('disconnects only the confirmed binding, saves permission CAS and resets the 
       value: JSON.stringify({ expectedRevision: 5, whitelistEnabled: false }),
     }),
   );
-  await act(() => result.current.action('settingsPcfReset', { id: 'plugin', field: 'login' }));
   expect(writes).toEqual([
     {
       path: '/api/plugin-manager/plugins/plugin/bindings/disconnect',
@@ -208,7 +207,6 @@ it('disconnects only the confirmed binding, saves permission CAS and resets the 
       method: 'PUT',
       body: { expectedRevision: 5, whitelistEnabled: false },
     },
-    { path: '/api/plugins/plugin/operations/login/reset', method: 'POST', body: {} },
   ]);
-  expect(result.current.data.pluginDetails.plugin.lifecycleRevision).toBe(7);
+  expect(result.current.data.pluginDetails.plugin.lifecycleRevision).toBe(6);
 });

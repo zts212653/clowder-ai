@@ -205,6 +205,8 @@ function navTitleAt(t) {
   const pane = t && t.closest && t.closest('[data-ct^="pane"]'), ph = pane && pane.querySelector('h1, h2'); if (ph) return navText(ph);
   const ly = t && t.closest && t.closest('[data-layer]'), ttl = ly && ly.querySelector('[data-title]');
   if (ttl) return navText(ttl);
+  const ct = t && t.closest && t.closest('[data-c]'), top = ct && navTop(ct.dataset.c), e = top && pdlEntry(top.f);   /* 所在容器没有标题元素：用打开它当前这一层的入口的名字（设置菜单 = 「设置」） */
+  if (e && e.title) return e.title;
   return navTitleNow();
 }
 /* 焦点那一层现在的名字：它自己的标题元素，或者功能模块登记的名字（对话页 = 对话名），或者路由的标题。

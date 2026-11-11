@@ -311,12 +311,6 @@ export function useSettingsBindings() {
           'PUT',
         );
         await readPlugin(args.id);
-      } else if (name === 'settingsPcfReset') {
-        await write(
-          `/api/plugins/${encodeURIComponent(args.id)}/operations/${encodeURIComponent(args.field)}/reset`,
-          {},
-        );
-        await readPlugin(args.id);
       } else if (name === 'settingsEnvRead') {
         data.current = { ...data.current, env: await request<EnvironmentSummary>('/api/config/env-summary') };
       } else if (name === 'settingsSystemRead') {

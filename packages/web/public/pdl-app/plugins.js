@@ -452,27 +452,22 @@ function bindPluginSpaces() {
     };
     return dialog(dd);
   };
+  // Update and install start on the click (no confirmation)
   A.capUpdate = function (d) {
     const plugin = pluginRows().find(function (p) {
       return p.pluginId === d.k;
     });
-    return dialog({
-      kind: 'pluginUpdate',
-      args: { name: plugin.displayName, version: plugin.availableVersion, on: plugin.intent === 'enabled' },
-      on: function () {
-        pluginOp(
-          d.k,
-          'update',
-          api
-            .post(
-              '/api/plugin-manager/plugins/' + encodeURIComponent(d.k) + '/update',
-              {},
-              { expectedVersion: plugin.availableVersion, expectedRevision: plugin.lifecycleRevision },
-            )
-            .then(read),
-        );
-      },
-    });
+    pluginOp(
+      d.k,
+      'update',
+      api
+        .post(
+          '/api/plugin-manager/plugins/' + encodeURIComponent(d.k) + '/update',
+          {},
+          { expectedVersion: plugin.availableVersion, expectedRevision: plugin.lifecycleRevision },
+        )
+        .then(read),
+    );
   };
   A.install = function (d) {
     const plugin = pluginRows().find(function (p) {
@@ -487,27 +482,13 @@ function bindPluginSpaces() {
             expectedVersion: plugin.availableVersion,
             expectedDigest: plugin.packageDigest,
           };
-    return dialog({
-      kind: 'pluginInstall',
-      args: {
-        name: plugin.displayName,
-        publisher: plugin.publisher,
-        version: plugin.availableVersion,
-        customLabel: false,
-        provides: plugin.capabilitySummary.map(function (c) {
-          return { kind: c.kind, items: [{ title: c.name, titleMode: 'plain' }] };
-        }),
-      },
-      on: function () {
-        pluginOp(
-          d.k,
-          'install',
-          chatPort.action('settingsPluginInstall', { value: JSON.stringify(input) }).then(function () {
-            receivePlugins(chatDataSnapshot.project.settings.plugins.plugins);
-          }),
-        );
-      },
-    });
+    pluginOp(
+      d.k,
+      'install',
+      chatPort.action('settingsPluginInstall', { value: JSON.stringify(input) }).then(function () {
+        receivePlugins(chatDataSnapshot.project.settings.plugins.plugins);
+      }),
+    );
   };
   A.installFile = function () {
     let input = null;
