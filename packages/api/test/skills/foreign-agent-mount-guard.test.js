@@ -315,3 +315,48 @@ it('PUT with a junction target also skips the separate plugin reconciliation loo
   assert.equal((await lstat(join(project, '.test-skills', 'probe-skill'))).isSymbolicLink(), true);
   assert.deepEqual(await readdir(join(home, '.relay')), []);
 });
+
+[
+  { method: 'POST', url: '/api/skills/sync', routes: skillsWriteRoutes },
+  { method: 'PUT', url: '/api/mount-rules', routes: mountRulesRoutes },
+  { method: 'PUT', url: '/api/mount-rules', routes: mountRulesRoutes, scope: 'default' },
+].forEach(({ method, url, routes, scope }) => {
+  it(`${method} ${url} ${scope ?? 'project'} reports a blocked plugin-only skill and mounts legal targets`, async (t) => {
+    const { home, project, source, warnings } = await fixture(t);
+    await mkdir(join(home, '.relay'));
+    await symlink(join(home, '.relay'), join(project, 'bridge'), LINK_TYPE);
+    const rules = rulesFor({ alias: 'blocked', path: 'bridge/skills' }, { alias: 'safe', path: '.test-skills' });
+    await writeCapabilitiesConfig(project, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'probe-skill',
+          type: 'skill',
+          source: 'plugin',
+          enabled: true,
+          pluginId: 'fixture-plugin',
+          skillsSource: source,
+          mountPaths: ['blocked', 'safe'],
+        },
+      ],
+    });
+    await writeMountRules(project, rules);
+    const app = await appFor(t, routes, {
+      mainProjectRoot: project,
+      ...(method === 'POST' ? { skillsSourceDir: join(source, 'refs') } : {}),
+    });
+    const response = await app.inject({
+      method,
+      url,
+      headers: WRITE_HEADERS,
+      payload: method === 'PUT' ? { rules, ...(scope ? { scope } : {}) } : {},
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(response.json().skipped?.includes('probe-skill'), response.body);
+    assert.equal((await lstat(join(project, '.test-skills', 'probe-skill'))).isSymbolicLink(), true);
+    assert.deepEqual(await readdir(join(home, '.relay')), []);
+    assert.ok(
+      warnings.mock.calls.some(({ arguments: args }) => args.some((arg) => String(arg).includes('probe-skill'))),
+    );
+  });
+});

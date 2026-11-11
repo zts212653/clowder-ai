@@ -123,7 +123,14 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
             const linkPath = join(dir, ps.skillName);
             const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
             if (shouldMount && status === 'missing') {
-              if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already reported this target's conflicts.
+              const privateRoot = await resolveForeignAgentMountRoot(dir);
+              if (privateRoot) {
+                result.conflicts.push({ skillName: ps.skillName, mountPointId: target.id, path: linkPath });
+                console.warn(
+                  `[skills/sync] Skipping plugin skill ${ps.skillName} in foreign agent directory ${privateRoot}`,
+                );
+                continue;
+              }
               // Guard: reject symlinked provider dirs to prevent writing outside project
               try {
                 const dirStat = await lstat(dir);

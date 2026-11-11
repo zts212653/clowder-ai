@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
@@ -46,4 +47,43 @@ it('resolves an aliased home and reconstructs absent private-root descendants', 
   );
   assert.equal(await resolveForeignAgentMountRoot(join(project, 'new', 'skills'), home), null);
   assert.equal(await resolveForeignAgentMountRoot(join(project, '.cac', 'skills'), home), null);
+});
+
+['file', 'file-link'].forEach((kind) => {
+  it(`allows unrelated mounts when home/.config is a ${kind}`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'foreign-agent-config-file-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const home = join(root, 'home');
+    await mkdir(home);
+    const config = join(home, '.config');
+    if (kind === 'file') await writeFile(config, 'existing user file');
+    else {
+      const target = join(root, 'config-file');
+      await writeFile(target, 'existing user file');
+      await symlink(target, config, 'file');
+    }
+    assert.equal(await resolveForeignAgentMountRoot(join(root, 'project', 'skills'), home), null);
+    assert.equal(await resolveForeignAgentMountRoot(join(home, '.cac', 'skills'), home), join(home, '.cac'));
+  });
+});
+
+it('treats ENOTDIR from private-root resolution as absent while preserving permission errors', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'foreign-agent-root-error-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const privateRoot = join(root, '.config', 'opencode');
+  const nativeRealpath = fs.realpath;
+  let code = 'ENOTDIR';
+  // Windows reports ENOENT for this layout; inject the POSIX error at the filesystem boundary.
+  t.mock.method(fs, 'realpath', (path) => {
+    if (path === privateRoot) return Promise.reject(Object.assign(new Error(code), { code }));
+    return nativeRealpath(path);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  assert.equal(await resolveForeignAgentMountRoot(join(root, 'project', 'skills'), root), null);
+  code = 'EACCES';
+  await assert.rejects(resolveForeignAgentMountRoot(join(root, 'project', 'skills'), root), { code: 'EACCES' });
 });

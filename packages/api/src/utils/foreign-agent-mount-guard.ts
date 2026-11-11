@@ -14,7 +14,7 @@ export function isForeignAgentPrivatePath(value: string): boolean {
 /** Resolve an absent private root through its nearest existing ancestor. Other I/O errors propagate. */
 async function canonicalPath(path: string): Promise<string> {
   return realpath(path).catch(async (error: NodeJS.ErrnoException) => {
-    if (error.code !== 'ENOENT' || dirname(path) === path) throw error;
+    if ((error.code !== 'ENOENT' && error.code !== 'ENOTDIR') || dirname(path) === path) throw error;
     return join(await canonicalPath(dirname(path)), basename(path));
   });
 }
