@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { initialState } from '../../hub-cat-editor.model';
-import { dshConnectionKey, runtimeDefaults } from '../../settings/members/member-runtime-draft';
+import { runtimeDefaults } from '../../settings/members/member-runtime-draft';
 import { nativeRuntimeSelectable, recommendNativePartners } from '../native-onboarding';
 
 it('DSH one-click creation prepares automatically without a model-request gate', () => {
@@ -15,13 +15,7 @@ it('DSH one-click creation prepares automatically without a model-request gate',
   };
   const form = { ...initialState(), ...runtimeDefaults(runtime) };
   expect(nativeRuntimeSelectable(runtime, form)).toBe(true);
-  const verified = {
-    ...runtime,
-    connectionVerification: {
-      key: dshConnectionKey(form),
-      checkedAt: Date.now(),
-    },
-  };
+  const verified = runtime;
   expect(nativeRuntimeSelectable(verified, form)).toBe(true);
   expect(nativeRuntimeSelectable(verified, { ...form, defaultModel: '["custom","another-model"]' })).toBe(true);
   expect(nativeRuntimeSelectable(verified, { ...form, cliEffort: 'high' })).toBe(true);
@@ -39,4 +33,6 @@ it('does not recommend saved manual DSH entries as new automatic Desktop members
     acp: { command: 'dsh', startupArgs: ['--profile', 'acp'] },
   };
   expect(recommendNativePartners([manual], [], [], 'journey')).toEqual([]);
+  expect(nativeRuntimeSelectable(manual)).toBe(true);
+  expect(nativeRuntimeSelectable({ ...manual, discoveryStatus: 'acp_profile_invalid' })).toBe(false);
 });

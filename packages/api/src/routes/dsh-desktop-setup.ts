@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { stringify } from 'yaml';
@@ -99,6 +99,7 @@ export async function prepareDshDesktopSetup(
   revision: string,
   provider: string,
   model: string,
+  existingHome?: string,
 ) {
   const current = await readDshDesktopSetup(source);
   if (current.state.revision !== revision) throw Error('dsh_setup_changed');
@@ -120,9 +121,18 @@ export async function prepareDshDesktopSetup(
       { provider, model },
     );
   const id = randomUUID();
-  const home = join(current.runtime.directory, id);
-  mkdirSync(home, { mode: 0o700 });
-  const path = join(home, 'member.patch.yml');
+  const home = existingHome ?? join(current.runtime.directory, id);
+  if (existingHome) {
+    // Only reuse the saved member's direct managed directory, never a native HOME or a link.
+    if (
+      resolve(dirname(home)) !== resolve(current.runtime.directory) ||
+      !z.string().uuid().safeParse(basename(home)).success ||
+      lstatSync(home).isSymbolicLink() ||
+      !lstatSync(home).isDirectory()
+    )
+      throw Error('dsh_setup_storage_invalid');
+  } else mkdirSync(home, { mode: 0o700 });
+  const path = join(home, `member-${id}.patch.yml`);
   const patch = stringify([
     { id: 'credentials', disabled: true },
     {

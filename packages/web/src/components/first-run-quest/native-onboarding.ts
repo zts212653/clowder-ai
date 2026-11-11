@@ -1,12 +1,7 @@
 import { isDshLauncher } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { autoSlug, type HubCatEditorFormState, initialState } from '../hub-cat-editor.model';
-import {
-  dshConnectionKey,
-  matchesRuntime,
-  type RuntimeChoice,
-  runtimeDefaults,
-} from '../settings/members/member-runtime-draft';
+import { matchesRuntime, type RuntimeChoice, runtimeDefaults } from '../settings/members/member-runtime-draft';
 import { withLegacyNativeIdentityRepair } from './native-identity-repair';
 import { usesDetectedRuntimeConfiguration } from './native-partner-config';
 import { nativePartnerIdentity } from './native-partner-identity';
@@ -45,12 +40,7 @@ export const newNativeRequestKey = () =>
 export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEditorFormState): boolean {
   if (!runtime.installed || (runtime.clientId === 'acp' && !runtime.acp)) return false;
   if (runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs)) {
-    if (runtime.dshDesktop) return true; // Desktop is prepared automatically before writing.
-    const current = form ?? { ...initialState(), ...runtimeDefaults(runtime) };
-    return (
-      usesDetectedRuntimeConfiguration(current, runtime) &&
-      runtime.connectionVerification?.key === dshConnectionKey(current)
-    );
+    return runtime.discoveryStatus !== 'acp_profile_invalid';
   }
   if (form && !usesDetectedRuntimeConfiguration(form, runtime)) return true;
   if (['openai', 'anthropic'].includes(runtime.clientId) && runtime.readiness) {

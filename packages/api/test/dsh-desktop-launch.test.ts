@@ -7,6 +7,7 @@ import { resolveDshSetupLaunch } from '../src/routes/dsh-setup-launch.js';
 import { discoverDshRuntimes } from '../src/routes/native-dsh-discovery.js';
 import { invalidateCliCommand } from '../src/utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../src/utils/cli-spawn-win.js';
+import { resolveDshDesktopLaunch } from '../src/utils/dsh-desktop-launch.js';
 
 test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-launch-'));
@@ -74,6 +75,14 @@ test('the installed Desktop launcher preserves its Electron CLI and environment 
   writeFileSync(command, script.replace('setlocal DisableDelayedExpansion', 'set DSH_HOME=C:\\other-home'));
   assert.equal(resolveWindowsSpawnPlan(command, args, { refresh: true }).env, undefined);
   writeFileSync(command, script);
+  for (const desktopVersion of ['0.2.2', '0.2.3']) {
+    writeFileSync(manifest, JSON.stringify({ desktopVersion }));
+    assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));
+  }
   writeFileSync(manifest, JSON.stringify({ desktopVersion: 'unreviewed' }));
-  assert.equal(resolveWindowsSpawnPlan(command, args, { refresh: true }).env, undefined);
+  assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));
+  writeFileSync(command, script.replace('@echo off', '  @ECHO   off  \r\nREM current Desktop launcher'));
+  assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));
+  writeFileSync(command, script.replace('..\\..\\..\\..\\DeepSeek Harness.exe', '..\\..\\..\\..\\Other.exe'));
+  assert.equal(resolveDshDesktopLaunch(command, args), null);
 });

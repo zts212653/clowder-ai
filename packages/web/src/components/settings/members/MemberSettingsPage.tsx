@@ -231,7 +231,6 @@ export function MemberSettingsPage({
                   <MemberRuntimeFields
                     form={form}
                     preparedRuntime={draft.preparedRuntime}
-                    onPreparedRuntime={editor.setPreparedRuntime}
                     accounts={accounts}
                     patch={editor.patch}
                     onToolChange={editor.switchRuntime}

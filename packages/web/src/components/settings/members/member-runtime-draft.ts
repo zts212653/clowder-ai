@@ -18,29 +18,12 @@ export interface RuntimeChoice {
   dshDesktop?: boolean;
   onboardingEligible?: boolean;
   env?: Record<string, string>;
-  connectionVerification?: { key: string; checkedAt: number };
   models: string[];
   configuredModel?: string;
   modelSource?: 'tool_config' | 'tool_recent';
   defaultsStatus?: 'configured_only' | 'unconfigured' | 'session_only';
   configuredEffort?: string;
   acp?: { agentProvider?: string; command: string; startupArgs: string[]; transport?: 'stdio' | 'httpstream' };
-}
-
-export function dshConnectionKey(
-  form: Pick<
-    HubCatEditorFormState,
-    'acpCommand' | 'acpStartupArgs' | 'acpTransport' | 'defaultModel' | 'cliEffort' | 'env'
-  >,
-) {
-  return JSON.stringify([
-    form.acpCommand,
-    splitCommandArgs(form.acpStartupArgs),
-    form.acpTransport,
-    form.defaultModel,
-    form.cliEffort,
-    Object.entries(form.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
-  ]);
 }
 
 const runtimeFields = [

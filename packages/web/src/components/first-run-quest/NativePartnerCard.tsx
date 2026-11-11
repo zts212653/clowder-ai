@@ -114,11 +114,6 @@ export function NativePartnerCard({
                 ? '安装 DSH 后重新检测；首次连接时由 DSH 准备 ACP。'
                 : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
       </p>
-      {runtime.dshDesktop && !partner.existingId && !created && (
-        <p className="mt-2 text-sm text-cafe-secondary">
-          添加后自动检查连接，费用取决于模型和工具定义规模。检查失败保留成员，不自动重试。
-        </p>
-      )}
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.identityConflict && !created && (
         <p role="status" className="mt-3 text-sm text-cafe-secondary">
@@ -195,7 +190,6 @@ export function NativePartnerCard({
           <MemberRuntimeFields
             nativeSetup
             preparedRuntime={runtime}
-            onPreparedRuntime={(next) => patch({ runtime: next })}
             form={form}
             accounts={[]}
             patch={(change) => patch({ form: { ...form, ...change } })}

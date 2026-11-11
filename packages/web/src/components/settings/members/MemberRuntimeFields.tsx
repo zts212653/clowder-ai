@@ -26,6 +26,7 @@ import { MemberModelSummary } from './MemberModelSummary';
 import { matchesRuntime, type RuntimeChoice, type RuntimeDrafts, runtimeDefaults } from './member-runtime-draft';
 import { memberRuntimeOptions, memberRuntimeTools } from './member-runtime-tools';
 import { usesDefaultNativeIdentity } from './native-login-state';
+import { usesDshDesktopSetup } from './prepare-native-member';
 import { useRuntimeCatalog } from './useRuntimeCatalog';
 export type MemberText = (zh: string, en: string) => string;
 export function MemberRuntimeFields({
@@ -53,7 +54,6 @@ export function MemberRuntimeFields({
   /** First-run keeps the detected tool and its existing connection, exposing only model preferences. */
   nativeSetup?: boolean;
   preparedRuntime?: RuntimeChoice;
-  onPreparedRuntime?: (runtime: RuntimeChoice) => void;
 }) {
   const runtimes = useMemberModelCatalogs((state) => state.runtimes);
   const [error, setError] = useState(false),
@@ -129,9 +129,7 @@ export function MemberRuntimeFields({
   };
   const dsh = isDshMember(displayMember, runtimeEvidence);
   const automaticDsh =
-    native &&
-    !form.accountRef &&
-    dsh &&
+    usesDshDesktopSetup(form, editing, runtimes) &&
     runtimes.some((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
   const english = t('zh', 'en') === 'en';
   const availableAccounts = filterAccounts(form.clientId, accounts),
