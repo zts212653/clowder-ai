@@ -240,7 +240,26 @@ test('malformed native quota observations do not break the account directory', a
 test('a native observation write failure is not reported as persisted success', async () => {
   mkdirSync(join(root, '.cat-cafe/native-codex-quota.json'));
   const result = await query();
-  assert.notEqual(result.statusCode, 200);
+  assert.equal(result.statusCode, 500);
+  assert.equal(result.json().error, '无法读取账号，请核对账号配置');
   assert.equal(readAccountStoreSnapshot(root).resolve('codex').account, undefined);
   assert.equal((await nativeRow()).quota, undefined);
+});
+
+test('a signed-out native observation disappears after the CLI signs in', async () => {
+  unlinkSync(join(home, 'auth.json'));
+  assert.equal((await query()).json().quota.failure.kind, 'signin_required');
+  assert.equal((await nativeRow()).quota.failure.kind, 'signin_required');
+  auth();
+  assert.equal((await nativeRow()).quota, undefined);
+});
+
+test('persisted legacy quota without an owner keeps its existing projection', async () => {
+  const quota = (await query()).json().quota;
+  delete quota.owner;
+  writeFileSync(
+    join(root, '.cat-cafe/accounts.json'),
+    JSON.stringify({ codex: { authType: 'oauth', clientId: 'openai', quota } }),
+  );
+  assert.deepEqual((await nativeRow()).quota, quota);
 });

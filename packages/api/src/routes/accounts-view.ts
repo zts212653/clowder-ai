@@ -30,7 +30,7 @@ export function accountToView(
   const identity = account.codex?.identity ?? nativeView.nativeLogin?.identity;
   const ready = account.codex ? codexStatus === 'ready' : nativeView.codexLoginStatus === 'ready';
   const quota =
-    (account.codex || nativeView.nativeLogin) &&
+    (account.codex || nativeDefault) &&
     (observed?.status === 'ok' || observed?.lastSuccess) &&
     (!ready || !accountQuotaOwnerMatches(observed, id, identity))
       ? {
