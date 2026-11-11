@@ -42,6 +42,7 @@ import type {
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
+  type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpStreamIdleError,
@@ -68,6 +69,7 @@ import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
 import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
+import { DshTurnInput } from './dsh/dsh-turn-input.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import {
@@ -154,6 +156,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
+  dshTurnInput?: boolean;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -221,6 +225,8 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly dshTurnInput: boolean;
+  private bridgeSteerAvailable = false;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -262,6 +268,7 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
@@ -357,8 +364,8 @@ export class AcpAgentService implements AgentService {
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: 'unsupported',
-      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: this.bridgeSteerAvailable ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.bridgeSteerAvailable ? 'supported' : 'unsupported',
     };
   }
 
@@ -661,6 +668,7 @@ export class AcpAgentService implements AgentService {
     let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
+    let dshTurn: DshTurnInput | undefined;
     let agyActive = true;
     let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
@@ -1102,6 +1110,13 @@ export class AcpAgentService implements AgentService {
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       let hasResponseOutput = false;
+      if (this.dshTurnInput) {
+        const dshClient = lease.client as unknown as AcpClient;
+        const capability = await dshClient.probeTurnBridge();
+        this.bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (this.bridgeSteerAvailable && options?.activeRunDispatch)
+          dshTurn = new DshTurnInput(dshClient, sessionId, options);
+      }
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -1468,6 +1483,7 @@ export class AcpAgentService implements AgentService {
       if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
+      await dshTurn?.dispose();
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
