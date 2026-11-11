@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import { DshTurnInput } from '../../dist/domains/cats/services/agents/providers/acp/dsh/dsh-turn-input.js';
+import { AcpSessionProvider } from '../../dist/domains/cats/services/agents/session-contract/acp-session-provider.js';
 import { deferred } from '../agent-session-contract/fake-session-provider.js';
 import { appendRecoveryFixture } from '../helpers/append-recovery-fixture.js';
 
@@ -142,71 +143,37 @@ test('a persistent completion-store failure is reported by disposal', async () =
   await assert.rejects(f.turn.dispose(), (error) => error === failure);
 });
 
-test('reporting completion custody failure still releases the ACP lease', async () => {
-  const listeners = new Set();
-  let dispatcher;
-  let released = 0;
-  const failure = Error('completion store unavailable');
-  const notify = (type, fields = {}) => {
-    for (const listener of listeners) listener({ sessionId: 'session', nativeTurnId: 1, type, ...fields });
-  };
-  const client = {
-    recentCapacitySignal: null,
-    onCapacity() {},
-    offCapacity() {},
-    clearRecentCapacitySignal() {},
-    cancelSession() {},
-    async newSession() {
-      return { sessionId: 'session', configOptions: [] };
-    },
-    async probeTurnBridge() {
-      return { protocol: 1, steer: true, nativeTurns: true };
-    },
-    onTurnBridgeEvent(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    async steerTurn() {
-      return { accepted: true, nativeTurnId: 1 };
-    },
-    async *promptStream(sessionId) {
-      notify('turn_started');
-      yield { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ready' } } };
-      notify('input_read', { deliveryId: 'delivery' });
-      notify('turn_ended', { reason: 'completed' });
-    },
-  };
-  const service = new AcpAgentService({
-    catId: 'dsh',
-    providerName: 'dsh',
-    modelName: 'fixture',
-    projectRoot: process.cwd(),
-    dshTurnInput: true,
-    mcpSupport: false,
-    poolKey: { projectPath: process.cwd(), providerProfile: 'completion-failure' },
-    pool: {
-      async acquire() {
-        return {
-          client,
-          release() {
-            released++;
-          },
-        };
+for (const ending of ['completed', 'empty', 'error']) {
+  test(`the session adapter reports completion custody failure after ${ending} and releases the lease`, async () => {
+    const listeners = new Set();
+    let dispatcher;
+    let released = 0;
+    const failure = Error('completion store unavailable');
+    const notify = (type, fields = {}) => {
+      for (const listener of listeners) listener({ sessionId: 'session', nativeTurnId: 1, type, ...fields });
+    };
+    const client = {
+      recentCapacitySignal: null,
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+      cancelSession() {},
+      async newSession() {
+        return { sessionId: 'session', configOptions: [] };
       },
-    },
-  });
-  await assert.rejects(
-    async () => {
-      for await (const message of service.invoke('fixture', {
-        activeRunDispatch: {
-          invocationId: 'invocation',
-          register(value) {
-            dispatcher = value;
-            return () => {};
-          },
-        },
-      })) {
-        if (message.type !== 'text') continue;
+      async probeTurnBridge() {
+        return { protocol: 1, steer: true, nativeTurns: true };
+      },
+      onTurnBridgeEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async steerTurn() {
+        return { accepted: true, nativeTurnId: 1 };
+      },
+      hasPromptFinalResponse: () => true,
+      async *promptStream(sessionId) {
+        notify('turn_started');
         await dispatcher.dispatch(
           {
             text: 'new input',
@@ -218,9 +185,66 @@ test('reporting completion custody failure still releases the ACP lease', async 
           },
           { expectedInvocationId: 'invocation', force: false },
         );
-      }
-    },
-    (error) => error === failure,
-  );
-  assert.equal(released, 1, 'receipt-store failure cannot leak the provider lease');
-});
+        notify('input_read', { deliveryId: 'delivery' });
+        notify('turn_ended', { reason: 'completed' });
+        if (ending === 'error') throw Error('provider failure');
+        if (ending === 'completed')
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ready' } },
+          };
+      },
+    };
+    const service = new AcpAgentService({
+      catId: 'dsh',
+      providerName: 'dsh',
+      modelName: 'fixture',
+      projectRoot: process.cwd(),
+      dshTurnInput: true,
+      mcpSupport: false,
+      poolKey: { projectPath: process.cwd(), providerProfile: 'completion-failure' },
+      pool: {
+        async acquire() {
+          return {
+            client,
+            release() {
+              released++;
+            },
+          };
+        },
+      },
+    });
+    const provider = new AcpSessionProvider({ catId: 'dsh', service });
+    await provider.openSession({ sessionId: 'logical' });
+    const input = {
+      prompt: { kind: 'frozen', text: 'fixture' },
+      invocation: { invocationId: 'invocation' },
+      hostOptions: {
+        activeRunDispatch: {
+          invocationId: 'invocation',
+          register(value) {
+            dispatcher = value;
+            return () => {};
+          },
+        },
+      },
+    };
+    const signal = new AbortController().signal;
+    const turn = await provider.startTurn('logical', input, signal);
+    assert.equal(turn.ok, true);
+    const events = [];
+    await assert.rejects(
+      async () => {
+        for await (const event of turn.events) events.push(event);
+      },
+      (error) => error === failure,
+    );
+    assert.equal(released, 1, 'receipt-store failure cannot leak the provider lease');
+    assert.equal(
+      events.some((event) => event.type === 'done'),
+      false,
+      'failed cleanup cannot expose a settled terminal',
+    );
+    assert.deepEqual(await provider.startTurn('logical', input, signal), { ok: false, code: 'busy' });
+  });
+}

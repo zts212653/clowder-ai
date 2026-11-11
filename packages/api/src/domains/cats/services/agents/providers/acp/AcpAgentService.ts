@@ -1582,6 +1582,7 @@ export class AcpAgentService implements AgentService {
           }
           throw releaseError;
         }
+        if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
         if (deferredTerminal) {
           yield {
             type: 'done',
@@ -1592,7 +1593,6 @@ export class AcpAgentService implements AgentService {
           };
         }
       }
-      if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
     }
   }
 }
