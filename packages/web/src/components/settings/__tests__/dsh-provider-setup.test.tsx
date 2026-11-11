@@ -66,7 +66,10 @@ it('ignores an old installation response after changing sources', async () => {
 });
 it('keeps a saved model visible while loading and after a failed free read', async () => {
   const reading = Promise.withResolvers<Response>();
-  vi.stubGlobal('fetch', vi.fn(() => reading.promise));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => reading.promise),
+  );
   await act(async () =>
     root.render(
       <DshProviderSetup runtimeId="dsh" selectedModel='["custom","chosen"]' onSelection={vi.fn()} t={(zh) => zh} />,
