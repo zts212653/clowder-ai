@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/memory-message-proposals.test.ts -t 'queue continue control|entity conflict only|exact owner rejection|entire shell'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/memory-message-proposals.test.ts (5 tests | 4 skipped) 55ms
+ ✓ src/pdl/__tests__/runtime.test.ts (77 tests | 74 skipped) 1054ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  526ms
+   ✓ labels the declared queue continue control from copy and sends the actual entry id and selected mode  328ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed | 78 skipped (82)
+   Start at  12:42:56
+   Duration  3.53s (transform 2.22s, setup 54ms, import 3.27s, tests 1.11s, environment 454ms)
+
+
+Exit code: 0

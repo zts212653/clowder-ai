@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { guessAndRenderCardType } from '@/pdl/message-cards';
 import { useChatStore } from '../stores/chatStore';
 import { apiSessionIdentity } from '../utils/api-session-identity';
 import { threadArtifactsEntry } from './thread-artifacts-store';
@@ -34,11 +35,14 @@ export function useWorksSourceRefresh(
       JSON.stringify(
         messages
           .flatMap((message) => {
-            const blocks = message.extra?.rich?.blocks?.filter(
-              (block) =>
-                ['media_gallery', 'file', 'diff', 'audio', 'html_widget'].includes(block.kind) ||
-                (block.kind === 'card' && block.meta?.kind === 'work_reference'),
-            );
+            const works = guessAndRenderCardType(message, threadId ?? '').flatMap((card) =>
+                card.type === 'work' ? [card.blockId] : [],
+              ),
+              blocks = message.extra?.rich?.blocks?.filter(
+                (block) =>
+                  ['media_gallery', 'file', 'diff', 'audio', 'html_widget'].includes(block.kind) ||
+                  works.includes(block.id),
+              );
             const content = message.contentBlocks?.filter((block) => block.type === 'image' || block.type === 'file');
             return blocks?.length || content?.length ? [[message.id, blocks, content]] : [];
           })
@@ -72,7 +76,7 @@ export function useWorksSourceRefresh(
   }, [enabled, threadId, refetch, scopeToThread]);
 }
 
-export function useThreadArtifacts(threadId: string | undefined, view?: 'works', active = true) {
+export function useThreadArtifacts(threadId: string | undefined, view?: 'works', active: boolean | number = true) {
   const scopeThreadId = view === 'works' && threadId === 'default' ? undefined : threadId;
   const identity = useSyncExternalStore(
     apiSessionIdentity.subscribe,
@@ -81,11 +85,11 @@ export function useThreadArtifacts(threadId: string | undefined, view?: 'works',
   );
   const key = JSON.stringify([identity.ownerUserId, identity.generation, scopeThreadId, view]);
   const entry = useMemo(() => threadArtifactsEntry(key, scopeThreadId, view), [key, scopeThreadId, view]);
-  const subscribe = useCallback((listener: () => void) => entry.subscribe(listener, active), [entry, active]);
+  const subscribe = useCallback((listener: () => void) => entry.subscribe(listener, Boolean(active)), [entry, active]);
   const snapshot = useSyncExternalStore(subscribe, entry.getSnapshot, entry.getSnapshot);
   const refetch = useCallback(() => {
     if (active) entry.refetch();
   }, [active, entry]);
-  useWorksSourceRefresh(scopeThreadId, active && view === 'works', refetch);
-  return { ...snapshot, loading: active && snapshot.loading, refetch };
+  useWorksSourceRefresh(scopeThreadId, Boolean(active) && view === 'works', refetch);
+  return { ...snapshot, loading: Boolean(active) && snapshot.loading, refetch };
 }

@@ -1,0 +1,386 @@
+$ python3 /tmp/pdl-r3b14-biome.py
+
+$ pnpm exec biome check packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/hooks/useWorkspace.ts packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/project-data-host.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/types.ts packages/web/src/pdl/useWorkbenchBindings.ts packages/web/src/pdl/useTrashBindings.ts
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:104:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    102 │       return response(task);
+    103 │     }
+  > 104 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    105 │   });
+    106 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    102 102 │         return response(task);
+    103 103 │       }
+    104     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        104 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    105 105 │     });
+    106 106 │   });
+
+
+packages/web/src/pdl/chat-models.ts:182:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    180 │                 ? [b.text]
+    181 │                 : b.type === 'code'
+  > 182 │                   ? ['```' + (b.language ?? '') + '\n' + b.code + '\n```']
+        │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    183 │                   : [],
+    184 │             )
+
+  i Unsafe fix: Use a template literal.
+
+    180 180 │                   ? [b.text]
+    181 181 │                   : b.type === 'code'
+    182     │ - ··················?·['```'·+·(b.language·??·'')·+·'\n'·+·b.code·+·'\n```']
+        182 │ + ··················?·[`\`\`\`${b.language·??·''}\n${b.code}\n\`\`\``]
+    183 183 │                     : [],
+    184 184 │               )
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:130:18 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    128 │   useLayoutEffect(() => {
+    129 │     changed({
+  > 130 │       models: () => {
+        │                  ^^^
+    131 │         const values = readBindingModels(modelReaders, window.clowderChat, readFailures.current);
+    132 │         const { workbench: bench, voice: audio, document: docs } = values;
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:146:45 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    144 │                 filePage: {
+    145 │                   ...bench.filePage,
+  > 146 │                   documentReview: current ? docs!.documentReview : null,
+        │                                             ^^^^^
+    147 │                   annotations: current ? docs!.documentAnnotations : [],
+    148 │                 },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    144 144 │                   filePage: {
+    145 145 │                     ...bench.filePage,
+    146     │ - ··················documentReview:·current·?·docs!.documentReview·:·null,
+        146 │ + ··················documentReview:·current·?·docs?.documentReview·:·null,
+    147 147 │                     annotations: current ? docs!.documentAnnotations : [],
+    148 148 │                   },
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:147:42 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    145 │                   ...bench.filePage,
+    146 │                   documentReview: current ? docs!.documentReview : null,
+  > 147 │                   annotations: current ? docs!.documentAnnotations : [],
+        │                                          ^^^^^
+    148 │                 },
+    149 │               }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    145 145 │                     ...bench.filePage,
+    146 146 │                     documentReview: current ? docs!.documentReview : null,
+    147     │ - ··················annotations:·current·?·docs!.documentAnnotations·:·[],
+        147 │ + ··················annotations:·current·?·docs?.documentAnnotations·:·[],
+    148 148 │                   },
+    149 149 │                 }
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:153:43 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 26 detected (max: 15).
+
+    151 │         };
+    152 │       },
+  > 153 │       action: async (name, args, element) => {
+        │                                           ^^^
+    154 │         for (const [owner, binding] of Object.entries(bindings)) {
+    155 │           if (!('action' in binding)) continue;
+
+  i Please refactor this function to reduce its complexity score from 26 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:63:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    61 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    62 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 63 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    64 │     const path = String(raw),
+    65 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:188:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    186 │     marks: [],
+    187 │   });
+  > 188 │   expect(new URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        │                  ^^^^^
+    189 │ });
+    190 │ it('projects actual Office pageCount, modifiedAt and size into the generic no-preview metadata', async () => {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    186 186 │       marks: [],
+    187 187 │     });
+    188     │ - ··expect(new·URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        188 │ + ··expect(new·URL(page?.actions.source).searchParams.get('path')).toBe(path);
+    189 189 │   });
+    190 190 │   it('projects actual Office pageCount, modifiedAt and size into the generic no-preview metadata', async () => {
+
+
+packages/web/src/pdl/chat-models.ts:56:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━
+
+  ! Excessive complexity of 138 detected (max: 15).
+
+    54 │ }
+    55 │
+  > 56 │ export function chatModels(data: ChatData, ui: ChatUiState) {
+       │                 ^^^^^^^^^^
+    57 │   const messages = data.messages
+    58 │     .filter((m) => m.extra?.recall?.exposure !== 'none')
+
+  i Please refactor this function to reduce its complexity score from 138 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/chat-models.ts:107:49 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 175 detected (max: 15).
+
+    105 │     .filter((m) => !m.queuedEntryId)
+    106 │     .filter((m) => !ui.viewCat || m.type === 'user' || m.catId === ui.viewCat);
+  > 107 │   const items = sourceMessages.map((message, i) => {
+        │                                                 ^^^
+    108 │     const from =
+    109 │       message.from ??
+
+  i Please refactor this function to reduce its complexity score from 175 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/chat-models.ts:121:20 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    119 │     const executionRows = output?.record.map((entry) => {
+    120 │       if (entry.kind === 'text') return { key: entry.id, title: entry.text, mono: false };
+  > 121 │       const tool = tools.find((tool) => tool.id === entry.id)!;
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    122 │       return {
+    123 │         key: tool.id,
+
+
+packages/web/src/pdl/chat-models.ts:198:65 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    196 │             editing: false,
+    197 │             asking: false,
+  > 198 │             rejectable: scheduleRecord.status === 'pending' && !schedule!.blocked,
+        │                                                                 ^^^^^^^^^
+    199 │             decided: scheduleSettled || schedule!.blocked,
+    200 │             okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    196 196 │               editing: false,
+    197 197 │               asking: false,
+    198     │ - ············rejectable:·scheduleRecord.status·===·'pending'·&&·!schedule!.blocked,
+        198 │ + ············rejectable:·scheduleRecord.status·===·'pending'·&&·!schedule?.blocked,
+    199 199 │               decided: scheduleSettled || schedule!.blocked,
+    200 200 │               okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+
+
+packages/web/src/pdl/chat-models.ts:199:41 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    197 │             asking: false,
+    198 │             rejectable: scheduleRecord.status === 'pending' && !schedule!.blocked,
+  > 199 │             decided: scheduleSettled || schedule!.blocked,
+        │                                         ^^^^^^^^^
+    200 │             okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+    201 │             status: schedule!.error ? { tone: 'warn', text: schedule!.error } : null,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    197 197 │               asking: false,
+    198 198 │               rejectable: scheduleRecord.status === 'pending' && !schedule!.blocked,
+    199     │ - ············decided:·scheduleSettled·||·schedule!.blocked,
+        199 │ + ············decided:·scheduleSettled·||·schedule?.blocked,
+    200 200 │               okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+    201 201 │               status: schedule!.error ? { tone: 'warn', text: schedule!.error } : null,
+
+
+packages/web/src/pdl/chat-models.ts:201:21 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    199 │             decided: scheduleSettled || schedule!.blocked,
+    200 │             okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+  > 201 │             status: schedule!.error ? { tone: 'warn', text: schedule!.error } : null,
+        │                     ^^^^^^^^^
+    202 │             result: scheduleSettled
+    203 │               ? {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    199 199 │               decided: scheduleSettled || schedule!.blocked,
+    200 200 │               okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+    201     │ - ············status:·schedule!.error·?·{·tone:·'warn',·text:·schedule!.error·}·:·null,
+        201 │ + ············status:·schedule?.error·?·{·tone:·'warn',·text:·schedule!.error·}·:·null,
+    202 202 │               result: scheduleSettled
+    203 203 │                 ? {
+
+
+packages/web/src/pdl/chat-models.ts:201:61 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    199 │             decided: scheduleSettled || schedule!.blocked,
+    200 │             okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+  > 201 │             status: schedule!.error ? { tone: 'warn', text: schedule!.error } : null,
+        │                                                             ^^^^^^^^^
+    202 │             result: scheduleSettled
+    203 │               ? {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    199 199 │               decided: scheduleSettled || schedule!.blocked,
+    200 200 │               okLabel: scheduleRecord.status === 'applying' ? '继续' : '同意',
+    201     │ - ············status:·schedule!.error·?·{·tone:·'warn',·text:·schedule!.error·}·:·null,
+        201 │ + ············status:·schedule!.error·?·{·tone:·'warn',·text:·schedule?.error·}·:·null,
+    202 202 │               result: scheduleSettled
+    203 203 │                 ? {
+
+
+packages/web/src/pdl/chat-models.ts:500:54 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    498 │                         : [];
+    499 │   const previewSource = ui.lb
+  > 500 │     ? data.messages.find((message) => message.id === ui.lb!.mid && !message.extra?.recall)
+        │                                                      ^^^^^^
+    501 │     : undefined;
+    502 │   const previewBlock = previewSource
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    498 498 │                           : [];
+    499 499 │     const previewSource = ui.lb
+    500     │ - ····?·data.messages.find((message)·=>·message.id·===·ui.lb!.mid·&&·!message.extra?.recall)
+        500 │ + ····?·data.messages.find((message)·=>·message.id·===·ui.lb?.mid·&&·!message.extra?.recall)
+    501 501 │       : undefined;
+    502 502 │     const previewBlock = previewSource
+
+
+packages/web/src/pdl/chat-models.ts:503:69 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    501 │     : undefined;
+    502 │   const previewBlock = previewSource
+  > 503 │     ? messageRichBlocks(previewSource).find((block) => block.id === ui.lb!.block)
+        │                                                                     ^^^^^^
+    504 │     : undefined;
+    505 │   const gallery = previewBlock?.kind === 'media_gallery' ? previewBlock : undefined;
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    501 501 │       : undefined;
+    502 502 │     const previewBlock = previewSource
+    503     │ - ····?·messageRichBlocks(previewSource).find((block)·=>·block.id·===·ui.lb!.block)
+        503 │ + ····?·messageRichBlocks(previewSource).find((block)·=>·block.id·===·ui.lb?.block)
+    504 504 │       : undefined;
+    505 505 │     const gallery = previewBlock?.kind === 'media_gallery' ? previewBlock : undefined;
+
+
+packages/web/src/pdl/chat-models.ts:507:9 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    505 │   const gallery = previewBlock?.kind === 'media_gallery' ? previewBlock : undefined;
+    506 │   const previewIndex = gallery?.items.length
+  > 507 │     ? ((ui.lb!.i % gallery.items.length) + gallery.items.length) % gallery.items.length
+        │         ^^^^^^
+    508 │     : 0;
+    509 │   const image = gallery?.items[previewIndex];
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    505 505 │     const gallery = previewBlock?.kind === 'media_gallery' ? previewBlock : undefined;
+    506 506 │     const previewIndex = gallery?.items.length
+    507     │ - ····?·((ui.lb!.i·%·gallery.items.length)·+·gallery.items.length)·%·gallery.items.length
+        507 │ + ····?·((ui.lb?.i·%·gallery.items.length)·+·gallery.items.length)·%·gallery.items.length
+    508 508 │       : 0;
+    509 509 │     const image = gallery?.items[previewIndex];
+
+
+packages/web/src/pdl/chat-models.ts:513:16 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    511 │   const mediaPreview = image
+    512 │     ? {
+  > 513 │         id: `${previewSource!.id}:${previewBlock!.id}:${previewIndex}`,
+        │                ^^^^^^^^^^^^^^
+    514 │         title: image.alt || gallery?.title || '图片',
+    515 │         sub: image.caption ?? '',
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    511 511 │     const mediaPreview = image
+    512 512 │       ? {
+    513     │ - ········id:·`${previewSource!.id}:${previewBlock!.id}:${previewIndex}`,
+        513 │ + ········id:·`${previewSource?.id}:${previewBlock!.id}:${previewIndex}`,
+    514 514 │           title: image.alt || gallery?.title || '图片',
+    515 515 │           sub: image.caption ?? '',
+
+
+packages/web/src/pdl/chat-models.ts:513:37 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    511 │   const mediaPreview = image
+    512 │     ? {
+  > 513 │         id: `${previewSource!.id}:${previewBlock!.id}:${previewIndex}`,
+        │                                     ^^^^^^^^^^^^^
+    514 │         title: image.alt || gallery?.title || '图片',
+    515 │         sub: image.caption ?? '',
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    511 511 │     const mediaPreview = image
+    512 512 │       ? {
+    513     │ - ········id:·`${previewSource!.id}:${previewBlock!.id}:${previewIndex}`,
+        513 │ + ········id:·`${previewSource!.id}:${previewBlock?.id}:${previewIndex}`,
+    514 514 │           title: image.alt || gallery?.title || '图片',
+    515 515 │           sub: image.caption ?? '',
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 574.
+Checked 11 files in 2s. No fixes applied.
+Found 565 warnings.
+Found 29 infos.
+
+Exit code: 0

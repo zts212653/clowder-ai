@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/review-bindings.test.tsx src/components/artifacts/__tests__/artifact-detail-widget.test.tsx --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/review-bindings.test.tsx (8 tests) 51ms
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/artifacts/__tests__/artifact-detail-widget.test.tsx (4 tests) 19ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  03:56:16
+   Duration  3.31s (transform 1.43s, setup 44ms, import 2.24s, tests 70ms, environment 714ms)
+
+
+Exit code: 0

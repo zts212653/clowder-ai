@@ -23,6 +23,7 @@ const empty = (): Snapshot => ({
   hasMore: false,
   stale: false,
 });
+const EMPTY_SNAPSHOT = empty();
 class WorksSnapshotInvalid extends Error {}
 
 async function fetchPage(token: string | undefined, signal: AbortSignal): Promise<GlobalWorksPageResponse> {
@@ -42,8 +43,8 @@ async function fetchPage(token: string | undefined, signal: AbortSignal): Promis
 }
 
 /** One initial page; only an explicit continuation admits another bounded, serial batch. */
-export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null, paused = false) {
-  const active = enabled && !paused;
+export function usePagedGlobalWorks(enabled: boolean | number, ownerKey?: string | null, paused = false) {
+  const active = Boolean(enabled) && !paused;
   const [snapshot, setSnapshot] = useState(empty);
   const current = useRef(snapshot);
   const cursor = useRef<string>();
@@ -150,7 +151,7 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null, 
     }
     admitted.current = active;
     if (active) {
-      if (!initialized.current) restart();
+      if (!initialized.current || typeof enabled === 'number') restart();
       else setSnapshot(current.current);
     }
     return () => {
@@ -160,7 +161,7 @@ export function usePagedGlobalWorks(enabled: boolean, ownerKey?: string | null, 
       current.current = { ...current.current, loadingMore: false, stale: initialized.current };
     };
   }, [active, enabled, ownerKey, restart]);
-  const visible = enabled && owner.current === ownerKey ? snapshot : empty();
+  const visible = enabled && owner.current === ownerKey ? snapshot : EMPTY_SNAPSHOT;
   return {
     ...visible,
     loading: active && visible.loading,

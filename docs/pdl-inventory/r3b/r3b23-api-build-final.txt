@@ -1,0 +1,21 @@
+$ pnpm --filter @cat-cafe/api... build
+
+Scope: 4 of 8 workspace projects
+packages/shared build$ tsc
+packages/finance build$ tsc
+packages/finance build: Done
+packages/shared build: Done
+packages/mcp-server build$ node ./scripts/prepare-secret-runtime.mjs && tsc
+packages/mcp-server build: Secret runtime: staged 94 package-local inputs
+packages/mcp-server build: Done
+packages/api build$ pnpm --dir ../shared build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-memory-read-window.mjs && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs
+packages/api build: > @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/shared
+packages/api build: > tsc
+packages/api build: > @cat-cafe/mcp-server@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/mcp-server
+packages/api build: > node ./scripts/prepare-secret-runtime.mjs && tsc
+packages/api build: Secret runtime: staged 94 package-local inputs
+packages/api build: Built bounded SQLite read-window backend
+packages/api build: F299 provider request recorder census OK (12 implementers)
+packages/api build: Done
+
+Exit code: 0

@@ -1,0 +1,390 @@
+$ pnpm exec biome check packages/web/public/pdl-app/project.js packages/web/src/pdl/__tests__/runtime.test.ts
+
+packages/web/public/pdl-app/project.js:13:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    11 │ }
+    12 │ function projectFileKey(data) {
+  > 13 │   const key = 'file:' + JSON.stringify([data.w, data.p]);
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    14 │   projectFiles[key] = data;
+    15 │   PANEL_VIEWS[key] = [data.p.split('/').pop(), 'file', '', 'file', data.p];
+
+  i Unsafe fix: Use a template literal.
+
+      11   11 │   }
+      12   12 │   function projectFileKey(data) {
+      13      │ - ··const·key·=·'file:'·+·JSON.stringify([data.w,·data.p]);
+           13 │ + ··const·key·=·`file:${JSON.stringify([data.w,·data.p])}`;
+      14   14 │     projectFiles[key] = data;
+      15   15 │     PANEL_VIEWS[key] = [data.p.split('/').pop(), 'file', '', 'file', data.p];
+
+
+packages/web/public/pdl-app/project.js:96:57 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    94 │   ['voice', 'memory', 'system', 'works'].forEach(function (key) {
+    95 │     PAGES[key] = function () {
+  > 96 │       return pdlView(key === 'memory' ? 'cafe.memory' : 'page.' + key);
+       │                                                         ^^^^^^^^^^^^^
+    97 │     };
+    98 │   });
+
+  i Unsafe fix: Use a template literal.
+
+      94   94 │     ['voice', 'memory', 'system', 'works'].forEach(function (key) {
+      95   95 │       PAGES[key] = function () {
+      96      │ - ······return·pdlView(key·===·'memory'·?·'cafe.memory'·:·'page.'·+·key);
+           96 │ + ······return·pdlView(key·===·'memory'·?·'cafe.memory'·:·`page.${key}`);
+      97   97 │       };
+      98   98 │     });
+
+
+packages/web/public/pdl-app/project.js:191:81 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    189 │   PDL_GUARDS['live.stop'] = function (ctx) {
+    190 │     return ctx.cancel && ctx.cancel.state !== 'cancelable'
+  > 191 │       ? tc(ctx.cancel.reason === 'cancellation_pending' ? 'composer.stopping' : 'wsOps.OP_BLOCKED.' + ctx.cancel.reason)
+        │                                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    192 │       : '';
+    193 │   };
+
+  i Unsafe fix: Use a template literal.
+
+     189  189 │     PDL_GUARDS['live.stop'] = function (ctx) {
+     190  190 │       return ctx.cancel && ctx.cancel.state !== 'cancelable'
+     191      │ - ······?·tc(ctx.cancel.reason·===·'cancellation_pending'·?·'composer.stopping'·:·'wsOps.OP_BLOCKED.'·+·ctx.cancel.reason)
+          191 │ + ······?·tc(ctx.cancel.reason·===·'cancellation_pending'·?·'composer.stopping'·:·`wsOps.OP_BLOCKED.${ctx.cancel.reason}`)
+     192  192 │         : '';
+     193  193 │     };
+
+
+packages/web/public/pdl-app/project.js:240:20 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    238 │           label: tc('wsItems.hbSuggest.label'),
+    239 │           options: cats.map(function (c) {
+  > 240 │             return c.name + ' ' + c.handle;
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^
+    241 │           }),
+    242 │           value: cats[0] ? cats[0].name + ' ' + cats[0].handle : '',
+
+  i Unsafe fix: Use a template literal.
+
+     238  238 │             label: tc('wsItems.hbSuggest.label'),
+     239  239 │             options: cats.map(function (c) {
+     240      │ - ············return·c.name·+·'·'·+·c.handle;
+          240 │ + ············return·`${c.name}·${c.handle}`;
+     241  241 │             }),
+     242  242 │             value: cats[0] ? cats[0].name + ' ' + cats[0].handle : '',
+
+
+packages/web/public/pdl-app/project.js:242:28 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    240 │             return c.name + ' ' + c.handle;
+    241 │           }),
+  > 242 │           value: cats[0] ? cats[0].name + ' ' + cats[0].handle : '',
+        │                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    243 │         },
+    244 │         { id: 'dlg-why', label: tc('wsItems.hbSuggest.label2'), req: true },
+
+  i Unsafe fix: Use a template literal.
+
+     240  240 │               return c.name + ' ' + c.handle;
+     241  241 │             }),
+     242      │ - ··········value:·cats[0]·?·cats[0].name·+·'·'·+·cats[0].handle·:·'',
+          242 │ + ··········value:·cats[0]·?·`${cats[0].name}·${cats[0].handle}`·:·'',
+     243  243 │           },
+     244  244 │           { id: 'dlg-why', label: tc('wsItems.hbSuggest.label2'), req: true },
+
+
+packages/web/public/pdl-app/project.js:251:37 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    249 │         if (dlgNeed(form, ['dlg-why', 'dlg-plan'])) return false;
+    250 │         const cat = cats.find(function (c) {
+  > 251 │           return val('dlg-cat') === c.name + ' ' + c.handle;
+        │                                     ^^^^^^^^^^^^^^^^^^^^^^^
+    252 │         });
+    253 │         return chatAction(
+
+  i Unsafe fix: Use a template literal.
+
+     249  249 │           if (dlgNeed(form, ['dlg-why', 'dlg-plan'])) return false;
+     250  250 │           const cat = cats.find(function (c) {
+     251      │ - ··········return·val('dlg-cat')·===·c.name·+·'·'·+·c.handle;
+          251 │ + ··········return·val('dlg-cat')·===·`${c.name}·${c.handle}`;
+     252  252 │           });
+     253  253 │           return chatAction(
+
+
+packages/web/public/pdl-app/project.js:388:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    386 │   };
+    387 │   ['rpReview', 'rpArch'].forEach(function (field) {
+  > 388 │     SET_AFTER['ws.' + field] = function (value) {
+        │               ^^^^^^^^^^^^^
+    389 │       return chatAction('routingPolicySet', { field: field, value: value });
+    390 │     };
+
+  i Unsafe fix: Use a template literal.
+
+     386  386 │     };
+     387  387 │     ['rpReview', 'rpArch'].forEach(function (field) {
+     388      │ - ····SET_AFTER['ws.'·+·field]·=·function·(value)·{
+          388 │ + ····SET_AFTER[`ws.${field}`]·=·function·(value)·{
+     389  389 │         return chatAction('routingPolicySet', { field: field, value: value });
+     390  390 │       };
+
+
+packages/web/public/pdl-app/project.js:829:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    827 │         row.sub = [
+    828 │           row.origin,
+  > 829 │           tc('evolutionFlow.stage.' + row.stage),
+        │              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    830 │           row.lifecycle === 'active' ? '' : tc('evolutionFlow.state.' + row.lifecycle),
+    831 │         ]
+
+  i Unsafe fix: Use a template literal.
+
+     827  827 │           row.sub = [
+     828  828 │             row.origin,
+     829      │ - ··········tc('evolutionFlow.stage.'·+·row.stage),
+          829 │ + ··········tc(`evolutionFlow.stage.${row.stage}`),
+     830  830 │             row.lifecycle === 'active' ? '' : tc('evolutionFlow.state.' + row.lifecycle),
+     831  831 │           ]
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:1662:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    1660 │       ['schedule', 'ws.schedule', 'Owner dated work'],
+    1661 │     ]) {
+  > 1662 │       w.eval('ENGINE_PARTS.openTab("panel",' + JSON.stringify(panel) + ');render(true)');
+         │              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1663 │       await w.__settled();
+    1664 │       const node = w.document.querySelector('[data-view="' + view + '"]');
+
+  i Unsafe fix: Use a template literal.
+
+    1660 1660 │         ['schedule', 'ws.schedule', 'Owner dated work'],
+    1661 1661 │       ]) {
+    1662      │ - ······w.eval('ENGINE_PARTS.openTab("panel",'·+·JSON.stringify(panel)·+·');render(true)');
+         1662 │ + ······w.eval(`ENGINE_PARTS.openTab("panel",${JSON.stringify(panel)});render(true)`);
+    1663 1663 │         await w.__settled();
+    1664 1664 │         const node = w.document.querySelector('[data-view="' + view + '"]');
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:1664:45 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    1662 │       w.eval('ENGINE_PARTS.openTab("panel",' + JSON.stringify(panel) + ');render(true)');
+    1663 │       await w.__settled();
+  > 1664 │       const node = w.document.querySelector('[data-view="' + view + '"]');
+         │                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1665 │       expect(node?.textContent, view).toContain(text);
+    1666 │     }
+
+  i Unsafe fix: Use a template literal.
+
+    1662 1662 │         w.eval('ENGINE_PARTS.openTab("panel",' + JSON.stringify(panel) + ');render(true)');
+    1663 1663 │         await w.__settled();
+    1664      │ - ······const·node·=·w.document.querySelector('[data-view="'·+·view·+·'"]');
+         1664 │ + ······const·node·=·w.document.querySelector(`[data-view="${view}"]`);
+    1665 1665 │         expect(node?.textContent, view).toContain(text);
+    1666 1666 │       }
+
+
+packages/web/public/pdl-app/project.js:2:1 lint/suspicious/noRedundantUseStrict  FIXABLE  ━━━━━━━━━━
+
+  ! Redundant use strict directive.
+
+    1 │ /* Project-owned data and action bindings for the copied declarations. */
+  > 2 │ 'use strict';
+      │ ^^^^^^^^^^^^^
+    3 │ const projectFiles = {};
+    4 │ function syncProject() {
+
+  i The entire contents of JavaScript modules are automatically in strict mode, with no statement needed to initiate it.
+
+  i Safe fix: Remove the redundant use strict directive.
+
+    2 │ 'use·strict';
+      │ -------------
+
+packages/web/public/pdl-app/project.js:421:12 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    419 │       });
+    420 │   }
+  > 421 │   function evoPreparationVM(p) {
+        │            ^^^^^^^^^^^^^^^^
+    422 │     if (!p.preparation) return null;
+    423 │     const sections = p.preparation.sections,
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/public/pdl-app/project.js:453:39 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    451 │           unknowns: evoRows(objectBody.unknowns),
+    452 │           source: source(map),
+  > 453 │           items: objectBody.items.map(function (item) {
+        │                                       ^^^^^^^^^
+    454 │             const decision = item.decision,
+    455 │               input = decision && decision.responsibility && decision.responsibility.input;
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/public/pdl-app/project.js:623:12 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    621 │     return { title: label, act: href && /^https?:\/\//.test(href) ? 'openUrl' : '', args: { url: href }, ref: ref };
+    622 │   }
+  > 623 │   function evolutionUseVM(p, raw) {
+        │            ^^^^^^^^^^^^^^
+    624 │     if (!raw || !raw.catalog) return { unavailable: true, versions: [], receipts: [], observations: [] };
+    625 │     const catalog = raw.catalog,
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/public/pdl-app/project.js:669:12 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 53 detected (max: 15).
+
+    667 │     };
+    668 │   }
+  > 669 │   function evolutionDetail(models) {
+        │            ^^^^^^^^^^^^^^^
+    670 │     const p = models.evolutionOwner;
+    671 │     if (!p) return null;
+
+  i Please refactor this function to reduce its complexity score from 53 to the max allowed complexity 15.
+
+
+packages/web/public/pdl-app/project.js:792:91 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 20 detected (max: 15).
+
+    790 │         preparation: p.preparation
+    791 │           ? Object.values(p.preparation.sections).flatMap(function (section) {
+  > 792 │               return section.history.concat(section.current ? [section.current] : []).map(function (entry) {
+        │                                                                                           ^^^^^^^^^
+    793 │                 return {
+    794 │                   title: entry.submission ? entry.submission.title : tcOf('evolutionFlow.preparation', entry.section),
+
+  i Please refactor this function to reduce its complexity score from 20 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:41:64 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    39 │   const errors = vi.spyOn(w.console, 'error').mockImplementation(() => {});
+    40 │   const tokens = readFileSync(path.join(process.cwd(), 'public/pdl/theme/default/tokens.css'), 'utf8');
+  > 41 │   w.document.documentElement.style.setProperty('--hold-toast', tokens.match(/--hold-toast:\s*([^;]+)/)![1]);
+       │                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    42 │   await new Promise<void>((resolve) => w.document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+    43 │   // jsdom lacks browser rendering APIs; this test verifies DOM/actions, never visual layout.
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+      39   39 │     const errors = vi.spyOn(w.console, 'error').mockImplementation(() => {});
+      40   40 │     const tokens = readFileSync(path.join(process.cwd(), 'public/pdl/theme/default/tokens.css'), 'utf8');
+      41      │ - ··w.document.documentElement.style.setProperty('--hold-toast',·tokens.match(/--hold-toast:\s*([^;]+)/)![1]);
+           41 │ + ··w.document.documentElement.style.setProperty('--hold-toast',·tokens.match(/--hold-toast:\s*([^;]+)/)?.[1]);
+      42   42 │     await new Promise<void>((resolve) => w.document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+      43   43 │     // jsdom lacks browser rendering APIs; this test verifies DOM/actions, never visual layout.
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:419:15 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    417 │         selected: review.selected,
+    418 │         selectedTitle: review.versions[2].title,
+  > 419 │         diff: review.selected!.diff,
+        │               ^^^^^^^^^^^^^^^^
+    420 │         versions: projectAssetVersions(owner, review).map((v) => ({
+    421 │           ...v,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     417  417 │           selected: review.selected,
+     418  418 │           selectedTitle: review.versions[2].title,
+     419      │ - ········diff:·review.selected!.diff,
+          419 │ + ········diff:·review.selected?.diff,
+     420  420 │           versions: projectAssetVersions(owner, review).map((v) => ({
+     421  421 │             ...v,
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:471:5 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    469 │     owner.program.currentAssetVersionRefs = [assetRef('v2')];
+    470 │     const review = assetReviewFixture('v2');
+  > 471 │     review.selected!.uses[0].ownerHref = '/thread/consumer-thread?messageId=consumer-mid';
+        │     ^^^^^^^^^^^^^^^^
+    472 │     const reading = { view: 'judge', stage: null, decision: '', notice: '' };
+    473 │     const { dom, w, action } = await boot(undefined, undefined, undefined, {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     469  469 │       owner.program.currentAssetVersionRefs = [assetRef('v2')];
+     470  470 │       const review = assetReviewFixture('v2');
+     471      │ - ····review.selected!.uses[0].ownerHref·=·'/thread/consumer-thread?messageId=consumer-mid';
+          471 │ + ····review.selected?.uses[0].ownerHref·=·'/thread/consumer-thread?messageId=consumer-mid';
+     472  472 │       const reading = { view: 'judge', stage: null, decision: '', notice: '' };
+     473  473 │       const { dom, w, action } = await boot(undefined, undefined, undefined, {
+
+
+packages/web/src/pdl/__tests__/runtime.test.ts:482:15 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    480 │         selected: review.selected,
+    481 │         selectedTitle: '补充边界示例',
+  > 482 │         diff: review.selected!.diff,
+        │               ^^^^^^^^^^^^^^^^
+    483 │         versions: projectAssetVersions(owner, review).map((v) => ({
+    484 │           ...v,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     480  480 │           selected: review.selected,
+     481  481 │           selectedTitle: '补充边界示例',
+     482      │ - ········diff:·review.selected!.diff,
+          482 │ + ········diff:·review.selected?.diff,
+     483  483 │           versions: projectAssetVersions(owner, review).map((v) => ({
+     484  484 │             ...v,
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 380.
+Checked 2 files in 285ms. No fixes applied.
+Found 379 warnings.
+Found 21 infos.
+
+Exit code: 0

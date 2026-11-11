@@ -1,0 +1,18 @@
+{
+  "ns": "superagent",
+  "inserts": [
+    {
+      "id": "superagent",
+      "anchor": "nav.cafe",
+      "at": "inside",
+      "node": {
+        "title": "t:superagent.plugin.entry",
+        "icon": "robot",
+        "badge": "superagent",
+        "open": {
+          "action": "superagentOpen"
+        }
+      }
+    }
+  ]
+}

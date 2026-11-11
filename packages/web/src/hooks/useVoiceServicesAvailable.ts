@@ -8,7 +8,7 @@ interface ServiceState {
 
 const VOICE_FEATURES = ['voice-input', 'voice-output', 'voice-companion'];
 
-export function useVoiceServicesAvailable(): boolean {
+export function useVoiceServicesAvailable(feature?: 'voice-input' | 'voice-output' | 'voice-companion'): boolean {
   const [available, setAvailable] = useState(false);
 
   useEffect(() => {
@@ -19,7 +19,8 @@ export function useVoiceServicesAvailable(): boolean {
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as { services: ServiceState[] };
         const anyHealthy = data.services.some(
-          (s) => s.status === 'healthy' && s.features.some((f) => VOICE_FEATURES.includes(f)),
+          (s) =>
+            s.status === 'healthy' && s.features.some((f) => (feature ? f === feature : VOICE_FEATURES.includes(f))),
         );
         if (!cancelled) setAvailable(anyHealthy);
       } catch {
@@ -29,7 +30,7 @@ export function useVoiceServicesAvailable(): boolean {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [feature]);
 
   return available;
 }

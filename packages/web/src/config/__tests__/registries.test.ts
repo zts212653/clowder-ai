@@ -1,9 +1,8 @@
 /**
- * F12: Registry tests — command-registry + shortcut-registry
+ * F12: Registry tests — command-registry
  */
 import { describe, expect, it } from 'vitest';
 import { COMMAND_CATEGORIES, COMMANDS, type CommandCategory } from '../command-registry';
-import { SHORTCUTS } from '../shortcut-registry';
 
 describe('command-registry', () => {
   it('exports at least 10 commands', () => {
@@ -43,20 +42,6 @@ describe('command-registry', () => {
     for (const cmd of COMMANDS) {
       expect(validSurfaces).toContain(cmd.surface);
       expect(validSources).toContain(cmd.source);
-    }
-  });
-});
-
-describe('shortcut-registry', () => {
-  it('exports at least 2 shortcuts', () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('every shortcut has keys, description, and context', () => {
-    for (const s of SHORTCUTS) {
-      expect(s.keys.length).toBeGreaterThan(0);
-      expect(s.description.length).toBeGreaterThan(0);
-      expect(s.context.length).toBeGreaterThan(0);
     }
   });
 });

@@ -3,7 +3,6 @@ import { Readable, Transform } from 'node:stream';
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withoutPluginCallContext } from '../../domains/plugin/carrier/plugin-call-context.js';
 import { withPluginOwnerRequest } from '../../domains/plugin/carrier/plugin-owner-request-context.js';
-import type { DeclaredPluginUi } from '../../domains/plugin/declared/declared-plugin-ui.js';
 import type { DeclaredPluginWebhook } from '../../domains/plugin/declared/declared-runtime-contributions.js';
 import {
   DEFAULT_PLUGIN_WEBHOOK_REQUEST_BODY_LIMIT_BYTES,
@@ -26,8 +25,6 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'x-cat-id',
   'x-csrf-token',
   'x-invocation-id',
-  'x-clowder-plugin-ui-instance',
-  'x-clowder-plugin-ui-generation',
 ]);
 const ALLOWED_RESPONSE_HEADERS = new Set([
   'accept-ranges',
@@ -55,7 +52,6 @@ export interface PluginWebhookForwardingPort {
 export interface PluginWebhookForwardingRoutesOptions {
   readonly webhooks: PluginWebhookForwardingPort;
   readonly timeoutMs?: number;
-  readonly ui?: DeclaredPluginUi;
 }
 
 interface ForwardingParams {
@@ -131,22 +127,9 @@ async function forwardPluginWebhook(
     if (target.allow) reply.header('allow', target.allow);
     return reply.status(target.status).send({ error: target.error });
   }
-  const instanceId = request.headers['x-clowder-plugin-ui-instance'];
-  const generation = request.headers['x-clowder-plugin-ui-generation'];
-  const fromPanel = instanceId !== undefined || generation !== undefined;
-  const principal = authorizeRequest(
-    request,
-    reply,
-    fromPanel ? { ...target.declared, anonymous: false } : target.declared,
-    target.method,
-  );
+  const principal = authorizeRequest(request, reply, target.declared, target.method);
   // Await the response already started by authorization, including async onSend hooks.
   if (principal === false) return reply;
-  const activation =
-    fromPanel && typeof instanceId === 'string' && typeof generation === 'string'
-      ? options.ui?.activation(request.params.pluginId, instanceId, generation)
-      : undefined;
-  if (fromPanel && !activation) return reply.status(409).send({ error: 'Plugin panel is no longer active' });
 
   const requestIdentity = captureOwnerHttpRequest(request, target);
   const lifetime = requestLifetime(request, reply);
@@ -177,13 +160,12 @@ async function forwardPluginWebhook(
               contributionId: target.declared.contributionId,
               userId: principal.id,
               operation: target.method === 'GET' ? 'read' : 'write',
-              signal: activation ? AbortSignal.any([lifetime.signal, activation.signal]) : lifetime.signal,
+              signal: lifetime.signal,
               requestIdentity,
             },
             invoke,
           ),
     );
-    activation?.assertCurrent();
     if (value && typeof value === 'object' && 'body' in value && value.body instanceof Readable)
       returnedBody = value.body;
     failurePhase = 'validation';

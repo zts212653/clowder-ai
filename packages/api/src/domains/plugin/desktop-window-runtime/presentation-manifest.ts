@@ -1,3 +1,4 @@
+import { pluginPdlSchema } from '@cat-cafe/shared';
 import { type PluginManifest, validateManifest } from '@clowder-ai/plugin-contract';
 import { validateManifest as validateDeskManifest } from '@clowder-ai/plugin-contract-033c0';
 import { validateManifest as validatePresentationManifest } from '@clowder-ai/plugin-contract-beta27';
@@ -18,10 +19,32 @@ const PUBLISHED_MANIFESTS: Partial<
   '0.3.3-candidate.0': { validate: validateDeskManifest, bridgeVersion: '1.7.0' },
 };
 
-/** Keep the generic manifest ABI unchanged; admit only the delivered companion's
- * new bridge literal. Installation and runtime still authenticate its exact SRI.
+/** The Host accepts E22's PDL data envelope alongside the package's base manifest.
+ * Existing companion bridge admission and exact archive SRI verification stay unchanged.
  */
 export function validateHostPluginManifest(value: unknown): ReturnType<typeof validateManifest> {
+  if (value && typeof value === 'object' && 'pdl' in value) {
+    const { pdl, ...body } = value;
+    const parsed = pluginPdlSchema.safeParse(pdl);
+    if (!parsed.success)
+      return {
+        valid: false,
+        errors: parsed.error.issues.map((issue) => ({
+          instancePath: '/pdl/' + issue.path.join('/'),
+          schemaPath: '#/pdl',
+          keyword: issue.code,
+          message: issue.message,
+        })),
+      };
+    const result = validateBaseManifest(body);
+    if (!result.valid) return result;
+    // Keep the extension in the admitted manifest. Archive identity/SRI verification is unchanged.
+    return { ...result, manifest: Object.assign(result.manifest, { pdl: parsed.data }) };
+  }
+  return validateBaseManifest(value);
+}
+
+function validateBaseManifest(value: unknown): ReturnType<typeof validateManifest> {
   let legacy = validateManifest(value);
   // A newer general schema must not widen the Host's pinned desktop bridge ABI.
   if (legacy.valid) {

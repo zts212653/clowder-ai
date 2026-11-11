@@ -5,7 +5,7 @@ import type {
   ActiveExecutionProjection,
   ActiveHoldWaitProjection,
 } from '@cat-cafe/shared';
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -120,7 +120,11 @@ export async function cancelUnverifiedLegacyExecution(target: {
  * poll narrowly so a background start that emitted no local socket event is
  * still discovered. The store retains the last good snapshot on transient error.
  */
-export function useActiveExecutionProjection(anchorThreadId: string, socketConnected: boolean | null): void {
+export function useActiveExecutionProjection(
+  anchorThreadId: string,
+  socketConnected: boolean | null,
+  needed: boolean | number = true,
+): void {
   const canonicalProjectPath = useSidebarProjectionStore(
     (state) => state.rows.find((row) => row.id === anchorThreadId)?.projectPath,
   );
@@ -129,9 +133,19 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
   );
   const projectPath = canonicalProjectPath ?? compatibilityProjectPath ?? null;
 
+  const current = useRef({ anchorThreadId, projectPath });
+  current.current = { anchorThreadId, projectPath };
   useLayoutEffect(() => {
+    if (!needed) return;
     const controller = new AbortController();
-    const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
+    const refresh = () => {
+      if (!document.hidden)
+        void refreshActiveExecutionProjection(
+          current.current.anchorThreadId,
+          current.current.projectPath,
+          controller.signal,
+        );
+    };
     refresh();
     const interval = window.setInterval(refresh, ACTIVE_EXECUTION_REFRESH_MS);
     const refreshWhenVisible = () => {
@@ -145,12 +159,16 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [anchorThreadId, projectPath]);
+  }, [needed]);
 
   useEffect(() => {
-    if (socketConnected !== true) return;
+    if (!needed || socketConnected !== true) return;
     const controller = new AbortController();
-    void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
+    void refreshActiveExecutionProjection(
+      current.current.anchorThreadId,
+      current.current.projectPath,
+      controller.signal,
+    );
     return () => controller.abort();
-  }, [anchorThreadId, projectPath, socketConnected]);
+  }, [needed, socketConnected]);
 }

@@ -1,0 +1,302 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 组件库的零件样式：这些类只由组件库（lrow / pdl-view / widgets / who）画出。 */
+/* from cafe.css */ .chip-main { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-xs); white-space: nowrap; }   /* 标签的主体（色点 · 勾 · 名字）排成一行，选中时多出的勾不把它挤成几行 */
+/* from cafe.css */ .clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* from cafe.css */ .cafe-title { border: 0; background: none; padding: var(--sp-xs) var(--sp-xs); margin-left: calc(-1 * var(--sp-xs)); border-radius: var(--r-s); text-align: left; cursor: text; }
+/* from cafe.css */ .cafe-title:hover { background: var(--bg-hover); }
+/* from cafe.css */ .cafe-people { display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-xs); border: 0; background: none; border-radius: var(--r-s); cursor: pointer; color: var(--fg-muted); font-size: var(--fs-m); }
+/* from cafe.css */ .cafe-people:hover { background: var(--bg-hover); color: var(--fg-strong); }
+/* from cafe.css */ .cafe-m-in { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* from cafe.css */ .cafe-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-xs); }
+/* from cafe.css */ .cafe-checks li { display: flex; align-items: center; gap: var(--sp-s); color: var(--fg-strong); }
+/* from cafe.css */ .cafe-sysc { width: var(--span-9); align-self: center; display: flex; gap: var(--sp-s); align-items: flex-start; padding: var(--sp-s) var(--sp-m); border-radius: var(--r-l); background: var(--bg-group); font-size: var(--fs-m); color: var(--fg-strong); }
+/* from cafe.css */ .cafe-sysc b { color: var(--fg-strong); font-weight: 500; }
+/* from cafe.css */ .cafe-sysc p { margin: 0; }
+/* from cafe.css */ .cafe-m-in > .cafe-sysc { grid-column: 2; }
+/* from cafe.css */ .cafe-supps { margin: var(--sp-xs) 0 0 var(--supp-indent, var(--sp-xl)); padding-top: var(--sp-xs); min-width: 0; }   /* 缩进是 token：你的消息（.user-msg）上设成 0，不按后代覆盖 */
+/* from cafe.css */ .msg-meta button[aria-expanded="true"] { color: var(--fg-strong); }
+/* from cafe.css */ .composer .input-title:focus { outline: none; }
+/* from cafe.css */ .cafe-greet { display: flex; flex-direction: column; gap: var(--sp-xs); align-items: center; }
+/* from cafe.css */ .cafe-sub { margin: 0; font-size: var(--fs-l); color: var(--fg-muted); text-align: center; }
+/* from cafe.css */ .cafe-two { display: grid; grid-template-columns: minmax(0, 1fr) var(--span-4); gap: var(--sp-l); align-items: start; }
+/* from cafe.css */ .cafe-two-main, .cafe-two-side { display: flex; flex-direction: column; gap: var(--sp-l); min-width: 0; }
+/* 侧栏内容显式分区滚动：放不下就上下排列，保留两区，不变成下钻。 */
+.cafe-two[data-scroll="panes"] { display: flex; flex-direction: column; gap: var(--sp-xl); }
+.cafe-two[data-scroll="panes"] > * { flex: none; }
+@container style(--g-panes: 1) {
+  .cafe-two[data-scroll="panes"] { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); align-items: stretch; flex: 1; min-height: 0; }
+  .cafe-two[data-scroll="panes"] > * { min-height: 0; padding-bottom: var(--sp-xl); }
+  .cafe-two[data-scroll="panes"] > * > * { flex: none; }
+  .ws-noted:has(.cafe-two[data-scroll="panes"]) { flex: 1; min-height: 0; }
+  .page:has(.cafe-two[data-scroll="panes"]) { height: 100%; padding-bottom: 0; }
+}
+.vw-split-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--span-3)), 1fr)); gap: var(--sp-m); min-width: 0; }
+.vw-split-compare > section { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-s); }
+/* from workspace.css */ .ws-opts { display: flex; flex-direction: column; }
+/* from workspace.css */ .ws-range { width: calc(35 * var(--unit)); accent-color: var(--fg-strong); }
+/* from workspace.css */ .ws-steps { display: flex; gap: var(--sp-xs); flex-wrap: wrap; }
+/* from settings.css */ .chip-x { border: 0; background: none; padding: 0; margin-right: calc(-1 * var(--sp-xs)); width: var(--ic-m); height: var(--ic-m); border-radius: var(--r-full); display: grid; place-items: center; color: var(--fg-faint); cursor: pointer; }
+.chip-x:hover, .chip-x:focus-visible { background: none; color: var(--accent-fg); }   /* 和全站图标按钮同一种悬停 */
+/* from capabilities.css */ .cap-lead { display: grid; place-items: center; flex: none; font-size: var(--fs-l); color: var(--fg-strong); max-width: 66ch; }
+/* from capabilities.css */ .cap-kvs { display: flex; flex-direction: column; gap: var(--sp-xs); align-items: flex-start; }
+/* from capabilities.css */ .cap-kv { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) var(--ctl-s); gap: var(--sp-xs); align-items: center; width: 100%; }
+/* from capabilities.css */ .cap-kv.cap-arg { grid-template-columns: minmax(0, 1fr) var(--ctl-s); }
+/* from capabilities.css */ .cap-pw { display: flex; gap: var(--sp-xs); align-items: center; min-width: 0; }
+/* from ws-code.css */ .wpv { flex: 1; min-height: calc(10 * var(--row-h-1)); display: flex; flex-direction: column; background: var(--bg-group); border-radius: var(--r-m); overflow: hidden; }
+/* from ws-code.css */ .wpv-tabs { display: flex; align-items: center; gap: var(--sp-hair); padding: var(--sp-xs) var(--sp-xs) 0; }
+/* from ws-code.css */ .wpv-tab { position: relative; display: inline-flex; align-items: center; flex: 0 1 calc(40 * var(--unit)); min-width: calc(18 * var(--unit)); height: var(--ctl-s); border-radius: var(--r-m) var(--r-m) 0 0; color: var(--fg-muted); }
+/* from ws-code.css */ .wpv-tab > button[role="tab"] { display: flex; align-items: center; gap: var(--sp-xs); flex: 1; min-width: 0; height: 100%; padding: 0 var(--sp-xl) 0 var(--sp-s); border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-s); text-align: left; white-space: nowrap; overflow: clip; text-overflow: ellipsis; cursor: pointer; }
+/* from ws-items.css */ .tk-st { display: grid; place-items: center; width: var(--av-s); height: var(--av-s); padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+/* from ws-items.css */ .tk-g { width: var(--ic-s); height: var(--ic-s); border-radius: var(--r-full); box-shadow: inset 0 0 0 1.5px var(--fg-faint); }
+/* from ws-items.css */ .tk-st:hover .tk-g { box-shadow: inset 0 0 0 1.5px var(--accent-fg); }
+/* from ws-items.css */ .hb-av { display: inline-flex; }
+/* ── 弹出层（组件库：PDL 块 pop / opts / well，选项见 lrow.js popEntry）。位置由锚定决定（--pop，见 ui.js），放不下翻边；高度不超过锚点那一侧的剩余空间 ── */
+.pop { position: fixed; z-index: var(--z-menu); position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom span-right; margin-block: var(--sp-xs); position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline; width: var(--u-w, auto); max-width: calc(100vw - 2 * var(--sp-s)); max-height: round(down, min(11 * var(--row-h-1), 100%), var(--row-h-1)); gap: var(--sp-hairline); }
+.pop.up { position-area: top span-right; }
+.pop.fit { width: max-content; max-width: calc(100vw - 2 * var(--sp-s)); }   /* 工具条类的浮层按内容定宽 */
+.pop-foot { margin: 0; padding: var(--sp-xs) var(--sp-s); }
+.pop-go { font-size: var(--fs-s); color: var(--fg-muted); white-space: nowrap; }
+.pop-glyph { width: var(--ctl-xs); height: var(--ctl-xs); }
+.pop-glyph .ic { width: var(--ic-s); height: var(--ic-s); }
+/* from cafe.css */ .cafe-err { color: var(--warn); }
+/* from cafe.css */ .cafe-star { color: var(--fg-faint); display: inline-flex; }
+/* 段头的三格：标题 · [数量 ⇄ 操作] · 箭头。按钮铺满三格（subgrid），操作落在数量那一格，悬停时互换；箭头那一格不动 */
+.cafe-ghead { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--sp-xs); margin-top: var(--sp-s); }
+.cafe-gacts { grid-area: 1 / 2; justify-self: end; position: relative; display: flex; align-items: center; gap: var(--sp-hair); }
+.cafe-glead { display: flex; align-items: center; gap: var(--sp-xs); min-width: 0; }
+.cafe-gbtn > .c { grid-column: 2; justify-self: end; } .cafe-gbtn > .tw { grid-column: 3; }
+.cafe-ghead:has(.cafe-gacts):is(:hover, :focus-within) .cafe-gbtn > .c { visibility: hidden; }
+/* from cafe.css */ .cafe-gbtn { grid-area: 1 / 1 / 2 / -1; min-width: 0; height: var(--ctl-s); display: grid; grid-template-columns: subgrid; align-items: center; padding: 0 var(--lr-pad); border: 0; background: none; border-radius: var(--r-s); color: var(--fg-muted); font-size: var(--fs-s); cursor: pointer; text-align: left; }
+/* from cafe.css */ .cafe-ghead:hover > .cafe-gbtn { background: var(--bg-hover); color: var(--fg-strong); }
+/* from cafe.css */ .cafe-hov { opacity: 0; }
+/* from cafe.css */ .cafe-other { width: 100%; height: var(--ctl-s); margin-top: var(--sp-s); display: flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-xs); border: 0; background: none; border-radius: var(--r-s); color: var(--fg-faint); font-size: var(--fs-s); cursor: pointer; }
+/* from cafe.css */ .cafe-other:hover { background: var(--bg-hover); color: var(--fg-strong); }
+/* 消息导航占对话主窗口最右的一个网格单位，刻度在这一格里居中 */ .cafe-mini { position: absolute; right: 0; top: 64px; bottom: 170px; width: var(--g-mod); display: flex; flex-direction: column; justify-content: center; z-index: var(--z-raised); }
+
+
+/* cafe 区域的样式：只用 core.css 里的语义变量；字号 12–16，字重 400 / 500 */
+/* ── 通用小件 ── */
+.cafe-inline { display: flex; align-items: center; gap: var(--sp-s); flex-wrap: wrap; min-width: 0; }
+.cafe-inline .input { flex: 1; min-width: calc(35 * var(--unit)); }
+.cafe-ellip { overflow: clip; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.cafe-tagt { display: inline-flex; align-items: center; gap: var(--sp-xs); white-space: nowrap; }
+.cafe-check { display: inline-flex; align-items: center; gap: var(--sp-s); border: 0; background: none; padding: var(--sp-xs) 0; cursor: pointer; color: var(--fg-strong); text-align: left; min-width: 0; font-size: var(--fs-l); }
+.group > .cafe-check { display: flex; width: 100%; }   /* 一组勾选：一项一行 */
+.box { width: var(--ic-m); height: var(--ic-m); border-radius: var(--r-xs); box-shadow: inset 0 0 0 1.5px var(--line-strong); display: inline-grid; place-items: center; flex-shrink: 0; }
+.box .ic { opacity: 0; }
+.box.on, [aria-checked="true"] > .box, input:checked + .box { background: var(--switch-on); box-shadow: none; color: var(--fg-on-accent); }
+.box.on .ic, [aria-checked="true"] > .box .ic, input:checked + .box .ic { opacity: 1; }
+.cafe-check[disabled] { opacity: var(--op-disabled); cursor: default; }
+.cafe-ul { margin-top: var(--sp-xs); }
+.cafe-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent-fg); cursor: pointer; text-align: left; display: inline-block; max-width: 100%; vertical-align: bottom; white-space: nowrap; overflow: clip; text-overflow: ellipsis; }   /* 正文里的路径 / 对话链接：一行，放不下时省略，全文在提示里 */
+.cafe-link.mono { font-family: var(--font-mono); font-size: .88em; }
+.cafe-link:hover { text-decoration: underline; }
+.cafe-navbar { display: flex; align-items: center; gap: var(--sp-hair); padding: var(--sp-m) 0 0; }
+.cafe-navbar > .cells { flex: 1; gap: var(--sp-hair); align-items: center; }
+.cafe-drop { height: var(--ctl-s); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-s); color: var(--fg-muted); font-size: var(--fs-s); display: inline-flex; align-items: center; gap: var(--sp-xs); cursor: pointer; white-space: nowrap; max-width: var(--span-2); overflow: hidden; }
+.cafe-drop > .ic { flex: none; }   /* 名字放不下时省略（.cafe-ellip），箭头不被挤掉 */
+.cafe-drop:hover { color: var(--accent-fg); }   /* 悬停只变字色（和图标按钮、开关同一个规则） */
+/* 对话框里：手风琴的行和设置行共用对话框的左右边（不再是缩进一层的卡片），行之间用分隔线 */
+.cafe-tints { display: inline-flex; gap: var(--sp-xs); }
+.cafe-tints button { width: var(--ctl-xs); height: var(--ctl-xs); border-radius: 50%; border: 0; cursor: pointer; padding: 0; }
+.cafe-tints button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3.5px var(--fg-strong); }
+/* ── 对话页 ── */
+.chat { display: flex; flex-direction: column; height: 100%; position: relative; }   /* relative：工作台收起时的菜单条、把手是对话主窗口的子节点，贴着它的右边缘 */
+.msg-head .cafe-tagt { margin-left: var(--sp-hair); }
+.user-msg .chips { justify-content: flex-end; }
+.cafe-checks li.done { color: var(--fg-muted); }
+.cafe-sysc .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-xs); }
+/* 补充消息：回复底部，细分隔线下面 */
+.composer .input-title { background: none; height: var(--row-h-1); padding: var(--sp-m) var(--sp-xs) 0; }   /* 输入区里的标题行（主页的对话名）：输入区的构成，没有框 */
+/* 回复引用（同一个 replyRef）+ 取消 */
+.target[disabled] { opacity: var(--op-disabled); cursor: default; }
+.target[aria-checked="true"] { color: var(--fg-strong); }
+/* ── 新对话 ── */
+/* ── 作品 ── */
+form.search { margin: 0; }
+/* 回收站一栏：和上面滚动的对话列表用一道向上的柔和阴影分开 */
+.nav-foot { position: relative; z-index: var(--z-raised); padding: var(--sp-s); }
+/* 步骤（能力进化的旅程、SOP 阶段） */
+.drag { width: var(--ctl-xs); height: var(--ctl-s); border: 0; background: none; border-radius: var(--r-s); color: var(--fg-faint); cursor: grab; display: grid; place-items: center; padding: 0; }
+.drag:hover { background: var(--bg-selected); color: var(--fg-strong); }
+/* 成员编辑器 */
+.form-sections { display: flex; flex-direction: column; gap: var(--page-gap); }   /* 由几个小节组成的表单（成员、MCP） */
+.vw-cols { display: flex; flex-wrap: wrap; gap: var(--sp-xl); align-items: flex-start; }   /* 并排的容器（box 的 columns 角色）：顺序 = 声明的顺序，放不下时换行 */
+:where(.vw-cols > *) { flex: 1 1 0; min-width: 0; }
+/* 小节目录（toc 块）：不占正文的宽度——页面左边距放得下时挂在正文左侧的边距里（吸顶、竖排），放不下时是正文上面的一行；正文宽度和别的页一样 */
+.mtoc { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: var(--sp-hair); z-index: var(--z-sticky); }
+@container style(--g-aside: 1) {
+  .mtoc.scroll { flex: none; width: var(--span-2); margin-inline-start: 0; flex-direction: column; flex-wrap: nowrap; position: fixed; position-anchor: --ct-box; left: calc(anchor(center) - var(--g-w) / 2 - var(--g-gap) - var(--span-2)); top: calc(anchor(top) + var(--gutter-top, var(--sp-l))); max-block-size: calc(anchor-size(block) - var(--gutter-top, var(--sp-l)) - var(--sp-l)); padding-top: calc(var(--ctl-s) + var(--sp-s)); }   /* 吸顶在左边距里浮着的返回下面（--gutter-top，容器给） */   /* 第一项和第一个小节的正文对齐：小节标题行高 + 小节里的间距 */
+}
+.range { flex: 1; accent-color: var(--switch-on); min-width: 0; }
+.input[aria-invalid="true"], .select[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 0; }
+/* 新建成员：模板卡片、头像 */
+/* 账户、画像、规则里的展开内容：缩进，不加框 */
+.obs { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.pop-list { display: flex; flex-direction: column; }
+.pop.up .pop-list { flex-direction: column-reverse; }   /* 朝上开：最常用的（列表第一项）落在最下面，离触发按钮最近 */
+.switch[disabled] { opacity: var(--op-disabled); cursor: default; }
+/* 项目条里的挂载设置、MCP 行下就地展开的按猫开关：比分组再深一层，用输入框底色 */
+/* 加载：骨架行 */
+/* SKILL.md / README 预览与编辑 */
+.cap-fm { margin: 0 0 var(--sp-m); padding: var(--sp-s) var(--sp-m); border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-muted); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-s); }
+/* MCP 表单 */
+.cap-pw .input { min-width: 0; }
+/* 状态字母 */
+/* 文件：搜索、面包屑 */
+.tk-g.done { background: var(--ok); box-shadow: none; }
+.tk-st:hover .tk-g.done { background: var(--accent-fg); }
+.hb-av .avatar + .avatar { margin-left: calc(-1 * var(--sp-xs)); }
+.lr-more .lr-text .select, .lr-more .lr-text select { margin-left: var(--sp-xs); }
+/* from workspace.css */ .ws-focus-t { display: inline-flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-xs); font-weight: 500; color: var(--fg-strong); min-width: 0; white-space: nowrap; }
+/* from workspace.css */ .ws-fnotice { padding: 0 var(--sp-l) var(--sp-s); }
+/* from workspace.css */ .ws-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-hair); }   /* 列能收窄（长名字省略，不把格子撑出容器） */
+.ws-grid > * { min-width: 0; }   /* 格子里的行也能收窄（很窄的并排窗格里不横向滚动） */
+/* from workspace.css */ .ws-all { align-self: flex-start; margin: var(--sp-xs) var(--sp-s); font-size: var(--fs-m); }
+/* from workspace.css */ .ws-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-s); padding: var(--sp-s); }
+.ws-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line-strong); border-radius: var(--r-m); overflow: hidden; }
+/* from workspace.css */ .ws-dhead { display: flex; align-items: flex-start; gap: var(--sp-m); flex-wrap: wrap; }
+/* from workspace.css */ .ws-acts { display: flex; gap: var(--sp-xs); align-items: center; flex-wrap: wrap; }
+/* from workspace.css */ .ws-h { margin: 0; font-family: var(--font-display); line-height: 1.4; display: flex; align-items: center; gap: var(--sp-s); overflow-wrap: anywhere; min-width: 0; }
+/* from workspace.css */ .t-sans .ws-h { font-family: var(--font-text); }
+/* from workspace.css */ .ws-fold { display: flex; flex-direction: column; gap: var(--sp-s); }
+/* from workspace.css */ .ws-fold-h { display: flex; align-items: center; gap: var(--sp-xs); width: 100%; border: 0; background: none; padding: var(--sp-xs) var(--sp-hair); cursor: pointer; color: var(--fg-strong); font: 500 var(--fs-l)/1.4 var(--font-text); text-align: left; border-radius: var(--r-s); }
+/* from workspace.css */ .ws-fold-h:hover { color: var(--fg-strong); background: var(--bg-hover); }
+/* from workspace.css */ .ws-fold-b { display: flex; flex-direction: column; gap: var(--sp-s); }
+/* from workspace.css */ .ws-pre { margin: 0; font: var(--fs-s)/1.6 var(--font-mono); background: var(--bg-field); color: var(--fg-strong); border-radius: var(--r-m); padding: var(--sp-s) var(--sp-m); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* from workspace.css */ .kv .ws-warn { color: var(--warn); }
+/* from workspace.css */ .ws-prog { display: inline-block; width: calc(18 * var(--unit)); height: var(--unit); border-radius: var(--r-xs); background: var(--bg-field); overflow: hidden; vertical-align: middle; flex-shrink: 0; }
+/* from workspace.css */ .ws-prog i { display: block; height: 100%; background: var(--fg-muted); border-radius: var(--r-xs); }
+/* from workspace.css */ .ws-noted { display: flex; flex-direction: column; gap: var(--sp-l); }
+.ws-noted:has([data-fill]) { flex: 1; min-height: 0; }
+/* from cafe.css */ .cafe-recbtn { color: var(--danger); }
+/* from workspace.css */ .ws-tabs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-hair); }
+.ws-strip { display: flex; align-items: center; gap: var(--sp-hair); flex: 0 1 auto; min-width: 0; }
+.ws-strip > .ws-chip[aria-selected="true"] { scroll-initial-target: nearest; }
+/* from workspace.css */ .ws-chip { display: inline-flex; align-items: center; height: var(--ctl-s); border-radius: var(--r-m); color: var(--fg-muted); flex-shrink: 0; max-width: calc(44 * var(--unit)); }
+/* from workspace.css */ .ws-chip:hover { background: var(--bg-hover); color: var(--fg-strong); }
+/* from workspace.css */ .ws-chip[aria-selected="true"] { background: var(--bg-selected); color: var(--fg-strong); }   /* 选中的标签：标准的选中叠色，不是浮起的白块 */
+/* from workspace.css */ .ws-chip-t { height: var(--ctl-s); padding: 0 var(--sp-s); border: 0; background: none; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-xs); font: 400 var(--fs-m)/1 var(--font-text); min-width: 0; border-radius: var(--r-m); }
+/* from workspace.css */ .ws-chip[aria-selected="true"] .ws-chip-t { font-weight: 500; padding-right: var(--sp-hair); }
+/* from workspace.css */ .ws-chip-l { overflow: clip; white-space: nowrap; text-overflow: ellipsis; max-width: calc(28 * var(--unit)); }
+.ws-more { position: relative; display: inline-flex; flex-shrink: 0; }   /* 全部标签：组件库的图标按钮；有新动静的标签时角上一个点 */
+/* from workspace.css */ .ws-lock { color: var(--fg-faint); display: inline-grid; place-items: center; width: var(--ctl-xs); flex-shrink: 0; }
+/* from workspace.css */ .ws-headacts { display: inline-flex; gap: var(--sp-hair); flex-shrink: 0; }
+/* from workspace.css */ .ws-pop.ws-pop-sm { position-anchor: var(--u-anchor); inset: auto; position-area: bottom span-left; margin-block: var(--sp-xs); position-try-fallbacks: flip-block; width: min(calc(70 * var(--unit)), calc(100vw - var(--sp-l))); max-height: round(down, min(10 * var(--row-h-1), 100vh - 2 * var(--float-margin)), var(--row-h-1)); }   /* 全部标签：贴着它的按钮 */
+/* 宽弹窗内容（组件库 wideBody） */
+.dialog:has(.dlg-wide) { width: var(--span-9); }
+/* from cafe.css */ .row-title mark { background: var(--accent-soft); color: var(--fg-strong); border-radius: var(--r-xs); }
+/* from workspace.css */ .ws-danger { color: var(--danger); }
+/* from settings.css */ .sw-line { display: flex; align-items: center; gap: var(--sp-s); flex-wrap: wrap; padding-top: var(--sp-xs); min-width: 0; }
+/* from settings.css */ .dlg-body { display: flex; flex-direction: column; gap: var(--sp-m); min-width: 0; }
+/* from settings.css */ .dlg-body > div[data-pane] { display: flex; flex-direction: column; gap: var(--sp-m); }
+/* from settings.css */ .dlg-body > div[data-pane][hidden] { display: none; }
+/* from settings.css */ .env-rows { display: flex; flex-direction: column; gap: var(--sp-xs); margin-bottom: var(--sp-xs); }
+/* from settings.css */ .env-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--sp-xs); }
+/* from settings.css */ .custom-model { padding: var(--sp-xs) var(--sp-m) 0 calc(10 * var(--unit)); }
+/* from settings.css */ .chip-empty { font-size: var(--fs-m); }
+/* from capabilities.css */ .cap-dlg-h { margin-top: var(--sp-xs); }
+
+/* from cafe.css */ .cafe-glyph-sm { width: var(--ctl-xs); height: var(--ctl-xs); }
+/* from cafe.css */ .cafe-glyph-sm .ic { width: var(--ic-s); height: var(--ic-s); }
+/* from cafe.css */ @media (min-width: 961px) {
+  .app:has(> .nav.cafe-hidden) { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
+  .nav.cafe-hidden { display: none; }
+}
+/* from cafe.css */ @media (max-width: 960px) { .cafe-expand { display: none; } }
+/* from cafe.css */ .cafe-trow.renaming { height: var(--row-h); display: flex; flex-direction: column; justify-content: center; gap: var(--sp-hair); padding: 0 var(--sp-xs); }
+/* from cafe.css */ .cafe-trow.renaming .input { height: var(--ctl-s); }
+/* from cafe.css */ .cafe-gbtn .n { min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-strong); font-weight: 500; }
+/* from cafe.css */ .cafe-inbox { width: min(var(--span-6), calc(100vw - calc(18 * var(--unit)))); height: calc(100vh - 2 * var(--float-margin) - 2 * var(--sp-l));   /* 高度固定（铺满到窗口减去浮层边距，内容在里层滚动）：换视图、筛选时面不变大小，标题不动 */ padding: var(--sp-s) var(--sp-m) var(--sp-m); display: flex; flex-direction: column; gap: var(--sp-xs); }
+/* from cafe.css */ .cafe-inbox h4 { margin: var(--sp-xs) 0; font-size: var(--fs-l); font-weight: 500; color: var(--fg-strong); }
+/* from cafe.css */ .cafe-m { position: relative; display: flex; gap: var(--sp-s); align-items: flex-start; border-radius: var(--r-m); }
+/* from cafe.css */ .cafe-m.picking { padding: var(--sp-xs); }
+/* from cafe.css */ .cafe-m.picking > .cafe-check { margin-top: var(--sp-xs); }
+/* from cafe.css */ .cafe-acts { position: absolute; top: -18px; right: 0; display: flex; gap: 0; padding: var(--sp-hair); border-radius: var(--r-m); background: var(--bg-raised); box-shadow: var(--shadow-raised); opacity: 0; z-index: var(--z-raised); }
+/* from cafe.css */ @media (hover: none) { .cafe-acts { position: static; opacity: 1; box-shadow: none; background: none; align-self: flex-end; } .cafe-m { flex-wrap: wrap; } }
+/* from cafe.css */ .cafe-sysc > .ic { margin-top: var(--sp-hair); color: var(--fg-muted); }
+.cafe-tick { position: relative; flex: none; display: grid; place-items: center; height: calc(3px + var(--sp-xs)); width: var(--ic-m); margin-inline: auto; border: 0; padding: 0; background: none; cursor: pointer; --tick-w: calc(2 * var(--unit)); }
+.cafe-tick::before { content: ""; width: var(--tick-w); height: 3px; border-radius: var(--r-xs); background: var(--c, var(--identity-fallback)); filter: grayscale(var(--tick-veil)); opacity: var(--op-wash); transition: width var(--dur-fast), filter var(--dur-fast), opacity var(--dur-fast); pointer-events: none; }
+.cafe-tick:has(+ .cafe-tick:hover), .cafe-tick:hover + .cafe-tick { --tick-w: calc(3 * var(--unit)); }
+.cafe-tick:hover, .cafe-tick:focus-visible { --tick-w: calc(4 * var(--unit)); }
+.cafe-tick:is([data-vis], :hover, :focus-visible)::before { filter: none; opacity: 1; }   /* 视口外：成员色上蒙一层灰（还看得出是谁），视口里和悬停时是原色 */
+.cafe-tick.s::before { height: 2px; }
+.cafe-tick.older { cursor: default; }
+.cafe-tick.older::before { height: 2px; background: repeating-linear-gradient(90deg, var(--line-strong) 0 4px, transparent 4px 7px); }
+/* from cafe.css */ .composer-wrap { padding: 0 var(--gutter-main) var(--sp-l); flex-shrink: 0; position: relative; }
+/* from cafe.css */ .cafe-latest { position: relative; z-index: var(--z-raised); height: var(--ctl-s); padding: 0 var(--sp-m); border: 0; border-radius: var(--r-full); background: var(--surf-secondary); backdrop-filter: blur(var(--blur-soft)); -webkit-backdrop-filter: blur(var(--blur-soft)); box-shadow: var(--shadow-low); color: var(--fg-strong); font-size: var(--fs-s); display: inline-flex; align-items: center; gap: var(--sp-xs); cursor: pointer; flex: none; scale: var(--jump-scale, 0); animation: var(--jump-anim, jump-vis linear forwards);   /* forwards：滚到最顶（时间线 100%）时仍然露出——100% 正好是区间的终点 */ animation-timeline: --chat-stream; animation-range: 240px 100% }
+/* from cafe.css */ .composer textarea[disabled], .composer .input-title[disabled] { opacity: var(--op-disabled); }
+/* from cafe.css */ .cafe-reader { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-l) var(--sp-l); }
+/* from cafe.css */ @media (max-width: 1100px) { .cafe-two { grid-template-columns: minmax(0, 1fr); } }
+/* from cafe.css */ .main-col .btn.nav-toggle { display: none; }
+/* from cafe.css */ @media (max-width: 960px) { .main-col .btn.nav-toggle { display: inline-flex; } }
+/* from cafe.css */ .cafe-m .msg, .cafe-m .user-msg { position: relative; }
+/* from cafe.css */ .cafe-acts.theirs { right: 0; left: auto; top: auto; z-index: var(--z-raised); bottom: calc(100% + 4px); }
+/* from cafe.css */ .cafe-acts.mine { left: 0; right: auto; top: auto; z-index: var(--z-raised); bottom: calc(100% + 4px); }
+/* 消息工具条锚在这条消息的正文上（结构：你的消息是气泡，否则是作者行之后的第一块）；每条消息一个锚点作用域 */
+.msg > .bubble, .msg:not(:has(> .bubble)) > :nth-child(1 of :not(.author-row, .cafe-acts)) { anchor-name: --msg-body, attr(data-aname type(<custom-ident>), --msg-body); }   /* 结构锚点 + 自己的锚点名并存 */
+.msg > .cafe-acts.theirs { top: auto; transform: none; right: 0; bottom: calc(anchor(--msg-body top, 100%) + var(--sp-xs)); }
+.msg > .cafe-acts.mine { top: auto; right: auto; left: anchor(--msg-body left, 0px); bottom: calc(anchor(--msg-body top, 100%) + var(--sp-hair)); }
+/* from cafe.css */ .cafe-m .author-row { position: relative; }
+/* from workspace.css */ @media (min-width: 961px) {
+  .split.has-panel { grid-template-columns: minmax(0, 1fr) var(--ws-w, min(var(--span-7), 44%)); }
+  .panel.ws { position: relative; }
+}
+/* from workspace.css */ .ws-head { gap: var(--sp-xs); padding: 0 var(--gutter-panel); }
+/* from workspace.css */ .ws-chip.side:not([aria-selected="true"]) { background: var(--bg-hover); color: var(--fg-strong); }
+/* from workspace.css */ .ws-chip.preview .ws-chip-l { font-style: italic; }
+/* from workspace.css */ .ws-chip .ic { flex-shrink: 0; }
+/* from workspace.css */ 
+/* 工作台的弹窗（启动面板）：弹窗栈里画，初始位置是工作台的右上角（锚在工作台上，不量坐标） */
+.panel.ws { anchor-name: --ws-panel, attr(data-aname type(<custom-ident>), --ws-panel); }   /* 结构锚点（启动面板在工作台的角上）+ 自己的锚点名并存 */
+.ws-pop { position: fixed; position-anchor: var(--u-anchor); inset: auto; position-area: bottom span-left; position-try-fallbacks: flip-block, --ws-left; margin: var(--sp-xs); width: min(var(--span-9), calc(100vw - 2 * var(--float-margin))); max-height: round(down, min(100vh - 2 * var(--float-margin), 100%), var(--row-h-1)); gap: var(--sp-hairline); }   /* 启动面板：默认大小放得下全部内置项（三列），只受视口限制（窗口减去边距）；里面的滚动只是小窗口 / 很多插件面板时的兜底 */
+.ws-launcher { width: min(var(--span-6), calc(100vw - 2 * var(--float-margin))); }   /* 启动菜单：两栏，展开时不比工作台宽 */
+.float-head { display: flex; align-items: center; gap: var(--sp-xs); flex: none; }   /* 浮层的头（标题 / 搜索 + 头上的操作 + ×）：一行，不随里层滚动 */
+/* from workspace.css */ .ws-dhead > .grow { flex: 1; min-width: calc(45 * var(--unit)); display: flex; flex-direction: column; gap: var(--sp-xs); }
+/* from workspace.css */ .ws-fold-h .ic { color: var(--fg-muted); flex-shrink: 0; }
+/* from workspace.css */ 
+.ws-fold-s { min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }   /* 标题后面的一行补充（当前值），长了省略 */
+/* from workspace.css */ .ws-fold-h .grow { flex: 1; }
+/* from workspace.css */ .ws-prog.warn i { background: var(--warn); }
+/* from workspace.css */ .ws-prog.danger i { background: var(--danger); }
+/* from workspace.css */ .group > .ws-prog, .ws-fold-b > .ws-prog, div > .ws-prog:only-child { width: 100%; }
+/* from workspace.css */ @media (max-width: 640px) {
+  .ws-grid { grid-template-columns: 1fr; }
+}
+/* from settings.css */ .sw-line .input { flex: 1; min-width: calc(40 * var(--unit)); }
+/* from settings.css */ .err-t { color: var(--danger); }
+/* from settings.css */ .warn-t { color: var(--warn); }
+.tag-ed > .ifield { flex: 0 1 calc(50 * var(--unit)); height: var(--ctl-s); }   /* 标签编辑器里加一项的输入框：和标签一样矮一档 */
+/* from settings.css */ .dlg-err { margin: 0; font-size: var(--fs-m); color: var(--fg-strong); }
+/* from settings.css */ .dialog:has(.dlg-body.wide) { width: var(--span-10); }
+/* from settings.css */ .seg-text { min-height: calc(6 * var(--row-h-1)); font-size: var(--fs-m); }
+/* from settings.css */ @media (max-width: 640px) {
+  .row.setting .row-trail .mono.faint { display: none; }
+}
+/* from settings.css */ @media (max-width: 640px) {
+  .row.setting { flex-wrap: wrap; }
+  .row.setting .row-trail { flex-wrap: wrap; flex-shrink: 1; min-width: 0; max-width: 100%; }
+  .row.setting .row-trail .mono { overflow-wrap: anywhere; }
+}
+/* from capabilities.css */ @media (max-width: 640px) {
+  .cap-kv { grid-template-columns: minmax(0, 1fr) var(--ctl-s); }
+  .cap-kv .cap-pw { grid-column: 1 / 2; }
+}
+/* from ws-ops.css */ .lr-col > .ic { display: inline-block; vertical-align: -1px; }
+/* from ws-ops.css */ .lr-text > .btn-icon:first-child { margin-left: calc(-1 * var(--sp-xs)); }
+/* from ws-code.css */ .panel-body:has(.tm), .panel-body:has(.wpv) { padding-bottom: var(--sp-m); }
+/* from ws-code.css */ .panel-body > :has(.tm), .panel-body > :has(.wpv), .panel-body > .vw-view > :is(.tm, .wpv) { flex: 1; min-height: 0; }
+/* from ws-code.css */ .wpv-tab.on { background: var(--bg-page); color: var(--fg-strong); }
+/* from ws-code.css */ .wpv-tab:not(.on):hover { color: var(--accent-fg); }
+/* from ws-code.css */ .wpv-tab > .btn-icon { flex: none; margin: 0 var(--sp-hair) 0 calc(-1 * var(--sp-xl)); opacity: 0; }   /* 关闭排在名字后面，叠进名字按钮留出的右边距（负外边距 = 声明过的叠放），不再绝对定位 */
+/* from ws-code.css */ .wpv-tab:hover > .btn-icon, .wpv-tab.on > .btn-icon, .wpv-tab:focus-within > .btn-icon { opacity: 1; }
+/* from ws-code.css */ .wpv-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-s); color: var(--fg-faint); font-size: var(--fs-m); }
+/* from ws-code.css */ .wpv-app-nav i.on { background: var(--accent-wash); }
+/* from ws-code.css */ .wpv-app-main > i.short { width: 55%; }
+/* from ws-code.css */ .wpv-app-tabs span.on { background: var(--bg-group); color: var(--fg-strong); }
+/* from ws-code.css */ .wpv-sb-side .on { color: var(--info); }
+/* from ws-code.css */ @media (max-width: 520px) { .wpv-tab { flex-basis: calc(28 * var(--unit)); } }
+/* from ws-items.css */ .tk-g.doing { box-shadow: inset 0 0 0 1.5px var(--info); background: radial-gradient(circle, var(--info) 0 3px, transparent 3.5px); }
+/* from ws-items.css */ .tk-g.blocked { box-shadow: inset 0 0 0 1.5px var(--warn); background: linear-gradient(135deg, transparent 44%, var(--warn) 44% 56%, transparent 56%); }
+/* from cafe.css */ .cafe-att.lost { color: var(--warn); }
+@position-try --ws-left { position-area: left span-bottom; }   /* 启动面板贴着打开它的按钮：竖条上的“更多”在右边缘，往左开 */

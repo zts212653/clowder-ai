@@ -1,0 +1,19 @@
+$ pnpm --filter @cat-cafe/api build
+
+
+> @cat-cafe/api@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/api
+> pnpm --dir ../shared build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-memory-read-window.mjs && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs
+
+
+> @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/shared
+> tsc
+
+
+> @cat-cafe/mcp-server@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/mcp-server
+> node ./scripts/prepare-secret-runtime.mjs && tsc
+
+Secret runtime: staged 94 package-local inputs
+Built bounded SQLite read-window backend
+F299 provider request recorder census OK (12 implementers)
+
+Exit code: 0

@@ -1,0 +1,331 @@
+$ pnpm exec biome check desktop/desktop-update-runtime.js desktop/preload.js desktop/preload.test.js desktop/update-prompt-controller.js desktop/update-prompt-controller.test.js packages/api/src/domains/cats/services/agents/routing/route-helpers.ts packages/api/src/domains/cats/services/stores/ports/MessageStore.ts packages/api/src/routes/config-chat-background.ts packages/api/src/routes/config.ts packages/api/src/routes/recent-works-view.ts packages/api/src/routes/threads.ts packages/api/test/config/appearance-config.test.ts packages/api/test/f232-recent-works-query.test.js packages/shared/src/chat-background.ts packages/shared/src/types/user-preferences.ts packages/web/public/pdl-app/appearance.js packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/project.js packages/web/src/components/__tests__/DesktopUpdatePrompt.test.tsx packages/web/src/components/__tests__/DesktopUpdateSettingsPanel.test.tsx packages/web/src/desktop-bridge.d.ts packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts packages/web/src/hooks/agent-messages/active-handler.ts packages/web/src/hooks/agent-messages/background-handler.ts packages/web/src/hooks/agent-messages/tool-events.ts packages/web/src/hooks/agent-messages/types.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/operations-bindings.test.ts packages/web/src/pdl/__tests__/preview-bindings.test.ts packages/web/src/pdl/__tests__/project-data-host.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/useHomeBindings.ts packages/web/src/stores/chat-types.ts packages/api/test/pdl-tool-detail.test.ts packages/web/public/pdl-app/home.js packages/web/src/pdl/__tests__/desktop-update-bindings.test.ts packages/web/src/pdl/__tests__/recent-works.test.ts packages/web/src/pdl/useDesktopUpdateBindings.ts packages/web/src/pdl/useRecentWorks.ts
+
+packages/api/src/routes/config-chat-background.ts:93:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    91 │     const current = images();
+    92 │     if (current.length >= 20) return reply.status(409).send({ error: 'Background catalogue is full' });
+  > 93 │     const id = 'user.' + randomUUID();
+       │                ^^^^^^^^^^^^^^^^^^^^^^
+    94 │     const image: AppearanceImage = {
+    95 │       id,
+
+  i Unsafe fix: Use a template literal.
+
+     91  91 │       const current = images();
+     92  92 │       if (current.length >= 20) return reply.status(409).send({ error: 'Background catalogue is full' });
+     93     │ - ····const·id·=·'user.'·+·randomUUID();
+         93 │ + ····const·id·=·`user.${randomUUID()}`;
+     94  94 │       const image: AppearanceImage = {
+     95  95 │         id,
+
+
+packages/api/test/f232-recent-works-query.test.js:171:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    169 │       await app.inject({
+    170 │         method: 'GET',
+  > 171 │         url: '/api/artifacts?view=recent-works&limit=3&projectId=' + encodeURIComponent(project),
+        │              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    172 │         headers: AUTH,
+    173 │       });
+
+  i Unsafe fix: Use a template literal.
+
+    169 169 │         await app.inject({
+    170 170 │           method: 'GET',
+    171     │ - ········url:·'/api/artifacts?view=recent-works&limit=3&projectId='·+·encodeURIComponent(project),
+        171 │ + ········url:·`/api/artifacts?view=recent-works&limit=3&projectId=${encodeURIComponent(project)}`,
+    172 172 │           headers: AUTH,
+    173 173 │         });
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:981:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 36 detected (max: 15).
+
+    979 │  * skips for span synthesis but still surfaces in the Hub history view.
+    980 │  */
+  > 981 │ export function toStoredToolEvent(
+        │                 ^^^^^^^^^^^^^^^^^
+    982 │   msg: AgentMessage,
+    983 │   executionRef = msg.turnInvocationId ?? msg.invocationId,
+
+  i Please refactor this function to reduce its complexity score from 36 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:1747:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 118 detected (max: 15).
+
+    1745 │ }
+    1746 │
+  > 1747 │ async function assembleIncrementalContextInternal(
+         │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1748 │   deps: RouteStrategyDeps,
+    1749 │   userId: string,
+
+  i Please refactor this function to reduce its complexity score from 118 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2143:86 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    2141 │   const baseMap = new Map(buildMessageMap(relevant));
+    2142 │   const missingReplyIds = [
+  > 2143 │     ...new Set(capped.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+         │                                                                                      ^^^^^^^^^^
+    2144 │   ];
+    2145 │   if (missingReplyIds.length > 0) {
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2298:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 130 detected (max: 15).
+
+    2296 │  * Burst detection → tombstone → evidence recall → tool scrub → compact context.
+    2297 │  */
+  > 2298 │ async function assembleSmartWindowContext(
+         │                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2299 │   deps: RouteStrategyDeps,
+    2300 │   relevant: StoredMessage[],
+
+  i Please refactor this function to reduce its complexity score from 130 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2497:93 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    2495 │   const baseMap = new Map(buildMessageMap(relevant));
+    2496 │   const missingReplyIds = [
+  > 2497 │     ...new Set(scrubbedBurst.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+         │                                                                                             ^^^^^^^^^^
+    2498 │   ];
+    2499 │   if (missingReplyIds.length > 0) {
+
+
+packages/api/src/routes/config-chat-background.ts:67:65 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    65 │     return readChatBackgroundPreferences(opts.projectRoot);
+    66 │   });
+  > 67 │   app.put('/api/config/chat-background', async (request, reply) => {
+       │                                                                 ^^^
+    68 │     const userId = owner(request, reply);
+    69 │     if (!userId) return { error: 'Owner identity required' };
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:177:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    175 │       continue;
+    176 │     }
+  > 177 │     const name = match[1]!;
+        │                  ^^^^^^^^^
+    178 │     if (!updates.has(name)) {
+    179 │       nextLines.push(line);
+
+
+packages/api/src/routes/config.ts:277:85 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    275 │   });
+    276 │
+  > 277 │   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {
+        │                                                                                     ^^^
+    278 │     const parsed = coCreatorPatchSchema.safeParse(request.body);
+    279 │     if (!parsed.success) {
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:361:55 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━━
+
+  ! Excessive complexity of 40 detected (max: 15).
+
+    359 │   });
+    360 │
+  > 361 │   app.patch('/api/config/env', async (request, reply) => {
+        │                                                       ^^^
+    362 │     const parsed = envPatchSchema.safeParse(request.body);
+    363 │     if (!parsed.success) {
+
+  i Please refactor this function to reduce its complexity score from 40 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:440:46 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    438 │     }
+    439 │
+  > 440 │     const auditOperator = touchesSensitive ? sessionOperator! : (sessionOperator ?? operator);
+        │                                              ^^^^^^^^^^^^^^^^
+    441 │     try {
+    442 │       await auditLog.append({
+
+
+packages/api/src/routes/config.ts:124:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This variable runtimeStatusQuerySchema is unused.
+
+    122 │ });
+    123 │
+  > 124 │ const runtimeStatusQuerySchema = z.object({
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^
+    125 │   category: z.string().optional(),
+    126 │ });
+
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+
+  i Unsafe fix: If this is intentional, prepend runtimeStatusQuerySchema with an underscore.
+
+    122 122 │   });
+    123 123 │
+    124     │ - const·runtimeStatusQuerySchema·=·z.object({
+        124 │ + const·_runtimeStatusQuerySchema·=·z.object({
+    125 125 │     category: z.string().optional(),
+    126 126 │   });
+
+
+packages/api/src/routes/config.ts:147:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! This function resolveOperator is unused.
+
+    145 │ }
+    146 │
+  > 147 │ function resolveOperator(raw: unknown): string | null {
+        │          ^^^^^^^^^^^^^^^
+    148 │   if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+    149 │   if (Array.isArray(raw)) {
+
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+
+  i Unsafe fix: If this is intentional, prepend resolveOperator with an underscore.
+
+    145 145 │   }
+    146 146 │
+    147     │ - function·resolveOperator(raw:·unknown):·string·|·null·{
+        147 │ + function·_resolveOperator(raw:·unknown):·string·|·null·{
+    148 148 │     if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+    149 149 │     if (Array.isArray(raw)) {
+
+
+packages/api/src/routes/threads.ts:710:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    708 │ });
+    709 │
+  > 710 │ async function resolveCreateThreadProjectPath(
+        │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    711 │   projectPath: string | undefined,
+    712 │   bootcampState: BootcampStateV1 | undefined,
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/api/test/pdl-tool-detail.test.ts:9:15 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     7 │   const input = { path: 'x'.repeat(600) },
+     8 │     content = 'actual result '.repeat(400);
+   > 9 │   const use = toStoredToolEvent(
+       │               ^^^^^^^^^^^^^^^^^^
+  > 10 │     {
+        ...
+  > 18 │     'turn',
+  > 19 │   )!;
+       │   ^^
+    20 │   const result = toStoredToolEvent(
+    21 │     {
+
+
+packages/api/test/pdl-tool-detail.test.ts:20:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    18 │     'turn',
+    19 │   )!;
+  > 20 │   const result = toStoredToolEvent(
+       │                  ^^^^^^^^^^^^^^^^^^
+  > 21 │     {
+        ...
+  > 30 │     'turn',
+  > 31 │   )!;
+       │   ^^
+    32 │   assert.ok(use.detail!.length < 600);
+    33 │   assert.equal(use.inputDetail, JSON.stringify(input));
+
+
+packages/api/test/pdl-tool-detail.test.ts:32:13 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    30 │     'turn',
+    31 │   )!;
+  > 32 │   assert.ok(use.detail!.length < 600);
+       │             ^^^^^^^^^^^
+    33 │   assert.equal(use.inputDetail, JSON.stringify(input));
+    34 │   assert.equal(use.toolName, 'read_file');
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    30 30 │       'turn',
+    31 31 │     )!;
+    32    │ - ··assert.ok(use.detail!.length·<·600);
+       32 │ + ··assert.ok(use.detail?.length·<·600);
+    33 33 │     assert.equal(use.inputDetail, JSON.stringify(input));
+    34 34 │     assert.equal(use.toolName, 'read_file');
+
+
+packages/api/test/pdl-tool-detail.test.ts:35:13 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    33 │   assert.equal(use.inputDetail, JSON.stringify(input));
+    34 │   assert.equal(use.toolName, 'read_file');
+  > 35 │   assert.ok(result.detail!.length < content.length);
+       │             ^^^^^^^^^^^^^^
+    36 │   assert.equal(result.resultDetail, content);
+    37 │   assert.equal(result.inputDetail, JSON.stringify(input));
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    33 33 │     assert.equal(use.inputDetail, JSON.stringify(input));
+    34 34 │     assert.equal(use.toolName, 'read_file');
+    35    │ - ··assert.ok(result.detail!.length·<·content.length);
+       35 │ + ··assert.ok(result.detail?.length·<·content.length);
+    36 36 │     assert.equal(result.resultDetail, content);
+    37 37 │     assert.equal(result.inputDetail, JSON.stringify(input));
+
+
+packages/api/test/pdl-tool-detail.test.ts:40:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    38 │   assert.equal(result.status, 'error');
+    39 │   assert.equal(result.executionRef, use.executionRef);
+  > 40 │   const absent = toStoredToolEvent({ type: 'tool_result', catId: 'codex' as CatId, timestamp: 3 }, 'turn')!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    41 │   assert.equal(absent.resultDetail, undefined);
+    42 │   assert.equal(absent.inputDetail, undefined);
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 807.
+Checked 44 files in 421ms. No fixes applied.
+Found 776 warnings.
+Found 51 infos.
+
+Exit code: 0

@@ -1,0 +1,399 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__ src/hooks/__tests__/useSendMessage-durable-receipt.test.ts src/components/__tests__/chat-input-draft-persistence.test.ts src/components/rich/__tests__/RuntimeConversationCard.test.tsx src/components/rich/__tests__/ScheduleMutationProposalCard-owner.test.tsx src/components/rich/__tests__/RuntimeInteractionCardConcurrency.test.tsx src/components/__tests__/delivery-response-ownership.test.tsx src/components/content-review/__tests__/review-command-settlement.test.tsx src/components/workspace/__tests__/MeetingShareControl.test.tsx src/components/reply-layers/__tests__/reply-output.test.ts src/components/workbench/content-review/__tests__/workspace-modification-source.test.ts src/components/workspace/__tests__/workspace-file-quote.test.ts src/hooks/__tests__/useEntrustedWorkProjection-retry.test.tsx src/components/routing-context/__tests__/routing-context-commands.test.ts src/components/routing-context/__tests__/routing-context-ownership.test.ts src/components/routing-context/__tests__/team-member-projection.test.ts src/lib/story-player/__tests__ src/components/workspace/__tests__/usePreviewBridge.admission.test.tsx src/components/workspace/__tests__/BrowserPanel.lifecycle.test.tsx src/components/workspace/__tests__/BrowserPanel.visible-page-path-switch.test.tsx src/components/workspace/__tests__/BrowserPanel.visible-page-admission.test.tsx src/components/workspace/__tests__/BrowserPanel.unavailable.test.tsx src/components/__tests__/preview-bridge-origin.test.ts src/components/capability-evolution/__tests__/EvolutionChangePanel.test.tsx src/components/capability-evolution/__tests__/evolution-progress-request.test.tsx src/components/capability-evolution/__tests__/evolution-preparation-lifecycle.test.tsx src/components/capability-evolution/__tests__/evolution-reading.test.tsx src/components/__tests__/governance-installer.test.tsx src/components/workbench/__tests__/project-review-panel.test.tsx src/components/workbench/__tests__/project-review-live.test.tsx src/components/workbench/__tests__/video-project-review-comparison.test.tsx src/hooks/__tests__/usePagedGlobalWorks.test.tsx src/hooks/__tests__/usePagedGlobalWorks-source-refresh.test.tsx src/hooks/__tests__/useGlobalArtifacts-owner-human501.test.tsx src/components/__tests__/appended-input-receipts.test.ts src/components/__tests__/interactive-block.test.ts src/components/__tests__/interactive-block-group.test.ts src/components/__tests__/feature-bird-eye-panel.test.ts src/components/__tests__/hub-quota-board-v2.test.ts src/components/__tests__/workspace-focus-mode.test.ts src/components/__tests__/f190-visual-contract.test.ts src/components/__tests__/thinking-mode-toggle.test.ts src/components/__tests__/composer-routing-preview.test.tsx src/components/workspace/__tests__/ConsolePanel.test.tsx src/components/workspace/__tests__/ConsolePanelV2.test.tsx src/components/workspace/trajectory/__tests__/InvocationTrajectoryDetail.test.tsx src/components/capability-evolution/__tests__/EvolutionAttributionPanel.test.tsx src/components/rich/__tests__/original-terminal-effect.test.tsx src/components/rich/__tests__/eval-repair-original.test.tsx src/components/rich/__tests__/ScheduleMutationProposalCard.test.tsx src/components/rich/__tests__/PersonMemoryProposalCard.test.tsx src/components/rich/__tests__/person-memory-original.test.tsx src/lib/__tests__/approval-result-read.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores draft when remounting with same threadId
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > hydrates saved reply drafts before mount-time persistence can clear them
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > maintains independent drafts per thread
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > clears draft after sending
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > preserves the session text draft through the initial SSR hydration commit
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > shows a session-restored context chip after hydration, not inside it
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores and sends structured context attachments without Markdown text
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores and sends structured context attachments without Markdown text
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > replaces an edited annotation in place without renumbering mixed draft attachments
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores image preview when remounting with same threadId
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > maintains independent image previews per thread across switches
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+ ✓ src/components/capability-evolution/__tests__/evolution-reading.test.tsx (13 tests) 1269ms
+     ✓ clears owner-current claims on authorization loss while retaining Program adoption truth  301ms
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > sends restored images and clears image drafts after sending
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > does not persist draft when threadId is undefined
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > syncs text drafts to sessionStorage for cross-navigation survival
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > clears sessionStorage entry when draft is emptied
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+ ✓ src/components/__tests__/chat-input-draft-persistence.test.ts (42 tests) 1668ms
+ ✓ src/components/__tests__/thinking-mode-toggle.test.ts (7 tests) 9096ms
+     ✓ default: thinking block is collapsed  8623ms
+     ✓ thread-level bubble override loaded async beats initial global default after refresh-like hydration  391ms
+ ✓ src/components/__tests__/composer-routing-preview.test.tsx (15 tests) 437ms
+ ✓ src/components/rich/__tests__/person-memory-original.test.tsx (25 tests) 865ms
+ ✓ src/components/__tests__/hub-quota-board-v2.test.ts (33 tests) 449ms
+ ✓ src/components/rich/__tests__/eval-repair-original.test.tsx (18 tests) 685ms
+ ✓ src/components/rich/__tests__/ScheduleMutationProposalCard.test.tsx (22 tests) 308ms
+ ✓ src/components/capability-evolution/__tests__/evolution-progress-request.test.tsx (7 tests) 360ms
+ ✓ src/components/__tests__/feature-bird-eye-panel.test.ts (10 tests) 118ms
+ ✓ src/components/workspace/trajectory/__tests__/InvocationTrajectoryDetail.test.tsx (11 tests) 141ms
+ ✓ src/components/rich/__tests__/original-terminal-effect.test.tsx (12 tests) 122ms
+ ✓ src/pdl/__tests__/r115-bindings.test.ts (7 tests) 95ms
+ ✓ src/components/workbench/__tests__/video-project-review-comparison.test.tsx (12 tests) 120ms
+ ✓ src/pdl/__tests__/recall-consent.test.ts (1 test) 55ms
+ ✓ src/components/rich/__tests__/RuntimeConversationCard.test.tsx (16 tests) 110ms
+ ✓ src/pdl/__tests__/operations-bindings.test.ts (8 tests) 78ms
+ ✓ src/components/capability-evolution/__tests__/evolution-preparation-lifecycle.test.tsx (9 tests) 98ms
+ ✓ src/pdl/__tests__/review-bindings.test.tsx (7 tests) 125ms
+ ✓ src/pdl/__tests__/remaining-bindings.test.ts (6 tests) 105ms
+ ✓ src/components/workbench/__tests__/project-review-panel.test.tsx (5 tests) 78ms
+ ✓ src/components/capability-evolution/__tests__/EvolutionChangePanel.test.tsx (14 tests) 82ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (8 tests) 172ms
+ ✓ src/components/workspace/__tests__/MeetingShareControl.test.tsx (11 tests) 119ms
+ ✓ src/pdl/__tests__/voice-bindings.test.ts (11 tests) 97ms
+ ✓ src/pdl/__tests__/preview-bindings.test.ts (3 tests) 184ms
+ ✓ src/components/workspace/__tests__/BrowserPanel.lifecycle.test.tsx (5 tests) 116ms
+ ✓ src/components/workspace/__tests__/BrowserPanel.unavailable.test.tsx (3 tests) 72ms
+ ✓ src/components/content-review/__tests__/review-command-settlement.test.tsx (24 tests) 146ms
+ ✓ src/components/rich/__tests__/ScheduleMutationProposalCard-owner.test.tsx (2 tests) 98ms
+ ✓ src/pdl/__tests__/memory-bindings.test.ts (4 tests) 67ms
+ ✓ src/components/__tests__/workspace-focus-mode.test.ts (8 tests) 58ms
+ ✓ src/components/__tests__/governance-installer.test.tsx (4 tests) 41ms
+ ✓ src/pdl/__tests__/execution-bindings.test.ts (3 tests) 31ms
+ ✓ src/components/workspace/__tests__/BrowserPanel.visible-page-path-switch.test.tsx (1 test) 28ms
+ ✓ src/components/rich/__tests__/RuntimeInteractionCardConcurrency.test.tsx (4 tests) 32ms
+ ✓ src/components/__tests__/f190-visual-contract.test.ts (167 tests) 46ms
+ ✓ src/pdl/__tests__/r114-bindings.test.ts (3 tests) 34ms
+ ✓ src/components/workspace/__tests__/BrowserPanel.visible-page-admission.test.tsx (1 test) 29ms
+ ✓ src/pdl/__tests__/terminal-bindings.test.ts (5 tests) 40ms
+ ✓ src/hooks/__tests__/usePagedGlobalWorks.test.tsx (7 tests) 27ms
+ ✓ src/components/capability-evolution/__tests__/EvolutionAttributionPanel.test.tsx (8 tests) 25ms
+ ✓ src/pdl/__tests__/ops-daemon.test.ts (2 tests) 34ms
+ ✓ src/pdl/__tests__/film-bindings.test.ts (3 tests) 31ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (10 tests) 56ms
+ ✓ src/pdl/__tests__/runtime-questions.test.ts (6 tests) 35ms
+ ✓ src/pdl/__tests__/platform.test.ts (4 tests) 67ms
+ ✓ src/components/workspace/__tests__/usePreviewBridge.admission.test.tsx (1 test) 40ms
+ ✓ src/components/workspace/__tests__/ConsolePanelV2.test.tsx (3 tests) 52ms
+ ✓ src/pdl/__tests__/runtime.test.ts (34 tests) 28936ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  3391ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  1270ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  1354ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  963ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  1066ms
+     ✓ retains the existing owner read-error component once without adding a toast  1029ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  1532ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  987ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  1032ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  996ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  554ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  790ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts  333ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  817ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  767ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  866ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  794ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  514ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  788ms
+     ✓ opens and leaves Team details through the native workbench stack  685ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  648ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls  367ms
+     ✓ preserves the typed work reference through the actual copied canon button  308ms
+     ✓ sends input through the registered action without replacing the active textarea  348ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  351ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  597ms
+     ✓ resolves draft-append consent only from the engine dialog decision  534ms
+     ✓ leaves text paste native while forwarding image paste through the application port  901ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  3334ms
+ ✓ src/components/workbench/__tests__/project-review-live.test.tsx (1 test) 58ms
+ ✓ src/pdl/__tests__/canon-bindings.test.ts (2 tests) 61ms
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > does not keep a delivered input in Queue while its member is still processing
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > does not keep a delivered input in Queue while its member is still processing
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > keeps the appended source under a failed response without a separate read outcome
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > keeps the appended source under a failed response without a separate read outcome
+Warning: The current testing environment is not configured to support act(...)
+
+ ✓ src/components/__tests__/delivery-response-ownership.test.tsx (2 tests) 52ms
+ ✓ src/hooks/__tests__/useSendMessage-durable-receipt.test.ts (5 tests) 52ms
+ ✓ src/pdl/__tests__/rich-models.test.ts (3 tests) 42ms
+ ✓ src/pdl/__tests__/project-data-host.test.tsx (2 tests) 24ms
+ ✓ src/hooks/__tests__/usePagedGlobalWorks-source-refresh.test.tsx (2 tests) 22ms
+ ✓ src/hooks/__tests__/useEntrustedWorkProjection-retry.test.tsx (4 tests) 32ms
+ ✓ src/components/routing-context/__tests__/routing-context-ownership.test.ts (4 tests) 17ms
+ ✓ src/pdl/__tests__/project-data.test.ts (3 tests) 21ms
+ ✓ src/components/routing-context/__tests__/routing-context-commands.test.ts (3 tests) 14ms
+ ✓ src/lib/story-player/__tests__/bullet-time.test.ts (14 tests) 16ms
+ ✓ src/hooks/__tests__/useGlobalArtifacts-owner-human501.test.tsx (1 test) 12ms
+ ✓ src/lib/story-player/__tests__/thread-replay-fetcher.test.ts (10 tests) 24ms
+ ✓ src/components/reply-layers/__tests__/reply-output.test.ts (15 tests) 18ms
+ ✓ src/components/workspace/__tests__/workspace-file-quote.test.ts (6 tests) 9ms
+ ✓ src/pdl/__tests__/owner-api.test.ts (7 tests) 18ms
+ ✓ src/lib/story-player/__tests__/thread-message-events.test.ts (15 tests) 15ms
+ ✓ src/lib/story-player/__tests__/scene-planner.test.ts (12 tests) 10ms
+ ✓ src/components/rich/__tests__/PersonMemoryProposalCard.test.tsx (5 tests) 15ms
+ ✓ src/pdl/__tests__/message-selection.test.ts (2 tests) 7ms
+ ✓ src/components/workspace/__tests__/ConsolePanel.test.tsx (4 tests) 4ms
+ ✓ src/lib/story-player/__tests__/cross-feature-detector.test.ts (16 tests) 6ms
+ ✓ src/pdl/__tests__/interactive-actions.test.ts (5 tests) 5ms
+ ✓ src/lib/story-player/__tests__/adapter.test.ts (16 tests) 5ms
+ ✓ src/lib/story-player/__tests__/bullet-time-trigger.test.ts (9 tests) 5ms
+ ✓ src/lib/__tests__/approval-result-read.test.ts (7 tests) 4ms
+ ✓ src/lib/story-player/__tests__/chapters.test.ts (19 tests) 5ms
+ ✓ src/lib/story-player/__tests__/adapter-system-info.test.ts (9 tests) 4ms
+ ✓ src/lib/story-player/__tests__/adapter-pairing.test.ts (11 tests) 17ms
+ ✓ src/lib/story-player/__tests__/replay-chat-bridge.test.ts (14 tests) 9ms
+ ✓ src/lib/story-player/__tests__/replay-engine.test.ts (31 tests) 5ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (4 tests) 3ms
+ ✓ src/lib/story-player/__tests__/adaptive-engine.test.ts (19 tests) 4ms
+ ✓ src/lib/story-player/__tests__/acp-final-input-pairing.test.ts (5 tests) 10ms
+ ✓ src/lib/story-player/__tests__/build-thread-panels.test.ts (13 tests) 3ms
+ ✓ src/lib/story-player/__tests__/adaptive-pass-ball.test.ts (22 tests) 4ms
+ ✓ src/lib/story-player/__tests__/event-density.test.ts (12 tests) 53ms
+ ✓ src/pdl/__tests__/delivery-models.test.ts (6 tests) 26ms
+ ✓ src/lib/story-player/__tests__/active-thread-tracker.test.ts (13 tests) 26ms
+ ✓ src/lib/story-player/__tests__/adaptive-pacing.test.ts (15 tests) 3ms
+ ✓ src/lib/story-player/__tests__/replay-engine-regression.test.ts (13 tests) 8ms
+ ✓ src/lib/story-player/__tests__/feature-replay-merger.test.ts (8 tests) 5ms
+ ✓ src/components/routing-context/__tests__/team-member-projection.test.ts (8 tests) 6ms
+ ✓ src/lib/story-player/__tests__/replay-chat-bridge-grouping.test.ts (4 tests) 6ms
+ ✓ src/components/workbench/content-review/__tests__/workspace-modification-source.test.ts (6 tests) 2ms
+ ✓ src/lib/story-player/__tests__/adapter-session-pairing.test.ts (5 tests) 6ms
+ ✓ src/lib/story-player/__tests__/bullet-time-seek.test.ts (8 tests) 3ms
+ ✓ src/lib/story-player/__tests__/feature-replay-pipeline.test.ts (1 test) 4ms
+ ✓ src/lib/story-player/__tests__/bullet-time-lifecycle.test.ts (6 tests) 3ms
+ ✓ src/components/__tests__/interactive-block.test.ts (13 tests) 2ms
+ ✓ src/components/__tests__/appended-input-receipts.test.ts (6 tests) 3ms
+ ✓ src/pdl/__tests__/export-route.test.ts (2 tests) 5ms
+ ✓ src/components/__tests__/interactive-block-group.test.ts (8 tests) 2ms
+ ✓ src/components/__tests__/preview-bridge-origin.test.ts (7 tests) 2ms
+ ✓ src/lib/story-player/__tests__/adapter-tool-result-status.test.ts (3 tests) 2ms
+
+ Test Files  106 passed (106)
+      Tests  1111 passed (1111)
+   Start at  20:29:54
+   Duration  65.14s (transform 52.29s, setup 2.37s, import 117.27s, tests 47.98s, environment 62.87s)
+
+
+Exit code: 0

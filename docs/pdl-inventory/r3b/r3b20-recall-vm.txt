@@ -1,0 +1,16 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/pdl/__tests__/workbench-bindings.test.ts src/pdl/__tests__/runtime.test.ts -t recall
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (46 tests | 45 skipped) 620ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  619ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (18 tests | 14 skipped) 33ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed | 59 skipped (64)
+   Start at  00:23:44
+   Duration  13.85s (transform 4.52s, setup 108ms, import 8.96s, tests 653ms, environment 282ms)
+
+
+Exit code: 0

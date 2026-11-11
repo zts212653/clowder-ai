@@ -1,0 +1,8 @@
+$ python3 /tmp/build-pdl-r3b23.py
+
+lint {'pdl-schema': 0, 'file-boundary': 0, 'derived-only': 0, 'css-important': 1} 基线 {'pdl-schema': 0, 'file-boundary': 0, 'derived-only': 0, 'css-important': 1}
+features: 74 个视图模型（1000 个字段）、383 个动作（其中演示 65）→ app/features.json
+built 6078251 bytes
+行为检查：../checks/run.sh（结果写进 ../checks/last-run.txt，说明见 ../checks/README.md）
+
+Exit code: 0

@@ -102,13 +102,9 @@ describe('thread projection writer boundary', () => {
     expect(calledNames).not.toContain('setHasActiveInvocation');
   });
 
-  it('forbids flat writers in command and component async completions with a captured thread', () => {
+  it('forbids flat writers in command async completions with a captured thread', () => {
     const commandCalls = collectCalledNames('src/hooks/useChatCommands.ts');
-    const inputCalls = collectCalledNames('src/components/ChatInput.tsx');
-    const containerCalls = collectCalledNames('src/components/ChatContainer.tsx');
     expect(commandCalls).not.toContain('addMessage');
-    expect(inputCalls).not.toContain('addMessage');
-    expect(containerCalls).not.toContain('addMessage');
   });
 
   it('forbids flat writers in thread-scoped history hydration', () => {

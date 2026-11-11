@@ -1,0 +1,152 @@
+$ pnpm exec biome check --max-diagnostics=8 packages/api/src/domains/cats/services/context/MessageBundleSourceProjection.ts packages/api/test/messages-context-attachments.test.js packages/shared/src/schemas/context-attachment.schema.ts packages/shared/src/schemas/quote-context-attachment.schema.ts packages/shared/src/types/context-attachment.ts packages/shared/src/types/index.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/plugin-config.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/project.js packages/web/public/pdl-app/sidebar.js packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/general-bindings.test.ts packages/web/src/pdl/__tests__/memory-message-proposals.test.ts packages/web/src/pdl/__tests__/message-selection.test.ts packages/web/src/pdl/__tests__/proposal-models.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/cloud-models.ts packages/web/src/pdl/delivery-models.ts packages/web/src/pdl/memory-message-proposals.tsx packages/web/src/pdl/message-selection.ts packages/web/src/pdl/proposal-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/types.ts packages/web/src/pdl/useGeneralBindings.ts packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useSidebarBindings.ts packages/web/public/pdl-app/inbox.js packages/web/src/pdl/__tests__/r136-owners.test.ts packages/web/src/pdl/useCommunityBindings.ts packages/web/src/pdl/useMessageSourceBindings.ts packages/web/src/utils/batch-apply-labels.ts
+
+packages/web/public/pdl-app/inbox.js:101:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+     99 │   };
+    100 │   ['time', 'page'].forEach(function (k) {
+  > 101 │     SET_AFTER['cs.ib.' + k] = load;
+        │               ^^^^^^^^^^^^
+    102 │   });
+    103 │   const selected = CHANGES.cafeSel,
+
+  i Unsafe fix: Use a template literal.
+
+     99  99 │     };
+    100 100 │     ['time', 'page'].forEach(function (k) {
+    101     │ - ····SET_AFTER['cs.ib.'·+·k]·=·load;
+        101 │ + ····SET_AFTER[`cs.ib.${k}`]·=·load;
+    102 102 │     });
+    103 103 │     const selected = CHANGES.cafeSel,
+
+
+packages/web/public/pdl-app/inbox.js:137:9 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    135 │     if (m)
+    136 │       await api.post(
+  > 137 │         '/api/concierge/work/mentions/' + encodeURIComponent(m.threadId) + '/resolve',
+        │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    138 │         {},
+    139 │         { expectedMessageId: m.messageId, expectedRevision: m.expectedRevision },
+
+  i Unsafe fix: Use a template literal.
+
+    135 135 │       if (m)
+    136 136 │         await api.post(
+    137     │ - ········'/api/concierge/work/mentions/'·+·encodeURIComponent(m.threadId)·+·'/resolve',
+        137 │ + ········`/api/concierge/work/mentions/${encodeURIComponent(m.threadId)}/resolve`,
+    138 138 │           {},
+    139 139 │           { expectedMessageId: m.messageId, expectedRevision: m.expectedRevision },
+
+
+packages/api/src/domains/cats/services/context/MessageBundleSourceProjection.ts:162:10 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    160 │ }
+    161 │
+  > 162 │ function readContentBlockFallback(block: MessageContent): string | null {
+        │          ^^^^^^^^^^^^^^^^^^^^^^^^
+    163 │   switch (block.type) {
+    164 │     case 'text':
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/public/pdl-app/inbox.js:2:1 lint/suspicious/noRedundantUseStrict  FIXABLE  ━━━━━━━━━━━━
+
+  ! Redundant use strict directive.
+
+    1 │ /* Real owner inbox; the r136 floating shell and row declarations are unchanged. */
+  > 2 │ 'use strict';
+      │ ^^^^^^^^^^^^^
+    3 │ function bindInbox() {
+    4 │   CS.ib = {
+
+  i The entire contents of JavaScript modules are automatically in strict mode, with no statement needed to initiate it.
+
+  i Safe fix: Remove the redundant use strict directive.
+
+    2 │ 'use·strict';
+      │ -------------
+
+packages/web/src/pdl/ProjectDataBinding.tsx:148:18 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    146 │   useLayoutEffect(() => {
+    147 │     changed({
+  > 148 │       models: () => {
+        │                  ^^^
+    149 │         const values = readBindingModels(modelReaders, window.clowderChat, readFailures.current);
+    150 │         const { workbench: bench, voice: audio, document: docs } = values;
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:164:45 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    162 │                 filePage: {
+    163 │                   ...bench.filePage,
+  > 164 │                   documentReview: current ? docs!.documentReview : null,
+        │                                             ^^^^^
+    165 │                   annotations: current ? docs!.documentAnnotations : [],
+    166 │                 },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    162 162 │                   filePage: {
+    163 163 │                     ...bench.filePage,
+    164     │ - ··················documentReview:·current·?·docs!.documentReview·:·null,
+        164 │ + ··················documentReview:·current·?·docs?.documentReview·:·null,
+    165 165 │                     annotations: current ? docs!.documentAnnotations : [],
+    166 166 │                   },
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:165:42 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    163 │                   ...bench.filePage,
+    164 │                   documentReview: current ? docs!.documentReview : null,
+  > 165 │                   annotations: current ? docs!.documentAnnotations : [],
+        │                                          ^^^^^
+    166 │                 },
+    167 │               }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    163 163 │                     ...bench.filePage,
+    164 164 │                     documentReview: current ? docs!.documentReview : null,
+    165     │ - ··················annotations:·current·?·docs!.documentAnnotations·:·[],
+        165 │ + ··················annotations:·current·?·docs?.documentAnnotations·:·[],
+    166 166 │                   },
+    167 167 │                 }
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:171:43 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 26 detected (max: 15).
+
+    169 │         };
+    170 │       },
+  > 171 │       action: async (name, args, element) => {
+        │                                           ^^^
+    172 │         for (const [owner, binding] of Object.entries(bindings)) {
+    173 │           if (!('action' in binding)) continue;
+
+  i Please refactor this function to reduce its complexity score from 26 to the max allowed complexity 15.
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 1265.
+Checked 35 files in 602ms. No fixes applied.
+Found 1145 warnings.
+Found 128 infos.
+
+Exit code: 0

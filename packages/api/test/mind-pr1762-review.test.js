@@ -8,9 +8,7 @@ import { captureImportedSessionBoundary } from '../dist/domains/cats/services/ag
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { SessionSealer } from '../dist/domains/cats/services/session/SessionSealer.js';
 import { SessionChainStore } from '../dist/domains/cats/services/stores/ports/SessionChainStore.js';
-import { DeclaredPluginUi } from '../dist/domains/plugin/declared/declared-plugin-ui.js';
 import { DeclaredRuntimeContributions } from '../dist/domains/plugin/declared/declared-runtime-contributions.js';
-import { pluginUiRoutes } from '../dist/routes/plugin/plugin-ui-routes.js';
 import { pluginWebhookForwardingRoutes } from '../dist/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { sessionChainRoutes } from '../dist/routes/session-chain.js';
 import { isolateAccountAuthEnvironment } from './helpers/account-auth-environment.js';
@@ -168,9 +166,8 @@ test('successful public native import must allow the next task to reach the prov
   assert.equal(f.store.getActive(f.catId, 'thread', 'owner').hostExecutionBoundary.clientId, 'openai');
 });
 
-test('UI dispatch must preserve the declared action params', async (t) => {
+test('webhook dispatch must preserve the declared action params', async (t) => {
   let received;
-  const ui = new DeclaredPluginUi();
   const admission = {
     instance: { pluginInstanceId: 'test' },
     packageRecord: {
@@ -184,26 +181,10 @@ test('UI dispatch must preserve the declared action params', async (t) => {
             methods: ['GET'],
             action: { method: 'panel', params: { pane: 'diagnostics' } },
           },
-          {
-            type: 'ui',
-            id: 'open',
-            label: 'Open',
-            kind: 'command',
-            action: { method: 'panel', params: { pane: 'diagnostics' } },
-          },
-          {
-            type: 'ui',
-            id: 'entry',
-            kind: 'slot-item',
-            label: 'Diagnostics',
-            command: 'open',
-            group: 'activity-bar.bottom',
-          },
         ],
       },
     },
   };
-  ui.activate(admission);
   const contributions = new DeclaredRuntimeContributions({
     packages: {
       resolveInstalledPackage: async () => {
@@ -222,16 +203,11 @@ test('UI dispatch must preserve the declared action params', async (t) => {
   app.addHook('onRequest', async (request) => {
     request.sessionUserId = 'owner';
   });
-  await app.register(pluginUiRoutes, { ui });
-  await app.register(pluginWebhookForwardingRoutes, { ui, webhooks: contributions });
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: contributions });
   const response = await app.inject({
     method: 'GET',
     url: '/api/plugins/dev.review/panel',
-    headers: {
-      origin: 'http://localhost:5173',
-      'x-clowder-plugin-ui-instance': 'test',
-      'x-clowder-plugin-ui-generation': ui.list()[0].generation,
-    },
+    headers: { origin: 'http://localhost:5173' },
   });
   assert.equal(response.statusCode, 200, response.body);
   console.log('PARAMS_EVIDENCE', JSON.stringify(received));

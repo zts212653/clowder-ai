@@ -1,0 +1,53 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/preview-bindings.test.ts --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/preview-bindings.test.ts (3 tests) 49ms
+ ❯ src/pdl/__tests__/chat-models.test.ts (10 tests | 1 failed) 29ms
+     ✓ shows canonical routing recipients instead of inferring a preferred member or displaying automatic twice 14ms
+     ✓ keeps multiple actual routing recipients and emits no normal-state notices 1ms
+     ✓ keeps Queue previews out of History and retains the real queue entry/target identity 0ms
+     ✓ uses exact message ids for streamed replacements and reply references 1ms
+     ✓ keeps CLI stdout/thinking in the execution log instead of duplicating it into the body 0ms
+     ✓ uses historical sender ids without substituting another configured member 0ms
+     ✓ never projects recalled bodies or stale quote previews 0ms
+     ✓ projects the existing deployment admission into the composer lock 0ms
+     ✓ admits a context-only draft but blocks a whisper without recipients 0ms
+   × projects proven final text and ordered commentary/tools, and ignores it after recall or a body change 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/chat-models.test.ts > projects proven final text and ordered commentary/tools, and ignores it after recall or a body change
+AssertionError: expected [] to deeply equal [ 'process', 'tool' ]
+
+- Expected
++ Received
+
+- [
+-   "process",
+-   "tool",
+- ]
++ []
+
+ ❯ src/pdl/__tests__/chat-models.test.ts:198:62
+    196|   let item = chatModels(data, ui).chatStream.items[1];
+    197|   expect(item.md).toBe('answer');
+    198|   expect(item.exec?.groups[0].items?.map((row) => row?.key)).toEqual([…
+       |                                                              ^
+    199|   message.content = 'new unverified body';
+    200|   expect(chatModels(data, ui).chatStream.items[1].md).toBe('');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 12 passed (13)
+   Start at  06:55:46
+   Duration  3.71s (transform 1.51s, setup 58ms, import 2.37s, tests 78ms, environment 925ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/preview-bindings.test.ts --maxWorkers=1
+
+Exit code: 1

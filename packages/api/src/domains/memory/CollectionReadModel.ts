@@ -56,6 +56,7 @@ export class CollectionReadModel {
     _collectionId: string,
     db: Database.Database,
     limit = 20,
+    offset = 0,
   ): Array<{
     kind: string;
     count: number;
@@ -90,8 +91,8 @@ export class CollectionReadModel {
       return {
         kind,
         count: total,
-        hasMore: documents.length > limit,
-        documents: documents.slice(0, limit),
+        hasMore: documents.length > offset + limit,
+        documents: documents.slice(offset, offset + limit),
       };
     });
   }

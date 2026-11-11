@@ -1,0 +1,6 @@
+$ git add <copy files>
+fatal: Unable to create '/Users/lang/workspace/github-lab/clowder-ai/.git/worktrees/clowder-ai-pdl/index.lock': Operation not permitted
+$ git commit -m 'chore(pdl): copy engine library platform and default theme from r110'
+fatal: Unable to create '/Users/lang/workspace/github-lab/clowder-ai/.git/worktrees/clowder-ai-pdl/index.lock': Operation not permitted
+Exit code: 128 (both commands)
+No commit created; no push attempted.

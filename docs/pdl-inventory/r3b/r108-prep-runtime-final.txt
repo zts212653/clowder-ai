@@ -1,0 +1,20 @@
+Command: pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (6 tests) 11160ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls  1707ms
+     ✓ sends input through the registered action without replacing the active textarea  2174ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  1641ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  2858ms
+     ✓ resolves draft-append consent only from the engine dialog decision  1846ms
+     ✓ leaves text paste native while forwarding image paste through the application port  931ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  00:00:22
+   Duration  25.64s (transform 8.47s, setup 112ms, import 12.88s, tests 11.16s, environment 0ms)
+
+
+Exit code: 0

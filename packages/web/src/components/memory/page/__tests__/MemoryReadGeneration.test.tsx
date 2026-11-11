@@ -62,7 +62,7 @@ it('hides previous data in every committed frame of a new read path', async () =
   await act(async () => pending.resolve(response({ value: 'new-window' })));
   expect(snapshots.at(-1)?.data).toBe('new-window');
 });
-it('hides previous data in every committed frame of a retry', async () => {
+it('keeps the current data in every committed frame while a retry re-reads the same path', async () => {
   mocks.fetch.mockResolvedValue(response({ value: 'old-revision' }));
   await act(async () => root.render(<ReadProbe path="/detail" />));
   const pending = deferred<Reply>();
@@ -70,7 +70,7 @@ it('hides previous data in every committed frame of a retry', async () => {
   snapshots = [];
   await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
   expect(snapshots.length).toBeGreaterThan(0);
-  expect(snapshots.every((frame) => frame.data === null && frame.loading)).toBe(true);
+  expect(snapshots.every((frame) => frame.data === 'old-revision' && !frame.loading && !frame.error)).toBe(true);
 });
 it('hides the previous recall filter in every committed frame of a new source and cat', async () => {
   mocks.fetch.mockResolvedValue(response(page({ records: [recallRow('old', 'old-filter')] })));

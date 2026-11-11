@@ -30,7 +30,10 @@
       "!docs/videos",
       "!site/tailwind.css",
       "!docs/architecture/memory/memory-architecture-closure.generated.json",
-      "!packages/mcp-server/governance/mcp-surface-baseline.json"
+      "!packages/mcp-server/governance/mcp-surface-baseline.json",
+      "!packages/web/public/pdl",
+      "!packages/web/public/pdl-app/api.js",
+      "!packages/web/public/pdl-app/copy"
     ]
   },
   "formatter": {

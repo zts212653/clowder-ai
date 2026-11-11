@@ -85,9 +85,9 @@ describe('F295 canonical execution hydration', () => {
     vi.useRealTimers();
   });
 
-  it('preserves verified project work during navigation and hides it while scope is unresolved', async () => {
+  it('preserves the all-project snapshot and pending controls across conversation navigation without rereading', async () => {
     const execution = liveExecution();
-    mocks.apiFetch.mockResolvedValueOnce(Response.json({ projectPath: '/project/cafe', executions: [execution] }));
+    mocks.apiFetch.mockResolvedValueOnce(Response.json({ scope: 'all', executions: [execution] }));
     await act(async () => {
       root.render(<Harness threadId="thread-a" connected={false} />);
     });
@@ -106,10 +106,11 @@ describe('F295 canonical execution hydration', () => {
       root.render(<Harness threadId="thread-missing" connected={false} />);
     });
     expect(useActiveExecutionStore.getState()).toMatchObject({
-      hydration: 'loading',
-      projectPath: null,
-      executionsByKey: {},
+      hydration: 'ready',
+      projectPath: '/project/cafe',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
     });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
   });
 
   it('cold-discovers another project without a sidebar start event or a current project', async () => {
@@ -154,7 +155,7 @@ describe('F295 canonical execution hydration', () => {
     });
   });
 
-  it('switches exact thread resource identity and rejects the late generation', async () => {
+  it('keeps one all-project request in flight across navigation and uses the new anchor on reconnect', async () => {
     let resolveThreadA!: (response: Response) => void;
     let resolveThreadB!: (response: Response) => void;
     mocks.apiFetch
@@ -177,6 +178,10 @@ describe('F295 canonical execution hydration', () => {
     await act(async () => {
       root.render(<Harness threadId="thread-b" connected={false} />);
     });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      root.render(<Harness threadId="thread-b" connected />);
+    });
 
     const threadBExecution = {
       ...liveExecution(),
@@ -195,14 +200,14 @@ describe('F295 canonical execution hydration', () => {
     };
     await act(async () => {
       resolveThreadB(
-        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [threadBExecution] }), {
+        new Response(JSON.stringify({ scope: 'all', executions: [threadBExecution] }), {
           status: 200,
         }),
       );
     });
     await act(async () => {
       resolveThreadA(
-        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [liveExecution()] }), {
+        new Response(JSON.stringify({ scope: 'all', executions: [liveExecution()] }), {
           status: 200,
         }),
       );

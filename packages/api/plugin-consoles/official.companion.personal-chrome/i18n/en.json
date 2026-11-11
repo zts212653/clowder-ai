@@ -1,0 +1,21 @@
+{
+  "readError": "The authorized conversations can't be read right now. Check the Personal Chrome plugin and try again.",
+  "settings": "Check Personal Chrome",
+  "refreshTitles": "Refresh names",
+  "issue": {
+    "HELPER_UPDATE_REQUIRED": "The connection component needs an update; existing authorizations are kept. Fix it in the plugin settings, then refresh.",
+    "HELPER_NOT_INSTALLED": "The local connection component isn't ready yet. Check it in the plugin settings.",
+    "EXTENSION_RELOAD_REQUIRED": "The Chrome extension needs a reload; existing authorizations are kept. Reload it, then refresh the names.",
+    "PAGE_RELOAD_REQUIRED": "The conversation page still uses the old connection. Reload that page, then choose \"Check conversation page\" for it in the plugin settings. Existing authorizations are kept.",
+    "STALE_HELPER": "The connection component was updated, but Chrome still uses the old one. Reload the extension, then refresh.",
+    "STALE_HELPER_PROTOCOL": "Chrome still uses the old connection component. Update it in the plugin settings and reload the extension.",
+    "CHROME_DISCONNECTED": "Can't reach Chrome right now. Make sure the extension is connected, then refresh the names.",
+    "TITLE_SYNC_TIMEOUT": "Name sync timed out. Make sure the Chrome extension is connected and try again.",
+    "AUTHORIZATION_INVALID": "The conversation authorizations can't be read right now. Check them in the plugin settings.",
+    "UNSUPPORTED_PLATFORM": "Name sync isn't supported on this system.",
+    "failed": "Name sync didn't finish this time. Try again later; saved names are kept.",
+    "none": "No names to sync were found. Open the conversation, wait for its title to load, then refresh.",
+    "all": "Synced {0} conversation names.",
+    "partial": "Synced {0} conversation names. The others have no name yet; open those conversations, then refresh."
+  }
+}

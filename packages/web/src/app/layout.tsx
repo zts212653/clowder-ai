@@ -1,25 +1,8 @@
-/* eslint-disable @next/next/no-css-tags -- Global CSS that does not need Next processing
- * (xterm vendor + app-level token/control styles) is served as static stylesheets to
- * bypass Next dev's flight CSS loader which chokes on class selectors and non-root CSS. */
 import { deploymentDefaults } from '@cat-cafe/shared';
 import type { Metadata, Viewport } from 'next';
-import { AppShell } from '@/components/AppShell';
-import { WorkCoverLayer } from '@/components/artifacts/WorkCoverLayer';
-import { BrakeModal } from '@/components/BrakeModal';
-import { CatHueInjector } from '@/components/CatHueInjector';
-import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
-import { GuideOverlay } from '@/components/GuideOverlay';
-import { SessionBootstrap } from '@/components/SessionBootstrap';
-import { ThemeApplier } from '@/components/ThemeApplier';
-import { ThemeProvider } from '@/components/ThemeProvider';
-import { ToastContainer } from '@/components/ToastContainer';
-import { ConfirmProvider } from '@/components/useConfirm';
-import vendorStylesheets from '@/generated/vendor-stylesheets.json';
 import { META_THEME_COLOR } from '@/lib/color-defaults';
 import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
 import { runtimeApiOriginFromPort } from '@/lib/runtime-api-origin';
-import './globals.css';
-import './watcher.css';
 
 // The document must carry this process's API port, never a statically baked build port.
 export const dynamic = 'force-dynamic';
@@ -66,12 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       data-pwa-cleanup-state={pwaEnabled ? 'enabled' : 'pending'}
       data-cat-cafe-api-origin={runtimeApiOriginFromPort(process.env.API_SERVER_PORT)}
     >
-      <head>
-        {vendorStylesheets.map((href) => (
-          <link key={href} rel="stylesheet" href={href} />
-        ))}
-      </head>
-      <body className="min-h-screen">
+      <body>
         {pwaRetirementScript ? (
           <script
             id="cat-cafe-pwa-retirement"
@@ -79,19 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             dangerouslySetInnerHTML={{ __html: pwaRetirementScript }}
           />
         ) : null}
-        <SessionBootstrap />
-        <CatHueInjector />
-        <CoCreatorHueInjector />
-        <ThemeProvider>
-          <ThemeApplier />
-          <ConfirmProvider>
-            <AppShell>{children}</AppShell>
-          </ConfirmProvider>
-          <BrakeModal />
-          <GuideOverlay />
-          <ToastContainer />
-          <WorkCoverLayer />
-        </ThemeProvider>
+        {children}
       </body>
     </html>
   );

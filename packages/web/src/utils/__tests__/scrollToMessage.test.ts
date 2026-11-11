@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { focusLineageMessage } from '@/utils/focusLineageMessage';
 import {
   captureMessageScrollAnchor,
   captureMessageScrollAnchorForElement,
@@ -329,21 +328,6 @@ describe('scrollToMessage', () => {
 
     expect(el.dataset.messageJumpFocus).toBeUndefined();
 
-    vi.useRealTimers();
-  });
-
-  it('uses the same marker for lineage jumps', () => {
-    vi.useFakeTimers();
-    const el = document.createElement('div');
-    el.setAttribute('data-message-id', 'lineage-msg');
-    el.scrollIntoView = vi.fn();
-    document.body.appendChild(el);
-
-    expect(focusLineageMessage('lineage-msg')).toBe(true);
-    expect(el.dataset.messageJumpFocus).toBe('true');
-
-    vi.advanceTimersByTime(3200);
-    expect(el.dataset.messageJumpFocus).toBeUndefined();
     vi.useRealTimers();
   });
 

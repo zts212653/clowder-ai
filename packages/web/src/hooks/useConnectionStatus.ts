@@ -152,7 +152,10 @@ function mergeUpstreamSignal(ready: ConnectionLevel, cats: ConnectionLevel): Con
   return 'online';
 }
 
-export function useConnectionStatus(socketConnected?: boolean | null): ConnectionProbeState {
+export function useConnectionStatus(
+  socketConnected?: boolean | null,
+  needed: boolean | number = true,
+): ConnectionProbeState {
   const probesEnabled = process.env.NODE_ENV !== 'test';
   const browserOnline = useSyncExternalStore(subscribeBrowserOnline, readBrowserOnline, readServerOnline);
   const initialLevel = shouldForceBrowserOffline(browserOnline, API_URL) ? 'offline' : 'online';
@@ -198,7 +201,7 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
 
   const runProbe = useCallback(async () => {
     if (browserOfflineForcesDown) return;
-    if (!probesEnabled) return;
+    if (!probesEnabled || !needed || document.hidden) return;
     const [apiProbe, readyProbe, catsLevel] = await Promise.all([
       probePublicEndpoint('/api/health'),
       probePublicEndpoint('/api/ready'),
@@ -210,7 +213,7 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
     applyWithFailureThreshold(mergeUpstreamSignal(readyProbe.level, catsLevel), upstreamFailureCountRef, setUpstream);
     pageDeploymentRevision.observe(apiProbe.deploymentRevision, apiProbe.level === 'online');
     setCheckedAt(Date.now());
-  }, [applyWithFailureThreshold, browserOfflineForcesDown, probesEnabled]);
+  }, [applyWithFailureThreshold, browserOfflineForcesDown, probesEnabled, needed]);
 
   useEffect(() => {
     if (browserOfflineForcesDown) {
@@ -231,12 +234,20 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
       return;
     }
 
+    if (!needed) return;
     void runProbe();
+    const visible = () => {
+      if (!document.hidden) void runProbe();
+    };
+    document.addEventListener('visibilitychange', visible);
     const timer = setInterval(() => {
       void runProbe();
     }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [browserOfflineForcesDown, runProbe, probesEnabled]);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [browserOfflineForcesDown, runProbe, probesEnabled, needed]);
 
   useEffect(() => {
     if (socketConnected === true) void runProbe();

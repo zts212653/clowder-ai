@@ -5,6 +5,7 @@ import {
   type LifecycleDispatchRef,
   type LifecycleStoredMessageMetadata,
 } from '@cat-cafe/shared';
+import { dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
 
 export interface MessageDispatchAvatarProjection {
@@ -225,4 +226,40 @@ export function resolveDispatchReplyArrow(input: {
   )
     ? '↑'
     : '↓';
+}
+
+export function projectAppendedInputReceipts(
+  response: ChatMessage,
+  timelineMessages: readonly ChatMessage[],
+): readonly ChatMessage[] {
+  if (
+    response.lifecycle?.kind !== 'response' ||
+    response.lifecycle.inputEntryIds.length < 2 ||
+    response.lifecycle.inputMessageIds.length < 2
+  ) {
+    return [];
+  }
+  const startedAt = response.lifecycle.startedAt;
+  const byId = new Map(timelineMessages.map((message) => [message.id, message]));
+  return response.lifecycle.inputMessageIds.slice(1).flatMap((messageId) => {
+    const source = byId.get(messageId);
+    return source && source.timestamp > startedAt ? [source] : [];
+  });
+}
+
+/** Only the exact delivered source × response can supply a read observation. */
+export function appendedInputReadDisplay(source: ChatMessage, response: ChatMessage) {
+  const lifecycle = response.lifecycle;
+  const refs =
+    lifecycle?.kind === 'response'
+      ? (source.lifecycle?.dispatchRefs?.filter(
+          (ref) => ref.targetId === lifecycle.targetId && ref.statusMessageId === response.id,
+        ) ?? [])
+      : [];
+  const ref = refs.length === 1 ? refs[0] : undefined;
+  return dispatchReceiptDisplay(
+    ref,
+    lifecycle?.kind === 'response' && lifecycle.status === 'processing',
+    source.lifecycle,
+  );
 }

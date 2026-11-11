@@ -12,16 +12,13 @@ assert.deepEqual(missingScopePaths, [], 'Update the border policy scope when its
 const tester = new RuleTester({
   parserOptions: { ecmaVersion: 2020, ecmaFeatures: { jsx: true }, sourceType: 'module' },
 });
-const divider = '/repo/packages/web/src/components/memory/MemoryNav.tsx';
-const card = '/repo/packages/web/src/components/mission-control/MissionControlCard.tsx';
+const divider = '/repo/packages/web/src/components/workspace/ConsolePanel.tsx';
 
 tester.run('no-raw-console-borders', rule, {
   valid: [
     { filename: divider, code: '<nav className="console-divider-b" />' },
-    { filename: card, code: '<div className="console-list-card" />' },
     { filename: divider, code: '// border-b border-[var(--console-border-soft)]\nconst note = "unrelated";' },
     { filename: divider, code: '<input className="border border-[var(--console-border-soft)]" />' },
-    { filename: card, code: 'const data = "border border-[var(--console-border-soft)]";' },
     {
       filename: '/repo/packages/web/src/components/OtherCard.tsx',
       code: '<div className="border border-[var(--console-border-soft)] border-b border-[var(--console-border-soft)]" />',
@@ -42,11 +39,6 @@ tester.run('no-raw-console-borders', rule, {
       filename: divider,
       code: '<nav className={`px-4 border-t border-[var(--console-border-soft)] ${active}`} />',
       errors: [{ messageId: 'divider' }],
-    },
-    {
-      filename: card,
-      code: '<div className="p-2 border border-[var(--console-border-soft)]" />',
-      errors: [{ messageId: 'card' }],
     },
   ],
 });

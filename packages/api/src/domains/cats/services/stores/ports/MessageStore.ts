@@ -77,6 +77,7 @@ import {
 } from '../message-search-answer-binding.js';
 import { storedMessageSource } from '../message-source.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
+import { withPluginMessageRich } from '../plugin-message-rich.js';
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
@@ -265,6 +266,7 @@ export interface StoredToolEvent {
   detail?: string;
   /** Finalized call input carried by a result; replaces provisional use detail without adding a call. */
   inputDetail?: string;
+  resultMeta?: string;
   timestamp: number;
   /** F153 Phase J AC-J7: native provider tool id, used to pair tool_use ↔ tool_result
    *  and to key the synthesized span on hydrate. Set by provider transformer via
@@ -2948,6 +2950,7 @@ export class MessageStore {
       ...payload,
       id: reservedId ?? generateSortableId(normalizedMessage.timestamp),
       threadId,
+      ...(payload.extra ? { extra: withPluginMessageRich(payload.extra) } : {}),
     };
     this.messages.push(stored);
     this.threadTimeline.upsert(stored);
@@ -3891,7 +3894,9 @@ export class MessageStore {
       ...hostOnly
     } = extra as Record<string, unknown>;
     const previousRich = JSON.stringify(msg.extra?.rich);
-    msg.extra = preserveMessageSearchAnswerBlock({ ...msg.extra, ...hostOnly }, msg.extra?.messageSearchAnswer);
+    msg.extra = withPluginMessageRich(
+      preserveMessageSearchAnswerBlock({ ...msg.extra, ...hostOnly }, msg.extra?.messageSearchAnswer),
+    );
     if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
@@ -3926,7 +3931,7 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (msg.extra?.pluginMessage?.revision !== expectedRevision) return null;
-    msg.extra = { ...msg.extra, pluginMessage };
+    msg.extra = withPluginMessageRich({ ...msg.extra, pluginMessage });
     return msg;
   }
 

@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/message-selection.test.ts src/pdl/__tests__/runtime.test.ts -t 'message selection toolbar|message parts|declared forwarding'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/message-selection.test.ts (2 tests) 2ms
+ ✓ src/pdl/__tests__/runtime.test.ts (60 tests | 58 skipped) 1390ms
+     ✓ opens the message selection toolbar and forwards its exact quote through the existing dialog  619ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  770ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed | 58 skipped (62)
+   Start at  08:24:00
+   Duration  3.88s (transform 2.18s, setup 59ms, import 3.29s, tests 1.39s, environment 463ms)
+
+
+Exit code: 0

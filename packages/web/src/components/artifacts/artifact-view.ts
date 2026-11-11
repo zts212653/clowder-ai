@@ -67,6 +67,7 @@ export function isSiteAssetPath(url: string | undefined): boolean {
 export function resolveAssetUrl(url: string | undefined, apiBase: string): string | undefined {
   if (!url) return undefined;
   const t = url.trim();
+  if (t.startsWith('/avatars/')) return t;
   if (isSiteAssetPath(t)) return `${apiBase}${t}`;
   return t;
 }

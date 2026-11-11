@@ -1,0 +1,8 @@
+$ pnpm --filter @cat-cafe/shared build
+
+
+> @cat-cafe/shared@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/shared
+> tsc
+
+
+Exit code: 0

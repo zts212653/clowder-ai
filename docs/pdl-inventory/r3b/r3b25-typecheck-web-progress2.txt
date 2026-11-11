@@ -1,0 +1,8 @@
+$ pnpm --filter @cat-cafe/web exec tsc --noEmit
+
+src/pdl/proposal-models.ts(86,64): error TS2367: This comparison appears to be unintentional because the types '"F225"' and '"F231"' have no overlap.
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
+
+Exit code: 1

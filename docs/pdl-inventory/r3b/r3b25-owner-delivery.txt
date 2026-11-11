@@ -1,0 +1,73 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/sidebar-bindings.test.ts src/pdl/__tests__/general-bindings.test.ts src/pdl/__tests__/cloud-models.test.ts src/pdl/__tests__/memory-message-proposals.test.ts src/pdl/__tests__/proposal-models.test.ts src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/message-selection.test.ts src/pdl/__tests__/plugin-spaces.test.ts src/pdl/__tests__/project-data-host.test.tsx
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/cloud-models.test.ts (1 test) 2ms
+ ✓ src/pdl/__tests__/project-data-host.test.tsx (5 tests) 131ms
+ ✓ src/pdl/__tests__/memory-message-proposals.test.ts (4 tests) 56ms
+ ✓ src/pdl/__tests__/general-bindings.test.ts (1 test) 9ms
+ ✓ src/pdl/__tests__/sidebar-bindings.test.ts (2 tests) 16ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (12 tests) 26ms
+ ✓ src/pdl/__tests__/plugin-spaces.test.ts (3 tests) 5ms
+ ✓ src/pdl/__tests__/message-selection.test.ts (3 tests) 6ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (5 tests) 3ms
+ ✓ src/pdl/__tests__/runtime.test.ts (63 tests) 28995ms
+     ✓ awaits a plugin row operation under its original confirmation and keeps an owner refusal in the dialog  593ms
+     ✓ renders real plugin schema branches and retains a rejected config draft until its owner accepts  513ms
+     ✓ keeps general UI choices local and sends the busy policy to its real owner  377ms
+     ✓ opens the message selection toolbar and forwards its exact quote through the existing dialog  445ms
+     ✓ opens real member candidates at the caret and chooses one without sending or losing the input suffix  347ms
+     ✓ renders canonical sidebar groups and keeps organize drafts on owner rejection before submitting the original snapshot  542ms
+     ✓ renders native update state in the declared system section and waits for the install owner  520ms
+     ✓ uses the shared recent-work view below component-owned recent tabs and opens command details in live  421ms
+     ✓ keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there  542ms
+     ✓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials  697ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  638ms
+     ✓ keeps appearance preferences and complete custom theme documents in the original local store with no server writes  589ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  394ms
+     ✓ renders only the declared restore action and waits for its owner before removing a trash row  357ms
+     ✓ renders r126 file media and generic Office metadata through the original file view  404ms
+     ✓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys  577ms
+     ✓ reads project pins and display names from the real preference snapshot and dispatches their existing writers  494ms
+     ✓ opens the owner source thread from the declared task row action and respects rejected navigation  437ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  583ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  815ms
+     ✓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media  727ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  674ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  636ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  396ms
+     ✓ renders real reply groups and connects the r129 older link without excluding a focused older reply  552ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  527ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  447ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  351ms
+     ✓ retains the existing owner read-error component once without adding a toast  399ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  602ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  593ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  630ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  596ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  389ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  539ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  427ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  325ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  425ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  422ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  603ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  367ms
+     ✓ opens and leaves Team details through the native workbench stack  404ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  371ms
+     ✓ sends input through the registered action without replacing the active textarea  351ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  348ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  474ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  1003ms
+     ✓ closes chat.modal through the declared cancel and Esc exits without sending  462ms
+     ✓ resolves draft-append consent only from the engine dialog decision  383ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1543ms
+
+ Test Files  10 passed (10)
+      Tests  99 passed (99)
+   Start at  09:14:24
+   Duration  32.12s (transform 5.09s, setup 149ms, import 8.32s, tests 29.25s, environment 2.57s)
+
+
+Exit code: 0

@@ -1,0 +1,70 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/recent-works.test.ts src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/project-data-host.test.tsx -t 'project|paired tool|shared recent|data boundary'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/recent-works.test.ts (2 tests | 1 skipped) 54ms
+ ✓ src/pdl/__tests__/project-data-host.test.tsx (5 tests | 4 skipped) 665ms
+   ✓ passes trash read errors and recovery through the existing per-binding data boundary  664ms
+ ✓ src/pdl/__tests__/runtime.test.ts (56 tests | 1 skipped) 106875ms
+     ✓ renders one expandable paired tool row with three raw blocks, actual group icons and live following  1141ms
+     ✓ uses the shared recent-work view below component-owned recent tabs and opens command details in live  1762ms
+     ✓ loads a src-only plugin workbench tool from its declared entry metadata without a route or another painter  533ms
+     ✓ keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there  2565ms
+     ✓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials  3902ms
+     ✓ keeps unknown agent identities from their own from name or id without borrowing another member  673ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  2495ms
+     ✓ keeps appearance preferences and complete custom theme documents in the original local store with no server writes  3109ms
+     ✓ exposes retained per-thread background data for v2 while the default theme intentionally reads only the local global choice  992ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  1297ms
+     ✓ renders only the declared restore action and waits for its owner before removing a trash row  1084ms
+     ✓ renders r126 file media and generic Office metadata through the original file view  2773ms
+     ✓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys  1789ms
+     ✓ reads project pins and display names from the real preference snapshot and dispatches their existing writers  1820ms
+     ✓ opens the owner source thread from the declared task row action and respects rejected navigation  1649ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  2631ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  3336ms
+     ✓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media  2308ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  3371ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  2878ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  1839ms
+     ✓ renders real reply groups and connects the r129 older link without excluding a focused older reply  1863ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  1913ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  1693ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  1735ms
+     ✓ retains the existing owner read-error component once without adding a toast  1399ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  2113ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  2930ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  2976ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  2664ms
+     ✓ does not show the history marker or load-older action for a new empty thread (r116)  855ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  1819ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  2084ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts  1842ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  2806ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  1790ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  2537ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  2232ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  4817ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  1505ms
+     ✓ opens and leaves Team details through the native workbench stack  3203ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  2201ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls  859ms
+     ✓ preserves the typed work reference through the actual copied canon button  1061ms
+     ✓ preserves the contracted annotationId through the actual copied review judgment button  1480ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111  764ms
+     ✓ sends input through the registered action without replacing the active textarea  1467ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  1149ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  2180ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  2768ms
+     ✓ closes chat.modal through the declared cancel and Esc exits without sending  1524ms
+     ✓ resolves draft-append consent only from the engine dialog decision  1658ms
+     ✓ leaves text paste native while forwarding image paste through the application port  568ms
+
+ Test Files  3 passed (3)
+      Tests  57 passed | 6 skipped (63)
+   Start at  07:18:14
+   Duration  128.57s (transform 31.20s, setup 286ms, import 39.72s, tests 107.59s, environment 4.51s)
+
+
+Exit code: 0

@@ -1,7 +1,7 @@
 import { evolutionExplorationReviewV1Schema, refIdentity } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
-import { mockExploration } from '../../../../test/browser/f311-duck-exploration.data.mjs';
 import { compareExplorationRecords } from '../exploration/exploration-comparison';
+import { mockExploration } from './fixtures/exploration-data';
 
 describe('mock data through the production exploration contract', () => {
   it('preserves four compositions, two parents, seven experiments and exact selected records', () => {

@@ -4,7 +4,7 @@ import { type PreviewVisiblePageAttestation, previewVisiblePageAttestationSchema
 import { useCallback, useEffect, useState } from 'react';
 import type { PreviewVisiblePageAdmissionRequest } from '@/lib/preview-visible-page-admission-controller';
 import { apiFetch } from '@/utils/api-client';
-import type { ConsoleEntry } from './ConsolePanel';
+
 import { getPreviewBridgeOrigin, isValidBridgeOrigin } from './preview-bridge-origin';
 
 function persistBridgeScreenshot(
@@ -12,21 +12,27 @@ function persistBridgeScreenshot(
   setScreenshotUrl: (url: string | null) => void,
   setIsCapturing: (capturing: boolean) => void,
 ): void {
-  apiFetch('/api/preview/screenshot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataUrl }),
-  })
-    .then((response) => response.json() as Promise<{ url: string }>)
-    .then((data) => {
-      setScreenshotUrl(data.url);
+  saveBridgeScreenshot(dataUrl)
+    .then((url) => {
+      setScreenshotUrl(url);
       setTimeout(() => setScreenshotUrl(null), 5000);
     })
     .catch(() => {})
     .finally(() => setIsCapturing(false));
 }
 
-function appendBridgeConsoleEntry(
+export async function saveBridgeScreenshot(dataUrl: unknown): Promise<string> {
+  const response = await apiFetch('/api/preview/screenshot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const data = await response.json();
+  if (!response.ok || typeof data.url !== 'string') throw new Error(data.error ?? '截图未保存');
+  return data.url;
+}
+
+export function appendBridgeConsoleEntry(
   data: { level: ConsoleEntry['level']; args: string[]; timestamp: number },
   setConsoleEntries: React.Dispatch<React.SetStateAction<ConsoleEntry[]>>,
   setConsoleOpen: (open: boolean) => void,
@@ -38,7 +44,7 @@ function appendBridgeConsoleEntry(
   if (data.level === 'error') setConsoleOpen(true);
 }
 
-function isAuthorizedBridgeMessage(
+export function isAuthorizedBridgeMessage(
   event: MessageEvent,
   iframe: HTMLIFrameElement | null,
   gatewayPort: number,
@@ -139,4 +145,10 @@ export function usePreviewBridge(
     clearConsole,
     requestVisiblePageAttestation,
   };
+}
+
+export interface ConsoleEntry {
+  level: 'log' | 'warn' | 'error' | 'info';
+  args: string[];
+  timestamp: number;
 }

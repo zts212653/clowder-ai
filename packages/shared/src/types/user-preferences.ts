@@ -4,7 +4,7 @@
  * Separate from cat-catalog.json (configuration, not preference).
  */
 
-import type { ChatBackgroundPreferences } from '../chat-background.js';
+import type { AppearanceImage, ChatBackgroundPreferences } from '../chat-background.js';
 import type { ConversationViewPreferences } from '../conversation-view-preference.js';
 import type { IgnoredItemPreferences } from '../ignored-item-preference.js';
 import type { ProcessTalkMode } from '../process-talk-preference.js';
@@ -56,6 +56,8 @@ export interface BubbleDefaultPreferences {
 }
 
 export interface UserPreferences {
+  /** Uploaded image catalogue only. Existing UI preference fields on disk are intentionally unread. */
+  appearance?: { background: { images: AppearanceImage[] } };
   /** F322: private whole-window image preferences. No TTL, message or export content. */
   chatBackgrounds?: ChatBackgroundPreferences;
   /** F322: personal display only, per authenticated user, no TTL and no thread override. */

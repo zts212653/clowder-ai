@@ -11,7 +11,7 @@ type ReadState = 'loading' | 'ready' | 'changed' | 'failed' | 'hidden';
 export function useWorkspaceFileQuotes(
   locator: { worktreeId: string; path: string },
   revision: string,
-  visible: boolean,
+  visible: boolean | number,
 ) {
   const { worktreeId, path } = locator;
   const scope = JSON.stringify([worktreeId, path, revision]);
@@ -45,11 +45,7 @@ export function useWorkspaceFileQuotes(
     async (before?: string) => {
       const ticket = ++sequence.current;
       lastReadAt.current = Date.now();
-      setView((current) => ({
-        scope,
-        quotes: before && current.scope === scope ? current.quotes : [],
-        state: 'loading',
-      }));
+      setView((current) => (current.scope === scope ? current : { scope, quotes: [], state: 'loading' }));
       try {
         const query = new URLSearchParams({
           worktreeId,
@@ -90,7 +86,6 @@ export function useWorkspaceFileQuotes(
   );
   useEffect(() => {
     sequence.current += 1;
-    setView({ scope, quotes: [], state: 'loading' });
     if (!visible) return;
     void read();
     const refresh = () => void read();

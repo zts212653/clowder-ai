@@ -1,0 +1,321 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__ src/hooks/__tests__/useSendMessage-durable-receipt.test.ts src/components/__tests__/chat-input-draft-persistence.test.ts src/components/rich/__tests__/RuntimeConversationCard.test.tsx src/components/rich/__tests__/ScheduleMutationProposalCard-owner.test.tsx src/components/rich/__tests__/RuntimeInteractionCardConcurrency.test.tsx src/components/__tests__/delivery-response-ownership.test.tsx
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/recall-consent.test.ts (1 test) 53ms
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores draft when remounting with same threadId
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > hydrates saved reply drafts before mount-time persistence can clear them
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+ ✓ src/components/rich/__tests__/ScheduleMutationProposalCard-owner.test.tsx (2 tests) 42ms
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > maintains independent drafts per thread
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > clears draft after sending
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > preserves the session text draft through the initial SSR hydration commit
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > shows a session-restored context chip after hydration, not inside it
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at AppTooltip (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/AppTooltip.tsx:40:3)
+    at AppTooltip
+    at div
+    at ComposerFrame (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/ui/src/ShellFrame.tsx:33:3)
+    at div
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores and sends structured context attachments without Markdown text
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores and sends structured context attachments without Markdown text
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > replaces an edited annotation in place without renumbering mixed draft attachments
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > restores image preview when remounting with same threadId
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > maintains independent image previews per thread across switches
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > sends restored images and clears image drafts after sending
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > does not persist draft when threadId is undefined
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > syncs text drafts to sessionStorage for cross-navigation survival
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+stderr | src/components/__tests__/chat-input-draft-persistence.test.ts > ChatInput draft persistence > clears sessionStorage entry when draft is emptied
+Warning: An update to ChatInput inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at ChatInput (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web/src/components/ChatInput.tsx:187:3)
+
+ ✓ src/components/__tests__/chat-input-draft-persistence.test.ts (42 tests) 310ms
+ ✓ src/components/rich/__tests__/RuntimeConversationCard.test.tsx (16 tests) 63ms
+ ✓ src/pdl/__tests__/platform.test.ts (4 tests) 18ms
+ ✓ src/components/rich/__tests__/RuntimeInteractionCardConcurrency.test.tsx (4 tests) 33ms
+ ✓ src/pdl/__tests__/runtime-questions.test.ts (6 tests) 19ms
+ ❯ src/pdl/__tests__/runtime.test.ts (9 tests | 2 failed) 1828ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 273ms
+     × uses the full-window export frame, exact mids and the same readonly message nodes 62ms
+     × settles only after an asynchronous rich-body render is complete (r110 contract) 86ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r110 134ms
+     ✓ sends input through the registered action without replacing the active textarea 270ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations 258ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  356ms
+     ✓ resolves draft-append consent only from the engine dialog decision 281ms
+     ✓ leaves text paste native while forwarding image paste through the application port 107ms
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > does not keep a delivered input in Queue while its member is still processing
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > does not keep a delivered input in Queue while its member is still processing
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > keeps the appended source under a failed response without a separate read outcome
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/components/__tests__/delivery-response-ownership.test.tsx > delivered input belongs to the member response > keeps the appended source under a failed response without a separate read outcome
+Warning: The current testing environment is not configured to support act(...)
+
+ ✓ src/components/__tests__/delivery-response-ownership.test.tsx (2 tests) 17ms
+ ✓ src/hooks/__tests__/useSendMessage-durable-receipt.test.ts (5 tests) 14ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (7 tests) 15ms
+ ✓ src/pdl/__tests__/rich-models.test.ts (3 tests) 13ms
+ ✓ src/pdl/__tests__/interactive-actions.test.ts (5 tests) 4ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (4 tests) 3ms
+ ✓ src/pdl/__tests__/delivery-models.test.ts (3 tests) 2ms
+ ✓ src/pdl/__tests__/message-selection.test.ts (2 tests) 2ms
+ ✓ src/pdl/__tests__/export-route.test.ts (2 tests) 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > uses the full-window export frame, exact mids and the same readonly message nodes
+AssertionError: expected '#chat-pdl-test' to be '#export-pdl-test' // Object.is equality
+
+Expected: "#export-pdl-test"
+Received: "#chat-pdl-test"
+
+ ❯ src/pdl/__tests__/runtime.test.ts:99:31
+     97|       ).toEqual(['reply-1']);
+     98|       expect(frame.querySelectorAll('#chat-input, .cafe-acts').length)…
+     99|       expect(w.location.hash).toBe('#export-pdl-test');
+       |                               ^
+    100|       expect(runInContext("navStack('window').map(function(x){return x…
+    101|         'frame:thread.export',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > settles only after an asynchronous rich-body render is complete (r110 contract)
+AssertionError: expected null not to be null
+ ❯ src/pdl/__tests__/runtime.test.ts:116:95
+    114|     try {
+    115|       await w.__settled();
+    116|       expect(w.document.querySelector('[data-view="thread.export"] .md…
+       |                                                                                               ^
+    117|     } finally {
+    118|       resolve('<math><mi>x</mi></math>');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 16 passed (17)
+      Tests  2 failed | 115 passed (117)
+   Start at  01:30:04
+   Duration  5.00s (transform 5.14s, setup 210ms, import 10.41s, tests 2.44s, environment 4.48s)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__ src/hooks/__tests__/useSendMessage-durable-receipt.test.ts src/components/__tests__/chat-input-draft-persistence.test.ts src/components/rich/__tests__/RuntimeConversationCard.test.tsx src/components/rich/__tests__/ScheduleMutationProposalCard-owner.test.tsx src/components/rich/__tests__/RuntimeInteractionCardConcurrency.test.tsx src/components/__tests__/delivery-response-ownership.test.tsx
+
+Exit code: 1

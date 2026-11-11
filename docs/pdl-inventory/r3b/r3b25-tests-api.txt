@@ -1,0 +1,92 @@
+$ pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=4 --test-timeout=60000 test/label-routes.test.js test/routes/thread-attention-search-organize.test.js test/routes/thread-attention-group-metadata-route.test.js test/routes/thread-attention-undo-proof.test.js test/routes/message-disposition-preference-route.test.js test/taste-proposal-routes.test.js test/f202-c1-plugin-operations.test.js
+
+✔ installed plugin operation routes invoke declared actions, persist state, backfill targets, reset, and test (56.253916ms)
+✔ operation routes fail closed for auth, lifecycle, declarations, invalid responses, and timeouts (352.254208ms)
+✔ declared test route requires a direct local owner session before invoking a package (5.233125ms)
+✔ declared test route retains installed and enabled checks (2.435333ms)
+✔ loaded settings run before enable without restoring previous action output (0.696833ms)
+✔ declared confirmation requires authenticated carrier marker (undefined) (9.074625ms)
+✔ declared confirmation requires authenticated carrier marker (false) (2.591167ms)
+✔ declared confirmation requires authenticated carrier marker (true) (1.702375ms)
+﹣ Label API routes (Fastify inject) (0.972583ms) # Redis port 0 is disabled or protected
+▶ GET/PUT /api/config/message-disposition (F264)
+  ✔ defaults to queued work and reports the product source (219.377459ms)
+  ✔ resolves thread over global and removing thread restores inheritance (8.926083ms)
+  ✔ rejects non-owner writes and invalid dispositions (6.080417ms)
+✔ GET/PUT /api/config/message-disposition (F264) (607.845958ms)
+▶ F277 manual Group metadata truth
+  ✔ creates a Group only after an explicit command and stores membership in thread metadata (251.485459ms)
+  ✔ moves, renames, removes, and dissolves Groups through the same metadata command path (12.414542ms)
+  ✔ rolls back earlier metadata writes and reports a server failure honestly (53.259917ms)
+  ✔ rejects system and Hub threads from Group membership and projection (83.098542ms)
+  ✔ rolls back Group membership when a named create cannot persist its alias (23.62975ms)
+  ✔ rejects non-owner access without reading or mutating metadata (6.146167ms)
+✔ F277 manual Group metadata truth (500.215458ms)
+▶ F277 search organizing and guarded undo
+  ✔ saves the complete explicit selection including unpinned threads and can undo it (42.6545ms)
+  ✔ adds a batch to an existing stable Group and restores both source and target (73.588959ms)
+  ✔ rejects a stale selection before moving a newly grouped thread (26.741833ms)
+  ✔ rejects undo after another thread joined, even when old member order did not change (183.173042ms)
+  ✔ rolls back the entire batch on a metadata failure (21.17775ms)
+  ✔ rejects unknown members, non-owner requests and malformed undo without mutation (5.531375ms)
+  ✔ does not accept an undo receipt that fabricates a singleton Group (5.722666ms)
+  ✔ rejects a complete forged closure that splits a real Group into hidden singletons (9.363334ms)
+  ✔ organizes and undoes a visually ungrouped survivor of a soft-deleted partner (24.769084ms)
+  ✔ classifies undo after a receipt member becomes soft-deleted as a no-write conflict (9.156583ms)
+  ✔ organizes and undoes a visually ungrouped survivor of a system partner (140.238375ms)
+  ✔ classifies undo after a receipt member becomes system as a no-write conflict (6.761792ms)
+  ✔ organizes and undoes a visually ungrouped survivor of a Hub partner (13.82075ms)
+  ✔ classifies undo after a receipt member becomes Hub as a no-write conflict (3.664542ms)
+  ✔ organizes and undoes a visually ungrouped survivor of a absent partner (7.700583ms)
+  ✔ classifies undo after a receipt member becomes absent as a no-write conflict (3.69375ms)
+  ✔ rejects the old visible snapshot and permits retry after refreshing a now-hidden source Group (11.656709ms)
+  ✔ rejects undo if the previously hidden partner recovers after organizing (7.258209ms)
+✔ F277 search organizing and guarded undo (631.735125ms)
+▶ F277 authenticated current-UI undo receipts
+  ✔ rejects complete closure with singleton before groups without changing membership or aliases (294.466333ms)
+  ✔ rejects fabricated two-member history without changing membership or aliases (80.092083ms)
+  ✔ rejects changed after-state without changing membership or aliases (64.73425ms)
+  ✔ rejects missing closure member without changing membership or aliases (11.463583ms)
+  ✔ rejects wrong proof without changing membership or aliases (133.837792ms)
+  ✔ rejects malformed proof without changing membership or aliases (32.43575ms)
+  ✔ rejects missing proof without changing membership or aliases (38.574042ms)
+  ✔ accepts the genuine state after JSON object property reordering (15.646875ms)
+  ✔ rejects a receipt from a prior API instance without changing durable Group state (14.057916ms)
+  ✔ binds receipt proof to its owner as well as its complete state (4.275833ms)
+✔ F277 authenticated current-UI undo receipts (693.846833ms)
+▶ taste-proposal-decision-routes
+  ▶ GET /api/taste-proposals/:id
+    ✔ returns proposal status (115.5245ms)
+    ✔ returns 404 for unknown id (22.483959ms)
+    ✔ returns 401 without userId (1.885625ms)
+    ✔ returns 403 for wrong user (1.328125ms)
+  ✔ GET /api/taste-proposals/:id (141.965458ms)
+  ▶ POST /api/taste-proposals/:id/approve
+    ✔ approves a pending proposal → vignette written, status=approved (30.541542ms)
+    ✔ approve emits proposal_updated WebSocket event (2.371458ms)
+    ✔ resumes a persisted approving checkpoint without rewriting and remains idempotent (1.425209ms)
+    ✔ returns 409 for already rejected proposal (1.351792ms)
+    ✔ rollbacks claim on writer failure (ADV-3) (7.702833ms)
+    ✔ returns 404 for unknown proposal (1.381667ms)
+    ✔ returns 401 without userId (4.027541ms)
+  ✔ POST /api/taste-proposals/:id/approve (49.132959ms)
+  ▶ POST /api/taste-proposals/:id/reject
+    ✔ rejects a pending proposal with reason (158.227333ms)
+    ✔ reject emits proposal_updated WebSocket event (24.635125ms)
+    ✔ returns 409 for already approved proposal (1.926417ms)
+    ✔ refuses rejection while an approving proposal may already have durable output (1.323125ms)
+    ✔ uses default reason when none provided (1.407917ms)
+    ✔ returns 404 for unknown proposal (3.389875ms)
+    ✔ returns 401 without userId (1.761833ms)
+  ✔ POST /api/taste-proposals/:id/reject (192.984125ms)
+✔ taste-proposal-decision-routes (384.639125ms)
+ℹ tests 63
+ℹ suites 9
+ℹ pass 63
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5895.591
+
+Exit code: 0

@@ -1,0 +1,5 @@
+$ pnpm --filter @cat-cafe/web exec next lint --file src/pdl/useDesktopUpdateBindings.ts --file src/pdl/__tests__/desktop-update-bindings.test.ts --file src/desktop-bridge.d.ts --file src/components/__tests__/DesktopUpdateSettingsPanel.test.tsx --file src/components/__tests__/DesktopUpdatePrompt.test.tsx
+
+✔ No ESLint warnings or errors
+
+Exit code: 0

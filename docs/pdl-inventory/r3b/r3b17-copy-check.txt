@@ -1,0 +1,8 @@
+Source: design-accepted-r124 (unchanged; no copy performed)
+Verification: independent git show and existing source-manifest SHA-256
+Files checked: 81
+Byte or manifest mismatches: 0
+Extra files: 0
+mock / proto / local files: 0
+Manifest and prior copy-check: unchanged
+Exit code: 0

@@ -1,0 +1,55 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/film-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/film-bindings.test.ts (6 tests | 1 failed) 29ms
+   × compares the exact opinion/result inputs and annotates each side with its own screening and clock 15ms
+   ✓ does not infer a new screening from an unchanged, reopened, foreign or mismatched result 1ms
+   ✓ keeps both shown inputs unchanged when the comparison read fails and refuses stale comparison args 3ms
+   ✓ freezes registration input and media source across a lost reply and retains a later selected project 5ms
+   ✓ imports a chosen document through its real owner and revalidates the project list 2ms
+   ✓ reads actual opinions, compares frozen inputs, queues a position without writing review, and confirms a lost reopen reply 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/film-bindings.test.ts > compares the exact opinion/result inputs and annotates each side with its own screening and clock
+AssertionError: expected { …(10) } to match object { …(3) }
+(15 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,9 +1,9 @@
+  {
+    "marks": [
+      {
+-       "from": 0.5,
++       "from": 2.5,
+        "label": "opinion-new",
+      },
+    ],
+    "pick": {
+      "args": {
+
+ ❯ src/pdl/__tests__/film-bindings.test.ts:188:28
+    186|     marks: [{ label: 'opinion-old', from: 0.5 }],
+    187|   });
+    188|   expect(model.comparison).toMatchObject({
+       |                            ^
+    189|     pick: { args: { screening: 'screening-new' } },
+    190|     sync: { source: false },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  20:48:05
+   Duration  1.26s (transform 573ms, setup 35ms, import 787ms, tests 29ms, environment 311ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/film-bindings.test.ts
+
+Exit code: 1

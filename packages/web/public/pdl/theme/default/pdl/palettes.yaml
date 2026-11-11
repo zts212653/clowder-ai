@@ -1,0 +1,13 @@
+palettes:
+  - id: cream
+    name: t:theme.presets.name
+    desc: t:theme.presets.desc
+    accent: "#b05f45"
+    default: true
+  - id: graphite
+    name: t:theme.presets.graphite
+    desc: t:theme.presets.graphiteDescription
+    accent: "#3b6ea8"
+sysThemes:
+  - {id: sys:1, n: 1, skin: default, palette: cream}
+  - {id: sys:2, n: 2, skin: classic, palette: graphite}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
-import { projectTargetReply, targetReplyNotice } from '../target-response-projection';
+import { projectTargetReply } from '../target-response-projection';
 
 const source: ChatMessage = {
   id: 'input',
@@ -68,8 +68,8 @@ describe('one participant response projection', () => {
     };
     expect(projectTargetReply(plugin, [source, plugin])?.terminal).toBe(true);
     expect(projectTargetReply(member, [source, member])?.terminal).toBe(true);
-    expect(targetReplyNotice(projectTargetReply(plugin, [source, plugin])!.status)).toBe(
-      targetReplyNotice(projectTargetReply(member, [source, member])!.status),
+    expect(projectTargetReply(plugin, [source, plugin])!.status).toBe(
+      projectTargetReply(member, [source, member])!.status,
     );
   });
   it('content takes over without fabricating completion for a multi-part plugin', () => {

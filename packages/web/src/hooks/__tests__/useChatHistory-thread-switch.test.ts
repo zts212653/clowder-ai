@@ -349,8 +349,7 @@ describe('useChatHistory thread switch ordering', () => {
     expect(historyCall).toBeDefined();
   });
 
-  it('cached thread with unreadCount === 0 does NOT trigger fetchHistory', () => {
-    // When unread is 0, no need to force-refresh — cache is good enough.
+  it('keeps a cached thread visible and re-pulls full history even when unreadCount is zero', () => {
     useChatStore.setState({
       currentThreadId: 'thread-d',
       threadStates: {
@@ -392,11 +391,9 @@ describe('useChatHistory thread switch ordering', () => {
       root.render(React.createElement(HookHost, { threadId: 'thread-d' }));
     });
 
-    // Should NOT call fetchHistory (no /api/messages call) — uses cache silently.
-    // Secondary panel hydration (tasks, queue) still fires.
     const calls = apiFetchMock.mock.calls;
     const historyCall = calls.find(([url]) => typeof url === 'string' && url.includes('/api/messages'));
-    expect(historyCall).toBeUndefined();
+    expect(historyCall?.[0]).toBe('/api/messages?limit=50&threadId=thread-d');
   });
 
   it('defers a background thread catch-up until that thread history hook is mounted', async () => {

@@ -1,0 +1,347 @@
+packages/web/src/pdl/__tests__/chat-models.test.ts:75:5 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    73 │     expect(JSON.stringify(vm)).not.toContain('private recalled body');
+    74 │     expect(vm.chatStream.items[0].md).toBe('已撤回 · 曾读取');
+  > 75 │     data.messages[0].extra.recall!.exposure = 'none';
+       │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    76 │     vm = chatModels(data, fixtureUi());
+    77 │     expect(vm.chatStream.items.map((m) => m.mid)).toEqual(['reply-1']);
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:57:12 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    55 │       ...messages[1],
+    56 │       lifecycle: {
+  > 57 │         ...messages[1].lifecycle!,
+       │            ^^^^^^^^^^^^^^^^^^^^^^
+    58 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+    59 │       },
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:58:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    56 │       lifecycle: {
+    57 │         ...messages[1].lifecycle!,
+  > 58 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+       │                             ^^^^^^^^^^^^^^^^^^^^^^
+    59 │       },
+    60 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    56 56 │         lifecycle: {
+    57 57 │           ...messages[1].lifecycle!,
+    58    │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+       58 │ + ········dispatchRefs:·[{·...messages[1].lifecycle?.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+    59 59 │         },
+    60 60 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:58:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    56 │       lifecycle: {
+    57 │         ...messages[1].lifecycle!,
+  > 58 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+       │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    59 │       },
+    60 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    56 56 │         lifecycle: {
+    57 57 │           ...messages[1].lifecycle!,
+    58    │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+       58 │ + ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs?.[0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+    59 59 │         },
+    60 60 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:70:12 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    68 │       ...messages[1],
+    69 │       lifecycle: {
+  > 70 │         ...messages[1].lifecycle!,
+       │            ^^^^^^^^^^^^^^^^^^^^^^
+    71 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+    72 │       },
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:71:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    69 │       lifecycle: {
+    70 │         ...messages[1].lifecycle!,
+  > 71 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+       │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    72 │       },
+    73 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    69 69 │         lifecycle: {
+    70 70 │           ...messages[1].lifecycle!,
+    71    │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+       71 │ + ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs?.[0],·statusMessageId:·'other-reply'·}],
+    72 72 │         },
+    73 73 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:71:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    69 │       lifecycle: {
+    70 │         ...messages[1].lifecycle!,
+  > 71 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+       │                             ^^^^^^^^^^^^^^^^^^^^^^
+    72 │       },
+    73 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    69 69 │         lifecycle: {
+    70 70 │           ...messages[1].lifecycle!,
+    71    │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+       71 │ + ········dispatchRefs:·[{·...messages[1].lifecycle?.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+    72 72 │         },
+    73 73 │       };
+
+
+packages/web/src/pdl/__tests__/message-selection.test.ts:13:5 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    11 │     source.extra = { rich: { v: 1, blocks: [a, b] } };
+    12 │     const picked = { [source.id]: { text: false, blocks: { [a.id]: true } } };
+  > 13 │     source.extra.rich!.blocks.reverse();
+       │     ^^^^^^^^^^^^^^^^^^
+    14 │     expect(selectedItems(data.messages, picked)).toEqual([
+    15 │       { kind: 'rich_block', messageId: 'reply-1', sourceMessageIds: ['reply-1'], blockId: a.id },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    11 11 │       source.extra = { rich: { v: 1, blocks: [a, b] } };
+    12 12 │       const picked = { [source.id]: { text: false, blocks: { [a.id]: true } } };
+    13    │ - ····source.extra.rich!.blocks.reverse();
+       13 │ + ····source.extra.rich?.blocks.reverse();
+    14 14 │       expect(selectedItems(data.messages, picked)).toEqual([
+    15 15 │         { kind: 'rich_block', messageId: 'reply-1', sourceMessageIds: ['reply-1'], blockId: a.id },
+
+
+packages/web/src/pdl/__tests__/proposal-models.test.ts:83:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    81 │       actions: [{ label: '同意', action: 'handoff:approve', payload: { proposalId: 'handoff-1' } }],
+    82 │     };
+  > 83 │     const handoff = proposalTarget(block, 'thread-1', 'message-1')!;
+       │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    84 │     transport.read.mockResolvedValue({
+    85 │       proposal: {
+
+
+packages/web/src/pdl/delivery-models.ts:9:82 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 28 detected (max: 15).
+
+     7 │ /** Read evidence and reply progress remain separate, as in the existing lifecycle projection. */
+     8 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+   > 9 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+       │                                                                                  ^^^
+    10 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+    11 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+
+  i Please refactor this function to reduce its complexity score from 28 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/delivery-models.ts:10:17 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     8 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+     9 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 10 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^
+    11 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    12 │     const response = timeline.find((m) => m.id === projection.statusMessageId);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     8  8 │   export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+     9  9 │     return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+    10    │ - ····const·ref·=·message.lifecycle!.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+       10 │ + ····const·ref·=·message.lifecycle?.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+    11 11 │       const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    12 12 │       const response = timeline.find((m) => m.id === projection.statusMessageId);
+
+
+packages/web/src/pdl/delivery-models.ts:10:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     8 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+     9 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 10 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    11 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    12 │     const response = timeline.find((m) => m.id === projection.statusMessageId);
+
+
+packages/web/src/pdl/delivery-models.ts:10:17 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     8 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+     9 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 10 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    11 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    12 │     const response = timeline.find((m) => m.id === projection.statusMessageId);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     8  8 │   export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+     9  9 │     return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+    10    │ - ····const·ref·=·message.lifecycle!.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+       10 │ + ····const·ref·=·message.lifecycle!.dispatchRefs?.find((r)·=>·r.targetId·===·projection.targetId)!;
+    11 11 │       const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    12 12 │       const response = timeline.find((m) => m.id === projection.statusMessageId);
+
+
+packages/web/src/pdl/interactive-actions.ts:19:45 lint/suspicious/noConfusingVoidType  FIXABLE  ━━━━━━━━━━
+
+  ! void is confusing inside a union type.
+
+    17 │   selectedIds: string[],
+    18 │   customInput: string | undefined,
+  > 19 │   send: (text: string) => Promise<boolean | void>,
+       │                                             ^^^^
+    20 │ ) {
+    21 │   validateSelection(block, selectedIds, customInput);
+
+  i Unsafe fix: Use undefined instead.
+
+    17 17 │     selectedIds: string[],
+    18 18 │     customInput: string | undefined,
+    19    │ - ··send:·(text:·string)·=>·Promise<boolean·|·void>,
+       19 │ + ··send:·(text:·string)·=>·Promise<boolean·|·undefined>,
+    20 20 │   ) {
+    21 21 │     validateSelection(block, selectedIds, customInput);
+
+
+packages/web/src/pdl/interactive-actions.ts:80:45 lint/suspicious/noConfusingVoidType  FIXABLE  ━━━━━━━━━━
+
+  ! void is confusing inside a union type.
+
+    78 │   messageId: string,
+    79 │   picks: { block: RichInteractiveBlock; selectedIds: string[]; customInput?: string }[],
+  > 80 │   send: (text: string) => Promise<boolean | void>,
+       │                                             ^^^^
+    81 │ ) {
+    82 │   for (const p of picks) validateSelection(p.block, p.selectedIds, p.customInput);
+
+  i Unsafe fix: Use undefined instead.
+
+    78 78 │     messageId: string,
+    79 79 │     picks: { block: RichInteractiveBlock; selectedIds: string[]; customInput?: string }[],
+    80    │ - ··send:·(text:·string)·=>·Promise<boolean·|·void>,
+       80 │ + ··send:·(text:·string)·=>·Promise<boolean·|·undefined>,
+    81 81 │   ) {
+    82 82 │     for (const p of picks) validateSelection(p.block, p.selectedIds, p.customInput);
+
+
+packages/web/src/pdl/message-selection.ts:26:54 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 27 detected (max: 15).
+
+    24 │   const items = messages
+    25 │     .filter((m) => picked[m.id] && !m.extra?.recall)
+  > 26 │     .flatMap((message): MessageBundleSelectionItem[] => {
+       │                                                      ^^^
+    27 │       const selection = picked[message.id];
+    28 │       if (Object.keys(selection.blocks).some((id) => !message.extra?.rich?.blocks.some((b) => b.id === id)))
+
+  i Please refactor this function to reduce its complexity score from 27 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/proposal-models.ts:24:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    22 │   const id = action?.payload?.proposalId;
+    23 │   return typeof id === 'string' && id
+  > 24 │     ? { feature: action!.action === 'propose:approve' ? 'F128' : 'F225', id, threadId, mid, blockId: block.id }
+       │                  ^^^^^^^
+    25 │     : null;
+    26 │ }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     22  22 │     const id = action?.payload?.proposalId;
+     23  23 │     return typeof id === 'string' && id
+     24     │ - ····?·{·feature:·action!.action·===·'propose:approve'·?·'F128'·:·'F225',·id,·threadId,·mid,·blockId:·block.id·}
+         24 │ + ····?·{·feature:·action?.action·===·'propose:approve'·?·'F128'·:·'F225',·id,·threadId,·mid,·blockId:·block.id·}
+     25  25 │       : null;
+     26  26 │   }
+
+
+packages/web/src/pdl/proposal-models.ts:60:23 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    58 │   return proposal;
+    59 │ }
+  > 60 │ export async function decideProposal(
+       │                       ^^^^^^^^^^^^^^
+    61 │   binding: ProposalBinding,
+    62 │   decision: 'approve' | 'reject',
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/proposal-models.ts:100:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 30 detected (max: 15).
+
+     98 │ }
+     99 │
+  > 100 │ export function proposalView(
+        │                 ^^^^^^^^^^^^
+    101 │   binding: ProposalBinding,
+    102 │   editing: boolean,
+
+  i Please refactor this function to reduce its complexity score from 30 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/rich-models.ts:40:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━
+
+  ! Excessive complexity of 19 detected (max: 15).
+
+    39 │ /** Source block coordinates remain intact; rendering belongs to the copied components. */
+  > 40 │ export function richBlockView(
+       │                 ^^^^^^^^^^^^^
+    41 │   block: RichBlock,
+    42 │   mid: string,
+
+  i Please refactor this function to reduce its complexity score from 19 to the max allowed complexity 15.
+
+
+Skipped 29 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 30.
+Checked 24 files in 58ms. Fixed 1 file.
+Found 49 warnings.
+Found 1 info.

@@ -1,0 +1,115 @@
+$ pnpm exec biome check --max-diagnostics=5 packages/api/src/config/user-preferences-appearance.ts packages/api/test/config/appearance-config.test.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/hooks/useArtifactWidgetBlock.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/__tests__/memory-bindings.test.ts packages/web/src/pdl/__tests__/review-bindings.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/useMemoryBindings.tsx packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useWorkbenchBindings.ts packages/web/public/pdl-app/members.js packages/web/src/pdl/member-actions.ts packages/web/src/pdl/__tests__/member-actions.test.ts
+
+packages/web/src/pdl/__tests__/member-actions.test.ts:83:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    81 │         },
+    82 │       });
+  > 83 │     throw new Error('unhandled ' + url);
+       │                     ^^^^^^^^^^^^^^^^^^
+    84 │   });
+    85 │ });
+
+  i Unsafe fix: Use a template literal.
+
+     81  81 │           },
+     82  82 │         });
+     83     │ - ····throw·new·Error('unhandled·'·+·url);
+         83 │ + ····throw·new·Error(`unhandled·${url}`);
+     84  84 │     });
+     85  85 │   });
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:123:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    121 │       return response(task);
+    122 │     }
+  > 123 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    124 │   });
+    125 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    121 121 │         return response(task);
+    122 122 │       }
+    123     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        123 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    124 124 │     });
+    125 125 │   });
+
+
+packages/web/src/hooks/useArtifactWidgetBlock.ts:81:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: attempt.
+
+    79 │   const messageId = coordinates?.messageId ?? null;
+    80 │   const blockId = coordinates?.blockId ?? null;
+  > 81 │   useEffect(() => {
+       │   ^^^^^^^^^
+    82 │     if (!thread || !messageId || !blockId) {
+    83 │       setLoaded({ key, state: { status: 'idle' } });
+
+  i This dependency can be removed from the list.
+
+     99 │       controller.abort();
+    100 │     };
+  > 101 │   }, [key, thread, messageId, blockId, attempt]);
+        │                                        ^^^^^^^
+    102 │
+    103 │   // 坐标变化后、effect 跑完前，旧结果不能当成新块的预览。
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    101 │ ··},·[key,·thread,·messageId,·blockId,·attempt]);
+        │                                      ---------
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:82:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    80 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    81 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 82 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    83 │     const path = String(raw),
+    84 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:195:19 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    193 │   await act(() => hook.result.current.action('fileOpen', { p: 'note.md', w: 'wt' }));
+    194 │   await waitFor(() => expect(hook.result.current.models().filePage?.actions.load).toBe(''));
+  > 195 │   const actions = hook.result.current.models().filePage!.actions;
+        │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    196 │   expect(actions.allowedActions).toEqual([]);
+    197 │   expect(actions.menuActions).toEqual([{ label: '在访达中显示', op: 'reveal' }]);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    193 193 │     await act(() => hook.result.current.action('fileOpen', { p: 'note.md', w: 'wt' }));
+    194 194 │     await waitFor(() => expect(hook.result.current.models().filePage?.actions.load).toBe(''));
+    195     │ - ··const·actions·=·hook.result.current.models().filePage!.actions;
+        195 │ + ··const·actions·=·hook.result.current.models().filePage?.actions;
+    196 196 │     expect(actions.allowedActions).toEqual([]);
+    197 197 │     expect(actions.menuActions).toEqual([{ label: '在访达中显示', op: 'reveal' }]);
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 786.
+Checked 18 files in 391ms. No fixes applied.
+Found 735 warnings.
+Found 56 infos.
+
+Exit code: 0

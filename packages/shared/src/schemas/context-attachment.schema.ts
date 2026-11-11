@@ -31,6 +31,17 @@ export const ThreadContextAttachmentSchema = z
   })
   .strict();
 
+export const WorkContextAttachmentSchema = z
+  .object({
+    v: z.literal(CONTEXT_ATTACHMENT_VERSION),
+    id: boundedId,
+    kind: z.literal('work'),
+    workId: boundedId,
+    version: z.number().int().positive().safe(),
+    title: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
 export const WorkspaceFileContextAttachmentSchema = withValidLineRange({
   v: z.literal(CONTEXT_ATTACHMENT_VERSION),
   id: boundedId,
@@ -61,6 +72,7 @@ export const ContextAttachmentSchema = z.union([
     })
     .strict(),
   ThreadContextAttachmentSchema,
+  WorkContextAttachmentSchema,
   WorkspaceFileContextAttachmentSchema,
   QuoteContextAttachmentSchema,
   MediaContextAttachmentSchema,

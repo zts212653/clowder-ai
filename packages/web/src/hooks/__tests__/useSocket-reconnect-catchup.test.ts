@@ -37,6 +37,7 @@ const mockSetIntentMode = vi.fn();
 const mockClearCatStatuses = vi.fn();
 const mockSetStreaming = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
+const neededReappeared = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockRefreshSidebarThreadSnapshot = vi.fn(() => Promise.resolve(true));
 const mockGetThreadState = vi.fn(() => ({
@@ -156,6 +157,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.clearAllMocks();
+    window.addEventListener('cat-cafe:socket-reconnected', neededReappeared);
     mockSocket.removeAllListeners();
     configureDebug({ enabled: false });
 
@@ -172,6 +174,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
   });
 
   afterEach(() => {
+    window.removeEventListener('cat-cafe:socket-reconnected', neededReappeared);
     act(() => {
       root.unmount();
     });
@@ -275,7 +278,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
   });
 
   describe('canonical Sidebar snapshot reconnect recovery', () => {
-    it('rehydrates the canonical sidebar snapshot on reconnect but not initial connect', () => {
+    it('reappears needed sources once on reconnect, without a second sidebar pull', () => {
       mockStoreState.hasActiveInvocation = false;
       const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
       act(() => {
@@ -294,7 +297,8 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
           (listener as () => void)();
         }
       });
-      expect(mockRefreshSidebarThreadSnapshot).toHaveBeenCalledTimes(1);
+      expect(neededReappeared).toHaveBeenCalledTimes(1);
+      expect(mockRefreshSidebarThreadSnapshot).not.toHaveBeenCalled();
     });
 
     it('invalidates the canonical sidebar snapshot when the document becomes visible', () => {

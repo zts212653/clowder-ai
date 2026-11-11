@@ -1,0 +1,411 @@
+Biome encountered an unexpected error
+
+This is a bug in Biome, not an error in your code, and we would appreciate it if you could report it to https://github.com/biomejs/biome/issues/ along with the following information to help us fixing the issue.
+
+When opening the issue, please provide a minimal reproduction, or identify and share the file/code that triggers it. Without a way to reproduce the error, the error can't be fixed:
+
+Source Location: crates/biome_js_formatter/src/utils/string_utils.rs:164:33
+Thread Name: biome::workspace_worker_2
+Message: byte index 1 is out of bounds of ``
+Stack Trace: Re-run with `RUST_BACKTRACE=1` to capture the stack trace
+
+Biome encountered an unexpected error
+
+This is a bug in Biome, not an error in your code, and we would appreciate it if you could report it to https://github.com/biomejs/biome/issues/ along with the following information to help us fixing the issue.
+
+When opening the issue, please provide a minimal reproduction, or identify and share the file/code that triggers it. Without a way to reproduce the error, the error can't be fixed:
+
+Source Location: crates/biome_js_formatter/src/utils/string_utils.rs:164:33
+Thread Name: biome::workspace_worker_10
+Message: byte index 1 is out of bounds of ``
+Stack Trace: Re-run with `RUST_BACKTRACE=1` to capture the stack trace
+
+Biome encountered an unexpected error
+
+This is a bug in Biome, not an error in your code, and we would appreciate it if you could report it to https://github.com/biomejs/biome/issues/ along with the following information to help us fixing the issue.
+
+When opening the issue, please provide a minimal reproduction, or identify and share the file/code that triggers it. Without a way to reproduce the error, the error can't be fixed:
+
+Source Location: crates/biome_js_formatter/src/utils/string_utils.rs:164:33
+Thread Name: biome::workspace_worker_6
+Message: byte index 1 is out of bounds of ``
+Stack Trace: Re-run with `RUST_BACKTRACE=1` to capture the stack trace
+
+Biome encountered an unexpected error
+
+This is a bug in Biome, not an error in your code, and we would appreciate it if you could report it to https://github.com/biomejs/biome/issues/ along with the following information to help us fixing the issue.
+
+When opening the issue, please provide a minimal reproduction, or identify and share the file/code that triggers it. Without a way to reproduce the error, the error can't be fixed:
+
+Source Location: crates/biome_js_formatter/src/utils/string_utils.rs:164:33
+Thread Name: biome::workspace_worker_1
+Message: byte index 1 is out of bounds of ``
+Stack Trace: Re-run with `RUST_BACKTRACE=1` to capture the stack trace
+
+Biome encountered an unexpected error
+
+This is a bug in Biome, not an error in your code, and we would appreciate it if you could report it to https://github.com/biomejs/biome/issues/ along with the following information to help us fixing the issue.
+
+When opening the issue, please provide a minimal reproduction, or identify and share the file/code that triggers it. Without a way to reproduce the error, the error can't be fixed:
+
+Source Location: crates/biome_js_formatter/src/utils/string_utils.rs:164:33
+Thread Name: biome::workspace_worker_5
+Message: byte index 1 is out of bounds of ``
+Stack Trace: Re-run with `RUST_BACKTRACE=1` to capture the stack trace
+
+packages/web/src/components/cloud-binding-recovery.ts:47:10 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    45 │ }
+    46 │
+  > 47 │ function latestRecoveryForSource(source: ChatMessage, timelineMessages: readonly ChatMessage[], includeLive = true) {
+       │          ^^^^^^^^^^^^^^^^^^^^^^^
+    48 │   for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
+    49 │     const candidate = timelineMessages[index];
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:142:18 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    140 │   useLayoutEffect(() => {
+    141 │     changed({
+  > 142 │       models: () => {
+        │                  ^^^
+    143 │         const values = readBindingModels(modelReaders, window.clowderChat, readFailures.current);
+    144 │         const { workbench: bench, voice: audio, document: docs } = values;
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:158:45 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    156 │                 filePage: {
+    157 │                   ...bench.filePage,
+  > 158 │                   documentReview: current ? docs!.documentReview : null,
+        │                                             ^^^^^
+    159 │                   annotations: current ? docs!.documentAnnotations : [],
+    160 │                 },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    156 156 │                   filePage: {
+    157 157 │                     ...bench.filePage,
+    158     │ - ··················documentReview:·current·?·docs!.documentReview·:·null,
+        158 │ + ··················documentReview:·current·?·docs?.documentReview·:·null,
+    159 159 │                     annotations: current ? docs!.documentAnnotations : [],
+    160 160 │                   },
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:159:42 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    157 │                   ...bench.filePage,
+    158 │                   documentReview: current ? docs!.documentReview : null,
+  > 159 │                   annotations: current ? docs!.documentAnnotations : [],
+        │                                          ^^^^^
+    160 │                 },
+    161 │               }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    157 157 │                     ...bench.filePage,
+    158 158 │                     documentReview: current ? docs!.documentReview : null,
+    159     │ - ··················annotations:·current·?·docs!.documentAnnotations·:·[],
+        159 │ + ··················annotations:·current·?·docs?.documentAnnotations·:·[],
+    160 160 │                   },
+    161 161 │                 }
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:165:43 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 26 detected (max: 15).
+
+    163 │         };
+    164 │       },
+  > 165 │       action: async (name, args, element) => {
+        │                                           ^^^
+    166 │         for (const [owner, binding] of Object.entries(bindings)) {
+    167 │           if (!('action' in binding)) continue;
+
+  i Please refactor this function to reduce its complexity score from 26 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:92:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    90 │       },
+    91 │     ];
+  > 92 │     const exec = chatModels(data, fixtureUi()).chatStream.items[1].exec!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    93 │     expect(exec.live).toBe(true);
+    94 │     expect(exec.groups.map((group) => group.key)).toEqual(['thinking', 'subagents', 'tools']);
+
+
+packages/web/src/pdl/__tests__/message-selection.test.ts:14:20 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    12 │     document.body.append(row);
+    13 │     const range = document.createRange();
+  > 14 │     range.setStart(body.firstChild!, 7);
+       │                    ^^^^^^^^^^^^^^^^
+    15 │     range.setEnd(body.firstChild!, 20);
+    16 │     const selection = window.getSelection()!;
+
+
+packages/web/src/pdl/__tests__/message-selection.test.ts:15:18 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    13 │     const range = document.createRange();
+    14 │     range.setStart(body.firstChild!, 7);
+  > 15 │     range.setEnd(body.firstChild!, 20);
+       │                  ^^^^^^^^^^^^^^^^
+    16 │     const selection = window.getSelection()!;
+    17 │     selection.removeAllRanges();
+
+
+packages/web/src/pdl/__tests__/message-selection.test.ts:16:23 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    14 │     range.setStart(body.firstChild!, 7);
+    15 │     range.setEnd(body.firstChild!, 20);
+  > 16 │     const selection = window.getSelection()!;
+       │                       ^^^^^^^^^^^^^^^^^^^^^^
+    17 │     selection.removeAllRanges();
+    18 │     selection.addRange(range);
+
+
+packages/web/src/pdl/__tests__/message-selection.test.ts:37:5 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    35 │     source.extra = { rich: { v: 1, blocks: [a, b] } };
+    36 │     const picked = { [source.id]: { text: false, blocks: { [a.id]: true } } };
+  > 37 │     source.extra.rich!.blocks.reverse();
+       │     ^^^^^^^^^^^^^^^^^^
+    38 │     expect(selectedItems(data.messages, picked)).toEqual([
+    39 │       { kind: 'rich_block', messageId: 'reply-1', sourceMessageIds: ['reply-1'], blockId: a.id },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    35 35 │       source.extra = { rich: { v: 1, blocks: [a, b] } };
+    36 36 │       const picked = { [source.id]: { text: false, blocks: { [a.id]: true } } };
+    37    │ - ····source.extra.rich!.blocks.reverse();
+       37 │ + ····source.extra.rich?.blocks.reverse();
+    38 38 │       expect(selectedItems(data.messages, picked)).toEqual([
+    39 39 │         { kind: 'rich_block', messageId: 'reply-1', sourceMessageIds: ['reply-1'], blockId: a.id },
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:49:18 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    47 │   );
+    48 │   const result = await readPluginSpaces('https://host.test:3013');
+  > 49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:49:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    47 │   );
+    48 │   const result = await readPluginSpaces('https://host.test:3013');
+  > 49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    47 47 │     );
+    48 48 │     const result = await readPluginSpaces('https://host.test:3013');
+    49    │ - ··const·frames·=·result.fragments['official.collective-connector']!.frames!;
+       49 │ + ··const·frames·=·result.fragments['official.collective-connector']?.frames!;
+    50 50 │     expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51 51 │     expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:50:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    48 │   const result = await readPluginSpaces('https://host.test:3013');
+    49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+  > 50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+       │          ^^^^^^^^^^^^^^
+    51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+    52 │   expect(apiFetch).toHaveBeenCalledTimes(2);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    48 48 │     const result = await readPluginSpaces('https://host.test:3013');
+    49 49 │     const frames = result.fragments['official.collective-connector']!.frames!;
+    50    │ - ··expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+       50 │ + ··expect(frames.client?.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51 51 │     expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+    52 52 │     expect(apiFetch).toHaveBeenCalledTimes(2);
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:51:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+  > 51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    52 │   expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 │ });
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    49 49 │     const frames = result.fragments['official.collective-connector']!.frames!;
+    50 50 │     expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51    │ - ··expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       51 │ + ··expect(result.fragments['other.plugin']?.frames!.client!.src).toBe('https://other.test/');
+    52 52 │     expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 53 │   });
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:51:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+  > 51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    52 │   expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 │ });
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    49 49 │     const frames = result.fragments['official.collective-connector']!.frames!;
+    50 50 │     expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51    │ - ··expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       51 │ + ··expect(result.fragments['other.plugin']!.frames?.client!.src).toBe('https://other.test/');
+    52 52 │     expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 53 │   });
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:51:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+  > 51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    52 │   expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 │ });
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    49 49 │     const frames = result.fragments['official.collective-connector']!.frames!;
+    50 50 │     expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51    │ - ··expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+       51 │ + ··expect(result.fragments['other.plugin']!.frames!.client?.src).toBe('https://other.test/');
+    52 52 │     expect(apiFetch).toHaveBeenCalledTimes(2);
+    53 53 │   });
+
+
+packages/web/src/pdl/useSidebarBindings.ts:46:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    44 │         const command = JSON.parse(args.value) as ThreadAttentionGroupCommand;
+    45 │         const preferences = await write<ThreadAttentionPreferences>('/api/config/thread-attention/groups', command);
+  > 46 │         accept({ ...read.current.owner!, preferences });
+       │                     ^^^^^^^^^^^^^^^^^^^
+    47 │         await invalidateSidebarProjection();
+    48 │         return true;
+
+
+packages/web/src/pdl/useSidebarBindings.ts:52:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    50 │       case 'sidebarLabelCreate': {
+    51 │         const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+  > 52 │         accept({ ...read.current.owner!, labels: [...read.current.owner!.labels, label] });
+       │                     ^^^^^^^^^^^^^^^^^^^
+    53 │         return true;
+    54 │       }
+
+
+packages/web/src/pdl/useSidebarBindings.ts:52:54 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    50 │       case 'sidebarLabelCreate': {
+    51 │         const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+  > 52 │         accept({ ...read.current.owner!, labels: [...read.current.owner!.labels, label] });
+       │                                                      ^^^^^^^^^^^^^^^^^^^
+    53 │         return true;
+    54 │       }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     50  50 │         case 'sidebarLabelCreate': {
+     51  51 │           const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+     52     │ - ········accept({·...read.current.owner!,·labels:·[...read.current.owner!.labels,·label]·});
+         52 │ + ········accept({·...read.current.owner!,·labels:·[...read.current.owner?.labels,·label]·});
+     53  53 │           return true;
+     54  54 │         }
+
+
+packages/web/src/pdl/useSidebarBindings.ts:35:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook does not specify its dependency on load.
+
+    33 │     }
+    34 │   };
+  > 35 │   useEffect(() => {
+       │   ^^^^^^^^^
+    36 │     void load().catch(() => {});
+    37 │   }, []);
+
+  i This dependency is being used here, but is not specified in the hook dependency list.
+
+    34 │   };
+    35 │   useEffect(() => {
+  > 36 │     void load().catch(() => {});
+       │          ^^^^
+    37 │   }, []);
+    38 │   const action = async (name: string, args: Record<string, string>) => {
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Failing to specify dependencies can result in Effects not updating correctly when state changes.
+    These "stale closures" are a common source of surprising bugs.
+
+  i Either include it or remove the dependency array.
+
+  i Unsafe fix: Add the missing dependency to the list.
+
+    37 │ ··},·[load]);
+       │       ++++
+
+Skipped 62 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 84.
+Checked 24 files in 27s. Fixed 19 files.
+Found 81 warnings.
+Found 18 infos.
+
+Exit code: 0

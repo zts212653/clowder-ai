@@ -1,0 +1,47 @@
+{
+  "runtimeModuleCount": 350,
+  "runtimeJSX": [
+    "packages/web/src/pdl/PdlAppHost.tsx",
+    "packages/web/src/components/shell/useSettingsSourceReturn.tsx",
+    "packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx",
+    "packages/web/src/pdl/ProjectDataBinding.tsx",
+    "packages/web/src/components/workbench/WorkspaceSurfaceVisibility.tsx"
+  ],
+  "incomingToJSX": [
+    {
+      "from": "packages/web/src/hooks/useChatCommands.ts",
+      "to": "packages/web/src/components/shell/useSettingsSourceReturn.tsx",
+      "import": "@/components/shell/useSettingsSourceReturn"
+    },
+    {
+      "from": "packages/web/src/pdl/PdlAppHost.tsx",
+      "to": "packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx",
+      "import": "@/components/thread-chat/ThreadChatRuntimeProvider"
+    },
+    {
+      "from": "packages/web/src/hooks/useChatHistory.ts",
+      "to": "packages/web/src/components/thread-chat/ThreadChatRuntimeProvider.tsx",
+      "import": "@/components/thread-chat/ThreadChatRuntimeProvider"
+    },
+    {
+      "from": "packages/web/src/pdl/PdlAppHost.tsx",
+      "to": "packages/web/src/pdl/ProjectDataBinding.tsx",
+      "import": "./ProjectDataBinding"
+    },
+    {
+      "from": "packages/web/src/components/workbench/content-review/useWorkspaceReviewOwnerUpdates.ts",
+      "to": "packages/web/src/components/workbench/WorkspaceSurfaceVisibility.tsx",
+      "import": "../WorkspaceSurfaceVisibility"
+    },
+    {
+      "from": "packages/web/src/components/capability-evolution/evolution-asset-resource.ts",
+      "to": "packages/web/src/components/workbench/WorkspaceSurfaceVisibility.tsx",
+      "import": "@/components/workbench/WorkspaceSurfaceVisibility"
+    },
+    {
+      "from": "packages/web/src/components/capability-evolution/evolution-program-resource.ts",
+      "to": "packages/web/src/components/workbench/WorkspaceSurfaceVisibility.tsx",
+      "import": "@/components/workbench/WorkspaceSurfaceVisibility"
+    }
+  ]
+}

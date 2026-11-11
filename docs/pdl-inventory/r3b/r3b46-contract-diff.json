@@ -1,0 +1,4244 @@
+{
+  "baseline": "d1a7ad3842",
+  "scope": "features-r156.json -> features-now.json",
+  "vms": {
+    "accounts": {
+      "added": false,
+      "fieldsAdded": [
+        "accountUse",
+        "accountUse[].count",
+        "accountUse[].id",
+        "accountUse[].name",
+        "accountUse[].using",
+        "counts",
+        "counts.all",
+        "counts.key",
+        "counts.oauth",
+        "filter",
+        "mixed",
+        "mixedCount"
+      ],
+      "fieldsRemoved": ["filters", "mixedHead", "mixedText"],
+      "bindsAdded": [
+        "accountUse",
+        "counts.all",
+        "counts.key",
+        "counts.oauth",
+        "filter",
+        "keys.count",
+        "keys.hasAny",
+        "legacy.count",
+        "login.count",
+        "login.hasAny",
+        "mixed",
+        "mixedCount"
+      ],
+      "bindsRemoved": [
+        "filters",
+        "keys.empty",
+        "keys.title",
+        "legacy.label",
+        "login.empty",
+        "login.title",
+        "mixedHead",
+        "mixedText"
+      ],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.accounts"],
+      "newViews": ["page.accounts"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/accounts.js"],
+      "declarationGaps": []
+    },
+    "assetCanon": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": ["detail.statusOptions"],
+      "oldFile": "app/media.js",
+      "newFile": "app/media.js",
+      "oldViews": ["asset.canon"],
+      "newViews": ["asset.canon"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "cafeHome": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["composer", "composer.home", "composer.note"],
+      "bindsAdded": [],
+      "bindsRemoved": ["state.action", "state.strong", "state.text", "state.tone"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["cafe.home"],
+      "newViews": ["cafe.home"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/home.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "cafeInbox": {
+      "added": false,
+      "fieldsAdded": [
+        "ap.histItems[].from",
+        "ap.histItems[].keys",
+        "ap.histItems[].keys.card",
+        "ap.histItems[].keys.origin",
+        "ap.histItems[].keys.tech",
+        "ap.histItems[].name",
+        "ap.histItems[].origin",
+        "ap.histItems[].result",
+        "ap.histItems[].selected",
+        "ap.histItems[].selected.card",
+        "ap.histItems[].selected.origin",
+        "ap.histItems[].selected.tech",
+        "ap.histItems[].tech",
+        "ap.histItems[].time",
+        "ap.histItems[].timestamp",
+        "ap.histItems[].titleKind",
+        "ap.histItems[].type",
+        "ap.pendingCount",
+        "ap.pickedCount",
+        "ap.tab",
+        "handled.items[].handled",
+        "ignored.items[].ignored",
+        "ignored.time",
+        "ignoredCount",
+        "main.at[].handle",
+        "main.at[].name",
+        "main.at[].text",
+        "main.at[].threadTitle",
+        "main.at[].time",
+        "main.decide[].after",
+        "main.decide[].from",
+        "main.decide[].kind",
+        "main.decide[].name",
+        "main.decide[].time",
+        "main.decide[].timestamp",
+        "main.decide[].type",
+        "main.decide[].why",
+        "main.other[].advice",
+        "main.other[].goal",
+        "main.review[].icon",
+        "main.review[].pluginId",
+        "main.review[].state",
+        "main.time"
+      ],
+      "fieldsRemoved": [
+        "ap.acceptLabel",
+        "ap.histItems[].body",
+        "ap.histItems[].sub",
+        "ap.tabs",
+        "ignored.times",
+        "ignored.times[].active",
+        "ignored.times[].label",
+        "ignored.times[].v",
+        "main.at[].body",
+        "main.at[].slot",
+        "main.at[].sub",
+        "main.at[].title",
+        "main.decide[].body",
+        "main.decide[].dl",
+        "main.decide[].slot",
+        "main.decide[].sub",
+        "main.other[].body",
+        "main.other[].dl",
+        "main.other[].glyph",
+        "main.other[].slot",
+        "main.review[].act",
+        "main.review[].args",
+        "main.review[].args.exit",
+        "main.review[].args.p",
+        "main.review[].args.to",
+        "main.review[].glyph",
+        "main.times",
+        "main.times[].active",
+        "main.times[].label",
+        "main.times[].v"
+      ],
+      "bindsAdded": ["ap.pendingCount", "ap.pickedCount", "ap.tab", "ignored.time", "ignoredCount", "main.time"],
+      "bindsRemoved": ["ap.acceptLabel", "ap.tabs", "ignored.times", "main.times"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["cafe.inbox"],
+      "newViews": ["cafe.inbox.float", "cafe.inbox"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/inbox.js"],
+      "declarationGaps": []
+    },
+    "cafeMemory": {
+      "added": false,
+      "fieldsAdded": ["view"],
+      "fieldsRemoved": ["views", "views[].active", "views[].label", "views[].v"],
+      "bindsAdded": [
+        "all",
+        "all.cat",
+        "brakes.sel.quote",
+        "brakes.sel.rule",
+        "detail.active",
+        "detail.canRetire",
+        "detail.entity",
+        "detail.entity.attributes.aliases",
+        "detail.entity.attributes.stance",
+        "detail.family",
+        "detail.owner.correctionProposals.length",
+        "detail.owner.proposals.length",
+        "detail.person.aliases",
+        "detail.personId",
+        "detail.personRevision",
+        "detail.profile.openingReference.asOf",
+        "detail.profile.openingReference.excerpts",
+        "detail.profile.usage.allVersions.opening",
+        "detail.profile.usage.allVersions.read",
+        "detail.profile.usage.currentVersion.opening",
+        "detail.profile.usage.currentVersion.read",
+        "detail.profile.usage.error",
+        "detail.profile.usage.error.length",
+        "detail.profile.usage.openingMode",
+        "detail.retireEntity",
+        "detail.state",
+        "detail.taste",
+        "detail.unavailable",
+        "graph.depth",
+        "graph.graph.edges",
+        "graph.graph.nodes",
+        "graph.nodeCount",
+        "graph.relationCount",
+        "library.candidateCount",
+        "library.collectionCount",
+        "library.evidence.configWarnings.length",
+        "library.evidence.docs_count",
+        "library.evidence.edges_count",
+        "library.evidence.passages_count",
+        "library.evidence.x_demo.rebuildClock",
+        "library.maintenance.staleAnchors",
+        "library.tab",
+        "recall.more",
+        "search.query",
+        "status.archivedCount",
+        "status.collectionCount",
+        "status.curation.modelLabel",
+        "status.distribution",
+        "status.evidence.backend",
+        "status.evidence.docs_count",
+        "status.evidence.edges_count",
+        "status.evidence.embedding_model",
+        "status.evidence.last_rebuild_at",
+        "status.evidence.passages_count",
+        "status.evidence.threads_count",
+        "status.evidence.vectors_count",
+        "status.hitRate",
+        "status.maintenance.contradictions",
+        "status.maintenance.stale",
+        "status.maintenance.unverified",
+        "status.passages",
+        "status.reflections",
+        "status.replayDrift",
+        "status.searches",
+        "status.staleAnchors",
+        "status.vectors",
+        "status.windowDays",
+        "view"
+      ],
+      "bindsRemoved": [
+        "all.emptyText",
+        "all.list",
+        "all.showList",
+        "all.taste",
+        "brakes.sel.fields",
+        "detail.desc",
+        "detail.profile.openingFields",
+        "detail.profile.openingItems",
+        "detail.profile.usageCounts",
+        "detail.sections.corrections",
+        "detail.sections.proposals",
+        "detail.sections.sources",
+        "graph.graph",
+        "graph.kv",
+        "library.candTitle",
+        "library.collTitle",
+        "library.health",
+        "library.kv",
+        "library.tabs",
+        "recall.moreLabel",
+        "search.depths",
+        "search.title",
+        "search.types",
+        "status.curation.byText",
+        "status.health",
+        "status.healthRows",
+        "status.kv",
+        "views"
+      ],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["cafe.memory"],
+      "newViews": ["cafe.memory"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeNavShell": {
+      "added": false,
+      "fieldsAdded": [
+        "classifying",
+        "counts",
+        "group",
+        "hasTag",
+        "noTag",
+        "route",
+        "tags",
+        "tags[].id",
+        "tags[].n",
+        "tags[].name",
+        "tags[].on",
+        "unclassified",
+        "unread",
+        "untagged",
+        "untaggedOn"
+      ],
+      "fieldsRemoved": ["barNote", "groupLabel"],
+      "bindsAdded": [
+        "byProject",
+        "classifying",
+        "counts.favorites",
+        "counts.pinned",
+        "counts.project",
+        "counts.recent",
+        "counts.system",
+        "group",
+        "hasTag",
+        "hidden",
+        "noTag",
+        "route",
+        "tag",
+        "tagName",
+        "tags",
+        "trash",
+        "unclassified",
+        "unread",
+        "untagged",
+        "untaggedOn"
+      ],
+      "bindsRemoved": [],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": [],
+      "newViews": ["nav.cafe.shell"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/sidebar.js"],
+      "declarationGaps": []
+    },
+    "cafeSearch": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["scopes[].label"],
+      "bindsAdded": ["msgs.sort", "threads.count"],
+      "bindsRemoved": ["msgs.sorts", "threads.orgLabel"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["cafe.search"],
+      "newViews": ["cafe.search"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "cafeTrash": {
+      "added": false,
+      "fieldsAdded": ["items[].deleted", "items[].deletedAt"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["cafe.trash"],
+      "newViews": ["cafe.trash"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeWsClips": {
+      "added": false,
+      "fieldsAdded": ["layout", "project"],
+      "fieldsRemoved": [
+        "cards",
+        "detail",
+        "gallery",
+        "gallery.items",
+        "layouts",
+        "layouts[].active",
+        "layouts[].label",
+        "layouts[].v"
+      ],
+      "bindsAdded": ["layout", "project"],
+      "bindsRemoved": ["cards", "detail", "gallery", "layouts"],
+      "oldFile": "app/video-project.js",
+      "newFile": "app/video-project.js",
+      "oldViews": ["cafe.ws.clips"],
+      "newViews": ["cafe.ws.clips"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "cafeWsCommunity": {
+      "added": false,
+      "fieldsAdded": [
+        "list.cats[].handle",
+        "list.cats[].name",
+        "list.cats[].v",
+        "list.findings[].i",
+        "list.findings[].pending",
+        "list.issueCount",
+        "list.prCount",
+        "list.syncedAt",
+        "list.syncing"
+      ],
+      "fieldsRemoved": ["list.summary"],
+      "bindsAdded": [
+        "detail.ago",
+        "detail.catHandle",
+        "detail.catName",
+        "detail.dir.evidence",
+        "detail.dir.questions",
+        "detail.dir.role",
+        "detail.dir.route",
+        "detail.hasCat",
+        "detail.state",
+        "detail.threadTitle",
+        "list.issueCount",
+        "list.prCount",
+        "list.syncedAt",
+        "list.syncing"
+      ],
+      "bindsRemoved": ["detail.dir.rows", "detail.eyebrow", "detail.sub", "list.summary"],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.community"],
+      "newViews": ["cafe.ws.community"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeWsEvo": {
+      "added": false,
+      "fieldsAdded": ["activeCount"],
+      "fieldsRemoved": ["activeDesc", "sections", "sections.list"],
+      "bindsAdded": [
+        "activeCount",
+        "detail.actualStage",
+        "detail.cycle",
+        "detail.exploration.compare",
+        "detail.exploration.compare.errors",
+        "detail.exploration.compare.hasError",
+        "detail.exploration.compare.subset.count",
+        "detail.exploration.selectedExperiment",
+        "detail.exploration.unavailable",
+        "detail.hasName",
+        "detail.judge.change.status",
+        "detail.lifecycle.canPause",
+        "detail.lifecycle.mutable",
+        "detail.notice",
+        "detail.owner.attribution",
+        "detail.owner.attribution.comparability.label",
+        "detail.owner.attribution.confidence.label",
+        "detail.owner.lineage",
+        "detail.owner.observation",
+        "detail.owner.preparation",
+        "detail.preparation.measurement.comparison.controls",
+        "detail.preparation.measurement.comparison.independentHoldout",
+        "detail.preparation.measurement.comparison.primaryVariable",
+        "detail.preparation.measurement.comparison.repeatability",
+        "detail.preparation.measurement.comparison.unit",
+        "detail.progressRequest.canRequest",
+        "detail.stage",
+        "detail.unavailable",
+        "detail.use.rollback.programId",
+        "detail.use.rollback.versionRef",
+        "detail.use.selected",
+        "detail.use.selectedTitle.hasTitle",
+        "detail.use.selectedTitle.title",
+        "detail.use.unavailable",
+        "detail.view",
+        "load"
+      ],
+      "bindsRemoved": [
+        "activeDesc",
+        "detail.exploration.compare.error",
+        "detail.exploration.compare.sections.sides",
+        "detail.exploration.compare.subset.label",
+        "detail.exploration.sections.cases",
+        "detail.exploration.sections.experiments",
+        "detail.eyebrow",
+        "detail.hist.sections.preparation",
+        "detail.hist.sections.rounds",
+        "detail.hist.sections.versions",
+        "detail.judge.change.statusNote",
+        "detail.judge.decideOpts",
+        "detail.judge.judgement",
+        "detail.judge.noDecide",
+        "detail.preparation.measurement.comparison",
+        "detail.sections.attribution",
+        "detail.sections.change",
+        "detail.sections.exploration",
+        "detail.sections.observation",
+        "detail.sections.preparation",
+        "detail.sections.use",
+        "detail.steps",
+        "detail.use.rollback.args",
+        "detail.use.selectedTitle",
+        "detail.views",
+        "sections.list"
+      ],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.evolution"],
+      "newViews": ["cafe.ws.evolution"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeWsOps": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["sections[].label", "sections[].v"],
+      "bindsAdded": [
+        "brake.minutes",
+        "brake.mode",
+        "brake.on",
+        "cmd",
+        "gov.d.install",
+        "gov.d.path",
+        "gov.d.prev.count",
+        "gov.d.prev.undo",
+        "gov.d.version",
+        "lb.chatty",
+        "lb.cvo",
+        "lb.favorite",
+        "lb.gameStats.shameCount",
+        "lb.gameStats.spy.handle",
+        "lb.gameStats.spy.name",
+        "lb.gameStats.winner.handle",
+        "lb.gameStats.winner.name",
+        "lb.gameStats.wins",
+        "lb.hasRange",
+        "lb.night",
+        "lb.range",
+        "lb.streak",
+        "lb.workStats.bugFixes",
+        "lb.workStats.commits",
+        "lb.workStats.reviews",
+        "obs.cats",
+        "obs.members",
+        "obs.ready",
+        "obs.reasons",
+        "obs.samples",
+        "obs.stats.active",
+        "obs.stats.cats",
+        "obs.stats.errorRate",
+        "obs.stats.failed",
+        "obs.stats.ok30m",
+        "obs.stats.otelEnabled",
+        "obs.stats.snapshots",
+        "obs.stats.total",
+        "obs.stats.totalAll",
+        "obs.stats.uptime",
+        "obs.storeBytes",
+        "obs.storeRows",
+        "obs.telemetryOff",
+        "obs.tools",
+        "obs.view",
+        "obs.xcap",
+        "obs.xcats",
+        "quota.archive",
+        "quota.constrained",
+        "quota.hasToolcat",
+        "quota.hasToolrange",
+        "quota.hasTooltype",
+        "quota.review",
+        "quota.toolCats",
+        "quota.toolStats.mcp",
+        "quota.toolStats.mcpShare",
+        "quota.toolStats.native",
+        "quota.toolStats.nativeShare",
+        "quota.toolStats.skill",
+        "quota.toolStats.skillShare",
+        "quota.toolStats.total",
+        "quota.tools",
+        "rescue.count",
+        "rt.d.bind",
+        "rt.d.member.handle",
+        "rt.d.member.name",
+        "rt.d.model",
+        "rt.d.pages",
+        "rt.d.view",
+        "rt.filter"
+      ],
+      "bindsRemoved": [
+        "brake.rows",
+        "cmd.secs",
+        "daemon.attach",
+        "daemon.emptyText",
+        "gov.d.noneTip",
+        "gov.d.prev.applyLabel",
+        "gov.d.prev.danger",
+        "gov.d.prev.title",
+        "gov.d.sub",
+        "gov.d.title",
+        "lb.ranges",
+        "lb.secs",
+        "obs.secs",
+        "obs.stats",
+        "obs.telemetry",
+        "obs.telemetry.text",
+        "obs.telemetry.tone",
+        "obs.views",
+        "quota.refreshLabel",
+        "quota.route",
+        "quota.routeNote",
+        "quota.toolGroups",
+        "quota.toolStats",
+        "rescue.emptyText",
+        "rescue.fixLabel",
+        "rescue.scanLabel",
+        "rt.d.sub",
+        "rt.d.tabs",
+        "rt.filters"
+      ],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.ops"],
+      "newViews": ["cafe.ws.ops"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeWsRecall": {
+      "added": false,
+      "fieldsAdded": ["replyCount"],
+      "fieldsRemoved": ["summary"],
+      "bindsAdded": ["replyCount"],
+      "bindsRemoved": ["summary"],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.recall"],
+      "newViews": ["cafe.ws.recall"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "cafeWsSignals": {
+      "added": false,
+      "fieldsAdded": ["view"],
+      "fieldsRemoved": ["views"],
+      "bindsAdded": [
+        "detail.lastStudyAt",
+        "detail.pod.count",
+        "detail.pod.kind",
+        "detail.pod.minutes",
+        "detail.pod.playing",
+        "detail.source",
+        "detail.state",
+        "detail.tier",
+        "detail.time",
+        "detail.year",
+        "list.count",
+        "list.today",
+        "list.unread",
+        "list.week",
+        "view"
+      ],
+      "bindsRemoved": [
+        "detail.eyebrow",
+        "detail.lastStudy",
+        "detail.pod.line",
+        "detail.pod.playIcon",
+        "detail.pod.playLabel",
+        "detail.sub",
+        "list.countLine",
+        "list.selText",
+        "list.top",
+        "views"
+      ],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["signal.article", "cafe.ws.signals"],
+      "newViews": ["signal.article", "cafe.ws.signals"],
+      "status": "raw contract applied; copied declaration needs completion",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": ["signalFetchSummary"]
+    },
+    "cafeWsTeam": {
+      "added": false,
+      "fieldsAdded": ["ruleN", "view"],
+      "fieldsRemoved": ["views"],
+      "bindsAdded": [
+        "detail.m.breed",
+        "detail.m.model",
+        "detail.m.prof.care",
+        "detail.m.prof.care.length",
+        "detail.m.prof.good",
+        "detail.m.prof.good.length",
+        "detail.m.prof.hasDate",
+        "detail.m.tech.evidence",
+        "detail.m.tech.hasProvider",
+        "detail.m.tech.provider",
+        "detail.m.tech.version",
+        "detail.p.count",
+        "detail.signal.count",
+        "ledger.eventCount",
+        "ledger.versionCount",
+        "roster.affected.0.handle",
+        "roster.affected.0.name",
+        "roster.affected.1.handle",
+        "roster.affected.1.name",
+        "roster.counts.all",
+        "roster.counts.attention",
+        "roster.counts.noProfile",
+        "ruleN",
+        "view"
+      ],
+      "bindsRemoved": [
+        "detail.m.prof.rows",
+        "detail.m.sub",
+        "detail.m.tech",
+        "detail.m.tone",
+        "detail.p.sub",
+        "ledger.evDesc",
+        "ledger.verDesc",
+        "roster.degradedText",
+        "roster.filters",
+        "views"
+      ],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.team"],
+      "newViews": ["cafe.ws.team"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "cafeWsVoice": {
+      "added": false,
+      "fieldsAdded": ["items[].mediaId", "items[].path"],
+      "fieldsRemoved": ["items[].media", "items[].title", "recIcon", "recLabel"],
+      "bindsAdded": ["service.name", "service.state"],
+      "bindsRemoved": ["recIcon", "recLabel", "service"],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["cafe.ws.voice"],
+      "newViews": ["cafe.ws.voice"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "capAudit": {
+      "added": true,
+      "fieldsAdded": ["items", "load"],
+      "fieldsRemoved": [],
+      "bindsAdded": ["items", "load"],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/capabilities.js",
+      "oldViews": [],
+      "newViews": ["modal.capAudit"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/placement.js"],
+      "declarationGaps": []
+    },
+    "chatComposer": {
+      "added": false,
+      "fieldsAdded": ["proj.home", "proj.name", "proj.path", "send.reason", "target.route"],
+      "fieldsRemoved": [
+        "barNote",
+        "note",
+        "proj.label",
+        "proj.pop",
+        "proj.tip",
+        "send.tip",
+        "target.autoTip",
+        "target.tip"
+      ],
+      "bindsAdded": [
+        "input.draft.reply.from",
+        "input.draft.reply.mid",
+        "input.draft.reply.text",
+        "input.history",
+        "input.home",
+        "input.rec.busy",
+        "input.rec.secs",
+        "input.whisper",
+        "preflight.git.available",
+        "preflight.index.state",
+        "proj.home",
+        "proj.name",
+        "proj.path",
+        "send.reason",
+        "target.route.handle",
+        "target.route.name",
+        "target.route.names",
+        "target.route.reason"
+      ],
+      "bindsRemoved": [
+        "barNote",
+        "input.ghost",
+        "input.homeArg",
+        "input.on",
+        "input.placeholder",
+        "input.rec.clock",
+        "input.title.value",
+        "none",
+        "note",
+        "preflight.git.status",
+        "preflight.index.status",
+        "proj.label",
+        "proj.pop",
+        "proj.tip",
+        "queue.label",
+        "send.tip",
+        "target.tip"
+      ],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["chat.composer"],
+      "newViews": ["chat.composer"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "chatHeader": {
+      "added": false,
+      "fieldsAdded": ["fav", "id", "peopleCount", "pinned"],
+      "fieldsRemoved": ["peopleLabel"],
+      "bindsAdded": ["fav", "id", "peopleCount", "pinned"],
+      "bindsRemoved": ["peopleLabel"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["chat.header"],
+      "newViews": ["chat.header"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "chatModal": {
+      "added": false,
+      "fieldsAdded": ["kind"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["chat.modal"],
+      "newViews": ["chat.modal"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "chatPage": {
+      "added": false,
+      "fieldsAdded": ["hook.fixed", "hook.items", "hook.open", "hook.summary", "lobby", "messages", "title"],
+      "fieldsRemoved": ["none", "olderTicks", "stream", "welcome"],
+      "bindsAdded": [
+        "find.count",
+        "find.index",
+        "find.q",
+        "hook.fixed",
+        "imported.ago",
+        "imported.handle",
+        "imported.hasWho",
+        "imported.name",
+        "imported.tool",
+        "lobby",
+        "messages.length",
+        "title",
+        "viewCat.handle",
+        "viewCat.name",
+        "vote.count",
+        "vote.question"
+      ],
+      "bindsRemoved": ["find.label", "hook", "none", "olderTicks", "stream", "welcome"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["page.chat"],
+      "newViews": ["page.chat"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "chatPop": {
+      "added": false,
+      "fieldsAdded": [
+        "attachmentFull",
+        "commands",
+        "commands[].command",
+        "commands[].index",
+        "commands[].section",
+        "commands[].selected",
+        "comment",
+        "contextQuery",
+        "contexts",
+        "daemon",
+        "delivery.items[].repeated",
+        "delivery.items[].state",
+        "delivery.items[].transportError",
+        "files",
+        "find.count",
+        "find.done",
+        "find.scope",
+        "find.sort",
+        "groupSelected",
+        "members",
+        "members[].executing",
+        "members[].handle",
+        "members[].id",
+        "members[].name",
+        "members[].presenceTone",
+        "members[].selected",
+        "members[].state",
+        "members[].what",
+        "mentions",
+        "noHomeProject",
+        "noProject",
+        "paths",
+        "paths[].index",
+        "paths[].path",
+        "paths[].selected",
+        "preferNames",
+        "projects",
+        "projects[].id",
+        "projects[].name",
+        "projects[].path",
+        "projects[].selected",
+        "results",
+        "results[].allThreads",
+        "results[].hit",
+        "results[].hitAt",
+        "results[].index",
+        "results[].name",
+        "results[].post",
+        "results[].pre",
+        "results[].threadTitle",
+        "results[].time",
+        "selectionSource",
+        "sendMode",
+        "source",
+        "systemSelected",
+        "threads",
+        "whisperOn",
+        "works"
+      ],
+      "fieldsRemoved": [
+        "close",
+        "delivery.items[].jumpWhy",
+        "delivery.items[].result",
+        "delivery.items[].status",
+        "delivery.items[].status.text",
+        "delivery.items[].status.tone",
+        "find.scopes",
+        "find.sorts",
+        "headOn",
+        "items",
+        "items[].act",
+        "items[].args",
+        "items[].args.id",
+        "items[].args.kind",
+        "items[].args.path",
+        "items[].args.v",
+        "items[].cur",
+        "items[].sub",
+        "items[].title",
+        "navTitle",
+        "path",
+        "projTree",
+        "projTree.",
+        "title"
+      ],
+      "bindsAdded": [
+        "attachmentFull",
+        "commands",
+        "comment",
+        "contextFilter.length",
+        "contexts",
+        "daemon",
+        "find.count",
+        "find.done",
+        "find.scope",
+        "find.sort",
+        "groupSelected",
+        "kind",
+        "members",
+        "mentions",
+        "mode",
+        "noHomeProject",
+        "noProject",
+        "paths",
+        "preferNames",
+        "projects",
+        "query.length",
+        "results",
+        "selectionSource",
+        "sendMode",
+        "source",
+        "subpage",
+        "systemSelected",
+        "typed",
+        "up",
+        "voice.pendingCall",
+        "voice.service.name",
+        "voice.service.state",
+        "whisperOn"
+      ],
+      "bindsRemoved": [
+        "after",
+        "close",
+        "ctxSearch.ph",
+        "find.scopes",
+        "find.sorts",
+        "headOn",
+        "items",
+        "path",
+        "pos",
+        "projTree",
+        "title",
+        "voice.service"
+      ],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["chat.pop"],
+      "newViews": ["chat.pop"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat.js", "src/pdl/chat-models.ts"],
+      "declarationGaps": []
+    },
+    "contentModification": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": ["modification.choicesReady"],
+      "bindsRemoved": [],
+      "oldFile": "app/media.js",
+      "newFile": "app/media.js",
+      "oldViews": ["content.modification"],
+      "newViews": ["content.modification"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "env": {
+      "added": false,
+      "fieldsAdded": ["editable[].hasValue", "editable[].runtime", "editable[].secret", "editable[].value", "pending"],
+      "fieldsRemoved": ["editable[].display", "editable[].mono", "editable[].restart", "pendingText"],
+      "bindsAdded": ["pending"],
+      "bindsRemoved": ["pendingText"],
+      "oldFile": "app/system.js",
+      "newFile": "app/system.js",
+      "oldViews": ["page.env"],
+      "newViews": ["page.env"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/notifications.js"],
+      "declarationGaps": []
+    },
+    "eval": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["counts.staleTone", "noAct", "settledLabel"],
+      "bindsAdded": [
+        "ledger.duty.backup.handle",
+        "ledger.duty.backup.name",
+        "ledger.duty.hasBackup",
+        "ledger.duty.hasPrimary",
+        "ledger.duty.primary.handle",
+        "ledger.duty.primary.name",
+        "settledResolved"
+      ],
+      "bindsRemoved": [
+        "counts.staleTone",
+        "ledger.duty.backup",
+        "ledger.duty.options",
+        "ledger.duty.primary",
+        "settledLabel"
+      ],
+      "oldFile": "app/ws-ops.js",
+      "newFile": "app/ws-ops.js",
+      "oldViews": ["ws.eval"],
+      "newViews": ["ws.eval"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "exec": {
+      "added": false,
+      "fieldsAdded": ["externalDetail.model", "hits[].messages", "hits[].status", "hits[].statusEvents"],
+      "fieldsRemoved": [
+        "externalDetail.fields",
+        "hits[].args",
+        "hits[].args.k",
+        "hits[].args.kind",
+        "hits[].args.v",
+        "hits[].durTip",
+        "hits[].errorsTip",
+        "hits[].errorsTone",
+        "hits[].previewEm",
+        "hits[].statusTip",
+        "hits[].statusTone",
+        "hits[].tone",
+        "hits[].toolsTip"
+      ],
+      "bindsAdded": [
+        "externalDetail.model",
+        "run.at",
+        "run.duration",
+        "run.hasInput",
+        "run.hasTokens",
+        "run.input",
+        "run.name",
+        "run.output",
+        "run.rawRecords",
+        "run.sealed",
+        "run.seq"
+      ],
+      "bindsRemoved": [
+        "externalDetail.fields",
+        "run.eyebrow",
+        "run.raw",
+        "run.rawText",
+        "run.sub",
+        "run.timeline",
+        "run.tone"
+      ],
+      "oldFile": "app/ws-status.js",
+      "newFile": "app/ws-status.js",
+      "oldViews": ["ws.exec"],
+      "newViews": ["ws.exec"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "execDetail": {
+      "added": false,
+      "fieldsAdded": ["exitCode", "failed", "live"],
+      "fieldsRemoved": ["exit", "facts", "stateTone"],
+      "bindsAdded": ["blocked", "elapsed", "exitCode", "failed", "live", "thread"],
+      "bindsRemoved": ["facts", "stateTone"],
+      "oldFile": "app/ws-ops.js",
+      "newFile": "app/ws-ops.js",
+      "oldViews": ["ws.execDetail"],
+      "newViews": ["ws.execDetail"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "ext": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["emptyText"],
+      "bindsAdded": [
+        "sel.closure",
+        "sel.config.save.dirty",
+        "sel.config.tested",
+        "sel.hasContrib",
+        "sel.need",
+        "sel.needs",
+        "sel.publisher",
+        "sel.repositoryName",
+        "sel.trust"
+      ],
+      "bindsRemoved": [
+        "emptyText",
+        "sel.config.save.hidden",
+        "sel.config.save.text",
+        "sel.config.testText",
+        "sel.docs.empty",
+        "sel.primary",
+        "sel.primary.act",
+        "sel.primary.label",
+        "sel.status",
+        "sel.status.text",
+        "sel.status.tone",
+        "sel.tags"
+      ],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.ext"],
+      "newViews": ["page.ext"],
+      "status": "raw contract applied; copied declaration needs completion",
+      "bindingFiles": ["public/pdl-app/plugins.js"],
+      "declarationGaps": ["pluginImage", "pluginPermissionLabels"]
+    },
+    "filePage": {
+      "added": false,
+      "fieldsAdded": ["actions.canOpen", "actions.canReveal", "binary", "hasBody", "markdown", "mode", "quote"],
+      "fieldsRemoved": ["actions.allowedActions", "actions.menuActions", "modes", "noPreview", "pre", "render"],
+      "bindsAdded": [
+        "actions.canOpen",
+        "actions.canReveal",
+        "binary",
+        "fileInfo.mime",
+        "fileInfo.modifiedAt",
+        "fileInfo.pageCount",
+        "fileInfo.pageUnit",
+        "fileInfo.pageUnit.length",
+        "fileInfo.size",
+        "hasBody",
+        "markdown",
+        "media.id",
+        "media.kind",
+        "media.path",
+        "media.src",
+        "mode",
+        "quote"
+      ],
+      "bindsRemoved": ["actions.allowedActions", "modes", "noPreview", "pre", "render"],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["file.body"],
+      "newViews": ["file.body"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "files": {
+      "added": false,
+      "fieldsAdded": ["mode"],
+      "fieldsRemoved": ["modes"],
+      "bindsAdded": ["mode", "wt.branch", "wt.head", "wt.root", "wt.worktrees"],
+      "bindsRemoved": ["modes", "wt.name", "wt.tip"],
+      "oldFile": "app/ws-code.js",
+      "newFile": "app/ws-code.js",
+      "oldViews": ["ws.files"],
+      "newViews": ["ws.files"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "filmPreview": {
+      "added": false,
+      "fieldsAdded": ["hasScreeningTitle"],
+      "fieldsRemoved": [],
+      "bindsAdded": ["hasScreeningTitle", "inputRevision", "recordedAt", "screeningTitle"],
+      "bindsRemoved": ["sub"],
+      "oldFile": "app/video-project.js",
+      "newFile": "app/video-project.js",
+      "oldViews": ["clip.preview"],
+      "newViews": ["clip.preview"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "filmProject": {
+      "added": false,
+      "fieldsAdded": ["chapters[].canLocate", "chapters[].location", "inputRevision", "tab"],
+      "fieldsRemoved": [
+        "chapters[].act",
+        "chapters[].args",
+        "inputLabel",
+        "tabs",
+        "tabs[].active",
+        "tabs[].label",
+        "tabs[].v"
+      ],
+      "bindsAdded": ["inputRevision", "tab"],
+      "bindsRemoved": ["inputLabel", "sync.text", "tabs"],
+      "oldFile": "app/video-project.js",
+      "newFile": "app/video-project.js",
+      "oldViews": ["film.project"],
+      "newViews": ["film.project"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "filmRegisterForm": {
+      "added": true,
+      "fieldsAdded": ["hasValues", "values", "worktrees"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/video-project.js",
+      "oldViews": [],
+      "newViews": ["dlg.filmRegister"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "git": {
+      "added": false,
+      "fieldsAdded": [
+        "commitCount",
+        "commits[].authorHandle",
+        "commits[].authorName",
+        "count",
+        "drift",
+        "view",
+        "wts[].path"
+      ],
+      "fieldsRemoved": [
+        "clean",
+        "commits[].files[].name",
+        "commits[].files[].sub",
+        "commits[].id",
+        "commits[].tip",
+        "driftText",
+        "driftTip",
+        "isCommits",
+        "isHealth",
+        "isStatus",
+        "none",
+        "views",
+        "wts[].state",
+        "wts[].stateTone",
+        "wts[].sub"
+      ],
+      "bindsAdded": [
+        "commitCount",
+        "count",
+        "diffMode",
+        "drift.ahead",
+        "drift.available",
+        "drift.behind",
+        "drift.mainHead",
+        "drift.runtimeHead",
+        "view",
+        "wt.branch",
+        "wt.head",
+        "wt.root",
+        "wt.worktrees"
+      ],
+      "bindsRemoved": [
+        "branchTip",
+        "clean",
+        "driftText",
+        "driftTip",
+        "isCommits",
+        "isHealth",
+        "isStatus",
+        "none",
+        "review.ask",
+        "review.base",
+        "review.modes",
+        "review.sha",
+        "review.targets",
+        "split",
+        "unified",
+        "views",
+        "wt.name",
+        "wt.tip"
+      ],
+      "oldFile": "app/ws-code.js",
+      "newFile": "app/ws-code.js",
+      "oldViews": ["ws.git"],
+      "newViews": ["ws.git"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "hbClaimForm": {
+      "added": true,
+      "fieldsAdded": ["cats", "cats[].handle", "cats[].id", "cats[].name", "f", "k", "scope", "title"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/ws-items.js",
+      "oldViews": [],
+      "newViews": ["dlg.hbSelfClaim"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "hubPanel": {
+      "added": false,
+      "fieldsAdded": [
+        "counts.dispatched",
+        "counts.done",
+        "counts.suggested",
+        "done",
+        "projects",
+        "projects[].name",
+        "projects[].target",
+        "view"
+      ],
+      "fieldsRemoved": ["isList", "views"],
+      "bindsAdded": [
+        "counts.dispatched",
+        "counts.done",
+        "counts.suggested",
+        "deps.edges",
+        "deps.graph.edges",
+        "deps.graph.nodes",
+        "deps.graph.offset",
+        "deps.graph.zoom",
+        "deps.node.hasBlock",
+        "deps.node.hasFrom",
+        "deps.node.hasRel",
+        "deps.node.name",
+        "deps.nodes",
+        "deps.scope",
+        "done",
+        "done.length",
+        "ext.docCoverage",
+        "ext.hasCoverage",
+        "ext.health",
+        "ext.intent",
+        "ext.staleReqs",
+        "ext.untriaged",
+        "projects",
+        "view"
+      ],
+      "bindsRemoved": [
+        "counts",
+        "deps.graph",
+        "deps.node.title",
+        "deps.scopes",
+        "deps.summary",
+        "ext.empty",
+        "ext.kv",
+        "ext.notice",
+        "ext.orderAct",
+        "ext.secs",
+        "isList",
+        "views"
+      ],
+      "oldFile": "app/ws-items.js",
+      "newFile": "app/ws-items.js",
+      "oldViews": ["ws.board"],
+      "newViews": ["ws.board"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/planning-data.js"],
+      "declarationGaps": []
+    },
+    "l0": {
+      "added": true,
+      "fieldsAdded": ["lines", "path", "text"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/settings.js",
+      "oldViews": [],
+      "newViews": ["dlg.l0"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/rules.js"],
+      "declarationGaps": []
+    },
+    "live": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": ["waits.candidate.observed", "waits.candidate.satisfiable", "waits.candidate.unknown"],
+      "bindsRemoved": ["waits.candidate.more", "waits.candidate.rest"],
+      "oldFile": "app/ws-ops.js",
+      "newFile": "app/ws-ops.js",
+      "oldViews": ["ws.live"],
+      "newViews": ["ws.live"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "market": {
+      "added": false,
+      "fieldsAdded": ["sources[].availability", "sources[].eco", "sources[].issues"],
+      "fieldsRemoved": ["ecos", "emptyText", "kinds", "sources[].head", "sources[].text", "trusts"],
+      "bindsAdded": [
+        "sel.availability",
+        "sel.canInstall",
+        "sel.eco",
+        "sel.kind",
+        "sel.loc",
+        "sel.mcp",
+        "sel.mcp.command",
+        "sel.mcp.http",
+        "sel.mcp.t",
+        "sel.mcp.url",
+        "sel.mode",
+        "sel.modeIs.delegated_cli",
+        "sel.modeIs.manual_file",
+        "sel.modeIs.manual_ui",
+        "sel.pub",
+        "sel.showSource",
+        "sel.trust",
+        "sel.version",
+        "sel.where.kind"
+      ],
+      "bindsRemoved": [
+        "ecos",
+        "emptyText",
+        "kinds",
+        "sel.action",
+        "sel.action.act",
+        "sel.action.disabled",
+        "sel.action.label",
+        "sel.action.tip",
+        "sel.meta",
+        "sel.plan",
+        "sel.source",
+        "sel.where.label",
+        "trusts"
+      ],
+      "oldFile": "app/market.js",
+      "newFile": "app/market.js",
+      "oldViews": ["page.market"],
+      "newViews": ["page.market"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/plugins.js"],
+      "declarationGaps": []
+    },
+    "mcp": {
+      "added": false,
+      "fieldsAdded": ["export", "isNew"],
+      "fieldsRemoved": ["detail"],
+      "bindsAdded": ["export", "isNew", "projects"],
+      "bindsRemoved": ["bad.label", "detail", "scopeOpts"],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.mcp"],
+      "newViews": ["page.mcp"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/capabilities.js"],
+      "declarationGaps": []
+    },
+    "mcpItem": {
+      "added": false,
+      "fieldsAdded": [
+        "cfgResetScope",
+        "command",
+        "json",
+        "ov",
+        "resetScope",
+        "scope",
+        "src",
+        "src.external",
+        "src.src",
+        "srcTo"
+      ],
+      "fieldsRemoved": [
+        "catsDesc",
+        "issues[].action",
+        "issues[].head",
+        "issues[].text",
+        "projHelp",
+        "projOpts",
+        "project",
+        "restoreLabel",
+        "source",
+        "swLabel",
+        "tags[].chip"
+      ],
+      "bindsAdded": [
+        "cats.off",
+        "cfgOv",
+        "cfgResetScope",
+        "command",
+        "form.args",
+        "form.d.cmd",
+        "form.d.name",
+        "form.d.t",
+        "form.d.url",
+        "form.desc",
+        "form.dirty",
+        "form.env",
+        "form.headers",
+        "form.key",
+        "form.resolver",
+        "form.resolver.length",
+        "form.ro",
+        "form.scope",
+        "form.tools.errorCode",
+        "form.tools.errorText",
+        "form.tools.state",
+        "form.tools.total",
+        "json",
+        "ov",
+        "resetScope",
+        "scope",
+        "src.external",
+        "src.market",
+        "src.plugin",
+        "srcTo"
+      ],
+      "bindsRemoved": [
+        "cats.foot",
+        "catsDesc",
+        "form.fields",
+        "form.isNew",
+        "form.noPreview",
+        "form.preview.name",
+        "form.save",
+        "form.save.hidden",
+        "form.save.text",
+        "form.tools.empty",
+        "form.tools.probeLabel",
+        "form.tools.probing",
+        "form.tools.status",
+        "form.tools.status.text",
+        "form.tools.status.tone",
+        "form.tools.title"
+      ],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.mcpItem"],
+      "newViews": ["page.mcpItem"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/capabilities.js"],
+      "declarationGaps": []
+    },
+    "mcpNew": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": [
+        "form.args",
+        "form.d.cmd",
+        "form.d.name",
+        "form.d.t",
+        "form.d.url",
+        "form.desc",
+        "form.dirty",
+        "form.env",
+        "form.headers",
+        "form.key",
+        "form.resolver",
+        "form.resolver.length",
+        "form.ro",
+        "form.scope",
+        "form.tools.errorCode",
+        "form.tools.errorText",
+        "form.tools.state",
+        "form.tools.total"
+      ],
+      "bindsRemoved": [
+        "form.fields",
+        "form.isNew",
+        "form.noPreview",
+        "form.preview.name",
+        "form.save",
+        "form.save.hidden",
+        "form.save.text",
+        "form.tools.empty",
+        "form.tools.probeLabel",
+        "form.tools.probing",
+        "form.tools.status",
+        "form.tools.status.text",
+        "form.tools.status.tone",
+        "form.tools.title"
+      ],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.mcpNew"],
+      "newViews": ["page.mcpNew"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/capabilities.js"],
+      "declarationGaps": []
+    },
+    "mediaPreview": {
+      "added": false,
+      "fieldsAdded": ["at", "author", "index", "total", "version"],
+      "fieldsRemoved": ["sub"],
+      "bindsAdded": ["at", "author", "index", "total", "version"],
+      "bindsRemoved": ["sub"],
+      "oldFile": "app/media.js",
+      "newFile": "app/media.js",
+      "oldViews": ["media.preview"],
+      "newViews": ["media.preview"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js", "src/pdl/chat-models.ts", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "mediaReview": {
+      "added": false,
+      "fieldsAdded": ["history.items[].kind", "media.canPick", "media.canWrite", "media.review", "rounds[].v"],
+      "fieldsRemoved": ["history.items[].title", "media.edit", "media.pick"],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/media.js",
+      "newFile": "app/media.js",
+      "oldViews": ["media.review"],
+      "newViews": ["media.review"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "member": {
+      "added": false,
+      "fieldsAdded": ["is", "note"],
+      "fieldsRemoved": [],
+      "bindsAdded": [
+        "form.accounts",
+        "form.acp",
+        "form.active.acpArgs",
+        "form.active.acpCmd",
+        "form.active.acpMax",
+        "form.active.acpTtl",
+        "form.active.agyDirs",
+        "form.active.agyOn",
+        "form.active.agyPerm",
+        "form.active.agyProfile",
+        "form.active.agyRoot",
+        "form.active.cxApproval",
+        "form.active.cxSandbox",
+        "form.active.provider",
+        "form.astra",
+        "form.avatarPathOpen",
+        "form.canonBound",
+        "form.cli",
+        "form.clientShared.name",
+        "form.clients",
+        "form.cloud",
+        "form.ctxDirty",
+        "form.d.acc",
+        "form.d.acpArgs",
+        "form.d.acpCmd",
+        "form.d.acpMax",
+        "form.d.acpTtl",
+        "form.d.agyDirs",
+        "form.d.agyOn",
+        "form.d.agyPerm",
+        "form.d.agyProfile",
+        "form.d.agyRoot",
+        "form.d.aliases",
+        "form.d.args",
+        "form.d.avatarPath",
+        "form.d.breed",
+        "form.d.care",
+        "form.d.client",
+        "form.d.color",
+        "form.d.ctxLine",
+        "form.d.ctxMax",
+        "form.d.ctxStrat",
+        "form.d.ctxWarn",
+        "form.d.ctxWin",
+        "form.d.cxApproval",
+        "form.d.cxSandbox",
+        "form.d.effort",
+        "form.d.fixedColor",
+        "form.d.good",
+        "form.d.mcp",
+        "form.d.model",
+        "form.d.name",
+        "form.d.provider",
+        "form.d.role",
+        "form.d.speed",
+        "form.d.suffix",
+        "form.d.tags",
+        "form.d.tint",
+        "form.d.traits",
+        "form.d.vLang",
+        "form.d.vRef",
+        "form.d.vRefText",
+        "form.d.vSpeed",
+        "form.d.vTone",
+        "form.d.vVar",
+        "form.d.vVoice",
+        "form.d.via",
+        "form.existing",
+        "form.ext",
+        "form.follow",
+        "form.fromPlugin",
+        "form.handleLock",
+        "form.hybrid",
+        "form.id",
+        "form.invalid.acc",
+        "form.invalid.acpArgs",
+        "form.invalid.acpCmd",
+        "form.invalid.acpMax",
+        "form.invalid.acpTtl",
+        "form.invalid.agyDirs",
+        "form.invalid.agyPerm",
+        "form.invalid.agyProfile",
+        "form.invalid.agyRoot",
+        "form.invalid.aliases",
+        "form.invalid.breed",
+        "form.invalid.care",
+        "form.invalid.client",
+        "form.invalid.ctxLine",
+        "form.invalid.ctxMax",
+        "form.invalid.ctxStrat",
+        "form.invalid.ctxWarn",
+        "form.invalid.ctxWin",
+        "form.invalid.cxApproval",
+        "form.invalid.cxSandbox",
+        "form.invalid.effort",
+        "form.invalid.good",
+        "form.invalid.model",
+        "form.invalid.name",
+        "form.invalid.provider",
+        "form.invalid.role",
+        "form.invalid.speed",
+        "form.invalid.suffix",
+        "form.invalid.traits",
+        "form.invalid.vLang",
+        "form.invalid.vRefText",
+        "form.invalid.vSpeed",
+        "form.invalid.vTone",
+        "form.invalid.vVar",
+        "form.invalid.vVoice",
+        "form.invalid.via",
+        "form.last",
+        "form.modelNeedsProvider",
+        "form.modelUnlisted",
+        "form.models",
+        "form.noAccount",
+        "form.on",
+        "form.overrideAccount",
+        "form.required.model",
+        "form.required.provider",
+        "form.routing",
+        "form.runtime",
+        "form.runtime.connection.status",
+        "form.runtime.hooks.error",
+        "form.runtime.hooks.status",
+        "form.runtime.hooks.targets",
+        "form.save.missing",
+        "form.save.missingCount",
+        "form.save.n",
+        "form.speedOn",
+        "form.via",
+        "form.via.length",
+        "is.ok",
+        "note"
+      ],
+      "bindsRemoved": [
+        "form.advanced",
+        "form.clientShared.fields",
+        "form.clientShared.label",
+        "form.clientShared.tip",
+        "form.context",
+        "form.handles",
+        "form.identity",
+        "form.model.fields",
+        "form.model.notices",
+        "form.model.rows",
+        "form.order",
+        "form.routingLabel",
+        "form.runtime.connection.text",
+        "form.runtime.connection.tone",
+        "form.runtime.hooks.help",
+        "form.runtime.hooks.text",
+        "form.runtime.hooks.tone",
+        "form.save.hidden",
+        "form.save.ok",
+        "form.save.text",
+        "form.tocNote",
+        "form.voice.fields"
+      ],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.member"],
+      "newViews": ["page.member"],
+      "status": "raw contract applied; copied declaration needs completion",
+      "bindingFiles": ["public/pdl-app/members.js"],
+      "declarationGaps": ["memberEnums", "providerError"]
+    },
+    "memberNew": {
+      "added": false,
+      "fieldsAdded": ["templates", "templates[].id", "templates[].name"],
+      "fieldsRemoved": ["tplOpts"],
+      "bindsAdded": [
+        "form.accounts",
+        "form.acp",
+        "form.active.acpArgs",
+        "form.active.acpCmd",
+        "form.active.acpMax",
+        "form.active.acpTtl",
+        "form.active.agyDirs",
+        "form.active.agyOn",
+        "form.active.agyPerm",
+        "form.active.agyProfile",
+        "form.active.agyRoot",
+        "form.active.cxApproval",
+        "form.active.cxSandbox",
+        "form.active.provider",
+        "form.astra",
+        "form.avatarPathOpen",
+        "form.canonBound",
+        "form.cli",
+        "form.clientShared.name",
+        "form.clients",
+        "form.cloud",
+        "form.ctxDirty",
+        "form.d.acc",
+        "form.d.acpArgs",
+        "form.d.acpCmd",
+        "form.d.acpMax",
+        "form.d.acpTtl",
+        "form.d.agyDirs",
+        "form.d.agyOn",
+        "form.d.agyPerm",
+        "form.d.agyProfile",
+        "form.d.agyRoot",
+        "form.d.aliases",
+        "form.d.args",
+        "form.d.avatarPath",
+        "form.d.breed",
+        "form.d.care",
+        "form.d.client",
+        "form.d.color",
+        "form.d.ctxLine",
+        "form.d.ctxMax",
+        "form.d.ctxStrat",
+        "form.d.ctxWarn",
+        "form.d.ctxWin",
+        "form.d.cxApproval",
+        "form.d.cxSandbox",
+        "form.d.effort",
+        "form.d.fixedColor",
+        "form.d.good",
+        "form.d.mcp",
+        "form.d.model",
+        "form.d.name",
+        "form.d.provider",
+        "form.d.role",
+        "form.d.speed",
+        "form.d.suffix",
+        "form.d.tags",
+        "form.d.tint",
+        "form.d.traits",
+        "form.d.vLang",
+        "form.d.vRef",
+        "form.d.vRefText",
+        "form.d.vSpeed",
+        "form.d.vTone",
+        "form.d.vVar",
+        "form.d.vVoice",
+        "form.d.via",
+        "form.existing",
+        "form.ext",
+        "form.follow",
+        "form.fromPlugin",
+        "form.handleLock",
+        "form.hybrid",
+        "form.id",
+        "form.invalid.acc",
+        "form.invalid.acpArgs",
+        "form.invalid.acpCmd",
+        "form.invalid.acpMax",
+        "form.invalid.acpTtl",
+        "form.invalid.agyDirs",
+        "form.invalid.agyPerm",
+        "form.invalid.agyProfile",
+        "form.invalid.agyRoot",
+        "form.invalid.aliases",
+        "form.invalid.breed",
+        "form.invalid.care",
+        "form.invalid.client",
+        "form.invalid.ctxLine",
+        "form.invalid.ctxMax",
+        "form.invalid.ctxStrat",
+        "form.invalid.ctxWarn",
+        "form.invalid.ctxWin",
+        "form.invalid.cxApproval",
+        "form.invalid.cxSandbox",
+        "form.invalid.effort",
+        "form.invalid.good",
+        "form.invalid.model",
+        "form.invalid.name",
+        "form.invalid.provider",
+        "form.invalid.role",
+        "form.invalid.speed",
+        "form.invalid.suffix",
+        "form.invalid.traits",
+        "form.invalid.vLang",
+        "form.invalid.vRefText",
+        "form.invalid.vSpeed",
+        "form.invalid.vTone",
+        "form.invalid.vVar",
+        "form.invalid.vVoice",
+        "form.invalid.via",
+        "form.last",
+        "form.modelNeedsProvider",
+        "form.modelUnlisted",
+        "form.models",
+        "form.noAccount",
+        "form.on",
+        "form.overrideAccount",
+        "form.required.model",
+        "form.required.provider",
+        "form.routing",
+        "form.runtime",
+        "form.runtime.connection.status",
+        "form.runtime.hooks.error",
+        "form.runtime.hooks.status",
+        "form.runtime.hooks.targets",
+        "form.save.missing",
+        "form.save.missingCount",
+        "form.save.n",
+        "form.speedOn",
+        "form.via",
+        "form.via.length",
+        "templates"
+      ],
+      "bindsRemoved": [
+        "form.advanced",
+        "form.clientShared.fields",
+        "form.clientShared.label",
+        "form.clientShared.tip",
+        "form.context",
+        "form.handles",
+        "form.identity",
+        "form.model.fields",
+        "form.model.notices",
+        "form.model.rows",
+        "form.order",
+        "form.routingLabel",
+        "form.runtime.connection.text",
+        "form.runtime.connection.tone",
+        "form.runtime.hooks.help",
+        "form.runtime.hooks.text",
+        "form.runtime.hooks.tone",
+        "form.save.hidden",
+        "form.save.ok",
+        "form.save.text",
+        "form.tocNote",
+        "form.voice.fields",
+        "tplOpts"
+      ],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.memberNew"],
+      "newViews": ["page.memberNew"],
+      "status": "raw contract applied; copied declaration needs completion",
+      "bindingFiles": ["public/pdl-app/members.js"],
+      "declarationGaps": ["memberEnums"]
+    },
+    "members": {
+      "added": false,
+      "fieldsAdded": [
+        "counts",
+        "counts.all",
+        "counts.off",
+        "counts.on",
+        "filter",
+        "owner",
+        "owner.name",
+        "owner.tags",
+        "prefsCount",
+        "rows[].availability",
+        "stale"
+      ],
+      "fieldsRemoved": ["accessOpts", "clearV", "filters", "ownerText", "prefsText", "rows[].status"],
+      "bindsAdded": [
+        "counts.all",
+        "counts.off",
+        "counts.on",
+        "filter",
+        "owner.name",
+        "owner.tags",
+        "prefsCount",
+        "stale"
+      ],
+      "bindsRemoved": ["accessOpts", "clearV", "filters", "ownerText", "prefsText"],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.members"],
+      "newViews": ["page.members"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/members.js"],
+      "declarationGaps": []
+    },
+    "mountRules": {
+      "added": false,
+      "fieldsAdded": ["projectName", "scope"],
+      "fieldsRemoved": ["hint", "title"],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["dlg.mountRules"],
+      "newViews": ["dlg.mountRules"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/rules.js"],
+      "declarationGaps": []
+    },
+    "nativeSetup": {
+      "added": false,
+      "fieldsAdded": [
+        "items[].existingId",
+        "items[].name",
+        "items[].runtime",
+        "items[].selectable",
+        "items[].selected",
+        "items[].state"
+      ],
+      "fieldsRemoved": ["items[].lead", "items[].sub", "items[].title", "items[].trail"],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": [],
+      "newViews": [],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/members.js"],
+      "declarationGaps": []
+    },
+    "navThreads": {
+      "added": false,
+      "fieldsAdded": ["group", "route"],
+      "fieldsRemoved": ["note"],
+      "bindsAdded": ["group", "route"],
+      "bindsRemoved": ["note"],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["nav.threads"],
+      "newViews": ["nav.threads"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/sidebar.js"],
+      "declarationGaps": []
+    },
+    "pageAction": {
+      "added": false,
+      "fieldsAdded": ["pages[].title", "pages[].url", "pages[].v"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/workspace.js",
+      "newFile": "app/workspace.js",
+      "oldViews": ["dlg.pageAction"],
+      "newViews": ["dlg.pageAction"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/placement.js"],
+      "declarationGaps": []
+    },
+    "pcfCatalog": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/plugin-config.js",
+      "newFile": "proto/catalog.js",
+      "oldViews": [],
+      "newViews": [],
+      "status": "demo-only; not bound",
+      "bindingFiles": [],
+      "declarationGaps": [],
+      "reason": "Component-library form catalog, no real product owner or theme trigger in the console."
+    },
+    "preview": {
+      "added": false,
+      "fieldsAdded": [
+        "connection",
+        "counts",
+        "filter",
+        "host",
+        "log.entries[].args",
+        "log.total",
+        "path",
+        "port",
+        "tabs[].framework",
+        "tabs[].host",
+        "tabs[].path",
+        "tabs[].port"
+      ],
+      "fieldsRemoved": [
+        "addr",
+        "dot",
+        "filters",
+        "log.empty",
+        "log.entries[].text",
+        "log.entries[].tip",
+        "log.entries[].tone",
+        "tabs[].tip"
+      ],
+      "bindsAdded": [
+        "connection",
+        "counts.all",
+        "counts.error",
+        "counts.warn",
+        "filter",
+        "log.entries",
+        "log.total",
+        "path",
+        "port"
+      ],
+      "bindsRemoved": ["addr", "dot", "dot.tip", "dot.tone", "filters", "log"],
+      "oldFile": "app/ws-code.js",
+      "newFile": "app/ws-code.js",
+      "oldViews": ["ws.preview"],
+      "newViews": ["ws.preview"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/planning-data.js"],
+      "declarationGaps": []
+    },
+    "profiles": {
+      "added": false,
+      "fieldsAdded": [
+        "coverage",
+        "modelCount",
+        "models[].cats[].availability",
+        "models[].hasProfiles",
+        "models[].profiles",
+        "total"
+      ],
+      "fieldsRemoved": ["desc", "models[].cats[].status", "models[].sub"],
+      "bindsAdded": ["coverage", "modelCount", "total"],
+      "bindsRemoved": ["desc"],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.profiles"],
+      "newViews": ["page.profiles"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/profiles.js"],
+      "declarationGaps": []
+    },
+    "pushDiag": {
+      "added": false,
+      "fieldsAdded": [
+        "attemptAt",
+        "capability",
+        "delivery",
+        "errorHints",
+        "errorHints[].code",
+        "hasHttpStatus",
+        "result",
+        "subscriptions"
+      ],
+      "fieldsRemoved": ["permissionTone", "rows"],
+      "bindsAdded": [
+        "attemptAt",
+        "capability.enabled",
+        "capability.pushServiceConfigured",
+        "capability.vapidPublicKeyConfigured",
+        "delivery.lastError",
+        "delivery.lastHttpStatus",
+        "delivery.lastResult",
+        "errorHints",
+        "hasHttpStatus",
+        "permission",
+        "result",
+        "result.label",
+        "result.tone",
+        "result.value",
+        "subscriptions.count",
+        "subscriptions.targets"
+      ],
+      "bindsRemoved": ["rows"],
+      "oldFile": "app/system.js",
+      "newFile": "app/system.js",
+      "oldViews": ["dialog.push"],
+      "newViews": ["dialog.push", "dlg.push"],
+      "status": "raw contract applied; copied declaration needs completion",
+      "bindingFiles": ["public/pdl-app/notifications.js"],
+      "declarationGaps": ["pushResult"]
+    },
+    "queueTargets": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": ["dispatched[].state"],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["dlg.queueTargets"],
+      "newViews": ["dlg.queueTargets"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/chat-owners.js"],
+      "declarationGaps": []
+    },
+    "replay": {
+      "added": false,
+      "fieldsAdded": [
+        "player.chapters",
+        "player.chapters[].i",
+        "player.chapters[].kind",
+        "player.chapters[].time",
+        "player.ended",
+        "player.faithful",
+        "player.playing",
+        "player.skip",
+        "player.time.totalCount"
+      ],
+      "fieldsRemoved": [
+        "player.more",
+        "player.more.label",
+        "player.more.menu",
+        "player.play",
+        "player.play.act",
+        "player.play.label",
+        "player.play.on",
+        "player.speed.change",
+        "player.speed.id",
+        "player.speed.label",
+        "player.speed.options",
+        "player.speed.value",
+        "player.toggles"
+      ],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/ws-trace.js",
+      "newFile": "app/ws-trace.js",
+      "oldViews": [],
+      "newViews": [],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/planning-data.js"],
+      "declarationGaps": []
+    },
+    "rules": {
+      "added": false,
+      "fieldsAdded": [
+        "files[].desc",
+        "files[].extra",
+        "files[].items",
+        "files[].items[].k",
+        "files[].items[].lines",
+        "files[].items[].missing",
+        "files[].items[].on",
+        "files[].items[].path",
+        "files[].items[].pending",
+        "files[].items[].title",
+        "files[].items[].use",
+        "files[].items[].who",
+        "files[].title"
+      ],
+      "fieldsRemoved": ["agent", "l0", "life", "pickHint", "previewOff"],
+      "bindsAdded": [
+        "flow.0.affected",
+        "flow.0.count",
+        "flow.0.description",
+        "flow.0.name",
+        "flow.0.selected",
+        "flow.1.affected",
+        "flow.1.count",
+        "flow.1.description",
+        "flow.1.name",
+        "flow.1.selected",
+        "flow.2.affected",
+        "flow.2.count",
+        "flow.2.description",
+        "flow.2.name",
+        "flow.2.selected",
+        "flow.3.affected",
+        "flow.3.count",
+        "flow.3.description",
+        "flow.3.name",
+        "flow.3.selected",
+        "flow.4.affected",
+        "flow.4.count",
+        "flow.4.description",
+        "flow.4.name",
+        "flow.4.selected",
+        "flow.5.affected",
+        "flow.5.count",
+        "flow.5.description",
+        "flow.5.name",
+        "flow.5.selected",
+        "flow.6.affected",
+        "flow.6.count",
+        "flow.6.description",
+        "flow.6.name",
+        "flow.6.selected",
+        "stage.count",
+        "stage.groupKind",
+        "stage.mechanisms",
+        "stage.scope"
+      ],
+      "bindsRemoved": [
+        "flow",
+        "l0",
+        "life",
+        "previewOff",
+        "stage.countText",
+        "stage.empty",
+        "stage.facts",
+        "stage.isInit"
+      ],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.rules"],
+      "newViews": ["page.rules"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/rules.js"],
+      "declarationGaps": []
+    },
+    "schedule": {
+      "added": false,
+      "fieldsAdded": ["month", "year"],
+      "fieldsRemoved": ["calendar.act", "calendar.args", "calendar.args.cast", "calendar.args.path", "title"],
+      "bindsAdded": [
+        "calendar.anchor",
+        "calendar.marks",
+        "calendar.mode",
+        "calendar.today",
+        "calendar.value",
+        "month",
+        "year"
+      ],
+      "bindsRemoved": ["calendar", "title"],
+      "oldFile": "app/ws-ops.js",
+      "newFile": "app/ws-ops.js",
+      "oldViews": ["ws.schedule"],
+      "newViews": ["ws.schedule"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/planning-data.js"],
+      "declarationGaps": []
+    },
+    "skill": {
+      "added": false,
+      "fieldsAdded": ["issues.dep", "issues.drift", "issues.xproj", "mounted", "ov", "resetScope", "src", "srcTo"],
+      "fieldsRemoved": [
+        "doc.missingText",
+        "issues[].action",
+        "issues[].head",
+        "issues[].text",
+        "mountLabel",
+        "mountTip",
+        "mounts",
+        "projHelp",
+        "projOpts",
+        "project",
+        "swLabel"
+      ],
+      "bindsAdded": [
+        "issues.dep",
+        "issues.drift",
+        "issues.xproj",
+        "mounted",
+        "ov",
+        "resetScope",
+        "src.market",
+        "src.plugin",
+        "srcTo"
+      ],
+      "bindsRemoved": ["doc.missingText", "issues", "mountLabel", "mountTip"],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.skill"],
+      "newViews": ["page.skill"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/capabilities.js"],
+      "declarationGaps": []
+    },
+    "skills": {
+      "added": false,
+      "fieldsAdded": [
+        "cats",
+        "cats[].v",
+        "count",
+        "items[].issue",
+        "items[].on",
+        "items[].ov",
+        "items[].resetScope",
+        "items[].selected",
+        "items[].skill",
+        "mount.n",
+        "mount.scope"
+      ],
+      "fieldsRemoved": ["catOpts", "catOpts[].label", "catOpts[].v", "items[].icon", "items[].meta", "items[].tone"],
+      "bindsAdded": ["cats", "count", "mount.n", "mount.scope", "projects"],
+      "bindsRemoved": ["bad.label", "catOpts", "mount.label", "mount.title", "scopeOpts"],
+      "oldFile": "app/capabilities.js",
+      "newFile": "app/capabilities.js",
+      "oldViews": ["page.skills"],
+      "newViews": ["page.skills"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/capabilities.js"],
+      "declarationGaps": []
+    },
+    "system": {
+      "added": false,
+      "fieldsAdded": ["legacyRoute", "theme", "theme.mode", "theme.name"],
+      "fieldsRemoved": [
+        "notifyTypes[].label",
+        "themeText",
+        "v.lan",
+        "v.lang",
+        "v.logKeep",
+        "v.logLevel",
+        "v.memFallback",
+        "v.preview",
+        "v.record",
+        "v.send",
+        "v.timeout",
+        "v.ttlMsg",
+        "v.ttlTask",
+        "v.ttlThread"
+      ],
+      "bindsAdded": ["app.desktop", "legacyRoute", "theme.mode", "theme.name", "update.failed"],
+      "bindsRemoved": ["push.permissionTone", "themeText", "update.state"],
+      "oldFile": "app/system.js",
+      "newFile": "app/system.js",
+      "oldViews": ["page.system"],
+      "newViews": ["page.system"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "taskForm": {
+      "added": true,
+      "fieldsAdded": ["hasValues", "members", "values"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/ws-items.js",
+      "oldViews": [],
+      "newViews": ["dlg.task", "dlg.hbSuggest", "dlg.feat", "dlg.intent", "dlg.triage"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "tasks": {
+      "added": false,
+      "fieldsAdded": ["count", "counts", "filter", "hasTasks"],
+      "fieldsRemoved": ["chips", "emptyText"],
+      "bindsAdded": [
+        "counts.all",
+        "counts.blocked",
+        "counts.doing",
+        "counts.done",
+        "counts.todo",
+        "filter",
+        "hasTasks"
+      ],
+      "bindsRemoved": ["chips", "emptyText"],
+      "oldFile": "app/ws-items.js",
+      "newFile": "app/ws-items.js",
+      "oldViews": ["ws.tasks"],
+      "newViews": ["ws.tasks"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "terminal": {
+      "added": false,
+      "fieldsAdded": ["owner"],
+      "fieldsRemoved": ["roTip"],
+      "bindsAdded": ["owner", "wt.branch", "wt.head", "wt.root", "wt.worktrees"],
+      "bindsRemoved": ["roTip", "wt.name", "wt.tip"],
+      "oldFile": "app/ws-code.js",
+      "newFile": "app/ws-code.js",
+      "oldViews": ["ws.terminal"],
+      "newViews": ["ws.terminal"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/workbench-data.js"],
+      "declarationGaps": []
+    },
+    "theater": {
+      "added": false,
+      "fieldsAdded": [],
+      "fieldsRemoved": [],
+      "bindsAdded": [
+        "player.chapters",
+        "player.ended",
+        "player.faithful",
+        "player.playing",
+        "player.skip",
+        "player.speed"
+      ],
+      "bindsRemoved": [],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["replay.body", "theater", "ws.replay"],
+      "newViews": ["replay.body", "theater", "ws.replay"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/planning-data.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "theme": {
+      "added": false,
+      "fieldsAdded": ["inRail", "mode", "palette"],
+      "fieldsRemoved": [
+        "fontOpts",
+        "modes",
+        "modes[].active",
+        "modes[].label",
+        "modes[].thumb",
+        "modes[].v",
+        "motionOpts",
+        "motionOpts[].active",
+        "motionOpts[].label",
+        "motionOpts[].v",
+        "radiusOpts",
+        "readOpts",
+        "readOpts[].active",
+        "readOpts[].label",
+        "readOpts[].v",
+        "scaleOpts",
+        "scaleOpts[].active",
+        "scaleOpts[].label",
+        "scaleOpts[].v"
+      ],
+      "bindsAdded": ["inRail", "mode", "palette", "style.motion", "style.readSize", "style.uiScale"],
+      "bindsRemoved": ["fontOpts", "modes", "motionOpts", "radiusOpts", "readOpts", "scaleOpts"],
+      "oldFile": "app/theme.js",
+      "newFile": "app/theme.js",
+      "oldViews": ["page.theme"],
+      "newViews": ["page.theme"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/appearance.js"],
+      "declarationGaps": []
+    },
+    "themeBg": {
+      "added": false,
+      "fieldsAdded": ["presets[].name", "presets[].v"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/background.js",
+      "newFile": "app/background.js",
+      "oldViews": ["theme.bg"],
+      "newViews": ["theme.bg"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/appearance.js"],
+      "declarationGaps": []
+    },
+    "themeThemes": {
+      "added": false,
+      "fieldsAdded": ["archived[].tried", "archived[].version"],
+      "fieldsRemoved": ["archived[].sub", "archived[].title"],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/theme.js",
+      "newFile": "app/theme.js",
+      "oldViews": ["theme.themes"],
+      "newViews": ["theme.themes"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/appearance.js"],
+      "declarationGaps": []
+    },
+    "voice": {
+      "added": false,
+      "fieldsAdded": ["dict[].a", "dict[].b", "svc[].installPhase", "svc[].log", "svc[].pending", "svc[].state"],
+      "fieldsRemoved": [
+        "dict[].text",
+        "svc[].dot",
+        "svc[].error",
+        "svc[].next",
+        "svc[].port",
+        "svc[].running",
+        "svc[].showMore",
+        "svc[].sub",
+        "svc[].swLabel",
+        "terms[].pair"
+      ],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": "app/settings.js",
+      "newFile": "app/settings.js",
+      "oldViews": ["page.voice"],
+      "newViews": ["page.voice"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/owner-projections.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "voteDialog": {
+      "added": true,
+      "fieldsAdded": ["anonymous", "options", "question", "timeout"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/cafe.js",
+      "oldViews": [],
+      "newViews": ["dlg.vote"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "work": {
+      "added": false,
+      "fieldsAdded": [
+        "kind",
+        "meta.at",
+        "meta.author",
+        "meta.hasThread",
+        "meta.page",
+        "meta.threadTitle",
+        "meta.type",
+        "meta.version",
+        "openPath",
+        "source"
+      ],
+      "fieldsRemoved": ["frame", "image", "nosrc", "page"],
+      "bindsAdded": [
+        "fileInfo.mime",
+        "fileInfo.modifiedAt",
+        "fileInfo.pageCount",
+        "fileInfo.pageUnit",
+        "fileInfo.pageUnit.length",
+        "fileInfo.size",
+        "kind",
+        "meta.at",
+        "meta.author",
+        "meta.hasThread",
+        "meta.page",
+        "meta.threadTitle",
+        "meta.type",
+        "meta.version",
+        "openPath",
+        "pr.ref",
+        "source",
+        "text.mode"
+      ],
+      "bindsRemoved": [
+        "frame",
+        "frame.icon",
+        "frame.note",
+        "meta",
+        "nosrc",
+        "pr.rows",
+        "text.modes",
+        "text.render",
+        "text.src"
+      ],
+      "oldFile": "app/cafe.js",
+      "newFile": "app/cafe.js",
+      "oldViews": ["page.work", "work.body"],
+      "newViews": ["page.work", "work.body"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js", "public/pdl-app/project.js"],
+      "declarationGaps": []
+    },
+    "works": {
+      "added": false,
+      "fieldsAdded": [
+        "catOpts[].handle",
+        "catOpts[].name",
+        "catOpts[].v",
+        "items[].args",
+        "items[].args.k",
+        "items[].args.kind",
+        "items[].at",
+        "items[].cat",
+        "items[].catHandle",
+        "items[].catName",
+        "items[].group",
+        "items[].id",
+        "items[].index",
+        "items[].memberName",
+        "items[].name",
+        "items[].revision",
+        "items[].scope",
+        "items[].source",
+        "items[].stale",
+        "items[].thread",
+        "items[].threadTitle",
+        "items[].type",
+        "layout",
+        "scope"
+      ],
+      "fieldsRemoved": [
+        "cardView",
+        "cards",
+        "global",
+        "groupOpts",
+        "groupOpts[].label",
+        "groupOpts[].v",
+        "grouped",
+        "layouts",
+        "scopes",
+        "showScope"
+      ],
+      "bindsAdded": ["items.length", "layout", "scope"],
+      "bindsRemoved": ["cardView", "cards", "global", "groupOpts", "grouped", "layouts", "scopes", "showScope"],
+      "oldFile": "app/ws-items.js",
+      "newFile": "app/ws-items.js",
+      "oldViews": ["ws.works"],
+      "newViews": ["ws.works"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "worksAll": {
+      "added": false,
+      "fieldsAdded": [
+        "catOpts[].handle",
+        "catOpts[].name",
+        "catOpts[].v",
+        "items[].args",
+        "items[].args.k",
+        "items[].args.kind",
+        "items[].at",
+        "items[].cat",
+        "items[].catHandle",
+        "items[].catName",
+        "items[].group",
+        "items[].id",
+        "items[].index",
+        "items[].memberName",
+        "items[].name",
+        "items[].revision",
+        "items[].scope",
+        "items[].source",
+        "items[].stale",
+        "items[].thread",
+        "items[].threadTitle",
+        "items[].type",
+        "layout",
+        "scope"
+      ],
+      "fieldsRemoved": [
+        "cardView",
+        "cards",
+        "global",
+        "groupOpts",
+        "groupOpts[].label",
+        "groupOpts[].v",
+        "grouped",
+        "layouts",
+        "scopes",
+        "showScope"
+      ],
+      "bindsAdded": ["items.length", "layout", "scope"],
+      "bindsRemoved": ["cardView", "cards", "global", "groupOpts", "grouped", "layouts", "scopes", "showScope"],
+      "oldFile": "app/ws-items.js",
+      "newFile": "app/ws-items.js",
+      "oldViews": ["page.works"],
+      "newViews": ["page.works"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/content-data.js"],
+      "declarationGaps": []
+    },
+    "wsMore": {
+      "added": true,
+      "fieldsAdded": ["closable", "focus", "home", "split", "tabCount", "unpinned"],
+      "fieldsRemoved": [],
+      "bindsAdded": [],
+      "bindsRemoved": [],
+      "oldFile": null,
+      "newFile": "app/workspace.js",
+      "oldViews": [],
+      "newViews": ["menu.wsMore"],
+      "status": "raw contract applied",
+      "bindingFiles": ["public/pdl-app/project.js"],
+      "declarationGaps": []
+    }
+  },
+  "actions": {
+    "added": {
+      "accOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/accounts.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "accVendorSet": {
+        "file": "app/settings.js",
+        "kind": "change",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/accounts.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "canonAvatarOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "clarification": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "compiledOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/rules.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "dirNew": {
+        "file": "app/cafe.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/setup.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "driftOpen": {
+        "file": "app/capabilities.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "envOpen": {
+        "file": "app/system.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/notifications.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "feat": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "featSave": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmRegister": {
+        "file": "app/video-project.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmRegisterSave": {
+        "file": "app/video-project.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmReopen": {
+        "file": "app/video-project.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "hbClaimDialog": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "hbClaimSave": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "intent": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "intentSave": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "ownerOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "pageActionOpen": {
+        "file": "app/workspace.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/placement.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "queueTargets": {
+        "file": "app/cafe.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/chat-owners.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "reflux": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "segOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/rules.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "semanticService": {
+        "file": "app/cafe.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "slice": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "task": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "taskSave": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "tokenOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/accounts.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "triageSave": {
+        "file": "app/ws-items.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "voiceInstallOpen": {
+        "file": "app/settings.js",
+        "kind": "act",
+        "theme": true,
+        "bindingFiles": ["public/pdl-app/placement.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "voteStart": {
+        "file": "app/cafe.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wcCreate": {
+        "file": "app/ws-code.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wcCreateSave": {
+        "file": "app/ws-code.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      }
+    },
+    "changed": {
+      "accOwnerSet": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/accounts.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "accRelogin": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/accounts.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "bgRemove": {
+        "old": {
+          "file": "app/background.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/background.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/appearance.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeAttach": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeAutoClassify": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/sidebar.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeExport": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeOrgNew": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/sidebar.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafePathPick": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/setup.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeProjectClone": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/setup.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeProjectPrepare": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/setup.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeQueue": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeQueueSend": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeReadAll": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeReveal": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat-owners.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeRunStop": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cafeTypedPick": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capAudit": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/placement.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capBulk": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capFile": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/plugins.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capFix": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capSkillMount": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capSysSync": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "capUpdate": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/plugins.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "cbAuthHideSimilar": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat-owners.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "evoLifecycle": {
+        "old": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmMapping": {
+        "old": {
+          "file": "app/video-project.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/video-project.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmOpen": {
+        "old": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmOpinionShow": {
+        "old": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "filmSelect": {
+        "old": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/video-project.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "followAcc": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "hbClaimCat": {
+        "old": {
+          "file": "app/ws-items.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-items.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "hbReclaim": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "installFile": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/plugins.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "mcpDirty": {
+        "old": {
+          "file": "app/capabilities.js",
+          "kind": "input",
+          "theme": false
+        },
+        "new": {
+          "file": "app/capabilities.js",
+          "kind": "input",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/capabilities.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "md": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "input",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "input",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "mdColor": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "input",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "input",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "mkCopy": {
+        "old": {
+          "file": "app/market.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/market.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/plugins.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "mkOpenUi": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": [],
+        "status": "demo-only; not bound",
+        "reason": "Prototype handler is empty; manual_ui install plan has instructions, no existing UI-installer command. Copied theme still draws its button for a manual_ui plan."
+      },
+      "msgDisposition": {
+        "old": {
+          "file": "app/ws-ops.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-ops.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat-owners.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "nativeSelect": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/members.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "opForceReset": {
+        "old": {
+          "file": "app/ws-ops.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-ops.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "personForget": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "profObs": {
+        "old": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/settings.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/profiles.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "rail": {
+        "old": {
+          "file": "engine/pdl.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "engine/pdl.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": [],
+        "status": "existing copied engine action; no app implementation"
+      },
+      "reset": {
+        "old": {
+          "file": "engine/core.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "engine/core.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/rules.js", "public/pdl-app/placement.js", "public/pdl-app/capabilities.js"],
+        "status": "existing copied engine action; no app implementation"
+      },
+      "reviewMarkupEdit": {
+        "old": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "rpPlay": {
+        "old": {
+          "file": "app/ws-trace.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-trace.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "rpSpeed": {
+        "old": {
+          "file": "app/ws-trace.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-trace.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "runtimeValue": {
+        "old": {
+          "file": "app/runtime.js",
+          "kind": "input",
+          "theme": false
+        },
+        "new": {
+          "file": "app/runtime.js",
+          "kind": "input",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "thread": {
+        "old": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/cafe.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/chat.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "toast": {
+        "old": {
+          "file": "engine/core.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "engine/core.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": [],
+        "status": "existing copied engine action; no app implementation"
+      },
+      "wcUpload": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "workReviewPick": {
+        "old": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "workSelect": {
+        "old": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/media.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsBrakeMin": {
+        "old": {
+          "file": "app/workspace.js",
+          "kind": "change",
+          "theme": false
+        },
+        "new": {
+          "file": "app/workspace.js",
+          "kind": "change",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsEvoNew": {
+        "old": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsFetch": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsFlag": {
+        "old": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": [],
+        "status": "demo-only write; not bound",
+        "reason": "Real F200 flags endpoint is read-only; VM options remain locked. Copied control can be drawn but cannot issue a write."
+      },
+      "wsImportBacklog": {
+        "old": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsImportProject": {
+        "old": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsPan": {
+        "old": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsRefluxDelete": {
+        "old": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/ws-items.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsRiskDetect": {
+        "old": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": false
+        },
+        "new": {
+          "file": "proto/demo.js",
+          "kind": "demo",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      },
+      "wsSendSys": {
+        "old": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": false
+        },
+        "new": {
+          "file": "app/workspace.js",
+          "kind": "act",
+          "theme": true
+        },
+        "bindingFiles": ["public/pdl-app/project.js"],
+        "status": "bound to existing data/action owner"
+      }
+    },
+    "removed": {
+      "cafeHistComplete": {
+        "file": "app/cafe.js",
+        "kind": "act",
+        "theme": false,
+        "bindingFiles": [],
+        "status": "removed"
+      }
+    }
+  },
+  "removedMenus": [
+    "acc",
+    "addAcc",
+    "cafeColl",
+    "cafeGroup",
+    "cafeGroupMenu",
+    "cafeMemItem",
+    "cafeMemRes",
+    "cafeMsg",
+    "cafeNav",
+    "cafeProj",
+    "cafeRow",
+    "cafeSvc",
+    "cafeTag",
+    "cbAuth",
+    "codexAcc",
+    "execRecovery",
+    "extPage",
+    "hbItem",
+    "hubIntent",
+    "hubReflux",
+    "ibMore",
+    "liveCall",
+    "marketItem",
+    "marketPage",
+    "mcp",
+    "mcpPage",
+    "member",
+    "memberAvatar",
+    "personClaim",
+    "profilesPage",
+    "projGit",
+    "projIndex",
+    "queueItem",
+    "recallSources",
+    "rpMore",
+    "skill",
+    "skillsPage",
+    "svc",
+    "themePage",
+    "thread",
+    "voicePage",
+    "wcNew",
+    "wcWt",
+    "work",
+    "wsBoard",
+    "wsEvo",
+    "wsEvoD",
+    "wsFile",
+    "wsMore",
+    "wsPrefRow",
+    "wsRec",
+    "wsSigD",
+    "wsSigRow",
+    "wsSrc"
+  ],
+  "removedDialogs": [
+    "acc",
+    "canonAvatar",
+    "clarification",
+    "compiled",
+    "dirNew",
+    "drift",
+    "env",
+    "feat",
+    "filmRegister",
+    "filmReopen",
+    "frame",
+    "hbSelfClaim",
+    "install",
+    "intent",
+    "l0",
+    "mountRules",
+    "owner",
+    "pageAction",
+    "push",
+    "queueTargets",
+    "reflux",
+    "seg",
+    "semanticService",
+    "skillMounts",
+    "slice",
+    "task",
+    "token",
+    "triage",
+    "vote",
+    "wcCreate"
+  ],
+  "checks": {
+    "tsc": {
+      "command": "pnpm -C packages/web exec tsc --noEmit --incremental false",
+      "exitCode": 0,
+      "output": ""
+    },
+    "vitest": {
+      "command": "pnpm -C packages/web exec vitest run src/pdl/__tests__",
+      "exitCode": 0,
+      "output": [" Test Files  67 passed (67)", "      Tests  645 passed (645)"]
+    },
+    "biome": {
+      "command": "pnpm exec biome check <78 changed existing JS/TS/TSX/JSON files>",
+      "exitCode": 0,
+      "output": [
+        "Checked 78 files in 778ms. No fixes applied.",
+        "Found 2536 warnings.",
+        "Found 302 infos.",
+        "Biome exit: 0"
+      ]
+    },
+    "privacy": "Project public runtime privacy-grep: 0",
+    "copiedLayer": "Copied layer changed files: 0",
+    "copyFiles": "pdl-app/copy files: 0",
+    "baselineFailures": 65,
+    "remainingFailures": []
+  },
+  "settledActions": {
+    "capRestart": {
+      "status": "bound",
+      "bindingFiles": ["public/pdl-app/plugins.js", "src/pdl/useSettingsBindings.ts"],
+      "request": "POST /api/plugin-manager/plugins/:id/repair",
+      "body": {
+        "expectedRevision": "plugin.lifecycleRevision"
+      },
+      "replaces": "capRepair (removed)"
+    },
+    "cafeAutoClassify": {
+      "status": "bound",
+      "request": "existing clSuggest owner; open modal.classify before generating; no label write before review"
+    },
+    "cafeAttach": {
+      "status": "bound",
+      "request": "existing platform pickFile -> chatPort.attach; no fake attachment or upload timer"
+    }
+  },
+  "menuAndFormStatus": "Removed MENU_FNS/DIALOGS display builders are deleted. Existing copied inline menus/dlg views own their contents; app open actions pass raw args and submit to existing owners.",
+  "componentGaps": {
+    "pluginImage": {
+      "vm": ["ext"],
+      "where": "library/ui.js:glyph; library/who.js:whoInfo plugin branch",
+      "missing": "Package icon src can be PNG/SVG, but glyph/identity only take an icon key and render at 18/13px; no package image/avatar-fill port.",
+      "host": "One icon registration per package; same-origin package src retained. Old PluginVisual used an img covering the container. Browser load and natural-size measurements are not verified."
+    },
+    "pluginPermissionLabels": {
+      "vm": ["ext"],
+      "where": "library/ui.js:pcf field labels",
+      "missing": "Real-only permission form labels are t: keys; the field renderer escapes the label without resolving its key.",
+      "host": "Keys supplied, with no app wording or replacement form."
+    },
+    "signalFetchSummary": {
+      "vm": ["cafeWsSignals"],
+      "where": "theme/default/views-cafe.js:sources.fetchRes notice",
+      "missing": "The notice still treats fetchRes as a string; the real fetch receipt is a structured summary.",
+      "host": "Raw fetchedArticles/newArticles/duplicateArticles/errors retained."
+    },
+    "pushResult": {
+      "vm": ["pushDiag"],
+      "where": "theme/default/views-settings.js:dialog.push result row",
+      "missing": "The row still reads result.label/value/tone instead of the raw result.kind/message.",
+      "host": "Raw result; write rejection also remains visible in the existing dialog.error slot."
+    },
+    "memberEnums": {
+      "vm": ["member", "memberNew"],
+      "where": "theme/default/views-settings.js:memberForm select options",
+      "missing": "cxSandbox/cxApproval/vLang/speed/agyPerm options still contain translated values rather than backend enums.",
+      "host": "Canonical enum values retained; no translated-value table added to app."
+    },
+    "providerError": {
+      "vm": ["member"],
+      "where": "theme/default/views-settings.js:rt-dsh-profile provider section",
+      "missing": "No declared error element reads form.model.provider.error.",
+      "host": "Raw provider error is supplied; inspect/prepare/test use the real revision and receipt."
+    },
+    "productDialogs": {
+      "vm": [],
+      "where": "theme/default: missing dlg declarations",
+      "missing": ["fileOverwrite", "queueRecallAppend", "nativeReviewTarget", "routingPreferenceRetire"],
+      "host": "Real actions pass raw dialog kinds/args; no app-built dialog fields or wording."
+    }
+  },
+  "productOnlyWording": [
+    {
+      "key": "settingsUi.contribution.kind.direct-tool",
+      "zh": "工具",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.contribution.kind.connector",
+      "zh": "连接器",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.contribution.kind.service",
+      "zh": "服务",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.contribution.kind.ui",
+      "zh": "界面",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.contribution.kind.media-source",
+      "zh": "媒体来源",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.contribution.kind.cloud-conversation-host",
+      "zh": "云端对话宿主",
+      "where": "插件详情能力分组"
+    },
+    {
+      "key": "settingsUi.starry",
+      "zh": "猫猫星球",
+      "where": "独立 frame 入口"
+    },
+    {
+      "key": "signals.fetchSummary",
+      "zh": "新增 {newArticles} · 获取 {fetchedArticles} · 重复 {duplicateArticles}",
+      "where": "信号源拉取回执；errors 保留原始错误项"
+    },
+    {
+      "key": "settingsUi.confirm.fileOverwrite",
+      "zh": "覆盖文件？ / {name} 已存在，是否覆盖？",
+      "where": "文件保存冲突确认"
+    },
+    {
+      "key": "chat.queueRecallAppend",
+      "zh": "撤回并重新编辑 / 将撤回的内容追加到当前草稿？",
+      "where": "当前输入框非空时撤回队列项"
+    },
+    {
+      "key": "workbench.nativeReviewTarget",
+      "zh": "审查改动 / 选择审阅成员",
+      "where": "有多个真实审阅目标时"
+    },
+    {
+      "key": "settingsUi.confirm.routingPreferenceRetire",
+      "zh": "停用协作偏好？",
+      "where": "协作偏好停用确认"
+    }
+  ],
+  "testsUpdated": [
+    {
+      "before": "formatted status/tone/summary strings",
+      "after": "raw status/count/timestamps/error codes, plus the copied rendered state/owner write where available",
+      "files": ["runtime.test.ts", "settings-runtime.test.ts", "*-bindings.test.ts"]
+    },
+    {
+      "before": "MENU_FNS work/member/svc/etc. and DIALOGS constructors",
+      "after": "open the copied declaration via the actual trigger; verify items/args and same successful/rejected owner writes",
+      "files": ["runtime.test.ts", "settings-runtime.test.ts", "w2-bindings.test.ts"]
+    },
+    {
+      "before": "chatPage.welcome/stream and recalled fallback wording",
+      "after": "raw message membership/length, recalled flag and empty private body, actual empty composer and no private text leakage",
+      "files": ["chat-models.test.ts", "runtime.test.ts"]
+    },
+    {
+      "before": "rich/file display strings and media pick args",
+      "after": "raw embeds/card preview sources, numeric file metadata and media canPick/project/screening/annotation coordinates; same writes",
+      "files": ["rich-models.test.ts", "film-bindings.test.ts", "runtime.test.ts"]
+    },
+    {
+      "before": "runtime account/permission labels",
+      "after": "real statuses/account/rateLimits/capabilities/permissionProfiles objects with the same target thread and write",
+      "files": ["settings-runtime.test.ts"]
+    },
+    {
+      "before": "candidate notice and voice dictionary joined labels",
+      "after": "materialized receipt, terminal status, separate a/b fields and actual inverse writer",
+      "files": ["memory-bindings.test.ts", "settings-runtime.test.ts"]
+    },
+    {
+      "before": "context policy dirty count and launch setup error text",
+      "after": "same exact dirty count (fixed structural comparison), raw provider error, revision-bound prepare/test and invalidation after edit",
+      "files": ["runtime.test.ts"]
+    },
+    {
+      "before": "owner color save remains #527b99 when aliases change",
+      "after": "Same behavior assertion retained and passing: lead follows the prototype identity shape {name,color:primaryHex}; changing aliases preserves both primary and secondary.",
+      "files": ["runtime.test.ts"]
+    },
+    {
+      "before": "no single-message library-render cache behavior test",
+      "after": "20 unchanged Markdown VM reads call msgMd once; changed Markdown calls it a second time",
+      "files": ["runtime.test.ts"]
+    },
+    {
+      "before": "capRepair action",
+      "after": "capRestart reaches repair with exact revision guard; rejection retains owner state",
+      "files": ["settings-bindings.test.ts"]
+    }
+  ],
+  "r3b45": {
+    "body": "whole_body_replaced stream content is body; true tools/stdout remain execution data",
+    "fold": "bodyLength/relayed raw fields supplied; shape and measured fold remain theme/library",
+    "draft": "restored text applied through local composer path; images/context references and sidebar draft flag retained",
+    "project": "new conversation has no cwd-derived project; explicit saved choice retained; raw project name/path/pathCopy",
+    "images": "gallery/user embeds now use cards.items[].src and preview kind=image; real browser natural-height comparison still awaits rebuild/walk"
+  }
+}

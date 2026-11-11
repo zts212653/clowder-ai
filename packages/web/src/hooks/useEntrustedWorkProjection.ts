@@ -42,6 +42,7 @@ async function readProjection(
 
 export function useEntrustedWorkProjection(
   projection: EntrustedWorkProjection = 'schedule',
+  needed: boolean | number = true,
 ): EntrustedWorkProjectionResult {
   const [ownerReads, setOwnerReads] = useState<EntrustedWorkOwnerReadV1[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,16 +81,23 @@ export function useEntrustedWorkProjection(
   }, [projection]);
 
   useEffect(() => {
-    void refetch();
-    const refresh = (): void => void refetch();
+    if (!needed) return;
+    const refresh = (): void => {
+      if (!document.hidden) void refetch();
+    };
+    refresh();
+    const timer = projection === 'schedule' ? setInterval(refresh, 30_000) : undefined;
+    document.addEventListener('visibilitychange', refresh);
     window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', refresh);
     window.addEventListener('cat-cafe:runtime-interaction-updated', refresh);
     return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
       window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', refresh);
       window.removeEventListener('cat-cafe:runtime-interaction-updated', refresh);
       abortRef.current?.abort();
     };
-  }, [refetch]);
+  }, [needed, refetch, projection]);
 
   return {
     ownerReads,

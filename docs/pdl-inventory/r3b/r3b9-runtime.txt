@@ -1,0 +1,31 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/pdl/__tests__/runtime.test.ts (21 tests) 7435ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts  426ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  379ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  326ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  419ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  413ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  345ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  351ms
+     ✓ opens and leaves Team details through the native workbench stack  395ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  353ms
+     ✓ sends input through the registered action without replacing the active textarea  335ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  311ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  400ms
+     ✓ resolves draft-append consent only from the engine dialog decision  336ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1348ms
+
+ Test Files  1 passed (1)
+      Tests  21 passed (21)
+   Start at  13:49:48
+   Duration  8.75s (transform 725ms, setup 30ms, import 1.19s, tests 7.44s, environment 0ms)
+
+
+Exit code: 0

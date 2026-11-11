@@ -1,0 +1,24 @@
+{
+  "plugin": {
+    "entries": {
+      "commit": "Open on GitHub",
+      "community": "Community",
+      "issue": "Send to a GitHub issue"
+    },
+    "panel": {
+      "desc": "Community items and contribution records"
+    }
+  },
+  "issueDraft": {
+    "title": "Title",
+    "body": "Body",
+    "create": "Create draft",
+    "publish": "Publish",
+    "published": "Published"
+  },
+  "chatCards": {
+    "field": {
+      "repo": "Repository"
+    }
+  }
+}

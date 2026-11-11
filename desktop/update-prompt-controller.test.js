@@ -12,8 +12,10 @@ const {
   UPDATE_PROGRESS_CHANNEL,
   UPDATE_SETTINGS_GET_CHANNEL,
   UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL,
+  UPDATE_CHECK_CHANNEL,
 } = require('./update-prompt-controller');
 const { createManualUpdateHandler } = require('./desktop-update-menu');
+const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
 
 function harness(options = {}) {
   const ipcMain = new EventEmitter();
@@ -122,6 +124,56 @@ describe('UpdatePromptController', () => {
     assert.equal(await result, 'later');
   });
 
+  test('admits a manual check only from the trusted main frame and awaits its existing owner', async () => {
+    let calls = 0;
+    let finish;
+    const h = harness({
+      onCheckForUpdates: () => {
+        calls++;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    const check = h.handlers.get(UPDATE_CHECK_CHANNEL);
+    await assert.rejects(() => check({ sender: {}, senderFrame: {} }), /untrusted/i);
+    await assert.rejects(() => check({ sender: h.webContents, senderFrame: {} }), /untrusted/i);
+    h.webContents.mainFrame.url = 'https://other.example';
+    await assert.rejects(() => check(h.event), /untrusted/i);
+    assert.equal(calls, 0);
+    h.webContents.mainFrame.url = 'http://localhost:3003/settings';
+    let completed = false;
+    const pending = check(h.event).then(() => {
+      completed = true;
+    });
+    assert.equal(calls, 1);
+    assert.equal(completed, false);
+    finish();
+    await pending;
+    assert.equal(completed, true);
+    h.controller.dispose();
+    assert.equal(h.handlers.has(UPDATE_CHECK_CHANNEL), false);
+  });
+
+  test('routes the native check IPC to UpdateManager with manual true', async () => {
+    const h = harness();
+    h.controller.dispose();
+    const runtime = createDesktopUpdateRuntime({
+      ipcMain: h.ipcMain,
+      getMainWindow: () => h.window,
+      dbg: () => {},
+      trustedOrigin: 'http://localhost:3003',
+      userDataRoot: '/not-read-by-this-test',
+      app: {},
+    });
+    const calls = [];
+    runtime.updater.checkForUpdates = async (options) => {
+      calls.push(options);
+    };
+    await h.handlers.get(UPDATE_CHECK_CHANNEL)(h.event);
+    assert.deepEqual(calls, [{ manual: true }]);
+    runtime.updatePrompt.dispose();
+  });
   test('returns a prompt that became pending before trusted renderer readiness', async () => {
     const h = harness();
     let resolved = false;
@@ -431,5 +483,6 @@ describe('UpdatePromptController', () => {
     assert.equal(h.handlers.has(UPDATE_PROMPT_READY_CHANNEL), false);
     assert.equal(h.handlers.has(UPDATE_SETTINGS_GET_CHANNEL), false);
     assert.equal(h.handlers.has(UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL), false);
+    assert.equal(h.handlers.has(UPDATE_CHECK_CHANNEL), false);
   });
 });

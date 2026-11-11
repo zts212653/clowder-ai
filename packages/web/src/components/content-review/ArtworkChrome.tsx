@@ -14,10 +14,6 @@ type Slots = {
 };
 const Context = createContext<Slots | null>(null);
 const ActionsVisible = createContext(true);
-/** The visible media owns the one action row, including during owner admission. */
-export function ArtworkActionsVisibility({ visible, children }: { visible: boolean; children: ReactNode }) {
-  return <ActionsVisible.Provider value={visible}>{children}</ActionsVisible.Provider>;
-}
 export function useArtworkActionsVisible() {
   return useContext(ActionsVisible);
 }

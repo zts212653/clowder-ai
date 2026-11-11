@@ -1,0 +1,36 @@
+{
+ "scripts": [
+  "engine/i18n.js",
+  "theme/default/i18n.js",
+  "engine/core.js",
+  "engine/theme.js",
+  "engine/proj.js",
+  "engine/frame.js",
+  "engine/anchor.js",
+  "engine/pdl-view.js",
+  "engine/pdl.js",
+  "engine/tree.js",
+  "engine/pdl-doc.js",
+  "engine/platform.js",
+  "platform/web.js",
+  "library/icons.js",
+  "library/library.js",
+  "library/ui.js",
+  "library/shell.js",
+  "library/blocks.js",
+  "library/lrow.js",
+  "library/widgets.js",
+  "library/who.js",
+  "library/themecalc.js",
+  "theme/default/pdl.js",
+  "theme/default/assets.js",
+  "theme/default/assets/bg-assets.js",
+  "theme/default/assets/font-assets.js"
+ ],
+ "styles": [
+  "library/css/core.css",
+  "library/css/parts.css",
+  "library/css/widgets.css",
+  "library/css/library.css"
+ ]
+}

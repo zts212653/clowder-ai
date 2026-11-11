@@ -12,6 +12,7 @@ import {
 export async function readRecentWorksView(input: {
   userId: string;
   limit: number;
+  projectId?: string;
   threadStore: IThreadStore;
   messageStore: IMessageStore | undefined;
   independent: IndependentWorkCataloguePort | undefined;
@@ -22,8 +23,12 @@ export async function readRecentWorksView(input: {
   ): Promise<{ artifacts: ThreadArtifactDTO[]; complete: boolean }>;
 }): Promise<GlobalArtifactsResponse & { complete: boolean }> {
   const threads = (await input.threadStore.list(input.userId)).filter(
-    (thread) => thread.createdBy === input.userId || thread.createdBy === 'system',
+    (thread) =>
+      (thread.createdBy === input.userId || thread.createdBy === 'system') &&
+      (input.projectId === undefined || thread.projectPath === input.projectId),
   );
+  if (input.projectId !== undefined && threads.length === 0)
+    return { artifacts: [], total: 0, workLineage: 'resolved', complete: true };
   const threadTitles = new Map(threads.map((thread) => [thread.id, thread.title ?? thread.id]));
   const scan = await (async () => {
     if (input.messageStore) {

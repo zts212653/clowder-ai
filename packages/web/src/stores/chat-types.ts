@@ -115,6 +115,7 @@ export interface ToolEvent {
   executionRef?: string;
   type: 'tool_use' | 'tool_result';
   label: string;
+  toolName?: string;
   detail?: string;
   /** Terminal input for the same native tool call, separate from its output detail. */
   inputDetail?: string;
@@ -122,7 +123,8 @@ export interface ToolEvent {
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
   /** Persisted tool result status; replay adapter maps error status to failed tool UI. */
-  status?: 'completed' | 'error';
+  /** Stored native outcome, or the existing replay adapter's completed projection. */
+  status?: 'ok' | 'error' | 'unknown' | 'completed';
   timestamp: number;
 }
 

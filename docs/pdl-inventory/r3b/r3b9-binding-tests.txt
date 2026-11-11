@@ -1,0 +1,50 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/recall-consent.test.ts (1 test) 52ms
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/pdl/__tests__/review-bindings.test.tsx (5 tests) 47ms
+ ✓ src/pdl/__tests__/preview-bindings.test.ts (3 tests) 41ms
+ ✓ src/pdl/__tests__/remaining-bindings.test.ts (5 tests) 39ms
+ ✓ src/pdl/__tests__/voice-bindings.test.ts (8 tests) 33ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (4 tests) 36ms
+ ✓ src/pdl/__tests__/r114-bindings.test.ts (3 tests) 29ms
+ ✓ src/pdl/__tests__/terminal-bindings.test.ts (5 tests) 24ms
+ ✓ src/pdl/__tests__/operations-bindings.test.ts (4 tests) 29ms
+ ✓ src/pdl/__tests__/memory-bindings.test.ts (3 tests) 20ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (8 tests) 21ms
+ ✓ src/pdl/__tests__/runtime-questions.test.ts (6 tests) 18ms
+ ✓ src/pdl/__tests__/platform.test.ts (4 tests) 20ms
+ ✓ src/pdl/__tests__/film-bindings.test.ts (2 tests) 16ms
+ ✓ src/pdl/__tests__/canon-bindings.test.ts (2 tests) 13ms
+ ✓ src/pdl/__tests__/rich-models.test.ts (3 tests) 11ms
+ ✓ src/pdl/__tests__/interactive-actions.test.ts (5 tests) 4ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (4 tests) 3ms
+ ✓ src/pdl/__tests__/delivery-models.test.ts (3 tests) 2ms
+ ✓ src/pdl/__tests__/export-route.test.ts (2 tests) 2ms
+ ✓ src/pdl/__tests__/message-selection.test.ts (2 tests) 2ms
+ ✓ src/pdl/__tests__/runtime.test.ts (21 tests) 6982ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts  427ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  369ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  319ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  424ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  405ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  346ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  347ms
+     ✓ opens and leaves Team details through the native workbench stack  418ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  329ms
+     ✓ sends input through the registered action without replacing the active textarea  301ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  357ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1205ms
+
+ Test Files  22 passed (22)
+      Tests  103 passed (103)
+   Start at  14:02:21
+   Duration  8.51s (transform 3.19s, setup 219ms, import 7.76s, tests 7.44s, environment 4.82s)
+
+
+Exit code: 0

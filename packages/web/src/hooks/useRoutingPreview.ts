@@ -25,6 +25,12 @@ export type RoutingPreviewState =
       unavailableTargets?: RoutingPreviewResponse['unavailableTargets'];
     };
 
+function sameTargets(left: readonly string[] | undefined, right: readonly string[] | undefined) {
+  return (
+    left === right || (!!left && !!right && left.length === right.length && left.every((id, i) => id === right[i]))
+  );
+}
+
 export function useRoutingPreview({
   enabled,
   content,
@@ -61,17 +67,26 @@ export function useRoutingPreview({
   useEffect(() => {
     if (!enabled || !scopeKind) {
       previousScopeKey.current = '';
-      setState({ status: 'idle', targetCats: [], reason: null });
+      setState((previous) =>
+        previous.status === 'idle' ? previous : { status: 'idle', targetCats: [], reason: null },
+      );
       return;
     }
     const scopeChanged = previousScopeKey.current !== scopeKey;
     previousScopeKey.current = scopeKey;
-    if (scopeChanged) setState({ status: 'loading', targetCats: [], reason: null });
+    if (scopeChanged)
+      setState((previous) =>
+        previous.status === 'loading' ? previous : { status: 'loading', targetCats: [], reason: null },
+      );
     if (suspended) return;
     const controller = new AbortController();
     let current = true;
     setState((previous) =>
-      scopeChanged || previous.status !== 'ready' ? { status: 'loading', targetCats: [], reason: null } : previous,
+      scopeChanged || previous.status !== 'ready'
+        ? previous.status === 'loading'
+          ? previous
+          : { status: 'loading', targetCats: [], reason: null }
+        : previous,
     );
     const timer = window.setTimeout(() => {
       const body =
@@ -92,12 +107,25 @@ export function useRoutingPreview({
           if (!response.ok) throw new Error(`Routing preview failed: ${response.status}`);
           const parsed = routingPreviewResponseSchema.safeParse(await response.json());
           if (!parsed.success) throw new Error('Invalid routing preview response');
-          if (current) setState({ status: 'ready', ...parsed.data });
+          if (current)
+            setState((previous) =>
+              previous.status === 'ready' &&
+              previous.reason.kind === parsed.data.reason.kind &&
+              (previous.reason.kind !== 'thread_policy' ||
+                (parsed.data.reason.kind === 'thread_policy' &&
+                  previous.reason.baseKind === parsed.data.reason.baseKind)) &&
+              sameTargets(previous.targetCats, parsed.data.targetCats) &&
+              sameTargets(previous.unavailableTargets, parsed.data.unavailableTargets)
+                ? previous
+                : { status: 'ready', ...parsed.data },
+            );
         })
         .catch((error: unknown) => {
           if (!current || controller.signal.aborted) return;
           if (error instanceof DOMException && error.name === 'AbortError') return;
-          setState({ status: 'error', targetCats: [], reason: null });
+          setState((previous) =>
+            previous.status === 'error' ? previous : { status: 'error', targetCats: [], reason: null },
+          );
         });
     }, 150);
     return () => {

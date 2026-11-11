@@ -1,0 +1,4 @@
+W2/W3 progress rows changed: 0
+Reserved binding diff exit: 0
+
+Exit code: 0

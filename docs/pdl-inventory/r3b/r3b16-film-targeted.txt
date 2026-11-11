@@ -1,0 +1,191 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/film-bindings.test.ts src/pdl/__tests__/runtime.test.ts -t 'scene|exact opinion|two independently|replay player|file-context|sandbox widgets|receiver'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/film-bindings.test.ts (9 tests | 2 failed | 5 skipped) 29ms
+   × locates scene nodes in the frozen input, including partial mapping, without choosing an unrelated later shot 3ms
+   ✓ offers only common scene identities when one side is unmapped: false 13ms
+   × offers only common scene identities when one side is unmapped: true 4ms
+   ✓ compares the exact opinion/result inputs and annotates each side with its own screening and clock 9ms
+   ↓ does not infer a new screening from an unchanged, reopened, foreign or mismatched result
+   ↓ keeps both shown inputs unchanged when the comparison read fails and refuses stale comparison args
+   ↓ freezes registration input and media source across a lost reply and retains a later selected project
+   ↓ imports a chosen document through its real owner and revalidates the project list
+   ↓ reads actual opinions, compares frozen inputs, queues a position without writing review, and confirms a lost reopen reply
+ ❯ src/pdl/__tests__/runtime.test.ts (36 tests | 3 failed | 31 skipped) 31297ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  929ms
+     ↓ offers rollback only for one source-current version with one parent while leaving history available
+     ↓ renders owner adoption, actual use receipts and version history through the existing evolution declarations
+     ↓ opens the verified recall source and its original reply through one existing row menu
+     ↓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery
+     ↓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary
+     ↓ opens a live child trajectory through the declared run opener and the existing execution view
+     ↓ retains the existing owner read-error component once without adding a toast
+     ↓ keeps the shell and other owner data when the home binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the ops binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the replay binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast
+     ↓ does not show the history marker or load-older action for a new empty thread (r116)
+     ↓ opens the existing all-works page with its global owner and reuses the current work controls
+     ↓ binds r115 runtime identity and real evolution detail through the copied declarations
+     ↓ uses the r114 report collection and actual telemetry condition without sample facts
+     ↓ mounts the r114 preview frame and forwards only its own raw message source to the application
+     ↓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen
+     ↓ keeps the actual task dialog busy until its owner settles and retains the draft on failure
+     ↓ keeps entity removal confirmation open while the real terminal owner is pending
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  354ms
+     ↓ retains the file rename draft and owner rejection in the native entity dialog
+     ↓ opens and leaves Team details through the native workbench stack
+     ↓ retains terminal deletion confirmation and the exact owner rejection
+     ↓ paints the entire shell and chat from the copied theme, including rich-body platform calls
+     ↓ uses the full-window export frame, exact mids and the same readonly message nodes
+     ↓ preserves the typed work reference through the actual copied canon button
+     ↓ preserves the contracted annotationId through the actual copied review judgment button
+     ↓ settles only after an asynchronous rich-body render is complete (r111 contract)
+     × renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 10009ms
+     ↓ sends input through the registered action without replacing the active textarea
+     × binds export filtering and file-context input through the existing VM and popup declarations 10002ms
+     × requires an explicit receiver and forwards canonical message ids through the existing modal row control 10001ms
+     ↓ resolves draft-append consent only from the engine dialog decision
+     ↓ leaves text paste native while forwarding image paste through the application port
+   ↓ renders bound workbench tools and voice settings through the same copied declarations
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/film-bindings.test.ts > locates scene nodes in the frozen input, including partial mapping, without choosing an unrelated later shot
+ZodError: [
+  {
+    "code": "custom",
+    "path": [
+      "timeline",
+      "segments",
+      1
+    ],
+    "message": "Narrative segments must be ordered, nonoverlapping and inside the timeline"
+  },
+  {
+    "code": "custom",
+    "path": [
+      "timeline",
+      "segments",
+      4
+    ],
+    "message": "Narrative segments must be ordered, nonoverlapping and inside the timeline"
+  },
+  {
+    "code": "custom",
+    "path": [
+      "decisions",
+      0,
+      "targets",
+      "segmentIds",
+      0
+    ],
+    "message": "Reference is not in this project"
+  }
+]
+ ❯ Object.get error [as error] ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js:39:31
+ ❯ ZodEffects.parse ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js:114:22
+ ❯ src/pdl/__tests__/film-bindings.test.ts:57:77
+     55|     { mediaStartPts: 46080, mediaEndPts: 61440, projectStartTick: 40, …
+     56|   ];
+     57|   expect(filmPoints({ ...snapshots[0], document: videoProjectDocumentS…
+       |                                                                             ^
+     58|     { key: 'scene-1', label: 'First scene', at: 1 },
+     59|     { key: 'scene-2', label: 'Second scene', at: 3 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pdl/__tests__/film-bindings.test.ts > offers only common scene identities when one side is unmapped: true
+PdlReadError: [
+  {
+    "code": "custom",
+    "path": [
+      "timeline",
+      "segments",
+      1
+    ],
+    "message": "Narrative segments must be ordered, nonoverlapping and inside the timeline"
+  }
+]
+ ❯ failRead src/pdl/owner-api.ts:6:19
+      4| export function failRead(error: unknown): never {
+      5|   if (error instanceof Error && ['PdlReadError', 'AbortError'].include…
+      6|   const failure = new Error(error instanceof Error ? error.message : S…
+       |                   ^
+      7|   failure.name = 'PdlReadError';
+      8|   throw failure;
+ ❯ open src/pdl/useFilmBindings.ts:157:7
+ ❯ Object.action src/pdl/useFilmBindings.ts:317:7
+ ❯ src/pdl/__tests__/hook-host.tsx:9:13
+
+Caused by: ZodError: [
+  {
+    "code": "custom",
+    "path": [
+      "timeline",
+      "segments",
+      1
+    ],
+    "message": "Narrative segments must be ordered, nonoverlapping and inside the timeline"
+  }
+]
+ ❯ Object.get error [as error] ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js:39:31
+ ❯ ZodEffects.parse ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js:114:22
+ ❯ src/pdl/__tests__/film-bindings.test.ts:213:64
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { issues: [ { code: 'custom', path: [ 'timeline', 'segments', 1 ], message: 'Narrative segments must be ordered, nonoverlapping and inside the timeline' } ], addIssue: 'Function<anonymous>', addIssues: 'Function<anonymous>', errors: [ { code: 'custom', path: [ 'timeline', 'segments', 1 ], message: 'Narrative segments must be ordered, nonoverlapping and inside the timeline' } ], format: 'Function<format>', isEmpty: false, flatten: 'Function<flatten>', formErrors: { formErrors: [], fieldErrors: { timeline: [ 'Narrative segments must be ordered, nonoverlapping and inside the timeline' ] } } }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111
+Error: Test timed out in 10000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pdl/__tests__/runtime.test.ts:1175:3
+    1173|   });
+    1174|
+    1175|   it('renders rich card body, user attachments, sandbox widgets and mu…
+       |   ^
+    1176|     const { dom, w } = await boot(undefined, (data, ui) => {
+    1177|       data.messages[0].contentBlocks = [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > binds export filtering and file-context input through the existing VM and popup declarations
+Error: Test timed out in 10000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pdl/__tests__/runtime.test.ts:1249:3
+    1247|   });
+    1248|
+    1249|   it('binds export filtering and file-context input through the existi…
+       |   ^
+    1250|     const { dom, w, data, ui, action } = await boot();
+    1251|     try {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > requires an explicit receiver and forwards canonical message ids through the existing modal row control
+Error: Test timed out in 10000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/pdl/__tests__/runtime.test.ts:1273:3
+    1271|   });
+    1272|
+    1273|   it('requires an explicit receiver and forwards canonical message ids…
+       |   ^
+    1274|     const { dom, w, data, ui, action } = await boot();
+    1275|     try {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 4 passed | 36 skipped (45)
+   Start at  21:42:27
+   Duration  33.49s (transform 1.97s, setup 57ms, import 2.99s, tests 31.33s, environment 470ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/film-bindings.test.ts src/pdl/__tests__/runtime.test.ts -t scene|exact opinion|two independently|replay player|file-context|sandbox widgets|receiver
+
+Exit code: 1

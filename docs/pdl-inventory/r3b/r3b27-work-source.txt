@@ -1,0 +1,46 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/r136-owners.test.ts (7 tests | 1 failed) 36ms
+   ✓ generates suggestions without writes and accepts only the reviewed row using real label ids 10ms
+   ✓ reads authoritative evidence and resolves a workspace file to its retained owner version 15ms
+   ✓ keeps generation source ids separate from read receipts, including unloaded and incomplete sources 3ms
+   ✓ binds a cat source using the existing binding writer without dispatching a retry 1ms
+   ✓ preserves the exact work version and CLI owner leaf in the existing send/read schema 1ms
+   ✓ keeps the real draft receipt after publish failure and retries publish without recreating 1ms
+   × opens the resolved work version through the existing owner without requiring a current catalogue row 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/r136-owners.test.ts > opens the resolved work version through the existing owner without requiring a current catalogue row
+AssertionError: expected undefined to be 'Retained owner version 2' // Object.is equality
+
+- Expected:
+"Retained owner version 2"
+
++ Received:
+undefined
+
+ ❯ src/pdl/__tests__/r136-owners.test.ts:325:52
+    323|   const reference = JSON.stringify({ threadId: 'host-thread', contentR…
+    324|   await act(() => hook.result.current.action('workOpen', { i: referenc…
+    325|   expect(hook.result.current.models().work?.title).toBe('Retained owne…
+       |                                                    ^
+    326|   expect(apiFetch).toHaveBeenCalledWith(
+    327|     '/api/works/resolve-file?threadId=host-thread&contentRef=work%3Are…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  12:30:18
+   Duration  2.03s (transform 1.02s, setup 37ms, import 1.42s, tests 36ms, environment 421ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/r136-owners.test.ts
+
+Exit code: 1

@@ -1,0 +1,99 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/chat-models.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/chat-models.test.ts (10 tests) 23ms
+ ❯ src/pdl/__tests__/runtime.test.ts (40 tests | 1 failed) 17255ms
+     × groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys 765ms
+     ✓ opens the owner source thread from the declared task row action and respects rejected navigation  438ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  567ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  776ms
+     ✓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media  658ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  627ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  613ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  375ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  501ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  430ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  324ms
+     ✓ retains the existing owner read-error component once without adding a toast  379ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  577ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  580ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  594ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  578ms
+     ✓ does not show the history marker or load-older action for a new empty thread (r116) 163ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  377ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  558ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts 253ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  418ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  308ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  416ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  395ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  569ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  338ms
+     ✓ opens and leaves Team details through the native workbench stack  383ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  344ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 187ms
+     ✓ uses the full-window export frame, exact mids and the same readonly message nodes 75ms
+     ✓ preserves the typed work reference through the actual copied canon button 237ms
+     ✓ preserves the contracted annotationId through the actual copied review judgment button 234ms
+     ✓ settles only after an asynchronous rich-body render is complete (r111 contract) 144ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 203ms
+     ✓ sends input through the registered action without replacing the active textarea  325ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  315ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  390ms
+     ✓ resolves draft-append consent only from the engine dialog decision  328ms
+     ✓ leaves text paste native while forwarding image paste through the application port 187ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1322ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 2 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "preview:visible",
+      Object {
+        "v": "false",
+      },
+      undefined,
+    ]
+
+  2nd vi.fn() call:
+
+    Array [
+      "terminal:visible",
+      Object {
+        "v": "false",
+      },
+      undefined,
+    ]
+
+
+Number of calls: 2
+
+ ❯ src/pdl/__tests__/runtime.test.ts:138:26
+    136|       expect(w.eval('VM.cafeNavShell().byProject')).toBe(false);
+    137|       expect(ui.projOpen?.[alpha]).toBe(false);
+    138|       expect(action).not.toHaveBeenCalled();
+       |                          ^
+    139|       expect(errors).not.toHaveBeenCalled();
+    140|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 49 passed (50)
+   Start at  22:40:42
+   Duration  19.41s (transform 2.01s, setup 51ms, import 3.01s, tests 17.28s, environment 382ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/chat-models.test.ts
+
+Exit code: 1

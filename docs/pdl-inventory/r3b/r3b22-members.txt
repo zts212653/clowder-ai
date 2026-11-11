@@ -1,0 +1,75 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/member-actions.test.ts --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/member-actions.test.ts (6 tests | 1 failed) 63ms
+   ✓ permutes only visible member slots and awaits the existing ordering owner 4ms
+   ✓ uses real templates without changing an uploaded avatar, including blank 11ms
+   ✓ derives account options from real account families and exposes only actual carrier choices 1ms
+   ✓ writes member changes with revision and account-derived service tier, without a credential setting 10ms
+   × keeps failed owner writes failed without publishing success, and creates via the real endpoint 25ms
+   ✓ uses the co-creator receipt and preserves the owner secondary color without a second control 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/member-actions.test.ts > keeps failed owner writes failed without publishing success, and creates via the real endpoint
+AssertionError: expected { path: '/api/cats', body: { …(20) } } to match object { path: '/api/cats', …(1) }
+(22 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "body": {
+-     "id": "new-member",
++     "accountRef": "oauth-one",
++     "avatar": "",
++     "carrier": "app_server",
++     "catId": "new-member",
++     "caution": null,
++     "cliConfigArgs": [],
++     "clientId": "openai",
++     "color": {
++       "primary": "#527b99",
++       "secondary": "#e8eff5",
++     },
++     "configurationSource": "managed_account",
++     "defaultModel": "GPT",
++     "displayName": "Codex",
++     "mcpSupport": true,
++     "mentionPatterns": [
++       "@codex",
++     ],
++     "name": "Codex",
++     "nickname": "",
++     "personality": "",
++     "roleDescription": "code",
++     "strengths": [],
++     "teamStrengths": "",
++     "variantLabel": "",
+    },
+    "path": "/api/cats",
+  }
+
+ ❯ src/pdl/__tests__/member-actions.test.ts:82:25
+     80|   expect(refreshCatsNow).not.toHaveBeenCalled();
+     81|   rejectWrite = false; await saveMember(form, null, undefined);
+     82|   expect(writes.at(-1)).toMatchObject({ path: '/api/cats', body: { id:…
+       |                         ^
+     83| });
+     84|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  04:11:00
+   Duration  20.96s (transform 10.99s, setup 144ms, import 14.21s, tests 63ms, environment 3.95s)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/member-actions.test.ts --maxWorkers=1
+
+Exit code: 1

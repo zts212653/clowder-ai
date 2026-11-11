@@ -23,6 +23,13 @@ export interface AssetContextAttachment extends ContextAttachmentBase {
   readonly work: AssetWorkCoordinate;
 }
 
+export interface WorkContextAttachment extends ContextAttachmentBase {
+  readonly kind: 'work';
+  readonly workId: string;
+  readonly version: number;
+  readonly title: string;
+}
+
 export interface ThreadContextAttachment extends ContextAttachmentBase {
   readonly kind: 'thread';
   readonly threadId: string;
@@ -63,6 +70,9 @@ export interface CliOutputQuoteSource {
   readonly messageId: string;
   /** Stable rendered leaf that owns selectionStart/selectionEnd (for example stdout or one tool detail). */
   readonly segmentId?: string;
+  readonly toolUseId?: string;
+  readonly executionRef?: string;
+  readonly part?: 'call' | 'input' | 'result' | 'meta';
 }
 
 export interface WorkspaceFileQuoteSource {
@@ -105,6 +115,7 @@ export interface QuoteContextAttachment extends ContextAttachmentBase {
 export type ContextAttachment =
   | AssetContextAttachment
   | ThreadContextAttachment
+  | WorkContextAttachment
   | WorkspaceFileContextAttachment
   | QuoteContextAttachment
   | MediaContextAttachment

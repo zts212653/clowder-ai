@@ -1,0 +1,434 @@
+$ pnpm exec biome check desktop/desktop-update-runtime.js desktop/preload.js desktop/preload.test.js desktop/update-prompt-controller.js desktop/update-prompt-controller.test.js packages/api/src/domains/cats/services/agents/routing/route-helpers.ts packages/api/src/domains/cats/services/stores/ports/MessageStore.ts packages/api/src/routes/config-chat-background.ts packages/api/src/routes/config.ts packages/api/src/routes/recent-works-view.ts packages/api/src/routes/threads.ts packages/api/test/config/appearance-config.test.ts packages/api/test/f232-recent-works-query.test.js packages/shared/src/chat-background.ts packages/shared/src/types/user-preferences.ts packages/web/public/pdl-app/appearance.js packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/project.js packages/web/src/components/__tests__/DesktopUpdatePrompt.test.tsx packages/web/src/components/__tests__/DesktopUpdateSettingsPanel.test.tsx packages/web/src/desktop-bridge.d.ts packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts packages/web/src/hooks/agent-messages/active-handler.ts packages/web/src/hooks/agent-messages/background-handler.ts packages/web/src/hooks/agent-messages/tool-events.ts packages/web/src/hooks/agent-messages/types.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/operations-bindings.test.ts packages/web/src/pdl/__tests__/preview-bindings.test.ts packages/web/src/pdl/__tests__/project-data-host.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/useHomeBindings.ts packages/web/src/stores/chat-types.ts packages/api/test/pdl-tool-detail.test.ts packages/web/public/pdl-app/home.js packages/web/src/pdl/__tests__/desktop-update-bindings.test.ts packages/web/src/pdl/__tests__/recent-works.test.ts packages/web/src/pdl/useDesktopUpdateBindings.ts packages/web/src/pdl/useRecentWorks.ts
+
+packages/api/src/routes/config-chat-background.ts:93:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    91 │     const current = images();
+    92 │     if (current.length >= 20) return reply.status(409).send({ error: 'Background catalogue is full' });
+  > 93 │     const id = 'user.' + randomUUID();
+       │                ^^^^^^^^^^^^^^^^^^^^^^
+    94 │     const image: AppearanceImage = {
+    95 │       id,
+
+  i Unsafe fix: Use a template literal.
+
+     91  91 │       const current = images();
+     92  92 │       if (current.length >= 20) return reply.status(409).send({ error: 'Background catalogue is full' });
+     93     │ - ····const·id·=·'user.'·+·randomUUID();
+         93 │ + ····const·id·=·`user.${randomUUID()}`;
+     94  94 │       const image: AppearanceImage = {
+     95  95 │         id,
+
+
+packages/api/test/f232-recent-works-query.test.js:171:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    169 │       await app.inject({
+    170 │         method: 'GET',
+  > 171 │         url: '/api/artifacts?view=recent-works&limit=3&projectId=' + encodeURIComponent(project),
+        │              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    172 │         headers: AUTH,
+    173 │       });
+
+  i Unsafe fix: Use a template literal.
+
+    169 169 │         await app.inject({
+    170 170 │           method: 'GET',
+    171     │ - ········url:·'/api/artifacts?view=recent-works&limit=3&projectId='·+·encodeURIComponent(project),
+        171 │ + ········url:·`/api/artifacts?view=recent-works&limit=3&projectId=${encodeURIComponent(project)}`,
+    172 172 │           headers: AUTH,
+    173 173 │         });
+
+
+packages/api/src/routes/config-chat-background.ts:67:65 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    65 │     return readChatBackgroundPreferences(opts.projectRoot);
+    66 │   });
+  > 67 │   app.put('/api/config/chat-background', async (request, reply) => {
+       │                                                                 ^^^
+    68 │     const userId = owner(request, reply);
+    69 │     if (!userId) return { error: 'Owner identity required' };
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:177:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    175 │       continue;
+    176 │     }
+  > 177 │     const name = match[1]!;
+        │                  ^^^^^^^^^
+    178 │     if (!updates.has(name)) {
+    179 │       nextLines.push(line);
+
+
+packages/api/src/routes/config.ts:277:85 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    275 │   });
+    276 │
+  > 277 │   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {
+        │                                                                                     ^^^
+    278 │     const parsed = coCreatorPatchSchema.safeParse(request.body);
+    279 │     if (!parsed.success) {
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:361:55 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━━
+
+  ! Excessive complexity of 40 detected (max: 15).
+
+    359 │   });
+    360 │
+  > 361 │   app.patch('/api/config/env', async (request, reply) => {
+        │                                                       ^^^
+    362 │     const parsed = envPatchSchema.safeParse(request.body);
+    363 │     if (!parsed.success) {
+
+  i Please refactor this function to reduce its complexity score from 40 to the max allowed complexity 15.
+
+
+packages/api/src/routes/config.ts:440:46 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    438 │     }
+    439 │
+  > 440 │     const auditOperator = touchesSensitive ? sessionOperator! : (sessionOperator ?? operator);
+        │                                              ^^^^^^^^^^^^^^^^
+    441 │     try {
+    442 │       await auditLog.append({
+
+
+packages/api/src/routes/config.ts:124:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This variable runtimeStatusQuerySchema is unused.
+
+    122 │ });
+    123 │
+  > 124 │ const runtimeStatusQuerySchema = z.object({
+        │       ^^^^^^^^^^^^^^^^^^^^^^^^
+    125 │   category: z.string().optional(),
+    126 │ });
+
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+
+  i Unsafe fix: If this is intentional, prepend runtimeStatusQuerySchema with an underscore.
+
+    122 122 │   });
+    123 123 │
+    124     │ - const·runtimeStatusQuerySchema·=·z.object({
+        124 │ + const·_runtimeStatusQuerySchema·=·z.object({
+    125 125 │     category: z.string().optional(),
+    126 126 │   });
+
+
+packages/api/src/routes/config.ts:147:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! This function resolveOperator is unused.
+
+    145 │ }
+    146 │
+  > 147 │ function resolveOperator(raw: unknown): string | null {
+        │          ^^^^^^^^^^^^^^^
+    148 │   if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+    149 │   if (Array.isArray(raw)) {
+
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+
+  i Unsafe fix: If this is intentional, prepend resolveOperator with an underscore.
+
+    145 145 │   }
+    146 146 │
+    147     │ - function·resolveOperator(raw:·unknown):·string·|·null·{
+        147 │ + function·_resolveOperator(raw:·unknown):·string·|·null·{
+    148 148 │     if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+    149 149 │     if (Array.isArray(raw)) {
+
+
+packages/web/public/pdl-app/home.js:2:1 lint/suspicious/noRedundantUseStrict  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Redundant use strict directive.
+
+    1 │ /* The new-conversation and workbench home share one project-scoped recent-works VM. */
+  > 2 │ 'use strict';
+      │ ^^^^^^^^^^^^^
+    3 │ function bindHome() {
+    4 │   PAGES.home = function () {
+
+  i The entire contents of JavaScript modules are automatically in strict mode, with no statement needed to initiate it.
+
+  i Safe fix: Remove the redundant use strict directive.
+
+    2 │ 'use·strict';
+      │ -------------
+
+packages/web/public/pdl-app/home.js:3:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! This function bindHome is unused.
+
+    1 │ /* The new-conversation and workbench home share one project-scoped recent-works VM. */
+    2 │ 'use strict';
+  > 3 │ function bindHome() {
+      │          ^^^^^^^^
+    4 │   PAGES.home = function () {
+    5 │     return pdlView('cafe.home');
+
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+
+  i Unsafe fix: If this is intentional, prepend bindHome with an underscore.
+
+     1  1 │   /* The new-conversation and workbench home share one project-scoped recent-works VM. */
+     2  2 │   'use strict';
+     3    │ - function·bindHome()·{
+        3 │ + function·_bindHome()·{
+     4  4 │     PAGES.home = function () {
+     5  5 │       return pdlView('cafe.home');
+
+
+packages/web/public/pdl-app/home.js:4:16 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+    2 │ 'use strict';
+    3 │ function bindHome() {
+  > 4 │   PAGES.home = function () {
+      │                ^^^^^^^^^^^^^
+  > 5 │     return pdlView('cafe.home');
+  > 6 │   };
+      │   ^
+    7 │   VM.cafeHome = function () {
+    8 │     return chatModels().cafeHome;
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+     2  2 │   'use strict';
+     3  3 │   function bindHome() {
+     4    │ - ··PAGES.home·=·function·()·{
+     5    │ - ····return·pdlView('cafe.home');
+     6    │ - ··};
+        4 │ + ··PAGES.home·=·()·=>·pdlView('cafe.home');
+     7  5 │     VM.cafeHome = function () {
+     8  6 │       return chatModels().cafeHome;
+
+
+packages/web/public/pdl-app/home.js:7:17 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+     5 │     return pdlView('cafe.home');
+     6 │   };
+   > 7 │   VM.cafeHome = function () {
+       │                 ^^^^^^^^^^^^^
+   > 8 │     return chatModels().cafeHome;
+   > 9 │   };
+       │   ^
+    10 │   const pop = VM.chatPop;
+    11 │   VM.chatPop = function () {
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+     5  5 │       return pdlView('cafe.home');
+     6  6 │     };
+     7    │ - ··VM.cafeHome·=·function·()·{
+     8    │ - ····return·chatModels().cafeHome;
+     9    │ - ··};
+        7 │ + ··VM.cafeHome·=·()·=>·chatModels().cafeHome;
+    10  8 │     const pop = VM.chatPop;
+    11  9 │     VM.chatPop = function () {
+
+
+packages/web/public/pdl-app/home.js:11:16 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+     9 │   };
+    10 │   const pop = VM.chatPop;
+  > 11 │   VM.chatPop = function () {
+       │                ^^^^^^^^^^^^^
+  > 12 │     const model = pop();
+        ...
+  > 17 │     return model;
+  > 18 │   };
+       │   ^
+    19 │   VM.recentWorks = function () {
+    20 │     return chatModels().recentWorks;
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+     9  9 │     };
+    10 10 │     const pop = VM.chatPop;
+    11    │ - ··VM.chatPop·=·function·()·{
+       11 │ + ··VM.chatPop·=·()·=>·{
+    12 12 │       const model = pop();
+    13 13 │       if (model.projTree) {
+
+
+packages/web/public/pdl-app/home.js:19:20 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+    17 │     return model;
+    18 │   };
+  > 19 │   VM.recentWorks = function () {
+       │                    ^^^^^^^^^^^^^
+  > 20 │     return chatModels().recentWorks;
+  > 21 │   };
+       │   ^
+    22 │   A.cafeRwRetry = function () {
+    23 │     return chatAction('cafeRwRetry');
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+    17 17 │       return model;
+    18 18 │     };
+    19    │ - ··VM.recentWorks·=·function·()·{
+    20    │ - ····return·chatModels().recentWorks;
+    21    │ - ··};
+       19 │ + ··VM.recentWorks·=·()·=>·chatModels().recentWorks;
+    22 20 │     A.cafeRwRetry = function () {
+    23 21 │       return chatAction('cafeRwRetry');
+
+
+packages/web/public/pdl-app/home.js:22:19 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+    20 │     return chatModels().recentWorks;
+    21 │   };
+  > 22 │   A.cafeRwRetry = function () {
+       │                   ^^^^^^^^^^^^^
+  > 23 │     return chatAction('cafeRwRetry');
+  > 24 │   };
+       │   ^
+    25 │   SET_AFTER['cs.homeProj'] = function (id) {
+    26 │     CS.pop = null;
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+    20 20 │       return chatModels().recentWorks;
+    21 21 │     };
+    22    │ - ··A.cafeRwRetry·=·function·()·{
+    23    │ - ····return·chatAction('cafeRwRetry');
+    24    │ - ··};
+       22 │ + ··A.cafeRwRetry·=·()·=>·chatAction('cafeRwRetry');
+    25 23 │     SET_AFTER['cs.homeProj'] = function (id) {
+    26 24 │       CS.pop = null;
+
+
+packages/web/public/pdl-app/home.js:25:30 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+    23 │     return chatAction('cafeRwRetry');
+    24 │   };
+  > 25 │   SET_AFTER['cs.homeProj'] = function (id) {
+       │                              ^^^^^^^^^^^^^^^
+  > 26 │     CS.pop = null;
+  > 27 │     return chatAction('newProject', { id: id || '' });
+  > 28 │   };
+       │   ^
+    29 │   let route = '';
+    30 │   onRender(function () {
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+    23 23 │       return chatAction('cafeRwRetry');
+    24 24 │     };
+    25    │ - ··SET_AFTER['cs.homeProj']·=·function·(id)·{
+       25 │ + ··SET_AFTER['cs.homeProj']·=·(id)·=>·{
+    26 26 │       CS.pop = null;
+    27 27 │       return chatAction('newProject', { id: id || '' });
+
+
+packages/web/public/pdl-app/home.js:30:12 lint/complexity/useArrowFunction  FIXABLE  ━━━━━━━━━━━━━━━
+
+  ! This function expression can be turned into an arrow function.
+
+    28 │   };
+    29 │   let route = '';
+  > 30 │   onRender(function () {
+       │            ^^^^^^^^^^^^^
+  > 31 │     if (route === S.route) return;
+  > 32 │     route = S.route;
+  > 33 │     if (route === 'home' && chatPort.threadId !== 'default') chatAction('thread', { id: 'default' });
+  > 34 │   });
+       │   ^
+    35 │ }
+    36 │
+
+  i Function expressions that don't use this can be turned into arrow functions.
+
+  i Safe fix: Use an arrow function instead.
+
+    28 28 │     };
+    29 29 │     let route = '';
+    30    │ - ··onRender(function·()·{
+       30 │ + ··onRender(()·=>·{
+    31 31 │       if (route === S.route) return;
+    32 32 │       route = S.route;
+
+
+packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts:35:72 lint/suspicious/noUselessEscapeInString  FIXABLE  ━━━━━━━━━━
+
+  ! The character doesn't need to be escaped.
+
+    33 │     active.send(event('tool_result', 'thread-1'));
+    34 │     const tools = flatCodexStreamBubbles().flatMap((message) => message.toolEvents ?? []);
+  > 35 │     expect(tools[0]).toMatchObject({ toolName: 'Read', inputDetail: '{\"path\":\"/source.ts\"}' });
+       │                                                                        ^
+    36 │     expect(tools[1]).toMatchObject({ status: 'error', resultDetail: 'done' });
+    37 │     expect(tools.map((tool) => tool.toolUseId)).toEqual(['native-pair', 'native-pair']);
+
+  i Only quotes that enclose the string and special characters need to be escaped.
+
+  i Safe fix: Unescape the character.
+
+    35 │ ····expect(tools[0]).toMatchObject({·toolName:·'Read',·inputDetail:·'{\"path\":\"/source.ts\"}'·});
+       │                                                                       -
+
+packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts:56:72 lint/suspicious/noUselessEscapeInString  FIXABLE  ━━━━━━━━━━
+
+  ! The character doesn't need to be escaped.
+
+    54 │       ['toolr-api-result', 'child'],
+    55 │     ]);
+  > 56 │     expect(tools[0]).toMatchObject({ toolName: 'Read', inputDetail: '{\"path\":\"/source.ts\"}' });
+       │                                                                        ^
+    57 │     expect(tools[1]).toMatchObject({ status: 'error', resultDetail: 'done' });
+    58 │     expect(tools.map((tool) => tool.toolUseId)).toEqual(['native-pair', 'native-pair']);
+
+  i Only quotes that enclose the string and special characters need to be escaped.
+
+  i Safe fix: Unescape the character.
+
+    56 │ ····expect(tools[0]).toMatchObject({·toolName:·'Read',·inputDetail:·'{\"path\":\"/source.ts\"}'·});
+       │                                                                       -
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 814.
+Checked 44 files in 2s. No fixes applied.
+Found 783 warnings.
+Found 51 infos.
+
+Exit code: 0

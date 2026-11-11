@@ -1,0 +1,307 @@
+$ pnpm exec biome check packages/api/src/domains/preview/bridge-script.ts packages/api/test/domains/preview/bridge-navigation.test.ts packages/web/src/app/dev/f299-trajectory-visual-preview/preview.tsx packages/web/src/components/AppendedInputReceipts.tsx packages/web/src/components/ChatVoiceFeatureControlsClassic.tsx packages/web/src/components/ChatVoiceFeatureControlsV2.tsx packages/web/src/components/GovernanceInstaller.tsx packages/web/src/components/HubAgentSessionsTab.tsx packages/web/src/components/HubGovernanceTab.tsx packages/web/src/components/HubQuotaBoardTab.tsx packages/web/src/components/SessionChainPanel.tsx packages/web/src/components/VoiceCompanionButton.tsx packages/web/src/components/__tests__/appended-input-receipts.test.ts packages/web/src/components/__tests__/f190-visual-contract.test.ts packages/web/src/components/__tests__/feature-bird-eye-panel.test.ts packages/web/src/components/__tests__/hub-quota-board-v2.test.ts packages/web/src/components/__tests__/interactive-block-group.test.ts packages/web/src/components/__tests__/interactive-block.test.ts packages/web/src/components/__tests__/thinking-mode-toggle.test.ts packages/web/src/components/__tests__/workspace-focus-mode.test.ts packages/web/src/components/agent-session-types.ts packages/web/src/components/audit/SessionEventRows.tsx packages/web/src/components/audit/SessionEventsViewer.tsx packages/web/src/components/audit/index.ts packages/web/src/components/audit/session-event-types.ts packages/web/src/components/capability-evolution/EvolutionAttributionPanel.tsx packages/web/src/components/capability-evolution/EvolutionChangePanel.tsx packages/web/src/components/capability-evolution/EvolutionObservationPanel.tsx packages/web/src/components/capability-evolution/__tests__/EvolutionAttributionPanel.test.tsx packages/web/src/components/capability-evolution/evolution-attribution-validation.ts packages/web/src/components/capability-evolution/evolution-change-commands.ts packages/web/src/components/capability-evolution/evolution-program-projection.ts packages/web/src/components/governance-operations.ts packages/web/src/components/hub-quota-pools.ts packages/web/src/components/hub-quota-refresh.ts packages/web/src/components/memory/page/MemoryCorrectionApprovalCard.tsx packages/web/src/components/message-dispatch-projection.ts packages/web/src/components/mission-control/FeatureBirdEyePanel.tsx packages/web/src/components/mission-control/FeatureRowList.tsx packages/web/src/components/mission-control/MissionControlPage.tsx packages/web/src/components/mission-control/ThreadSituationPanel.tsx packages/web/src/components/mission-control/dag-graph-utils.ts packages/web/src/components/mission-control/feature-id.ts packages/web/src/components/quota-cards.tsx packages/web/src/components/quota-data.ts packages/web/src/components/rich/InteractiveBlock.tsx packages/web/src/components/rich/InteractiveBlockGroup.tsx packages/web/src/components/rich/OriginalDomainApprovalCard.tsx packages/web/src/components/rich/OriginalEvalRepairCard.tsx packages/web/src/components/rich/RuntimeConversationCard.tsx packages/web/src/components/rich/interactive-message.ts packages/web/src/components/rich/use-original-approval-read.tsx packages/web/src/components/rich/use-person-memory-proposal.ts packages/web/src/components/rich/useScheduleApprovalController.ts packages/web/src/components/routing-context/__tests__/routing-context-ownership.test.ts packages/web/src/components/runtime-sessions/ExternalRuntimeSessionsPanel.tsx packages/web/src/components/runtime-sessions/external-runtime-session-format.ts packages/web/src/components/session-chain-types.ts packages/web/src/components/voice-autoplay.ts packages/web/src/components/workbench/__tests__/project-review-live.test.tsx packages/web/src/components/workbench/video-project/ProjectReviewPanel.tsx packages/web/src/components/workbench/video-project/screening-ui/project-review-read.ts packages/web/src/components/workspace-status/SessionRowV2.tsx packages/web/src/components/workspace-status/StatusCatGroupV2.tsx packages/web/src/components/workspace-status/WorkspaceStatusPanelV2.tsx packages/web/src/components/workspace/ConsolePanel.tsx packages/web/src/components/workspace/ConsolePanelV2.tsx packages/web/src/components/workspace/__tests__/ConsolePanel.test.tsx packages/web/src/components/workspace/__tests__/ConsolePanelV2.test.tsx packages/web/src/components/workspace/trajectory/InvocationTrajectoryDetail.tsx packages/web/src/components/workspace/trajectory/TrajectoryPanel.tsx packages/web/src/components/workspace/trajectory/__tests__/InvocationTrajectoryDetail.test.tsx packages/web/src/components/workspace/trajectory/invocation-trajectory-model.ts packages/web/src/components/workspace/trajectory/trajectory-panel-support.tsx packages/web/src/components/workspace/usePreviewBridge.ts packages/web/src/lib/use-original-approval-read.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/chat-fixture.ts packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/ops-daemon.test.ts packages/web/src/pdl/__tests__/review-bindings.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/voice-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/delivery-models.ts packages/web/src/pdl/interactive-actions.ts packages/web/src/pdl/useBoardBindings.ts packages/web/src/pdl/useEvolutionBindings.ts packages/web/src/pdl/useExecutionBindings.ts packages/web/src/pdl/useFilmBindings.ts packages/web/src/pdl/useOpsBindings.ts packages/web/src/pdl/usePreviewBindings.ts packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useVoiceBindings.ts packages/web/src/pdl/useWorkbenchBindings.ts packages/web/public/pdl-app/project.js
+
+packages/api/test/domains/preview/bridge-navigation.test.ts:20:36 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    18 │     console: { log() {}, info() {}, warn() {}, error() {} },
+    19 │   });
+  > 20 │   return { calls, parent, message: listeners.get('message')! };
+       │                                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    21 │ }
+    22 │
+
+
+packages/web/src/components/ChatVoiceFeatureControlsClassic.tsx:40:11 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    38 │       >
+    39 │         {isPaused ? (
+  > 40 │           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    41 │             <path d="M8 5v14l11-7z" />
+    42 │           </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/ChatVoiceFeatureControlsClassic.tsx:44:11 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    42 │           </svg>
+    43 │         ) : (
+  > 44 │           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    45 │             <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    46 │           </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/ChatVoiceFeatureControlsClassic.tsx:56:9 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    54 │         title="跳过当前"
+    55 │       >
+  > 56 │         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    57 │           <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+    58 │         </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/ChatVoiceFeatureControlsV2.tsx:178:25 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    176 │     view: ServiceView,
+    177 │     words: Copy['voice'] | Copy['meeting'],
+  > 178 │   ): CompanionCardModel => {
+        │                         ^^^
+    179 │     const base = {
+    180 │       feature,
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/src/components/ChatVoiceFeatureControlsV2.tsx:223:46 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 19 detected (max: 15).
+
+    221 │   };
+    222 │
+  > 223 │   const voiceModel = ((): CompanionCardModel => {
+        │                                              ^^^
+    224 │     if (voiceCompanionActive) {
+    225 │       const statusLine =
+
+  i Please refactor this function to reduce its complexity score from 19 to the max allowed complexity 15.
+
+
+packages/web/src/components/HubAgentSessionsTab.tsx:74:9 lint/a11y/useButtonType ━━━━━━━━━━━━━━━━━━━
+
+  ! Provide an explicit type prop for the button element.
+
+    72 │       <div className="flex items-center justify-between">
+    73 │         <h2 className="text-sm font-semibold text-cafe-text">后台 Daemon 会话</h2>
+  > 74 │         <button
+       │         ^^^^^^^
+  > 75 │           onClick={() => void refresh()}
+  > 76 │           disabled={loading}
+  > 77 │           className="rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50"
+  > 78 │         >
+       │         ^
+    79 │           {loading ? '加载中…' : '刷新'}
+    80 │         </button>
+
+  i The default type of a button is submit, which causes the submission of a form when placed inside a `form` element. This is likely not the behaviour that you want inside a React application.
+
+  i Allowed button types are: submit, button or reset
+
+
+packages/web/src/components/SessionChainPanel.tsx:186:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 30 detected (max: 15).
+
+    184 │ }
+    185 │
+  > 186 │ export function SessionChainPanel({
+        │                 ^^^^^^^^^^^^^^^^^
+    187 │   threadId,
+    188 │   catInvocations,
+
+  i Please refactor this function to reduce its complexity score from 30 to the max allowed complexity 15.
+
+
+packages/web/src/components/SessionChainPanel.tsx:243:25 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 25 detected (max: 15).
+
+    241 │     setLoading(true);
+    242 │     apiFetch(`/api/threads/${threadId}/sessions`)
+  > 243 │       .then(async (res) => {
+        │                         ^^^
+    244 │         if (cancelled) return;
+    245 │         if (!res.ok) {
+
+  i Please refactor this function to reduce its complexity score from 25 to the max allowed complexity 15.
+
+
+packages/web/src/components/SessionChainPanel.tsx:492:40 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 44 detected (max: 15).
+
+    490 │       {/* Current unsealed sessions. Storage status "active" does not imply live execution. */}
+    491 │       {!chainCollapsed &&
+  > 492 │         unsealedSessions.map((session) => {
+        │                                        ^^^
+    493 │           const inv = catInvocations[session.catId];
+    494 │           const multipleUnsealedRecords = hasMultipleUnsealedRecords(session.catId);
+
+  i Please refactor this function to reduce its complexity score from 44 to the max allowed complexity 15.
+
+
+packages/web/src/components/SessionChainPanel.tsx:681:52 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 37 detected (max: 15).
+
+    679 │           {!sealedCollapsed && (
+    680 │             <div className="space-y-1">
+  > 681 │               {visibleSealedSessions.map((session) => {
+        │                                                    ^^^
+    682 │                 const sealedColors = colorsForCat(session.catId);
+    683 │                 const lifecycle = terminalSessionLifecycle(session.status, t);
+
+  i Please refactor this function to reduce its complexity score from 37 to the max allowed complexity 15.
+
+
+packages/web/src/components/VoiceCompanionButton.tsx:29:11 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    27 │       >
+    28 │         {isPaused ? (
+  > 29 │           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    30 │             <path d="M8 5v14l11-7z" />
+    31 │           </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/VoiceCompanionButton.tsx:33:11 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    31 │           </svg>
+    32 │         ) : (
+  > 33 │           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    34 │             <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    35 │           </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/VoiceCompanionButton.tsx:45:9 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    43 │         title="跳过当前"
+    44 │       >
+  > 45 │         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+       │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    46 │           <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+    47 │         </svg>
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/VoiceCompanionButton.tsx:86:9 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+
+    84 │         title={isActive ? '停止语音陪伴' : '语音陪伴'}
+    85 │       >
+  > 86 │         <svg
+       │         ^^^^
+  > 87 │           className={`w-4 h-4${isActive ? ' animate-pulse' : ''}`}
+        ...
+  > 91 │           strokeWidth="2"
+  > 92 │         >
+       │         ^
+    93 │           <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+    94 │           <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+
+
+packages/web/src/components/__tests__/workspace-focus-mode.test.ts:39:17 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    37 │       root.render(React.createElement(FocusModeButton, { onClick: vi.fn() }));
+    38 │     });
+  > 39 │     const btn = container.querySelector('button')!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    40 │     expect(btn.textContent).toBe('专注');
+    41 │     expect(btn.disabled).toBe(false);
+
+
+packages/web/src/components/__tests__/workspace-focus-mode.test.ts:49:12 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    47 │       root.render(React.createElement(FocusModeButton, { label: 'Focus', onClick: vi.fn() }));
+    48 │     });
+  > 49 │     expect(container.querySelector('button')!.textContent).toBe('Focus');
+       │            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    50 │   });
+    51 │
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     47  47 │         root.render(React.createElement(FocusModeButton, { label: 'Focus', onClick: vi.fn() }));
+     48  48 │       });
+     49     │ - ····expect(container.querySelector('button')!.textContent).toBe('Focus');
+         49 │ + ····expect(container.querySelector('button')?.textContent).toBe('Focus');
+     50  50 │     });
+     51  51 │
+
+
+packages/web/src/components/__tests__/workspace-focus-mode.test.ts:58:17 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    56 │       root.render(React.createElement(FocusModeButton, { disabled: true, onClick }));
+    57 │     });
+  > 58 │     const btn = container.querySelector('button')!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    59 │     expect(btn.disabled).toBe(true);
+    60 │     btn.click();
+
+
+packages/web/src/components/__tests__/workspace-focus-mode.test.ts:70:5 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    68 │       root.render(React.createElement(FocusModeButton, { onClick }));
+    69 │     });
+  > 70 │     container.querySelector('button')!.click();
+       │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    71 │     expect(onClick).toHaveBeenCalledOnce();
+    72 │   });
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     68  68 │         root.render(React.createElement(FocusModeButton, { onClick }));
+     69  69 │       });
+     70     │ - ····container.querySelector('button')!.click();
+         70 │ + ····container.querySelector('button')?.click();
+     71  71 │       expect(onClick).toHaveBeenCalledOnce();
+     72  72 │     });
+
+
+packages/web/src/components/__tests__/workspace-focus-mode.test.ts:106:22 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    104 │       );
+    105 │     });
+  > 106 │     const viewport = container.querySelector('[data-testid="workspace-focus-shell-viewport"]')!;
+        │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    107 │     expect(viewport.querySelector('#inner')!.textContent).toBe('hello');
+    108 │   });
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 601.
+Checked 97 files in 326ms. No fixes applied.
+Found 571 warnings.
+Found 50 infos.
+
+Exit code: 0

@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/member-actions.test.ts src/pdl/__tests__/runtime.test.ts --maxWorkers=1 -t 'member|template|co-creator|credential'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (52 tests | 49 skipped) 14277ms
+     ✓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials  5899ms
+     ✓ keeps unknown agent identities from their own from name or id without borrowing another member  2366ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  6010ms
+ ✓ src/pdl/__tests__/member-actions.test.ts (6 tests | 2 skipped) 67ms
+
+ Test Files  2 passed (2)
+      Tests  7 passed | 51 skipped (58)
+   Start at  04:17:15
+   Duration  59.21s (transform 27.16s, setup 433ms, import 37.87s, tests 14.34s, environment 3.93s)
+
+
+Exit code: 0

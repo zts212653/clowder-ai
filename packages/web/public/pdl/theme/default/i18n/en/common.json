@@ -1,0 +1,13 @@
+{
+ "common": {
+  "viewMode": {
+   "list": "List",
+   "cards": "Cards"
+  }
+ },
+ "platform": {
+  "clipboardImage": {
+   "invalid": "Only PNG images up to 8 MB can be copied"
+  }
+ }
+}

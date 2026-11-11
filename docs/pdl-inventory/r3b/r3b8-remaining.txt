@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/remaining-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/pdl/__tests__/remaining-bindings.test.ts (5 tests) 34ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  12:05:19
+   Duration  1.19s (transform 602ms, setup 28ms, import 822ms, tests 34ms, environment 221ms)
+
+
+Exit code: 0

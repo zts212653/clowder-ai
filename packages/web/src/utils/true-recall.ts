@@ -39,12 +39,12 @@ const inFlightRecall = new Map<string, InFlightRecall>();
 async function executeTrueRecall(input: {
   threadId: string;
   messageId: string;
-  confirmAppend: (draft: OwnerComposerDraft) => boolean;
+  confirmAppend: (draft: OwnerComposerDraft) => boolean | Promise<boolean>;
 }): Promise<TrueRecallResponse | null> {
   const clientSnapshot = await flushComposerDraft(input.threadId);
   const current = await loadOwnerComposerDraft(input.threadId);
   const append = hasComposerDraftContent(current.draft);
-  if (append && current.draft && !input.confirmAppend(current.draft)) return null;
+  if (append && current.draft && !(await input.confirmAppend(current.draft))) return null;
 
   const response = await apiFetch(`/api/messages/${input.messageId}/recall`, {
     method: 'POST',
@@ -63,7 +63,7 @@ async function executeTrueRecall(input: {
 export async function requestTrueRecall(input: {
   threadId: string;
   messageId: string;
-  confirmAppend: (draft: OwnerComposerDraft) => boolean;
+  confirmAppend: (draft: OwnerComposerDraft) => boolean | Promise<boolean>;
 }): Promise<TrueRecallResponse | null> {
   // Every recall mutates the same owner+thread draft revision. Serialize the
   // whole thread, not only duplicate controls for one source message.

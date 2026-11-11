@@ -1,0 +1,136 @@
+{
+  "wsCommunity": {
+    "load": {
+      "loading": "刷新中…",
+      "error": "同步失败：GitHub 暂时不可达。",
+      "text": "社区管理看板"
+    },
+    "detail": {
+      "title": "这条决策已处理",
+      "recommendedRoute": "推荐路线",
+      "role": "角色",
+      "maintainer": "维护者",
+      "reviewer": "审阅者",
+      "observer": "旁观",
+      "checksPassed": "全部检查通过，可以关闭",
+      "text": "未完成",
+      "ready": "就绪"
+    },
+    "pendingDecision": "待决策",
+    "unreplied": "未回复",
+    "discussing": "讨论中",
+    "closed": "已关闭",
+    "openThread": "打开对话",
+    "directionCard": "方向卡",
+    "directionHelp": "系统猫整理的问题，等你拍板。",
+    "evidence": "证据",
+    "preCloseCheck": "关闭前检查",
+    "markReplied": "标记已公开回复",
+    "exemptClose": "豁免关闭",
+    "closeIssue": "关闭 Issue",
+    "sync": "同步",
+    "syncHelp": "还没有仓库。",
+    "allStates": "全部状态",
+    "list": {
+      "cats": "全部负责猫",
+      "empty": "没有。",
+      "sub": "{0} · 严重度 {1} · {2}"
+    },
+    "ownerCat": "负责猫",
+    "within7d": "7 天内",
+    "within30d": "30 天内",
+    "within90d": "90 天内",
+    "reconcileFindings": "状态不一致",
+    "issue": {
+      "menu": {
+        "label": "交给系统猫"
+      }
+    },
+    "priority": {
+      "urgent": "紧急",
+      "high": "高",
+      "normal": "普通"
+    },
+    "delivery": {
+      "text": "已送达 "
+    },
+    "resolved": "已解决",
+    "exempted": "已豁免",
+    "exempt": "豁免",
+    "report": {
+      "label": "公开评论链接"
+    },
+    "waiver": {
+      "evidencePlaceholder": "链接、提交 SHA 或说明"
+    },
+    "reason": "理由",
+    "submit": "提交"
+  },
+  "memoryOwners": {
+    "stateNote": {
+      "materialized": "已接受",
+      "rejected": "已拒绝",
+      "replayed": "已确认"
+    }
+  },
+  "work": {
+    "openGithub": "在 GitHub 打开"
+  },
+  "common": {
+    "reject": "拒绝",
+    "accept": "接受",
+    "state": "状态",
+    "confirm": "确认"
+  },
+  "workbench": {
+    "route": {
+      "new": "新对话",
+      "thread": "交给「{0}」"
+    },
+    "communitySummary": {
+      "true": "同步中…",
+      "false": "Issue {0} · PR {1}"
+    },
+    "identity": "{0} {1}",
+    "prGroup": {
+      "unreplied": "PR 未回复",
+      "replied": "PR 已回复",
+      "merged": "已合入"
+    },
+    "issueSubKey": "i{0}",
+    "prCI": "CI {0}"
+  },
+  "chatCards": {
+    "field": {
+      "repo": "仓库"
+    }
+  },
+  "memory": {
+    "allTime": "全部时间"
+  },
+  "frame": {
+    "newActivity": "有新动态"
+  },
+  "films": {
+    "opinionState": {
+      "open": "待处理"
+    }
+  },
+  "plugin": {
+    "entries": {
+      "commit": "在 GitHub 打开",
+      "community": "社区",
+      "issue": "发到 GitHub issue"
+    },
+    "panel": {
+      "desc": "社区事项与贡献记录"
+    }
+  },
+  "issueDraft": {
+    "title": "标题",
+    "body": "正文",
+    "create": "创建草稿",
+    "publish": "发布",
+    "published": "已发布"
+  }
+}

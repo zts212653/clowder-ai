@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 /**
  * F39 Bug 1: useChatHistory fetches queue state on mount/thread-switch
- * so that F5 refresh restores QueuePanel correctly.
+ * so that F5 refresh restores canonical queue state.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueuePanel } from '@/components/QueuePanel';
 import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -27,21 +26,8 @@ function HookProbe({ threadId }: { threadId: string }) {
   );
 }
 
-function QueueHydrationPanelProbe({ threadId }: { threadId: string }) {
-  useChatHistory(threadId);
-  return React.createElement(QueuePanel, { threadId });
-}
-
 function HookHost({ threadId }: { threadId: string }) {
   return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
-}
-
-function QueueHydrationPanelHost({ threadId }: { threadId: string }) {
-  return React.createElement(
-    ThreadChatHistoryAdmissionProvider,
-    null,
-    React.createElement(QueueHydrationPanelProbe, { threadId }),
-  );
 }
 
 describe('useChatHistory queue hydration (F39 Bug 1)', () => {
@@ -605,7 +591,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(QueueHydrationPanelHost, { threadId: 'thread-q' }));
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
     });
     await act(async () => {
       await Promise.resolve();
@@ -615,10 +601,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       invocationId: 'parent-opus',
       turnInvocationId: undefined,
     });
-    expect(container.textContent).toContain('same parent must not certify an old child');
-    expect(container.textContent).not.toContain('未投递 · 排队中');
-    expect(container.textContent).not.toContain('当前轮处理中');
-    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
   it('F108B P1-2: replaces stale slots — no ghost cats in ThreadExecutionBar', async () => {

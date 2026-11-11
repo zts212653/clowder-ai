@@ -1,0 +1,5 @@
+$ pnpm exec biome check packages/web/src/pdl packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js --diagnostic-level=error
+
+Checked 43 files in 52ms. No fixes applied.
+
+Exit code: 0

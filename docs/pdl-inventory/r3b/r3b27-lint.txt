@@ -1,0 +1,363 @@
+$ pnpm --filter @cat-cafe/web lint
+
+
+> @cat-cafe/web@0.1.0 lint /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+> next lint
+
+
+./src/app/starry/page.tsx
+62:28  Warning: Hex color "#1a0a2e" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+66:18  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+
+./src/components/ConfirmDialog.tsx
+53:29  Warning: The ref value 'returnFocusRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'returnFocusRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/DirectionCard.tsx
+165:25  Warning: Hardcoded Tailwind color "bg-purple-500/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+165:25  Warning: Hardcoded Tailwind color "text-purple-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+165:25  Warning: Hardcoded Tailwind color "dark:text-purple-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+238:25  Warning: Hardcoded Tailwind color "border-red-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+238:25  Warning: Hardcoded Tailwind color "text-red-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+238:25  Warning: Hardcoded Tailwind color "dark:text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+238:25  Warning: Hardcoded Tailwind color "hover:border-red-500" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+248:25  Warning: Hardcoded Tailwind color "border-amber-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+248:25  Warning: Hardcoded Tailwind color "text-amber-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+248:25  Warning: Hardcoded Tailwind color "dark:text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+259:25  Warning: Hardcoded Tailwind color "text-green-600/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+259:25  Warning: Hardcoded Tailwind color "dark:text-green-400/40" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+259:25  Warning: Hardcoded Tailwind color "hover:text-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+259:25  Warning: Hardcoded Tailwind color "hover:border-green-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+272:25  Warning: Hardcoded Tailwind color "bg-green-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+272:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+272:25  Warning: Hardcoded Tailwind color "hover:bg-green-700" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+282:25  Warning: Hardcoded Tailwind color "border-amber-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+282:25  Warning: Hardcoded Tailwind color "text-amber-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+282:25  Warning: Hardcoded Tailwind color "dark:text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+292:25  Warning: Hardcoded Tailwind color "hover:border-red-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+292:25  Warning: Hardcoded Tailwind color "hover:text-red-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/PersonMemoryClaimSelector.tsx
+66:6  Warning: React Hook useEffect has a missing dependency: 'draftIds'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/ThreadSidebar/use-group-open-interaction.ts
+54:5  Warning: React Hook useCallback has an unnecessary dependency: 'state'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/artifacts/PublishedTextReader.tsx
+85:6  Warning: React Hook useEffect has a missing dependency: 'fileSource'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/artifacts/WorkPreview.tsx
+51:12  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/artifacts/WorkVideoPreview.tsx
+78:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/capability-evolution/CapabilityEvolutionWorkspace.tsx
+135:6  Warning: React Hook useLayoutEffect has a missing dependency: 'viewport'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/capability-evolution/exploration/ExplorationCover.tsx
+11:5  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/capability-evolution/exploration/ExplorationMedia.tsx
+50:11  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+91:5  Warning: React Hook useEffect has a missing dependency: 'playback'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/capability-evolution/exploration/use-exploration-showcase.ts
+59:6  Warning: React Hook useEffect has missing dependencies: 'projection' and 'rows'. Either include them or remove the dependency array. If 'setReads' needs the current value of 'rows', you can also switch to useReducer instead of useState and read 'rows' in the reducer.  react-hooks/exhaustive-deps
+
+./src/components/capability-evolution/exploration/use-exploration-workspace.ts
+100:5  Warning: React Hook useCallback has a missing dependency: 'resource'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/capability-evolution/solution-gate/SolutionSource.tsx
+61:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/collective/CollectiveEntryReview.tsx
+169:21  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/collective/use-collective-appearance-bridge.ts
+82:6  Warning: React Hook useEffect has a missing dependency: 'bridgeId'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+82:7  Warning: React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-document-bridge.ts
+156:33  Warning: The ref value 'pending.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'pending.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+159:6  Warning: React Hook useEffect has missing dependencies: 'connection' and 'context'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-frame-recovery.ts
+42:6  Warning: React Hook useEffect has a missing dependency: 'input'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-media-review.ts
+99:20  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-participation.ts
+142:20  Warning: The ref value 'readRevision.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'readRevision.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-work-policy-bridge.ts
+75:39  Warning: The ref value 'pending.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'pending.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/collective/use-collective-world-navigation.ts
+51:9  Warning: The 'desiredTarget' logical expression could make the dependencies of useMemo Hook (at line 67) change on every render. Move it inside the useMemo callback. Alternatively, wrap the initialization of 'desiredTarget' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+
+./src/components/community/ClosureChecklistCard.tsx
+91:31  Warning: Hardcoded Tailwind color "text-amber-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+102:24  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+160:21  Warning: Hardcoded Tailwind color "bg-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+160:21  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+160:21  Warning: Hardcoded Tailwind color "hover:bg-emerald-500/30" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/community/ReconciliationFindingCard.tsx
+123:23  Warning: Hardcoded Tailwind color "bg-emerald-500/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+123:23  Warning: Hardcoded Tailwind color "text-emerald-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+123:23  Warning: Hardcoded Tailwind color "border-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+123:23  Warning: Hardcoded Tailwind color "hover:bg-emerald-500/20" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/community/closure-forms.tsx
+88:53  Warning: Hardcoded Tailwind color "text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+171:53  Warning: Hardcoded Tailwind color "text-red-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/content-review/ContentMediaElement.tsx
+34:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/content-review/ContentModificationForm.tsx
+62:19  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/content-review/ContentModificationLanding.tsx
+114:6  Warning: React Hook useEffect has a missing dependency: 'props'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/content-review/ContentModificationPanel.tsx
+37:6  Warning: React Hook useEffect has a missing dependency: 'props'. Either include it or remove the dependency array. However, 'props' will change when *any* prop changes, so the preferred fix is to destructure the 'props' object outside of the useEffect call and refer to those specific props inside useEffect.  react-hooks/exhaustive-deps
+
+./src/components/content-review/ReviewActor.tsx
+21:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+24:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/content-review/useContentMediaOpen.tsx
+71:6  Warning: React Hook useEffect has missing dependencies: 'navigation' and 'setNavigating'. Either include them or remove the dependency array. If 'setNavigating' changes too often, find the parent component that defines it and wrap that definition in useCallback.  react-hooks/exhaustive-deps
+74:6  Warning: React Hook useCallback has a missing dependency: 'navigation'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/content-review/useFileActionController.ts
+73:18  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+127:6  Warning: React Hook useEffect has a missing dependency: 'refreshInfo'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/growing/NeedsMePanel.tsx
+48:6  Warning: React Hook useEffect has a missing dependency: 'source'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/growing/PreparedArtifactPreview.tsx
+61:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/growing/prepared-review-presentation.tsx
+38:5  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/memory/page/MemoryCorrectionApprovalCard.tsx
+50:6  Warning: React Hook useCallback has a missing dependency: 'original'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/memory/page/use-brakes.ts
+52:20  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/rich/CardBlock.tsx
+341:5  Warning: React Hook useCallback has a missing dependency: 'resolveCatName'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+530:5  Warning: React Hook useCallback has an unnecessary dependency: 'handleConciergePeek'. Either exclude it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/rich/WorkspaceHtmlWidgetBlock.tsx
+28:21  Warning: Hardcoded Tailwind color "bg-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/rich/use-person-memory-proposal.ts
+54:5  Warning: React Hook useCallback has a missing dependency: 'result'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/rich/use-taste-approval-status.ts
+30:6  Warning: React Hook useCallback has a missing dependency: 'native'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+33:6  Warning: React Hook useCallback has a missing dependency: 'native'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/rich/useScheduleApprovalController.ts
+69:6  Warning: React Hook useCallback has a missing dependency: 'original'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/story-player/ChapterBadge.tsx
+101:20  Warning: Hex color "#e0e0e0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+
+./src/components/story-player/FeatureTheaterContent.tsx
+120:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+
+./src/components/story-player/TheaterOverlay.tsx
+73:19  Warning: Arbitrary rgba/hsl color function in Tailwind utility "bg-[var(--console-overlay-backdrop,rgba(0,0,0,0.75))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+81:24  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+113:23  Warning: Arbitrary rgba/hsl color function in Tailwind utility "hover:bg-[var(--console-hover,rgba(255,255,255,0.08))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+139:26  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+
+./src/components/story-player/ThreadPanel.tsx
+69:22  Warning: Arbitrary rgba/hsl color function in Tailwind utility "border-[var(--console-border,rgba(255,255,255,0.1))]" — define a CSS variable (e.g., --xxx-shadow) and use shadow-[var(--xxx-shadow)] instead. (F056 Phase E)  cafe/no-hardcoded-colors
+72:69  Warning: Hardcoded Tailwind color "bg-purple-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+72:121  Warning: Hardcoded Tailwind color "bg-green-400" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+72:138  Warning: Hardcoded Tailwind color "bg-gray-600" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/visible-cafe/ProvenanceOverlay.tsx
+35:16  Warning: Hex color "#e8e0f0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+53:20  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+87:77  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+100:59  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+
+./src/components/visible-cafe/StarCard.tsx
+110:18  Warning: Hex color "#e8e0f0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+125:20  Warning: Hex color "#a090c0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+141:20  Warning: Hex color "#f0e8ff" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+177:20  Warning: Hex color "#c0b0d8" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+192:33  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+201:20  Warning: Hex color "#8070a0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+245:18  Warning: Hex color "#a0b0d0" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+
+./src/components/visible-cafe/StarryRoom.tsx
+121:26  Warning: Hex color "#1a0a2e" in style prop — use a CSS variable (var(--xxx)) or design token.  cafe/no-hardcoded-colors
+
+./src/components/workbench/ArtifactFileSourceResolver.tsx
+103:6  Warning: React Hook useEffect has a missing dependency: 'rootSelection'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/F307FilesOwnerSurface.tsx
+152:5  Warning: React Hook useCallback has a missing dependency: 'opening'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/GrowingOwnerSurfaces.tsx
+199:5  Warning: React Hook useCallback has a missing dependency: 'target'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/LegacyArtifactFileResolver.tsx
+91:6  Warning: React Hook useEffect has a missing dependency: 'source'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/WorkspaceRootConnectionPanel.tsx
+134:6  Warning: React Hook useEffect has missing dependencies: 'connection.admission', 'connection.ownerUserId', 'connection.root', 'consume', and 'resumeOnOpen'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/__tests__/screening-design-presentation.test.tsx
+14:48  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/workbench/content-editor/WorkspaceOfficeSurface.tsx
+113:64  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/content-review/AssetCanonDetail.tsx
+92:6  Warning: React Hook useEffect has a missing dependency: 'item.record.status'. Either include it or remove the dependency array. If 'setStatus' needs the current value of 'item.record.status', you can also switch to useReducer instead of useState and read 'item.record.status' in the reducer.  react-hooks/exhaustive-deps
+
+./src/components/workbench/content-review/AssetCanonJudgment.tsx
+80:19  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/content-review/AssetCanonUpdateView.tsx
+78:23  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+122:29  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/content-review/VideoComparisonPlayback.tsx
+54:27  Warning: Hardcoded Tailwind color "bg-black" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/content-review/VideoWorkMaterialPreview.tsx
+45:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/workbench/content-review/VideoWorkMaterials.tsx
+117:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/workbench/content-review/VideoWorkReview.tsx
+95:19  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/content-review/WorkspacePendingFileQuoteMarks.tsx
+81:6  Warning: React Hook useMemo has a missing dependency: 'locator'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workbench/content-review/__tests__/PublicationContentReviewSurface.ready.test.tsx
+67:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/workbench/content-review/useWorkspaceContentReview.ts
+151:18  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/workbench/video-project/ProjectModificationView.tsx
+153:19  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/video-project/ProjectScreeningCompare.tsx
+141:23  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/video-project/RegisterScreening.tsx
+114:19  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/video-project/ScreeningRegion.tsx
+87:21  Warning: Hardcoded Tailwind color "border-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+87:21  Warning: Hardcoded Tailwind color "bg-white/10" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/video-project/VideoProjectScreeningPlayer.tsx
+106:6  Warning: React Hook useEffect has a missing dependency: 'frame'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+155:23  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+161:22  Warning: Hardcoded Tailwind color "bg-black" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+229:25  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workbench/video-project/screening-ui/ProjectReviewSummary.tsx
+40:21  Warning: Hardcoded Tailwind color "text-white" — use a semantic token (e.g., bg-surface, text-primary, border-default). See F056 design token contract.  cafe/no-hardcoded-colors
+
+./src/components/workspace/WorkspaceFileViewer.tsx
+107:5  Warning: React Hook useCallback has a missing dependency: 'published'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/components/workspace/useAgentPanes.ts
+60:22  Warning: The ref value 'requestEpoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'requestEpoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/components/workspace/useChangesDiff.ts
+163:18  Warning: The ref value 'requestSeq.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'requestSeq.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/__tests__/r136-owners.test.ts
+19:55  Error: 'init' is defined but never used.  @typescript-eslint/no-unused-vars
+86:55  Error: 'init' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/pdl/useCommunityBindings.ts
+30:6  Warning: React Hook useEffect has a missing dependency: 'sources'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useExecutionBindings.ts
+183:21  Warning: The ref value 'detailRequest.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'detailRequest.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/useFilmBindings.ts
+135:16  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+136:23  Warning: The ref value 'previewSequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'previewSequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/useGeneralBindings.ts
+37:6  Warning: React Hook useEffect has a missing dependency: 'ui'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useMemoryExploreBindings.ts
+101:6  Warning: React Hook useEffect has a missing dependency: 'libraryCreated'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+129:6  Warning: React Hook useEffect has a missing dependency: 'brake'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+152:6  Warning: React Hook useEffect has missing dependencies: 'ui.depth', 'ui.limit', 'ui.searched', and 'ui.type'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+202:6  Warning: React Hook useEffect has missing dependencies: 'catalog', 'index', and 'maintenance'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useMessageSourceBindings.ts
+56:6  Warning: React Hook useEffect has missing dependencies: 'data.threadId' and 'sources'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useOpsBindings.ts
+279:5  Warning: React Hook useCallback has a missing dependency: 'ui'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+285:15  Warning: The ref value 'epoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'epoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/usePreviewBindings.ts
+119:15  Warning: The ref value 'epoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'epoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+157:6  Warning: React Hook useEffect has missing dependencies: 'probe', 'setEntries', 'target', and 'ui'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useRecallBindings.ts
+39:18  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+42:6  Warning: React Hook useEffect has a missing dependency: 'data.threadId'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+95:6  Warning: React Hook useEffect has missing dependencies: 'data.messages', 'events', 'more', and 'ui.recallExpected'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useReplayBindings.ts
+69:17  Warning: The ref value 'request.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'request.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/useReviewBindings.tsx
+238:6  Warning: React Hook useEffect has a missing dependency: 'historyRead'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useSidebarBindings.ts
+41:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useSignalBindings.ts
+155:13  Warning: The ref value 'epoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'epoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/useTerminalBindings.ts
+190:13  Warning: The ref value 'epoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'epoch.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+194:15  Warning: The ref value 'sockets.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sockets.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+197:6  Warning: React Hook useEffect has missing dependencies: 'connect' and 'ui'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useTrashBindings.ts
+28:18  Warning: The ref value 'sequence.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'sequence.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/pdl/useVoiceBindings.ts
+206:21  Warning: The ref value 'captureRead.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'captureRead.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+308:6  Warning: React Hook useEffect has a missing dependency: 'call'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/pdl/useWorkbenchBindings.ts
+335:6  Warning: React Hook useEffect has a missing dependency: 'nativeRead'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+389:6  Warning: React Hook useEffect has missing dependencies: 'opened?.file' and 'opened?.worktreeId'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @cat-cafe/web@0.1.0 lint: `next lint`
+Exit status 1
+
+Exit code: 1

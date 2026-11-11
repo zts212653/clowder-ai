@@ -1,0 +1,33 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts -t 'admitted plugin' --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: boot
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: client entry
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: disabled
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: view entry
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: direct source page
+
+stdout | src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+plugin-check: detail
+
+ ✓ src/pdl/__tests__/runtime.test.ts (50 tests | 49 skipped) 3589ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  3585ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 49 skipped (50)
+   Start at  02:00:42
+   Duration  42.67s (transform 28.57s, setup 392ms, import 37.69s, tests 3.59s, environment 0ms)
+
+
+Exit code: 0

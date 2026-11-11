@@ -89,6 +89,7 @@ export * from './message-search-selection.js';
 export * from './native-tool-identities.js';
 export * from './plugin-archive-replacement.js';
 export * from './plugin-configuration-required.js';
+export * from './plugin-pdl.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
 export * from './preview-visible-page-admission.js';

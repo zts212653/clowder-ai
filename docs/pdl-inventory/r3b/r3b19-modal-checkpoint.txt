@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/pdl/__tests__/runtime.test.ts -t 'forward|chat.modal'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (44 tests | 39 skipped) 2765ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  717ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  514ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  870ms
+     ✓ closes chat.modal through the declared cancel and Esc exits without sending  456ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed | 39 skipped (44)
+   Start at  23:24:42
+   Duration  6.86s (transform 2.68s, setup 68ms, import 3.88s, tests 2.77s, environment 0ms)
+
+
+Exit code: 0

@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/runtime.test.ts -t 'real member candidates|sends input|backend member order'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/chat-models.test.ts (12 tests | 11 skipped) 13ms
+ ✓ src/pdl/__tests__/runtime.test.ts (59 tests | 57 skipped) 855ms
+     ✓ opens real member candidates at the caret and chooses one without sending or losing the input suffix  523ms
+     ✓ sends input through the registered action without replacing the active textarea  331ms
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 68 skipped (71)
+   Start at  08:20:41
+   Duration  3.11s (transform 2.08s, setup 51ms, import 3.11s, tests 868ms, environment 456ms)
+
+
+Exit code: 0

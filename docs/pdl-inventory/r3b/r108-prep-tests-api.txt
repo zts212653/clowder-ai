@@ -1,0 +1,81 @@
+Command: pnpm --filter @cat-cafe/api exec node --test test/thread-export-route.test.js test/image-export-browser-session.test.js
+
+✔ close prevents an in-flight openPage from relaunching a replacement browser (3.08425ms)
+✔ close consumes a browser launch that completes during shutdown (0.4545ms)
+✔ openPage after close fails without launching a browser (0.104709ms)
+✔ transport disconnect drains the owned browser and permits one replacement (6.348833ms)
+✔ shutdown joins a retiring disconnected browser and the current replacement (13.341292ms)
+{"level":30,"time":"2026-11-03T07:49:33.680Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.681Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":101,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":30,"time":"2026-11-03T07:49:33.682Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":true,"pid":101,"wasCurrent":false,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport closed"}
+{"level":30,"time":"2026-11-03T07:49:33.682Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":101,"exitCode":0,"signalCode":null,"closeReason":"session_close","lifetimeMs":1,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.683Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.683Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":303,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":30,"time":"2026-11-03T07:49:33.683Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":true,"pid":303,"wasCurrent":false,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport closed"}
+{"level":30,"time":"2026-11-03T07:49:33.683Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":303,"exitCode":0,"signalCode":null,"closeReason":"session_close","lifetimeMs":0,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.683Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.684Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":505,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":40,"time":"2026-11-03T07:49:33.684Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":false,"pid":505,"wasCurrent":true,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport disconnected; draining the owned process"}
+{"level":30,"time":"2026-11-03T07:49:33.684Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":505,"exitCode":0,"signalCode":null,"closeReason":"unexpected_disconnect","lifetimeMs":0,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.689Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.689Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":606,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":30,"time":"2026-11-03T07:49:33.689Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":true,"pid":606,"wasCurrent":false,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport closed"}
+{"level":30,"time":"2026-11-03T07:49:33.689Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":606,"exitCode":0,"signalCode":null,"closeReason":"session_close","lifetimeMs":0,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.690Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.690Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":707,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":40,"time":"2026-11-03T07:49:33.690Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":false,"pid":707,"wasCurrent":true,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport disconnected; draining the owned process"}
+{"level":30,"time":"2026-11-03T07:49:33.696Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.697Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":808,"ownedBrowserCount":2,"msg":"Image export browser ready"}
+{"level":30,"time":"2026-11-03T07:49:33.697Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":true,"pid":808,"wasCurrent":false,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":2,"msg":"Image export browser transport closed"}
+{"level":30,"time":"2026-11-03T07:49:33.697Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":808,"exitCode":0,"signalCode":null,"closeReason":"session_close","lifetimeMs":0,"ownedBrowserCount":1,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.703Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":707,"exitCode":0,"signalCode":null,"closeReason":"unexpected_disconnect","lifetimeMs":13,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+{"level":30,"time":"2026-11-03T07:49:33.705Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","path":"/opt/homebrew/Cellar/node@24/24.15.0/bin/node","msg":"Using CHROME_EXECUTABLE_PATH from env"}
+{"level":30,"time":"2026-11-03T07:49:33.705Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":53909,"ownedBrowserCount":1,"msg":"Image export browser ready"}
+{"level":30,"time":"2026-11-03T07:49:33.705Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","expected":true,"pid":53909,"wasCurrent":false,"processAlive":true,"exitCode":null,"signalCode":null,"ownedBrowserCount":1,"msg":"Image export browser transport closed"}
+✔ close force-kills only its exact owned process when browser close never settles (5053.073ms)
+{"level":40,"time":"2026-11-03T07:49:38.711Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":53909,"closeReason":"session_close","closeTimedOut":true,"msg":"Image export browser did not exit during bounded close; force-killing its owned process"}
+{"level":30,"time":"2026-11-03T07:49:38.754Z","pid":53788,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","pid":53909,"exitCode":null,"signalCode":"SIGKILL","closeReason":"session_close","lifetimeMs":5049,"ownedBrowserCount":0,"msg":"Image export browser process exited"}
+▶ POST /api/threads/:threadId/export-image
+  ✔ uses localhost:3003 as default frontend URL when FRONTEND_URL is missing (63.997375ms)
+  ✔ uses FRONTEND_PORT when FRONTEND_URL is missing (3.082417ms)
+  ✔ uses FRONTEND_URL when present (higher priority than FRONTEND_PORT) (1.888334ms)
+  ✔ closes ImageExporter browser when app.close() fires (BACKLOG #86) (2.841875ms)
+  ✔ falls back to localhost:3003 when FRONTEND_PORT is invalid (11.545875ms)
+  ✔ resolves selection before capture and passes only timeline-normalized IDs (13.217959ms)
+  ✔ passes the resolved partial selection to image rendering and counts the source once (89.901875ms)
+  ✔ does not launch capture when selection resolution fails (23.888334ms)
+✔ POST /api/threads/:threadId/export-image (211.546125ms)
+▶ buildImageExportUrl
+  ✔ appends export identity and repeated validated selection parameters (1.0075ms)
+  ✔ uses the export root height instead of the 4000px capture viewport floor (0.090625ms)
+  ✔ requires every html_widget to be measured and fully expanded before capture (0.1205ms)
+  ✔ surfaces html_widget measurement failures instead of permitting a clipped PNG (0.038167ms)
+  ✔ requires every html_widget to acknowledge the current exporter proof request (0.044208ms)
+  ✔ reports the exact proof stage and timing when renderer dispatch exhausts the operation deadline (0.5205ms)
+  ✔ waits for asynchronous export content even when no HTML widgets exist (1.1035ms)
+  ✔ commits a screenshot candidate only after fresh proof both before and after capture (0.136375ms)
+  ✔ rejects an engine settle delivered after the capture deadline and closes the page (0.247042ms)
+  ✔ shares one deadline across engine settles and rejects a PNG whose message identities changed (6.023958ms)
+  ✔ measures the message stream without counting nested reply/action data-mid attributes or the viewport floor (14.943125ms)
+  ✔ captures the full frame stream in exact chunks after engine settling and retains authentication (78.317916ms)
+  ✔ stitches exact chunk boundaries without repeating or dropping boundary content (5.471292ms)
+✔ buildImageExportUrl (108.619167ms)
+▶ resolveFrontendBaseUrl
+  ✔ is exported for direct unit testing (0.168291ms)
+  ✔ warns and falls back when FRONTEND_PORT is invalid (0.206958ms)
+✔ resolveFrontendBaseUrl (0.505125ms)
+▶ resolveFrontendCorsOrigins
+  ✔ includes FRONTEND_PORT origin when configured (0.185666ms)
+  ✔ includes FRONTEND_URL origin when configured (0.072375ms)
+✔ resolveFrontendCorsOrigins (0.307458ms)
+{"level":30,"time":"2026-11-03T07:49:38.482Z","pid":53791,"hostname":"langdeMacBook-Pro.local","module":"image-exporter","height":4510,"messages":2,"chunks":2,"bytes":32456,"msg":"Engine export captured"}
+ℹ tests 31
+ℹ suites 4
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7114.179083
+
+Exit code: 0

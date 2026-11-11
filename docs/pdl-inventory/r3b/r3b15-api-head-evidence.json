@@ -1,0 +1,22 @@
+{
+  "HEAD": "54972ff983d40309eb12a69af8f023bef6303a59",
+  "apiSharedChanges": [],
+  "failureBeforeBusinessRequest": "video-project-review-routes.test.ts:120 appends catId:null without from; canonicalizeAppendMessageInput rejects before HTTP synchronize is called",
+  "files": [
+    {
+      "path": "packages/api/test/video-project-review-routes.test.ts",
+      "identicalToHEAD": true,
+      "sha256": "4c6461f052a54e196ca14db37f8bb1b76a8f65e681e9bb640299b6094cf52091"
+    },
+    {
+      "path": "packages/api/test/helpers/video-project-review-http.ts",
+      "identicalToHEAD": true,
+      "sha256": "e6d667f84c11e15b0df95c93146163537690f628522583b3191e247975d3b15e"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/stores/ports/MessageStore.ts",
+      "identicalToHEAD": true,
+      "sha256": "146e31acf9d5776ed8fdebcfb2d89a3aad9a5124846866ebd7cf9ec26450bd4b"
+    }
+  ]
+}

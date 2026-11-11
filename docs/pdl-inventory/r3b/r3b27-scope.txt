@@ -1,0 +1,10 @@
+HEAD: 6448aa5afd
+Branch: feat/pdl-migration
+Old component files changed: 0
+W2/W3 documents and shared progress rows changed: 0
+Copied runtime files changed: 0
+Environment files changed: 0
+Other W2/W3 tool binding files changed: 0
+Diff whitespace exit: 0
+Shared work owner exception: useReviewBindings context candidates and native fixed-reference receipt only (W1 #207).
+Exit code: 0

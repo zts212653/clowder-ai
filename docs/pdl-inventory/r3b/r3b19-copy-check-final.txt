@@ -1,0 +1,7 @@
+Source: design-accepted-r128
+Verification: final independent git show and source-manifest SHA-256 after bindings
+Files checked: 81
+Byte mismatches: 0
+Extra files: 0
+mock / proto / local files: 0
+Exit code: 0

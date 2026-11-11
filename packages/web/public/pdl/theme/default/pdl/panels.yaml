@@ -1,0 +1,59 @@
+panels:
+  home: [t:workbench.panels.home, home, "", "", t:frame.menuStripe]
+  exec: [t:wsExec.title, trace, thread, thread, t:workbench.panels.executionHelp]
+  works-t: [t:common.works, works, thread, thread, t:workbench.panels.threadWorks]
+  tasks: [t:system.tasks, tasks, thread, thread, t:workbench.panels.threadTasks]
+  live: [t:schedule.doing, live, "", act, t:workbench.panels.activeWork]
+  recall:
+    - t:workbench.panels.recall
+    - bookmark
+    - ""
+    - act
+    - t:workbench.panels.recallHelp
+  replay: [t:workbench.panels.replay, history, "", act, t:workbench.panels.replayHelp]
+  schedule:
+    - t:workbench.panels.schedule
+    - clock
+    - ""
+    - act
+    - t:workbench.panels.scheduleHelp
+  eval: [t:memory.evaluate, chart, "", act, t:workbench.panels.evaluationHelp]
+  board: [Mission Hub, kanban, "", act, t:workbench.panels.board]
+  files: [t:workbench.panels.files, folder, "", code, t:workbench.panels.fileHelp]
+  git: [Git, git, "", code, t:workbench.panels.git]
+  terminal:
+    - t:wsTrace.event.kindLabel.terminal
+    - terminal
+    - ""
+    - code
+    - t:workbench.panels.terminalHelp
+  preview: [t:workbench.panels.preview, eye, "", code, t:workbench.panels.previewHelp]
+  mem: [t:common.memory, memory, "", other, t:workbench.panels.memoryHelp]
+  voice: [t:workbench.panels.voice, mic, "", other, t:workbench.panels.voiceHelp]
+  clips: [t:workbench.panels.clips, video, "", other, t:workbench.panels.filmsHelp]
+  team: [t:workbench.panels.team, users, "", other, t:workbench.panels.teamHelp]
+  evolution:
+    - t:workbench.evoName.false
+    - spark
+    - ""
+    - other
+    - t:workbench.panels.evolutionHelp
+  signals:
+    - t:chat.commands.group.signals
+    - signal
+    - ""
+    - other
+    - t:workbench.panels.signalsHelp
+  ops:
+    - t:workbench.panels.ops
+    - wrench
+    - ""
+    - other
+    - t:workbench.panels.operationsHelp
+titles: {file: t:workbench.panels.files}
+panelGroups:
+  - [thread, t:composerPop.options.currentThread]
+  - [act, t:workbench.groups.activity]
+  - [code, t:common.artType.code]
+  - [mine, t:entryLayout.actions.push]
+  - [other, t:workbench.groups.other]

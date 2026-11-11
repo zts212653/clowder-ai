@@ -3,7 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pluginReplyFor } from '@/components/plugin-reply-state';
-import { QueuePanel } from '@/components/QueuePanel';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { MEMORY_CHANGED, MEMORY_CHANGED_STORAGE_KEY } from '../memory-changed';
@@ -55,7 +54,7 @@ const QUEUED_SEEN_ENTRY: QueueEntry = {
 function Host() {
   const callbacks: SocketCallbacks = { onMessage: vi.fn() };
   useSocket(callbacks, THREAD_ID);
-  return <QueuePanel threadId={THREAD_ID} />;
+  return null;
 }
 
 function emitServerEvent(event: string, ...args: unknown[]) {
@@ -208,14 +207,11 @@ describe('dispatch receipt Queue publication', () => {
       });
     });
     const live = useChatStore.getState().getThreadState(THREAD_ID).queue;
-    if (mode === 'consumed') expect(container.querySelector(`[data-testid="steer-${initial.id}"]`)).toBeNull();
     if (mode === 'sibling') {
       expect(live[0]?.messageId).toBe('sibling');
-      expect(container.textContent).not.toContain('（已读）');
     }
     if (mode === 'multi-target') {
       expect(live[0]?.targetCats).toEqual(['opus']);
-      expect(container.textContent).toContain('（已投递）');
     }
     apiFetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ queue: remaining, paused: false, activeInvocations: [] })),

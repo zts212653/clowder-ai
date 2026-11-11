@@ -1,0 +1,20 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts -t 'plugin schema branches|general UI choices|native update state|project pins|owner member card|real author member card|registers admitted plugin'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (62 tests | 56 skipped) 3257ms
+     ✓ renders real plugin schema branches and retains a rejected config draft until its owner accepts  677ms
+     ✓ keeps general UI choices local and sends the busy policy to its real owner  395ms
+     ✓ renders native update state in the declared system section and waits for the install owner  521ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  636ms
+     ✓ reads project pins and display names from the real preference snapshot and dispatches their existing writers  484ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  542ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed | 56 skipped (62)
+   Start at  08:36:21
+   Duration  5.62s (transform 1.32s, setup 37ms, import 2.20s, tests 3.26s, environment 0ms)
+
+
+Exit code: 0

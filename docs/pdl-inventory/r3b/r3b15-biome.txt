@@ -1,0 +1,333 @@
+$ python3 /tmp/pdl-r3b14-biome.py
+
+$ pnpm exec biome check packages/web/public/pdl-app/project.js packages/web/src/pdl/__tests__/film-bindings.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/useFilmBindings.ts
+packages/web/src/pdl/__tests__/film-bindings.test.ts:86:20 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    84 │       source: {
+    85 │         threadId: 'film-thread',
+  > 86 │         messageId: id + '-message',
+       │                    ^^^^^^^^^^^^^^^
+    87 │         messageRevision: digest,
+    88 │         attachmentId: id + '-attachment',
+
+  i Unsafe fix: Use a template literal.
+
+     84  84 │         source: {
+     85  85 │           threadId: 'film-thread',
+     86     │ - ········messageId:·id·+·'-message',
+         86 │ + ········messageId:·`${id}-message`,
+     87  87 │           messageRevision: digest,
+     88  88 │           attachmentId: id + '-attachment',
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:88:23 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    86 │         messageId: id + '-message',
+    87 │         messageRevision: digest,
+  > 88 │         attachmentId: id + '-attachment',
+       │                       ^^^^^^^^^^^^^^^^^^
+    89 │         selectionId: id + '-selection',
+    90 │         visibility: 'public',
+
+  i Unsafe fix: Use a template literal.
+
+     86  86 │           messageId: id + '-message',
+     87  87 │           messageRevision: digest,
+     88     │ - ········attachmentId:·id·+·'-attachment',
+         88 │ + ········attachmentId:·`${id}-attachment`,
+     89  89 │           selectionId: id + '-selection',
+     90  90 │           visibility: 'public',
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:89:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    87 │         messageRevision: digest,
+    88 │         attachmentId: id + '-attachment',
+  > 89 │         selectionId: id + '-selection',
+       │                      ^^^^^^^^^^^^^^^^^
+    90 │         visibility: 'public',
+    91 │         whisperTo: [],
+
+  i Unsafe fix: Use a template literal.
+
+     87  87 │           messageRevision: digest,
+     88  88 │           attachmentId: id + '-attachment',
+     89     │ - ········selectionId:·id·+·'-selection',
+         89 │ + ········selectionId:·`${id}-selection`,
+     90  90 │           visibility: 'public',
+     91  91 │           whisperTo: [],
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:102:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    100 │       sourceState: 'current',
+    101 │       selection: {
+  > 102 │         id: id + '-selection',
+        │             ^^^^^^^^^^^^^^^^^
+    103 │         mediaRange: {
+    104 │           startPts: screen.media.media.startTick + screen.media.media.timebase.denominator / 2,
+
+  i Unsafe fix: Use a template literal.
+
+    100 100 │         sourceState: 'current',
+    101 101 │         selection: {
+    102     │ - ········id:·id·+·'-selection',
+        102 │ + ········id:·`${id}-selection`,
+    103 103 │           mediaRange: {
+    104 104 │             startPts: screen.media.media.startTick + screen.media.media.timebase.denominator / 2,
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:160:52 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    158 │     if (p.endsWith('/review')) return response({ review });
+    159 │     const screen = p.endsWith('/screening-old') ? old : next;
+  > 160 │     return response({ screening: screen, mediaUrl: p + '/media' });
+        │                                                    ^^^^^^^^^^^^
+    161 │   });
+    162 │   useChatStore.setState({ currentThreadId: 'film-thread', pendingChatInsert: null });
+
+  i Unsafe fix: Use a template literal.
+
+    158 158 │       if (p.endsWith('/review')) return response({ review });
+    159 159 │       const screen = p.endsWith('/screening-old') ? old : next;
+    160     │ - ····return·response({·screening:·screen,·mediaUrl:·p·+·'/media'·});
+        160 │ + ····return·response({·screening:·screen,·mediaUrl:·`${p}/media`·});
+    161 161 │     });
+    162 162 │     useChatStore.setState({ currentThreadId: 'film-thread', pendingChatInsert: null });
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:316:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    314 │         review: {
+    315 │           version: 1,
+  > 316 │           reviewId: 'review-' + contentRef,
+        │                     ^^^^^^^^^^^^^^^^^^^^^^
+    317 │           ownerUserId: 'human',
+    318 │           contentRef,
+
+  i Unsafe fix: Use a template literal.
+
+    314 314 │           review: {
+    315 315 │             version: 1,
+    316     │ - ··········reviewId:·'review-'·+·contentRef,
+        316 │ + ··········reviewId:·`review-${contentRef}`,
+    317 317 │             ownerUserId: 'human',
+    318 318 │             contentRef,
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:484:50 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    482 │     if (p.includes('/review/operations/')) return response({ receipt: { operationId: 'reopen-owner' } });
+    483 │     const item = p.endsWith('/old-screening') ? old : current;
+  > 484 │     return response({ screening: item, mediaUrl: p + '/media' });
+        │                                                  ^^^^^^^^^^^^
+    485 │   });
+    486 │   useChatStore.setState({ currentThreadId: 'film-thread', pendingChatInsert: null });
+
+  i Unsafe fix: Use a template literal.
+
+    482 482 │       if (p.includes('/review/operations/')) return response({ receipt: { operationId: 'reopen-owner' } });
+    483 483 │       const item = p.endsWith('/old-screening') ? old : current;
+    484     │ - ····return·response({·screening:·item,·mediaUrl:·p·+·'/media'·});
+        484 │ + ····return·response({·screening:·item,·mediaUrl:·`${p}/media`·});
+    485 485 │     });
+    486 486 │     useChatStore.setState({ currentThreadId: 'film-thread', pendingChatInsert: null });
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:30:59 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    28 │   vi.resetAllMocks();
+    29 │   vi.mocked(listProjects).mockResolvedValue(snapshots);
+  > 30 │   vi.mocked(loadProject).mockImplementation(async (id) => snapshots.find((p) => p.contentRef === id)!);
+       │                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    31 │ });
+    32 │ afterEach(cleanup);
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:179:17 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    177 │     result.current.action('filmOpinionCompare', { id: 'opinion-old', from: 'screening-old', to: 'screening-new' }),
+    178 │   );
+  > 179 │   const model = result.current.models().filmProject!;
+        │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    180 │   expect(model.screening).toBe('screening-old');
+    181 │   expect(model.compare).toBe('screening-new');
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:259:17 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    257 │   const { review, head } = comparedOwner(),
+    258 │     annotation = review.annotations[0],
+  > 259 │     addressed = annotation.projectHistory![0];
+        │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    260 │   const compare = (result: NonNullable<typeof addressed.result>) =>
+    261 │     opinionComparison({ ...annotation, projectHistory: [{ ...addressed, result }] }, head);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    257 257 │     const { review, head } = comparedOwner(),
+    258 258 │       annotation = review.annotations[0],
+    259     │ - ····addressed·=·annotation.projectHistory![0];
+        259 │ + ····addressed·=·annotation.projectHistory?.[0];
+    260 260 │     const compare = (result: NonNullable<typeof addressed.result>) =>
+    261 261 │       opinionComparison({ ...annotation, projectHistory: [{ ...addressed, result }] }, head);
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:277:44 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    275 │   expect(
+    276 │     opinionComparison(
+  > 277 │       { ...annotation, projectHistory: [...annotation.projectHistory!, { ...addressed, kind: 'reopened' }] },
+        │                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    278 │       head,
+    279 │     ),
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:293:16 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    291 │     ).rejects.toThrow('已变化');
+    292 │   });
+  > 293 │   const load = vi.mocked(loadProject).getMockImplementation()!;
+        │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    294 │   vi.mocked(loadProject).mockImplementation(async (id, signal, revision) => ({
+    295 │     ...(await load(id, signal, revision)),
+
+
+packages/web/src/pdl/__tests__/film-bindings.test.ts:468:18 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    466 │             state: 'open',
+    467 │             projectHistory: [
+  > 468 │               ...review.annotations[0].projectHistory!,
+        │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    469 │               {
+    470 │                 kind: 'reopened',
+
+
+packages/web/src/pdl/useFilmBindings.ts:197:15 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    195 │   };
+    196 │   const media = (source: FrozenScreening, right = false) => {
+  > 197 │     const s = selected!,
+        │               ^^^^^^^^^
+    198 │       { descriptor, input } = source,
+    199 │       screen = descriptor.screening;
+
+
+packages/web/src/pdl/useFilmBindings.ts:226:69 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 85 detected (max: 15).
+
+    224 │     };
+    225 │   };
+  > 226 │   const action = async (name: string, args: Record<string, string>) => {
+        │                                                                     ^^^
+    227 │     if (name === 'filmOpinionCompare') {
+    228 │       const s = selected!,
+
+  i Please refactor this function to reduce its complexity score from 85 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useFilmBindings.ts:228:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    226 │   const action = async (name: string, args: Record<string, string>) => {
+    227 │     if (name === 'filmOpinionCompare') {
+  > 228 │       const s = selected!,
+        │                 ^^^^^^^^^
+    229 │         stamp = sequence.current,
+    230 │         ticket = ++compareSequence.current;
+
+
+packages/web/src/pdl/useFilmBindings.ts:250:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    248 │     }
+    249 │     if (name === 'filmOpinionShow') {
+  > 250 │       const s = selected!;
+        │                 ^^^^^^^^^
+    251 │       if (
+    252 │         s.head.contentRef !== args.project ||
+
+
+packages/web/src/pdl/useFilmBindings.ts:270:47 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    268 │         return true;
+    269 │       }
+  > 270 │       const frozen = await readScreeningInput(selected!.head, args.v, new AbortController().signal).catch(failRead);
+        │                                               ^^^^^^^^^
+    271 │       if (stamp === sequence.current && ticket === compareSequence.current) {
+    272 │         ui.current.compare = args.v;
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    268 268 │           return true;
+    269 269 │         }
+    270     │ - ······const·frozen·=·await·readScreeningInput(selected!.head,·args.v,·new·AbortController().signal).catch(failRead);
+        270 │ + ······const·frozen·=·await·readScreeningInput(selected?.head,·args.v,·new·AbortController().signal).catch(failRead);
+    271 271 │         if (stamp === sequence.current && ticket === compareSequence.current) {
+    272 272 │           ui.current.compare = args.v;
+
+
+packages/web/src/pdl/useFilmBindings.ts:278:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    276 │     }
+    277 │     if (name === 'filmReopen') {
+  > 278 │       const s = selected!,
+        │                 ^^^^^^^^^
+    279 │         stamp = sequence.current;
+    280 │       if (s.head.contentRef !== args.project) throw new Error('影片已切换，请重新打开意见');
+
+
+packages/web/src/pdl/useFilmBindings.ts:287:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    285 │     }
+    286 │     if (name === 'filmMark') {
+  > 287 │       const s = selected!;
+        │                 ^^^^^^^^^
+    288 │       const source = sourceFor(args.screening);
+    289 │       if (!threadId || s.head.contentRef !== args.id || !source) throw new Error('请重新选择当前成片');
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 406.
+Checked 4 files in 308ms. No fixes applied.
+Found 398 warnings.
+Found 28 infos.
+
+Exit code: 0

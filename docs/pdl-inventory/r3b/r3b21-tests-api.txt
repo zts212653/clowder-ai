@@ -1,0 +1,157 @@
+$ pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 test/config/appearance-config.test.ts test/plugin-pdl.test.ts test/plugin-host-inventory.test.js test/plugin-host-inventory-restart.test.js test/plugin-manager-service.test.js test/plugin-manager-routes.test.js test/f317-published-presentation-manifest.test.ts test/config/user-preferences-write-failure.test.ts test/config/cat-order-store.test.js
+
+✔ replaces per-thread background data with one appearance owner and preserves unrelated preferences (106.071959ms)
+✔ persists original PDL theme documents and mode/style/tokens across a fresh API instance (19.038209ms)
+✔ owns uploaded image bytes and catalogue, rejects forged sources, and clears the selected image on removal (29.501167ms)
+✔ requires the real owner and does not overwrite malformed preference files (9.227459ms)
+▶ cat-order-store
+  ✔ loadCatOrder returns [] when preferences file does not exist (7.866875ms)
+  ✔ saveCatOrder then loadCatOrder roundtrips (118.446583ms)
+  ✔ saveCatOrder preserves other user-preferences fields (9.791625ms)
+  ✔ loadCatOrder ignores non-string entries (3.541042ms)
+  ✔ loadCatOrder returns [] when file contains invalid JSON (2.32ms)
+✔ cat-order-store (143.412875ms)
+✔ runs pin rollback even when rename and temporary unlink both fail, preserving the rename cause (17.674125ms)
+✔ runs temporary and pin rollback even if closing an open failed-write descriptor also fails (11.885542ms)
+✔ preserves all secondary cleanup failures and later collects the failed generation pin (32.815042ms)
+✔ does not delete a file that open(wx) rejected before ownership was acquired (23.004ms)
+✔ preserves generation-verification failure when pin removal fails and still removes the temporary file (15.728375ms)
+✔ continues collecting other orphan pins if one old pin cannot be removed (7.740292ms)
+✖ the new manifest reader admits only the delivered companion bridge without expanding generic grants (23.252958ms)
+▶ K-2A persisted restart normalization
+  ✔ uses the same narrowed compatibility range for admission and persisted packages (158.585458ms)
+  ✔ restores an in-range declaration without a release-specific entry or rewriting its authority (11.611625ms)
+  ✔ opens inventory admitted by the published beta.15 Host without changing persisted authority (13.802916ms)
+  ✔ reloads durable axes and resets only interrupted runtime progress (13.037458ms)
+  ✔ fails closed on corrupted or unsupported persisted snapshots (3.028709ms)
+  ✔ preserves explicit enabled intent when restart finds the old runtime already stopped (41.270083ms)
+  ✔ rejects runtime diagnostics with unrecognized fields instead of persisting raw detail (10.88425ms)
+  ✔ retains packages outside the Host contract as incompatible without admitting them (6.709792ms)
+  ✔ rejects a current installed instance backed by a quarantined package (21.569333ms)
+✔ K-2A persisted restart normalization (282.231333ms)
+▶ K-2A contract-native inventory
+  ✔ pins the consumed contract candidate archive and preserves older manifest compatibility (8.412ms)
+  ✔ rejects a traversal entrypoint before admitting any package or instance (10.263875ms)
+  ✔ installs package and instance atomically with orthogonal initial state (8.697834ms)
+  ✔ admits the installed beta lines and the currently consumed contract (4.789917ms)
+  ✔ restores an admitted 0.1.0-beta.13 inventory without changing its identity (1.555792ms)
+  ✔ restores an admitted 0.1.0-beta.15 inventory without changing its identity (0.608292ms)
+  ✔ restores an admitted 0.1.0-beta.16 inventory without changing its identity (0.596541ms)
+  ✔ restores an admitted 0.1.0-beta.17 inventory without changing its identity (0.860959ms)
+  ✔ restores an admitted 0.1.0-beta.18 inventory without changing its identity (2.750625ms)
+  ✔ restores an admitted 0.1.0-beta.19 inventory without changing its identity (1ms)
+  ✔ restores an admitted 0.1.0-beta.20 inventory without changing its identity (0.203958ms)
+  ✔ admits compatible declarations without enumerating every library release (1.956167ms)
+  ✔ rejects declarations below the compatibility floor or above the implemented contract without writes (1.363083ms)
+  ✔ keeps a plugin declaration unchanged when the Host consumes a newer contract package (0.376917ms)
+  ✔ rejects a newer contract without admitting any inventory (0.158125ms)
+  ✔ keeps the old Host range from admitting a plugin that requires the new contract (0.777625ms)
+  ✔ can bind admission to an exact newer contract runtime using the selected contract runtime (0.977042ms)
+  ✔ upgrades the current installation without changing its identity (0.666416ms)
+  ✔ reinstall mints a fresh namespace and retires the prior instance (0.400084ms)
+✔ K-2A contract-native inventory (49.935792ms)
+✔ detail and crafted disconnect preserve Host-reserved binding while ordinary disconnect works (34.023625ms)
+✔ binding projection is owner-scoped and disconnect rejects missing confirmation and stale bindings (10.738333ms)
+✔ serves package icons as authenticated same-origin resources with active-content confinement (9.416334ms)
+✔ serves package README only to the direct owner Console without adding an Agent Manager operation (3.16825ms)
+✔ upload rejects invalid replacement fields without audit or admission: [["replacement","{bad json"]] (8.521834ms)
+✔ upload rejects invalid replacement fields without audit or admission: [["replacement","{\"pluginId\":\"official.video\",\"pluginInstanceId\":\"pi_video\",\"currentPa (5.965792ms)
+✔ upload rejects invalid replacement fields without audit or admission: [["replacement","{\"pluginId\":\"official.video\",\"pluginInstanceId\":\"pi_video\",\"currentPa (7.353792ms)
+✔ upload rejects invalid replacement fields without audit or admission: [["unknown","{\"pluginId\":\"official.video\",\"pluginInstanceId\":\"pi_video\",\"currentPackag (2.627625ms)
+✔ upload rejects invalid replacement fields without audit or admission: [["replacement","                                                                               (3.810708ms)
+✔ JSON install rejects archive confirmation for local-directory (4.823334ms)
+✔ JSON install rejects archive confirmation for git (8.258292ms)
+✔ exposes canonical Manager state/lifecycle operations and version update through one service (19.426208ms)
+✔ configuration is a revision-fenced typed contribution, not a seventh Agent management operation (5.624125ms)
+✔ write routes require direct loopback owner access before audit or service calls (1.854833ms)
+✔ verified Agent principal can read and mutate through the same owner/loopback gates (4.480625ms)
+✔ verified Agent principal discovers and invokes only active plugin-declared direct tools (5.326542ms)
+✔ every restricted Agent policy is denied before Manager mutations and contribution calls (14.041291ms)
+✔ invalid Agent authority cannot reach a Manager mutation (4.61125ms)
+✔ multipart upload is a bounded transport adapter for local-archive install and cleans its temp path (19.275667ms)
+✔ multipart upload rejects missing/wrong file parts before audit or Manager admission (3.65425ms)
+✔ closed request validation rejects ambiguous or extra mutation fields (1.826541ms)
+✔ an unknown read origin is not an installation request source or an admission bypass (2.155375ms)
+✔ audit admission is fail-closed and happens before each mutation (1.375666ms)
+✔ maps stale revision and catalog fences to conflict without retrying (1.464833ms)
+✔ local path install audit records source kind but never persists the raw path (4.708292ms)
+✔ git install passes the closed source through one Manager route without auditing the repository URL (2.885959ms)
+✔ home local read routes retain authentication, query validation and private namespace (3.333875ms)
+✔ home local detail scopes bindings to the verified session or callback user (1.992958ms)
+✔ repair retains the Manager owner, strict revision and audit boundaries (2.063584ms)
+▶ F202 terminal Plugin Manager service
+  ✔ projects Host-bundled candidates without awaiting remote catalog discovery (3.446542ms)
+  ✔ projects installed plugins without awaiting remote catalog discovery (0.415292ms)
+  ✔ operates on installed plugins without awaiting remote catalog discovery (2.487334ms)
+  ✔ applies the live state projection to local installed rows before authorizing lifecycle writes (6.034125ms)
+  ✔ returns installed package contributions in detail without treating grants as tools (6.069833ms)
+  ✔ preserves unavailable catalog contribution metadata in detail (0.462709ms)
+  ✔ returns one searchable list across catalog and installed packages (13.195584ms)
+  ✔ searches every localized manifest description without creating a Console-only copy (0.17375ms)
+  ✔ deduplicates an installed row when the same plugin is in catalog inventory (0.250875ms)
+  ✔ keeps installed packages visible when catalog discovery fails (0.254417ms)
+  ✔ gets the same projection used by list and reports an unknown plugin honestly (0.189917ms)
+  ✔ keeps human package README outside list, search, and Agent detail projections (0.124292ms)
+  ✔ adds a typed Host configuration contribution and fences its mutation (0.425291ms)
+  ✔ fences catalog installation to the exact version and digest (0.176416ms)
+  ✔ rejects installation while the selected catalog release is quarantined (0.17ms)
+  ✔ checks lifecycle revision and action policy before enable (0.727834ms)
+  ✔ keeps disable and uninstall available when an enabled plugin config later degrades (0.388083ms)
+✔ F202 terminal Plugin Manager service (37.852959ms)
+✔ keeps one plugin row without exposing source or version choices (0.211875ms)
+✔ offers only newer compatible updates: 0.9.0 (2.294042ms)
+✔ offers only newer compatible updates: 1.0.0 (0.351916ms)
+✔ offers only newer compatible updates: 1.0.1 (0.126792ms)
+✔ offers only newer compatible updates: 1.0.1-alpha.1 (0.580208ms)
+✔ admits the PDL manifest extension without weakening base manifest or package identity checks (15.614584ms)
+✔ exposes only current admitted installed fragments through the authenticated manager endpoint (29.128542ms)
+ℹ tests 97
+ℹ suites 4
+ℹ pass 96
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62624.369833
+
+✖ failing tests:
+
+test at test/f317-published-presentation-manifest.test.ts:1:339
+✖ the new manifest reader admits only the delivered companion bridge without expanding generic grants (23.252958ms)
+  AssertionError [ERR_ASSERTION]: manifest bytes are never rewritten to a legacy bridge
+  + actual - expected
+  ... Skipped lines
+
+    {
+      contractVersion: '0.1.0',
+      contributions: [
+        {
+          bridgeVersion: '1.4.0',
+  ...
+        {
+  -       capabilities: [
+  -         'windows.create'
+  -       ],
+          contributions: [
+            {
+              id: 'body',
+              type: 'desktop-window'
+            }
+
+      at TestContext.<anonymous> (/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/api/test/f317-published-presentation-manifest.test.ts:18:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { pluginId: 'official.companion', version: '0.1.0-alpha.24', contractVersion: '0.1.0', name: 'Window', runtime: { transport: 'builtin' }, features: [ [Object] ], contributions: [ [Object] ] },
+    expected: { pluginId: 'official.companion', version: '0.1.0-alpha.24', contractVersion: '0.1.0', name: 'Window', runtime: { transport: 'builtin' }, features: [ [Object] ], contributions: [ [Object] ] },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/api:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 test/config/appearance-config.test.ts test/plugin-pdl.test.ts test/plugin-host-inventory.test.js test/plugin-host-inventory-restart.test.js test/plugin-manager-service.test.js test/plugin-manager-routes.test.js test/f317-published-presentation-manifest.test.ts test/config/user-preferences-write-failure.test.ts test/config/cat-order-store.test.js
+
+Exit code: 1

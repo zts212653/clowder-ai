@@ -1,0 +1,159 @@
+{
+ "common": {
+  "threads": "对话",
+  "undo": "撤销",
+  "export": "导出",
+  "save": "保存",
+  "delete": "删除",
+  "done": "完成",
+  "required": "必填",
+  "exists": "已经有了",
+  "rename": "重命名",
+  "resetDone": "已恢复默认",
+  "copy": "复制",
+  "import": "导入",
+  "dataError": "有一部分数据没读到，先按空的显示",
+  "restore": "恢复",
+  "search": "搜索",
+  "gotIt": "知道了",
+  "retry": "重试",
+  "moreActions": "更多操作",
+  "note": "说明",
+  "close": "关闭",
+  "create": "创建",
+  "cancel": "取消",
+  "remove": "移除",
+  "add": "添加",
+  "loading": "加载中…",
+  "none": "无",
+  "expand": "展开",
+  "collapse": "收起",
+  "select": "选择",
+  "send": "发送",
+  "clear": "清除",
+  "messages": "消息",
+  "works": "作品",
+  "memory": "记忆",
+  "open": "打开",
+  "source": "来源",
+  "type": "类型",
+  "refresh": "刷新",
+  "reject": "拒绝",
+  "approve": "同意",
+  "accept": "接受",
+  "prev": "上一页",
+  "next": "下一页",
+  "state": "状态",
+  "optional": "可选",
+  "tags": "标签",
+  "addTag": "添加标签",
+  "download": "下载",
+  "edit": "编辑",
+  "details": "详情",
+  "install": "安装",
+  "uninstall": "卸载",
+  "effectRestart": "需重启",
+  "currentThread": "当前对话",
+  "more": "更多",
+  "confirm": "确认",
+  "back": "返回",
+  "view": "查看",
+  "stop": "停止",
+  "justNow": "刚刚",
+  "you": "你",
+  "artType": {
+   "image": "图片",
+   "file": "文档",
+   "code": "代码",
+   "pr": "PR",
+   "audio": "语音",
+   "video": "视频",
+   "widget": "小组件"
+  },
+  "effectSession": "下次会话生效",
+  "effectLaunch": "下次启动生效",
+  "viewMode": {
+   "list": "列表",
+   "cards": "卡片"
+  },
+  "status": {
+   "completed": "已完成",
+   "archived": "已归档",
+   "cancelled": "已取消",
+   "connected": "已连接",
+   "running": "运行中",
+   "disconnected": "未连接",
+   "notConfigured": "未配置",
+   "notInstalled": "未安装",
+   "disabled": "已停用",
+   "permissionDenied": "已拒绝",
+   "draft": "草稿",
+   "error": "出错"
+  },
+  "all": "全部",
+  "name": "名称",
+  "cat": "猫",
+  "time": "时间",
+  "identifier": "ID"
+ },
+ "media": {
+  "group": {
+   "play": "一起播放",
+   "pause": "一起暂停",
+   "point": "对齐到节点"
+  },
+  "markup": {
+   "stroke": "笔迹",
+   "arrow": "箭头",
+   "text": "文字",
+   "tooLong": "最多 {0} 个字符"
+  },
+  "preview": "预览"
+ },
+ "calendar": {
+  "weekdays": "一 二 三 四 五 六 日",
+  "count": "{0} 项"
+ },
+ "schedule": {
+  "monthTitle": "{0} 年 {1} 月",
+  "unknown": "待补充工作目标",
+  "todo": "待开始",
+  "doing": "进行中",
+  "blocked": "已阻塞",
+  "actual_start": "实际开始",
+  "business_deadline": "截止",
+  "partial": "部分日程暂时无法读取"
+ },
+ "engine": {
+  "block": {
+   "error": "PDL: 没有块 {0}"
+  },
+  "part": {
+   "error": "PDL: 没有组件 {0}"
+  },
+  "control": {
+   "missingControl": "PDL: 没有控件 {0}"
+  },
+  "row": {
+   "error": "PDL: 没有行模板 {0}"
+  }
+ },
+ "binding": {
+  "dayBucket": {
+   "yesterday": "昨天",
+   "week": "本周"
+  },
+  "activity": {
+   "full_gate": "在跑完整检查",
+   "build": "在构建"
+  },
+  "execution": {
+   "text": "在执行"
+  }
+ },
+ "platform": {
+  "clipboardImage": {
+   "invalid": "仅支持复制 8 MB 以内的 PNG 图片"
+  }
+ }
+}

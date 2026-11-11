@@ -1,0 +1,120 @@
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/platform.test.ts (4 tests) 23ms
+ ✓ src/pdl/__tests__/recall-consent.test.ts (1 test) 53ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (7 tests) 15ms
+ ❯ src/pdl/__tests__/rich-models.test.ts (3 tests | 1 failed) 16ms
+     ✓ preserves unified diff signs, whitespace and multiple hunks using the project parser 1ms
+     ✓ keeps canonical message/block/item coordinates and resolves actual media URLs 10ms
+     × retains card Markdown as data for the original body component and keeps file download sources 4ms
+ ❯ src/pdl/__tests__/runtime-questions.test.ts (5 tests | 1 failed) 19ms
+     ✓ rejects a record owned by a different session 2ms
+     ✓ re-reads and checks the exact published message/block before sending an answer 2ms
+     ✓ keeps unanswerable/closed requests out of the write path and returns a bounded input error 0ms
+     × converts form primitives only at submission and uses the real elicitation decision contract 3ms
+     ✓ encodes opaque question ids in state paths and never returns private answers in terminal VMs 11ms
+ ✓ src/pdl/__tests__/export-route.test.ts (2 tests) 2ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (4 tests) 3ms
+ ✓ src/pdl/__tests__/interactive-actions.test.ts (3 tests) 3ms
+ ❯ src/pdl/__tests__/runtime.test.ts (6 tests | 1 failed) 2441ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 261ms
+     ✓ sends input through the registered action without replacing the active textarea 274ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations 238ms
+     × requires an explicit receiver and forwards canonical message ids through the existing modal row control 1297ms
+     ✓ resolves draft-append consent only from the engine dialog decision 269ms
+     ✓ leaves text paste native while forwarding image paste through the application port 101ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/rich-models.test.ts > rich blocks projected into the existing component contract > retains card Markdown as data for the original body component and keeps file download sources
+AssertionError: expected { title: '卡片', md: '**正文**', …(1) } to match object { md: '**正文**', …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "kv": [
+      {
+-       "label": "状态",
+-       "value": "可用",
++       "k": "状态",
++       "v": "可用",
+      },
+    ],
+    "md": "**正文**",
+  }
+
+ ❯ src/pdl/__tests__/rich-models.test.ts:60:7
+     58|         (s) => s,
+     59|       ),
+     60|     ).toMatchObject({ md: '**正文**', kv: [{ label: '状态', value: '可用' }]…
+       |       ^
+     61|     expect(
+     62|       richBlockView(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/pdl/__tests__/runtime-questions.test.ts > canonical runtime question binding > converts form primitives only at submission and uses the real elicitation decision contract
+AssertionError: expected [] to deeply equal [ 'form:count', 'form:enabled', …(1) ]
+
+- Expected
++ Received
+
+- [
+-   "form:count",
+-   "form:enabled",
+-   "decision",
+- ]
++ []
+
+ ❯ src/pdl/__tests__/runtime-questions.test.ts:125:35
+    123|     transport.read.mockResolvedValue({ interaction: record });
+    124|     const rows = questionRows(record, 'reply-1', {});
+    125|     expect(rows.map((r) => r.id)).toEqual(['form:count', 'form:enabled…
+       |                                   ^
+    126|     await submitRuntimeAnswers(
+    127|       'question-1',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > requires an explicit receiver and forwards canonical message ids through the existing modal row control
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'forward', …(1) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    "forward",
+    {
+      "cats": "[\"codex\"]",
+      "mids": "[\"reply-1\"]",
++     "partial": "true",
+      "to": "target-thread",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/pdl/__tests__/runtime.test.ts:140:24
+    138|         .dispatchEvent(new w.Event('submit', { bubbles: true, cancelab…
+    139|       await vi.waitFor(() =>
+    140|         expect(action).toHaveBeenCalledWith('forward', { to: 'target-t…
+       |                        ^
+    141|       );
+    142|       await vi.waitFor(() => expect(ui.modal).toBeNull());
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  3 failed | 6 passed (9)
+      Tests  3 failed | 32 passed (35)
+   Start at  01:12:59
+   Duration  4.24s (transform 2.79s, setup 142ms, import 4.89s, tests 2.58s, environment 2.71s)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__

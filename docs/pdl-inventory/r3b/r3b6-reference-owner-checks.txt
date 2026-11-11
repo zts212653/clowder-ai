@@ -1,0 +1,92 @@
+$ node checks/data/voice-review-owners.js (isolated design-accepted-r111)
+PASS V12 初始没有后端历史就不造录音条目
+PASS 3A7 保存回执给出同一测试音的播放/下载与三条真实形状转写
+PASS V07 开始采集带 thread_id 和真实 AudioInputRequest
+PASS V07 暂停从 owner status 回读
+PASS V07 恢复从 owner status 回读
+PASS V08 修正说话人不冒充文字修正
+PASS V01/V02 会话区别短听写，播放状态由统一控制回推
+PASS V03 VAD 只投影中断，无第二个开关
+PASS V04 准备仅传家庭资料选择，成员/对话由后端给；协商后启动
+PASS V05 文字写呼叫 owner 与 UUID，未发送普通消息
+PASS V06 明确选择后才提交 screen open；保留选择身份
+PASS V06 停止共享必须收到 accepted
+PASS V09 授权提交原预览 intent，不能只切本地布尔值
+PASS V10 撤回失败不换源/暂停、不伪造已撤回
+PASS V10/V14 停止先撤回、保存结果属于采集原对话
+PASS V01/V04 结束由 owner/播放绑定确认
+PASS V07 读失败进入统一 load:error
+PASS R01/R03 版本身份保留，新增批注走真实 round 与 revision
+PASS R03 编辑保留 annotationId 与 anchor
+PASS R04 解决状态读回实际回执
+PASS R02 历史来自独立 owner 条目，非前端拼接
+PASS R06 回复同时保留来源和结果定位身份
+PASS R07 判断绑定原轮次与当前结果 ownerRevision
+PASS R05 重新定位生成当前版本批注并保留旧来源
+PASS R12 比较直接使用两个冻结 media，未猜同步映射
+PASS R08 讨论只放原对话草稿，保留原轮次，不发送
+PASS R09/R10 修改命令保留精确 source、目标和图片 edit
+PASS R11 取消后重读 owner，不把取消等同执行停止
+PASS R21 已有整件作品引用时不静默缩成选区
+PASS R21 图片选点和文字只写原草稿，不写批注或消息
+PASS R13 文字引用保留来源 revision 与范围，放入同一输入框胶囊
+PASS R14 回复只提交 workspace owner，不误用 artifact owner
+PASS R14 解决状态与原 workspace review 身份一致
+PASS R25 听读绑定同一 sourceVersion，播放句子由控制器给
+PASS R16/R17 正典读写同一 works owner，状态按回执重读
+PASS R18 替代携双方 revision 与绑定 disposition
+PASS R19 保留决定写真实 notice/fingerprint；提示由后端回读消失
+PASS R20 文件打开用实际 owner 文件动作
+PASS R15 素材稳定版本、用途与章节定位都来自同一冻结输入
+PASS R20/R24 文件动作来自 info，源码切换只读，不调用写文件
+PASS R24 Markdown 默认阅读态仍使用同一正文与批注
+PASS R25 另一份文件的播放事件不覆盖当前正文
+PASS PDL 按 index.html 真实顺序加载，正文共用声明没有初始化前引用
+PASS 3A7 audio/tts 共用设置状态，状态带服务名（lang 2026-11-03）；运行隐去状态、停用不开始；异常按 voice 路由打开，安装仍为 stopped
+PASS PDL 没有新增行模板、组件、危险读取条或可见内部坐标
+TOTAL 45 passed, 0 failed
+Exit code: 0
+
+$ node checks/data/output-media-owners.js (isolated design-accepted-r111)
+PASS 原生 final 独占正文，canonical content 保留完整原文
+PASS commentary 与真实 toolEvents 严格按 order，正文作为展开内容
+PASS 摘要只在确有过程段时加计数，复制正文不带过程段
+PASS Host 边界默认 whole 不分离
+PASS processTalk PUT 带 owner 并回读真实偏好形状
+PASS Host 边界仅 record 时将工具前话语放入记录
+PASS Host 未完成回合保留完整正文
+PASS 偏好 owner 冲突进入 load:error，不伪造已保存
+PASS 偏好统一重试重读 owner
+PASS owner 不匹配 不移动任何正文
+PASS 工具 executionRef 不匹配 不移动任何正文
+PASS order 重复 run 不移动任何正文
+PASS range 不完整 不移动任何正文
+PASS Host 边界把工具后段误当 commentary 不移动任何正文
+PASS 同长原文变化仍须通过 SHA-256 校验
+PASS 没有 layout 的执行记录也只读真实事件和状态，不按 meta 数量造列表
+PASS Host 签名尾段留在最终回答，不计入过程段
+PASS 过长文字使用统一字段错误，并保留输入位置
+PASS 真实 pointer 手势输出笔迹 / 箭头 / 文字，坐标按显示比例还原媒体像素
+PASS SVG 文字转义，形状携带合法颜色与稳定像素线宽
+PASS 取消手势不留下草稿
+PASS 撤销只由 media 行为回传新事实，不直接请求后端
+PASS 删除选中标绘后可撤销恢复
+PASS contentModify 先保存真实 drawing，再引用 owner 新 revision；intent 不夹带虚构 markup 字段
+PASS 保存后 markup 从 owner 的 active 标记回读，与定位 marks 分开
+PASS 删除已保存标记走真实 delete_visual_mark，保留后端 deleted 记录
+PASS 保存标绘冲突阻止修改请求，不丢草稿
+PASS 只读版本仍显示 owner 标绘，不提供编辑工具
+PASS media 视频标绘只输出秒，应用层恢复真实 streamId/tick
+PASS 无 frameRate 的真实视频仍可保存标绘，时间只在应用层转为合法 tick
+PASS 首份尺寸回来之前持有 settleHold
+PASS 外部窗口不能给 iframe 改高或结束等待
+PASS 只更新消息来源 iframe，初次测量完成才解除等待
+PASS 内容缩短也能收回高度
+PASS 引擎同步属性后的重画恢复组件量出的高度
+PASS 测高消息边界拒绝非数值
+PASS 内容未回尺寸就关闭时释放等待，不让页面永远未静止
+PASS srcdoc 实际注入脚本量内容与边距，不读块 height
+PASS 内容尺寸变化继续 postMessage
+TOTAL 39 passed, 0 failed
+Exit code: 0
+

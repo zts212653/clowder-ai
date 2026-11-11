@@ -345,6 +345,7 @@ export class SendService {
           ...(stored.contentBlocks === undefined ? {} : { contentBlocks: stored.contentBlocks }),
           ...(hostOptions?.sender === undefined ? {} : { sender: hostOptions.sender }),
           timestamp,
+          ...(stored.extra?.rich === undefined ? {} : { rich: stored.extra.rich }),
           ingress,
         });
       }

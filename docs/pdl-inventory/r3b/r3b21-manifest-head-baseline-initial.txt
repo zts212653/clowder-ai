@@ -1,0 +1,50 @@
+$ pnpm --filter @cat-cafe/api exec node --import tsx --input-type=module -e 'import assert from '"'"'node:assert/strict'"'"';
+import {validateHostPluginManifest as baseline} from '"'"'./src/domains/plugin/desktop-window-runtime/.r3b21-baseline-manifest.ts'"'"';
+import {validateHostPluginManifest as current} from '"'"'./src/domains/plugin/desktop-window-runtime/presentation-manifest.ts'"'"';
+import {desktopWindowManifest} from '"'"'./test/f317-window.fixture.ts'"'"';
+const legacy=desktopWindowManifest(undefined,'"'"'1.3.0'"'"');
+const published={...legacy,pluginId:'"'"'official.companion'"'"',version:'"'"'0.1.0-alpha.24'"'"',contributions:legacy.contributions?.map(c=>({...c,bridgeVersion:'"'"'1.4.0'"'"'}))};
+for(const [label,input] of Object.entries({legacy,published,foreignId:{...published,pluginId:'"'"'dev.other'"'"'},alpha25:{...published,version:'"'"'0.1.0-alpha.25'"'"'},alpha23:{...published,version:'"'"'0.1.0-alpha.23'"'"'},grants:{...published,features:published.features.map(f=>({...f,capabilities:['"'"'windows.create'"'"','"'"'files.write'"'"']}))}})){
+ const a=baseline(input),b=current(input);assert.deepEqual(b,a);console.log(label+'"'"': HEAD='"'"'+a.valid+'"'"'; worktree='"'"'+b.valid+'"'"'; same result'"'"');
+}
+'
+
+[console.log] legacy: HEAD=true; worktree=true; same result
+[console.log] published: HEAD=true; worktree=true; same result
+[console.log] foreignId: HEAD=true; worktree=true; same result
+[console.log] alpha25: HEAD=true; worktree=true; same result
+[console.log] alpha23: HEAD=true; worktree=true; same result
+[console.log] grants: HEAD=true; worktree=true; same result
+
+node:internal/event_target:1118
+  process.nextTick(() => { throw err; });
+                           ^
+Error [ERR_INPUT_TYPE_NOT_ALLOWED]: --input-type can only be used with string input via --eval, --print, or STDIN
+    at defaultResolve (node:internal/modules/esm/resolve:982:49)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:697:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:714:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:746:52)
+    at #resolve (node:internal/modules/esm/loader:679:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:599:35)
+    at onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:628:32)
+    at TracingChannel.tracePromise (node:diagnostics_channel:362:14)
+    at ModuleLoader.import (node:internal/modules/esm/loader:624:21)
+    at node:internal/modules/run_main:162:35 {
+  code: 'ERR_INPUT_TYPE_NOT_ALLOWED'
+}
+
+Node.js v24.15.0
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/api:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: node --import tsx --input-type=module -e import assert from 'node:assert/strict';
+import {validateHostPluginManifest as baseline} from './src/domains/plugin/desktop-window-runtime/.r3b21-baseline-manifest.ts';
+import {validateHostPluginManifest as current} from './src/domains/plugin/desktop-window-runtime/presentation-manifest.ts';
+import {desktopWindowManifest} from './test/f317-window.fixture.ts';
+const legacy=desktopWindowManifest(undefined,'1.3.0');
+const published={...legacy,pluginId:'official.companion',version:'0.1.0-alpha.24',contributions:legacy.contributions?.map(c=>({...c,bridgeVersion:'1.4.0'}))};
+for(const [label,input] of Object.entries({legacy,published,foreignId:{...published,pluginId:'dev.other'},alpha25:{...published,version:'0.1.0-alpha.25'},alpha23:{...published,version:'0.1.0-alpha.23'},grants:{...published,features:published.features.map(f=>({...f,capabilities:['windows.create','files.write']}))}})){
+ const a=baseline(input),b=current(input);assert.deepEqual(b,a);console.log(label+': HEAD='+a.valid+'; worktree='+b.valid+'; same result');
+}
+
+
+Exit code: 1

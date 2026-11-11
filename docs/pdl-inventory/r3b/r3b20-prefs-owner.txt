@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/components/__tests__/active-workspace.test.ts src/components/ThreadSidebar/__tests__/project-display-name.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/components/__tests__/active-workspace.test.ts (15 tests) 11ms
+ ✓ src/components/ThreadSidebar/__tests__/project-display-name.test.ts (18 tests) 4ms
+
+ Test Files  2 passed (2)
+      Tests  33 passed (33)
+   Start at  00:50:06
+   Duration  2.92s (transform 148ms, setup 135ms, import 86ms, tests 16ms, environment 1.34s)
+
+
+Exit code: 0

@@ -1,0 +1,21 @@
+{
+  "readError": "暂时读不到已授权的会话，请检查 Personal Chrome 插件状态后重试。",
+  "settings": "检查 Personal Chrome",
+  "refreshTitles": "刷新名称",
+  "issue": {
+    "HELPER_UPDATE_REQUIRED": "连接组件需要更新，已有会话授权仍保留。请在插件设置中修复后再刷新。",
+    "HELPER_NOT_INSTALLED": "本机连接组件尚未就绪，请在插件设置中检查。",
+    "EXTENSION_RELOAD_REQUIRED": "Chrome 扩展需要重载，已有会话授权仍保留。重载后再刷新名称。",
+    "PAGE_RELOAD_REQUIRED": "原对话页面仍在使用旧连接。请重载该页面，再到插件设置对这条会话点「检查会话页面」。已有会话授权仍保留。",
+    "STALE_HELPER": "连接组件已更新，但 Chrome 仍在使用旧组件。重载扩展后再刷新。",
+    "STALE_HELPER_PROTOCOL": "Chrome 仍在使用旧连接组件，请在插件设置中更新并重载扩展。",
+    "CHROME_DISCONNECTED": "暂时无法连接 Chrome。请确认扩展已连接，再刷新名称。",
+    "TITLE_SYNC_TIMEOUT": "名称同步超时。请确认 Chrome 扩展已连接后再试。",
+    "AUTHORIZATION_INVALID": "暂时无法读取会话授权，请在插件设置中检查。",
+    "UNSUPPORTED_PLATFORM": "当前系统暂不支持名称同步。",
+    "failed": "这次没有完成名称同步，请稍后再试；已保存的名称仍保留。",
+    "none": "未读到可同步的名称。请打开原对话，等待标题加载后再刷新。",
+    "all": "已同步 {0} 个会话名称。",
+    "partial": "已同步 {0} 个会话名称。其余会话尚未读到名称，可打开原对话后再刷新。"
+  }
+}

@@ -1,0 +1,20 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/workbench-bindings.test.ts src/pdl/__tests__/runtime.test.ts -t 'file|unknown agent' --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (51 tests | 46 skipped) 1826ms
+     ✓ keeps unknown agent identities from their own from name or id without borrowing another member  346ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  414ms
+     ✓ renders r126 file media and generic Office metadata through the original file view  396ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  348ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  321ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (19 tests | 16 skipped) 32ms
+
+ Test Files  2 passed (2)
+      Tests  8 passed | 62 skipped (70)
+   Start at  03:51:21
+   Duration  4.96s (transform 1.72s, setup 50ms, import 2.62s, tests 1.86s, environment 232ms)
+
+
+Exit code: 0

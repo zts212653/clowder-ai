@@ -140,7 +140,8 @@ export async function readMemoryRecallPage(
   cursor: RecallPageCursor | null,
 ) {
   if (!readers.threadStore) throw new Error('Thread store unavailable');
-  const threads = await visibleRecallThreads(owner, readers.threadStore);
+  const visible = await visibleRecallThreads(owner, readers.threadStore);
+  const threads = new Map([...visible].filter(([id]) => !query.threadId || id === query.threadId));
   const to = cursor?.to ?? Date.now();
   const rows = recallTimeline(db, owner, [...threads.keys()], query, cursor, to);
   const page = rows.slice(0, query.limit);
@@ -171,7 +172,7 @@ export async function readMemoryRecallPage(
   const last = page.at(-1);
   return {
     days: Number(query.days),
-    from: to - Number(query.days) * 86400000,
+    from: query.days === '0' ? 0 : to - Number(query.days) * 86400000,
     to,
     readStatus: partial || replies.partial ? 'partial' : 'ready',
     records,

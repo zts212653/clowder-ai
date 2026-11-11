@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/shared exec vitest run src/__tests__/context-attachment.test.ts src/__tests__/media-context-attachment.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/shared
+
+ ✓ src/__tests__/media-context-attachment.test.ts (5 tests) 5ms
+ ✓ src/__tests__/context-attachment.test.ts (16 tests) 10ms
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  12:30:45
+   Duration  1.24s (transform 1.63s, setup 0ms, import 2.22s, tests 15ms, environment 0ms)
+
+
+Exit code: 0

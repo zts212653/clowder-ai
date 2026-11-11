@@ -244,6 +244,7 @@ export class PendingMediaPublication {
       ...(stored.contentBlocks === undefined ? {} : { contentBlocks: stored.contentBlocks }),
       ...(row.sender === undefined ? {} : { sender: row.sender }),
       timestamp: stored.timestamp,
+      ...(stored.extra?.rich === undefined ? {} : { rich: stored.extra.rich }),
       ingress: {
         deps: this.deps.ingressWake,
         source,

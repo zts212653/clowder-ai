@@ -1,0 +1,356 @@
+$ python3 /tmp/pdl-r3b14-biome.py
+
+$ pnpm exec biome check packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/components/capability-evolution/evolution-asset-resource.ts packages/web/src/pdl/__tests__/operations-bindings.test.ts packages/web/src/pdl/__tests__/r115-bindings.test.ts packages/web/src/pdl/__tests__/remaining-bindings.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/useEvolutionBindings.ts packages/web/src/pdl/useHomeBindings.ts packages/web/src/pdl/useReplayBindings.ts
+packages/web/src/pdl/__tests__/operations-bindings.test.ts:189:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    187 │         denominator: {},
+    188 │       });
+  > 189 │     throw new Error('Unexpected operation owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    190 │   });
+    191 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    187 187 │           denominator: {},
+    188 188 │         });
+    189     │ - ····throw·new·Error('Unexpected·operation·owner·'·+·path);
+        189 │ + ····throw·new·Error(`Unexpected·operation·owner·${path}`);
+    190 190 │     });
+    191 191 │   });
+
+
+packages/web/src/pdl/__tests__/r115-bindings.test.ts:94:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    92 │             eventNo: Number(url.searchParams.get('cursor')),
+    93 │             role: 'assistant',
+  > 94 │             content: 'owner page ' + url.searchParams.get('cursor'),
+       │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    95 │             timestamp: 1,
+    96 │           },
+
+  i Unsafe fix: Use a template literal.
+
+     92  92 │               eventNo: Number(url.searchParams.get('cursor')),
+     93  93 │               role: 'assistant',
+     94     │ - ············content:·'owner·page·'·+·url.searchParams.get('cursor'),
+         94 │ + ············content:·`owner·page·${url.searchParams.get('cursor')}`,
+     95  95 │               timestamp: 1,
+     96  96 │             },
+
+
+packages/web/src/pdl/useReplayBindings.ts:173:94 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    171 │                 label: '播放速度',
+    172 │                 value: state.speed,
+  > 173 │                 options: ['1', '10', '50', '100', 'max'].map((v) => [v, v === 'max' ? '最快' : v + '×']),
+        │                                                                                                ^^^^^^^
+    174 │                 change: 'rpSpeed',
+    175 │               },
+
+  i Unsafe fix: Use a template literal.
+
+    171 171 │                   label: '播放速度',
+    172 172 │                   value: state.speed,
+    173     │ - ················options:·['1',·'10',·'50',·'100',·'max'].map((v)·=>·[v,·v·===·'max'·?·'最快'·:·v·+·'×']),
+        173 │ + ················options:·['1',·'10',·'50',·'100',·'max'].map((v)·=>·[v,·v·===·'max'·?·'最快'·:·`${v}×`]),
+    174 174 │                   change: 'rpSpeed',
+    175 175 │                 },
+
+
+packages/web/src/pdl/__tests__/operations-bindings.test.ts:97:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 36 detected (max: 15).
+
+    95 │     ],
+    96 │   } as EvalHubSummary;
+  > 97 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    98 │     const path = String(raw),
+    99 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 36 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/operations-bindings.test.ts:252:20 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    251 │ it.each(['home', 'live'])('retries %s through the existing execution and deployment owners', async (key) => {
+  > 252 │   const original = vi.mocked(apiFetch).getMockImplementation()!;
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    253 │   const reads: string[] = [];
+    254 │   vi.mocked(apiFetch).mockImplementation((path, init, options) => {
+
+
+packages/web/src/pdl/__tests__/remaining-bindings.test.ts:137:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    135 │   if (!('detail' in modelVm)) throw new Error('Expected member detail');
+    136 │   const detail = modelVm.detail;
+  > 137 │   expect(detail.m!.prof!.rows[0].sub).toBe('复杂系统攻坚');
+        │          ^^^^^^^^^^^^^^^
+    138 │   expect(detail.signal.rows[0].trail.map((t) => t.control.args.v)).toEqual(['recover', 'retract']);
+    139 │   const args = {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    135 135 │     if (!('detail' in modelVm)) throw new Error('Expected member detail');
+    136 136 │     const detail = modelVm.detail;
+    137     │ - ··expect(detail.m!.prof!.rows[0].sub).toBe('复杂系统攻坚');
+        137 │ + ··expect(detail.m!.prof?.rows[0].sub).toBe('复杂系统攻坚');
+    138 138 │     expect(detail.signal.rows[0].trail.map((t) => t.control.args.v)).toEqual(['recover', 'retract']);
+    139 139 │     const args = {
+
+
+packages/web/src/pdl/__tests__/remaining-bindings.test.ts:137:10 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    135 │   if (!('detail' in modelVm)) throw new Error('Expected member detail');
+    136 │   const detail = modelVm.detail;
+  > 137 │   expect(detail.m!.prof!.rows[0].sub).toBe('复杂系统攻坚');
+        │          ^^^^^^^^^
+    138 │   expect(detail.signal.rows[0].trail.map((t) => t.control.args.v)).toEqual(['recover', 'retract']);
+    139 │   const args = {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    135 135 │     if (!('detail' in modelVm)) throw new Error('Expected member detail');
+    136 136 │     const detail = modelVm.detail;
+    137     │ - ··expect(detail.m!.prof!.rows[0].sub).toBe('复杂系统攻坚');
+        137 │ + ··expect(detail.m?.prof!.rows[0].sub).toBe('复杂系统攻坚');
+    138 138 │     expect(detail.signal.rows[0].trail.map((t) => t.control.args.v)).toEqual(['recover', 'retract']);
+    139 139 │     const args = {
+
+
+packages/web/src/pdl/useEvolutionBindings.ts:33:13 lint/suspicious/noAssignInExpressions ━━━━━━━━━━━
+
+  ! The assignment should not be in an expression.
+
+    31 │   const reading = () => {
+    32 │     ui.evoReading ||= {};
+  > 33 │     return (ui.evoReading[ui.evoId!] ||= { view: 'judge', stage: null, decision: '', notice: '' });
+       │             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    34 │   };
+    35 │   const owner = projection();
+
+  i The use of assignments in expressions is confusing.
+    Expressions are often considered as side-effect free.
+
+
+packages/web/src/pdl/useEvolutionBindings.ts:33:27 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    31 │   const reading = () => {
+    32 │     ui.evoReading ||= {};
+  > 33 │     return (ui.evoReading[ui.evoId!] ||= { view: 'judge', stage: null, decision: '', notice: '' });
+       │                           ^^^^^^^^^
+    34 │   };
+    35 │   const owner = projection();
+
+
+packages/web/src/pdl/useEvolutionBindings.ts:38:64 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 50 detected (max: 15).
+
+    36 │   const assets = useEvolutionAssetReview(owner, owner ? reading().asset : undefined);
+    37 │   return {
+  > 38 │     action: async (name: string, args: Record<string, string>) => {
+       │                                                                ^^^
+    39 │       if (name === 'evolutionOpen') {
+    40 │         const asset =
+
+  i Please refactor this function to reduce its complexity score from 50 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useEvolutionBindings.ts:95:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 37 detected (max: 15).
+
+    93 │       return true;
+    94 │     },
+  > 95 │     models: () => {
+       │                ^^^
+    96 │       const rows = query.programs.map((p) => ({
+    97 │         id: p.program.programId,
+
+  i Please refactor this function to reduce its complexity score from 37 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useHomeBindings.ts:86:69 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 18 detected (max: 15).
+
+    84 │     };
+    85 │   }, [selected, attempt]);
+  > 86 │   const action = async (name: string, args: Record<string, string>) => {
+       │                                                                     ^^^
+    87 │     if (name === 'refresh' && ['home', 'live'].includes(args.k)) {
+    88 │       await Promise.all([
+
+  i Please refactor this function to reduce its complexity score from 18 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useHomeBindings.ts:114:21 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 59 detected (max: 15).
+
+    112 │     return false;
+    113 │   };
+  > 114 │   const models = () => {
+        │                     ^^^
+    115 │     const now = Date.now();
+    116 │     const runs = data.executions.map((x) => {
+
+  i Please refactor this function to reduce its complexity score from 59 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useHomeBindings.ts:116:42 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+    114 │   const models = () => {
+    115 │     const now = Date.now();
+  > 116 │     const runs = data.executions.map((x) => {
+        │                                          ^^^
+    117 │       const cmd = x.kind === 'managed_command',
+    118 │         what = cmd ? activities[x.activity ?? 'command'] : '回复';
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useHomeBindings.ts:218:40 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    216 │               command: job.command ?? '',
+    217 │               elapsed,
+  > 218 │               cancelable: !!current && read!.cancelable,
+        │                                        ^^^^^
+    219 │               threadId: selected?.threadId,
+    220 │               tail: job.tail ?? '',
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    216 216 │                 command: job.command ?? '',
+    217 217 │                 elapsed,
+    218     │ - ··············cancelable:·!!current·&&·read!.cancelable,
+        218 │ + ··············cancelable:·!!current·&&·read?.cancelable,
+    219 219 │                 threadId: selected?.threadId,
+    220 220 │                 tail: job.tail ?? '',
+
+
+packages/web/src/pdl/useHomeBindings.ts:56:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: attempt.
+
+    54 │   const [attempt, retry] = useState(0);
+    55 │   const [detail, setDetail] = useState<{ id: string; load: string; read?: JobRead }>({ id: '', load: 'loading' });
+  > 56 │   useEffect(() => {
+       │   ^^^^^^^^^
+    57 │     if (!selected) return;
+    58 │     const abort = new AbortController();
+
+  i This dependency can be removed from the list.
+
+    83 │       clearInterval(timer);
+    84 │     };
+  > 85 │   }, [selected, attempt]);
+       │                 ^^^^^^^
+    86 │   const action = async (name: string, args: Record<string, string>) => {
+    87 │     if (name === 'refresh' && ['home', 'live'].includes(args.k)) {
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    85 │ ··},·[selected,·attempt]);
+       │               ---------
+
+packages/web/src/pdl/useReplayBindings.ts:78:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 24 detected (max: 15).
+
+    76 │     }
+    77 │     if (!['rpPlay', 'rpSeek', 'rpSpeed', 'rpMode', 'rpSkip'].includes(name)) return false;
+  > 78 │     setRead((s) => {
+       │                 ^^^
+    79 │       let engine = s.engine;
+    80 │       if (name === 'rpPlay') engine = engine.state === 'playing' ? pause(engine) : play(engine);
+
+  i Please refactor this function to reduce its complexity score from 24 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useReplayBindings.ts:90:21 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 24 detected (max: 15).
+
+    88 │     return true;
+    89 │   };
+  > 90 │   const models = () => {
+       │                     ^^^
+    91 │     const { engine, events } = read,
+    92 │       current = engine.currentIndex;
+
+  i Please refactor this function to reduce its complexity score from 24 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useReplayBindings.ts:157:59 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    155 │               note:
+    156 │                 events[current]?.idleSkipMs && engine.adaptivePacing
+  > 157 │                   ? { icon: 'skipIdle', text: `跳过 ${clock(events[current].idleSkipMs!)} 空闲` }
+        │                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    158 │                   : null,
+    159 │               play: {
+
+
+packages/web/src/pdl/useReplayBindings.ts:35:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: attempt.
+
+    33 │   }>({ thread: null, load: 'loading', events: [], engine: createReplayEngine([]) });
+    34 │   const request = useRef(0);
+  > 35 │   useEffect(() => {
+       │   ^^^^^^^^^
+    36 │     if (!thread) return;
+    37 │     const generation = ++request.current;
+
+  i This dependency can be removed from the list.
+
+    49 │       ++request.current;
+    50 │     };
+  > 51 │   }, [thread, attempt]);
+       │               ^^^^^^^
+    52 │   useEffect(() => {
+    53 │     if (read.engine.state !== 'playing') return;
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    51 │ ··},·[thread,·attempt]);
+       │             ---------
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 543.
+Checked 10 files in 1077ms. No fixes applied.
+Found 535 warnings.
+Found 28 infos.
+
+Exit code: 0

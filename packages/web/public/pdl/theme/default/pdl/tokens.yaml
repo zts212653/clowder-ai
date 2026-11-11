@@ -1,0 +1,380 @@
+tokens:
+  lengths:
+    - --unit
+    - --g-mod
+    - --sp-xs
+    - --sp-s
+    - --sp-m
+    - --sp-l
+    - --sp-xl
+    - --ctl-xs
+    - --ctl-s
+    - --ctl-m
+    - --ctl-l
+    - --row-h
+    - --row-h-1
+    - --row-h-sm
+    - --page-gap
+    - --msg-gap
+    - --gutter-main
+    - --gutter-panel
+    - --lr-pad
+    - --lr-gap
+    - --lr-lead
+    - --cell
+    - --rail-w
+  base:
+    --bubble-cmul: "0.45"
+    --media-mark-ink: "#d04a3a"
+    --unit: 4px
+    --near-rows: "9"
+    --ta-rows-min: "2"
+    --ta-rows-max: "8"
+    --g-mod: calc(12 * var(--unit))
+    --g-n: "12"
+    --g-gap: var(--sp-xl)
+    --g-pad: 0px
+    --rail-w: calc(14 * var(--unit))
+    --nav-w0: calc(62 * var(--unit))
+    --nav-min: calc(50 * var(--unit))
+    --nav-max: calc(105 * var(--unit))
+    --ws-min: calc(90 * var(--unit))
+    --ws-pair: min(calc(205 * var(--unit)), 60%)
+    --main-min: calc(80 * var(--unit))
+    --shade: var(--ink)
+    --bg-scrim: color-mix(in srgb, var(--shade) 28%, transparent)
+    --fg-on-accent: "#ffffff"
+    --shadow-raised: 0 8px 28px color-mix(in srgb, var(--shade) 12%, transparent), 0 1px 3px color-mix(in srgb, var(--shade) 8%, transparent)
+    --shadow-float: 0 0 0 1px color-mix(in srgb, var(--shade) 10%, transparent), 0 2px 6px color-mix(in srgb, var(--shade) 9%, transparent), 0 12px 32px color-mix(in srgb, var(--shade) 14%, transparent)
+    --shadow-low: 0 1px 2px color-mix(in srgb, var(--shade) 4%, transparent)
+    --shadow-pressed: 0 1px 2px color-mix(in srgb, var(--shade) 6%, transparent)
+    --shadow-thumb: 0 1px 2px color-mix(in srgb, var(--shade) 20%, transparent)
+    --shadow-dock: 0 6px 24px color-mix(in srgb, var(--shade) 10%, transparent), 0 1px 3px color-mix(in srgb, var(--shade) 6%, transparent)
+    --proto: "#3f74a0"
+    --on-proto: "#ffffff"
+    --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif
+    --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif
+    --font-mono: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace'
+    --r-xs: 4px
+    --r-s: 6px
+    --r-m: 8px
+    --r-l: 12px
+    --r-xl: 16px
+    --r-full: 999px
+    --fs-scale: "1"
+    --fs-read: 15px
+    --fs-xs: calc(11px * var(--fs-scale))
+    --fs-s: calc(12px * var(--fs-scale))
+    --fs-m: calc(13px * var(--fs-scale))
+    --fs-l: calc(14px * var(--fs-scale))
+    --fs-xl: var(--fs-read)
+    --fs-title: calc(20px * var(--fs-scale))
+    --fs-hero: calc(28px * var(--fs-scale))
+    --fw-normal: "400"
+    --fw-medium: "500"
+    --fw-bold: "600"
+    --fw-display: var(--fw-bold)
+    --lh-read: "1.75"
+    --op-disabled: ".45"
+    --op-wash: ".7"
+    --tick-veil: ".55"
+    --dur-fast: .12s
+    --dur-med: .2s
+    --dur-slow: .6s
+    --dur-emph: 1.4s
+    --z-raised: "2"
+    --z-sticky: "5"
+    --z-pop: "20"
+    --z-bar: "30"
+    --z-drawer: "40"
+    --z-drawer-top: "45"
+    --z-float: "55"
+    --z-float-top: "56"
+    --z-menu: "60"
+    --z-tool: "65"
+    --z-dialog: "70"
+    --z-viewer: "75"
+    --z-toast: "80"
+    --z-drag: "90"
+    --z-tip: "1000"
+    --row-h: calc(13 * var(--unit))
+    --page-gap: calc(8 * var(--unit))
+    --accent: "#a9624a"
+    --accent-hover: "#965038"
+    --accent-fg: "#924d35"
+    --accent-soft: "#f8e3dc"
+    --focus: "#a9624a"
+    --bg-rail: "#ebe7e1"
+    --bg-nav: "#f2eee7"
+    --bg-page: "#f5f1ea"
+    --bg-group: "#fefaf3"
+    --bg-raised: "#fefaf3"
+    --bg-bubble: "#dfcab2"
+    --fg-strong: "#000000"
+    --fg: "#252421"
+    --fg-muted: "#575552"
+    --fg-faint: "#676561"
+    --fg-disabled: "#8f8c88"
+    --fg-muted-glass: "#45433f"
+    --fg-faint-glass: "#524f4b"
+    --fg-disabled-glass: "#6c6965"
+    --glass-inline: color-mix(in srgb, var(--bg-group) 58%, transparent)
+    --switch-on: var(--accent)
+    --ok: "#519160"
+    --warn: "#a37734"
+    --danger: "#b3362c"
+    --info: "#4188b6"
+    --warn-soft: "#ecdbc5"
+    --danger-soft: "#f5d6d2"
+    --name-1: "#6b5b7f"
+    --tint-1: "#b5a7c8"
+    --name-2: "#456783"
+    --tint-2: "#94b2cc"
+    --name-3: "#5a6a44"
+    --tint-3: "#a5b492"
+    --name-4: "#356e6c"
+    --tint-4: "#89b9b6"
+    --name-5: "#765f3b"
+    --tint-5: "#c0ab8b"
+    --name-6: "#805563"
+    --tint-6: "#c9a1ae"
+    --msg-gap: calc(10 * var(--unit))
+    --gutter-panel: calc(4 * var(--unit))
+    --gutter-main: calc(6 * var(--unit))
+    --row-h-sm: calc(8 * var(--unit))
+    --lr-pad: calc(3 * var(--unit))
+    --lr-gap: calc(3 * var(--unit))
+    --lr-lead: calc(7 * var(--unit))
+    --row-h-1: calc(11 * var(--unit))
+    --ink: var(--fg-strong)
+    --d-hover: 4%
+    --d-btn: 10%
+    --btn-soft: color-mix(in srgb, var(--ink) var(--d-btn), transparent)
+    --btn-soft-hover: color-mix(in srgb, var(--ink) calc(var(--d-btn) + var(--d-hover)), transparent)
+    --d-selected: 9%
+    --d-inset: 5%
+    --d-code: 9%
+    --d-line: 10%
+    --d-line-strong: 16%
+    --d-wash: 10%
+    --d-tone: 22%
+    --sp-hairline: 1px
+    --sp-hair: 2px
+    --sp-xs: var(--unit)
+    --sp-s: calc(2 * var(--unit))
+    --sp-m: calc(3 * var(--unit))
+    --sp-l: calc(4 * var(--unit))
+    --sp-xl: calc(6 * var(--unit))
+    --ctl-xs: calc(6 * var(--unit))
+    --ctl-s: calc(7 * var(--unit))
+    --ctl-m: calc(8 * var(--unit))
+    --ctl-l: calc(9 * var(--unit))
+    --ic-s: 14px
+    --ic-m: 16px
+    --dot: 7px
+    --av-s: 18px
+    --av-m: 28px
+    --av-l: 36px
+    --av-xl: 52px
+    --thumb-w: calc(28 * var(--unit))
+    --thumb-h: calc(18 * var(--unit))
+    --qr-size: calc(36 * var(--unit))
+    --cells-pad: 0px
+    --reveal-delay: 0s
+    --reveal-hold: .6s
+    --reveal-fade: .4s
+    --typing-hold: 1.5s
+    --blur-scrim: 6px
+    --blur-glass: 18px
+    --blur-soft: 12px
+    --hold-toast: 1.6s
+    --hold-copied: 1.2s
+    --hold-undo: 4s
+    --hold-cue: 4s
+    --dbl-click: .28s
+    --emph-off: 4px
+    --surf-anchor: var(--bg-raised)
+    --surf-group: var(--bg-group)
+    --surf-secondary: color-mix(in srgb, var(--bg-page) 88%, transparent)
+    --surf-inline: var(--bg-field)
+    --roll-hold: 3s
+    --beat: 1s
+    --loop: calc(var(--beat) * 2)
+    --surf-float: color-mix(in oklab, var(--bg-page) 70%, var(--bg-group))
+    --indent-child: 1em
+    --tip-delay: .7s
+    --kv-k-max: 8.5em
+    --log-max: calc(10.5 * var(--row-h-sm) + 16 * var(--unit))
+    --tile-min: calc(35 * var(--unit))
+    --tile-num: var(--fs-title)
+    --tile-bg: var(--bg-group)
+    --tile-pad: var(--sp-m)
+    --tile-dir: column
+    --tile-gap: var(--sp-hair)
+    --row-pad: var(--sp-s) var(--sp-m)
+    --notice-pad: var(--sp-m) var(--sp-l)
+    --notice-gap: var(--sp-m)
+    --field-h: var(--ctl-m)
+    --mono-em: .93em
+    --desc-fs: var(--fs-m)
+    --trail-max: 62%
+    --field-gap: var(--sp-xs) var(--sp-xl)
+    --seg-wrap: wrap
+    --stripe-w: calc(11 * var(--unit))
+    --stripe-rows: "7"
+    --float-margin: calc(6 * var(--unit))
+    --seg-fs: var(--fs-l)
+    --col-icon: calc(7 * var(--unit))
+    --col-num: calc(11 * var(--unit))
+    --col-id: calc(14 * var(--unit))
+    --col-money: calc(16 * var(--unit))
+    --col-time: calc(18 * var(--unit))
+    --col-label: calc(20 * var(--unit))
+    --col-state: calc(24 * var(--unit))
+    --col-date: calc(32 * var(--unit))
+    --cell-rail: calc(10 * var(--unit))
+    --cell-bar: calc(8 * var(--unit))
+    --jig: 1.2deg
+    --jig-row: .35deg
+    --resize-c: var(--accent)
+    --identity-fallback: var(--fg-muted)
+    --identity-line: var(--line-strong)
+    --diff-bg: color-mix(in oklab, var(--fg) 6%, var(--bg-group))
+    --term-bg: "#201e1b"
+    --term-fg: "#f5f1eb"
+    --term-dim: "#bfb9b2"
+    --term-ps: "#88c7bd"
+    --term-br: "#d0b9ed"
+    --term-error: "#ff9f96"
+    --term-ok: "#a0d7ae"
+    --bg-hover: color-mix(in oklab, var(--ink) var(--d-hover), transparent)
+    --bg-selected: color-mix(in oklab, var(--ink) var(--d-selected), transparent)
+    --bg-field: color-mix(in oklab, var(--ink) var(--d-inset), transparent)
+    --bg-code: color-mix(in oklab, var(--ink) var(--d-code), transparent)
+    --line: color-mix(in oklab, var(--ink) var(--d-line), transparent)
+    --line-strong: color-mix(in oklab, var(--ink) var(--d-line-strong), transparent)
+    --accent-wash: color-mix(in oklab, var(--accent) var(--d-wash), transparent)
+    --ok-wash: color-mix(in oklab, var(--ok) var(--d-wash), transparent)
+    --warn-wash: color-mix(in oklab, var(--warn) var(--d-wash), transparent)
+    --danger-wash: color-mix(in oklab, var(--danger) var(--d-wash), transparent)
+    --current-wash: color-mix(in oklab, currentColor 14%, transparent)
+    --accent-ring: color-mix(in oklab, var(--accent) 40%, transparent)
+    --glass-rail: color-mix(in srgb, var(--bg-rail) 78%, transparent)
+    --glass-nav: color-mix(in srgb, var(--bg-nav) 82%, transparent)
+    --glass-panel: color-mix(in srgb, var(--bg-nav) 84%, transparent)
+    --glass-raised: color-mix(in srgb, var(--bg-raised) 92%, transparent)
+    --glass-group: color-mix(in srgb, var(--bg-group) 62%, transparent)
+    --glass-secondary: color-mix(in srgb, var(--bg-page) 70%, transparent)
+    --glass-head: color-mix(in srgb, var(--bg-page) 70%, transparent)
+  queries:
+    - media: "(max-width: 600px)"
+      vars: {--gutter-main: calc(3 * var(--unit))}
+    - media: "(max-width: 767px)"
+      vars: {--ta-rows-max: "4"}
+  dark:
+    --shade: "#000000"
+    --bubble-cmul: "0.15"
+    --bg-scrim: color-mix(in srgb, var(--shade) 50%, transparent)
+    --fg-on-accent: "#1a1714"
+    --shadow-raised: 0 8px 28px color-mix(in srgb, var(--shade) 45%, transparent), 0 1px 3px color-mix(in srgb, var(--shade) 40%, transparent)
+    --shadow-float: "0 0 0 1px color-mix(in srgb, #ffffff 12%, transparent), 0 2px 6px color-mix(in srgb, var(--shade) 40%, transparent), 0 12px 32px color-mix(in srgb, var(--shade) 55%, transparent)"
+    --proto: "#7fb0d0"
+    --on-proto: "#10151b"
+    color-scheme: dark
+    --accent: "#cd8369"
+    --accent-hover: "#e1957a"
+    --accent-fg: "#e89b80"
+    --accent-soft: "#392a24"
+    --focus: "#cd8369"
+    --bg-rail: "#120f0b"
+    --bg-nav: "#181611"
+    --bg-page: "#1c1914"
+    --bg-group: "#24211c"
+    --bg-raised: "#24211c"
+    --bg-bubble: "#443524"
+    --fg-strong: "#f7f5f1"
+    --fg: "#d6d4d1"
+    --fg-muted: "#a3a19e"
+    --fg-faint: "#8e8c88"
+    --fg-disabled: "#757370"
+    --fg-muted-glass: "#bebbb7"
+    --fg-faint-glass: "#aeaba6"
+    --fg-disabled-glass: "#918e89"
+    --glass-inline: color-mix(in srgb, var(--bg-group) 62%, transparent)
+    --switch-on: var(--accent)
+    --ok: "#76be86"
+    --warn: "#d3a056"
+    --danger: "#ef7268"
+    --info: "#65b4e9"
+    --warn-soft: "#392b17"
+    --danger-soft: "#3f2624"
+    --name-1: "#bba6d6"
+    --tint-1: "#4e415e"
+    --name-2: "#8cb6db"
+    --tint-2: "#304b61"
+    --name-3: "#a5ba8a"
+    --tint-3: "#404d2f"
+    --name-4: "#7bc0bc"
+    --tint-4: "#23504e"
+    --name-5: "#caac7f"
+    --tint-5: "#574428"
+    --name-6: "#d79fb1"
+    --tint-6: "#5e3c47"
+    --d-hover: 7%
+    --d-selected: 13%
+    --d-inset: 8%
+    --d-code: 12%
+    --d-line: 12%
+    --d-line-strong: 18%
+    --d-wash: 15%
+    --d-tone: 28%
+    --diff-bg: "color-mix(in oklab, #000 35%, var(--bg-page))"
+  skins:
+    graphite:
+      light:
+        --bg-rail: "#e8eaed"
+        --bg-nav: "#f1f2f4"
+        --bg-page: "#f7f8f9"
+        --bg-group: "#ffffff"
+        --bg-bubble: "#dfe6f0"
+        --bg-raised: "#ffffff"
+        --fg-strong: "#15181c"
+        --fg: "#3a3f46"
+        --fg-muted: "#5d6470"
+        --fg-faint: "#8a919c"
+        --accent: "#3b6ea8"
+        --accent-hover: "#2f5a8a"
+        --accent-soft: "#e1eaf5"
+        --accent-fg: "#2f5a8a"
+        --focus: "#3b6ea8"
+        --switch-on: var(--accent)
+        --tint-1: "#e3e0f0"
+        --tint-2: "#dbe8e0"
+        --tint-3: "#efe2d6"
+        --tint-4: "#dbe5ef"
+        --tint-5: "#ece6d2"
+        --tint-6: "#e3e1df"
+        --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Noto Sans SC", system-ui, sans-serif
+      dark:
+        --bg-rail: "#0f1114"
+        --bg-nav: "#14171b"
+        --bg-page: "#181b20"
+        --bg-group: "#20242a"
+        --bg-bubble: "#2b3442"
+        --bg-raised: "#252a30"
+        --fg-strong: "#f1f3f5"
+        --fg: "#c9ced5"
+        --fg-muted: "#959daa"
+        --fg-faint: "#6b7380"
+        --accent: "#7aa6d8"
+        --accent-hover: "#93b8e2"
+        --accent-soft: "#1f2d3d"
+        --accent-fg: "#9cbde3"
+        --focus: "#7aa6d8"
+        --switch-on: var(--accent)
+        --tint-1: "#343149"
+        --tint-2: "#2b3a31"
+        --tint-3: "#423529"
+        --tint-4: "#2a3746"
+        --tint-5: "#3d3826"
+        --tint-6: "#36332f"

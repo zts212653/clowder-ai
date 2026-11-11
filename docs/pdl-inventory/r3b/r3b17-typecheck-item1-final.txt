@@ -1,0 +1,13 @@
+$ pnpm --filter @cat-cafe/web exec tsc --noEmit
+
+src/pdl/__tests__/memory-bindings.test.ts(195,58): error TS2339: Property 'proposals' does not exist on type '{ id: string; title: string | undefined; desc: string | undefined; family: "person" | "profile" | "entity" | "taste" | "event"; revision: string; fields: { label: string; value: string; }[]; ... 5 more ...; error: string; } | { ...; }'.
+  Property 'proposals' does not exist on type '{ title: string; error: string; }'.
+src/pdl/__tests__/memory-bindings.test.ts(237,58): error TS2339: Property 'proposals' does not exist on type '{ id: string; title: string | undefined; desc: string | undefined; family: "person" | "profile" | "entity" | "taste" | "event"; revision: string; fields: { label: string; value: string; }[]; ... 5 more ...; error: string; } | { ...; }'.
+  Property 'proposals' does not exist on type '{ title: string; error: string; }'.
+src/pdl/useMemoryBindings.tsx(167,76): error TS2339: Property 'revision' does not exist on type 'Entry | PersonDetail'.
+  Property 'revision' does not exist on type 'PersonDetail'.
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
+
+Exit code: 1

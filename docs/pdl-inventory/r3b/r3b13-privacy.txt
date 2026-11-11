@@ -1,0 +1,6 @@
+Source: design-accepted-r118 checks/lib/run.js PRIVACY (unchanged expression; matching lines)
+Scope: isolated tag build and project public/pdl + public/pdl-app
+Isolated r118 build privacy-grep: 0
+Project public runtime privacy-grep: 0
+Full browser run.sh: skipped under lang's browser-check exception
+Exit code: 0

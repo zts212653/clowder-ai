@@ -1,0 +1,16 @@
+{
+ "queue": {
+  "targets": {
+   "title": "Change recipients"
+  }
+ },
+ "delivery": {
+  "recovery": {
+   "repeat": "Send again",
+   "jump": "Jump to reply",
+   "noReply": "No reply yet",
+   "repeated": "Sent again",
+   "unavailable": "Unavailable"
+  }
+ }
+}

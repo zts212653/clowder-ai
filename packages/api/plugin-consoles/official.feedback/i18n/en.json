@@ -1,0 +1,4 @@
+{
+  "plugin": { "entry": "Feedback", "desc": "Sanitized reports, checked before an Issue is filed" },
+  "load": { "loading": "Opening…", "error": "Feedback is not available right now." }
+}

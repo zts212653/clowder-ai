@@ -1,0 +1,7 @@
+Source: design-accepted-r116
+Commit: f27f1c62efbb37ce20127399164fc8f0f9d884bb
+Verification: independent git show of every tagged source
+Files checked: 81
+Byte mismatches: 0
+Extra files: 0
+mock / proto / local files: 0

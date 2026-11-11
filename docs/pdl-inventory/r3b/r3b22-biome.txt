@@ -1,0 +1,383 @@
+$ pnpm exec biome check packages/api/src/config/user-preferences-appearance.ts packages/api/test/config/appearance-config.test.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/hooks/useArtifactWidgetBlock.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/__tests__/memory-bindings.test.ts packages/web/src/pdl/__tests__/review-bindings.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/useMemoryBindings.tsx packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useWorkbenchBindings.ts packages/web/public/pdl-app/members.js packages/web/src/pdl/member-actions.ts packages/web/src/pdl/__tests__/member-actions.test.ts
+
+packages/web/src/pdl/__tests__/member-actions.test.ts:83:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    81 │         },
+    82 │       });
+  > 83 │     throw new Error('unhandled ' + url);
+       │                     ^^^^^^^^^^^^^^^^^^
+    84 │   });
+    85 │ });
+
+  i Unsafe fix: Use a template literal.
+
+     81  81 │           },
+     82  82 │         });
+     83     │ - ····throw·new·Error('unhandled·'·+·url);
+         83 │ + ····throw·new·Error(`unhandled·${url}`);
+     84  84 │     });
+     85  85 │   });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:71:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    69 │     id: 'profile',
+    70 │     revision: 'profile-r0',
+  > 71 │     content: prefix + 'Original body',
+       │              ^^^^^^^^^^^^^^^^^^^^^^^^
+    72 │     title: 'Profile',
+    73 │     type: 'profile',
+
+  i Unsafe fix: Use a template literal.
+
+     69  69 │       id: 'profile',
+     70  70 │       revision: 'profile-r0',
+     71     │ - ····content:·prefix·+·'Original·body',
+         71 │ + ····content:·`${prefix}Original·body`,
+     72  72 │       title: 'Profile',
+     73  73 │       type: 'profile',
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:100:42 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+     98 │       return response({
+     99 │         readStatus: 'ready',
+  > 100 │         entries: [{ ...person, personId: 'person-' + offset }],
+        │                                          ^^^^^^^^^^^^^^^^^^
+    101 │         meta: { count: 1, limit: 20, offset, hasMore: offset < 2, nextOffset: offset < 2 ? offset + 1 : undefined },
+    102 │       });
+
+  i Unsafe fix: Use a template literal.
+
+     98  98 │         return response({
+     99  99 │           readStatus: 'ready',
+    100     │ - ········entries:·[{·...person,·personId:·'person-'·+·offset·}],
+        100 │ + ········entries:·[{·...person,·personId:·`person-${offset}`·}],
+    101 101 │           meta: { count: 1, limit: 20, offset, hasMore: offset < 2, nextOffset: offset < 2 ? offset + 1 : undefined },
+    102 102 │         });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:125:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    123 │     if (url.pathname === '/api/memory/events')
+    124 │       return response({ events: [], meta: { count: 0, offset: 0, hasMore: false } });
+  > 125 │     throw new Error('Unexpected memory owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    126 │   });
+    127 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    123 123 │       if (url.pathname === '/api/memory/events')
+    124 124 │         return response({ events: [], meta: { count: 0, offset: 0, hasMore: false } });
+    125     │ - ····throw·new·Error('Unexpected·memory·owner·'·+·path);
+        125 │ + ····throw·new·Error(`Unexpected·memory·owner·${path}`);
+    126 126 │     });
+    127 127 │   });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:323:92 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    321 │   });
+    322 │   const hook = await ready();
+  > 323 │   await act(() => hook.result.current.action('memoryOpen', { family, id: family, revision: family + '-r0' }));
+        │                                                                                            ^^^^^^^^^^^^^^
+    324 │   expect(hook.result.current.models().cafeMemory.detail).toEqual(
+    325 │     expect.objectContaining({
+
+  i Unsafe fix: Use a template literal.
+
+    321 321 │     });
+    322 322 │     const hook = await ready();
+    323     │ - ··await·act(()·=>·hook.result.current.action('memoryOpen',·{·family,·id:·family,·revision:·family·+·'-r0'·}));
+        323 │ + ··await·act(()·=>·hook.result.current.action('memoryOpen',·{·family,·id:·family,·revision:·`${family}-r0`·}));
+    324 324 │     expect(hook.result.current.models().cafeMemory.detail).toEqual(
+    325 325 │       expect.objectContaining({
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:123:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    121 │       return response(task);
+    122 │     }
+  > 123 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    124 │   });
+    125 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    121 121 │         return response(task);
+    122 122 │       }
+    123     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        123 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    124 124 │     });
+    125 125 │   });
+
+
+packages/web/src/hooks/useArtifactWidgetBlock.ts:81:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: attempt.
+
+    79 │   const messageId = coordinates?.messageId ?? null;
+    80 │   const blockId = coordinates?.blockId ?? null;
+  > 81 │   useEffect(() => {
+       │   ^^^^^^^^^
+    82 │     if (!thread || !messageId || !blockId) {
+    83 │       setLoaded({ key, state: { status: 'idle' } });
+
+  i This dependency can be removed from the list.
+
+     99 │       controller.abort();
+    100 │     };
+  > 101 │   }, [key, thread, messageId, blockId, attempt]);
+        │                                        ^^^^^^^
+    102 │
+    103 │   // 坐标变化后、effect 跑完前，旧结果不能当成新块的预览。
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    101 │ ··},·[key,·thread,·messageId,·blockId,·attempt]);
+        │                                      ---------
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:80:61 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 30 detected (max: 15).
+
+    78 │     proposals: [],
+    79 │   };
+  > 80 │   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+       │                                                             ^^^
+    81 │     const url = new URL(String(path), 'https://api.test');
+    82 │     if (init?.method === 'POST') {
+
+  i Please refactor this function to reduce its complexity score from 30 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:155:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    153 │     ],
+    154 │   };
+  > 155 │   profile.content = updateProfileOpeningReference(profile.content, opening)!;
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    156 │   const hook = await ready();
+    157 │   await act(() =>
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:160:18 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    158 │     hook.result.current.action('memoryOpen', { family: 'profile', id: 'profile', revision: 'profile-r0' }),
+    159 │   );
+  > 160 │   const detail = hook.result.current.models().cafeMemory.detail!;
+        │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    161 │   expect(detail).toHaveProperty('profile.openingReference', opening);
+    162 │   await act(() =>
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:187:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    185 │   expect(readProfileOpeningReference(profile.content)).toBeNull();
+    186 │   expect(profile.content).toContain('Original body');
+  > 187 │   const cancelled = hook.result.current.models().cafeMemory.detail!;
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    188 │   expect(cancelled).toHaveProperty('profile.openingReference', null);
+    189 │ });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:191:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    189 │ });
+    190 │ it('rejects invalid or stale opening edits before writing to the profile owner', async () => {
+  > 191 │   profile.content = updateProfileOpeningReference(profile.content, {
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 192 │     asOf: '2026-11-03',
+  > 193 │     excerpts: [{ kind: 'relationship', text: 'Original', source: { threadId: 'thread', messageId: 'message' } }],
+  > 194 │   })!;
+        │   ^^^
+    195 │   const hook = await ready();
+    196 │   await act(() =>
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:294:16 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    292 │     } satisfies PersonMemoryProposalView,
+    293 │   };
+  > 294 │   const read = vi.mocked(apiFetch).getMockImplementation()!;
+        │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    295 │   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    296 │     const pathname = new URL(String(path), 'https://api.test').pathname;
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:82:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    80 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    81 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 82 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    83 │     const path = String(raw),
+    84 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:195:19 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    193 │   await act(() => hook.result.current.action('fileOpen', { p: 'note.md', w: 'wt' }));
+    194 │   await waitFor(() => expect(hook.result.current.models().filePage?.actions.load).toBe(''));
+  > 195 │   const actions = hook.result.current.models().filePage!.actions;
+        │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    196 │   expect(actions.allowedActions).toEqual([]);
+    197 │   expect(actions.menuActions).toEqual([{ label: '在访达中显示', op: 'reveal' }]);
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    193 193 │     await act(() => hook.result.current.action('fileOpen', { p: 'note.md', w: 'wt' }));
+    194 194 │     await waitFor(() => expect(hook.result.current.models().filePage?.actions.load).toBe(''));
+    195     │ - ··const·actions·=·hook.result.current.models().filePage!.actions;
+        195 │ + ··const·actions·=·hook.result.current.models().filePage?.actions;
+    196 196 │     expect(actions.allowedActions).toEqual([]);
+    197 197 │     expect(actions.menuActions).toEqual([{ label: '在访达中显示', op: 'reveal' }]);
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:217:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    215 │     marks: [],
+    216 │   });
+  > 217 │   expect(new URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        │                  ^^^^^
+    218 │ });
+    219 │ it.each([
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    215 215 │       marks: [],
+    216 216 │     });
+    217     │ - ··expect(new·URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        217 │ + ··expect(new·URL(page?.actions.source).searchParams.get('path')).toBe(path);
+    218 218 │   });
+    219 219 │   it.each([
+
+
+packages/web/src/pdl/member-actions.ts:64:23 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 21 detected (max: 15).
+
+    62 │ }
+    63 │
+  > 64 │ export async function saveMember(
+       │                       ^^^^^^^^^^
+    65 │   form: HubCatEditorFormState,
+    66 │   baseline: CatData | null,
+
+  i Please refactor this function to reduce its complexity score from 21 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/member-actions.ts:112:29 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    110 │ ) {
+    111 │   const receipt = await write<{ config: ConfigData }>('/api/config/co-creator', value, 'PATCH');
+  > 112 │   primeCoCreatorConfigCache(receipt.config.coCreator!);
+        │                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+    113 │   return receipt.config.coCreator;
+    114 │ }
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:1:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━
+
+  × The imports and exports are not sorted.
+
+  > 1 │ import type {
+      │ ^^^^^^^^^^^^^
+  > 2 │   EntityMemoryProposalView,
+  > 3 │   PersonMemoryProposalView,
+  > 4 │   ProfileMemoryProposalView,
+  > 5 │   ProfileUsageSummary,
+  > 6 │ } from '@cat-cafe/shared';
+      │ ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    7 │ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+    8 │ import { apiFetch } from '@/utils/api-client';
+
+  i Safe fix: Organize Imports (Biome)
+
+      5   5 │     ProfileUsageSummary,
+      6   6 │   } from '@cat-cafe/shared';
+      7     │ - import·{·afterEach,·beforeEach,·expect,·it,·vi·}·from·'vitest';
+      8     │ - import·{·apiFetch·}·from·'@/utils/api-client';
+      9     │ - import·{·readProfileOpeningReference,·updateProfileOpeningReference·}·from·'@cat-cafe/shared/profile-opening-reference';
+          7 │ + import·{·readProfileOpeningReference,·updateProfileOpeningReference·}·from·'@cat-cafe/shared/profile-opening-reference';
+          8 │ + import·{·afterEach,·beforeEach,·expect,·it,·vi·}·from·'vitest';
+          9 │ + import·{·apiFetch·}·from·'@/utils/api-client';
+     10  10 │   import { useMemoryBindings } from '../useMemoryBindings';
+     11  11 │   import { act, cleanup, renderHook, waitFor } from './hook-host';
+
+
+packages/web/src/pdl/member-actions.ts:1:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  × The imports and exports are not sorted.
+
+  > 1 │ import type { CoCreatorConfig, ConfigData } from '@/components/config-viewer-types';
+      │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2 │ import type { TemplateCard } from '@/components/first-run-quest/TemplateStep';
+    3 │ import type { AccountsResponse } from '@/components/hub-accounts.types';
+
+  i Safe fix: Organize Imports (Biome)
+
+      7   7 │     buildCatPayload,
+      8   8 │     buildCodexConfigPatches,
+      9     │ - ··carrierOptionsForClient,
+     10     │ - ··CLIENT_OPTIONS,
+          9 │ + ··CLIENT_OPTIONS,
+     11  10 │     type CodexRuntimeSettings,
+     12     │ - ··filterAccounts,
+         11 │ + ··carrierOptionsForClient,
+         12 │ + ··filterAccounts,
+     13  13 │     type HubCatEditorFormState,
+     14  14 │     initialState,
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 773.
+Checked 18 files in 1970ms. No fixes applied.
+Found 5 errors.
+Found 732 warnings.
+Found 56 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+
+
+
+Exit code: 1

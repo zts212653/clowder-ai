@@ -1,0 +1,5597 @@
+nav: {cafe: nav.cafe.shell, settings: nav.settings.shell}
+frags:
+  refChip:
+    icon:
+      of: "@kind"
+      map:
+        missing: file
+        file: file
+        commit: git
+        _:
+          of: "@objectType"
+          map: {issue: issue, _: pr}
+    name:
+      of: "@kind"
+      map:
+        missing: {of: "@reference", fmt: basename}
+        file:
+          parts:
+            - {of: "@path", fmt: basename}
+            - parts:
+                - parts: [":", "@line"]
+                  sep: ""
+              when: "@line"
+          sep: ""
+        commit: "@title"
+        _:
+          parts:
+            - parts:
+                - parts: ["#", "@number"]
+                  sep: ""
+            - parts:
+                - parts: [" ", "@title"]
+                  sep: ""
+              when: "@title"
+          sep: ""
+    tone:
+      of: "@kind"
+      map:
+        missing: warn
+        file: ""
+        commit: ""
+        _:
+          of: "@checks"
+          map:
+            checksFailed: danger
+            _:
+              of: "@state"
+              map: {closed: warn, _: ""}
+    tip:
+      of: "@kind"
+      map:
+        missing: t:chatCards.refs.missing
+        file: "@absolutePath"
+        commit:
+          of: "@sha"
+          slice: [0, 10]
+        _:
+          of: [0, 1, 2, 3]
+          item:
+            of: "@"
+            map:
+              "0": $.repo
+              "1": "#"
+              "2": $.number
+              "3":
+                of: $.checks
+                map:
+                  checksFailed:
+                    of: [0, 1]
+                    item:
+                      of: "@"
+                      map: {"0": " · ", "1": t:chatCards.refs.checksFailed}
+                    sep: ""
+                  _:
+                    of: $.state
+                    map:
+                      closed:
+                        of: [0, 1]
+                        item:
+                          of: "@"
+                          map: {"0": " · ", "1": t:wsCommunity.closed}
+                        sep: ""
+                      _: ""
+          sep: ""
+    act:
+      of: "@kind"
+      map: {missing: "", file: fileOpen, commit: copy, _: openUrl}
+    args:
+      of: "@kind"
+      map:
+        file: {v: "@absolutePath", w: "@worktreeId"}
+        commit: {v: "@sha"}
+        _: {url: "@url"}
+  MAIN: {anchor: main, as: cover}
+  EXEC_MEMBER_ITEM:
+    overview:
+      - kind: usage
+        when: "@currentSession.usage"
+        input: "@currentSession.usage.in"
+        output: "@currentSession.usage.out"
+        cache: "@currentSession.cachePercent"
+        cost: "@currentSession.usage.cost"
+      - kind: context
+        when: "@currentSession"
+        hasCeiling: "@hasContext"
+        used: "@context.used"
+        ceiling: "@context.ceiling"
+        source: "@context.source"
+        pct: "@contextPercent"
+        warn: "@contextWarn"
+      - kind: runtime
+        when: "@currentSession.runtime"
+        runtimeKind: "@currentSession.runtime.kind"
+        life: "@currentSession.runtime.life"
+      - kind: started
+        when: "@currentSession"
+        created: "@currentSession.created"
+        createdTimestamp: "@currentSession.createdTimestamp"
+        messages: "@currentSession.msgs"
+        compress: "@currentSession.compress"
+        hasCompress:
+          of: "@currentSession.compress"
+          gte: 0
+          map: {"true": true, _: false}
+        compressed:
+          of: "@currentSession.compress"
+          gte: 1
+          map: {"true": true, _: false}
+    slot: ws.exec.cat
+    actsCtx: {who: "@id", cur: "@hasSession", cli: "@session.cli", running: "@running"}
+    expand:
+      lit: {$frag: EXEC_CAT_EXPAND}
+    ctx:
+      of: "@hasContext"
+      map:
+        "true":
+          label:
+            t: workbench.percent
+            args: ["@contextPercent"]
+          tone:
+            of: "@contextWarn"
+            map: {"true": warn, "false": "", _: ""}
+          tip:
+            t: wsSessions.member.ctxTip
+            args:
+              - t: wsSessions.context.tip.value
+                args:
+                  - true
+                  - {of: "@context.used", fmt: num}
+                  - {of: "@context.ceiling", fmt: num}
+                  - t: wsSessions.context.tip.source
+                    args: ["@context.source"]
+        _: null
+    run:
+      tone:
+        of: {$frag: EXEC_RUN_STATE}
+        map:
+          idle: idle
+          spawning: info
+          streaming: info
+          alive_but_silent: warn
+          suspected_stall: warn
+          error: danger
+          _: {$frag: EXEC_RUN_STATE}
+      tip:
+        t: workbench.runTip
+        args:
+          - {$frag: EXEC_RUN_STATE}
+          - {of: "@run.time", fmt: clock}
+          - of: "@run.hasLast"
+            map:
+              "true":
+                t: workbench.previousRun.true
+                args: ["@run.last"]
+              "false": ""
+              _: "@run.hasLast"
+      timer:
+        of: "@running"
+        map:
+          "true": {of: "@run.time", fmt: clock}
+          "false": ""
+          _: "@running"
+    tone:
+      of: "@running"
+      map:
+        "true": run
+        "false":
+          of: "@current"
+          map: {"true": "", "false": past, _: "@current"}
+        _: "@running"
+    ctl:
+      - type: copy
+        value:
+          t: workbench.sessionNumber
+          args: ["@sessionSeq"]
+        v: "@sessionId"
+        label: t:wsStatus.copySessionId
+        tip:
+          t: wsExec.session
+          args: ["@sessionSeq"]
+        when: "@hasSession"
+    stat:
+      - {text: —, tip: t:wsSessions.member.noCurrentSession, when: "!@hasSession"}
+    bar:
+      pct: "@contextPercent"
+      tone:
+        of: "@contextWarn"
+        map: {"true": warn, "false": "", _: ""}
+  EXEC_CAT_EXPAND:
+    - type: list
+      inline: true
+      from: "@overview"
+      row:
+        layout: line
+        title:
+          text:
+            of: "@kind"
+            map:
+              usage: t:wsSessions.member.overviewLabel.usage
+              context: t:memberForm.context
+              runtime: t:wsSessions.runtime
+              started: t:wsSessions.started
+              _: "@kind"
+        cols:
+          - v:
+              parts:
+                - of: "@kind"
+                  map:
+                    usage:
+                      t: wsSessions.member.overviewValue.usage
+                      args:
+                        - {of: "@input", fmt: compact}
+                        - {of: "@output", fmt: compact}
+                        - "@cache"
+                        - {of: "@cost", fmt: dec2}
+                        - t: wsSessions.context.tip.value
+                          args:
+                            - "@hasCeiling"
+                            - {of: "@used", fmt: num}
+                            - {of: "@ceiling", fmt: num}
+                            - t: wsSessions.context.tip.source
+                              args: ["@source"]
+                        - "@runtimeKind"
+                        - "@life"
+                        - of: "@createdTimestamp"
+                          map:
+                            "true": {of: "@created", fmt: ago}
+                            _: "@created"
+                        - "@messages"
+                        - of: "@hasCompress"
+                          map:
+                            "false":
+                              t: wsSessions.compression.value.false
+                              args:
+                                - t: wsSessions.compression.known
+                                  args: ["@compressed", "@compress"]
+                            "true":
+                              t: wsSessions.compression.known
+                              args: ["@compressed", "@compress"]
+                            _: "@hasCompress"
+                    context:
+                      t: wsSessions.context.tip.value
+                      args:
+                        - "@hasCeiling"
+                        - {of: "@used", fmt: num}
+                        - {of: "@ceiling", fmt: num}
+                        - t: wsSessions.context.tip.source
+                          args: ["@source"]
+                    runtime:
+                      parts: ["@runtimeKind", " · ", "@life"]
+                      sep: ""
+                    started:
+                      t: wsSessions.member.overviewValue.started
+                      args:
+                        - {of: "@input", fmt: compact}
+                        - {of: "@output", fmt: compact}
+                        - "@cache"
+                        - {of: "@cost", fmt: dec2}
+                        - t: wsSessions.context.tip.value
+                          args:
+                            - "@hasCeiling"
+                            - {of: "@used", fmt: num}
+                            - {of: "@ceiling", fmt: num}
+                            - t: wsSessions.context.tip.source
+                              args: ["@source"]
+                        - "@runtimeKind"
+                        - "@life"
+                        - of: "@createdTimestamp"
+                          map:
+                            "true": {of: "@created", fmt: ago}
+                            _: "@created"
+                        - "@messages"
+                        - of: "@hasCompress"
+                          map:
+                            "false":
+                              t: wsSessions.compression.value.false
+                              args:
+                                - t: wsSessions.compression.known
+                                  args: ["@compressed", "@compress"]
+                            "true":
+                              t: wsSessions.compression.known
+                              args: ["@compressed", "@compress"]
+                            _: "@hasCompress"
+                    _: "@kind"
+            w: auto
+        bar:
+          pct: "@pct"
+          tone:
+            of: "@warn"
+            map: {"true": warn, "false": "", _: ""}
+      optional: true
+    - type: text
+      parts:
+        - text:
+            t: wsSessions.member.ctxWarn
+            args:
+              - of: "@session.compressed"
+                map:
+                  "true": t:wsSessions.member.compressNext.true
+                  "false": t:memberForm.contextPolicy.ctxStrat
+                  _: "@session.compressed"
+      tone: warn
+      when: "@session.ctxWarn"
+    - type: list
+      label: t:wsSessions.plan
+      count:
+        t: workbench.planProgress
+        args: ["@plan.doneCount", "@plan.count"]
+      from: "@plan.items"
+      row:
+        layout: line
+        lead:
+          - {icon: check, size: s, when: "@done"}
+          - dot:
+              of: "@state"
+              map: {completed: idle, in_progress: info, pending: idle, _: "@state"}
+            when: "!@done"
+        title: "@title"
+        tone:
+          of: "@done"
+          map: {"true": done, "false": "", _: "@done"}
+      optional: true
+    - type: list
+      id: "@runsId"
+      label: t:wsSessions.sessions
+      from: "@sessions"
+      row:
+        layout: line
+        key: "@key"
+        title:
+          text:
+            t: wsExec.session
+            args: ["@seq"]
+        inline:
+          - control: {type: status, tone: info, text: t:wsExec.current}
+            when: "@current"
+          - text:
+              t: wsSessions.sealReason
+              args: ["@reason"]
+            variant: meta
+            when: ["@reason", "!@current"]
+        cols:
+          - v:
+              text:
+                of: "@current"
+                map:
+                  "true": ""
+                  "false":
+                    t: wsSessions.member.sessionAt.false
+                    args:
+                      - of: "@timestamp"
+                        map:
+                          "true": {of: "@at", fmt: ago}
+                          _: "@at"
+                  _: "@current"
+            w: auto
+          - control:
+              - {type: copy, value: "", v: "@sid", label: t:wsStatus.copySessionId}
+        expand:
+          - type: list
+            inline: true
+            id: "@runsId"
+            from: "@runs"
+            item: {who: ""}
+            row: exec.run
+            empty: t:wsTrace.notFound
+  EXEC_RUN_STATE:
+    of: "@run.state"
+    map:
+      idle: idle
+      spawning: spawning
+      streaming: streaming
+      alive_but_silent: alive_but_silent
+      suspected_stall: suspected_stall
+      error: error
+      _: streaming
+  LIVE_WAIT_DETAILS:
+    - type: text
+      tone: warn
+      when:
+        of: "@state"
+        map:
+          unknown: "1"
+          ready_to_return: "@reason"
+          waiting_for_update: "@reason"
+          _: "@state"
+      parts:
+        - text:
+            of: "@reason"
+            map:
+              deployment_evidence_unavailable:
+                t: wsLive.wait.reason.label.deployment_evidence_unavailable
+                args:
+                  - of: "@state"
+                    map:
+                      unknown: t:wsLive.wait.reason.fallback.unknown
+                      ready_to_return: ""
+                      waiting_for_update: ""
+                      _: "@state"
+              deployment_evidence_incomplete:
+                t: wsLive.wait.reason.label.deployment_evidence_incomplete
+                args:
+                  - of: "@state"
+                    map:
+                      unknown: t:wsLive.wait.reason.fallback.unknown
+                      ready_to_return: ""
+                      waiting_for_update: ""
+                      _: "@state"
+              deployment_match_pending_recheck:
+                t: wsLive.wait.reason.label.deployment_match_pending_recheck
+                args:
+                  - of: "@state"
+                    map:
+                      unknown: t:wsLive.wait.reason.fallback.unknown
+                      ready_to_return: ""
+                      waiting_for_update: ""
+                      _: "@state"
+              "":
+                of: "@state"
+                map:
+                  unknown: t:wsLive.wait.reason.fallback.unknown
+                  ready_to_return: ""
+                  waiting_for_update: ""
+                  _: "@state"
+              _: "@reason"
+    - type: text
+      parts:
+        parts:
+          - text:
+              t: wsLive.wait.item.nextPrefix
+              args: ["@ready"]
+          - text:
+              t: wsLive.wait.item.nextText
+              args: ["@nextStep"]
+        sep: ""
+  CAFE_SHELL_TOOLS:
+    - type: button
+      variant: drawer
+      iconOnly: true
+      icon: menu
+      label: t:chatHeader.openList
+      act: toggle
+      args: {path: s.navOpen}
+    - type: button
+      variant: reveal
+      iconOnly: true
+      icon: menu
+      label: t:chatHeader.expandNav
+      act: toggle
+      args: {path: cs.navHidden}
+      when: $.navHidden
+  CAFE_MEMORY_VALUE:
+    of:
+      of: "@field"
+      map:
+        type: 0
+        occurredAt: 1
+        duration: 1
+        topic: 1
+        uncertainty: 1
+        aliases: 1
+        asOf: 1
+        openingMode: 2
+        stance: 1
+        takeaway: 1
+        quotes: 1
+        brakeQuote: 1
+        brakeAction: 3
+        brakeRule: 1
+        _: -1
+    map:
+      "0":
+        of: "@value"
+        map:
+          taste: t:memoryOwners.category.taste
+          profile: t:memoryOwners.layer.primer
+          person: t:memoryOwners.category.person
+          entity: t:memoryOwners.category.entity
+          event: t:settingsUi.contribution.kind.events
+          meeting: t:memoryOwners.category.meeting
+          _: "@value"
+      "1":
+        of: "@field"
+        map:
+          aliases:
+            t: chat.emptyValue
+            args:
+              - {of: "@value", sep: " · "}
+          uncertainty: {of: "@value", sep: ；}
+          quotes: {of: "@value", sep: "\n"}
+          occurredAt:
+            t: chat.emptyValue
+            args:
+              - of: "@value.kind"
+                map: {exact: "@value.value", _: "@value.raw"}
+          duration:
+            t: chat.emptyValue
+            args:
+              - of: "@value.kind"
+                map: {exact: "@value.value", _: "@value.raw"}
+          topic:
+            t: chat.emptyValue
+            args: ["@value"]
+          _: "@value"
+      "2":
+        of: "@usageError"
+        map:
+          "true": "@value"
+          "false":
+            of: "@value"
+            map:
+              enabled: t:control.enable
+              onDemand: t:memoryOwners.mode.onDemand
+              _: "@value"
+          _: "@usageError"
+      "3":
+        t: memoryOwners.fieldValue.brakeAction
+        args:
+          - of: "@field"
+            map:
+              aliases:
+                t: chat.emptyValue
+                args:
+                  - {of: "@value", sep: " · "}
+              uncertainty: {of: "@value", sep: ；}
+              quotes: {of: "@value", sep: "\n"}
+              occurredAt:
+                t: chat.emptyValue
+                args:
+                  - of: "@value.kind"
+                    map: {exact: "@value.value", _: "@value.raw"}
+              duration:
+                t: chat.emptyValue
+                args:
+                  - of: "@value.kind"
+                    map: {exact: "@value.value", _: "@value.raw"}
+              topic:
+                t: chat.emptyValue
+                args: ["@value"]
+              _: "@value"
+          - of: "@value"
+            map:
+              taste: t:memoryOwners.category.taste
+              profile: t:memoryOwners.layer.primer
+              person: t:memoryOwners.category.person
+              entity: t:memoryOwners.category.entity
+              event: t:settingsUi.contribution.kind.events
+              meeting: t:memoryOwners.category.meeting
+              _: "@value"
+          - of: "@usageError"
+            map:
+              "true": "@value"
+              "false":
+                of: "@value"
+                map:
+                  enabled: t:control.enable
+                  onDemand: t:memoryOwners.mode.onDemand
+                  _: "@value"
+              _: "@usageError"
+      _: "@field"
+  INBOX_DECISION:
+    act: fold
+    args: {path: cs.ib.open, v: "@id"}
+    titleKind: decision
+    name: {of: "@from", fmt: identityHandle}
+    decide: true
+    ask:
+      of: "@kind"
+      map: {ask: true, _: false}
+    slot: cafe.inbox.decide
+    dl:
+      - field: why
+        v: "@why"
+        when:
+          of: "@kind"
+          map: {ask: false, _: true}
+      - field: after
+        v: "@after"
+        when:
+          of: "@kind"
+          map: {ask: false, _: true}
+  FILM_MEDIA_BLOCKS:
+    - {type: view, id: film.media, data: $.media, when: "!$.comparison"}
+    - type: toolbar
+      when: $.compareGroup
+      items:
+        - type: button
+          iconOnly: true
+          icon: play
+          label: t:media.group.play
+          act: mediaGroup
+          args: {group: $.compareGroup.group, op: play}
+        - type: button
+          iconOnly: true
+          icon: pause
+          label: t:media.group.pause
+          act: mediaGroup
+          args: {group: $.compareGroup.group, op: pause}
+        - type: select
+          id: film-point
+          options:
+            - ["", t:media.group.point]
+            - from: $.compareGroup.points
+              item: ["@0", "@1"]
+          value: ""
+          change: mediaGroupPoint
+          args: {group: $.compareGroup.group}
+          label: t:media.group.point
+          when: $.compareGroup.hasPoints
+    - type: split
+      variant: compare
+      when: $.comparison
+      left:
+        - {type: text, variant: meta, text: $.primaryTitle}
+        - {type: view, id: film.media, data: $.media}
+      right:
+        - {type: text, variant: meta, text: $.referenceTitle}
+        - {type: view, id: film.media, data: $.comparison}
+  EVO_JUDGE:
+    of: $.detail.view
+    map: {judge: true, _: false}
+  EVO_FIELD_ITEM:
+    label:
+      of: "@field"
+      map:
+        content: "@label"
+        axes: "@label"
+        scope:
+          t: mcp.scope
+          args: ["@label"]
+        reason:
+          t: evolutionFlow.reason
+          args: ["@label"]
+        boundary:
+          t: workbench.evoField.boundary
+          args: ["@label"]
+        choiceReason:
+          t: workbench.evoField.choiceReason
+          args: ["@label"]
+        nextAction:
+          t: guide.next
+          args: ["@label"]
+        observationUnit:
+          t: workbench.evoField.observationUnit
+          args: ["@label"]
+        estimator:
+          t: workbench.evoField.estimator
+          args: ["@label"]
+        counterexample:
+          t: workbench.evoField.counterexample
+          args: ["@label"]
+        validity:
+          t: workbench.evoField.validity
+          args: ["@label"]
+        collection:
+          t: workbench.evoField.collection
+          args: ["@label"]
+        missing:
+          t: workbench.evoField.missing
+          args: ["@label"]
+        variable:
+          t: workbench.evoField.variable
+          args: ["@label"]
+        controls:
+          t: workbench.evoField.controls
+          args: ["@label"]
+        holdout:
+          t: workbench.evoField.holdout
+          args: ["@label"]
+        repeatability:
+          t: workbench.evoField.repeatability
+          args: ["@label"]
+        confidence:
+          t: workbench.evoField.confidence
+          args: ["@label"]
+        comparability:
+          t: workbench.evoField.comparability
+          args: ["@label"]
+        summary:
+          t: evolutionFlow.summary
+          args: ["@label"]
+        metric: "@label"
+        comparison: "@label"
+        _: "@field"
+    v:
+      parts:
+        - parts: "@value"
+          sep: ；
+          each: {text: "@"}
+          when: "@multiple"
+        - parts:
+            - of: "@field"
+              map:
+                content: "@value"
+                axes:
+                  parts: ["@axis", " · ", "@unit"]
+                  sep: ""
+                scope: "@value"
+                reason: "@value"
+                boundary: "@value"
+                choiceReason: "@value"
+                nextAction: "@value"
+                observationUnit: "@value"
+                estimator: "@value"
+                counterexample: "@value"
+                validity: "@value"
+                collection: "@value"
+                missing: "@value"
+                variable: "@value"
+                controls: "@value"
+                holdout: "@value"
+                repeatability: "@value"
+                confidence: "@value"
+                comparability: "@value"
+                summary: "@value"
+                metric:
+                  of: "@measured"
+                  map:
+                    "true":
+                      parts: ["@value", " ", "@unit"]
+                      sep: ""
+                    "false": —
+                    _: "@measured"
+                comparison:
+                  parts:
+                    - of: "@leftMeasured"
+                      map: {"true": "@left", "false": —, _: "@leftMeasured"}
+                    - " → "
+                    - of: "@rightMeasured"
+                      map: {"true": "@right", "false": —, _: "@rightMeasured"}
+                    - " "
+                    - "@unit"
+                  sep: ""
+                _: "@field"
+          when: "!@multiple"
+      sep: ""
+  EVO_CASES:
+    - $.detail.exploration.selectedExperiment
+    - of: $.detail.exploration.compare.hasError
+      map: {"false": false, _: true}
+  EVO_HIST:
+    of: $.detail.view
+    map: {hist: true, _: false}
+  CHAT_SYS_MARKDOWN:
+    - from: "@commands"
+      item:
+        t: chat.helpLine
+        args:
+          - "@command"
+          - of: "@command"
+            map:
+              /help: t:chat.commands.description./help
+              /config: t:chat.commands.description./config
+              /config set: t:chat.commands.description./config set
+              /remember: t:chat.commands.description./remember
+              /recall: t:chat.commands.description./recall
+              /approve: t:chat.commands.description./approve
+              /archive: t:chat.commands.description./archive
+              /evidence: t:chat.commands.description./evidence
+              /reflect: t:chat.commands.description./reflect
+              /tasks extract: t:chat.commands.description./tasks extract
+              /vote: t:chat.commands.description./vote
+              /game werewolf: t:workbench.commands.startWerewolf
+              /signals: inbox · search · sources · stats
+              /thread: t:chat.commands.description./thread
+              /file: t:chat.commands.description./file
+              _: "@command"
+    - of: "@command"
+      map:
+        help: ""
+        vote: "@question"
+        voteStatus: ""
+        noVote: ""
+        remember: ""
+        recall:
+          t: chat.commands.body.recall
+          args:
+            - "@question"
+            - "@count"
+            - of: "@sendMode"
+              map:
+                queue: t:composer.sendMode.queue
+                steer: t:queue.send.steerReply
+                _: "@sendMode"
+            - t: gameLobby.dialog.board
+              args: ["@board"]
+            - of: "@mode"
+              map:
+                player: t:gameLobby.mode.player
+                standard: t:gameLobby.mode.player
+                _: "@mode"
+            - of: "@voice"
+              map: {"true": t:chat.gameVoice.true, "false": "", _: "@voice"}
+        configSet: ""
+        config:
+          t: chat.commands.body.config
+          args:
+            - "@question"
+            - "@count"
+            - of: "@sendMode"
+              map:
+                queue: t:composer.sendMode.queue
+                steer: t:queue.send.steerReply
+                _: "@sendMode"
+            - t: gameLobby.dialog.board
+              args: ["@board"]
+            - of: "@mode"
+              map:
+                player: t:gameLobby.mode.player
+                standard: t:gameLobby.mode.player
+                _: "@mode"
+            - of: "@voice"
+              map: {"true": t:chat.gameVoice.true, "false": "", _: "@voice"}
+        tasks: ""
+        evidence:
+          t: chat.commands.body.evidence
+          args:
+            - "@question"
+            - "@count"
+            - of: "@sendMode"
+              map:
+                queue: t:composer.sendMode.queue
+                steer: t:queue.send.steerReply
+                _: "@sendMode"
+            - t: gameLobby.dialog.board
+              args: ["@board"]
+            - of: "@mode"
+              map:
+                player: t:gameLobby.mode.player
+                standard: t:gameLobby.mode.player
+                _: "@mode"
+            - of: "@voice"
+              map: {"true": t:chat.gameVoice.true, "false": "", _: "@voice"}
+        reflect: ""
+        approve: ""
+        archive: ""
+        unknown: ""
+        game:
+          t: chat.commands.body.game
+          args:
+            - "@question"
+            - "@count"
+            - of: "@sendMode"
+              map:
+                queue: t:composer.sendMode.queue
+                steer: t:queue.send.steerReply
+                _: "@sendMode"
+            - t: gameLobby.dialog.board
+              args: ["@board"]
+            - of: "@mode"
+              map:
+                player: t:gameLobby.mode.player
+                standard: t:gameLobby.mode.player
+                _: "@mode"
+            - of: "@voice"
+              map: {"true": t:chat.gameVoice.true, "false": "", _: "@voice"}
+        _: ""
+      when:
+        of: "@command"
+        map: {help: false, _: true}
+  QUEUE_TARGET_STATE:
+    of: "@failure.acceptance"
+    map:
+      unknown:
+        of: "@dispatch.inputRead.status"
+        map: {read: read_uncertain, _: uncertain}
+      not_accepted: failed
+      _:
+        of: "@dispatch.appendAcceptance"
+        map:
+          pending: confirming
+          written:
+            of: "@dispatch.inputRead.status"
+            map: {read: read_wait, _: written}
+          _:
+            of: "@dispatch.inputRead.status"
+            map: {read: read, _: delivered}
+  CHAT_POP_BACK_HEADER:
+    of: $.from.kind
+    map:
+      plus:
+        of: $.from.subpage
+        map:
+          main: plus.main
+          mode: plus.mode
+          prefer: plus.prefer
+          whisper: plus.whisper
+          game: plus.game
+          gameMode: plus.gameMode
+      projPick:
+        of: $.from.subpage
+        map: {browse: projPick.browse, _: projPick}
+      _: $.from.kind
+  CHAT_POP_HEADER:
+    of: $.kind
+    map:
+      plus:
+        of: $.subpage
+        map:
+          main: ""
+          mode: plus.mode
+          prefer: plus.prefer
+          whisper: plus.whisper
+          game: plus.game
+          gameMode: plus.gameMode
+      projPick:
+        of: $.subpage
+        map: {browse: projPick.browse, _: projPick}
+      textsel: ""
+      projView: ""
+      _: $.kind
+  THREAD_PROJECT_OPEN:
+    of: "@override"
+    map:
+      "true": true
+      "false": false
+      _:
+        of: "@idle"
+        map: {"true": false, _: true}
+  THREAD_SECTION_ITEM:
+    key: "@key"
+    rows: "@rows"
+    collapsed:
+      of: "@head.kind"
+      map:
+        proj:
+          of: "@override"
+          map:
+            "true": false
+            "false": true
+            _:
+              of: "@idle"
+              map: {"true": true, _: false}
+        _: "@collapsed"
+    empty:
+      of: "@head.kind"
+      map:
+        proj:
+          of: "@head.unassigned"
+          map: {"true": "", _: project}
+        _:
+          of: $.group
+          map: {pinned: pinned, favorites: favorites, _: ""}
+    head:
+      kind: "@head.kind"
+      id: "@head.id"
+      name: "@head.name"
+      path: "@head.path"
+      tip: "@head.path"
+      n: "@head.n"
+      unassigned: "@head.unassigned"
+      warn: "@head.warn"
+      fixed: "@head.fixed"
+      peek: "@head.peek"
+      sort: "@head.sort"
+      open:
+        of: "@head.kind"
+        map:
+          proj: {$frag: THREAD_PROJECT_OPEN}
+          _: "@head.open"
+      add:
+        of: "@head.kind"
+        map:
+          proj:
+            of: "@head.unassigned"
+            map: {"true": false, _: true}
+          _: false
+      note:
+        of: $.route
+        map:
+          chat:
+            of: $.group
+            map:
+              recent:
+                of: "@key"
+                map: {pinned: "10", _: ""}
+              _: ""
+          _: ""
+  REPLAY_STREAM: {type: stream, id: theater, from: $.items}
+  FILE_INFO:
+    type: each
+    from:
+      - {}
+    when: $.fileInfo
+    item:
+      fields:
+        - {field: type, value: $.fileInfo.mime, when: $.fileInfo.mime}
+        - field: size
+          value: $.fileInfo.size
+          when:
+            of: $.fileInfo.size
+            map: {"0": true, _: $.fileInfo.size}
+        - field: modified
+          value: $.fileInfo.modifiedAt
+          when: $.fileInfo.modifiedAt
+        - field:
+            of: $.fileInfo.pageUnit.length
+            gte: 1
+            map: {"true": $.fileInfo.pageUnit, _: pages}
+          value: $.fileInfo.pageCount
+          when: $.fileInfo.pageCount
+    blocks:
+      - type: kv
+        from: "@fields"
+        item:
+          k:
+            of: "@field"
+            map:
+              type: t:common.type
+              size: t:workbench.fileInfoField.size
+              modified: t:workbench.fileInfoField.modified
+              pages: t:workbench.fileInfoField.pages
+              slides: t:workbench.fileInfoField.slides
+              sheets: t:workbench.fileInfoField.sheets
+              _: "@field"
+          v:
+            text:
+              of: "@field"
+              map:
+                size: {of: "@value", fmt: bytes}
+                modified: {of: "@value", fmt: ago}
+                _: "@value"
+  WORK_CARD:
+    title: "@name"
+    icon: "@type"
+    sub:
+      t: workbench.workCardSub
+      args:
+        - "@memberName"
+        - {of: "@at", fmt: at}
+    act: workOpen
+    args: {k: "@id"}
+    preview:
+      kind:
+        of: "@cover.state"
+        map: {image: image, _: "@type"}
+      src:
+        of: "@cover.state"
+        map: {image: "@coverSource", _: "@source"}
+      when:
+        of: "@type"
+        map: {image: true, video: true, _: false}
+    actions:
+      - label: t:work.openInChat
+        icon: jump
+        act: cafeWorkSrc
+        args: {i: "@index"}
+      - label: t:works.cover.title
+        icon: image
+        act: workCoverOpen
+        args: {id: "@id"}
+        when: "@cover"
+  WORKS_GROUPED:
+    of: $.scope
+    map:
+      global:
+        of: $.groupVal
+        map: {none: false, _: $.items.length}
+      _: false
+  HUB_BLOCKS:
+    - type: toolbar
+      items:
+        - type: seg
+          options:
+            - {v: list, label: t:workbench.hubView.list}
+            - {v: deps, label: t:workbench.hubView.deps}
+            - from: $.projects
+              item: {v: "@target", label: "@name"}
+          value: $.view
+          act: set
+          args: {path: ws.boardV}
+        - {type: grow}
+        - type: each
+          from:
+            - {}
+          item:
+            counts:
+              - {state: suggested, n: $.counts.suggested}
+              - {state: dispatched, n: $.counts.dispatched}
+              - {state: done, n: $.counts.done}
+          control:
+            type: each
+            from: "@counts"
+            control:
+              type: text
+              variant: meta
+              parts:
+                - dot:
+                    of: "@state"
+                    map:
+                      open: idle
+                      suggested: warn
+                      approved: warn
+                      dispatched: info
+                      done: ok
+                      _: "@state"
+                - " "
+                - text:
+                    of: "@state"
+                    map:
+                      open: t:hub.state.label.open
+                      suggested: t:hub.state.label.suggested
+                      approved: t:memoryOwners.stateNote.approved
+                      dispatched: t:wsLive.live
+                      done: t:common.status.completed
+                      _: "@state"
+                - " "
+                - {text: "@n", num: true}
+        - type: button
+          iconOnly: true
+          icon: plus
+          label: t:hub.add
+          act: dialog
+          args: {kind: feat}
+        - type: more
+          items:
+            - {label: t:hub.menu.label, act: wsImportBacklog}
+            - {label: t:hub.menu.importProject, act: wsImportProject}
+    - type: notice
+      tone: danger
+      text: t:hub.summary.policy
+      when: $.policy
+    - type: each
+      from:
+        - {}
+      item:
+        feats:
+          - {from: $.feats, item: "@"}
+          - id: __done
+            selected: false
+            state: done
+            code: ""
+            name: ""
+            isDone: true
+            doneCount: $.done.length
+            doneItems: $.done
+            when: $.done.length
+      blocks:
+        - type: list
+          id: hub
+          from: "@feats"
+          item:
+            isDone:
+              of: "@isDone"
+              map: {"true": true, _: false}
+            selected: false
+          row:
+            layout: line
+            key: "@id"
+            tone:
+              of: "@selected"
+              map:
+                "true": selected
+                "false":
+                  of: "@state"
+                  map:
+                    open: ""
+                    suggested: ""
+                    approved: ""
+                    dispatched: ""
+                    done: past
+                    _: "@state"
+                _: "@selected"
+            lead:
+              dot:
+                of: "@state"
+                map:
+                  open: idle
+                  suggested: warn
+                  approved: warn
+                  dispatched: info
+                  done: ok
+                  _: "@state"
+              tip:
+                of: "@isDone"
+                map:
+                  "true": ""
+                  "false":
+                    of: "@state"
+                    map:
+                      open: t:hub.state.label.open
+                      suggested: t:hub.state.label.suggested
+                      approved: t:memoryOwners.stateNote.approved
+                      dispatched: t:wsLive.live
+                      done: t:common.status.completed
+                      _: "@state"
+                  _:
+                    of: "@state"
+                    map:
+                      open: t:hub.state.label.open
+                      suggested: t:hub.state.label.suggested
+                      approved: t:memoryOwners.stateNote.approved
+                      dispatched: t:wsLive.live
+                      done: t:common.status.completed
+                      _: "@state"
+            title:
+              - text:
+                  of: "@untagged"
+                  map: {"true": —, "false": "@code", _: "@untagged"}
+                mono: true
+                when: "@code"
+              - {text: "@name", when: "!@isDone"}
+              - {text: t:hub.summary.name, when: "@isDone"}
+            cols:
+              - v: {icon: chat, size: xs, text: "@threads", when: "@threads"}
+                w: num
+                tip:
+                  t: hub.feature.threadsTip
+                  args: ["@threads"]
+                when: ["!@isDone", "@threads"]
+              - v:
+                  parts:
+                    - of: "@isDone"
+                      map:
+                        "true": "@doneCount"
+                        "false":
+                          parts: ["@doneCount", /, "@totalCount"]
+                          sep: ""
+                        _: "@isDone"
+                w: num
+                tip:
+                  t: hub.feature.progressHint
+                  args: ["@isDone"]
+            expand:
+              - type: toolbar
+                when: "@deps"
+                items:
+                  - type: each
+                    from: "@deps"
+                    control:
+                      type: chip
+                      kind: "@id"
+                      label:
+                        of: "@kind"
+                        map:
+                          from: t:hub.evolvedFrom
+                          block: t:hub.blocked
+                          rel: t:hub.related
+                          _: "@kind"
+                      act:
+                        of: "@known"
+                        map: {"true": featOpen, _: null}
+                      args: {k: "@id"}
+                      tip:
+                        of: "@known"
+                        map:
+                          "true":
+                            t: hub.feature.dependencyTip.true
+                            args:
+                              - of: "@kind"
+                                map:
+                                  from: t:hub.evolvedFrom
+                                  block: t:hub.blocked
+                                  rel: t:hub.related
+                                  _: "@kind"
+                              - "@id"
+                          "false":
+                            t: hub.feature.dependencyTip.false
+                            args:
+                              - of: "@kind"
+                                map:
+                                  from: t:hub.evolvedFrom
+                                  block: t:hub.blocked
+                                  rel: t:hub.related
+                                  _: "@kind"
+                              - "@id"
+                          _: "@known"
+              - type: text
+                from: "@phases"
+                parts:
+                  - {text: "@label"}
+                  - text:
+                      of: "@hasPct"
+                      map:
+                        "true":
+                          t: workbench.percent
+                          args: ["@pct"]
+                        "false": —
+                        _: "@hasPct"
+                    num: true
+                tip:
+                  t: hub.feature.acceptance
+                  args:
+                    - {of: "@criteria", sep: ；}
+                when: "@phases"
+              - type: list
+                id: "@listId"
+                from: "@items"
+                row:
+                  layout: record
+                  key: "@id"
+                  tone:
+                    of: "@selected"
+                    map:
+                      "true": selected
+                      "false":
+                        of: "@state"
+                        map:
+                          open: ""
+                          suggested: ""
+                          approved: ""
+                          dispatched: ""
+                          done: past
+                          _: "@state"
+                      _: "@selected"
+                  lead:
+                    dot:
+                      of: "@state"
+                      map:
+                        open: idle
+                        suggested: warn
+                        approved: warn
+                        dispatched: info
+                        done: ok
+                        _: "@state"
+                    tip:
+                      of: "@state"
+                      map:
+                        open: t:hub.state.label.open
+                        suggested: t:hub.state.label.suggested
+                        approved: t:memoryOwners.stateNote.approved
+                        dispatched: t:wsLive.live
+                        done: t:common.status.completed
+                        _: "@state"
+                  title: "@t"
+                  cols:
+                    - v:
+                        text:
+                          of: "@pri"
+                          map: {p0: P0, p1: P1, p2: P2, p3: P3, _: "@pri"}
+                        variant: badge
+                        tone:
+                          of: "@pri"
+                          map: {p0: danger, p1: warn, p2: "", p3: "", _: "@pri"}
+                      w: icon
+                      tip:
+                        t: hub.item.priTip
+                        args:
+                          - of: "@pri"
+                            map: {p0: P0, p1: P1, p2: P2, p3: P3, _: "@pri"}
+                    - v: {who: "@lease", form: avatar, when: "@lease"}
+                      w: icon
+                      tip:
+                        t: hub.item.leaseTip
+                        args:
+                          - "@leaseName"
+                          - of: "@hasLeaseExpiryMinutes"
+                            map:
+                              "true":
+                                t: workbench.leaseExpiry.true
+                                args: ["@leaseExpiryMinutes", "@leaseExpiry"]
+                              "false": "@leaseExpiry"
+                              _: "@hasLeaseExpiryMinutes"
+                      when: "@lease"
+                  act: fold
+                  args: {path: ws.hbItem, v: "@id"}
+                optional: true
+              - type: list
+                id: hub-done
+                from: "@doneItems"
+                row:
+                  layout: record
+                  title:
+                    - {text: "@id", mono: true}
+                    - {text: "@name"}
+                  cols:
+                    - v: "@n"
+                      w: num
+                      tip:
+                        t: hub.summary.nTip
+                        args: ["@n"]
+                optional: true
+              - type: toolbar
+                when: "@sel"
+                items:
+                  - type: seg
+                    value: "@sel.view"
+                    options:
+                      - {v: sug, label: t:hub.detail.label}
+                      - {v: sop, label: SOP}
+                      - {v: threads, label: t:hub.detail.threadStatus}
+                    act: set
+                    args: {path: ws.hbView}
+              - type: text
+                parts:
+                  - {text: "@sel.sum"}
+                when: "@sel.sum"
+              - type: kv
+                when:
+                  of: "@sel.view"
+                  map: {sug: true, _: false}
+                from:
+                  - k: t:common.state
+                    v:
+                      of: "@sel.state"
+                      map:
+                        open:
+                          of: "@sel.state"
+                          map:
+                            open: t:hub.state.label.open
+                            suggested: t:hub.state.label.suggested
+                            approved: t:memoryOwners.stateNote.approved
+                            dispatched: t:wsLive.live
+                            done: t:common.status.completed
+                            _: "@sel.state"
+                        suggested:
+                          t: workbench.hubState.suggested
+                          args:
+                            - of: "@sel.state"
+                              map:
+                                open: t:hub.state.label.open
+                                suggested: t:hub.state.label.suggested
+                                approved: t:memoryOwners.stateNote.approved
+                                dispatched: t:wsLive.live
+                                done: t:common.status.completed
+                                _: "@sel.state"
+                        approved:
+                          of: "@sel.state"
+                          map:
+                            open: t:hub.state.label.open
+                            suggested: t:hub.state.label.suggested
+                            approved: t:memoryOwners.stateNote.approved
+                            dispatched: t:wsLive.live
+                            done: t:common.status.completed
+                            _: "@sel.state"
+                        dispatched:
+                          of: "@sel.state"
+                          map:
+                            open: t:hub.state.label.open
+                            suggested: t:hub.state.label.suggested
+                            approved: t:memoryOwners.stateNote.approved
+                            dispatched: t:wsLive.live
+                            done: t:common.status.completed
+                            _: "@sel.state"
+                        done:
+                          of: "@sel.state"
+                          map:
+                            open: t:hub.state.label.open
+                            suggested: t:hub.state.label.suggested
+                            approved: t:memoryOwners.stateNote.approved
+                            dispatched: t:wsLive.live
+                            done: t:common.status.completed
+                            _: "@sel.state"
+                        _: "@sel.state"
+                  - k: t:common.create
+                    v:
+                      of: "@sel.createdBy"
+                      map: {user: t:common.you, system: "@sel.createdBy", _: "@sel.creatorName"}
+                  - k: t:hub.detail.suggestedMember
+                    v:
+                      t: workbench.memberName
+                      args: ["@sel.suggestion.catName", "@sel.suggestion.catHandle"]
+                    when: "@sel.suggestion"
+                  - {k: t:hub.detail.reason, v: "@sel.suggestion.why", when: "@sel.suggestion"}
+                  - {k: t:wsSessions.plan, v: "@sel.suggestion.plan", when: "@sel.suggestion"}
+                  - k: t:hub.detail.stage
+                    v:
+                      of: "@sel.suggestion.phase"
+                      map:
+                        coding: t:wsItems.notifications.phase
+                        research: t:hub.detail.phase.research
+                        brainstorm: t:hub.detail.phase.brainstorm
+                        _: "@sel.suggestion.phase"
+                    when: "@sel.suggestion"
+                  - k: t:hub.detail.decision
+                    v:
+                      t: workbench.hubDecision
+                      args:
+                        - of: "@sel.suggestion.status"
+                          map:
+                            approved: t:memoryOwners.stateNote.approved
+                            rejected: t:memoryOwners.stateNote.rejected
+                            _: "@sel.suggestion.status"
+                        - of: "@sel.suggestion.by"
+                          map: {user: t:common.you, _: "@sel.suggestion.by"}
+                        - of: "@sel.suggestion.timestamp"
+                          map:
+                            "true": {of: "@sel.suggestion.at", fmt: ago}
+                            _: "@sel.suggestion.at"
+                        - of: "@sel.suggestion.hasNote"
+                          map:
+                            "true":
+                              t: workbench.noteSuffix.true
+                              args: ["@sel.suggestion.note"]
+                            "false": ""
+                            _: "@sel.suggestion.hasNote"
+                    when: "@sel.suggestion.decided"
+                  - k: t:hub.detail.assignedTo
+                    v:
+                      of: "@sel.hasThread"
+                      map:
+                        "true": "@sel.threadTitle"
+                        "false": t:hub.detail.missingThread
+                        _: "@sel.hasThread"
+                    act:
+                      of: "@sel.hasThread"
+                      map: {"true": goThread, _: ""}
+                    args: {id: "@sel.thread"}
+                    warn:
+                      of: "@sel.hasThread"
+                      map: {"true": false, _: true}
+                    when: "@sel.dispatched"
+                  - k: t:hub.detail.claim
+                    v:
+                      of: "@sel.hasLease"
+                      map:
+                        "true":
+                          t: workbench.hubLease.true
+                          args:
+                            - "@sel.leaseData.name"
+                            - of: "@sel.leaseData.hasMinutes"
+                              map:
+                                "true":
+                                  t: workbench.leaseExpiry.true
+                                  args: ["@sel.leaseData.expMinutes", "@sel.leaseData.exp"]
+                                "false": "@sel.leaseData.exp"
+                                _: "@sel.leaseData.hasMinutes"
+                            - of: "@sel.leaseData.beatTimestamp"
+                              map:
+                                "true": {of: "@sel.leaseData.beat", fmt: ago}
+                                _: "@sel.leaseData.beat"
+                        "false":
+                          t: skillPreview.none
+                          args:
+                            - "@sel.leaseData.name"
+                            - of: "@sel.leaseData.hasMinutes"
+                              map:
+                                "true":
+                                  t: workbench.leaseExpiry.true
+                                  args: ["@sel.leaseData.expMinutes", "@sel.leaseData.exp"]
+                                "false": "@sel.leaseData.exp"
+                                _: "@sel.leaseData.hasMinutes"
+                            - of: "@sel.leaseData.beatTimestamp"
+                              map:
+                                "true": {of: "@sel.leaseData.beat", fmt: ago}
+                                _: "@sel.leaseData.beat"
+                        _: "@sel.hasLease"
+                    when: "@sel.dispatched"
+              - type: toolbar
+                when:
+                  of: "@sel.view"
+                  map: {sug: true, _: false}
+                items:
+                  - type: button
+                    label: t:hub.suggestClaim
+                    act: hbSuggest
+                    args: {f: "@sel.f", k: "@sel.k"}
+                    when: "@sel.canSuggest"
+                  - type: button
+                    primary: true
+                    label: t:hub.approveDispatch
+                    act: hbApprove
+                    args: {f: "@sel.f", k: "@sel.k"}
+                    when: "@sel.canApprove"
+                  - type: button
+                    label: t:common.reject
+                    act: hbReject
+                    args: {f: "@sel.f", k: "@sel.k"}
+                    when: "@sel.canApprove"
+                  - type: button
+                    primary: true
+                    label: t:hub.retryDispatch
+                    act: hbApprove
+                    args: {f: "@sel.f", k: "@sel.k"}
+                    when: "@sel.canRetry"
+                  - type: button
+                    iconOnly: true
+                    icon: clock
+                    label: t:hub.renewLease
+                    act: setStatus
+                    args: {entity: hbItem, id: "@sel.id", field: lease, v: beat}
+                    when: "@sel.hasLease"
+                  - type: button
+                    iconOnly: true
+                    icon: release
+                    label: t:hub.releaseLease
+                    act: setStatus
+                    args: {entity: hbItem, id: "@sel.id", field: lease, v: release}
+                    when: "@sel.hasLease"
+                  - type: button
+                    icon: key
+                    label: t:hub.takeLease
+                    act: dialog
+                    args: {kind: hbSelfClaim, f: "@sel.f", k: "@sel.k"}
+                    when: "@sel.canSelfClaim"
+                  - type: button
+                    iconOnly: true
+                    icon: more
+                    label: t:common.moreActions
+                    args: {k: "@sel.id"}
+                    items:
+                      - label: t:hub.reclaimLease
+                        act: hbReclaim
+                        args: {id: "@sel.k"}
+                    when: "@sel.canReclaim"
+              - type: each
+                from:
+                  - {}
+                when: "@sel.sop"
+                item:
+                  steps:
+                    - i: 0
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"0": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 1}
+                    - i: 1
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"1": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 2}
+                    - i: 2
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"2": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 3}
+                    - i: 3
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"3": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 4}
+                    - i: 4
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"4": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 5}
+                    - i: 5
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"5": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 6}
+                    - i: 6
+                      on:
+                        of: "@sel.sop.stage"
+                        map: {"6": true, _: false}
+                      done: {of: "@sel.sop.stage", gte: 7}
+                blocks:
+                  - type: steps
+                    variant: progress
+                    from: "@steps"
+                    item:
+                      label:
+                        t: workbench.sopStage
+                        args: ["@i"]
+              - type: kv
+                when: "@sel.sop"
+                from:
+                  - k: t:hub.detail.baton
+                    v:
+                      t: workbench.baton
+                      args: ["@sel.sop.batonName", "@sel.sop.batonHandle", "@sel.sop.skill"]
+                  - {k: t:hub.detail.focus, v: "@sel.sop.focus"}
+              - type: text
+                sep: ""
+                from: "@sel.sop.checks"
+                parts:
+                  - dot:
+                      of: "@state"
+                      map:
+                        verified: ok
+                        unknown: warn
+                        unverified: idle
+                        failed: idle
+                        _: "@state"
+                    tip: "@state"
+                  - {text: "@label"}
+                tip: "@state"
+                when: "@sel.sop"
+              - type: text
+                parts:
+                  - text:
+                      t: hub.detail.updated
+                      args: ["@sel.sop.at", "@sel.sop.by"]
+                when: "@sel.sop"
+              - type: empty
+                text: t:hub.noSop
+                when:
+                  - of: "@sel.view"
+                    map: {sop: true, _: false}
+                  - "!@sel.sop"
+              - type: list
+                id: "@sel.threadsId"
+                from: "@sel.threads"
+                item:
+                  who: {of: "@who", item: "@id"}
+                  whoTip:
+                    t: hub.participants
+                    args:
+                      - of: "@who"
+                        item:
+                          t: workbench.identity
+                          args: ["@name", "@handle"]
+                        sep: 、
+                  timeTip: t:hub.lastActive
+                  act: goThread
+                  args: {id: "@id"}
+                row: thread.row
+                when:
+                  - "@sel"
+                  - of: "@sel.view"
+                    map: {sug: false, sop: false, _: true}
+                empty: t:hub.noLinkedThreads
+          when:
+            of: $.view
+            map: {list: true, _: false}
+    - type: toolbar
+      when: $.deps
+      items:
+        - type: seg
+          value: $.deps.scope
+          options:
+            - {v: connected, label: t:hub.dependencies.label}
+            - {v: active, label: t:hub.dependencies.active}
+            - {v: all, label: t:common.all}
+          act: set
+          args: {path: ws.depScope}
+        - type: text
+          text:
+            t: hub.dependencies.summary
+            args: [$.deps.nodes, $.deps.edges]
+          variant: meta
+        - {type: grow}
+        - type: button
+          iconOnly: true
+          icon: zoomOut
+          label: t:hub.zoomOut
+          act: set
+          args: {path: ws.zoomBy, v: "-1"}
+        - type: button
+          iconOnly: true
+          icon: zoomIn
+          label: t:hub.zoomIn
+          act: set
+          args: {path: ws.zoomBy, v: "1"}
+        - type: button
+          label: t:hub.resetZoom
+          act: set
+          args: {path: ws.zoomBy, v: "0"}
+    - type: component
+      use: graph
+      props:
+        nodes: $.deps.graph.nodes
+        edges: $.deps.graph.edges
+        zoom: $.deps.graph.zoom
+        offset: $.deps.graph.offset
+        label: t:hub.graph.label
+        empty: t:hub.graph.empty
+        pan: {act: wsPan}
+        item:
+          shape: card
+          prefix: "@id"
+          text: "@name"
+          limit: 7
+          tip:
+            t: workbench.graphTip
+            args: ["@id", "@name"]
+          tone:
+            of: "@state"
+            map: {suggested: warn, dispatched: info, done: ok, open: idle}
+          on: "@selected"
+          dim: "@done"
+          act: fold
+          args: {path: ws.node, v: "@id"}
+        edge:
+          from: "@from"
+          to: "@to"
+          dash:
+            of: "@kind"
+            map: {from: "", block: 6 4, rel: 2 4}
+        legend:
+          items:
+            - {tone: warn, label: t:hub.state.label.suggested}
+            - {tone: info, label: t:wsLive.live}
+            - {tone: ok, label: t:common.status.completed}
+            - {tone: idle, label: t:hub.state.label.open}
+          tail: t:hub.graph.tail
+      when: $.deps
+    - type: section
+      title:
+        of: [0, 1, 2]
+        item:
+          of: "@"
+          map: {"0": $.deps.node.id, "1": " ", "2": $.deps.node.name}
+        sep: ""
+      when: $.deps.node
+      actions:
+        - type: button
+          iconOnly: true
+          icon: close
+          label: t:common.close
+          act: close
+          args: {path: ws.node}
+      blocks:
+        - type: settings
+          rows:
+            - label: t:common.state
+              value:
+                of: $.deps.node.status
+                map:
+                  open: t:hub.state.label.open
+                  suggested: t:hub.state.label.suggested
+                  approved: t:memoryOwners.stateNote.approved
+                  dispatched: t:wsLive.live
+                  done: t:common.status.completed
+                  _: $.deps.node.status
+            - label: t:hub.evolvedFrom
+              control:
+                type: text
+                variant: value
+                parts:
+                  - parts: $.deps.node.from
+                    sep: 、
+                    each: {text: "@"}
+                    when: $.deps.node.hasFrom
+                  - {text: t:common.none, when: "!$.deps.node.hasFrom"}
+            - label: t:hub.blocked
+              control:
+                type: text
+                variant: value
+                parts:
+                  - parts: $.deps.node.block
+                    sep: 、
+                    each: {text: "@"}
+                    when: $.deps.node.hasBlock
+                  - {text: t:common.none, when: "!$.deps.node.hasBlock"}
+            - label: t:hub.related
+              control:
+                type: text
+                variant: value
+                parts:
+                  - parts: $.deps.node.rel
+                    sep: 、
+                    each: {text: "@"}
+                    when: $.deps.node.hasRel
+                  - {text: t:common.none, when: "!$.deps.node.hasRel"}
+            - label: t:hub.openFeature
+              link: true
+              act: featOpen
+              args: {k: $.deps.node.id}
+    - type: head
+      variant: detail
+      when: $.ext
+      desc:
+        - {text: $.ext.path, mono: true}
+        - {text: · Backlog}
+        - {text: $.ext.backlog, mono: true}
+      actions:
+        - type: button
+          label: t:hub.importBacklog
+          act: wsExtImport
+          args: {n: $.ext.name}
+    - {type: notice, text: $.ext.result, when: $.ext.result}
+    - type: toolbar
+      when: $.ext
+      items:
+        - type: select
+          id: ws-ext-sec
+          options:
+            - {v: intent, label: t:hub.external.requirementTracking}
+            - {v: health, label: t:hub.external.governanceHealth}
+            - {v: features, label: t:workbench.hubView.list}
+            - {v: dispatch, label: t:hub.external.dispatchProgress}
+            - {v: risk, label: t:hub.external.riskAlerts}
+            - {v: clarify, label: t:hub.external.clarifications}
+            - {v: slice, label: t:hub.external.slicePlan}
+            - {v: reflux, label: t:hub.external.feedback}
+          value: $.ext.cur
+          change: wsExtSec
+          label: t:hub.sections
+    - type: notice
+      tone: warn
+      text: t:hub.external.notice
+      when: $.ext.intent
+      action:
+        type: button
+        label: t:hub.editAudit
+        act: dialog
+        args: {kind: frame}
+    - type: settings
+      when: $.ext.health
+      rows:
+        - label: t:hub.external.documentCoverage
+          value:
+            of: $.ext.hasCoverage
+            map:
+              "true":
+                of: [0, 1]
+                item:
+                  of: "@"
+                  map: {"0": $.ext.docCoverage, "1": "%"}
+                sep: ""
+              "false": —
+              _: $.ext.hasCoverage
+        - label: t:hub.external.expiredRequirements
+          value:
+            t: wsTeam.list.evDesc
+            args: [$.ext.staleReqs]
+        - label: t:threadRow.unassigned
+          value:
+            t: wsTeam.list.evDesc
+            args: [$.ext.untriaged]
+    - type: list
+      id: hub-ext
+      from: $.ext.rows
+      order:
+        of: $.ext.canSlice
+        map: {"true": hubSliceOrder, "false": "", _: $.ext.canSlice}
+      row:
+        layout: two
+        key: "@id"
+        title:
+          - {text: "@title", when: "@title"}
+          - text:
+              t: workspaceOwners.risk
+              args: ["@risk"]
+            when: "@risk"
+        sub:
+          - {text: "@sub", when: "@sub"}
+          - parts:
+              - parts: ["@description", " · ", "@verifiableOutcome"]
+                sep: ""
+            when: "@canEditSlice"
+          - parts:
+              - parts: ["@insight", " · ", "@evidence"]
+                sep: ""
+            when: "@canDeleteReflux"
+          - text: "@sourceDetail"
+            when: ["@canTriage", "!@triage"]
+          - text:
+              t: hub.external.triage
+              args:
+                - "@triage.clarity"
+                - "@triage.groundedness"
+                - "@triage.necessity"
+                - "@triage.coupling"
+                - "@triage.sizeBand"
+            when: "@triage"
+        act: "@act"
+        args: "@args"
+        cols:
+          - control:
+              - type: status
+                tone: warn
+                text: t:hub.external.blocked
+                when: "@blocked"
+              - type: status
+                tone: warn
+                text:
+                  of: "@severity"
+                  map:
+                    critical: t:workspaceOwners.severity.critical
+                    high: t:wsCommunity.priority.high
+                    medium: t:workspaceOwners.severity.medium
+                    _: "@severity"
+                when: "@severity"
+              - type: status
+                tone:
+                  of: "@questionState"
+                  map: {answered: "", open: "", escalated: warn, _: "@questionState"}
+                text:
+                  of: "@questionState"
+                  map:
+                    answered: t:chat.answer.answered
+                    open: t:workspaceOwners.open
+                    escalated: t:workspaceOwners.escalated
+                    _: "@questionState"
+                when: "@questionState"
+              - type: status
+                text:
+                  of: "@sliceState"
+                  map:
+                    planned: t:schedule.todo
+                    in_progress: t:schedule.doing
+                    delivered: t:workspaceOwners.delivered
+                    validated: t:wsEval.continuation.verified_outcome
+                    _: "@sliceState"
+                when: "@sliceState"
+              - type: status
+                text:
+                  of: "@category"
+                  map:
+                    methodology: t:workspaceOwners.methodology
+                    risk_pattern: t:workspaceOwners.risk_pattern
+                    resolution_strategy: t:workspaceOwners.resolution_strategy
+                    _: "@category"
+                when: "@category"
+              - {type: text, text: "@muted", when: "@muted"}
+              - type: button
+                label: t:workspaceOwners.triage
+                act: wsTriage
+                args: {projectId: "@projectId", cardId: "@cardId"}
+                when: "@canTriage"
+              - type: button
+                label: t:workspaceOwners.answer
+                act: clarification
+                args: {kind: clarification, projectId: "@projectId", id: "@id"}
+                when: "@canAnswer"
+              - type: button
+                label: t:common.edit
+                act: slice
+                args: {kind: slice, projectId: "@projectId", id: "@id"}
+                when: "@canEditSlice"
+          - control:
+              type: more
+              items:
+                - label: t:workspaceOwners.detectRisks
+                  act: wsRiskDetect
+                  args: {projectId: "@projectId", cardId: "@cardId"}
+              k: "@cardId"
+              label: t:common.moreActions
+            when: "@canTriage"
+          - control:
+              type: more
+              items:
+                - label: t:common.delete
+                  act: wsRefluxDelete
+                  tone: danger
+                  args: {projectId: "@projectId", id: "@id"}
+              k: "@id"
+            when: "@canDeleteReflux"
+      empty: t:hub.external.empty
+      when: $.ext.hasRows
+    - type: toolbar
+      when: $.ext
+      items:
+        - type: button
+          iconOnly: true
+          icon: plus
+          label: t:workspaceOwners.newSlice
+          act: slice
+          args: {kind: slice, projectId: $.ext.projectId}
+          when: $.ext.canSlice
+        - type: button
+          iconOnly: true
+          icon: plus
+          label: t:hub.newIntent
+          act: dialog
+          args: {kind: intent, projectId: $.ext.projectId}
+          when: $.ext.canIntent
+        - type: button
+          iconOnly: true
+          icon: plus
+          label: t:hub.recordLesson
+          act: reflux
+          args: {kind: reflux, projectId: $.ext.projectId}
+          when: $.ext.canReflux
+  WC_PICKER:
+    type: picker
+    icon: folder
+    label: {of: $.wt.root, fmt: basename}
+    tip:
+      t: wsGit.worktree.tip
+      args: [$.wt.root, $.wt.branch, $.wt.head]
+    items:
+      - {scope: t:wsGit.worktrees}
+      - from: $.wt.worktrees
+        item:
+          label:
+            t: wsGit.worktree.option
+            args:
+              - {of: "@root", fmt: basename}
+              - "@branch"
+          act: set
+          args: {path: wc.wt, v: "@id"}
+          cur: "@current"
+  CHANGE_EXPAND:
+    - type: component
+      use: diff
+      props:
+        hunks: "@diff.hunks"
+        mode: "@diff.mode"
+        empty:
+          of: "@st"
+          map:
+            ??: t:workbench.diffEmpty.??
+            M: t:workbench.diffEmpty.M
+            A: t:workbench.diffEmpty.M
+            D: t:workbench.diffEmpty.M
+            _: "@st"
+  SYSTEM_DESKTOP_SECTIONS:
+    general:
+      type: section
+      id: sys-general
+      key: general
+      title: t:system.general
+      help: t:system.generalHelp
+      open: $.help.general
+      rows:
+        - label: t:system.language
+          ctls:
+            - type: select
+              id: sys-lang
+              options:
+                - {v: zh-Hans, label: t:system.langZhHans}
+                - {v: en, label: English}
+              value: $.v.lang
+              label: t:system.language
+              change: sysPick
+              args: {k: lang}
+        - label: t:system.recordDefault
+          ctls:
+            - type: select
+              id: sys-record
+              options:
+                - [collapsed, t:common.collapse]
+                - [expanded, t:common.expand]
+              value: $.v.record
+              label: t:system.recordDefault
+              change: sysPick
+              args: {k: record}
+        - blocks:
+            - type: box
+              load: $.processTalk.load
+              error: t:frame.loadError
+              retry: {act: processTalkRead}
+              blocks:
+                - type: settings
+                  rows:
+                    - label: t:system.process.label
+                      ctls:
+                        - type: select
+                          id: sys-process-talk
+                          options:
+                            - [whole, t:wsSignals.body]
+                            - [record, t:wsSessions.record]
+                          value: $.processTalk.mode
+                          label: t:system.process.label
+                          change: processTalk
+        - label: t:system.sendWhileBusy
+          ctls:
+            - type: select
+              id: sys-send
+              options:
+                - [current, t:system.steer]
+                - [next, t:system.queueNext]
+              value: $.v.send
+              label: t:system.sendWhileBusy
+              change: sysPick
+              args: {k: send}
+    notify:
+      type: section
+      id: sys-notify
+      key: notify
+      title: t:system.notify
+      help: t:system.notifyHelp
+      open: $.help.notify
+      rows:
+        - label: t:system.browserPush
+          ctls:
+            - type: switch
+              value: $.push.subscribed
+              act: pushToggle
+              label: t:system.browserPush
+              when: "!$.push.unavailable"
+            - type: status
+              text:
+                of: $.push.permission
+                map:
+                  granted: t:system.pushConfiguration.permission.granted
+                  denied: t:common.status.permissionDenied
+                  default: t:system.pushConfiguration.permission.default
+                  unsupported: t:settingsUi.member.hooks.unsupported
+                  _: $.push.permission
+              tone:
+                of: $.push.permission
+                map:
+                  granted: ok
+                  denied: warn
+                  default: warn
+                  unsupported: warn
+                  _: $.push.permission
+              when: $.push.unavailable
+        - blocks:
+            - type: settings
+              from: $.notifyTypes
+              row:
+                label:
+                  of: "@id"
+                  map:
+                    cat: t:system.catMessages
+                    perm: t:system.permRequests
+                    mention:
+                      t: system.mentions
+                      args: []
+                    cron: t:settingsUi.contribution.kind.scheduler
+                    signal: t:system.signalUpdates
+                    _: "@id"
+                control:
+                  type: switch
+                  value: "@value"
+                  act: toggle
+                  args:
+                    path: s.notify.{k}
+                    k: "@id"
+                  label:
+                    of: "@id"
+                    map:
+                      cat: t:system.catMessages
+                      perm: t:system.permRequests
+                      mention:
+                        t: system.mentions
+                        args: []
+                      cron: t:settingsUi.contribution.kind.scheduler
+                      signal: t:system.signalUpdates
+                      _: "@id"
+        - label: t:system.pushDiag
+          ctls:
+            - type: button
+              label: t:system.view
+              act: dialog
+              args: {kind: push}
+    network:
+      type: section
+      id: sys-network
+      key: network
+      title: t:system.network
+      help: t:system.networkHelp
+      open: $.help.network
+      from: $.groups.network
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    storage:
+      type: section
+      id: sys-storage
+      key: storage
+      title: t:system.data
+      help: t:system.dataHelp
+      open: $.help.storage
+      from: $.groups.storage
+      row: {$frag: SYSTEM_CONFIG_ROW}
+      actions:
+        - type: button
+          label: t:system.exportMore
+          act: logsExport
+          args: {scope: full}
+          tip: t:system.fullLog
+    ttl:
+      type: section
+      id: sys-ttl
+      key: ttl
+      title: t:system.retention
+      help: t:system.retentionHelp
+      open: $.help.ttl
+      from: $.groups.lifecycle
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    log:
+      type: section
+      id: sys-log
+      key: log
+      title: t:system.runLogs
+      help: t:system.timeoutHelp
+      open: $.help.log
+      from: $.groups.runtime
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    safety:
+      type: section
+      id: sys-safety
+      key: safety
+      title: t:system.security
+      help: t:system.securityHelp
+      open: $.help.safety
+      from: $.groups.security
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    env:
+      type: section
+      id: sys-env
+      key: env
+      title: t:env.envVars
+      help: t:system.envHelp
+      open: $.help.env
+      rows:
+        - label: t:system.editableVars
+          ctls:
+            - type: text
+              variant: value
+              text:
+                t: env.system.count
+                args: [$.envCount]
+            - type: button
+              label: t:system.editMore
+              act: open
+              args: {page: env}
+    update:
+      type: section
+      id: sys-update
+      key: update
+      title: t:system.desktopUpdate
+      help: t:system.desktopOnly
+      open: $.help.update
+      rows:
+        - label: t:system.autoUpdate
+          ctls:
+            - type: switch
+              value: $.desktopAuto
+              act: toggle
+              args: {path: s.desktopUpdate.settings.autoCheck}
+              label: t:system.autoUpdate
+        - label: t:films.current
+          ctls:
+            - {type: text, variant: value, text: $.app.version}
+            - type: button
+              label: t:system.checkUpdate
+              act: desktopUpdate
+              args: {op: check}
+        - label: t:runtime.updateVersion
+          ctls:
+            - {type: text, variant: value, text: $.update.version}
+            - type: status
+              tone: warn
+              text: t:runtime.updateFailed
+              when: $.update.failed
+            - type: button
+              primary: true
+              label: t:common.download
+              act: desktopUpdate
+              args: {op: download}
+              when: $.update.canDownload
+            - type: button
+              primary: true
+              label: t:common.install
+              act: desktopUpdate
+              args: {op: install}
+              when: $.update.canInstall
+      blocks:
+        - type: each
+          from:
+            - {}
+          item:
+            label: t:runtime.downloadProgress
+            max: 100
+            items:
+              - from: $.update.progress
+                item:
+                  label:
+                    t: workbench.percent
+                    args: ["@percent"]
+                  value: "@value"
+          when: $.update.sections.progress
+          blocks:
+            - {type: component, use: bars, props: "@"}
+      when: $.app.desktop
+  SYSTEM_CONFIG_ROW:
+    label: "@label"
+    help:
+      - {text: "@name", mono: true}
+      - {br: true}
+      - {text: "@description"}
+      - {br: true}
+      - text:
+          t: system.config.defaultValue
+          args: ["@defaultValue"]
+    ctls:
+      - type: text
+        variant: value
+        mono: true
+        text: {$frag: SYSTEM_CONFIG_VALUE}
+        when: "!@booleanSemantics"
+      - type: status
+        text:
+          of: "@enabled"
+          map:
+            "true": t:system.pushConfiguration.service.true
+            _: t:common.status.disabled
+        when: "@booleanSemantics"
+      - {type: status, text: t:settingsUi.mcp.tag.readonly, when: "@readonly"}
+      - type: status
+        tone: warn
+        text: t:common.effectRestart
+        when: "@restartRequired"
+      - type: button
+        iconOnly: true
+        icon: reveal
+        label: t:control.reveal
+        act: reveal
+        args:
+          path:
+            of: "@name"
+            map:
+              CAT_CAFE_DATA_DIR: $.env.dataDir
+              UPLOAD_DIR: $.env.uploadDir
+              TRANSCRIPT_DATA_DIR: $.env.transcriptDir
+        when:
+          - "@currentValue"
+          - of: "@name"
+            map:
+              CAT_CAFE_DATA_DIR: true
+              UPLOAD_DIR: true
+              TRANSCRIPT_DATA_DIR: true
+              _: false
+  SYSTEM_CONFIG_VALUE:
+    of: "@settingsGroup"
+    map:
+      lifecycle:
+        of: "@currentValue.length"
+        gte: 1
+        map:
+          "true":
+            t: format.duration.seconds
+            args:
+              - {of: "@currentValue", fmt: num}
+          _: "@defaultValue"
+      runtime:
+        of: "@name"
+        map:
+          CLI_TIMEOUT_MS:
+            of: "@currentValue.length"
+            gte: 1
+            map:
+              "true":
+                t: system.config.milliseconds
+                args:
+                  - {of: "@currentValue", fmt: num}
+              _: "@defaultValue"
+          _: "@value"
+      network:
+        of: "@name"
+        map: {FRONTEND_URL: $.env.frontendUrl, _: "@value"}
+      storage:
+        of: "@name"
+        map: {TRANSCRIPT_DATA_DIR: $.env.transcriptDir, _: "@value"}
+      _: "@value"
+  SYSTEM_SECTIONS:
+    general:
+      type: section
+      id: sys-general
+      key: general
+      title: t:system.general
+      help: t:system.generalHelp
+      open: $.help.general
+      rows:
+        - label: t:system.language
+          ctls:
+            - type: select
+              id: sys-lang
+              options:
+                - {v: zh-Hans, label: t:system.langZhHans}
+                - {v: en, label: English}
+              value: $.v.lang
+              label: t:system.language
+              change: sysPick
+              args: {k: lang}
+        - label: t:system.recordDefault
+          ctls:
+            - type: select
+              id: sys-record
+              options:
+                - [collapsed, t:common.collapse]
+                - [expanded, t:common.expand]
+              value: $.v.record
+              label: t:system.recordDefault
+              change: sysPick
+              args: {k: record}
+        - blocks:
+            - type: box
+              load: $.processTalk.load
+              error: t:frame.loadError
+              retry: {act: processTalkRead}
+              blocks:
+                - type: settings
+                  rows:
+                    - label: t:system.process.label
+                      ctls:
+                        - type: select
+                          id: sys-process-talk
+                          options:
+                            - [whole, t:wsSignals.body]
+                            - [record, t:wsSessions.record]
+                          value: $.processTalk.mode
+                          label: t:system.process.label
+                          change: processTalk
+        - label: t:system.sendWhileBusy
+          ctls:
+            - type: select
+              id: sys-send
+              options:
+                - [current, t:system.steer]
+                - [next, t:system.queueNext]
+              value: $.v.send
+              label: t:system.sendWhileBusy
+              change: sysPick
+              args: {k: send}
+    notify:
+      type: section
+      id: sys-notify
+      key: notify
+      title: t:system.notify
+      help: t:system.notifyHelp
+      open: $.help.notify
+      rows:
+        - label: t:system.browserPush
+          ctls:
+            - type: switch
+              value: $.push.subscribed
+              act: pushToggle
+              label: t:system.browserPush
+              when: "!$.push.unavailable"
+            - type: status
+              text:
+                of: $.push.permission
+                map:
+                  granted: t:system.pushConfiguration.permission.granted
+                  denied: t:common.status.permissionDenied
+                  default: t:system.pushConfiguration.permission.default
+                  unsupported: t:settingsUi.member.hooks.unsupported
+                  _: $.push.permission
+              tone:
+                of: $.push.permission
+                map:
+                  granted: ok
+                  denied: warn
+                  default: warn
+                  unsupported: warn
+                  _: $.push.permission
+              when: $.push.unavailable
+        - blocks:
+            - type: settings
+              from: $.notifyTypes
+              row:
+                label:
+                  of: "@id"
+                  map:
+                    cat: t:system.catMessages
+                    perm: t:system.permRequests
+                    mention:
+                      t: system.mentions
+                      args: []
+                    cron: t:settingsUi.contribution.kind.scheduler
+                    signal: t:system.signalUpdates
+                    _: "@id"
+                control:
+                  type: switch
+                  value: "@value"
+                  act: toggle
+                  args:
+                    path: s.notify.{k}
+                    k: "@id"
+                  label:
+                    of: "@id"
+                    map:
+                      cat: t:system.catMessages
+                      perm: t:system.permRequests
+                      mention:
+                        t: system.mentions
+                        args: []
+                      cron: t:settingsUi.contribution.kind.scheduler
+                      signal: t:system.signalUpdates
+                      _: "@id"
+        - label: t:system.pushDiag
+          ctls:
+            - type: button
+              label: t:system.view
+              act: dialog
+              args: {kind: push}
+    network:
+      type: section
+      id: sys-network
+      key: network
+      title: t:system.network
+      help: t:system.networkHelp
+      open: $.help.network
+      from: $.groups.network
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    storage:
+      type: section
+      id: sys-storage
+      key: storage
+      title: t:system.data
+      help: t:system.dataHelp
+      open: $.help.storage
+      from: $.groups.storage
+      row: {$frag: SYSTEM_CONFIG_ROW}
+      actions:
+        - type: button
+          label: t:system.exportMore
+          act: logsExport
+          args: {scope: full}
+          tip: t:system.fullLog
+    ttl:
+      type: section
+      id: sys-ttl
+      key: ttl
+      title: t:system.retention
+      help: t:system.retentionHelp
+      open: $.help.ttl
+      from: $.groups.lifecycle
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    log:
+      type: section
+      id: sys-log
+      key: log
+      title: t:system.runLogs
+      help: t:system.timeoutHelp
+      open: $.help.log
+      from: $.groups.runtime
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    safety:
+      type: section
+      id: sys-safety
+      key: safety
+      title: t:system.security
+      help: t:system.securityHelp
+      open: $.help.safety
+      from: $.groups.security
+      row: {$frag: SYSTEM_CONFIG_ROW}
+    env:
+      type: section
+      id: sys-env
+      key: env
+      title: t:env.envVars
+      help: t:system.envHelp
+      open: $.help.env
+      rows:
+        - label: t:system.editableVars
+          ctls:
+            - type: text
+              variant: value
+              text:
+                t: env.system.count
+                args: [$.envCount]
+            - type: button
+              label: t:system.editMore
+              act: open
+              args: {page: env}
+    update:
+      type: section
+      id: sys-update
+      key: update
+      title: t:system.desktopUpdate
+      help: t:system.desktopOnly
+      open: $.help.update
+      rows:
+        - label: t:system.autoUpdate
+          ctls:
+            - type: switch
+              value: $.desktopAuto
+              act: toggle
+              args: {path: s.desktopUpdate.settings.autoCheck}
+              label: t:system.autoUpdate
+        - label: t:films.current
+          ctls:
+            - {type: text, variant: value, text: $.app.version}
+            - type: button
+              label: t:system.checkUpdate
+              act: desktopUpdate
+              args: {op: check}
+        - label: t:runtime.updateVersion
+          ctls:
+            - {type: text, variant: value, text: $.update.version}
+            - type: status
+              tone: warn
+              text: t:runtime.updateFailed
+              when: $.update.failed
+            - type: button
+              primary: true
+              label: t:common.download
+              act: desktopUpdate
+              args: {op: download}
+              when: $.update.canDownload
+            - type: button
+              primary: true
+              label: t:common.install
+              act: desktopUpdate
+              args: {op: install}
+              when: $.update.canInstall
+      blocks:
+        - type: each
+          from:
+            - {}
+          item:
+            label: t:runtime.downloadProgress
+            max: 100
+            items:
+              - from: $.update.progress
+                item:
+                  label:
+                    t: workbench.percent
+                    args: ["@percent"]
+                  value: "@value"
+          when: $.update.sections.progress
+          blocks:
+            - {type: component, use: bars, props: "@"}
+  ADD_ACCOUNT_ITEMS:
+    - {scope: t:accounts.create.group}
+    - label: t:accounts.create.label
+      act: accOpen
+      args: {kind: acc, v: oauth}
+    - label: t:accounts.create.addClaudeToken
+      act: tokenOpen
+      args: {kind: token}
+    - label: t:accounts.create.enterApiKey
+      act: accOpen
+      args: {kind: acc, v: key}
+    - {scope: t:accounts.create.localLoginHelp}
+  CODEX_ACCOUNT_ITEMS:
+    - {scope: t:accounts.codex.group}
+    - from: $.accountUse
+      item:
+        label:
+          t: settingsUi.account.switchLabel
+          args: ["@using", "@name", "@count"]
+        act: accSwitch
+        args: {k: "@id"}
+        why:
+          of: "@using"
+          map:
+            "true":
+              t: accounts.switch.toast
+              args: ["@name"]
+            "false": ""
+            _: "@using"
+  PROFILE_BODY:
+    - type: box
+      variant: expand
+      when: "@hasBody"
+      blocks:
+        - type: text
+          variant: para
+          when: "@body.p"
+          parts:
+            - {text: "@body.p.ver", variant: meta}
+            - {br: true}
+            - {text: "@body.p.one", strong: true}
+            - {br: true}
+            - {lit: t:profiles.summary}
+            - {text: "@body.p.l0"}
+        - type: disclosure
+          when: "@body.p"
+          key: "@body.sigKey"
+          title: t:wsTeam.routeSignals
+          blocks:
+            - type: text
+              variant: para
+              parts:
+                - {lit: t:profiles.goodAt}
+                - {parts: "@body.good", sep: " · "}
+                - {br: true}
+                - {lit: t:profiles.avoid}
+                - {parts: "@body.bad", sep: " · ", tone: warn}
+        - type: box
+          blocks:
+            - type: each
+              from: "@body.obs"
+              blocks:
+                - type: text
+                  variant: para
+                  parts:
+                    - {text: "@t"}
+                    - {lit: " "}
+                    - {text: "@at", variant: meta, when: "!@recent"}
+                    - text:
+                        t: settings.notifications.unshift
+                        args: ["@author"]
+                      variant: meta
+                      when: "@recent"
+        - type: box
+          load: "@body.evLoad"
+          blocks:
+            - type: each
+              from: "@body.ev"
+              blocks:
+                - type: text
+                  variant: para
+                  parts:
+                    - {text: "@t", strong: true}
+                    - {lit: " "}
+                    - {text: "@meta", variant: meta}
+                    - {br: true}
+                    - {text: "@text"}
+  MCP_FORM:
+    type: form
+    id: mcp
+    blocks:
+      - type: notice
+        tone: danger
+        strong:
+          of: $.form.err
+          map:
+            previewRequired: t:capabilities.mcp.previewBeforeAdd
+            saveFailed: t:capabilities.mcp.saveFailed
+            _: $.form.err
+        text: ""
+        when: $.form.err
+      - type: section
+        title: t:ext.connection
+        blocks:
+          - type: settings
+            rows:
+              - kind: field
+                label: t:common.name
+                id: m-name
+                req: {$frag: MCP_NEW}
+                help:
+                  - text:
+                      of: {$frag: MCP_NEW}
+                      map:
+                        "true": ""
+                        "false": t:settingsUi.mcp.nameHelp.false
+                        _: {$frag: MCP_NEW}
+                control:
+                  type: input
+                  id: m-name
+                  value: $.form.d.name
+                  placeholder: t:mcpForm.fields.serviceName
+                  input: mcpDirty
+                  args: {draft: name}
+                  mono: true
+                  ro: {$frag: MCP_EXISTING}
+              - kind: field
+                label: t:mcpForm.fields.transport
+                control:
+                  - type: seg
+                    value: $.form.d.t
+                    act: set
+                    args: {path: s.mcpDraft.t}
+                    options:
+                      - {v: stdio, label: STDIO}
+                      - {v: http, label: t:settingsUi.mcp.transport.http}
+                    when: {$frag: MCP_NEW}
+                  - type: text
+                    variant: value
+                    text:
+                      t: settingsUi.mcp.transport
+                      args: [$.form.d.t]
+                    when: {$frag: MCP_EXISTING}
+              - kind: field
+                label: t:mcpForm.fields.parser
+                when: $.form.resolver
+                control: {type: text, variant: value, text: $.form.resolver, mono: true}
+              - kind: field
+                label: URL
+                id: m-url
+                req: {$frag: MCP_NEW}
+                when:
+                  of: $.form.d.t
+                  map: {http: true, _: false}
+                control:
+                  type: input
+                  id: m-url
+                  value: $.form.d.url
+                  placeholder:
+                    of: {$frag: MCP_EDIT}
+                    map:
+                      "true": t:settingsUi.mcp.urlPh.true
+                      "false": https://mcp.example.com/mcp
+                      _: {$frag: MCP_EDIT}
+                  input: mcpDirty
+                  args: {draft: url}
+                  mono: true
+                  ro: $.form.ro
+              - kind: field
+                label: t:mcpForm.fields.headers
+                when:
+                  - of: $.form.d.t
+                    map: {http: true, _: false}
+                  - "!$.form.ro"
+                control:
+                  type: kvlist
+                  key: headers
+                  input: mcpDirty
+                  eye: toggle
+                  del: listOp
+                  path: s.mcpDraft.{l}
+                  add: t:mcpForm.fields.kv
+                  rows:
+                    - from: $.form.headers
+                      item:
+                        k: "@k"
+                        v: "@v"
+                        show: "@show"
+                        ph:
+                          of: "@saved"
+                          map: {"true": t:settingsUi.mcp.valuePh.true, "false": t:kv.value, _: "@saved"}
+              - kind: field
+                label: t:market.detail.launchCommand
+                id: m-cmd
+                req:
+                  of: $.form.key
+                  map:
+                    __new:
+                      of: $.form.resolver.length
+                      gte: 1
+                      map: {"true": false, _: true}
+                    _: false
+                when:
+                  of: $.form.d.t
+                  map: {http: false, _: true}
+                control:
+                  type: input
+                  id: m-cmd
+                  value: $.form.d.cmd
+                  placeholder:
+                    of: {$frag: MCP_EDIT}
+                    map:
+                      "true": t:settingsUi.mcp.commandPh.true
+                      "false": t:wsLive.activity.command
+                      _: {$frag: MCP_EDIT}
+                  input: mcpDirty
+                  args: {draft: cmd}
+                  mono: true
+                  ro: $.form.ro
+              - kind: field
+                label: t:mcpForm.fields.arguments
+                when:
+                  - of: $.form.d.t
+                    map: {http: false, _: true}
+                  - $.form.ro
+                control:
+                  - type: text
+                    variant: value
+                    parts:
+                      - parts: $.form.args
+                        sep: " "
+                        each: {text: "@v"}
+                    mono: true
+                    when: [$.form.ro, $.form.args]
+                  - type: text
+                    variant: meta
+                    text: t:common.none
+                    when: [$.form.ro, "!$.form.args"]
+              - kind: field
+                label: t:mcpForm.fields.arguments
+                when:
+                  - of: $.form.d.t
+                    map: {http: false, _: true}
+                  - "!$.form.ro"
+                control:
+                  type: kvlist
+                  key: args
+                  single: true
+                  input: mcpDirty
+                  del: listOp
+                  path: s.mcpDraft.{l}
+                  add: t:mcpForm.fields.add
+                  rows:
+                    - from: $.form.args
+                      item:
+                        v: "@v"
+                        ph:
+                          of: {$frag: MCP_EDIT}
+                          map:
+                            "true": t:settingsUi.mcp.argsPh.true
+                            "false": t:mcpForm.fields.arguments
+                            _: {$frag: MCP_EDIT}
+              - kind: field
+                label: t:env.envVars
+                when:
+                  of: $.form.d.t
+                  map: {http: false, _: true}
+                help:
+                  - text:
+                      of:
+                        of: $.form.ro
+                        map:
+                          "true": managed
+                          _:
+                            of: $.form.key
+                            map: {__new: new, _: edit}
+                      map:
+                        managed: t:settingsUi.mcp.envHelp.managed
+                        edit: t:settingsUi.mcp.envHelp.edit
+                        new: ""
+                        _:
+                          of: $.form.ro
+                          map:
+                            "true": managed
+                            _:
+                              of: $.form.key
+                              map: {__new: new, _: edit}
+                control:
+                  type: kvlist
+                  key: env
+                  ro: $.form.ro
+                  input: mcpDirty
+                  eye: toggle
+                  del: listOp
+                  path: s.mcpDraft.{l}
+                  add: t:mcpForm.fields.addEnvironmentVariable
+                  rows:
+                    - from: $.form.env
+                      item:
+                        k: "@k"
+                        v: "@v"
+                        show: "@show"
+                        ph:
+                          of: "@saved"
+                          map: {"true": t:settingsUi.mcp.valuePh.true, "false": t:kv.value, _: "@saved"}
+              - kind: field
+                label: t:common.note
+                when: {$frag: MCP_EXISTING}
+                control:
+                  - {type: text, variant: value, text: $.form.desc, when: $.form.desc}
+                  - {type: text, variant: meta, text: t:list.noDesc, when: "!$.form.desc"}
+      - type: section
+        title:
+          of:
+            of: $.form.tools.state
+            map: {ok: true, _: false}
+          map:
+            "true":
+              t: settingsUi.mcp.toolsTitle.true
+              args: [$.form.tools.total]
+            "false":
+              t: frame.tools
+              args: [$.form.tools.total]
+            _:
+              of: $.form.tools.state
+              map: {ok: true, _: false}
+        keep: true
+        actions:
+          - type: status
+            tone: warn
+            text: $.form.tools.errorText
+            when:
+              - of: $.form.tools.state
+                map: {error: true, _: false}
+              - $.form.tools.errorText
+          - type: status
+            tone: warn
+            text:
+              t: settingsUi.mcp.probeError
+              args: [$.form.tools.errorCode]
+            when:
+              - of: $.form.tools.state
+                map: {error: true, _: false}
+              - "!$.form.tools.errorText"
+          - type: status
+            tone: warn
+            text: t:mcpForm.fields.connectionTimeout
+            when:
+              of: $.form.tools.state
+              map: {timeout: true, _: false}
+          - type: status
+            tone: ok
+            text: t:common.status.connected
+            when:
+              of: $.form.tools.state
+              map: {ok: true, _: false}
+          - type: button
+            label:
+              t: settingsUi.mcp.probeLabel
+              args:
+                - of: $.form.tools.state
+                  map: {probing: true, _: false}
+            act: mcpProbe
+            disabled:
+              of: $.form.tools.state
+              map: {probing: true, _: false}
+        blocks:
+          - type: list
+            id: mcp-tools
+            from: $.form.tools.rows
+            row:
+              layout: two
+              title: {text: "@name", mono: true}
+              sub: "@desc"
+            rows: 6
+            searchable: true
+            empty:
+              of:
+                of: $.form.tools.state
+                map:
+                  idle:
+                    of: $.form.key
+                    map: {__new: new, _: idle}
+                  _: $.form.tools.state
+              map:
+                probing: t:settingsUi.mcp.empty.probing
+                new: t:settingsUi.mcp.empty.new
+                idle: t:settingsUi.mcp.empty.ok
+                ok: t:settingsUi.mcp.empty.ok
+                error: t:settingsUi.mcp.empty.ok
+                timeout: t:settingsUi.mcp.empty.ok
+                _:
+                  of: $.form.tools.state
+                  map:
+                    idle:
+                      of: $.form.key
+                      map: {__new: new, _: idle}
+                    _: $.form.tools.state
+      - type: section
+        id: mcp-preview
+        title: t:mcpForm.whatChanges
+        when:
+          - {$frag: MCP_NEW}
+          - $.form.preview
+        blocks:
+          - type: settings
+            rows:
+              - label: t:mcpForm.identifier
+                ctls:
+                  - {type: text, variant: value, text: $.form.d.name, mono: true}
+              - label: t:mcpForm.writesCli
+                help:
+                  - text: ~/.claude/mcp.json · ~/.codex/config.toml · ~/.gemini/settings.json · ~/.kimi/mcp.json
+                    mono: true
+              - label: t:mcpForm.afterAdd
+                ctls:
+                  - {type: text, variant: meta, text: t:mcpForm.autoProbe}
+                  - {type: status, tone: warn, text: t:mcpForm.runsAsYou}
+      - type: toolbar
+        when: {$frag: MCP_NEW}
+        items:
+          - type: button
+            label: t:common.cancel
+            act: open
+            args: {page: mcp}
+          - {type: button, label: t:wsOps.previewChanges, act: mcpPreview}
+          - type: button
+            primary: true
+            label: t:mcpForm.confirmAdd
+            submit: true
+            disabled:
+              of: $.form.preview
+              map: {"true": false, _: true}
+      - type: toolbar
+        variant: savebar
+        id: savebar
+        when: {$frag: MCP_EDIT}
+        hidden: "!$.form.dirty"
+        items:
+          - type: text
+            text:
+              t: settingsUi.mcp.save
+              args: [$.form.scope]
+          - {type: grow}
+          - {type: button, primary: true, label: t:common.save, submit: true}
+  MCP_NEW:
+    of: $.form.key
+    map: {__new: true, _: false}
+  MCP_EXISTING:
+    of: $.form.key
+    map: {__new: false, _: true}
+  MCP_EDIT:
+    of: $.form.ro
+    map:
+      "true": false
+      _: {$frag: MCP_EXISTING}
+  MEMBER_FORM:
+    type: each
+    from:
+      - {}
+    item:
+      identity: {$frag: MEMBER_DRAFT_IDENTITY}
+    blocks:
+      - type: box
+        variant: columns
+        blocks:
+          - {type: toc, note: "2", when: $.form.isNew}
+          - {type: toc, note: "7", when: $.form.existing}
+          - type: form
+            id: member
+            htmlId: mform
+            note: "1"
+            blocks:
+              - type: ordered
+                order: [identity, model, ext, handles, voice, context, advanced]
+                blocks: {$frag: MEMBER_SECTIONS}
+                when: $.form.isNew
+              - type: ordered
+                order:
+                  - model
+                  - runtime
+                  - ext
+                  - handles
+                  - identity
+                  - voice
+                  - context
+                  - advanced
+                  - routing
+                blocks: {$frag: MEMBER_SECTIONS}
+                when: $.form.existing
+              - type: toolbar
+                variant: savebar
+                id: savebar
+                hidden:
+                  - "!$.form.isNew"
+                  - "!$.form.save.pendingWrite"
+                  - "!$.form.save.error"
+                  - of: $.form.save.n
+                    map: {"0": true, _: false}
+                items:
+                  - type: text
+                    text:
+                      t: memberForm.fields.unsavedChanges
+                      args: [$.form.save.n]
+                    when: $.form.existing
+                  - type: text
+                    parts:
+                      - text:
+                          t: settingsUi.member.missingLead
+                          args: [$.form.save.missingCount]
+                      - parts: $.form.save.missing
+                        sep: 、
+                        each:
+                          text:
+                            of: "@k"
+                            map:
+                              name: t:memberForm.fields.nickname
+                              role: t:memberForm.fields.roleDescription
+                              acc: t:memberForm.fields.account
+                              model: t:runtime.model
+                              provider: t:memberForm.fields.providerName
+                              acpCmd: t:market.detail.launchCommand
+                              acpArgs: t:memberForm.fields.launchArguments
+                              breed: t:common.name
+                              aliases:
+                                t: memberForm.handle
+                                args: []
+                              _: "@k"
+                    when: [$.form.isNew, $.form.save.missing]
+                  - {type: grow}
+                  - type: back
+                    label: t:common.cancel
+                    act: open
+                    args: {page: members}
+                    when: $.form.isNew
+                  - type: button
+                    primary: true
+                    label:
+                      of: $.form.save.state
+                      map:
+                        saving: t:memberForm.save.saving
+                        checking: t:memberForm.save.checking
+                        _:
+                          of: $.form.save.pendingWrite.catId.length
+                          gte: 1
+                          map: {"true": t:memberForm.save.continue, _: t:common.add}
+                    disabled:
+                      of: $.form.save.state
+                      map: {idle: false, _: true}
+                    submit: true
+                    when: $.form.isNew
+                  - type: button
+                    primary: true
+                    label:
+                      of: $.form.save.state
+                      map:
+                        saving: t:memberForm.save.saving
+                        checking: t:memberForm.save.checking
+                        _:
+                          of: $.form.save.pendingWrite.catId.length
+                          gte: 1
+                          map: {"true": t:memberForm.save.continue, _: t:common.save}
+                    disabled:
+                      of: $.form.save.state
+                      map: {idle: false, _: true}
+                    submit: true
+                    when: $.form.existing
+                  - type: component
+                    use: fieldError
+                    when: $.form.save.error
+                    props:
+                      id: member-save
+                      text:
+                        of: $.form.save.error
+                        map:
+                          recovered_draft: t:memberForm.save.recoveredDraft
+                          member_changed: t:memberForm.save.changed
+                          member_id_changed: t:memberForm.save.idChanged
+                          member_missing: t:memberForm.save.missing
+                          member_write_unconfirmed: t:memberForm.save.unconfirmed
+                          member_write_unavailable: t:memberForm.save.unavailable
+                          configuration_revision_conflict: t:memberForm.save.changed
+                          _: $.form.save.error
+  MEMBER_DRAFT_IDENTITY:
+    name:
+      of: $.form.d.name
+      map: {"": $.form.d.breed, _: $.form.d.name}
+    tint: $.form.d.tint
+    color: $.form.d.color
+    fixedColor: $.form.d.fixedColor
+  MEMBER_SECTIONS:
+    model:
+      type: section
+      id: ms-model
+      title: t:memberForm.modelAccess
+      keep: true
+      blocks:
+        - type: notice
+          strong: t:memberForm.fields.strong
+          text: t:memberForm.fields.text
+          when: $.form.cloud
+        - type: button
+          label: t:memberForm.runtime.restoreIdentity
+          act: memberCloudRestore
+          when:
+            of: $.form.identityProtection.state
+            map: {drifted: true, _: false}
+        - type: component
+          use: fieldError
+          props: {text: $.form.save.error}
+          when: [$.form.cloud, $.form.save.error]
+        - type: notice
+          text: t:memberForm.fields.noAccounts
+          when: ["!$.form.cloud", $.form.noAccount]
+          action:
+            type: button
+            label: t:memberForm.fields.newOrLoginAccount
+            items: {$frag: ADD_ACCOUNT_ITEMS}
+        - type: settings
+          rows:
+            - label: t:members.carriers
+              control: {type: text, variant: value, text: t:memberForm.fields.value}
+            - label: t:memberForm.fields.modelIdentity
+              control: {type: text, variant: value, text: $.form.d.model, mono: true}
+            - label: t:memberForm.fields.returnTool
+              control: {type: text, variant: value, text: t:memberForm.fields.remoteMcpEnabled}
+            - label: t:ext.connection
+              control:
+                type: button
+                label: t:memberForm.fields.manageInPlugin
+                act: open
+                args: {page: extItem-chatgptPro}
+          when: $.form.cloud
+        - type: settings
+          rows:
+            - kind: field
+              label: t:memberForm.fields.client
+              id: f-client
+              control:
+                type: select
+                id: f-client
+                value: $.form.d.client
+                change: md
+                args: {k: client}
+                invalid: $.form.invalid.client
+                options:
+                  - from: $.form.clients
+                    item:
+                      v: "@value"
+                      label:
+                        of: "@type"
+                        map:
+                          name: "@name"
+                          plugin:
+                            t: settingsUi.member.clientName.plugin
+                            args: ["@name", "@pluginName"]
+                          legacy:
+                            t: settingsUi.member.clientName.legacy
+                            args: ["@name", "@pluginName"]
+                          cloud:
+                            t: memberForm.fields.value
+                            args: ["@name", "@pluginName"]
+                          _: "@type"
+                      why:
+                        of: "@why"
+                        map:
+                          absent:
+                            t: settingsUi.member.clientWhy.absent
+                            args: ["@pluginName"]
+                          off:
+                            t: settingsUi.member.clientWhy.off
+                            args: ["@pluginName"]
+                          "": ""
+                          legacy: ""
+                          _: "@why"
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.client
+              req: true
+              help: t:memberForm.fields.help
+            - kind: field
+              label: t:members.carriers
+              id: f-via
+              control:
+                type: select
+                id: f-via
+                value: $.form.d.via
+                change: md
+                args: {k: via}
+                invalid: $.form.invalid.via
+                options:
+                  - from: $.form.via
+                    item:
+                      v: "@value"
+                      label:
+                        of: "@name"
+                        map: {builtin: t:settingsUi.mcp.tag.builtin, _: "@name"}
+                      why:
+                        of: "@why"
+                        map:
+                          absent:
+                            t: settingsUi.member.clientWhy.absent
+                            args: ["@pluginName"]
+                          off:
+                            t: settingsUi.member.clientWhy.off
+                            args: ["@pluginName"]
+                          "": ""
+                          legacy: ""
+                          _: "@why"
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.via}
+                - {text: t:memberForm.fields.acpExperimental, tone: warn, when: $.form.acp}
+              req: true
+              when: {of: $.form.via.length, gte: 2}
+            - kind: field
+              label: t:memberForm.fields.account
+              id: f-acc
+              control:
+                type: select
+                id: f-acc
+                value: $.form.d.acc
+                change: md
+                args: {k: acc}
+                invalid: $.form.invalid.acc
+                options:
+                  - v: ""
+                    label:
+                      t: memberForm.fields.clientOwn
+                      args: [$.form.clientName]
+                  - from: $.form.accounts
+                    item:
+                      v: "@id"
+                      label:
+                        t: settingsUi.member.accountName
+                        args: ["@kind", "@name"]
+              foot:
+                - {text: t:memberForm.fields.err, tone: danger, when: $.form.invalid.acc}
+                - {text: t:memberForm.fields.followCodexAccount, when: $.form.follow}
+                - {text: t:memberForm.fields.dedicatedAccount, when: $.form.overrideAccount}
+                - control:
+                    type: button
+                    link: true
+                    label: t:memberForm.fields.foot
+                    act: followAcc
+                  when: $.form.overrideAccount
+                - control:
+                    type: button
+                    link: true
+                    label: t:memberForm.fields.addOrLoginAccount
+                    items: {$frag: ADD_ACCOUNT_ITEMS}
+            - kind: field
+              label: t:common.source
+              control: {type: text, variant: value, text: $.form.fromPlugin}
+              when: $.form.fromPlugin
+            - kind: field
+              label: t:memberForm.fields.providerName
+              id: f-provider
+              control:
+                type: input
+                id: f-provider
+                value: $.form.d.provider
+                placeholder: deepseek
+                input: md
+                args: {k: provider}
+                mono: true
+                invalid: $.form.invalid.provider
+                listFrom:
+                  - anthropic
+                  - openai
+                  - openai-responses
+                  - openrouter
+                  - google
+                  - azure
+                  - deepseek
+                  - zhipu
+                  - glm
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.provider
+              req: $.form.required.provider
+              help: t:memberForm.fields.providerProtocolHelp
+              when: $.form.active.provider
+            - kind: field
+              label: t:memberForm.fields.enableNative
+              help: t:memberForm.fields.nativeChannelHelp
+              control:
+                type: switch
+                value: $.form.d.agyOn
+                act: toggle
+                args:
+                  path: ss.draft.{k}
+                  k: agyOn
+                label: t:memberForm.fields.enableNative
+              when: $.form.active.agyOn
+            - kind: field
+              label: t:threadSettings.permission
+              id: f-agyPerm
+              control:
+                type: select
+                id: f-agyPerm
+                value: $.form.d.agyPerm
+                change: md
+                args: {k: agyPerm}
+                invalid: $.form.invalid.agyPerm
+                options:
+                  - {v: false, label: t:memberForm.contextPolicy.agyPerm}
+                  - {v: true, label: t:memberForm.contextPolicy.fullTrust}
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.agyPerm
+              when: $.form.active.agyPerm
+            - kind: field
+              label: t:memberForm.fields.isolatedProfileId
+              id: f-agyProfile
+              control:
+                type: input
+                id: f-agyProfile
+                value: $.form.d.agyProfile
+                placeholder: gemini38
+                input: md
+                args: {k: agyProfile}
+                mono: true
+                invalid: $.form.invalid.agyProfile
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.agyProfile
+              when: $.form.active.agyProfile
+            - kind: field
+              label: t:memberForm.fields.profileRoot
+              id: f-agyRoot
+              control:
+                type: input
+                id: f-agyRoot
+                value: $.form.d.agyRoot
+                placeholder: ~/.cat-cafe/agy-profiles
+                input: md
+                args: {k: agyRoot}
+                mono: true
+                invalid: $.form.invalid.agyRoot
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.agyRoot
+              when: $.form.active.agyRoot
+            - kind: field
+              label: t:memberForm.fields.approvedWorkspaces
+              id: f-agyDirs
+              control:
+                type: input
+                id: f-agyDirs
+                value: $.form.d.agyDirs
+                placeholder: t:memberForm.fields.absolutePath
+                input: md
+                args: {k: agyDirs}
+                mono: true
+                invalid: $.form.invalid.agyDirs
+                rows: true
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.agyDirs
+              when: $.form.active.agyDirs
+            - kind: field
+              label: t:memberForm.runtime.executionApproval
+              id: f-executionApproval
+              control:
+                type: select
+                id: f-executionApproval
+                value: $.form.d.executionApproval
+                change: md
+                args: {k: executionApproval}
+                options:
+                  - {v: auto, label: t:memberForm.runtime.auto}
+                  - {v: ask_user, label: t:memberForm.runtime.ask_user}
+              when: $.form.active.executionApproval
+              help: t:memberForm.runtime.executionApprovalHelp
+            - kind: field
+              label: t:market.detail.launchCommand
+              id: f-acpCmd
+              control:
+                type: input
+                id: f-acpCmd
+                value: $.form.d.acpCmd
+                placeholder: kimi
+                input: md
+                args: {k: acpCmd}
+                mono: true
+                invalid: $.form.invalid.acpCmd
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.acpCmd
+              req: true
+              when: $.form.active.acpCmd
+            - kind: field
+              label: t:memberForm.fields.launchArguments
+              id: f-acpArgs
+              control:
+                type: input
+                id: f-acpArgs
+                value: $.form.d.acpArgs
+                placeholder: acp
+                input: md
+                args: {k: acpArgs}
+                mono: true
+                invalid: $.form.invalid.acpArgs
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.acpArgs
+              req: true
+              help: t:memberForm.fields.argumentSyntaxHelp
+              when: $.form.active.acpArgs
+            - kind: field
+              label: t:memberForm.fields.maxProcesses
+              id: f-acpMax
+              control:
+                type: input
+                id: f-acpMax
+                value: $.form.d.acpMax
+                placeholder: $.form.preferences.acpMaxDefault
+                input: md
+                args: {k: acpMax}
+                mono: false
+                invalid: $.form.invalid.acpMax
+                num: true
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.acpMax
+              when: $.form.active.acpMax
+            - kind: field
+              label: t:memberForm.fields.idleTimeout
+              id: f-acpTtl
+              control:
+                type: input
+                id: f-acpTtl
+                value: $.form.d.acpTtl
+                placeholder: "30"
+                input: md
+                args: {k: acpTtl}
+                mono: false
+                invalid: $.form.invalid.acpTtl
+                num: true
+                post: t:memberForm.fields.post
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.acpTtl
+              when: $.form.active.acpTtl
+            - kind: field
+              label: t:runtime.model
+              id: f-model
+              control:
+                - type: input
+                  id: f-model
+                  value: $.form.d.model
+                  input: md
+                  change: md
+                  args: {k: model}
+                  mono: true
+                  placeholder: t:memberForm.runtime.follow
+                  listFrom:
+                    - v: ""
+                      label: t:memberForm.runtime.follow
+                      sub:
+                        of: $.form.preferences.catalog.defaultModelLabel.length
+                        gte: 1
+                        map:
+                          "true":
+                            t: memberForm.runtime.inherited
+                            args:
+                              - of: $.form.preferences.catalog.defaultModelSource
+                                map: {$frag: MEMBER_MODEL_SOURCE}
+                              - $.form.preferences.catalog.defaultModelLabel
+                          _: ""
+                    - from: $.form.preferences.catalog.models
+                      item: {v: "@value", label: "@label", sub: "@description"}
+                  reload:
+                    act: memberCatalogRefresh
+                    busy: $.form.preferences.catalogLoading
+                    tip: t:memberForm.catalogRefresh
+                    why:
+                      of: $.form.preferences.catalogRead
+                      map: {"true": "", _: t:memberForm.catalogUnsupported}
+              foot:
+                - text:
+                    t: memberForm.runtime.inherited
+                    args:
+                      - of: $.form.preferences.catalog.defaultModelSource
+                        map: {$frag: MEMBER_MODEL_SOURCE}
+                      - $.form.preferences.catalog.defaultModelLabel
+                  when: $.form.preferences.catalog.defaultModelLabel
+            - kind: field
+              label: t:memberForm.fields.collaborationTools
+              help: t:memberForm.fields.collaborationHelp
+              note: "4"
+              control:
+                type: switch
+                value: $.form.d.mcp
+                act: toggle
+                args:
+                  path: ss.draft.{k}
+                  k: mcp
+                label: t:memberForm.fields.collaborationTools
+          when: "!$.form.cloud"
+        - type: disclosure
+          key: dsh-provider
+          title: t:runtime.dshProvider
+          when: $.form.model.provider
+          blocks:
+            - type: settings
+              rows:
+                - label: t:runtime.sourceProfile
+                  ctls:
+                    - type: select
+                      id: rt-dsh-profile
+                      value: $.form.model.provider.sourceProfile
+                      invalid: $.form.model.provider.error
+                      options: $.form.model.provider.profiles
+                      change: runtimeSet
+                      args: {path: ss.providerSetup.sourceProfile}
+                    - type: component
+                      use: fieldError
+                      props: {id: rt-dsh-profile, text: $.form.model.provider.error}
+                      when: $.form.model.provider.error
+                - label: t:runtime.provider
+                  when: $.form.model.provider.canPrepare
+                  ctls:
+                    - type: select
+                      id: rt-dsh-provider
+                      value: $.form.model.provider.provider
+                      options: $.form.model.provider.routes
+                      change: runtimeSet
+                      args: {path: ss.providerSetup.provider}
+                - label: t:runtime.model
+                  when: $.form.model.provider.canPrepare
+                  ctls:
+                    - type: select
+                      id: rt-dsh-model
+                      value: $.form.model.provider.model
+                      options: $.form.model.provider.models
+                      change: runtimeSet
+                      args: {path: ss.providerSetup.model}
+            - type: status
+              tone: ok
+              text: t:runtime.tested
+              when: $.form.model.provider.tested
+            - type: toolbar
+              items:
+                - type: button
+                  label: t:runtime.inspect
+                  act: memberProviderSetup
+                  args: {op: inspect}
+                - type: button
+                  label: t:runtime.prepare
+                  act: memberProviderSetup
+                  args: {op: prepare}
+                  when: $.form.model.provider.canPrepare
+                - type: button
+                  label: t:runtime.test
+                  act: memberProviderSetup
+                  args: {op: test}
+                  when: $.form.model.provider.canTest
+        - type: component
+          use: pluginConfigForm
+          props: $.form.model.plugin
+          when: $.form.model.plugin
+        - type: box
+          variant: group
+          key: clientShared
+          when: $.form.clientShared
+          blocks:
+            - type: label
+              text:
+                t: memberForm.clientShared
+                args: [$.form.clientShared.name]
+              tip:
+                t: memberForm.clientSharedTip
+                args: [$.form.clientShared.name]
+            - type: settings
+              rows:
+                - kind: field
+                  label: t:memberForm.fields.sandbox
+                  id: f-cxSandbox
+                  control:
+                    type: select
+                    id: f-cxSandbox
+                    value: $.form.d.cxSandbox
+                    change: md
+                    args: {k: cxSandbox}
+                    invalid: $.form.invalid.cxSandbox
+                    options:
+                      - {v: read-only, label: t:memberForm.contextPolicy.sandbox}
+                      - {v: workspace-write, label: t:memberForm.contextPolicy.writableWorkspace}
+                      - {v: danger-full-access, label: t:memberForm.contextPolicy.fullAccess}
+                  foot:
+                    - text: t:memberForm.access.text
+                      tone: danger
+                      when: $.form.invalid.cxSandbox
+                  when: $.form.active.cxSandbox
+                - kind: field
+                  label: t:memberForm.fields.approvalMode
+                  id: f-cxApproval
+                  control:
+                    type: select
+                    id: f-cxApproval
+                    value: $.form.d.cxApproval
+                    change: md
+                    args: {k: cxApproval}
+                    invalid: $.form.invalid.cxApproval
+                    options:
+                      - {v: untrusted, label: t:memberForm.contextPolicy.approval}
+                      - {v: on-failure, label: t:memberForm.contextPolicy.approvalOnFailure}
+                      - {v: on-request, label: t:memberForm.contextPolicy.approvalOnRequest}
+                      - {v: never, label: t:memberForm.contextPolicy.approvalNever}
+                  foot:
+                    - text: t:memberForm.access.text
+                      tone: danger
+                      when: $.form.invalid.cxApproval
+                  when: $.form.active.cxApproval
+            - type: component
+              use: pluginConfigForm
+              props: $.form.clientShared.plugin
+              when: $.form.clientShared.plugin
+    runtime:
+      type: section
+      id: ms-runtime
+      title: t:wsSessions.runtime
+      keep: true
+      blocks:
+        - type: settings
+          rows:
+            - label: t:runtime.hooks.label
+              help:
+                - parts: $.form.runtime.hooks.targets
+                  sep: |+
+                    
+                  when: "!$.form.runtime.hooks.error"
+                  each:
+                    parts:
+                      - {text: "@name"}
+                      - {text: " · "}
+                      - {text: "@reason"}
+              ctls:
+                - type: status
+                  tone:
+                    of: $.form.runtime.hooks.status
+                    map:
+                      configured: ok
+                      missing: warn
+                      stale: warn
+                      unsupported: warn
+                      error: danger
+                      _: $.form.runtime.hooks.status
+                  text:
+                    of: $.form.runtime.hooks.status
+                    map:
+                      configured: t:threadSettings.synced
+                      missing: t:runtime.hooks.missing
+                      stale: t:runtime.hooks.stale
+                      unsupported: t:settingsUi.member.hooks.unsupported
+                      error: t:common.status.error
+                      _: $.form.runtime.hooks.status
+                  when: "!$.form.runtime.hooks.error"
+                - type: status
+                  tone: danger
+                  text: $.form.runtime.hooks.error
+                  when: $.form.runtime.hooks.error
+                - type: button
+                  label: t:wsCommunity.sync
+                  act: memberHooksSync
+                  when: $.form.runtime.hooks.canSync
+            - label: t:ext.connection
+              help: $.form.runtime.connection.tip
+              when: $.form.runtime.canTest
+              ctls:
+                - type: status
+                  tone:
+                    of: $.form.runtime.connection.status
+                    map:
+                      skipped: warn
+                      ok: ok
+                      error: danger
+                      _: $.form.runtime.connection.status
+                  text:
+                    of: $.form.runtime.connection.status
+                    map:
+                      skipped: t:workbench.govern.skipped
+                      ok: t:common.status.connected
+                      error: t:runtime.connectionFailed
+                      _: $.form.runtime.connection.status
+                  when: $.form.runtime.connection
+                - {type: button, label: t:ext.testConn, act: memberConnection}
+      when: $.form.runtime
+    ext:
+      type: section
+      id: ms-ext
+      title: $.form.ext.title
+      keep: true
+      blocks:
+        - {type: component, use: pluginConfigForm, props: $.form.ext.form}
+      when: $.form.ext
+    handles:
+      type: section
+      id: ms-handles
+      title: {lit: t:memberForm.handle}
+      keep: true
+      blocks:
+        - type: settings
+          rows:
+            - kind: field
+              label: {lit: t:memberForm.handle}
+              req: true
+              help: t:memberForm.fields.handleHelp
+              foot:
+                - text: t:memberForm.fields.handleRequired
+                  tone: danger
+                  when: $.form.invalid.aliases
+              control:
+                type: tags
+                id: mc-aliases
+                values: $.form.d.aliases
+                kind: handle
+                k: aliases
+                placeholder: {lit: "@sol2"}
+                label: t:members.ownerForm.addHandle
+                empty: t:memberForm.fields.noHandles
+                lock: $.form.handleLock
+    identity:
+      type: section
+      id: ms-identity
+      title: t:memberForm.identity
+      keep: true
+      blocks:
+        - type: settings
+          rows:
+            - kind: field
+              label: t:memberForm.fields.memberId
+              control: {type: text, variant: value, text: $.form.id, mono: true}
+              when: $.form.existing
+            - kind: field
+              label: t:common.name
+              id: f-breed
+              control:
+                type: input
+                id: f-breed
+                value: $.form.d.breed
+                placeholder:
+                  of: $.form.isNew
+                  map:
+                    "true": t:newLibrary.displayName
+                    "false": t:structure.name
+                    _: $.form.isNew
+                input: md
+                args: {k: breed}
+                mono: false
+                invalid: $.form.invalid.breed
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.breed
+              req: true
+            - kind: field
+              label: t:memberForm.fields.nickname
+              id: f-name
+              control:
+                type: input
+                id: f-name
+                value: $.form.d.name
+                placeholder: t:memberForm.fields.nickname
+                input: md
+                args: {k: name}
+                mono: false
+                invalid: $.form.invalid.name
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.name}
+            - kind: field
+              label: t:memberForm.fields.displaySuffix
+              id: f-suffix
+              control:
+                type: input
+                id: f-suffix
+                value: $.form.d.suffix
+                placeholder: t:memberForm.fields.suffixPlaceholder
+                input: md
+                args: {k: suffix}
+                mono: false
+                invalid: $.form.invalid.suffix
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.suffix
+            - kind: field
+              label: t:memberForm.fields.roleDescription
+              id: f-role
+              control:
+                type: input
+                id: f-role
+                value: $.form.d.role
+                placeholder: t:memberForm.fields.rolePlaceholder
+                input: md
+                args: {k: role}
+                mono: false
+                invalid: $.form.invalid.role
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.role}
+              req: true
+            - kind: field
+              label: t:memberNew.avatar
+              when: "!$.form.canonBound"
+              control:
+                - type: avatar
+                  lead: "@identity"
+                  size: xl
+                  upload:
+                    label: t:control.upload
+                    accept: image/png,image/jpeg,image/webp
+                    msg: t:control.avatarUploaded
+                - type: input
+                  id: f-avatarPath
+                  value: $.form.d.avatarPath
+                  placeholder: /avatars/xxx.png
+                  input: md
+                  args: {k: avatarPath}
+                  mono: true
+                  label: t:memberForm.fields.avatarPath
+                  when: $.form.avatarPathOpen
+                - type: more
+                  items:
+                    - label: t:memberForm.fields.avatarPath
+                      act: toggle
+                      args: {path: ss.avPathOpen}
+                      cur: $.form.avatarPathOpen
+                  label: t:common.moreActions
+            - kind: field
+              label: t:memberNew.avatar
+              when: $.form.canonBound
+              control:
+                - {type: avatar, lead: "@identity", size: xl}
+                - type: button
+                  label: t:members.avatarCorrection.open
+                  act: canonAvatarOpen
+                  args: {kind: canonAvatar, id: $.form.id}
+                - type: input
+                  id: f-avatarPath
+                  value: $.form.d.avatarPath
+                  placeholder: /avatars/xxx.png
+                  input: md
+                  args: {k: avatarPath}
+                  mono: true
+                  label: t:memberForm.fields.avatarPath
+                  when: $.form.avatarPathOpen
+                - type: more
+                  items:
+                    - label: t:memberForm.fields.avatarPath
+                      act: toggle
+                      args: {path: ss.avPathOpen}
+                      cur: $.form.avatarPathOpen
+                  label: t:common.moreActions
+            - kind: field
+              label: t:memberForm.fields.identityColor
+              note: "6"
+              help: t:memberForm.fields.identityColorHelp
+              control:
+                type: color
+                id: f-color
+                value: "@identity"
+                input: mdColor
+                slots: name
+                preview:
+                  of:
+                    of: $.form.d.name
+                    map: {"": $.form.d.breed, _: $.form.d.name}
+                  map:
+                    "": "?"
+                    _:
+                      of: $.form.d.name
+                      map: {"": $.form.d.breed, _: $.form.d.name}
+                label: t:memberForm.fields.identityColor
+            - kind: field
+              label: t:memberForm.fields.specialties
+              id: f-good
+              control:
+                type: input
+                id: f-good
+                value: $.form.d.good
+                placeholder: t:memberForm.fields.specialtiesPlaceholder
+                input: md
+                args: {k: good}
+                mono: false
+                invalid: $.form.invalid.good
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.good}
+            - kind: field
+              label: t:memberForm.fields.personality
+              id: f-traits
+              control:
+                type: input
+                id: f-traits
+                value: $.form.d.traits
+                placeholder: t:memberForm.fields.personality
+                input: md
+                args: {k: traits}
+                mono: false
+                invalid: $.form.invalid.traits
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.traits
+            - kind: field
+              label: t:memberForm.fields.precautions
+              id: f-care
+              control:
+                type: input
+                id: f-care
+                value: $.form.d.care
+                placeholder: ""
+                input: md
+                args: {k: care}
+                mono: false
+                invalid: $.form.invalid.care
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.care}
+            - kind: field
+              label: t:memberForm.fields.specialtyTags
+              control:
+                type: tags
+                id: mc-tags
+                values: $.form.d.tags
+                k: tags
+                placeholder: t:common.tags
+                label: t:memberForm.fields.addSpecialty
+                empty: t:threadSettings.noTags
+    voice:
+      type: section
+      id: ms-voice
+      title: t:voice.title
+      keep: true
+      blocks:
+        - type: settings
+          rows:
+            - kind: field
+              label: t:memberForm.fields.language
+              id: f-vLang
+              control:
+                type: select
+                id: f-vLang
+                value: $.form.d.vLang
+                change: md
+                args: {k: vLang}
+                invalid: $.form.invalid.vLang
+                options:
+                  - {v: "", label: t:pcf.unset}
+                  - {v: zh, label: t:voice.langZh}
+                  - {v: en-us, label: t:memberForm.contextPolicy.englishUs}
+                  - {v: ja, label: t:memberForm.contextPolicy.japanese}
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.vLang
+            - kind: field
+              label: t:memberForm.fields.voice
+              id: f-vVoice
+              control:
+                type: input
+                id: f-vVoice
+                value: $.form.d.vVoice
+                placeholder: zm_yunjian
+                input: md
+                args: {k: vVoice}
+                mono: true
+                invalid: $.form.invalid.vVoice
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.vVoice
+            - kind: field
+              label: t:memberForm.fields.speechRate
+              id: f-vSpeed
+              control:
+                type: input
+                id: f-vSpeed
+                value: $.form.d.vSpeed
+                placeholder: "1.0"
+                input: md
+                args: {k: vSpeed}
+                mono: false
+                invalid: $.form.invalid.vSpeed
+                num: true
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.vSpeed
+            - kind: field
+              label: t:memberForm.fields.referenceAudio
+              control:
+                - type: text
+                  variant: value
+                  text: $.form.d.vRef
+                  mono: true
+                  tip:
+                    of: [0, 1]
+                    item:
+                      of: "@"
+                      map: {"0": ~/.cat-cafe/voices/, "1": $.form.d.vRef}
+                    sep: ""
+                  when: $.form.d.vRef
+                - type: text
+                  variant: value
+                  text: t:pcf.unset
+                  faint: true
+                  when: "!$.form.d.vRef"
+                - type: upload
+                  label: t:control.upload
+                  accept: audio/*
+                  msg: t:memberForm.fields.referenceUploaded
+                  args: {k: vRef}
+            - kind: field
+              label: t:memberForm.fields.referenceTranscript
+              id: f-vRefText
+              control:
+                type: input
+                id: f-vRefText
+                value: $.form.d.vRefText
+                placeholder: t:memberForm.fields.referenceTranscriptPlaceholder
+                input: md
+                args: {k: vRefText}
+                mono: false
+                invalid: $.form.invalid.vRefText
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.vRefText
+            - kind: field
+              label: t:memberForm.fields.voiceInstructions
+              id: f-vTone
+              control:
+                type: input
+                id: f-vTone
+                value: $.form.d.vTone
+                placeholder: t:memberForm.fields.voiceInstructionsPlaceholder
+                input: md
+                args: {k: vTone}
+                mono: false
+                invalid: $.form.invalid.vTone
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.vTone
+            - kind: field
+              label: t:memberForm.fields.voiceVariation
+              id: f-vVar
+              control:
+                type: input
+                id: f-vVar
+                value: $.form.d.vVar
+                placeholder: "0.3"
+                input: md
+                args: {k: vVar}
+                mono: false
+                invalid: $.form.invalid.vVar
+                num: true
+              foot:
+                - {text: t:memberForm.access.text, tone: danger, when: $.form.invalid.vVar}
+      help: t:memberForm.voiceHelp
+    context:
+      type: section
+      id: ms-context
+      title: t:memberForm.context
+      keep: true
+      blocks:
+        - type: settings
+          rows:
+            - kind: field
+              label: t:memberForm.fields.contextWindow
+              id: f-ctxWin
+              control:
+                type: input
+                id: f-ctxWin
+                value: $.form.d.ctxWin
+                placeholder: t:modeThumb.label.system
+                input: md
+                args: {k: ctxWin}
+                mono: false
+                invalid: $.form.invalid.ctxWin
+                num: true
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.ctxWin
+              help: t:memberForm.fields.contextWindowHelp
+            - kind: field
+              label: t:memberForm.fields.contextFullPolicy
+              id: f-ctxStrat
+              control:
+                type: select
+                id: f-ctxStrat
+                value: $.form.d.ctxStrat
+                change: md
+                args: {k: ctxStrat}
+                invalid: $.form.invalid.ctxStrat
+                options:
+                  - {v: handoff, label: t:memberForm.contextPolicy.ctxStrat}
+                  - {v: compress, label: t:memberForm.contextPolicy.compressInPlace}
+                  - {v: hybrid, label: t:memberForm.contextPolicy.compressThenHandoff}
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.ctxStrat
+            - kind: field
+              label: t:memberForm.fields.reminderThreshold
+              id: f-ctxWarn
+              control:
+                type: range
+                id: f-ctxWarn
+                value: $.form.d.ctxWarn
+                input: md
+                args: {k: ctxWarn}
+                label: t:memberForm.fields.reminderThreshold
+                min: 50
+                max: 100
+                unit: "%"
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.ctxWarn
+              help: t:memberForm.fields.reminderThresholdHelp
+            - kind: field
+              label:
+                of: $.form.d.ctxStrat
+                map:
+                  compress: t:settingsUi.member.ctxLine.compress
+                  handoff: t:settingsUi.member.ctxLine.hybrid
+                  hybrid: t:settingsUi.member.ctxLine.hybrid
+                  _: $.form.d.ctxStrat
+              id: f-ctxLine
+              control:
+                type: range
+                id: f-ctxLine
+                value: $.form.d.ctxLine
+                input: md
+                args: {k: ctxLine}
+                label:
+                  of: $.form.d.ctxStrat
+                  map:
+                    compress: t:settingsUi.member.ctxLine.compress
+                    handoff: t:settingsUi.member.ctxLine.hybrid
+                    hybrid: t:settingsUi.member.ctxLine.hybrid
+                    _: $.form.d.ctxStrat
+                min: 30
+                max: 100
+                unit: "%"
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.ctxLine
+              help:
+                - text:
+                    of: $.form.d.ctxStrat
+                    map:
+                      compress: t:settingsUi.member.ctxHelp.compress
+                      handoff: t:settingsUi.member.ctxHelp.hybrid
+                      hybrid: t:settingsUi.member.ctxHelp.hybrid
+                      _: $.form.d.ctxStrat
+            - kind: field
+              label: t:memberForm.fields.maxCompressions
+              id: f-ctxMax
+              control:
+                type: input
+                id: f-ctxMax
+                value: $.form.d.ctxMax
+                placeholder: ""
+                input: md
+                args: {k: ctxMax}
+                mono: false
+                invalid: $.form.invalid.ctxMax
+                num: true
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.ctxMax
+              help: t:memberForm.fields.maxCompressionsHelp
+              when: $.form.hybrid
+            - kind: field
+              label: t:memberForm.fields.executionStatus
+              control:
+                - type: status
+                  tone: info
+                  text: t:memberForm.fields.pendingSettings
+                  when: $.form.ctxDirty
+                - type: text
+                  variant: meta
+                  text: t:memberForm.fields.savedSettings
+                  when: "!$.form.ctxDirty"
+      when: "!$.form.cloud"
+    advanced:
+      type: section
+      id: ms-advanced
+      title: t:memberForm.advanced
+      keep: true
+      blocks:
+        - type: kv
+          from:
+            - k: t:runtime.model
+              rawLabel: $.form.preferences.modelLabel
+              source: $.form.preferences.modelSource
+              v:
+                - {text: "@rawLabel"}
+                - text:
+                    of: "@source"
+                    map: {$frag: MEMBER_MODEL_SOURCE}
+                  tone: info
+            - k: t:memberForm.fields.reasoningEffort
+              rawLabel: $.form.preferences.effortLabel
+              source: $.form.preferences.effortSource
+              v:
+                - {text: "@rawLabel"}
+                - text:
+                    of: "@source"
+                    map: {$frag: MEMBER_MODEL_SOURCE}
+                  tone: info
+        - type: settings
+          rows:
+            - kind: field
+              label: t:memberForm.fields.reasoningEffort
+              id: f-effort
+              control:
+                - type: select
+                  id: f-effort
+                  value: $.form.d.effort
+                  change: md
+                  args: {k: effort}
+                  options:
+                    - {v: "", label: t:memberForm.runtime.follow}
+                    - from: $.form.preferences.efforts
+                      item: {v: "@value", label: "@label"}
+                  when: $.form.preferences.efforts
+                - type: input
+                  id: f-effort
+                  value: $.form.d.effort
+                  input: md
+                  args: {k: effort}
+                  placeholder: t:memberForm.fields.clientDefault
+                  when: "!$.form.preferences.efforts"
+              foot:
+                - text:
+                    t: memberForm.runtime.inherited
+                    args:
+                      - of: $.form.preferences.effortSource
+                        map: {$frag: MEMBER_MODEL_SOURCE}
+                      - $.form.preferences.effortLabel
+                  when: $.form.preferences.effortLabel
+                - text: t:memberForm.runtime.invalidEffort
+                  tone: danger
+                  when: $.form.preferences.invalidEffort
+            - kind: field
+              label: t:threadSettings.speed
+              id: f-speed
+              control:
+                type: select
+                id: f-speed
+                value: $.form.d.speed
+                change: md
+                args: {k: speed}
+                invalid: $.form.invalid.speed
+                options:
+                  - {v: "", label: t:memberForm.contextPolicy.speed}
+                  - {v: standard, label: t:memberForm.contextPolicy.speedStandard}
+                  - {v: fast, label: t:memberForm.contextPolicy.speedFast}
+              foot:
+                - text: t:memberForm.access.text
+                  tone: danger
+                  when: $.form.invalid.speed
+              help:
+                - text:
+                    of: $.form.astra
+                    map: {"true": t:settingsUi.member.speedHelp.true, "false": "", _: $.form.astra}
+              when: $.form.speedOn
+            - kind: field
+              label: t:memberForm.fields.extraCliArguments
+              help: t:memberForm.fields.extraCliArgumentsHelp
+              control:
+                type: tags
+                id: mc-args
+                values: $.form.d.args
+                k: args
+                placeholder: --flag value
+                label: t:mcpForm.fields.add
+                empty: t:memberForm.fields.noExtraArguments
+      when: "!$.form.cloud"
+    routing:
+      type: section
+      id: ms-routing
+      title: t:memberForm.route
+      keep: true
+      blocks:
+        - type: list
+          id: $.form.routing.list
+          from: $.form.routing.rows
+          row:
+            layout: line
+            key: "@key"
+            title:
+              - {text: "@st"}
+              - {text: "@src", variant: meta}
+            cols:
+              - {v: "@t", w: date}
+            expand:
+              - type: text
+                parts:
+                  - {lit: t:memberForm.recordId}
+                  - {text: "@id", mono: true}
+              - type: text
+                parts:
+                  - {lit: t:memberForm.basis}
+                  - {text: "@ev", mono: true}
+          rows: 8
+          load: $.form.routing.load
+          error: t:memberForm.routeError
+          empty: t:memberForm.routeEmpty
+      note: "5"
+      when: $.form.routing
+      label:
+        text:
+          t: settingsUi.member.routing
+          args:
+            - $.form.on
+            - t: settingsUi.member.last
+              args: [$.form.last]
+        pos: below
+      actions:
+        - type: button
+          label: t:memberForm.viewInStatus
+          act: open
+          args: {node: team, anchor: panel}
+  MEMBER_MODEL_SOURCE:
+    member: t:memberForm.runtime.source.member
+    client_report: t:memberForm.runtime.source.client_report
+    tool_config: t:memberForm.runtime.source.tool_config
+    account_config: t:memberForm.runtime.source.account_config
+  INBOX_TITLE:
+    t: chat.inboxTitle
+    args: ["@titleKind", "@title", "@name"]
+  INBOX_TIME:
+    of: "@timestamp"
+    map:
+      "true":
+        of: "@history"
+        map:
+          "true": {of: "@time", fmt: ago}
+          _: {of: "@time", fmt: hm}
+      _:
+        of: "@time"
+        map: {justNow: t:common.justNow, _: "@time"}
+  EVO_TRACE_ITEM:
+    title:
+      t: workbench.point
+      args: ["@x", "@y"]
+    act:
+      of: "@seekable"
+      map: {"true": mediaSeek, "false": "", _: "@seekable"}
+    args: {id: "@mediaId", at: "@seconds"}
+  ACCOUNT_EXCEPTION:
+    of: "@state"
+    map:
+      none: {of: "@usersCount", gte: 1}
+      nokey: {of: "@usersCount", gte: 1}
+      expired: true
+      conflict: true
+      login: true
+      cancelled: {of: "@usersCount", gte: 1}
+      _: false
+  CHAT_QUOTE:
+    when: "@quote"
+    mid: "@quote.mid"
+    from: "@quote.from"
+    text:
+      of: "@quote.derived"
+      map:
+        "true": {of: "@quote.text", max: 20}
+        _: "@quote.text"
+    state: "@quote.state"
+    busy: "@quote.busy"
+    time: "@quote.time"
+  CHAT_DELIVERY:
+    - from: "@delivery"
+      item:
+        who: "@who"
+        thread: "@thread"
+        title: "@title"
+        state: "@state"
+        live: "@live"
+        time: "@time"
+        mid: "@mid"
+        detail: {of: "@detail", sep: " · "}
+        open: "@open"
+  CHAT_RICH:
+    type: box
+    key: rich
+    when: "@rich"
+    blocks:
+      - {type: view, id: chat.rich.cards, data: "@rich.cards", when: "@rich.cards"}
+      - type: box
+        variant: card
+        when:
+          of: "@rich.rk"
+          map: {media_gallery: false, _: true}
+        blocks:
+          - type: toolbar
+            items:
+              - type: text
+                text:
+                  of:
+                    of: "@rich.rk"
+                    map:
+                      card: 0
+                      checklist: 0
+                      html_widget: 0
+                      interactive: 0
+                      audio: 1
+                      diff: 2
+                      file: 3
+                      _: -1
+                  map:
+                    "0":
+                      t: chat.rawTitle
+                      args:
+                        - "@rich.title"
+                        - of: "@rich.rk"
+                          map:
+                            checklist:
+                              t: chat.richDefaultTitle.checklist
+                              args: ["@rich.checked", "@rich.count"]
+                            html_widget:
+                              t: chat.richDefaultTitle.html_widget
+                              args: ["@rich.checked", "@rich.count"]
+                            card: ""
+                            interactive: ""
+                            _: "@rich.rk"
+                    "1":
+                      t: chat.richTitle.audio
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    "2":
+                      t: chat.richTitle.diff
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    "3":
+                      t: skill.file
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    _: "@rich.rk"
+                when: "!@rich.sel"
+              - {type: grow}
+              - type: check
+                value: "@rich.sel.on"
+                label:
+                  of:
+                    of: "@rich.rk"
+                    map:
+                      card: 0
+                      checklist: 0
+                      html_widget: 0
+                      interactive: 0
+                      audio: 1
+                      diff: 2
+                      file: 3
+                      _: -1
+                  map:
+                    "0":
+                      t: chat.rawTitle
+                      args:
+                        - "@rich.title"
+                        - of: "@rich.rk"
+                          map:
+                            checklist:
+                              t: chat.richDefaultTitle.checklist
+                              args: ["@rich.checked", "@rich.count"]
+                            html_widget:
+                              t: chat.richDefaultTitle.html_widget
+                              args: ["@rich.checked", "@rich.count"]
+                            card: ""
+                            interactive: ""
+                            _: "@rich.rk"
+                    "1":
+                      t: chat.richTitle.audio
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    "2":
+                      t: chat.richTitle.diff
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    "3":
+                      t: skill.file
+                      args:
+                        - t: chat.rawTitle
+                          args:
+                            - "@rich.title"
+                            - of: "@rich.rk"
+                              map:
+                                checklist:
+                                  t: chat.richDefaultTitle.checklist
+                                  args: ["@rich.checked", "@rich.count"]
+                                html_widget:
+                                  t: chat.richDefaultTitle.html_widget
+                                  args: ["@rich.checked", "@rich.count"]
+                                card: ""
+                                interactive: ""
+                                _: "@rich.rk"
+                        - "@rich.title"
+                        - "@rich.filePath"
+                    _: "@rich.rk"
+                act: cafePick
+                args: {mid: "@rich.sel.mid", b: "@rich.sel.b"}
+                when: "@rich.sel"
+          - type: content
+            html: {of: "@rich.markdown", fmt: markdown}
+            when: "@rich.markdown"
+          - {type: kv, from: "@rich.kv", when: "@rich.kv"}
+          - {type: steps, variant: checks, from: "@rich.checks", when: "@rich.checks"}
+          - {type: component, use: diff, props: "@rich.diff", when: "@rich.diff"}
+          - {type: component, use: media, props: "@rich.audio", when: "@rich.audio"}
+          - type: toolbar
+            when: "@rich.file"
+            items:
+              - type: text
+                parts:
+                  - {glyph: file}
+              - type: text
+                parts:
+                  - {text: "@rich.file.name", strong: true}
+                  - {br: true}
+                  - text:
+                      t: chatRich.selection.fileSub
+                      args:
+                        - {of: "@rich.file.size", fmt: bytes}
+                    variant: meta
+                    when: "@rich.file.size"
+              - {type: grow}
+              - type: button
+                label: t:chatRich.openWork
+                act: workOpen
+                args: {i: "@rich.file.work"}
+                when: "@rich.file.work"
+              - type: button
+                iconOnly: true
+                icon: download
+                label: t:common.download
+                act: download
+                args: {source: "@rich.file.source", name: "@rich.file.name"}
+                when: "@rich.file.source"
+          - type: frame
+            html: "@rich.widget.html"
+            title:
+              of:
+                of: "@rich.rk"
+                map:
+                  card: 0
+                  checklist: 0
+                  html_widget: 0
+                  interactive: 0
+                  audio: 1
+                  diff: 2
+                  file: 3
+                  _: -1
+              map:
+                "0":
+                  t: chat.rawTitle
+                  args:
+                    - "@rich.title"
+                    - of: "@rich.rk"
+                      map:
+                        checklist:
+                          t: chat.richDefaultTitle.checklist
+                          args: ["@rich.checked", "@rich.count"]
+                        html_widget:
+                          t: chat.richDefaultTitle.html_widget
+                          args: ["@rich.checked", "@rich.count"]
+                        card: ""
+                        interactive: ""
+                        _: "@rich.rk"
+                "1":
+                  t: chat.richTitle.audio
+                  args:
+                    - t: chat.rawTitle
+                      args:
+                        - "@rich.title"
+                        - of: "@rich.rk"
+                          map:
+                            checklist:
+                              t: chat.richDefaultTitle.checklist
+                              args: ["@rich.checked", "@rich.count"]
+                            html_widget:
+                              t: chat.richDefaultTitle.html_widget
+                              args: ["@rich.checked", "@rich.count"]
+                            card: ""
+                            interactive: ""
+                            _: "@rich.rk"
+                    - "@rich.title"
+                    - "@rich.filePath"
+                "2":
+                  t: chat.richTitle.diff
+                  args:
+                    - t: chat.rawTitle
+                      args:
+                        - "@rich.title"
+                        - of: "@rich.rk"
+                          map:
+                            checklist:
+                              t: chat.richDefaultTitle.checklist
+                              args: ["@rich.checked", "@rich.count"]
+                            html_widget:
+                              t: chat.richDefaultTitle.html_widget
+                              args: ["@rich.checked", "@rich.count"]
+                            card: ""
+                            interactive: ""
+                            _: "@rich.rk"
+                    - "@rich.title"
+                    - "@rich.filePath"
+                "3":
+                  t: skill.file
+                  args:
+                    - t: chat.rawTitle
+                      args:
+                        - "@rich.title"
+                        - of: "@rich.rk"
+                          map:
+                            checklist:
+                              t: chat.richDefaultTitle.checklist
+                              args: ["@rich.checked", "@rich.count"]
+                            html_widget:
+                              t: chat.richDefaultTitle.html_widget
+                              args: ["@rich.checked", "@rich.count"]
+                            card: ""
+                            interactive: ""
+                            _: "@rich.rk"
+                    - "@rich.title"
+                    - "@rich.filePath"
+                _: "@rich.rk"
+            when: "@rich.widget"
+          - type: choices
+            when:
+              - "@rich.pick"
+              - "!@rich.pick.done"
+              - of: "@rich.pick.interactiveType"
+                map: {multi-select: false, _: true}
+            group: "@rich.pick.group"
+            from: "@rich.pick.opts"
+            value: "@rich.pick.value"
+            act: richPick
+            args: {mid: "@rich.pick.mid", b: "@rich.pick.b"}
+          - type: choices
+            variant: multi
+            when:
+              - "@rich.pick"
+              - "!@rich.pick.done"
+              - of: "@rich.pick.interactiveType"
+                map: {multi-select: true, _: false}
+            from: "@rich.pick.opts"
+            act: richPick
+            args: {mid: "@rich.pick.mid", b: "@rich.pick.b"}
+          - type: toolbar
+            when: "@rich.pick.custom"
+            items:
+              - type: input
+                id: "@rich.pick.custom.id"
+                placeholder: "@rich.pick.custom.ph"
+          - type: toolbar
+            when: "@rich.pick"
+            items:
+              - type: text
+                variant: meta
+                text:
+                  t: chatCards.ask.selected
+                  args:
+                    - {of: "@rich.pick.result", sep: " / "}
+                when: "@rich.pick.done"
+              - {type: grow}
+              - type: button
+                label: t:chatRich.randomPick
+                act: richRandom
+                args: {mid: "@rich.pick.mid", b: "@rich.pick.b"}
+                when: ["!@rich.pick.done", "@rich.pick.allowRandom"]
+              - type: button
+                primary: true
+                label: t:chatRich.confirmPick
+                act: richSubmit
+                args:
+                  mid: "@rich.pick.mid"
+                  b: "@rich.pick.b"
+                  pickedPattern: t:chatRich.selection.picked
+                  customPattern: "{0}：{1}"
+                  titlePattern: "{0}（{1}）"
+                when: "@rich.pick.submit"
+                disabled: "@rich.pick.cant"
+  CHAT_META:
+    when: "@meta"
+    note: "@notes.meta"
+    parts:
+      - control:
+          type: button
+          variant: meta
+          act: cafeExecOpen
+          args: {i: "@i"}
+          expanded: "@meta.open"
+          parts:
+            - roll: "@meta.roll"
+              a: "@meta.roll.a"
+              b:
+                t: chatMessage.runtimeSlot.b
+                args: ["@meta.roll.tools", "@meta.roll.subs"]
+              when: "@meta.roll"
+              after:
+                icon: right
+                size: xs
+                variant: twisty
+                when:
+                  of: "@meta.kind"
+                  map: {typing: "@meta.roll", _: true}
+            - {text: t:chatMessage.runtimeSlot.now, when: "@meta.stopping"}
+            - text:
+                t: composer.actions.silentMinutes
+                args: ["@meta.minutes"]
+              tone: warn
+              when: "@meta.quiet"
+            - {text: "@meta.activity", when: "@meta.activity"}
+            - text:
+                of: "@meta.target"
+                map:
+                  delivering: t:chatMessage.targetReply.delivering
+                  waiting: t:chatMessage.targetReply.waiting
+                  processing: t:chatMessage.targetReply.processing
+                  unconfirmed: t:chatMessage.targetReply.unconfirmed
+                  completed: t:chatMessage.targetReply.completed
+                  failed: t:chatMessage.targetReply.failed
+                  canceled: t:chatMessage.targetReply.canceled
+                  interrupted: t:chatMessage.targetReply.interrupted
+              tone:
+                of: "@meta.target"
+                map: {unconfirmed: warn, failed: danger, interrupted: warn, _: ""}
+              when: "@meta.target"
+            - parts:
+                - {text: t:chatMessage.runtimeSlot.hint, variant: meta}
+                - {lit: " "}
+                - {text: "@meta.tipText"}
+              sep: ""
+              when: "@meta.tip"
+            - parts:
+                - text:
+                    t: chatMessage.process.sum
+                    args: ["@meta.toolCount"]
+                - text:
+                    t: chatMessage.process.text
+                    args: ["@meta.errors"]
+                  tone:
+                    of: "@meta.errors"
+                    gte: 1
+                    map: {"true": warn, _: ""}
+                - text:
+                    t: chatMessage.process.subagentCountSuffix
+                    args: ["@meta.subagents"]
+                - {lit: " · ", when: "@meta.processCount"}
+                - text:
+                    t: chatMessage.process.processCount
+                    args: ["@meta.processCount"]
+                  when: "@meta.processCount"
+              sep: ""
+              when:
+                of: "@meta.kind"
+                map: {typing: false, _: true}
+            - icon:
+                of:
+                  of: "@meta.kind"
+                  map: {typing: "@meta.roll", _: true}
+                map: {"true": right, _: ""}
+              size: xs
+              variant: twisty
+              when: "!@meta.roll"
+      - text: {of: "@meta.secs", fmt: duration}
+        num: true
+        when:
+          of: "@meta.secs"
+          map: {"0": true, _: "@meta.secs"}
+      - {text: "@meta.model", when: "@meta.model"}
+    end:
+      - control:
+          type: button
+          variant: meta
+          act: recallOpen
+          args: {i: "@i"}
+          parts:
+            - text:
+                t: wsRecall.summary.count
+                args: ["@meta.recall"]
+      - control:
+          type: button
+          variant: meta
+          act: traceOpen
+          args: {i: "@i"}
+          parts:
+            - {icon: trace, size: s}
+            - {text: t:wsTrace.timeline}
+  CHAT_WATCHER:
+    type: box
+    when: "@watcher"
+    blocks:
+      - {type: label, text: t:chatMessage.watcher.title}
+      - type: list
+        id: watcher-suggestions
+        from: "@suggestions"
+        optional: true
+        row:
+          layout: record
+          key: "@id"
+          title:
+            - text: "@label"
+              when:
+                of: "@state"
+                map: {open: true, _: false}
+            - {text: "@receipt.text", when: "@receipt"}
+            - text:
+                of: "@state"
+                map:
+                  dismissed: t:chatMessage.watcher.dismissed
+                  undone: t:chatMessage.watcher.undone
+                  _: ""
+          lead: {who: "@catId", size: s}
+          acts:
+            - label: "@label"
+              icon: check
+              act: watcherNudge
+              args: {threadId: "@threadId", id: "@id", decision: apply}
+              when:
+                of: "@state"
+                map: {open: true, _: false}
+            - label: t:chatMessage.watcher.dismiss
+              icon: close
+              act: watcherNudge
+              args: {threadId: "@threadId", id: "@id", decision: dismiss}
+              when:
+                of: "@state"
+                map: {open: true, _: false}
+            - label:
+                of: "@undo"
+                map: {resume: t:common.restore, _: t:common.undo}
+              icon: undo
+              act: watcherNudge
+              args: {threadId: "@threadId", id: "@id", decision: undo}
+              when:
+                of: "@state"
+                map: {applied: "@undo", dismissed: true, _: false}
+  CHAT_EXEC:
+    type: box
+    variant: log
+    when: "@exec"
+    open: "@meta.open"
+    follow: "@exec.live"
+    blocks:
+      - type: list
+        id: "@exec.id"
+        expand: many
+        groups: "@exec.groups"
+        group:
+          title:
+            of: "@kind"
+            map:
+              thinking: t:chat.executionGroup.thinking
+              subagents: t:chat.executionGroup.subagents
+              tools: t:chat.executionGroup.tools
+              process: t:wsSessions.record
+              _: "@kind"
+        row:
+          layout: two
+          key: "@key"
+          lead:
+            glyph:
+              of: "@kind"
+              map: {tool: wrench, commentary: chat, subagent: cat, thinking: spark}
+            when: "@kind"
+          title:
+            - text:
+                of: "@kind"
+                map:
+                  commentary: {of: "@title", fmt: plainLine}
+                  _: "@title"
+              mono:
+                of: "@kind"
+                map: {tool: true, _: false}
+              tone:
+                of: "@status"
+                map: {error: warn, _: ""}
+          inline:
+            - control: {type: status, tone: info, text: t:common.status.running}
+              when: ["@subagent", "@running"]
+            - control: {type: status, tone: "@stateTone", text: "@stateText"}
+              when: ["@subagent", "!@running"]
+          sub:
+            - {parts: "@sub", when: "!@subagent"}
+            - text:
+                t: chatMessage.execution.sub
+                args:
+                  - of: "@running"
+                    map:
+                      "true":
+                        t: chat.executionProgress.true
+                        args: ["@progress"]
+                      "false": "@progress"
+                      _: "@running"
+              when: "@subagent"
+          cols:
+            - v: "@dur"
+              w: time
+              tone:
+                of: "@status"
+                map: {error: warn, _: ""}
+              when: "@dur"
+          expand:
+            - type: label
+              text: t:chatMessage.execution.detailLabel
+              when: ["@subagent", "!@running"]
+            - type: content
+              html:
+                of: "@kind"
+                map:
+                  commentary: {of: "@detail", fmt: markdownRest}
+                  _: {of: "@detail", fmt: escaped}
+              raw: true
+              when:
+                - "@detail"
+                - "!@running"
+                - of: "@kind"
+                  map:
+                    commentary: {of: "@detail", fmt: markdownRest}
+                    _: true
+            - type: each
+              from: "@details"
+              blocks:
+                - type: box
+                  key: "@key"
+                  blocks:
+                    - type: content
+                      html: {of: "@text", fmt: escaped}
+                      raw: true
+                      when: "@text"
+                    - {type: view, id: chat.tool.result, data: "@tool", when: "@tool"}
+  CHAT_SUPP:
+    type: box
+    key: supp
+    when: "@supp"
+    blocks:
+      - type: text
+        parts:
+          - text:
+              t: chatMessage.supplement.title
+              args: ["@supp.count"]
+            variant: meta
+          - {text: t:chatMessage.supplement.status, variant: meta, when: "@supp.read"}
+      - type: fold
+        shape: bottom
+        key: "@supp.key"
+        height: s
+        blocks:
+          - type: list
+            inline: true
+            from: "@supp.items"
+            row:
+              layout: record
+              key: "@key"
+              lead:
+                - {who: "@who", form: dot}
+              title:
+                - text:
+                    of: "@fromMessage"
+                    map:
+                      "true": {of: "@who", fmt: identity}
+                      _: "@name"
+                  strong: true
+                - {lit: ：}
+                - text:
+                    of: "@fromMessage"
+                    map:
+                      "true":
+                        of: "@text"
+                        slice: [0, 80]
+                      _: "@text"
+                  variant: meta
+              cols:
+                - v:
+                    - icon: check
+                      size: xs
+                      when:
+                        of: "@state"
+                        map: {unknown: false, _: true}
+                    - text:
+                        of: "@state"
+                        map:
+                          read: t:delivery.read
+                          delivered: t:delivery.delivered
+                          received: t:delivery.received
+                          unknown: t:delivery.unknown
+                          _: "@state"
+                    - text:
+                        of: "@timestamp"
+                        map:
+                          "true": {of: "@time", fmt: hm}
+                          _: "@time"
+                      when:
+                        - "@time"
+                        - of: "@state"
+                          map: {delivered: false, _: true}
+                  w: state
+              acts:
+                - label: t:reply.jump
+                  icon: jump
+                  act: msgJump
+                  args: {mid: "@mid"}
+  CHAT_ACTS:
+    slot: chat.message.actions
+    ctx: "@actsCtx"
+    items:
+      - label: t:chatMessage.menu.label
+        act: copy
+        args: {v: "@mid"}
+      - label: t:placement.relatedDisposition
+        act: msgDisposition
+        args: {mid: "@mid"}
+      - label: t:chatMessage.menu.viewExecution
+        act: traceOpen
+        args: {i: "@i"}
+        when: "@isCat"
+      - label: t:chatMessage.menu.revealWhisper
+        act: setStatus
+        args: {entity: msg, id: "@i", field: revealed, v: "true", cast: bool}
+        when: "@canReveal"
+      - label: t:chatMessage.menu.branchHere
+        act: modal
+        args: {v: branch, i: "@i"}
+      - label: t:composerPop.forwardMore
+        act: modal
+        args: {v: forward, id: msg}
+      - label: t:chatMessage.menu.deleteMenu
+        act: setStatus
+        args: {entity: msgDel, id: "@i", v: "true", cast: bool}
+        tone: danger
+  CHAT_CONTEXT_CHIP:
+    kind:
+      of: "@kind"
+      map:
+        project-screening: t:films.review
+        _:
+          of: "@kind"
+          map:
+            work: t:common.works
+            quote: t:chat.contextKind.quote
+            review: t:chat.contextKind.review
+            document: t:chat.contextKind.quote
+            selection: t:chat.contextKind.quote
+            _: "@kind"
+    label:
+      of: "@kind"
+      map:
+        project-screening:
+          t: mediaReview.screeningContext
+          args:
+            - "@title"
+            - {of: "@time", fmt: clock}
+        _:
+          of:
+            of: "@kind"
+            map: {work: true, _: false}
+          map:
+            "true":
+              t: chat.workContext
+              args: ["@title", "@version"]
+            "false":
+              of:
+                of: "@kind"
+                map: {selection: true, _: false}
+              map:
+                "true":
+                  of: "@fromWork"
+                  map:
+                    "true":
+                      t: chat.selectionLabel.true
+                      args:
+                        - "@source"
+                        - of: "@snippet.length"
+                          gte: 0
+                          map:
+                            "true": "@snippet"
+                            _:
+                              of: "@text"
+                              slice: [0, 12]
+                    "false":
+                      t: chat.selectionLabel.false
+                      args:
+                        - "@source"
+                        - of: "@snippet.length"
+                          gte: 0
+                          map:
+                            "true": "@snippet"
+                            _:
+                              of: "@text"
+                              slice: [0, 12]
+                    _: "@fromWork"
+                "false":
+                  of:
+                    of: "@kind"
+                    map: {quote: true, _: false}
+                  map:
+                    "true":
+                      of: "@text"
+                      slice: [0, 24]
+                    "false": "@label"
+                    _:
+                      of: "@kind"
+                      map: {quote: true, _: false}
+                _:
+                  of: "@kind"
+                  map: {selection: true, _: false}
+            _:
+              of: "@kind"
+              map: {work: true, _: false}
+  CARD_TITLE:
+    type: text
+    variant: title
+    text:
+      t: chat.cardTitle
+      args:
+        - of: "@kind"
+          map: {cbauth: cbauth, cloudRecovery: cloudRecovery, _: "@card.titleType"}
+        - "@card.title"
+    help: "@card.help"
+    label:
+      text:
+        t: chat.cardLabel
+        args:
+          - of: "@kind"
+            map: {workref: workref, _: "@card.labelType"}
+          - "@card.label"
+          - "@card.rev"
+      pos: after
+  CARD_FIELDS:
+    type: kv
+    from: "@card.fields"
+    item:
+      k:
+        t: chatCards.field
+        args: ["@field", "@k"]
+      v:
+        t: chat.fieldValue
+        args:
+          - "@field"
+          - t: chat.answer
+            args:
+              - "@answer"
+              - of: "@field"
+                map:
+                  time: {of: "@v", fmt: hm}
+                  _: {of: "@v", sep: " / "}
+          - t: cbauth.reasons
+            args: ["@v"]
+          - t: chat.memberName
+            args: ["@name", "@handle"]
+    when: ["@card.fields", "!@card.result", "!@card.editing", "!@card.conflict"]
+  CARD_FOLD:
+    type: fold
+    shape: bottom
+    key: "@card.firstKey"
+    height: s
+    when: ["@card.first", "!@card.result", "!@card.editing", "!@card.conflict"]
+    blocks:
+      - type: label
+        text:
+          t: chat.proposalFirst
+          args: ["@card.firstTitle"]
+      - type: content
+        html: {of: "@card.first", fmt: markdown}
+  CARD_OWNER_REFRESH:
+    type: button
+    iconOnly: true
+    icon: refresh
+    label: t:common.refresh
+    act: proposalOwnerRefresh
+    args: {mid: "@mid"}
+    when: "@card.ownerKind"
+  CARD_STATUS:
+    type: status
+    tone: warn
+    text:
+      of: {$frag: CARD_NOTICE_KIND}
+      map:
+        memory:
+          of: "@card.noticeState"
+          map:
+            unavailable: t:memoryOwners.stateNote.unavailable
+            pending_approval: t:memoryOwners.stateNote.pending
+            not_now: t:memoryOwners.stateNote.not_now
+            partially_materialized: t:memoryOwners.stateNote.partially_materialized
+            materialized: t:memoryOwners.stateNote.materialized
+            withdrawn: t:memoryOwners.stateNote.withdrawn
+            active: t:memoryOwners.state.active
+            current: t:memoryOwners.state.current
+            retired: t:memoryOwners.stateNote.retired
+            pending: t:memoryOwners.stateNote.pending
+            approving: t:memoryOwners.stateNote.approving
+            approved: t:memoryOwners.stateNote.approved
+            rejected: t:memoryOwners.stateNote.rejected
+            applied: t:memoryOwners.stateNote.applied
+            replayed: t:memoryOwners.stateNote.replayed
+            _: "@card.noticeState"
+        message: "@card.noticeText"
+        approval:
+          t: chat.cardNotice.approval
+          args:
+            - "@card.noticeText"
+            - of: "@card.noticeState"
+              map:
+                unavailable: t:memoryOwners.stateNote.unavailable
+                pending_approval: t:memoryOwners.stateNote.pending
+                not_now: t:memoryOwners.stateNote.not_now
+                partially_materialized: t:memoryOwners.stateNote.partially_materialized
+                materialized: t:memoryOwners.stateNote.materialized
+                withdrawn: t:memoryOwners.stateNote.withdrawn
+                active: t:memoryOwners.state.active
+                current: t:memoryOwners.state.current
+                retired: t:memoryOwners.stateNote.retired
+                pending: t:memoryOwners.stateNote.pending
+                approving: t:memoryOwners.stateNote.approving
+                approved: t:memoryOwners.stateNote.approved
+                rejected: t:memoryOwners.stateNote.rejected
+                applied: t:memoryOwners.stateNote.applied
+                replayed: t:memoryOwners.stateNote.replayed
+                _: "@card.noticeState"
+        unavailable:
+          t: runtime.sourceUnavailable
+          args:
+            - "@card.noticeText"
+            - of: "@card.noticeState"
+              map:
+                unavailable: t:memoryOwners.stateNote.unavailable
+                pending_approval: t:memoryOwners.stateNote.pending
+                not_now: t:memoryOwners.stateNote.not_now
+                partially_materialized: t:memoryOwners.stateNote.partially_materialized
+                materialized: t:memoryOwners.stateNote.materialized
+                withdrawn: t:memoryOwners.stateNote.withdrawn
+                active: t:memoryOwners.state.active
+                current: t:memoryOwners.state.current
+                retired: t:memoryOwners.stateNote.retired
+                pending: t:memoryOwners.stateNote.pending
+                approving: t:memoryOwners.stateNote.approving
+                approved: t:memoryOwners.stateNote.approved
+                rejected: t:memoryOwners.stateNote.rejected
+                applied: t:memoryOwners.stateNote.applied
+                replayed: t:memoryOwners.stateNote.replayed
+                _: "@card.noticeState"
+        _: {$frag: CARD_NOTICE_KIND}
+    when: {$frag: CARD_NOTICE_KIND}
+  CARD_NOTICE_KIND:
+    of: "@card.ownerKind"
+    map:
+      frustration:
+        of: "@card.noticeText.length"
+        gte: 1
+        map: {"true": message, _: ""}
+      custody:
+        of: "@card.noticeText.length"
+        gte: 1
+        map:
+          "true": message
+          _:
+            of: "@card.offer.offerId.length"
+            gte: 1
+            map: {"true": "", _: unavailable}
+      _:
+        of: "@kind"
+        map:
+          memprop: approval
+          _:
+            of: "@card.memoryOwner.length"
+            gte: 1
+            map:
+              "true":
+                of: "@card.noticeState"
+                map:
+                  pending:
+                    of: "@card.noticeText.length"
+                    gte: 1
+                    map: {"true": message, _: ""}
+                  _: memory
+              _:
+                of: "@card.noticeText.length"
+                gte: 1
+                map: {"true": message, _: ""}
+  CHAT_PARTS:
+    exec:
+      node: {$frag: CHAT_EXEC}
+      field: exec
+    supp:
+      node: {$frag: CHAT_SUPP}
+      field: supp
+    rich:
+      node: {$frag: CHAT_RICH}
+      field: rich
+      in: embeds
+  CHAT_CARD_KINDS:
+    cloudRecovery: card.alert
+    cbauth: card.alert
+    ask: card.ask
+    proposal: card.proposal
+    memprop: card.proposal
+    brief: card.brief
+    summary: card.summary
+    evidence: card.brief
+    workref: card.work
+    letter: chat.node/cat
+    wake: chat.node/cat

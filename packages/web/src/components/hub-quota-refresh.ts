@@ -1,6 +1,8 @@
 import { type AccountQuotaObservation, accountQuotaOwnerMatches } from '@cat-cafe/shared';
+import type { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import type { ProfileItem } from './hub-accounts.types';
+import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
+import { normalizeBuiltinClientIds } from './hub-accounts.view';
 
 export interface ConfiguredQuotaPlatforms {
   claude: boolean;
@@ -96,4 +98,25 @@ export async function refreshAccountQuotaPools(
     }),
   );
   return [...new Set(results.flat())];
+}
+
+// --- Risk logic (kept for notification dedup) ---
+
+export function resolveConfiguredQuotaPlatforms(
+  profiles: AccountsResponse['providers'],
+  cats: ReturnType<typeof useCatData>['cats'],
+): ConfiguredQuotaPlatforms {
+  const clients = new Set(
+    normalizeBuiltinClientIds(profiles)
+      .filter((profile) => profile.authType === 'oauth' && !profile.codex)
+      .map((profile) => profile.clientId)
+      .filter(Boolean),
+  );
+  return {
+    claude: clients.has('anthropic'),
+    codex: clients.has('openai'),
+    gemini: clients.has('google'),
+    kimi: clients.has('kimi'),
+    antigravity: cats.some((cat) => cat.clientId === 'antigravity' && cat.roster?.available !== false),
+  };
 }

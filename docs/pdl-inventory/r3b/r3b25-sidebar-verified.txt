@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/sidebar-bindings.test.ts src/pdl/__tests__/runtime.test.ts -t 'sidebar|label IDs' --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (58 tests | 55 skipped) 1760ms
+     ✓ renders canonical sidebar groups and keeps organize drafts on owner rejection before submitting the original snapshot  732ms
+     ✓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys  586ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  441ms
+ ✓ src/pdl/__tests__/sidebar-bindings.test.ts (2 tests | 1 skipped) 12ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed | 56 skipped (60)
+   Start at  08:04:07
+   Duration  4.99s (transform 1.68s, setup 54ms, import 2.73s, tests 1.77s, environment 230ms)
+
+
+Exit code: 0

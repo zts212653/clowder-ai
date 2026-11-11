@@ -1,0 +1,14 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/pdl/__tests__/memory-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/memory-bindings.test.ts (13 tests) 60ms
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  23:32:53
+   Duration  2.37s (transform 1.01s, setup 49ms, import 1.43s, tests 60ms, environment 700ms)
+
+
+Exit code: 0

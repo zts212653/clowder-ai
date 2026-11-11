@@ -1,0 +1,5 @@
+# 主题包的清单：身份字段和插件清单（plugin.yaml）一样；pdl 段是主题的数据（这个仓库里按区域拆在 pdl/*.yaml，构建时合成）
+id: default
+name: t:theme.presets.name
+version: "1"
+contractVersion: 0.4.0

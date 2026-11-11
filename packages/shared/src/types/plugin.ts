@@ -395,6 +395,8 @@ export interface PluginManagerListItem {
   capabilitySummary: Array<Pick<PluginManagerCapability, 'id' | 'kind' | 'name' | 'active'>>;
   actions: PluginManagerActions;
   diagnostic?: PluginManagerDiagnostic;
+  /** Install / update / uninstall request still running for this plugin. */
+  operation?: PluginManagerOperation;
 }
 
 /** A mention recipient that has no member model/client configuration. */
@@ -410,6 +412,8 @@ export interface PluginMentionTarget {
   displayName: string;
   lifecycleRevision: number;
 }
+
+export type PluginManagerOperation = 'install' | 'update' | 'uninstall';
 
 export interface PluginManagerDetail extends PluginManagerListItem {
   /** Owner-scoped Host bindings; absent when this projection is unavailable. */

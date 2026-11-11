@@ -1,0 +1,976 @@
+popups:
+  menu:
+    at: trigger
+    exit: [outside, esc, pick]
+    drag: false
+    close: close
+    closeArgs: {path: s.menu}
+    via: [type:more, prop:menu]
+    demo:
+      - act: menu
+        args: {menu: work}
+  chat.pop:
+    view: chat.pop
+    when: cs.pop
+    at: trigger
+    exit: [outside, esc, pick]
+    drag: false
+    close: popClose
+    demo:
+      - act: popOpen
+        args: {pop: people}
+  ws.launcher:
+    at: trigger
+    exit: [x, esc, pick]
+    drag: true
+    close: close
+    closeArgs: {path: s.ws.pop}
+    demo:
+      - act: open
+        args: {node: home, anchor: panel}
+      - act: wsPop
+        args: {v: launcher}
+  ws.pop:
+    at: trigger
+    exit: [outside, esc, pick]
+    drag: false
+    close: close
+    closeArgs: {path: tabs.panel.menu}
+    demo:
+      - act: open
+        args: {node: home, anchor: panel}
+      - act: tab
+        args: {op: menu, r: panel}
+  inbox:
+    view: cafe.inbox.float
+    when: s.inboxOpen
+    at: trigger
+    exit: [x, esc]
+    drag: true
+    close: close
+    closeArgs: {path: s.inboxOpen}
+    demo:
+      - {act: inboxToggle}
+  confirm:
+    at: center
+    exit: [x, esc]
+    drag: true
+    focus: true
+    fixLayer: true
+    close: close
+    closeArgs: {path: s.popConfirm}
+    via: [type:form]
+    demo:
+      - {act: popConfirmShow}
+  dialog:
+    at: center
+    exit: [x, esc]
+    drag: true
+    focus: true
+    fixLayer: true
+    close: close
+    closeArgs: {path: s.dialog}
+    via: [shell]
+    demo:
+      - act: catalogDialog
+        args: {tone: danger}
+  chat.modal:
+    view: chat.modal
+    when: cs.modal
+    at: center
+    exit: [x, esc]
+    drag: true
+    focus: true
+    close: close
+    closeArgs: {path: cs.modal}
+    demo:
+      - act: modal
+        args: {v: tags}
+  media:
+    view: media.preview
+    when: cs.lb
+    at: center
+    within: main
+    exit: [x, esc]
+    drag: true
+    focus: false
+    close: close
+    closeArgs: {path: cs.lb}
+    demo:
+      - act: workOpen
+        args: {i: 1}
+  clip.preview:
+    view: clip.preview
+    when: ws.clipPreview
+    at: center
+    within: main
+    exit: [x, esc]
+    drag: true
+    focus: false
+    close: close
+    closeArgs: {path: ws.clipPreview}
+    demo:
+      - {act: catalogFilmPreview}
+  calc:
+    at: corner
+    state: calc
+    exit: [x, esc]
+    drag: true
+    close: close
+    closeArgs: {path: s.calc.open}
+    demo:
+      - act: set
+        args: {path: s.calc.open, v: "true", cast: bool}
+  editbar:
+    at: top
+    exit: [x, esc]
+    drag: true
+    state: editLayout
+    close: close
+    closeArgs: {path: s.editLayout}
+    demo:
+      - act: set
+        args: {path: s.editLayout, v: "true", cast: bool}
+  memberCard:
+    view: member.card.popup
+    when: cs.memberCard
+    at: trigger
+    exit: [outside, esc, leave]
+    drag: false
+    close: close
+    closeArgs: {path: cs.memberCard}
+    via: [prop:who]
+    demo:
+      - {act: memberCard}
+  theater:
+    view: theater
+    when: s.theater
+    at: fill
+    exit: [x, esc]
+    drag: false
+    focus: true
+    body: page
+    close: close
+    closeArgs: {path: s.theater}
+    demo:
+      - {act: theater}
+who:
+  member:
+    hover: memberCard
+    at: author
+    palette: ["#6b5b7f", "#456783", "#5a6a44", "#356e6c", "#765f3b", "#805563"]
+slots:
+  rail.mark:
+    display: mark
+    label: t:entryLayout.slot.label
+    accepts: brand
+    extensible: false
+    kids:
+      - id: cafe
+        title: t:chat.sidebar.title
+        asset: brand.logo
+        open: {space: cafe}
+        move: rail.mark
+  rail.top:
+    display: icon
+    label: t:entryLayout.slot.railTop
+    accepts: "*"
+    opens: {$frag: MAIN}
+    kids: []
+  rail.bottom:
+    display: icon
+    label: t:entryLayout.slot.railBottom
+    accepts: "*"
+    opens: {$frag: MAIN}
+    kids:
+      - id: inbox
+        title: t:inbox.title
+        icon: inbox
+        open: {action: inboxToggle}
+        on: inboxOpen
+        badge: inbox
+      - id: settings
+        title: t:ext.settings
+        icon: gear
+        open: {space: settings}
+        essential: true
+  nav.cafe:
+    display: row
+    label: t:entryLayout.slot.conversationSidebar
+    accepts: "*"
+    opens: {$frag: MAIN}
+    kids:
+      - id: home
+        title: t:workbench.route.new
+        icon: newchat
+        open: {page: home}
+        essential: true
+      - id: memory
+        title: t:common.memory
+        icon: memory
+        open: {page: memory, node: mem}
+      - id: works
+        hidden: true
+        title: t:home.allWorks
+        icon: works
+        open: {page: works}
+        also: [work]
+  nav.settings:
+    display: row
+    label: t:entryLayout.slot.settingsMenu
+    accepts: "*"
+    itemActions: [pin]
+    extensible: false
+    opens: {$frag: MAIN}
+    kids:
+      - id: members
+        title: t:member.title
+        icon: users
+        open: {page: members}
+        also: [member, memberNew]
+      - id: accounts
+        title: t:accounts.title
+        icon: key
+        open: {page: accounts}
+      - id: profiles
+        title: t:profiles.title
+        icon: person
+        open: {page: profiles}
+      - id: skills
+        title: Skill
+        icon: bolt
+        open: {page: skills}
+        also: [skill]
+      - id: mcp
+        title: MCP
+        icon: box
+        open: {page: mcp}
+        also: [mcpItem, mcpNew]
+      - id: market
+        title: t:mcp.market
+        icon: store
+        open: {page: market}
+        also: [marketItem]
+      - id: ext
+        title: t:ext.title
+        icon: puzzle
+        open: {page: ext}
+        also: [extItem]
+      - id: rules
+        title: t:rules.title
+        icon: rules
+        open: {page: rules}
+      - id: system
+        title: t:env.title
+        icon: sliders
+        open: {page: system}
+        also: [general, network, notify, env]
+      - id: appearance
+        title: t:system.theme
+        icon: palette
+        open: {page: appearance}
+      - id: voice
+        title: t:voice.title
+        icon: wave
+        open: {page: voice}
+  panel.tools:
+    display: tool
+    label: t:frame.workbench
+    accepts: page
+    opens: {anchor: panel, as: beside, force: true}
+    kids: {$panels: panel}
+  home.actions:
+    display: button
+    label: t:home.guide
+    scope: page
+    accepts: page-item
+    kids: []
+  members.actions:
+    display: button
+    label: t:member.title
+    scope: page
+    accepts: page-item
+    kids: []
+  chat.composer.tools:
+    display: icon
+    label: t:entryLayout.slot.composerTools
+    scope: page
+    accepts: page-item
+    kids:
+      - id: composer.mic
+        title: t:entryLayout.actions.title
+        icon: mic
+        open:
+          action: cafeMic
+          args: {inputId: "@inputId"}
+        pressed: {when: "@rec", title: t:frame.stopRecording, icon: stop}
+        arrive: "@micNew"
+        when: voice.input
+        scope: page
+        move: chat.composer.tools
+  chat.message.actions:
+    display: icon
+    label: t:message.actions
+    scope: page
+    accepts: page-item
+    kids:
+      - id: msg.copy
+        title: t:work.copyContent
+        icon: copy
+        open:
+          action: copy
+          args: {v: "@copy"}
+        scope: page
+        move: chat.message.actions
+      - id: msg.quote
+        title: t:entryLayout.actions.replyQuote
+        icon: reply
+        open: {action: reply}
+        scope: page
+        move: chat.message.actions
+      - id: msg.retry
+        title: t:entryLayout.actions.retryTurn
+        icon: refresh
+        open: {action: cafeMsgRetry}
+        when: "@fromMember"
+        scope: page
+        move: chat.message.actions
+      - id: msg.speak
+        title: t:frame.speak
+        icon: speaker
+        open:
+          action: fold
+          args: {path: cs.speaking, v: "@mid"}
+        pressed: {when: "@speaking", title: t:frame.stopSpeaking}
+        when: [voice.output, "@fromMember"]
+        scope: page
+        move: chat.message.actions
+      - id: msg.select
+        title: t:entryLayout.actions.selectMessages
+        icon: select
+        open: {action: multi}
+        scope: page
+        move: chat.message.actions
+      - id: msg.more
+        title: t:frame.msgMore
+        icon: more
+        open:
+          action: menu
+          args: {menu: "@menu", k: "@i"}
+        scope: page
+        move: chat.message.actions
+  chat.thread.more:
+    display: menu
+    label: t:pdlDoc.slotThreadMore
+    scope: page
+    accepts: page-item
+    kids: []
+  chat.node: {cardinality: keyed, label: t:entryLayout.slot.messageNodes, scope: page}
+  chat.tool.result: {cardinality: chain, label: t:entryLayout.slot.toolResults, scope: page}
+  chat.composer.notice:
+    cardinality: list
+    label: t:entryLayout.slot.composerNotices
+    scope: page
+  ws.exec.cat:
+    display: icon
+    label: t:entryLayout.rowSlot.label
+    scope: row
+    accepts: row-action
+    kids:
+      - id: sess.compress
+        scope: row
+        move: ws.exec.cat
+        title: t:entryLayout.rowSlot.compressContext
+        icon: shrink
+        open: {action: stCompress}
+        args: {k: who}
+        need: cur
+        guard: [session.compress]
+        why:
+          of: "@guard"
+          map:
+            notCli: t:entryLayout.session.compress.text
+            busy: t:entryLayout.session.compress.stopBeforeCompress
+      - id: sess.seal
+        scope: row
+        move: ws.exec.cat
+        title: t:entryLayout.rowSlot.sealSession
+        icon: archive
+        open:
+          action: remove
+          args: {entity: session}
+        args: {id: who}
+        need: cur
+        guard: [session.busy]
+        why:
+          of: "@guard"
+          map:
+            busy:
+              t: entryLayout.session.busy.text
+              args: [t:entryLayout.rowSlot.guard]
+      - id: sess.bind
+        scope: row
+        move: ws.exec.cat
+        title: t:entryLayout.rowSlot.bindSession
+        icon: link
+        open: {action: stBind}
+        args: {k: who}
+        guard: [session.busy]
+        why:
+          of: "@guard"
+          map:
+            busy:
+              t: entryLayout.session.busy.text
+              args: [t:entryLayout.rowSlot.bind]
+  ws.live.run:
+    display: icon
+    label: t:entryLayout.rowSlot.liveExecution
+    scope: row
+    accepts: row-action
+    kids:
+      - id: live.trace
+        scope: row
+        move: ws.live.run
+        title: t:entryLayout.rowSlot.viewNamedExecution
+        icon: trace
+        open: {action: runOpen}
+        args: {k: inv}
+        need: ["!cmd", inv]
+      - id: live.thread
+        scope: row
+        move: ws.live.run
+        title: t:entryLayout.rowSlot.openThread
+        icon: jump
+        open: {action: goThread}
+        args: {k: thread}
+      - id: live.stop
+        scope: row
+        move: ws.live.run
+        title: t:entryLayout.rowSlot.stopNamedExecution
+        icon: stop
+        open: {action: opLiveStop}
+        args: {k: id}
+        guard: [live.stop]
+        why:
+          of: "@guard"
+          map:
+            control_plane_unavailable: t:wsLive.blocked.control_plane_unavailable
+            cancellation_pending: t:composer.stopping
+            terminalizing: t:wsLive.blocked.terminalizing
+            foreign_principal: t:wsLive.blocked.foreign_principal
+            _: t:entryLayout.live.stop.text
+  ws.live.wait:
+    display: icon
+    label: t:wsLive.waits
+    scope: row
+    accepts: row-action
+    kids:
+      - id: wait.cancelHold
+        scope: row
+        move: ws.live.wait
+        title: t:wsLive.hold.cancel
+        icon: stop
+        open: {action: cancelHoldWait}
+        args: {waitId: waitId}
+        need: cancelable
+      - id: wait.thread
+        scope: row
+        move: ws.live.wait
+        title: t:wsCommunity.openThread
+        icon: jump
+        open: {action: goThread}
+        args: {k: thread}
+  ws.eval.event:
+    display: icon
+    label: t:entryLayout.rowSlot.evaluationEvents
+    scope: row
+    accepts: row-action
+    kids:
+      - id: eval.thread
+        scope: row
+        move: ws.eval.event
+        title: t:entryLayout.rowSlot.openWorkerThread
+        icon: chat
+        open: {action: goThread}
+        args: {id: thread}
+        need: thread
+  ws.eval.report:
+    display: icon
+    label: t:entryLayout.rowSlot.evaluationReports
+    scope: row
+    accepts: row-action
+    kids:
+      - id: eval.source
+        scope: row
+        move: ws.eval.report
+        title: t:entryLayout.rowSlot.openReportSource
+        icon: jump
+        open: {action: goThread}
+        args: {k: thread}
+  ws.tasks.task:
+    display: icon
+    label: t:system.tasks
+    scope: row
+    accepts: row-action
+    kids:
+      - id: task.source
+        scope: row
+        move: ws.tasks.task
+        title: t:entryLayout.rowSlot.jumpSourceMessage
+        icon: jump
+        open: {action: sourceOpen}
+        args: {t: thread}
+        need: msg
+  ws.works.work:
+    display: icon
+    label: t:common.works
+    scope: row
+    accepts: row-action
+    kids:
+      - id: work.source
+        scope: row
+        move: ws.works.work
+        title: t:entryLayout.rowSlot.openOriginalThread
+        icon: jump
+        open: {action: sourceOpen}
+        args: {t: thread}
+      - id: work.cover
+        scope: row
+        move: ws.works.work
+        title: t:works.cover.title
+        icon: image
+        open: {action: workCoverOpen}
+        args: {id: id}
+        need: cover
+  pick.folder:
+    display: icon
+    label: t:composerPop.newFolder
+    scope: row
+    accepts: row-action
+    kids:
+      - id: dir.new
+        scope: row
+        move: pick.folder
+        title: t:composerPop.newFolder
+        icon: plus
+        open:
+          action: dialog
+          args: {kind: dirNew}
+        args: {p: path}
+      - id: dir.rename
+        scope: row
+        move: pick.folder
+        title: t:common.rename
+        icon: pen
+        open:
+          action: rename
+          args: {entity: path}
+        args: {id: path, src: src}
+      - id: dir.delete
+        scope: row
+        move: pick.folder
+        title: t:common.delete
+        icon: delete
+        open:
+          action: remove
+          args: {entity: path}
+        args: {id: path, src: src}
+  ws.files.file:
+    display: icon
+    label: t:skill.file
+    scope: row
+    accepts: row-action
+    kids:
+      - id: file.quote
+        scope: row
+        move: ws.files.file
+        title: t:entryLayout.rowSlot.quoteInChat
+        icon: reply
+        open:
+          action: insert
+          args: {into: chat-input}
+        args: {text: quote}
+        need: "!dir"
+      - id: file.copy
+        scope: row
+        move: ws.files.file
+        title: t:composerPop.copyPath
+        icon: copy
+        open: {action: copy}
+        args: {v: path}
+      - id: file.rename
+        scope: row
+        move: ws.files.file
+        title: t:common.rename
+        icon: pen
+        open:
+          action: rename
+          args: {entity: path}
+        args: {id: path}
+      - id: file.delete
+        scope: row
+        move: ws.files.file
+        title: t:common.delete
+        icon: delete
+        open:
+          action: remove
+          args: {entity: path}
+        args: {id: path}
+  ws.changes.file:
+    display: icon
+    label: t:entryLayout.rowSlot.changedFiles
+    scope: row
+    accepts: row-action
+    kids:
+      - id: change.open
+        scope: row
+        move: ws.changes.file
+        title: t:entryLayout.rowSlot.openFile
+        icon: file
+        open: {action: wsFile}
+        args: {p: path}
+        need: "!deleted"
+  ws.git.commit:
+    display: icon
+    label: t:entryLayout.rowSlot.gitCommits
+    scope: row
+    accepts: row-action
+    kids: []
+  cafe.trash.item:
+    display: icon
+    label: t:trash.trashRow
+    scope: row
+    accepts: row-action
+    kids:
+      - id: trash.restore
+        scope: row
+        move: cafe.trash.item
+        title: t:common.restore
+        icon: undo
+        open:
+          action: remove
+          args: {entity: trashRestore}
+        args: {id: id}
+  cafe.mem.result:
+    display: icon
+    label: t:cafeRows.memoryResult
+    scope: row
+    accepts: row-action
+    kids:
+      - id: memres.open
+        scope: row
+        move: cafe.mem.result
+        title: t:common.open
+        icon: jump
+        open: {action: memOpen}
+        args: {sd: title}
+  cafe.inbox.decide:
+    display: icon
+    label: t:cafeRows.todoDecide
+    scope: row
+    accepts: row-action
+    kids:
+      - id: ib.reject
+        scope: row
+        move: cafe.inbox.decide
+        title: t:common.reject
+        icon: reject
+        open:
+          action: cafeIbDone
+          args: {res: reject}
+        args: {id: id}
+        need: canDecide
+      - id: ib.accept
+        scope: row
+        move: cafe.inbox.decide
+        title: t:common.approve
+        icon: check
+        tone: ok
+        open:
+          action: cafeIbDone
+          args: {res: accept}
+        args: {id: id}
+        need: canDecide
+      - id: ib.jump
+        scope: row
+        move: cafe.inbox.decide
+        title: t:cafeRows.jumpToSource
+        icon: jump
+        open: {action: msgJump}
+        args: {t: thread, mid: id}
+        need: "!noLoc"
+      - id: ib.jumpAp
+        scope: row
+        move: cafe.inbox.decide
+        title: t:cafeRows.jumpApprovalLog
+        icon: jump
+        open:
+          action: set
+          args:
+            path: cs.ib.{k}
+        args: {k: kView, v: vAp}
+        need: noLoc
+  cafe.inbox.at:
+    display: icon
+    label: t:cafeRows.todoMention
+    scope: row
+    accepts: row-action
+    kids:
+      - id: ibat.done
+        scope: row
+        move: cafe.inbox.at
+        title: t:common.done
+        icon: check
+        open:
+          action: cafeIbDone
+          args: {kind: mention}
+        args: {id: id, t: thread, mid: messageId, revision: expectedRevision}
+      - id: ibat.ignore
+        scope: row
+        move: cafe.inbox.at
+        title: t:inbox.muteMention
+        icon: eyeoff
+        open:
+          action: remove
+          args: {entity: ibAt}
+        args: {id: id}
+      - id: ibat.jump
+        scope: row
+        move: cafe.inbox.at
+        title: t:cafeRows.jumpToSource
+        icon: jump
+        open: {action: msgJump}
+        args: {t: thread, mid: messageId}
+        need: "!noLoc"
+      - id: ibat.jumpAp
+        scope: row
+        move: cafe.inbox.at
+        title: t:cafeRows.jumpApprovalLog
+        icon: jump
+        open:
+          action: set
+          args:
+            path: cs.ib.{k}
+        args: {k: kView, v: vAp}
+        need: noLoc
+  cafe.inbox.other:
+    display: icon
+    label: t:cafeRows.todoOther
+    scope: row
+    accepts: row-action
+    kids:
+      - id: ibo.jump
+        scope: row
+        move: cafe.inbox.other
+        title: t:cafeRows.jumpToSource
+        icon: jump
+        open: {action: msgJump}
+        args: {t: thread}
+        need: null
+  cafe.ws.mem.item:
+    display: icon
+    label: t:cafeRows.wsMemory
+    scope: row
+    accepts: row-action
+    kids:
+      - id: wsmem.more
+        scope: row
+        move: cafe.ws.mem.item
+        title: t:common.moreActions
+        icon: more
+        open: {action: menu}
+        args: {menu: menu}
+  cafe.ws.rec.item:
+    display: icon
+    label: t:cafeRows.wsVoice
+    scope: row
+    accepts: row-action
+    kids:
+      - id: rec.bring
+        scope: row
+        move: cafe.ws.rec.item
+        title: t:cafeRows.bringToChat
+        icon: msg
+        open:
+          action: insert
+          args: {into: chat-input}
+        args: {text: transcript}
+      - id: rec.more
+        scope: row
+        move: cafe.ws.rec.item
+        title: t:common.moreActions
+        icon: more
+        open: {action: menu}
+        args: {menu: menu}
+layout:
+  background: {image: bg.dusk, veil: 72}
+  order: [rail, nav, main, panel]
+  regions:
+    window: {label: t:entryLayout.shell.labelWindow}
+    shell: {label: t:entryLayout.shell.labelShell}
+    body: {label: t:entryLayout.shell.labelBody}
+    rail: {label: t:theme.tokens.rail}
+    nav: {label: t:entryLayout.shell.sidebar}
+    main:
+      label: t:entryLayout.shell.mainWindow
+      nodes:
+        view: page.chat
+        slots: [chat.message.actions, chat.thread.more]
+    panel:
+      label: t:frame.workbench
+      tabs: true
+      chrome:
+        home: {key: home, icon: home, label: t:entryLayout.shell.workbenchHome}
+        tabAct: wsTab
+        closeAct: wsClose
+        notes: {tabs: "1", actions: "2"}
+        tools: panel.tools
+        pageGroup: mine
+        launcher:
+          when: [$.launcherOpen, $.inSpace]
+        focus:
+          when: $.focus
+          note: "4"
+          suffix: t:frame.focusSuffix
+          actions:
+            - label: t:frame.exitFocus
+              act: toggle
+              args: {path: ws.focus}
+            - label: t:frame.exitWide
+              act: toggle
+              args: {path: s.panelWide}
+              when: $.wide
+        stripe:
+          label: t:frame.menuStripe
+          pinned: true
+          itemAct: wsTool
+          when: [$.menuPinned, "!$.narrow"]
+        handle:
+          icon: tabLeft
+          label: t:frame.workbench
+          act: wsReopen
+          when: $.closed
+        actions:
+          - type: button
+            iconOnly: true
+            icon: plus
+            label: t:frame.launcher
+            act: wsPop
+            args: {v: launcher, ws-pop: "1"}
+            pressed: $.launcherOpen
+          - type: button
+            iconOnly: true
+            icon: maximize
+            label: t:entryLayout.shell.expandPage
+            act: toggle
+            args: {path: s.panelWide}
+            when: "!$.wide"
+          - type: button
+            iconOnly: true
+            icon: shrink
+            label: t:frame.exitWide
+            act: toggle
+            args: {path: s.panelWide}
+            when: $.wide
+          - {type: more, menu: wsMore, label: t:entryLayout.shell.workbenchMore}
+          - type: button
+            iconOnly: true
+            icon: close
+            label: t:entryLayout.shell.collapseWorkbench
+            act: close
+            args: {path: s.panel}
+  tree:
+    key: window
+    dir: row
+    grid: {cols: 12, gap: xl}
+    kids:
+      - key: rail
+        dir: column
+        surface: {blur: 18}
+        grid: {cols: 1, gap: s}
+        slots: [rail.mark, rail.top, rail.bottom]
+      - key: shell
+        dir: row
+        flat: true
+        grid: {cols: 11, gap: xl, gutter: main}
+        kids:
+          - key: nav
+            dir: column
+            space: true
+            surface: {blur: 18}
+            grid: {cols: 1, gap: s}
+            slots: [nav.cafe, nav.settings]
+          - key: body
+            dir: row
+            opens: {anchor: body, as: cover}
+            grid: {cols: 11, gap: xl, gutter: main}
+            kids:
+              - key: main
+                dir: column
+                pages: true
+                surface: {mode: relative, opacity: 57}
+                grid: {cols: 11, gap: xl, gutter: main}
+              - key: panel
+                dir: column
+                tabs: true
+                surface: {blur: 18}
+                grid: {cols: 12, gap: xl}
+                slots: [panel.tools]
+spaces:
+  cafe:
+    home: chat
+    start: true
+    threadView: chat
+    routes: [chat, home, works, work, memory, search, trash, export]
+    prefix: plug-
+    panel: true
+    threadRoutes: [chat, home]
+    routesFrom: [panel.tools]
+  proto:
+    routes: [library, spec, structure, coverage]
+    own: true
+  settings: {home: members, fallback: true}
+pages:
+  system:
+    blocks:
+      - {id: general}
+      - {id: notify}
+      - {id: network}
+      - {id: storage}
+      - {id: ttl}
+      - {id: log}
+      - {id: safety}
+      - {id: env}
+      - {id: update, when: app.desktop}
+contributions:
+  - slot: chat.composer.notice
+    item:
+      id: core/conn
+      category: upstream_degraded
+      when: chat.conn
+      tone: warn
+      text: t:entryLayout.actions.text
+      tip: t:entryLayout.actions.tip
+modules:
+  - id: builtin.starry
+    inserts:
+      - id: builtin.starry
+        anchor: nav.settings
+        at: inside
+        after: voice
+        node:
+          title: t:settingsUi.starry
+          icon: planet
+          open: {node: builtin.starry, anchor: builtin.starry, depth: 65536, as: cover, backLabel: true}
+    views:
+      builtin.starry:
+        route: starry
+        vm: starryFrame
+        page: full
+        blocks:
+          - type: frame
+            key: starry
+            title: t:settingsUi.starry
+            src: $.src
+            tall: true
+            on: {message: starryFrameMessage}

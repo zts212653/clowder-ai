@@ -1,0 +1,5 @@
+$ pnpm exec biome format --write packages/web/public/pdl-app/plugins.js packages/web/src/pdl/__tests__/runtime.test.ts
+
+Formatted 2 files in 92ms. Fixed 2 files.
+
+Exit code: 0

@@ -1,0 +1,55 @@
+modules:
+  - id: guide
+    inserts:
+      - id: guide
+        anchor: home.actions
+        at: inside
+        node:
+          title: t:home.guide
+          icon: play
+          scope: page
+          open: {node: guide.window, as: float}
+    popups:
+      guide:
+        at: fill
+        exit: [x, esc]
+        drag: true
+        focus: true
+        close: guideDismiss
+    views:
+      guide.messages:
+        vm: guide
+        readonly: true
+        blocks:
+          - {$frag: REPLAY_STREAM}
+      guide.window:
+        bare: true
+        popup: guide
+        vm: guide
+        blocks:
+          - type: dialog
+            pop: guide
+            title: t:home.guide
+            layout: fill
+            span: full
+            actions:
+              - {type: button, icon: refresh, label: t:guide.replay, act: guideReplay}
+              - {type: button, primary: true, label: t:guide.next, act: guideNext}
+            blocks:
+              - type: steps
+                variant: progress
+                from:
+                  - {label: t:guide.demoStep, on: true}
+                  - {label: t:guide.memberStep}
+              - type: split
+                variant: aside
+                scroll: panes
+                follow: left
+                left:
+                  - {type: view, id: guide.messages}
+                right:
+                  - type: frame
+                    html: $.preview.html
+                    message: $.preview.message
+                    title: t:guide.preview
+                    tall: true

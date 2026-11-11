@@ -60,6 +60,7 @@ export interface AgentEventFields {
   toolUseId?: string;
   toolExecutionRef?: string;
   toolName?: string;
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   toolInput?: Record<string, unknown>;
   /** stream = the turn's own output; callback = a post_message with its own stored id. */
   origin?: 'stream' | 'callback';

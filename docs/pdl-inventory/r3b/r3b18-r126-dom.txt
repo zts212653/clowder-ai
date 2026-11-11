@@ -1,0 +1,10 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/project-data-host.test.tsx src/pdl/__tests__/workbench-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/project-data-host.test.tsx (5 tests) 793ms
+   ✓ restores the exact deleted owner only after its receipt, then rereads trash and the canonical sidebar  759ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (13 tests) 244ms
+
+Stopped only this test command after 90+ seconds without further output (Ctrl-C, exit 130). User services were not touched. Individual tests rerun below in separate logs.

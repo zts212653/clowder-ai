@@ -1,0 +1,360 @@
+$ python3 /tmp/pdl-r3b13-biome.py
+
+$ pnpm exec biome check packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/owner-api.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/owner-api.ts packages/web/src/pdl/types.ts packages/web/src/pdl/useCanonBindings.ts packages/web/src/pdl/useExecutionBindings.ts packages/web/src/pdl/useFilmBindings.ts packages/web/src/pdl/useMemoryBindings.tsx packages/web/src/pdl/useOpsBindings.ts packages/web/src/pdl/useSignalBindings.ts packages/web/src/pdl/useWorkbenchBindings.ts packages/web/src/pdl/__tests__/execution-bindings.test.ts packages/web/src/pdl/__tests__/project-data-host.test.tsx packages/web/src/pdl/__tests__/project-data.test.ts
+packages/web/src/pdl/__tests__/execution-bindings.test.ts:61:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    59 │     if (p.endsWith('/sessions') || p.startsWith('/api/external-runtime-sessions')) return response({ sessions: [] });
+    60 │     if (p.startsWith('/api/threads/pdl-test/invocations?')) return response({ invocations: [], total: 0 });
+  > 61 │     throw new Error('Unexpected execution owner ' + p);
+       │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    62 │   });
+    63 │ });
+
+  i Unsafe fix: Use a template literal.
+
+     59  59 │       if (p.endsWith('/sessions') || p.startsWith('/api/external-runtime-sessions')) return response({ sessions: [] });
+     60  60 │       if (p.startsWith('/api/threads/pdl-test/invocations?')) return response({ invocations: [], total: 0 });
+     61     │ - ····throw·new·Error('Unexpected·execution·owner·'·+·p);
+         61 │ + ····throw·new·Error(`Unexpected·execution·owner·${p}`);
+     62  62 │     });
+     63  63 │   });
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:101:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+     99 │       return response(task);
+    100 │     }
+  > 101 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    102 │   });
+    103 │ });
+
+  i Unsafe fix: Use a template literal.
+
+     99  99 │         return response(task);
+    100 100 │       }
+    101     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        101 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    102 102 │     });
+    103 103 │   });
+
+
+packages/web/src/pdl/useExecutionBindings.ts:278:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    276 │             sidLabel: '复制会话 ID',
+    277 │             at: at(s.sealedAt ?? s.createdAt),
+  > 278 │             runsId: 'runs-' + s.id,
+        │                     ^^^^^^^^^^^^^^
+    279 │             runs: rows.runs.filter((r) => r.sessionId === s.id).map(executionRun),
+    280 │             acts:
+
+  i Unsafe fix: Use a template literal.
+
+    276 276 │               sidLabel: '复制会话 ID',
+    277 277 │               at: at(s.sealedAt ?? s.createdAt),
+    278     │ - ············runsId:·'runs-'·+·s.id,
+        278 │ + ············runsId:·`runs-${s.id}`,
+    279 279 │               runs: rows.runs.filter((r) => r.sessionId === s.id).map(executionRun),
+    280 280 │               acts:
+
+
+packages/web/src/pdl/useExecutionBindings.ts:285:17 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    283 │                 : [],
+    284 │           })),
+  > 285 │         runsId: 'sessions-' + id,
+        │                 ^^^^^^^^^^^^^^^^
+    286 │         plan: plan
+    287 │           ? {
+
+  i Unsafe fix: Use a template literal.
+
+    283 283 │                   : [],
+    284 284 │             })),
+    285     │ - ········runsId:·'sessions-'·+·id,
+        285 │ + ········runsId:·`sessions-${id}`,
+    286 286 │           plan: plan
+    287 287 │             ? {
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:127:18 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    125 │   useLayoutEffect(() => {
+    126 │     changed({
+  > 127 │       models: () => {
+        │                  ^^^
+    128 │         const values = readBindingModels(modelReaders, window.clowderChat, readFailures.current);
+    129 │         const { workbench: bench, voice: audio, document: docs } = values;
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:52:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    50 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    51 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 52 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    53 │     const path = String(raw),
+    54 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/owner-api.ts:11:23 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━━━━
+
+  ! Excessive complexity of 17 detected (max: 15).
+
+     9 │ }
+    10 │ /** Application API boundary shared by VM/action bindings; the copied facade is unchanged. */
+  > 11 │ export async function request<T = Record<string, unknown>>(
+       │                       ^^^^^^^
+    12 │   path: string,
+    13 │   init?: RequestInit,
+
+  i Please refactor this function to reduce its complexity score from 17 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useCanonBindings.ts:41:36 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    39 │     operations = useRef(new Map<string, string>());
+    40 │   const command = <T>(input: Record<string, unknown>) => {
+  > 41 │     const result = canonCommand<T>(state.current!.threadId, input);
+       │                                    ^^^^^^^^^^^^^^
+    42 │     return /^(read|list)-/.test(String(input.action)) ? result.catch(failRead) : result;
+    43 │   };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     39  39 │       operations = useRef(new Map<string, string>());
+     40  40 │     const command = <T>(input: Record<string, unknown>) => {
+     41     │ - ····const·result·=·canonCommand<T>(state.current!.threadId,·input);
+         41 │ + ····const·result·=·canonCommand<T>(state.current?.threadId,·input);
+     42  42 │       return /^(read|list)-/.test(String(input.action)) ? result.catch(failRead) : result;
+     43  43 │     };
+
+
+packages/web/src/pdl/useCanonBindings.ts:45:15 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    43 │   };
+    44 │   const read = async (indexedVersionRef?: string) => {
+  > 45 │     const s = state.current!;
+       │               ^^^^^^^^^^^^^^
+    46 │     s.load = 'loading';
+    47 │     changed((n) => n + 1);
+
+
+packages/web/src/pdl/useCanonBindings.ts:91:15 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    89 │   };
+    90 │   const dispositions = (): AssetBindingDisposition[] => {
+  > 91 │     const s = state.current!,
+       │               ^^^^^^^^^^^^^^
+    92 │       d = s.detail!;
+    93 │     if (!s.reason.trim()) throw new Error('请填写理由');
+
+
+packages/web/src/pdl/useCanonBindings.ts:92:11 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    90 │   const dispositions = (): AssetBindingDisposition[] => {
+    91 │     const s = state.current!,
+  > 92 │       d = s.detail!;
+       │           ^^^^^^^^^
+    93 │     if (!s.reason.trim()) throw new Error('请填写理由');
+    94 │     return d.bindings.map((b) => {
+
+
+packages/web/src/pdl/useCanonBindings.ts:97:22 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    95 │       const ref = s.bindingChoices[b.bindingRef];
+    96 │       if (!ref) throw new Error('请决定原绑定如何处理');
+  > 97 │       const target = s.page!.items.find((x) => x.record.indexedVersionRef === ref);
+       │                      ^^^^^^^
+    98 │       return {
+    99 │         bindingRef: b.bindingRef,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     95  95 │         const ref = s.bindingChoices[b.bindingRef];
+     96  96 │         if (!ref) throw new Error('请决定原绑定如何处理');
+     97     │ - ······const·target·=·s.page!.items.find((x)·=>·x.record.indexedVersionRef·===·ref);
+         97 │ + ······const·target·=·s.page?.items.find((x)·=>·x.record.indexedVersionRef·===·ref);
+     98  98 │         return {
+     99  99 │           bindingRef: b.bindingRef,
+
+
+packages/web/src/pdl/useCanonBindings.ts:107:69 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 52 detected (max: 15).
+
+    105 │     });
+    106 │   };
+  > 107 │   const action = async (name: string, args: Record<string, string>) => {
+        │                                                                     ^^^
+    108 │     if (name === 'assetCanonRead') {
+    109 │       if (args.reference) {
+
+  i Please refactor this function to reduce its complexity score from 52 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useCanonBindings.ts:130:30 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    128 │         const page = await command<History>({
+    129 │           action: 'read-asset-history',
+  > 130 │           indexedVersionRef: s.detail!.record.indexedVersionRef,
+        │                              ^^^^^^^^^
+    131 │           reference: s.reference,
+    132 │           after: s.history!.nextAfter,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    128 128 │           const page = await command<History>({
+    129 129 │             action: 'read-asset-history',
+    130     │ - ··········indexedVersionRef:·s.detail!.record.indexedVersionRef,
+        130 │ + ··········indexedVersionRef:·s.detail?.record.indexedVersionRef,
+    131 131 │             reference: s.reference,
+    132 132 │             after: s.history!.nextAfter,
+
+
+packages/web/src/pdl/useCanonBindings.ts:132:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    130 │           indexedVersionRef: s.detail!.record.indexedVersionRef,
+    131 │           reference: s.reference,
+  > 132 │           after: s.history!.nextAfter,
+        │                  ^^^^^^^^^^
+    133 │           limit: 30,
+    134 │         });
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    130 130 │             indexedVersionRef: s.detail!.record.indexedVersionRef,
+    131 131 │             reference: s.reference,
+    132     │ - ··········after:·s.history!.nextAfter,
+        132 │ + ··········after:·s.history?.nextAfter,
+    133 133 │             limit: 30,
+    134 134 │           });
+
+
+packages/web/src/pdl/useCanonBindings.ts:135:45 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    133 │           limit: 30,
+    134 │         });
+  > 135 │         s.history = { ...page, history: [...s.history!.history, ...page.history] };
+        │                                             ^^^^^^^^^^
+    136 │       } else {
+    137 │         const page = await command<CanonPage>({
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    133 133 │             limit: 30,
+    134 134 │           });
+    135     │ - ········s.history·=·{·...page,·history:·[...s.history!.history,·...page.history]·};
+        135 │ + ········s.history·=·{·...page,·history:·[...s.history?.history,·...page.history]·};
+    136 136 │         } else {
+    137 137 │           const page = await command<CanonPage>({
+
+
+packages/web/src/pdl/useExecutionBindings.ts:141:69 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 61 detected (max: 15).
+
+    139 │     setExternalDetail({ id, messages: [...(before?.messages ?? []), ...next.messages], nextCursor: next.nextCursor });
+    140 │   };
+  > 141 │   const action = async (name: string, args: Record<string, string>) => {
+        │                                                                     ^^^
+    142 │     if (name === 'refresh' && args.k === 'exec') {
+    143 │       if (externalDetail) await readExternal(externalDetail.id, false);
+
+  i Please refactor this function to reduce its complexity score from 61 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useExecutionBindings.ts:220:35 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 29 detected (max: 15).
+
+    218 │       ]),
+    219 │     ];
+  > 220 │     const members = cats.map((id) => {
+        │                                   ^^^
+    221 │       const cat = data.cats.find((c) => c.id === id),
+    222 │         sessions = rows.sessions.filter((s) => s.catId === id),
+
+  i Please refactor this function to reduce its complexity score from 29 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useExecutionBindings.ts:354:19 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    352 │     if (detail) {
+    353 │       const sub = detail.invocationId,
+  > 354 │         summary = detail.summary!,
+        │                   ^^^^^^^^^^^^^^^
+    355 │         events = buildInvocationTimelineRows(detail.events, Number.MAX_SAFE_INTEGER).allRows;
+    356 │       return {
+
+
+packages/web/src/pdl/useExecutionBindings.ts:76:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: generation.
+
+    74 │   const detailRequest = useRef(0);
+    75 │   const refresh = () => setGeneration((v) => v + 1);
+  > 76 │   useEffect(() => {
+       │   ^^^^^^^^^
+    77 │     const abort = new AbortController(),
+    78 │       threadId = data.threadId;
+
+  i This dependency can be removed from the list.
+
+    124 │       clearInterval(timer);
+    125 │     };
+  > 126 │   }, [data.threadId, generation]);
+        │                      ^^^^^^^^^^
+    127 │   const readExternal = async (id: string, more: boolean) => {
+    128 │     if (!external.sessions.some((x) => x.sessionId === id)) throw new Error('外部会话已变化，请重新读取');
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    126 │ ··},·[data.threadId,·generation]);
+        │                    ------------
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 615.
+Checked 18 files in 296ms. No fixes applied.
+Found 590 warnings.
+Found 45 infos.
+
+Exit code: 0

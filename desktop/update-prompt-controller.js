@@ -8,6 +8,7 @@ const UPDATE_PROMPT_ACTION_CHANNEL = 'desktop-update:action';
 const UPDATE_PROGRESS_CHANNEL = 'desktop-update:progress';
 const UPDATE_SETTINGS_GET_CHANNEL = 'desktop-update:settings:get';
 const UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL = 'desktop-update:settings:set-auto-check';
+const UPDATE_CHECK_CHANNEL = 'desktop-update:check';
 const PROMPT_ACTIONS = Object.freeze({
   available: new Set(['download', 'later', 'skip', 'open-release']),
   'up-to-date': new Set(['dismiss']),
@@ -108,6 +109,7 @@ class UpdatePromptController {
     trustedOrigin,
     getUpdateSettings,
     setUpdateAutoCheck,
+    onCheckForUpdates,
     onRendererReady = () => {},
     setTimeout: scheduleTimeout = setTimeout,
     clearTimeout: cancelTimeout = clearTimeout,
@@ -120,6 +122,7 @@ class UpdatePromptController {
     this._trustedOrigin = trustedOrigin;
     this._getUpdateSettings = getUpdateSettings;
     this._setUpdateAutoCheck = setUpdateAutoCheck;
+    this._onCheckForUpdates = onCheckForUpdates;
     this._onRendererReady = onRendererReady;
     this._setTimeout = scheduleTimeout;
     this._clearTimeout = cancelTimeout;
@@ -131,10 +134,12 @@ class UpdatePromptController {
     this._onAction = this._handleAction.bind(this);
     this._onGetSettings = this._handleGetSettings.bind(this);
     this._onSetAutoCheck = this._handleSetAutoCheck.bind(this);
+    this._onCheck = this._handleCheck.bind(this);
     ipcMain.handle(UPDATE_PROMPT_READY_CHANNEL, this._onReady);
     ipcMain.on(UPDATE_PROMPT_ACTION_CHANNEL, this._onAction);
     ipcMain.handle(UPDATE_SETTINGS_GET_CHANNEL, this._onGetSettings);
     ipcMain.handle(UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL, this._onSetAutoCheck);
+    ipcMain.handle(UPDATE_CHECK_CHANNEL, this._onCheck);
   }
 
   show(payload, { presentationTimeoutMs = null } = {}) {
@@ -248,6 +253,13 @@ class UpdatePromptController {
     return { autoCheck: settings.autoCheck };
   }
 
+  async _handleCheck(event) {
+    if (!isTrustedSender(event, this._getMainWindow(), this._trustedOrigin)) {
+      throw new Error('Untrusted desktop update check sender');
+    }
+    await this._onCheckForUpdates();
+  }
+
   async _handleSetAutoCheck(event, enabled) {
     if (!isTrustedSender(event, this._getMainWindow(), this._trustedOrigin)) {
       throw new Error('Untrusted desktop update settings sender');
@@ -309,6 +321,7 @@ class UpdatePromptController {
     this._ipcMain.removeHandler(UPDATE_PROMPT_READY_CHANNEL);
     this._ipcMain.removeHandler(UPDATE_SETTINGS_GET_CHANNEL);
     this._ipcMain.removeHandler(UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL);
+    this._ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
     if (this._pending) this._finishPending(this._pending, 'later');
   }
 }
@@ -322,4 +335,5 @@ module.exports = {
   UPDATE_PROGRESS_CHANNEL,
   UPDATE_SETTINGS_GET_CHANNEL,
   UPDATE_SETTINGS_SET_AUTO_CHECK_CHANNEL,
+  UPDATE_CHECK_CHANNEL,
 };

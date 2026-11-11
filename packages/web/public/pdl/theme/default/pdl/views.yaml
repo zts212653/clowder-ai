@@ -1,0 +1,1736 @@
+views:
+  page.marketSources:
+    page: true
+    vm: marketSources
+    blocks:
+      - type: head
+        title: t:placement.sources
+        actions:
+          - type: button
+            iconOnly: true
+            icon: refresh
+            label: t:common.refresh
+            act: marketSourcesRefresh
+      - type: toolbar
+        items:
+          - type: input
+            add: true
+            id: market-url
+            label: t:chatCards.field.repo
+            go: marketSourceAdd
+            goLabel: t:common.add
+            more:
+              - {id: market-branch, label: t:placement.branch}
+      - type: list
+        rows: 8
+        from: $.sources
+        load: $.load
+        error: t:frame.loadError
+        retry: {act: marketSourcesRefresh}
+        row:
+          layout: two
+          key: "@id"
+          title: "@title"
+          sub:
+            parts:
+              - {text: "@branch"}
+              - {text: "@commit"}
+            sep: " · "
+          inline:
+            - control: {type: status, text: "@error", tone: warn}
+              when: "@error"
+            - control:
+                type: status
+                text: "@status"
+                tone:
+                  of: "@status"
+                  map: {error: warn, ready: ok, _: "@status"}
+              when: "!@error"
+          cols:
+            - w: ctl
+              control:
+                type: button
+                iconOnly: true
+                icon: delete
+                danger: true
+                label: t:common.delete
+                act: remove
+                args: {entity: marketSource, id: "@id"}
+                when: "@canRemove"
+  ws.exec:
+    loading: t:wsExec.loading
+    error: t:wsExec.error
+    vm: exec
+    empty: t:wsSessions.empty
+    blocks:
+      - {type: head, title: $.externalDetail.title, when: $.externalDetail}
+      - type: kv
+        from:
+          - {k: t:runtime.model, v: $.externalDetail.model}
+        when: $.externalDetail
+        item: {k: t:runtime.model, v: $.externalDetail.model}
+      - type: markdown
+        text: {of: $.externalDetail.body, sep: "\n\n"}
+        when: $.externalDetail
+      - type: button
+        label: t:memory.loadMore
+        act: runtimeExternalMore
+        args: {sessionId: $.externalDetail.sessionId}
+        when: $.externalDetail.more
+      - type: list
+        label: t:runtime.externalSessions
+        from: $.external
+        item:
+          trail: {of: "@trail", fmt: ago}
+          sub:
+            of: "@active"
+            map:
+              "true": "@model"
+              "false":
+                of: "@hasModel"
+                map:
+                  "true":
+                    t: chat.externalSub
+                    args:
+                      - "@model"
+                      - of: "@state"
+                        map:
+                          sealed: t:wsSessions.sealed
+                          runtime_seal_pending: t:runtime.sessionState.runtime_seal_pending
+                          runtime_conflict_pending: t:runtime.sessionState.runtime_conflict_pending
+                          _: "@state"
+                  "false":
+                    of: "@state"
+                    map:
+                      sealed: t:wsSessions.sealed
+                      runtime_seal_pending: t:runtime.sessionState.runtime_seal_pending
+                      runtime_conflict_pending: t:runtime.sessionState.runtime_conflict_pending
+                      _: "@state"
+                  _: "@hasModel"
+              _: "@active"
+        row: record.row
+        optional: true
+      - type: head
+        variant: detail
+        when: $.run
+        eyebrow:
+          parts:
+            - parts:
+                - $.run.name
+                - " · "
+                - t: wsExec.session
+                  args: [$.run.seq]
+                - of: $.run.sealed
+                  map: {"true": t:wsTrace.overview.sealed.true, "false": "", _: $.run.sealed}
+              sep: ""
+        title: $.run.title
+        sub:
+          parts:
+            - parts:
+                - $.run.at
+                - " · "
+                - {of: $.run.duration, fmt: duration}
+                - " · "
+                - t: wsTrace.overview.tokens
+                  args:
+                    - $.run.hasTokens
+                    - of: $.run.hasInput
+                      map:
+                        "true": {of: $.run.input, fmt: compact}
+                        "false": —
+                        _: $.run.hasInput
+                    - t: wsTrace.overview.output
+                      args:
+                        - {of: $.run.output, fmt: compact}
+              sep: ""
+        actions:
+          - type: status
+            tone:
+              of: $.run.state
+              map:
+                running: info
+                done: ok
+                error: danger
+                cancelled: ""
+                timeout: warn
+                _: $.run.state
+            text:
+              of: $.run.state
+              map:
+                error: t:common.status.error
+                cancelled: t:common.status.cancelled
+                timeout: t:wsTrace.status.label.timeout
+                running: t:common.status.running
+                done: t:common.status.completed
+                _: $.run.state
+          - {type: copy, value: $.run.id, label: t:wsExec.copyRunId, mono: true}
+          - type: button
+            iconOnly: true
+            icon: jump
+            label: t:reply.jump
+            act: traceMsg
+            args: {k: $.run.mid}
+            disabled: $.run.midGone
+            tip: t:wsTrace.messageJump.toast
+            when: $.run.mid
+      - type: toolbar
+        when: $.run
+        items:
+          - type: seg
+            value: $.run.mode
+            act: set
+            args: {path: ws.tjMode}
+            options:
+              - {v: timeline, label: t:wsTrace.timeline}
+              - {v: raw, label: t:wsTrace.raw}
+      - type: pre
+        text: {of: $.run.rawRecords, fmt: jsonLines}
+        when:
+          of: $.run.mode
+          map: {raw: true, _: false}
+      - type: each
+        from:
+          - {}
+        when:
+          - $.run
+          - of: $.run.mode
+            map: {raw: false, _: true}
+        item:
+          events:
+            - {from: $.run.events, item: "@"}
+            - kind: pending
+              when:
+                of: $.run.state
+                map: {running: true, _: false}
+        blocks:
+          - type: list
+            id: exec-ev
+            from: "@events"
+            row:
+              layout: record
+              lead:
+                - icon:
+                    t: wsTrace.event.toolIcon
+                    args: ["@resultStatus"]
+                  size: s
+                  when:
+                    of: "@kind"
+                    map: {tool: true, _: false}
+                - icon:
+                    of: "@role"
+                    map: {user: person, assistant: msg, system: msg, status: msg, _: "@role"}
+                  size: s
+                  when:
+                    of: "@kind"
+                    map: {message: true, _: false}
+                - icon:
+                    of: "@kind"
+                    map:
+                      error: alert
+                      session: sessions
+                      subexecution: users
+                      terminal: terminal
+                      system: info
+                      status-group: pulse
+                      _: "@kind"
+                  size: s
+                  when:
+                    - of: "@kind"
+                      map: {tool: false, _: true}
+                    - of: "@kind"
+                      map: {message: false, _: true}
+                    - of: "@kind"
+                      map: {pending: false, _: true}
+                - dot: info
+                  when:
+                    of: "@kind"
+                    map: {pending: true, _: false}
+              title:
+                - parts:
+                    - text:
+                        of:
+                          of: "@kind"
+                          map:
+                            tool: 0
+                            message: 1
+                            status-group: 0
+                            error: 2
+                            session: 3
+                            subexecution: 4
+                            terminal: 5
+                            system: 6
+                            pending: 7
+                            _: -1
+                        map:
+                          "0": ""
+                          "1":
+                            of: "@role"
+                            map:
+                              user:
+                                t: common.you
+                                args:
+                                  - t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                              assistant:
+                                t: wsTrace.event.channelLabel
+                                args: ["@channel"]
+                              system:
+                                t: wsTrace.event.kindLabel.system
+                                args:
+                                  - t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                              status:
+                                t: wsTrace.event.roleLabel.status
+                                args:
+                                  - t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                              _: "@role"
+                          "2":
+                            t: wsTrace.event.kindLabel.error
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          "3":
+                            t: wsSessions.sessions
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          "4":
+                            t: wsTrace.event.kindLabel.subexecution
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          "5":
+                            t: wsTrace.event.kindLabel.terminal
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          "6":
+                            t: wsTrace.event.kindLabel.system
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          "7":
+                            t: wsTrace.event.kindLabel.pending
+                            args:
+                              - of: "@role"
+                                map:
+                                  user:
+                                    t: common.you
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  assistant:
+                                    t: wsTrace.event.channelLabel
+                                    args: ["@channel"]
+                                  system:
+                                    t: wsTrace.event.kindLabel.system
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  status:
+                                    t: wsTrace.event.roleLabel.status
+                                    args:
+                                      - t: wsTrace.event.channelLabel
+                                        args: ["@channel"]
+                                  _: "@role"
+                          _: "@kind"
+                      when:
+                        of: "@kind"
+                        map: {status-group: false, _: true}
+                    - text:
+                        t: workbench.statusGroupPrefix
+                        args: ["@count"]
+                      when:
+                        of: "@kind"
+                        map: {status-group: true, _: false}
+                    - parts: "@types"
+                      sep: " · "
+                      each:
+                        parts:
+                          - parts: ["@type", " ", "@count"]
+                            sep: ""
+                      when:
+                        of: "@kind"
+                        map: {status-group: true, _: false}
+                  variant: meta
+                - text:
+                    of: "@kind"
+                    map: {tool: "@toolName", _: "@text"}
+                  mono:
+                    of: "@kind"
+                    map: {tool: true, _: false}
+                  tip:
+                    of:
+                      of: "@kind"
+                      map: {tool: true, _: false}
+                    map:
+                      "false": ""
+                      "true":
+                        t: wsTrace.event.toolTip.true
+                        args:
+                          - "@input"
+                          - t: wsTrace.event.result
+                            args: ["@result"]
+                      _:
+                        of: "@kind"
+                        map: {tool: true, _: false}
+                  when:
+                    of: "@kind"
+                    map: {tool: "@toolName", _: "@text"}
+                - text: "@input"
+                  variant: meta
+                  when:
+                    of: "@kind"
+                    map: {tool: true, _: false}
+              cols:
+                - v:
+                    text:
+                      t: wsTrace.source
+                      args: ["@source"]
+                  w: id
+                  when:
+                    of: "@kind"
+                    map: {pending: false, _: true}
+                - v: {of: "@ms", fmt: latency}
+                  w: num
+                  tone:
+                    t: wsTrace.event.msTone
+                    args: ["@resultStatus"]
+                  tip:
+                    t: wsTrace.event.msTip
+                    args: ["@resultStatus", "@result"]
+                  when:
+                    of: "@kind"
+                    map: {pending: false, _: true}
+                - v:
+                    of: "@ts"
+                    slice: [0, 5]
+                  w: num
+                  when:
+                    of: "@kind"
+                    map: {pending: false, _: true}
+      - type: toolbar
+        when: $.externalBrowsing
+        left:
+          - type: search
+            id: exec-q
+            placeholder: t:wsTrace.searchPlaceholder
+            value: $.q
+            input: execQ
+        right:
+          - type: button
+            iconOnly: true
+            icon: refresh
+            label: t:common.refresh
+            act: refresh
+            args: {k: exec}
+      - type: notice
+        tone: warn
+        when: $.warn
+        text:
+          t: wsStatus.sessions.warn
+          args: [$.warn]
+      - type: list
+        id: exec
+        from: $.now
+        item: {$frag: EXEC_MEMBER_ITEM}
+        row: member.row
+        when: $.browse
+      - type: list
+        id: exec
+        label: t:wsSessions.pastMembers
+        from: $.past
+        item: {$frag: EXEC_MEMBER_ITEM}
+        row: member.row
+        optional: true
+      - type: list
+        id: execQ
+        from: $.hits
+        row: exec.run
+        empty: t:wsTrace.notFound
+        when: $.searched
+  page.ext:
+    vm: ext
+    page: true
+    blocks:
+      - type: split
+        picked: $.picked
+        left:
+          - type: head
+            title: t:ext.title
+            actions:
+              - type: more
+                items:
+                  - {label: t:ext.offlineInstall, act: installFile}
+                  - label: t:market.page.label
+                    act: refresh
+                    args: {k: ext}
+                  - {label: t:pluginPage.page.developerDocs, act: openUrl}
+          - type: search
+            id: ext-q
+            placeholder: t:ext.searchPlaceholder
+            value: $.q
+            input: extQ
+          - type: list
+            id: ext
+            scroll: true
+            groups: $.groups
+            group:
+              title:
+                of: "@kind"
+                map:
+                  installed: t:market.installed
+                  available: t:market.browse.installable
+                  recommended: t:settingsUi.capGroup.recommended
+                  notInstalled: t:common.status.notInstalled
+                  _: "@kind"
+            row: cap.item
+            empty:
+              t: capabilities.ext.emptyText
+              args: [$.q]
+        right:
+          - {type: empty, icon: puzzle, text: t:ext.pickOne, when: "!$.sel"}
+          - type: each
+            from:
+              - {}
+            item:
+              tags:
+                - chip:
+                    t: settingsUi.plugin.tag.repository
+                    args: [$.sel.repositoryName]
+                  when: $.sel.repositoryName
+                - chip:
+                    of: $.sel.trust
+                    map:
+                      official: t:ext.trust.official
+                      first-party: t:ext.trust.official
+                      unverified: t:ext.trust.unverified
+                      unknown: t:wsTrace.source.unknown
+                  when: "!$.sel.repositoryName"
+                - chip:
+                    of: $.sel.trust
+                    map:
+                      official: t:ext.origin.official
+                      first-party: t:ext.origin.first-party
+                      unverified: t:ext.origin.unverified
+                      unknown: t:ext.origin.unknown
+                  when: "!$.sel.repositoryName"
+                - {chip: $.sel.publisher, when: $.sel.publisher}
+                - chip:
+                    of: $.sel.closure
+                    map: {shipped: t:ext.closure.shipped, materialized: t:ext.closure.materialized}
+                  when: $.sel.closure
+            blocks:
+              - type: head
+                when: $.sel
+                lead:
+                  - {glyph: $.sel.icon, size: xl}
+                title: $.sel.name
+                meta:
+                  - {chips: "@tags"}
+                  - {text: $.sel.version, when: $.sel.version}
+                  - control: {type: copy, value: $.sel.pkg, label: t:ext.copyPkg, mono: true}
+                    when: $.sel.pkg
+                actions:
+                  - type: button
+                    primary: true
+                    label: $.sel.installLabel
+                    act: install
+                    args: {k: $.sel.key}
+                    busy: $.sel.installing
+                    when: [$.sel.canInstall, $.sel.installLabel]
+                  - type: button
+                    primary: true
+                    label: t:common.install
+                    act: install
+                    args: {k: $.sel.key}
+                    busy: $.sel.installing
+                    when: [$.sel.canInstall, "!$.sel.installLabel"]
+                  - type: button
+                    primary: true
+                    label: t:ext.needAct.update
+                    act: capUpdate
+                    args: {k: $.sel.key}
+                    busy: $.sel.updating
+                    when:
+                      of: $.sel.need
+                      map: {update: true, _: false}
+                  - type: button
+                    label: t:ext.needAct.error
+                    act: capRestart
+                    args: {k: $.sel.key}
+                    when: $.sel.canRestart
+                  - type: button
+                    danger: true
+                    label: t:common.uninstall
+                    act: remove
+                    args: {entity: plugin, id: $.sel.key}
+                    busy: $.sel.uninstalling
+                    when: $.sel.installed
+                  - {type: grow, when: $.sel.installed}
+                  - type: switch
+                    value: $.sel.on
+                    act: togglePlugin
+                    args: {k: $.sel.key}
+                    label: t:control.enable
+                    when: $.sel.installed
+          - type: toolbar
+            when:
+              - $.sel.need
+              - of: $.sel.need
+                map: {update: false, _: true}
+            items:
+              - type: status
+                tone:
+                  of: $.sel.need
+                  map:
+                    error: danger
+                    restart: warn
+                    config: warn
+                    update: info
+                    _: $.sel.need
+                text:
+                  of: $.sel.need
+                  map:
+                    error: t:common.status.error
+                    restart: t:common.effectRestart
+                    config: t:ext.need.config
+                    update: t:ext.need.update
+                    _: $.sel.need
+          - type: notice
+            tone: warn
+            text: $.sel.mutationError
+            when: $.sel.mutationError
+          - type: section
+            title: t:ext.intro
+            when: $.sel.desc
+            blocks:
+              - type: text
+                variant: para
+                text: {of: $.sel.desc, fmt: localized}
+          - {type: notice, tone: warn, text: $.sel.diag, when: $.sel.diag}
+          - type: notice
+            tone: warn
+            text: t:pdlDoc.hiddenNotShown
+            items: $.sel.skips
+            each:
+              - parts:
+                  - parts:
+                      - "@key"
+                      - " → "
+                      - {of: "@path", sep: " › "}
+                      - ：
+                      - t: pdlDoc.skipReason
+                        args: ["@reason"]
+                    sep: ""
+            when: $.sel.skips
+          - type: notice
+            tone: warn
+            text:
+              t: pluginPage.detail.blocked
+              args: [$.sel.needs]
+            when: [$.sel.blocked, $.sel.needs]
+          - type: notice
+            tone: warn
+            text:
+              t: pluginPage.detail.blocked
+              args: [t:ext.need.config]
+            when: [$.sel.blocked, "!$.sel.needs"]
+          - type: section
+            title: t:ext.config
+            when: [$.sel.config, "!$.sel.connection"]
+            actions:
+              - type: status
+                tone: ok
+                text:
+                  t: pcf.testOk
+                  args: [$.sel.name]
+                when: $.sel.config.tested
+              - type: button
+                label: t:ext.testConn
+                act: pcfTest
+                args: {p: $.sel.config.p}
+                when: $.sel.config.test
+            blocks:
+              - type: form
+                id: pcf
+                args: {p: $.sel.config.p}
+                blocks:
+                  - {type: component, use: pluginConfigForm, props: $.sel.config.form}
+                  - type: toolbar
+                    variant: savebar
+                    id: savebar
+                    hidden: "!$.sel.config.save.dirty"
+                    items:
+                      - {type: text, text: t:ext.unsaved}
+                      - {type: grow}
+                      - type: button
+                        label: t:ext.discard
+                        act: pcfOp
+                        args: {op: discard, p: $.sel.config.p}
+                      - {type: button, primary: true, label: t:ext.saveConfig, submit: true}
+          - type: section
+            title: t:ext.address.title
+            help: t:ext.address.help
+            when: $.sel.address
+            blocks:
+              - type: settings
+                rows:
+                  - label: t:ext.address.alias
+                    ctls:
+                      - type: input
+                        id: plugin-alias
+                        value: $.sel.address.alias
+                        go: pluginAliasSave
+                        args: $.sel.address.args
+                        goLabel: t:common.save
+                  - label: t:ext.address.icon
+                    ctls:
+                      - type: avatar
+                        lead: $.sel.address.who
+                        size: l
+                        upload: {label: t:control.upload, accept: "image/png,image/jpeg,image/webp"}
+                        args: {p: $.sel.address.args.p, inst: $.sel.address.args.inst, change: pluginIcon}
+                      - type: button
+                        label: t:ext.address.iconReset
+                        act: pluginIconReset
+                        args: $.sel.address.args
+                        when: $.sel.address.custom
+              - type: notice
+                text:
+                  t: ext.address.off
+                  args: [$.sel.address.alias]
+                when: $.sel.address.off
+          - type: section
+            title: t:ext.connection
+            when: $.sel.connection
+            actions:
+              - type: each
+                from: $.sel.connection.actions
+                control: {type: button, primary: "@primary", label: "@label", act: openUrl}
+            blocks:
+              - type: kv
+                from: $.sel.connection.rows
+                item: {k: "@0", v: "@1"}
+          - type: list
+            from: $.sel.bindings
+            optional: true
+            row:
+              layout: two
+              title: "@title"
+              sub: "@sub"
+              cols:
+                - w: ctl
+                  control:
+                    type: button
+                    label: t:placement.disconnect
+                    act: pluginDisconnect
+                    args: "@args"
+          - type: section
+            title: $.sel.permissions.label
+            when: $.sel.permissions
+            blocks:
+              - type: form
+                id: pluginPermissions
+                args: {p: $.sel.permissions.p}
+                blocks:
+                  - type: component
+                    use: pluginConfigForm
+                    props: $.sel.permissions.form
+                    when: $.sel.permissions.form
+                  - type: notice
+                    tone: warn
+                    text: $.sel.permissions.error
+                    when: $.sel.permissions.error
+                  - type: toolbar
+                    when: $.sel.permissions.dirty
+                    items:
+                      - type: button
+                        label: t:common.cancel
+                        act: pcfOp
+                        args: {op: discard, p: $.sel.permissions.p}
+                      - {type: button, label: t:common.save, primary: true, submit: true}
+          - type: section
+            title: t:ext.docs
+            when: [$.sel.docs, "!$.sel.connection"]
+            actions:
+              - type: button
+                link: true
+                label: t:ext.openDocs
+                act: openUrl
+                when: $.sel.docs.docsUrl
+            blocks:
+              - {type: markdown, text: $.sel.docs.readme, when: $.sel.docs.readme}
+              - type: list
+                id: ext-prov
+                groups: $.sel.docs.provides
+                group:
+                  title:
+                    t: settingsUi.contribution.kind
+                    args: ["@kind"]
+                  more:
+                    label: t:pluginPage.contributions.label
+                    act: open
+                    args: {node: schedule, anchor: panel}
+                    when: "@scheduler"
+                row:
+                  layout: two
+                  lead:
+                    - {icon: bolt, when: "@is.skills"}
+                    - {icon: box, when: "@is.mcps"}
+                    - {icon: clock, when: "@is.scheduler"}
+                    - {icon: person, when: "@is.identity"}
+                    - {icon: msg, when: "@is.messaging"}
+                    - {icon: link, when: "@is.webhook"}
+                    - {icon: signal, when: "@is.events"}
+                    - {icon: eye, when: "@is.limb"}
+                    - {icon: file, when: "@is.editor"}
+                    - {icon: widget, when: "@is.desktop"}
+                    - {icon: terminal, when: "@is.clients"}
+                    - {icon: palette, when: "@theme"}
+                    - {icon: layers, when: "@ui"}
+                    - {icon: "@icon", when: "@icon"}
+                  title:
+                    - text:
+                        of: "@titleMode"
+                        map:
+                          plain: "@title"
+                          entry:
+                            t: settingsUi.contribution.title.entry
+                            args: ["@title"]
+                          legacy:
+                            t: settingsUi.contribution.title.legacy
+                            args: ["@title"]
+                          _: "@titleMode"
+                      mono: true
+                      when: "@is.skills"
+                    - text:
+                        of: "@titleMode"
+                        map:
+                          plain: "@title"
+                          entry:
+                            t: settingsUi.contribution.title.entry
+                            args: ["@title"]
+                          legacy:
+                            t: settingsUi.contribution.title.legacy
+                            args: ["@title"]
+                          _: "@titleMode"
+                      mono: true
+                      when: "@is.mcps"
+                    - text:
+                        of: "@titleMode"
+                        map:
+                          plain: "@title"
+                          entry:
+                            t: settingsUi.contribution.title.entry
+                            args: ["@title"]
+                          legacy:
+                            t: settingsUi.contribution.title.legacy
+                            args: ["@title"]
+                          _: "@titleMode"
+                      mono: true
+                      when: "@is.scheduler"
+                    - text:
+                        of: "@titleMode"
+                        map:
+                          plain: "@title"
+                          entry:
+                            t: settingsUi.contribution.title.entry
+                            args: ["@title"]
+                          legacy:
+                            t: settingsUi.contribution.title.legacy
+                            args: ["@title"]
+                          _: "@titleMode"
+                      when: ["!@is.skills", "!@is.mcps", "!@is.scheduler"]
+                  sub:
+                    parts:
+                      - {text: "@sub", when: "@sub"}
+                      - parts: "@tools"
+                        sep: 、
+                        each: {text: "@"}
+                        when: ["@is.mcps", "@installed", "@tools"]
+                      - text: t:pluginPage.contributions.toolsUnavailable
+                        when: ["@is.mcps", "@installed", "!@tools"]
+                      - {text: "@slot", when: "@slot"}
+                      - text: " · "
+                        when: ["@slot", "@region"]
+                      - text:
+                          of: "@region"
+                          map:
+                            main: t:settingsUi.contribution.region.main
+                            overlay: t:settingsUi.contribution.region.overlay
+                            panel: t:frame.openInPanel
+                            "": ""
+                            _: "@region"
+                        when: ["@region", "!@cover"]
+                      - text:
+                          t: pluginPage.contributions.coveredRegion
+                          args: ["@coveredRegion"]
+                        when: "@cover"
+                      - {text: t:pluginPage.contributions.memberReplyOnlySuffix, when: "@catOnly"}
+                    sep: ""
+                  act:
+                    of: "@kind"
+                    map: {skills: open, mcps: open, _: ""}
+                  args: {page: "@to"}
+                when: $.sel.docs.provides
+              - type: empty
+                text:
+                  of:
+                    of: $.sel.hasContrib
+                    map:
+                      "true":
+                        of: $.sel.installed
+                        map: {"true": none, _: locked}
+                      _: locked
+                  map:
+                    locked: t:common.status.notInstalled
+                    none: t:settingsUi.plugin.capsEmpty.none
+                    _:
+                      of: $.sel.hasContrib
+                      map:
+                        "true":
+                          of: $.sel.installed
+                          map: {"true": none, _: locked}
+                        _: locked
+                when: "!$.sel.docs.provides"
+  page.market:
+    vm: market
+    page: true
+    blocks:
+      - type: split
+        picked: $.picked
+        left:
+          - type: head
+            title: t:mcp.market
+            actions:
+              - type: more
+                items:
+                  - {label: t:market.page.label, act: mkRefresh}
+                  - label: t:placement.sources
+                    act: open
+                    args: {page: marketSources}
+          - type: search
+            id: mk-q
+            placeholder: t:market.searchPlaceholder
+            value: $.q
+            input: mkQ
+          - type: toolbar
+            items:
+              - type: select
+                id: mk-kind
+                options:
+                  - {v: all, label: t:inbox.allTypes}
+                  - {v: mcp_server, label: MCP}
+                  - {v: skill, label: Skill}
+                  - {v: plugin, label: t:who.plugin}
+                  - {v: app, label: t:settingsUi.market.kind.app}
+                  - {v: bundle, label: t:settingsUi.market.kind.bundle}
+                value: $.kind
+                label: t:common.type
+                change: mkKind
+              - type: select
+                id: mk-eco
+                options:
+                  - {v: all, label: t:market.browse.ecos}
+                  - {v: claude, label: Claude}
+                  - {v: codex, label: Codex}
+                  - {v: openclaw, label: OpenClaw}
+                  - {v: antigravity, label: Antigravity}
+                value: $.eco
+                label: t:market.ecosystem
+                change: mkEco
+              - type: select
+                id: mk-trust
+                options:
+                  - {v: all, label: t:market.browse.trusts}
+                  - {v: official, label: t:market.trustLevel.official}
+                  - {v: verified, label: t:market.trustLevel.verified}
+                  - {v: community, label: t:settingsUi.market.trust.community}
+                value: $.trust
+                label: t:market.trust
+                change: mkTrust
+          - type: notice
+            tone: warn
+            from: $.sources
+            strong:
+              t: settingsUi.market.sourceHead
+              args:
+                - "@availability"
+                - t: settingsUi.market.eco
+                  args: ["@eco"]
+            parts:
+              - {parts: "@issues", sep: ；}
+              - text:
+                  of: "@availability"
+                  map: {degraded: 。, unavailable: 。, _: "@availability"}
+            action: {type: button, label: t:common.retry, act: mkRefresh}
+          - type: list
+            id: mk
+            scroll: true
+            groups: $.groups
+            group:
+              title:
+                of: "@kind"
+                map:
+                  installed: t:market.installed
+                  available: t:market.browse.installable
+                  recommended: t:settingsUi.capGroup.recommended
+                  notInstalled: t:common.status.notInstalled
+                  _: "@kind"
+            row: cap.item
+            empty: t:market.browse.emptyText
+            load: $.listLoad
+        right:
+          - {type: empty, icon: store, text: t:market.pickOne, when: "!$.sel"}
+          - type: head
+            when: $.sel
+            title: $.sel.name
+            meta:
+              - parts:
+                  - parts:
+                      - t: settingsUi.market.kind
+                        args: [$.sel.kind]
+                      - " · "
+                      - $.sel.pub
+                    sep: ""
+              - status:
+                  lit: {tone: "", text: t:market.installed}
+                when: $.sel.installed
+              - status:
+                  lit: {tone: warn, text: t:market.unreviewed}
+                when: $.sel.community
+              - status:
+                  lit: {tone: "", text: t:market.detail.manualSetup}
+                when: $.sel.manual
+            actions:
+              - type: button
+                primary: true
+                label: t:market.detail.copyCommand
+                act: mkCopy
+                args: {k: $.sel.key}
+                when: [$.sel.canInstall, $.sel.modeIs.delegated_cli]
+              - type: button
+                primary: true
+                label: t:market.detail.copyConfiguration
+                act: mkCopy
+                args: {k: $.sel.key}
+                when: [$.sel.canInstall, $.sel.modeIs.manual_file]
+              - type: button
+                label:
+                  t: settingsUi.market.where
+                  args: [$.sel.where.kind]
+                act: open
+                args: {page: $.sel.where.to}
+                when: $.sel.where
+              - type: more
+                items:
+                  - label: t:market.item.label
+                    act: copy
+                    args: {v: $.sel.loc}
+                  - label:
+                      of: $.sel.mode
+                      map:
+                        manual_file: t:market.detail.copyConfiguration
+                        delegated_cli: t:market.detail.copyCommand
+                        _: $.sel.mode
+                    act: mkCopy
+                    args: {k: $.sel.key}
+                    when: $.sel.planText
+          - type: text
+            variant: para
+            text: {of: $.sel.desc, fmt: localized}
+            when: $.sel
+          - type: section
+            title: t:market.installMethod
+            when: $.sel
+            blocks:
+              - type: settings
+                rows:
+                  - label: t:market.detail.label
+                    control:
+                      type: text
+                      variant: value
+                      text:
+                        t: market.installMode
+                        args: [$.sel.mode]
+                  - label: t:market.detail.transport
+                    when: $.sel.mcp
+                    control: {type: text, variant: value, text: $.sel.mcp.t, mono: true}
+                  - label: URL
+                    when: $.sel.mcp.http
+                    control: {type: text, variant: value, text: $.sel.mcp.url, mono: true}
+                  - label: t:market.detail.launchCommand
+                    when: [$.sel.mcp, "!$.sel.mcp.http"]
+                    control:
+                      type: text
+                      variant: value
+                      parts:
+                        - {parts: $.sel.mcp.command, sep: " "}
+                      mono: true
+              - {type: pre, text: $.sel.planText, when: $.sel.planText}
+              - {type: label, text: t:market.envOptional, when: $.sel.env}
+              - type: settings
+                from: $.sel.env
+                when: $.sel.env
+                row:
+                  label: "@name"
+                  control: {type: text, variant: value, text: "@value", faint: true}
+              - {type: label, text: t:market.afterInstall, when: $.sel.steps}
+              - {type: steps, from: $.sel.steps}
+          - type: section
+            title: t:frame.tools
+            when: $.sel.tools
+            blocks:
+              - type: text
+                parts:
+                  - parts: $.sel.tools
+                    sep: 、
+                    each: {text: "@"}
+                    mono: true
+          - type: section
+            title: t:common.source
+            when: $.sel
+            blocks:
+              - type: settings
+                rows:
+                  - label: t:market.ecosystem
+                    control:
+                      type: text
+                      variant: value
+                      parts:
+                        - text:
+                            t: settingsUi.market.eco
+                            args: [$.sel.eco]
+                        - text:
+                            of: $.sel.availability
+                            map:
+                              live: ""
+                              degraded: t:settingsUi.market.sourceAvailability.degraded
+                              unavailable: t:settingsUi.market.sourceAvailability.degraded
+                              _: $.sel.availability
+                  - label: t:market.trust
+                    control:
+                      type: text
+                      variant: value
+                      text:
+                        of: $.sel.trust
+                        map:
+                          official: t:market.trustLevel.official
+                          verified: t:market.trustLevel.verified
+                          community: t:settingsUi.market.trust.community
+                          _: $.sel.trust
+                  - label: t:common.source
+                    when: $.sel.showSource
+                    control:
+                      type: text
+                      variant: value
+                      text: $.sel.loc
+                      tip: $.sel.loc
+                      mono: true
+                  - label: t:ext.version
+                    control: {type: text, variant: value, text: $.sel.version, mono: true}
+  dlg.stCompress:
+    title:
+      t: wsSessions.compression.title
+      args: [$.name]
+    text:
+      t: wsSessions.compression.compressionHelp
+      args:
+        - t: wsSessions.context.tip.value
+          args:
+            - $.hasCeiling
+            - {of: $.used, fmt: num}
+            - {of: $.ceiling, fmt: num}
+            - t: wsSessions.context.tip.source
+              args: [$.source]
+    ok: t:wsSessions.compression.ok
+rows:
+  exec.run:
+    layout: line
+    key: "@key"
+    lead:
+      - {who: "@who", form: avatar, when: "@who"}
+      - dot:
+          of: "@status"
+          map:
+            running: info
+            done: ok
+            error: danger
+            cancelled: ""
+            timeout: warn
+            _: "@status"
+        tip:
+          of: "@status"
+          map:
+            error: t:common.status.error
+            cancelled: t:common.status.cancelled
+            timeout: t:wsTrace.status.label.timeout
+            running: t:common.status.running
+            done: t:common.status.completed
+            _: "@status"
+    tone:
+      of: "@status"
+      map: {running: run, done: "", error: "", cancelled: "", timeout: "", _: "@status"}
+    title:
+      - text: "@preview"
+        tone:
+          of: "@preview.length"
+          gte: 1
+          map: {"true": false, _: true}
+        when: "@preview"
+      - text: t:wsTrace.overview.preview
+        tone:
+          of: "@preview.length"
+          gte: 1
+          map: {"true": false, _: true}
+        when: "!@preview"
+    cols:
+      - v:
+          - {icon: wrench, size: xs}
+          - {text: "@tools"}
+        w: num
+        tip:
+          t: wsTrace.overview.toolsTip
+          args: ["@tools", "@messages", "@statusEvents"]
+      - v:
+          - {icon: alert, size: xs, when: "@errors"}
+          - text:
+              of: "@errors"
+              map: {"0": "", _: "@errors"}
+        w: num
+        tip:
+          of: {of: "@errors", gte: 1}
+          map:
+            "true":
+              t: wsTrace.overview.errorTip.true
+              args: ["@errors"]
+            "false": ""
+            _: {of: "@errors", gte: 1}
+        tone:
+          of: {of: "@errors", gte: 1}
+          map:
+            "true": danger
+            "false": ""
+            _: {of: "@errors", gte: 1}
+      - v: {of: "@dur", fmt: duration}
+        w: time
+        tip:
+          t: wsTrace.overview.durTip
+          args: ["@at"]
+    act: wsSub
+    args: {k: exec, v: "@key"}
+  record.row:
+    layout: two
+    key: "@id"
+    lead:
+      - {parts: "@lead", when: "@lead"}
+    title:
+      - {parts: "@title"}
+    sub:
+      - {parts: "@sub", when: "@sub"}
+    meta:
+      - {parts: "@meta", when: "@meta"}
+    cols:
+      - v:
+          - {parts: "@trail"}
+        w: auto
+        when: "@trail"
+      - {control: "@controls", when: "@controls"}
+    act: "@act"
+    args: "@args"
+    tone: "@tone"
+    more: "@after"
+    moreWhen: "@after"
+  review.quote:
+    layout: two
+    key: "@id"
+    lead:
+      - {parts: "@lead", when: "@lead"}
+    title:
+      - {parts: "@title"}
+    sub:
+      - {text: t:films.sourceChanged, when: "@sourceChanged"}
+    meta:
+      - {parts: "@meta", when: "@meta"}
+    cols:
+      - v:
+          - {parts: "@trail"}
+        w: auto
+        when: "@trail"
+      - {control: "@controls", when: "@controls"}
+    act: "@act"
+    args: "@args"
+    tone: "@tone"
+    more: "@after"
+    moreWhen: "@after"
+  review.history:
+    layout: two
+    key: "@id"
+    lead:
+      - {parts: "@lead", when: "@lead"}
+    title:
+      - text:
+          t: reviewDetail.historyKind
+          args: ["@kind"]
+    sub:
+      - {parts: "@sub", when: "@sub"}
+    meta:
+      - {parts: "@meta", when: "@meta"}
+    cols:
+      - v:
+          - {parts: "@trail"}
+        w: auto
+        when: "@trail"
+      - {control: "@controls", when: "@controls"}
+    act: "@act"
+    args: "@args"
+    tone: "@tone"
+    more: "@after"
+    moreWhen: "@after"
+  review.result:
+    layout: two
+    key: "@id"
+    lead:
+      - {parts: "@lead", when: "@lead"}
+    title:
+      - {text: t:common.view}
+    sub:
+      - {parts: "@sub", when: "@sub"}
+    meta:
+      - {parts: "@meta", when: "@meta"}
+    cols:
+      - v:
+          - {parts: "@trail"}
+        w: auto
+        when: "@trail"
+      - {control: "@controls", when: "@controls"}
+    act: "@act"
+    args: "@args"
+    tone: "@tone"
+    more: "@after"
+    moreWhen: "@after"
+  memory.source:
+    layout: two
+    key: "@id"
+    lead:
+      - {parts: "@lead", when: "@lead"}
+    title:
+      - text:
+          of: "@title"
+          map: {"": t:memoryOwners.sourceMissing, _: "@title"}
+    sub:
+      - text: {of: "@sub", fmt: ago}
+        when: "@sub"
+    meta:
+      - {parts: "@meta", when: "@meta"}
+    cols:
+      - v:
+          - {parts: "@trail"}
+        w: auto
+        when: "@trail"
+      - {control: "@controls", when: "@controls"}
+    act:
+      of: "@canOpen"
+      map: {"true": msgJump, _: ""}
+    args: {t: "@threadId", mid: "@messageId"}
+    tone: "@tone"
+    more: "@after"
+    moreWhen: "@after"
+  memory.proposal:
+    layout: two
+    key: "@id"
+    title:
+      text:
+        of: "@title"
+        map: {"": t:memoryOwners.proposal, _: "@title"}
+    sub:
+      text:
+        of: "@state"
+        map:
+          unavailable: t:memoryOwners.stateNote.unavailable
+          pending_approval: t:memoryOwners.stateNote.pending
+          not_now: t:memoryOwners.stateNote.not_now
+          partially_materialized: t:memoryOwners.stateNote.partially_materialized
+          materialized: t:memoryOwners.stateNote.materialized
+          withdrawn: t:memoryOwners.stateNote.withdrawn
+          active: t:memoryOwners.state.active
+          current: t:memoryOwners.state.current
+          retired: t:memoryOwners.stateNote.retired
+          pending: t:memoryOwners.stateNote.pending
+          approving: t:memoryOwners.stateNote.approving
+          approved: t:memoryOwners.stateNote.approved
+          rejected: t:memoryOwners.stateNote.rejected
+          applied: t:memoryOwners.stateNote.applied
+          replayed: t:memoryOwners.stateNote.replayed
+          _: "@state"
+    act:
+      of: "@correction"
+      map:
+        "true": ""
+        _:
+          of: "@canOpen"
+          map: {"true": msgJump, _: ""}
+    args: "@args"
+    cols:
+      - control:
+          type: button
+          icon: jump
+          label: t:workspaceOwners.originalCard
+          act: msgJump
+          args: "@args"
+        when: ["@correction", "@canOpen"]
+  cap.item:
+    layout: item
+    key: "@key"
+    lead:
+      - {glyph: bolt, when: "@skill"}
+      - {glyph: "@icon", when: "@icon"}
+      - glyph: puzzle
+        when: ["@plugin", "!@icon"]
+      - {glyph: box, when: "@mcp"}
+      - {glyph: box, when: "@kindIs.mcp_server"}
+      - {glyph: bolt, when: "@kindIs.skill"}
+      - {glyph: puzzle, when: "@kindIs.plugin"}
+      - {glyph: grid, when: "@kindIs.app"}
+      - {glyph: layers, when: "@kindIs.bundle"}
+    title:
+      - {text: "@name"}
+      - icon: shield
+        size: s
+        tip: t:market.trustLevel.official
+        variant: meta
+        when: "@trustIs.official"
+      - icon: shieldCheck
+        size: s
+        tip: t:market.trustLevel.verified
+        variant: meta
+        when: "@trustIs.verified"
+    sub:
+      - text:
+          of: "@skill"
+          map:
+            "true": {of: "@desc", fmt: noFinalPeriod}
+            _: {of: "@desc", fmt: localized}
+        when: "@desc"
+      - text: t:list.noDesc
+        when: ["@mcp", "!@desc"]
+    subLines: 2
+    tone:
+      - {when: "@selected", value: selected}
+      - when: ["@skill", "!@on"]
+        value: past
+      - when: ["@mcp", "!@on"]
+        value: past
+      - when: ["@plugin", "@installed", "!@on"]
+        value: past
+      - {value: ""}
+    act: open
+    args: {page: "@to"}
+    aside:
+      - - control:
+            type: button
+            label: t:common.install
+            act: install
+            args: {k: "@key"}
+            busy: "@installing"
+          when: ["@plugin", "@canInstall"]
+        - control:
+            type: button
+            label: t:ext.needAct.update
+            act: capUpdate
+            args: {k: "@key"}
+            busy: "@updating"
+          when: ["@plugin", "@update"]
+        - {control: "@ctl", when: "@ctl"}
+        - control:
+            type: switch
+            value: "@on"
+            act: setStatus
+            args: {entity: mcp, id: "@name"}
+            label:
+              of: "@on"
+              map:
+                "true":
+                  t: settingsUi.mcp.switch.true
+                  args: ["@name"]
+                "false":
+                  t: wsSignals.list.enableNamed
+                  args: ["@name"]
+                _: "@on"
+          when: "@mcp"
+        - control:
+            type: switch
+            value: "@on"
+            act: capSkill
+            args: {n: "@name"}
+            label:
+              of: "@on"
+              map:
+                "true":
+                  t: settingsUi.mcp.switch.true
+                  args: ["@name"]
+                "false":
+                  t: wsSignals.list.enableNamed
+                  args: ["@name"]
+                _: "@on"
+          when: "@skill"
+      - - control:
+            type: status
+            tone:
+              of: "@need"
+              map: {error: danger, restart: warn, config: warn, update: info, _: "@need"}
+            text:
+              of: "@need"
+              map:
+                error: t:common.status.error
+                restart: t:common.effectRestart
+                config: t:ext.need.config
+                update: t:ext.need.update
+                _: "@need"
+          when: ["@plugin", "@needStatus"]
+        - {control: "@stat", when: "@stat"}
+        - control:
+            type: status
+            tone: warn
+            text:
+              of: "@issue.code"
+              map:
+                dep:
+                  t: capabilities.connectionIssue.deps
+                  args: ["@issue.n"]
+                xproj:
+                  t: capabilities.issue.label.xproj
+                  args: ["@issue.n"]
+                conflict:
+                  t: capabilities.drift.kind.conflict
+                  args: ["@issue.n"]
+                stale_mount:
+                  t: capabilities.drift.kind.stale_mount
+                  args: ["@issue.n"]
+                unregistered:
+                  t: capabilities.drift.kind.unregistered
+                  args: ["@issue.n"]
+                mount_missing:
+                  t: capabilities.drift.kind.mount_missing
+                  args: ["@issue.n"]
+                new_config:
+                  t: capabilities.drift.kind.new_config
+                  args: ["@issue.n"]
+                config_residue:
+                  t: capabilities.drift.kind.config_residue
+                  args: ["@issue.n"]
+                ghost:
+                  t: capabilities.drift.kind.ghost
+                  args: ["@issue.n"]
+                global_added:
+                  t: capabilities.drift.kind.global_added
+                  args: ["@issue.n"]
+                config_mismatch:
+                  t: capabilities.drift.kind.config_mismatch
+                  args: ["@issue.n"]
+                residual_config:
+                  t: capabilities.drift.kind.residual_config
+                  args: ["@issue.n"]
+                detect_failed:
+                  t: capabilities.drift.kind.detect_failed
+                  args: ["@issue.n"]
+                _: "@issue.code"
+          when: ["@skill", "@issue"]
+        - control:
+            type: status
+            tone: warn
+            text:
+              of: "@issue.code"
+              map:
+                conflict:
+                  t: capabilities.drift.kind.conflict
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                stale_mount:
+                  t: capabilities.drift.kind.stale_mount
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                unregistered:
+                  t: capabilities.drift.kind.unregistered
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                mount_missing:
+                  t: capabilities.drift.kind.mount_missing
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                new_config:
+                  t: capabilities.drift.kind.new_config
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                config_residue:
+                  t: capabilities.drift.kind.config_residue
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                ghost:
+                  t: capabilities.drift.kind.ghost
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                global_added:
+                  t: capabilities.drift.kind.global_added
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                config_mismatch:
+                  t: capabilities.drift.kind.config_mismatch
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                residual_config:
+                  t: capabilities.drift.kind.residual_config
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                detect_failed:
+                  t: capabilities.drift.kind.detect_failed
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                error:
+                  of: "@issue.text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                xproj:
+                  t: settingsUi.mcp.issueLabel.xproj
+                  args:
+                    - of: "@issue.text"
+                      map: {"": t:capabilities.connectionIssue.disconnected, _: "@issue.text"}
+                    - "@issue.n"
+                _: "@issue.code"
+          when: ["@mcp", "@issue"]
+        - control:
+            type: text
+            parts:
+              - text:
+                  of: "@ov"
+                  map:
+                    project: t:settingsUi.mcp.tag.project
+                    default: t:settingsUi.mcp.tag.default
+                    _: "@ov"
+                variant: meta
+              - control:
+                  type: button
+                  label:
+                    t: capabilities.ov.reset
+                    args: ["@ov"]
+                  act: reset
+                  args: {scope: "@resetScope"}
+          when: ["@ov", "!@issue"]

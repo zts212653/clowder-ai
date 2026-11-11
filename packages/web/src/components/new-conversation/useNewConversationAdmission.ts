@@ -2,7 +2,7 @@
 
 import type { ContextAttachment } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useSendMessage } from '@/hooks/useSendMessage';
+import { type RoutingConfirmation, useSendMessage } from '@/hooks/useSendMessage';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
@@ -86,10 +86,13 @@ export interface NewConversationAdmission {
   cancelSave: () => void;
 }
 
-export function useNewConversationAdmission(onNavigate: (threadId: string) => void): NewConversationAdmission {
+export function useNewConversationAdmission(
+  onNavigate: (threadId: string) => void,
+  confirmRouting?: RoutingConfirmation,
+): NewConversationAdmission {
   const setCurrentThread = useChatStore((state) => state.setCurrentThread);
   const setThreadHasDraft = useChatStore((state) => state.setThreadHasDraft);
-  const { handleSend, uploadStatus, uploadError } = useSendMessage(DRAFT_THREAD_ID);
+  const { handleSend, uploadStatus, uploadError } = useSendMessage(DRAFT_THREAD_ID, confirmRouting);
   const [intent, setIntent] = useState<PendingNewConversationIntent | null>(null);
   const [ready, setReady] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);

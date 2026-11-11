@@ -1,0 +1,111 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/memory-message-proposals.test.ts src/pdl/__tests__/proposal-models.test.ts src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/r136-owners.test.ts (3 tests) 16ms
+ ✓ src/pdl/__tests__/memory-message-proposals.test.ts (4 tests) 56ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (12 tests) 25ms
+ ❯ src/pdl/__tests__/proposal-models.test.ts (5 tests | 1 failed) 7ms
+     × reads the native profile proposal and submits its decision to the original writer 4ms
+     ✓ reads and verifies the owner and original publication before enabling writes 1ms
+     ✓ refuses a stale decision and does not infer a terminal result from a missing pending item 0ms
+     ✓ uses F128 overrides on its actual endpoint and re-reads after success 0ms
+     ✓ recognizes Session handoff as a different producer and never sends it to the thread proposal writer 0ms
+ ✓ src/pdl/__tests__/runtime.test.ts (71 tests) 33196ms
+     ✓ awaits a plugin row operation under its original confirmation and keeps an owner refusal in the dialog  564ms
+     ✓ renders real plugin schema branches and retains a rejected config draft until its owner accepts  509ms
+     ✓ keeps general UI choices local and sends the busy policy to its real owner  377ms
+     ✓ opens the message selection toolbar and forwards its exact quote through the existing dialog  440ms
+     ✓ opens real member candidates at the caret and chooses one without sending or losing the input suffix  335ms
+     ✓ loads the real QR src and retains it while the same authorization operation polls  1853ms
+     ✓ renders canonical sidebar groups and keeps organize drafts on owner rejection before submitting the original snapshot  572ms
+     ✓ renders native update state in the declared system section and waits for the install owner  573ms
+     ✓ uses the shared recent-work view below component-owned recent tabs and opens command details in live  393ms
+     ✓ keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there  510ms
+     ✓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials  682ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  622ms
+     ✓ keeps appearance preferences and complete custom theme documents in the original local store with no server writes  557ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  373ms
+     ✓ renders only the declared restore action and waits for its owner before removing a trash row  348ms
+     ✓ renders r126 file media and generic Office metadata through the original file view  380ms
+     ✓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys  551ms
+     ✓ reads project pins and display names from the real preference snapshot and dispatches their existing writers  477ms
+     ✓ opens the owner source thread from the declared task row action and respects rejected navigation  434ms
+     ✓ opens the real author member card through r124 declarations and inserts its actual handle  540ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  770ms
+     ✓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media  644ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  617ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  607ms
+     ✓ opens the verified recall source and its original reply through the r135 inline actions  313ms
+     ✓ filters one reply group, clears the filter and continues the r135 event cursor  577ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  557ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  418ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  335ms
+     ✓ retains the existing owner read-error component once without adding a toast  398ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  568ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  564ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  595ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  567ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  370ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  504ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  407ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  304ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  398ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  389ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  571ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  341ms
+     ✓ opens and leaves Team details through the native workbench stack  381ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  354ms
+     ✓ sends input through the registered action without replacing the active textarea  317ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  311ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  403ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  717ms
+     ✓ closes chat.modal through the declared cancel and Esc exits without sending  412ms
+     ✓ resolves draft-append consent only from the engine dialog decision  329ms
+   ✓ keeps context policy and reference audio in the current member draft until their actual writers acknowledge them  611ms
+   ✓ binds DSH inspection, exact revision preparation and optional test, then invalidates the receipt after a manual launch edit  634ms
+   ✓ creates only pending selected native partners and retains the same second request after an owner rejection  528ms
+   ✓ edits the selected plugin client library through the copied records form and retains drafts on a revision conflict  554ms
+   ✓ renders real and preview brake events with the copied dialog, required reason and owner acknowledgement  587ms
+   ✓ renders r135 file editing and conflict actions without another editor  475ms
+   ✓ uses the r135 library form values and captured Mission Hub dialog fields through the copied popup shells  570ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1591ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/proposal-models.test.ts > producer-specific proposal bindings > reads the native profile proposal and submits its decision to the original writer
+AssertionError: expected { title: '新对话', …(16) } to match object { canEditInPlace: false, …(2) }
+(16 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "asking": true,
+-   "canEditInPlace": false,
++   "canEditInPlace": true,
+    "canRequestChange": true,
+  }
+
+ ❯ src/pdl/__tests__/proposal-models.test.ts:61:52
+     59|       refresh = vi.fn();
+     60|     const binding = { target: profile, record: original, current: true…
+     61|     expect(proposalView(binding, false, true, {})).toMatchObject({ can…
+       |                                                    ^
+     62|     const send = vi.fn(async () => true);
+     63|     await requestProposalRevision(binding, '请修正这段画像', send);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 94 passed (95)
+   Start at  11:51:49
+   Duration  35.89s (transform 3.86s, setup 106ms, import 5.91s, tests 33.30s, environment 1.63s)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/memory-message-proposals.test.ts src/pdl/__tests__/proposal-models.test.ts src/pdl/__tests__/chat-models.test.ts src/pdl/__tests__/runtime.test.ts
+
+Exit code: 1

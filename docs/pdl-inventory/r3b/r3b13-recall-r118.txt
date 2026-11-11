@@ -1,0 +1,39 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/workbench-bindings.test.ts src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (8 tests) 52ms
+ ✓ src/pdl/__tests__/runtime.test.ts (33 tests) 12575ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  550ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  529ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  433ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  342ms
+     ✓ retains the existing owner read-error component once without adding a toast  404ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  591ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  557ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  582ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  562ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  371ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  511ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  434ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  304ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  413ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  387ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  342ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  336ms
+     ✓ opens and leaves Team details through the native workbench stack  358ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  324ms
+     ✓ sends input through the registered action without replacing the active textarea  323ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  321ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  380ms
+     ✓ resolves draft-append consent only from the engine dialog decision  308ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1295ms
+
+ Test Files  2 passed (2)
+      Tests  41 passed (41)
+   Start at  20:01:36
+   Duration  14.65s (transform 1.94s, setup 51ms, import 2.92s, tests 12.63s, environment 372ms)
+
+
+Exit code: 0

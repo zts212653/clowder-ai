@@ -144,6 +144,49 @@ describe('GET /api/artifacts bounded recent works view (F232 KD-9)', () => {
     assert.ok(messageReadLog.every((read) => !read.kind.startsWith('thread')));
   });
 
+  it('filters the project before the recent limit, preserves default and confirms an empty project without scanning', async () => {
+    const messageReadLog = [];
+    app = await makeApp({
+      threads: [
+        { ...T1, projectPath: '/target' },
+        { ...T2, projectPath: 'default' },
+      ],
+      threadMessages: {
+        T1: [
+          imageMessage('a', 1, 'target-a.png'),
+          imageMessage('b', 2, 'target-b.png'),
+          imageMessage('c', 3, 'target-c.png'),
+        ],
+        T2: [
+          imageMessage('x', 100, 'other-a.png'),
+          imageMessage('y', 101, 'other-b.png'),
+          imageMessage('z', 102, 'other-c.png'),
+        ],
+      },
+      messageReadLog,
+    });
+    const read = async (project) =>
+      await app.inject({
+        method: 'GET',
+        url: '/api/artifacts?view=recent-works&limit=3&projectId=' + encodeURIComponent(project),
+        headers: AUTH,
+      });
+    assert.deepEqual(
+      (await read('/target')).json().artifacts.map((work) => work.name),
+      ['target-c.png', 'target-b.png', 'target-a.png'],
+    );
+    assert.deepEqual(
+      (await read('default')).json().artifacts.map((work) => work.name),
+      ['other-c.png', 'other-b.png', 'other-a.png'],
+    );
+    messageReadLog.length = 0;
+    const empty = (await read('/empty')).json();
+    assert.deepEqual(empty.artifacts, []);
+    assert.equal(empty.complete, true);
+    assert.deepEqual(messageReadLog, []);
+    assert.equal((await read('')).statusCode, 400);
+  });
+
   it('caps an artifact-free history and reports unknown rather than verified empty', async () => {
     const messageReadLog = [];
     app = await makeApp({ threads: [T1], threadMessages: { T1: nonWorks(700) }, messageReadLog });

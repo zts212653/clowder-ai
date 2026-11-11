@@ -1,0 +1,12 @@
+Changed source/test files: 9
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts
+packages/api/src/domains/cats/services/stores/ports/MessageStore.ts
+packages/api/test/pdl-tool-detail.test.ts
+packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts
+packages/web/src/hooks/agent-messages/tool-events.ts
+packages/web/src/pdl/__tests__/chat-models.test.ts
+packages/web/src/pdl/__tests__/runtime.test.ts
+packages/web/src/pdl/chat-models.ts
+packages/web/src/stores/chat-types.ts
+Other pre-existing files changed: 0
+Exit code: 0

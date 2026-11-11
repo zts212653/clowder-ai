@@ -12,7 +12,7 @@ import type {
   RichBlockBase,
   RoutingPreflightDecisionV1,
 } from '@cat-cafe/shared';
-import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
+import { catRegistry, extractAppendedRecallMetaBlock, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -1019,11 +1019,13 @@ export function toStoredToolEvent(
   if (msg.type === 'tool_result') {
     const raw = (msg.content ?? '').trimEnd();
     const detail = raw.length > 0 ? truncateDetail(raw, 1500) : '(no output)';
+    const resultMeta = msg.content === undefined ? undefined : extractAppendedRecallMetaBlock(msg.content);
     return {
       ...instance,
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(resultMeta ? { resultMeta } : {}),
       ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),

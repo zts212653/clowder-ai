@@ -1,0 +1,75 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/runtime.test.ts (36 tests | 1 failed) 14107ms
+     × renders two independently selectable screenings and dispatches the result comparison through the copied film view 487ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  632ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  586ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  369ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  488ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  412ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  323ms
+     ✓ retains the existing owner read-error component once without adding a toast  380ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  553ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  554ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  566ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  556ms
+     ✓ does not show the history marker or load-older action for a new empty thread (r116) 161ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  371ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  501ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts 237ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  398ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  301ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  390ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  447ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  359ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  343ms
+     ✓ opens and leaves Team details through the native workbench stack  383ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  374ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 203ms
+     ✓ uses the full-window export frame, exact mids and the same readonly message nodes 78ms
+     ✓ preserves the typed work reference through the actual copied canon button 235ms
+     ✓ preserves the contracted annotationId through the actual copied review judgment button 230ms
+     ✓ settles only after an asynchronous rich-body render is complete (r111 contract) 141ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 199ms
+     ✓ sends input through the registered action without replacing the active textarea  322ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  309ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  394ms
+     ✓ resolves draft-append consent only from the engine dialog decision  327ms
+     ✓ leaves text paste native while forwarding image paste through the application port 185ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1311ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > renders two independently selectable screenings and dispatches the result comparison through the copied film view
+AssertionError: expected  to have a length of 2 but got +0
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ src/pdl/__tests__/runtime.test.ts:137:79
+    135|       const left = w.document.querySelector(`[data-media="${primaryId}…
+    136|         right = w.document.querySelector(`[data-media="${referenceId}"…
+    137|       expect(w.document.querySelectorAll('[data-view="film.project"] v…
+       |                                                                               ^
+    138|       expect(JSON.parse(left.dataset.pick).args).toEqual({ id: 'projec…
+    139|       expect(JSON.parse(right.dataset.pick).args).toEqual({ id: 'proje…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 35 passed (36)
+   Start at  21:03:45
+   Duration  15.80s (transform 961ms, setup 31ms, import 1.49s, tests 14.11s, environment 0ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts
+
+Exit code: 1

@@ -1,0 +1,66 @@
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/runtime.test.ts (28 tests | 4 failed) 9660ms
+     × keeps the shell and other owner data when the home binding is absent, with one danger toast 472ms
+     × keeps the shell and other owner data when the ops binding is absent, with one danger toast 306ms
+     × keeps the shell and other owner data when the replay binding is absent, with one danger toast 323ms
+     × keeps the shell and other owner data when the evolution binding is absent, with one danger toast 302ms
+     ✓ does not show the history marker or load-older action for a new empty thread (r116) 169ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  385ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  514ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts 240ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  456ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  304ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  399ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  390ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  353ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  354ms
+     ✓ opens and leaves Team details through the native workbench stack  396ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  340ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 183ms
+     ✓ uses the full-window export frame, exact mids and the same readonly message nodes 77ms
+     ✓ preserves the typed work reference through the actual copied canon button 236ms
+     ✓ preserves the contracted annotationId through the actual copied review judgment button 230ms
+     ✓ settles only after an asynchronous rich-body render is complete (r111 contract) 145ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 206ms
+     ✓ sends input through the registered action without replacing the active textarea  321ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  312ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  394ms
+     ✓ resolves draft-append consent only from the engine dialog decision  329ms
+     ✓ leaves text paste native while forwarding image paste through the application port 186ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1336ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > keeps the shell and other owner data when the home binding is absent, with one danger toast
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > keeps the shell and other owner data when the ops binding is absent, with one danger toast
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > keeps the shell and other owner data when the replay binding is absent, with one danger toast
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > keeps the shell and other owner data when the evolution binding is absent, with one danger toast
+AssertionError: expected undefined to be '暂时读不到。' // Object.is equality
+
+- Expected:
+"暂时读不到。"
+
++ Received:
+undefined
+
+ ❯ src/pdl/__tests__/runtime.test.ts:96:83
+     94|       w.eval(`ENGINE_PARTS.openTab('panel', '${panel}')`);
+     95|       await w.__settled();
+     96|       expect(w.document.querySelector('.toast[data-tone="danger"]')?.t…
+       |                                                                                   ^
+     97|       expect(w.document.querySelector('textarea')).not.toBeNull();
+     98|       expect(w.document.body.textContent).not.toContain('Application e…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 24 passed (28)
+   Start at  19:16:37
+   Duration  11.52s (transform 1.05s, setup 33ms, import 1.72s, tests 9.66s, environment 0ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts

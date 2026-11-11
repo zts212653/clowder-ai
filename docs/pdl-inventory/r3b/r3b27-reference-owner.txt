@@ -1,0 +1,16 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/review-bindings.test.tsx src/pdl/__tests__/memory-message-proposals.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/memory-message-proposals.test.ts (5 tests) 108ms
+ ✓ src/pdl/__tests__/review-bindings.test.tsx (8 tests) 59ms
+ ✓ src/pdl/__tests__/r136-owners.test.ts (7 tests) 46ms
+
+ Test Files  3 passed (3)
+      Tests  20 passed (20)
+   Start at  12:35:53
+   Duration  2.13s (transform 2.80s, setup 127ms, import 4.13s, tests 212ms, environment 1.47s)
+
+
+Exit code: 0

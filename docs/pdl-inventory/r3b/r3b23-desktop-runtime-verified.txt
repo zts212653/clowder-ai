@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts -t 'native update state'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (57 tests | 56 skipped) 3625ms
+     ✓ renders native update state in the declared system section and waits for the install owner  3623ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 56 skipped (57)
+   Start at  07:21:38
+   Duration  25.23s (transform 13.65s, setup 248ms, import 19.20s, tests 3.62s, environment 0ms)
+
+
+Exit code: 0

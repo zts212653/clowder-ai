@@ -1,0 +1,16 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/chat-models.test.ts src/hooks/__tests__/f322-tool-event-instance.test.ts src/utils/__tests__/toolPreview.test.ts --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/chat-models.test.ts (11 tests) 28ms
+ ✓ src/utils/__tests__/toolPreview.test.ts (6 tests) 2ms
+ ✓ src/hooks/__tests__/f322-tool-event-instance.test.ts (2 tests) 10ms
+
+ Test Files  3 passed (3)
+      Tests  19 passed (19)
+   Start at  07:45:10
+   Duration  4.42s (transform 1.59s, setup 78ms, import 2.70s, tests 40ms, environment 1.25s)
+
+
+Exit code: 0

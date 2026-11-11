@@ -1,0 +1,2071 @@
+{
+  "workbench": {
+    "tabs": {
+      "closeOthers": {
+        "toast": "已关闭其他未固定的标签"
+      },
+      "closeUnpinned": {
+        "toast": "已关闭全部未固定的标签"
+      },
+      "menu": {
+        "focus": "专注",
+        "focusHelp": "只留当前这个工具常驻打开，其他标签先收起；聊天照常在旁边",
+        "splitHorizontal": "左右并排",
+        "closeOthers": "关闭其他标签",
+        "closeUnpinned": "关闭全部未固定标签"
+      }
+    },
+    "panels": {
+      "home": "首页",
+      "threadWorks": "本对话的作品",
+      "threadTasks": "本对话的任务",
+      "activeWork": "所有正在进行的工作",
+      "executionHelp": "猫、会话和每次运行",
+      "recall": "召回",
+      "recallHelp": "一轮回复前召回的记忆",
+      "replay": "回放",
+      "replayHelp": "从头回放当前对话",
+      "schedule": "日程",
+      "scheduleHelp": "委托工作的开始与截止日期",
+      "evaluationHelp": "周期评估、结论与台账",
+      "board": "功能看板：Feature 进度、领取与分配",
+      "files": "项目文件",
+      "fileHelp": "按目录浏览项目文件",
+      "git": "分支、提交与仓库状态",
+      "terminalHelp": "命令与输出记录",
+      "preview": "页面预览",
+      "previewHelp": "预览本地页面",
+      "memoryHelp": "当前对话用到的记忆",
+      "voice": "语音与会议",
+      "voiceHelp": "语音转写、会议记录",
+      "clips": "片子",
+      "filmsHelp": "已有视频项目与制作",
+      "team": "成员状态",
+      "teamHelp": "成员能力、可用性与路由",
+      "evolutionHelp": "正在改进的能力与项目",
+      "signalsHelp": "浏览、筛选和研读信号文章",
+      "ops": "运维",
+      "operationsHelp": "额度、观测、会话、治理与救援"
+    },
+    "groups": {
+      "activity": "活动",
+      "other": "其他"
+    },
+    "empty": {
+      "emptyState": "还没有进化记录。"
+    },
+    "file": {
+      "openProject": "打开项目文件",
+      "noPreview": "这种文件不能在这里预览",
+      "openLocal": "用默认应用打开"
+    },
+    "runtime": {
+      "noSessions": "没有 runtime 会话。",
+      "handoff": "交接",
+      "raw": "原始",
+      "sub": "事件 {0}",
+      "sessionSummary": "{0} · {1} · 最后观察 {2} · 上下文策略 {3}"
+    },
+    "frameNotice": {
+      "restore": "暂时无法恢复原来的工作台。请从「+」里选择要打开的工具。",
+      "work": "无法在当前对话恢复这张作品卡。请回到来源对话查看。",
+      "pr": "这个 PR 缺少完整的仓库引用或可用工作区，暂时无法打开精确变更。",
+      "save": "工作台没能保存。当前页面仍可使用，重新加载前请重试刚才的操作。",
+      "loading": "正在读取工作区，随后打开「项目文件」…",
+      "noWs": "当前项目没有可用工作区，暂时无法打开「终端」。"
+    },
+    "header": {
+      "noteSaved": "备注已自动保存"
+    },
+    "notifications": {
+      "scenes": "大纲待定",
+      "text": "{0}我们来进化 {1}",
+      "draftPreserved": "已带到「{0}」，原有草稿已保留。由你确认后发送。",
+      "duplicatePreferenceMember": "同一成员不能同时出现在优先与对照两侧。",
+      "preferenceConflict": "偏好已在别处更新；已刷新最新版本，请重新确认后提交。",
+      "due": "{0}后",
+      "retired": "已退休",
+      "requiredFields": "四项都是必填的。"
+    },
+    "quota": {
+      "refreshAll": "刷新全部",
+      "label": "评审、合入、PR 场景",
+      "help": "避开 @opus（省额度）",
+      "avoidOpus": "避开 @opus",
+      "designScope": "架构、设计、取舍场景",
+      "preferOpus": "优先 @opus",
+      "text": "{0} 次调用",
+      "sub": "当前默认 ",
+      "tokenUsageSuffix": " · 输入 {0} / 输出 {1} tokens",
+      "invocationCount": "{0} 次",
+      "nativeShare": "原生工具 {0}%",
+      "mcpShare": "MCP 桥接 {0}%",
+      "skillShare": "技能调用 {0}%",
+      "dailyTrend": "每日使用趋势",
+      "usageBreakdown": "{0}：{1}（原生 {2} / MCP {3} / 技能 {4}）",
+      "nativeMcpBreakdown": "原生工具：{0} · MCP：{1}",
+      "totalInvocations": "总调用"
+    },
+    "leaderboard": {
+      "title": "搬砖",
+      "review": "评审",
+      "fixBug": "修 Bug",
+      "nightOwl": "夜猫子 · 深夜被 @",
+      "chatty": "话痨",
+      "streak": "连续签到",
+      "failures": "翻车现场",
+      "achievements": "成就墙",
+      "noAchievements": "还没有解锁成就。",
+      "collaborationLevel": "你的协作等级",
+      "sub": "距离“{0}”还需要 {1} 个成就",
+      "werewolfWins": "狼人杀胜场 · {0}",
+      "spyLosses": "谁是卧底社死 · {0}",
+      "mostMentioned": "本周之星 · 被提及最多",
+      "noFailures": "暂无翻车记录。"
+    },
+    "observe": {
+      "callbackAuthorization": "回调授权",
+      "uptime": "已运行",
+      "disabled": "未启用",
+      "errorRate": "错误率",
+      "title": "就绪检查",
+      "storage": "存储",
+      "trajectoryStorage": "轨迹存储",
+      "normalCount": "正常 · {0} 条",
+      "snapshotStorage": "快照存储",
+      "normalSummary": "正常 · {0}",
+      "failuresDay": "24 小时失败",
+      "total": "累计",
+      "affectedMembersDay": "受影响的猫（24 小时）",
+      "failureReasons": "失败原因",
+      "failingTools": "出错最多的工具",
+      "affectedMembers": "受影响的猫",
+      "text": "24 小时内没有猫受影响。",
+      "recentSamples": "最近样本",
+      "fails": "{0} 次失败",
+      "successfulCallsWindow": "成功调用（30 分钟）",
+      "failedCalls": "失败调用",
+      "totalCalls": "调用总数",
+      "snapshot": "快照",
+      "desc": "改了直接写进 .env。",
+      "captureFullPrompts": "捕获完整提示词",
+      "help": "开启后记录每次调用实际发给模型的提示词。",
+      "captureSelectedMembers": "只捕获这些猫",
+      "sessionHook": "会话 Hook",
+      "readyCount": "就绪 · {0}",
+      "pseudonymizationHelp": "遥测 ID 伪名化用；生产环境必设"
+    },
+    "daemon": {
+      "emptyText": "没有找到后台会话（~/.claude/jobs/ 是空的）。",
+      "sub": " · 创建 10/19 00:12 · 更新 01:50"
+    },
+    "govern": {
+      "versionSummary": "{0} · 版本 {1}",
+      "skipped": "已跳过",
+      "existingClaudeFile": "CLAUDE.md（已存在）",
+      "lastSynced": "版本 {0} · 上次同步 {1}"
+    },
+    "brake": {
+      "label": "启用休息提醒",
+      "interval": "提醒间隔",
+      "unit": " 分钟",
+      "mode": "提醒方式",
+      "gentle": "温柔",
+      "strict": "硬核"
+    },
+    "commands": {
+      "viewHelp": "查看帮助",
+      "viewConfiguration": "查看配置",
+      "editConfiguration": "修改配置",
+      "remember": "记住一件事",
+      "recall": "回想",
+      "approveMemory": "批准待入库的记忆",
+      "knowledgeLibrary": "知识库",
+      "findEvidence": "查证据",
+      "reflect": "反思",
+      "findSignals": "查信号",
+      "games": "游戏",
+      "startWerewolf": "开一局狼人杀",
+      "extractTasks": "从对话里提取任务",
+      "vote": "投票",
+      "crossPlatform": "跨平台",
+      "currentThreadCommand": "我在哪个对话",
+      "listThreads": "列出对话",
+      "switchThread": "切换对话",
+      "listMembers": "列出成员",
+      "focusMode": "专注模式",
+      "title": "快捷键",
+      "toggleSplit": "切换单屏 / 分屏",
+      "choosePane": "分屏时选择窗格",
+      "toggleVoiceInput": "切换语音录入"
+    },
+    "rescue": {
+      "emptyText": "暂未发现坏掉的 Claude 会话。",
+      "fixLabel": "修复选中的 {0} 个会话",
+      "last": "上次运行：{0}",
+      "sub": "纯 thinking 回合：{0} 条"
+    },
+    "rest": {
+      "confirm": {
+        "title": "休息时间到啦！",
+        "text": "已经连续专注 {0} 分钟了。",
+        "rest": "休息一下",
+        "wrap": "收个尾再停",
+        "go": "继续",
+        "goSub": "有紧急情况，需要写理由"
+      }
+    },
+    "signalState": {
+      "archived": "归档"
+    },
+    "star": {
+      "true": "取消收藏"
+    },
+    "playingLabel": {
+      "false": "全部播放"
+    },
+    "busyFetch": {
+      "true": "抓取中…",
+      "false": "抓取"
+    },
+    "profileKind": {
+      "good": "适合的任务 · {0}",
+      "care": "协作时留意 · {0}"
+    },
+    "assertState": {
+      "true": "已过期（等待确认）"
+    },
+    "reason": {
+      "owner-constraint": "你设置的临时限制",
+      "owner-maintenance": "维护中",
+      "quota-window": "额度周期限制",
+      "quota_exhausted": "额度已用尽",
+      "authentication_rejected": "鉴权被拒绝",
+      "provider_unreachable": "服务暂时不可达",
+      "provider_timeout": "服务响应超时"
+    },
+    "providerName": {
+      "true": "{0} 全部成员"
+    },
+    "eventName": {
+      "true": "{0} 服务"
+    },
+    "versionTitle": {
+      "true": "已替换 · v1 · @opus 优先于 @codex",
+      "false": "{0} · v{1} · {2} 优先于 {3}"
+    },
+    "versionSub": {
+      "true": "初版 · ",
+      "false": "{0} · 证据：{1} · "
+    },
+    "route": {
+      "new": "新对话",
+      "thread": "交给「{0}」"
+    },
+    "prCI": "CI {0}",
+    "sourceGroup": "{0} {1} · {2}",
+    "timelineAct": "{0} · {1}",
+    "fsDelete": {
+      "true": "里面的 {0} 个文件夹会一起删除。"
+    },
+    "issueSubKey": "i{0}",
+    "providerSubKey": "p:{0}",
+    "unknownSuffix": {
+      "true": " · {0} 位状态未知"
+    },
+    "providerMeta": {
+      "true": "{0} 位状态未知"
+    },
+    "communitySummary": {
+      "true": "同步中…",
+      "false": "Issue {0} · PR {1} · 上次同步 {2}前"
+    },
+    "fileBody": {
+      "false": "（空文件）"
+    },
+    "opsSection": {
+      "quota": "额度与用量",
+      "lb": "排行榜",
+      "obs": "观测",
+      "daemon": "后台会话",
+      "rt": "Runtime 会话",
+      "gov": "项目治理",
+      "brake": "休息提醒",
+      "cmd": "命令速查",
+      "rescue": "紧急救援"
+    },
+    "routeNote": {
+      "true": "当前已启用约束",
+      "false": "当前没有启用约束"
+    },
+    "leaderboardCount": {
+      "chatty": "{0} 条消息",
+      "streak": "连续 {0} 天（最长 {1}）"
+    },
+    "envDescription": {
+      "cfg3": "设为 1 跳过伪名化",
+      "cfg4": "未设置时只用 Prometheus",
+      "cfg5": "未设置即启用"
+    },
+    "runtimeState": {
+      "sealing": "封存中",
+      "conflict": "冲突待处理"
+    },
+    "runtimeOrigin": {
+      "true": "{0} · 封存原因：{1}"
+    },
+    "governState": {
+      "outdated": "旧版本"
+    },
+    "governOption": {
+      "guide": "项目指南",
+      "claude": "CLAUDE.md 薄入口",
+      "gemini": "GEMINI.md 薄入口",
+      "skills": "项目 Skills",
+      "sk": "Skill ID",
+      "docs": "文档生命周期模板"
+    },
+    "governOptionSub": {
+      "guide": "生成规范的 AGENTS.md",
+      "skills": "只链接点名的 Skill 与客户端",
+      "docs": "SOP、BACKLOG 与 feature 模板；默认不生成"
+    },
+    "governOperation": {
+      "remove": "将删除",
+      "write": "将创建",
+      "install": "将链接"
+    },
+    "governPreview": {
+      "true": "撤销预览",
+      "false": "改动预览"
+    },
+    "governApply": {
+      "true": "确认撤销 {0} 项",
+      "false": "确认写入 {0} 项"
+    },
+    "brakeHelp": {
+      "gentle": "普通提醒，可以一键关掉。",
+      "hard": "必须写理由才能继续；紧急跳过有次数限制。"
+    },
+    "scanLabel": {
+      "true": "扫描中…",
+      "false": "重新扫描"
+    },
+    "brakeLevel": {
+      "1": "猫猫提醒你喝口水。",
+      "2": "猫猫们有点担心你了！",
+      "3": "三猫紧急拦截！"
+    },
+    "ms": "{0} ms",
+    "governDisabled": {
+      "true": "先勾选要安装的项"
+    },
+    "evoName": {
+      "false": "能力进化"
+    },
+    "evoHeaderName": {
+      "true": "暂时读不到进化记录"
+    },
+    "evoState": {
+      "paused": "已暂停",
+      "terminal": "已结束",
+      "needs_expert": "等待负责方",
+      "needs_update": "需要更新",
+      "source_unavailable": "来源不可用",
+      "source_invalid": "来源无效",
+      "materializing": "正在整理",
+      "invalid": "记录无效"
+    },
+    "evoNotice": {
+      "conflict": "项目已更新，请核对后重试",
+      "waiting": "执行方仍在处理",
+      "blocked": "执行方尚未完成",
+      "writeFailed": "操作尚未确认，请重读",
+      "requestTargetChanged": "项目或原请求对象已变化，请核对后重试",
+      "requestDelivered": "请求已送达",
+      "requestUnconfirmed": "送达尚未确认，可重试同一请求"
+    },
+    "evoComparison": {
+      "comparisonUnavailable": "对照记录尚未读到",
+      "sameExperiment": "请选择另一轮实验作对照",
+      "conditionsDiffer": "条件不同，不能据此比较效果",
+      "incompleteRecords": "记录不完整或未绑定当前条件",
+      "differentSamples": "样本未完整配对；请分别核对原始记录"
+    },
+    "evoVersion": {
+      "false": "已记录版本"
+    },
+    "evoEvidenceTitle": {
+      "false": "评估依据"
+    },
+    "evoLifecycleLabel": {
+      "true": "暂停项目",
+      "false": "恢复项目"
+    },
+    "recallTool": {
+      "graph_resolve": "关系查询"
+    },
+    "pageActionState": {
+      "ready": "待预检",
+      "inspecting": "预检中",
+      "awaiting_consent": "待确认"
+    },
+    "recallToolDefault": {
+      "false": "检索"
+    },
+    "memberName": "{0} {1}",
+    "recallGroupTitle": {
+      "true": "{0} · {1}",
+      "false": "{2} · {0}"
+    },
+    "dailyUsageTitle": "{0} · {1}",
+    "toolGroup": {
+      "tools": "用得最多的工具",
+      "cats": "每只猫的分布"
+    },
+    "prGroup": {
+      "unreplied": "PR 未回复",
+      "replied": "PR 已回复",
+      "merged": "已合入"
+    },
+    "hubView": {
+      "list": "功能列表",
+      "deps": "依赖全景"
+    },
+    "evoField": {
+      "boundary": "可改边界",
+      "choiceReason": "决定依据",
+      "observationUnit": "观察单位",
+      "estimator": "测量方式",
+      "counterexample": "反例",
+      "validity": "适用范围",
+      "collection": "收集方式",
+      "missing": "缺口",
+      "variable": "主要变量",
+      "controls": "保持不变",
+      "holdout": "独立留出",
+      "repeatability": "复测方式",
+      "confidence": "证据把握",
+      "comparability": "可比条件"
+    },
+    "fileInfoField": {
+      "size": "大小",
+      "modified": "修改",
+      "pages": "页数",
+      "slides": "幻灯片",
+      "sheets": "工作表"
+    },
+    "daemonField": {
+      "pid": "进程",
+      "heartbeat": "心跳"
+    },
+    "pid": "pid {0}",
+    "execField": {
+      "elapsed": "耗时",
+      "exit": "退出码",
+      "thread": "来源对话",
+      "blocked": "停止"
+    },
+    "hubState": {
+      "suggested": "{0} · 等你决定"
+    },
+    "hubDecision": "{0} · {1} · {2}{3}",
+    "noteSuffix": {
+      "true": " · {0}"
+    },
+    "hubLease": {
+      "true": "{0} · {1}到期 · 心跳 {2}"
+    },
+    "leaseExpiry": {
+      "true": "{0} 分钟后"
+    },
+    "sopStage": {
+      "0": "立项",
+      "1": "实现隔离",
+      "2": "自检",
+      "3": "预审",
+      "4": "独立验证",
+      "5": "合入",
+      "6": "愿景守护"
+    },
+    "baton": "{0} {1} · {2}",
+    "identity": "{0} {1}",
+    "workCardSub": "{0} · {1}",
+    "diffEmpty": {
+      "??": "未跟踪的新文件，还没有差异可看。",
+      "M": "没有文本差异。"
+    },
+    "graphTip": "{0}：{1}",
+    "routingEvidence": {
+      "unknown": "provider_timeout 过期且没有恢复证据 · routing-signal:a1a5… · turn-execution:8082…"
+    },
+    "rosterSub": {
+      "true": "{0} · {1} · 路由状态与能力依据暂不可完整读取",
+      "false": "{0} · {1} · {2}"
+    },
+    "rosterProfile": {
+      "true": "擅长：{0}",
+      "false": "能力资料待补充"
+    },
+    "memberRef": "m:{0}",
+    "pageName": "{0} · {1}",
+    "pageActionField": {
+      "page": "页面",
+      "field": "目标",
+      "operation": "动作",
+      "expires": "到期",
+      "result": "结果"
+    },
+    "liveActionWhat": {
+      "false": "回复"
+    },
+    "point": "{0} · {1}",
+    "pageActionResult": {
+      "applied": "已执行",
+      "no_effect": "未生效",
+      "denied": "未授权"
+    },
+    "sessionNumber": "#{0}",
+    "planProgress": "{0}/{1}",
+    "flagName": {
+      "true": "整理猫自动运行",
+      "false": "{0}"
+    },
+    "flagRestart": {
+      "true": "重启生效"
+    },
+    "flagLocked": {
+      "true": "只能在配置文件里改"
+    },
+    "eventUntil": {
+      "true": "至 {0}后"
+    },
+    "profileEmpty": "没有记录",
+    "affectedPrefix": "影响 {0} 位成员：",
+    "noteName": "{0} · {1}",
+    "dayTime": "{0} {1}",
+    "runTip": {
+      "idle": "空闲{1}",
+      "spawning": "启动中 · 已运行 {0}",
+      "streaming": "运行中 · 已运行 {0}",
+      "alive_but_silent": "静默等待 · 已运行 {0}",
+      "suspected_stall": "疑似卡住 · 已运行 {0}",
+      "error": "异常 · 已运行 {0}"
+    },
+    "previousRun": {
+      "true": " · 上次运行 {0}"
+    },
+    "replaySource": {
+      "feature": "{0} {1}"
+    },
+    "statusGroupPrefix": "状态流水 {0} 条 · ",
+    "commitTip": "{0} {1} · {2}",
+    "percent": "{0}%",
+    "homePath": "~/{0}",
+    "nativeReviewTarget": {
+      "label": "选择审阅成员"
+    }
+  },
+  "wsEvolution": {
+    "load": {
+      "loading": "正在读取能力进化记录…",
+      "error": "暂时无法读取进化记录。",
+      "stale": "1 项记录暂时无法读取，原始记录仍保留；完成记录尚未读全，暂时不能确认。"
+    },
+    "item": {
+      "sub": "来自「{0}」 · {1}{2}{3} · {4} · 当前采用：{5} · {6} {7} · {8}",
+      "awaitingConfirmation": "等你确认",
+      "missingRequirements": "还缺：{0}",
+      "noMissingRequirements": "本阶段不缺"
+    },
+    "list": {
+      "noFinishedItems": "还没有完成或停止的项目。"
+    },
+    "detail": {
+      "sub": "来自「{0}」 · {1}",
+      "currentDecision": "本轮判断",
+      "changeHistory": "更改历史",
+      "currentAdoption": "当前采用",
+      "provenancePrefix": "{0} · {1} · 来源 ",
+      "fewerRules": "相对当前采用 {0}：少 {1} 条规则",
+      "roundTitle": "第 {0} 轮 · {1}",
+      "decidedBy": "决定来源：{0} {1} · 执行回执 ",
+      "rawDiff": "原始 diff",
+      "evaluationMethod": "评估方式",
+      "evaluationRequirements": "评估还需要",
+      "pendingCount": "{0} 项待完成",
+      "currentConclusion": "当前结论",
+      "msg": "打开采用来源（示意）",
+      "currentCandidate": "本轮候选",
+      "changeSource": "基于「{0}」的改动 · {1}",
+      "approval": "审批",
+      "judge": "这一轮看懂了什么",
+      "deferRationale": "为什么现在先不改",
+      "prReworkCount": "外部 PR 返工次数",
+      "dailySummary": "每天统计 · ",
+      "drillDown": "下钻",
+      "openOwnerDetail": "打开负责人下钻视图（示意）",
+      "nextEvaluation": "下次评估",
+      "evidenceGap": "证据缺口",
+      "noGaps": "当前没有缺口",
+      "changes": "本次改动",
+      "approve": "批准",
+      "verification": "复验",
+      "pendingReturn": "待返回",
+      "keepCurrent": "保持现状",
+      "internalState": "内部状态",
+      "ownership": "归属",
+      "dependencies": "内部依赖",
+      "versionSource": "版本来源",
+      "goal": "目标"
+    },
+    "menu": {
+      "label": "退出整窗阅读",
+      "expandWindow": "整窗展开阅读"
+    },
+    "create": {
+      "title": "新建进化目标",
+      "help": "会带到当前对话的输入框，由你确认后发送。",
+      "label": "想持续改进哪项能力",
+      "foot": "带到「{0}」",
+      "noWritableTarget": "没有可写入的目标对话",
+      "ok": "带到这个对话"
+    },
+    "evidenceOn": "站在哪些证据上",
+    "competing": "竞争的解释",
+    "stillMissing": "还缺什么",
+    "adopted": "采用与候选",
+    "evalAttribution": "评估与归因",
+    "eyesAttached": "评估来源",
+    "approveRun": "批准、执行与复验",
+    "submitDecision": "提交决定",
+    "changesKept": "留下了哪些改变",
+    "roundResults": "各轮处理结果",
+    "inProgress": "正在进行",
+    "recentDone": "最近完成",
+    "doneHelp": "完成、停止和放弃的都会留在这里，连同为什么。",
+    "newGoal": "新建目标"
+  },
+  "wsCommunity": {
+    "priority": {
+      "high": "高"
+    },
+    "openThread": "打开对话",
+    "closed": "已关闭",
+    "sync": "同步",
+    "evidence": "证据",
+    "resolved": "已解决"
+  },
+  "wsSignals": {
+    "load": {
+      "error": "请求失败：信号服务暂时不可达。"
+    },
+    "list": {
+      "noArticles": "当前筛选条件下没有文章。",
+      "label": "文章",
+      "studyHistory": "学习记录",
+      "sources": "信号源",
+      "enableNamed": "启用 {0}",
+      "empty": "最近 {0} 天没有学习活动。",
+      "selText": "已选 {0} 篇",
+      "top": "今天新增 {0} · 未读 {1} · 近 7 天 {2}",
+      "articleCount": "共 {0} 篇",
+      "selectNamed": "选择 {0}",
+      "sub": " · 有备注",
+      "studyCountSuffix": " · 学过 {0} 次"
+    },
+    "detail": {
+      "lastStudy": "上次学习 {0}",
+      "sub": "关联于 {0}",
+      "label": "取消关联",
+      "podGen": "{0}生成中…",
+      "line": "{0} · {1} 段 · 约 {2} 分钟",
+      "downloadAudio": "下载音频",
+      "msg": "已下载这段音频（示意）"
+    },
+    "articleMenu": {
+      "label": "打开原文",
+      "setInbox": "设为收件箱"
+    },
+    "sourceMenu": {
+      "label": "全部开启",
+      "disableAll": "全部关闭"
+    },
+    "batchTag": {
+      "title": "给 {0} 篇加标签",
+      "label": "标签名",
+      "ok": "确定"
+    },
+    "batchDelete": {
+      "title": "删除 {0} 篇文章？",
+      "text": "删除后不能恢复，学习记录一起删除。"
+    },
+    "delete": {
+      "title": "删除这篇文章？"
+    },
+    "body": "正文",
+    "noteDone": " · 已完成 · {0}",
+    "articleDeleted": "这篇文章已删除",
+    "discussInChat": "在对话中讨论",
+    "aiSummary": "AI 摘要",
+    "learn": "学习",
+    "startLearning": "开始学习",
+    "multiCatResearch": "多猫研究",
+    "linkedThreads": "关联对话",
+    "threadId": "对话 ID",
+    "notes": "学习笔记",
+    "podcast": "播客",
+    "makeBrief": "生成精华版",
+    "makeDeep": "生成深度版",
+    "podcastEmpty": "还没有播客脚本。",
+    "report": "研究报告",
+    "doneSuffix": " · 已完成",
+    "studySet": "学习集",
+    "addToSet": "加入学习集",
+    "newSetMore": "新建学习集…",
+    "newSet": "新建学习集",
+    "noTags": "暂无标签",
+    "memo": "备注",
+    "memoPlaceholder": "笔记",
+    "searchPlaceholder": "搜索信号",
+    "inbox": "收件箱",
+    "starred": "收藏",
+    "read": "已读",
+    "archive": "归档",
+    "allTiers": "全部等级",
+    "tier": "等级",
+    "markRead": "标记已读",
+    "addTag": "加标签",
+    "clearSelection": "取消选择",
+    "studyCount": "学习 {0}",
+    "discuss": "讨论",
+    "brief": "精华版",
+    "deep": "深度版",
+    "addToSetMore": "加入学习集…"
+  },
+  "wsTeam": {
+    "load": {
+      "loading": "正在读取成员…",
+      "error": "读取成员失败。",
+      "stale": "最新一次读取失败，下面是上次成功读到的内容，可能已经不是现在的状态。",
+      "text": "当前目录还没有可展示的成员。"
+    },
+    "list": {
+      "noPreferences": "还没有协作偏好。",
+      "noMatchingMembers": "没有找到符合条件的成员。",
+      "preferences": "协作偏好",
+      "assignmentHistory": "派活记录",
+      "text": "{0} 位需关注{1}",
+      "preferenceSummary": "{0} 优先于 {1} · {2} · v{3}",
+      "active": "生效中",
+      "evDesc": "{0} 条",
+      "degradedText": " 受影响成员：{0}、{1}。",
+      "needsAttention": "暂需留意",
+      "missingProfile": "资料待补",
+      "reviewedAt": "复核于 {0}",
+      "by": "来源：{0}"
+    },
+    "preference": {
+      "menu": {
+        "label": "编辑（保存为新版本）",
+        "extendDays": "续期 {0} 天",
+        "retirePreference": "退休这条偏好"
+      }
+    },
+    "signal": {
+      "untilSuffix": " · 至 {0}",
+      "label": "确认恢复",
+      "withdraw": "撤回"
+    },
+    "detail": {
+      "profileVersion": "画像版本",
+      "noAppliedProfiles": "还没有已应用的画像版本",
+      "statusEvidence": "状态依据",
+      "memberCount": "{0} 位成员使用这个服务",
+      "memberIdentity": "成员标识",
+      "evidencePrefix": " · 证据 "
+    },
+    "editInSettings": "在设置里编辑",
+    "abilities": "能力",
+    "profileMissing": "能力资料待补充。",
+    "evidenceDetails": "依据与技术详情",
+    "routeSignals": "路由信号",
+    "signalsHelp": "你登记的信号只影响以后发送前的判断；不会取消已经开始的执行，也不会自动改派原目标。",
+    "noSignals": "现在没有生效的信号。",
+    "throttle": "需节制",
+    "degraded": "能力降级",
+    "validFor": "有效时长",
+    "hours1": "1 小时",
+    "hours4": "4 小时",
+    "hours24": "24 小时",
+    "reasonHelp": "可以写原因代码，比如 owner-maintenance。",
+    "registerSignal": "登记信号",
+    "refreshLedger": "刷新派活记录",
+    "signalEvents": "信号事件",
+    "preferenceVersions": "偏好版本",
+    "settingsMembers": "在设置里管理成员",
+    "routeIncomplete": "当前路由信息暂时读不全；原有成员与目标不会被静默改派。",
+    "searchPlaceholder": "搜索猫猫或擅长的事",
+    "memberFilter": "成员筛选",
+    "byService": "按服务",
+    "eventType": {
+      "asserted": "标记受限",
+      "recovered": "已恢复",
+      "retracted": "已撤回"
+    },
+    "source": {
+      "quota_probe": "额度探测",
+      "provider_error": "服务报错",
+      "health_probe": "健康探测",
+      "dispatch_success": "派活成功"
+    }
+  },
+  "wsOps": {
+    "load": {
+      "loading": "正在读取运维数据…",
+      "error": "后端连接异常：没拿到后端响应。",
+      "stale": "额度数据加载失败，下面显示的可能是过期数据。",
+      "empty": "还没有工具使用记录。"
+    },
+    "copyAttach": "复制接管命令",
+    "lastRefresh": "最后刷新 {0}",
+    "usageTotal": "7 日合计 {0} 次 · 总 {1} · 输入 {2} · 输出 {3} · {4}",
+    "eventCount": "共 {0} 条事件",
+    "repairDesc": "修复 Claude 会话里坏掉的 thinking 签名。执行前自动备份记录，只移除纯 thinking 的回合。",
+    "repairFound": "发现 {0} 个会话需要修复。",
+    "sections": "运维分区",
+    "routeRules": "路由约束",
+    "routeHelp": "默认是猫自己决定派给谁；这里只放你明确要求的硬约束，只作用于当前对话。显式 @ 永远优先。",
+    "usage7d": "近 7 日用量",
+    "toolUsage": "工具使用",
+    "toolUsageHelp": "猫每天用了哪些工具。",
+    "nativeTools": "原生工具",
+    "mcpBridge": "MCP 桥接",
+    "skillCalls": "技能调用",
+    "last7d": "近 7 天",
+    "last14d": "近 14 天",
+    "last30d": "近 30 天",
+    "last90d": "近 90 天",
+    "telemetryOff": "可观测性没有启用。",
+    "configRefEnv": "配置参考（只读，改 .env 后重启生效）",
+    "diagnose": "诊断",
+    "sessionEvents": "会话事件 · ",
+    "governanceReady": "猫已经可以在这个项目工作",
+    "governanceHelp": "先预览精确动作，确认后才写入；已有文件不会覆盖。",
+    "previewChanges": "预览改动",
+    "previewUndo": "预览撤销",
+    "previewReminder": "预览提醒",
+    "commitment": "严格模式：",
+    "skipLimit": "紧急跳过每 4 小时限 2 次，第 3 次起会持续提醒。",
+    "nightSoft": "夜间自动更温柔",
+    "nightSoftHelp": "23:00–06:00 提醒更轻，配色更柔和。",
+    "eval": {
+      "noAct": "暂无需要处理的评估事件。",
+      "settled": {
+        "true": "最近闭环与观察",
+        "false": "最近保持观察"
+      }
+    },
+    "featureFlags": "功能开关",
+    "metricDirection": {
+      "higher": "越高越好",
+      "lower": "越低越好",
+      "neutral": "观察项"
+    }
+  },
+  "wsRecall": {
+    "summary": {
+      "count": "召回 {0}"
+    },
+    "help": "每次回复前，从记忆里检索、按关系查询、或被递送进来的条目；一次回复一组，新的在前",
+    "empty": "这个对话还没有召回记忆。",
+    "replies": "{0} 次回复用到了记忆"
+  },
+  "voiceReview": {
+    "recording": {
+      "startRecording": "开始录音"
+    },
+    "advisory": {
+      "dnd": "免打扰",
+      "mode": "建议模式",
+      "passive": "被动",
+      "active": "主动"
+    },
+    "callState": {
+      "preparing": "正在准备",
+      "connecting": "正在连接",
+      "failed": "呼叫失败"
+    },
+    "startSession": "语音陪伴",
+    "interrupted": "播放已中断",
+    "allowHomeReads": "允许查询家里资料",
+    "call": "实时呼叫",
+    "hangup": "结束呼叫",
+    "shareScreen": "选择共享内容",
+    "shareMeeting": "分享会议转写",
+    "pageAction": {
+      "title": "当前页面",
+      "inspect": "预检"
+    }
+  },
+  "wsEval": {
+    "runNow": "立即评估",
+    "concludeNow": "生成结论",
+    "overview": "总览",
+    "metrics": "指标",
+    "metricField": "字段名：",
+    "metricDescription": "说明：",
+    "noMetrics": "暂无指标说明",
+    "domains": "评估项",
+    "attention": "需关注",
+    "closedObserving": "闭环 / 观察",
+    "expired": "过期",
+    "pending": "待处置",
+    "handled": "已处置",
+    "noReports": "当前筛选下没有报告。",
+    "needsAttention": "需要关注",
+    "expiredSuffix": "· 已过期",
+    "nowDo": "现在要做",
+    "nextLook": "下次看什么",
+    "progress": "闭环进度",
+    "followUp": "跟进状态",
+    "reeval": "复评状态",
+    "ownerTask": "责任任务",
+    "conclusion": "结论文件",
+    "snapshot": "快照包",
+    "attribution": "归因包",
+    "fixTrace": "在执行里查看修复证据",
+    "rawReport": "原始报告",
+    "sourceMessage": "原消息",
+    "evalCat": "评估猫",
+    "ran": "已开始评估「{0}」",
+    "concluded": "「{0}」的结论已生成",
+    "dutySettings": "值班设置",
+    "primary": "主值班",
+    "backup": "备份",
+    "onCallHelp": "主值班持续负责；备份只在显式交接后接班",
+    "load": {
+      "loading": "加载周期评估事件…",
+      "error": "周期 Eval 暂时不可用",
+      "empty": "暂无评估数据。"
+    },
+    "kind": {
+      "label": {
+        "needs_decision": "需要拍板",
+        "needs_action": "需要处理",
+        "awaiting_reeval": "待复评",
+        "watching": "观察中",
+        "escalated": "{0}",
+        "resolved": "{0}"
+      }
+    },
+    "life": {
+      "observing": "持续观察",
+      "unavailable": "处置记录暂不可用",
+      "open": "等待接单",
+      "acknowledged": "已接单",
+      "action_planned": "已规划修复",
+      "fix_landed": "修复已落地",
+      "main_landed": "主干已落地",
+      "live_active": "运行环境已生效",
+      "monitoring": "持续监测",
+      "reeval_pending": "等待复评",
+      "resolved": "已验证闭环",
+      "suppressed_with_reason": "已说明不处理",
+      "escalated": "已超时升级"
+    },
+    "owner": {
+      "not_required": "不需要响应",
+      "unavailable": "接单状态暂不可读",
+      "not_started": "等待负责人接单",
+      "acknowledged": "负责人已接单"
+    },
+    "reevaluation": {
+      "not_required": "无需复评",
+      "unavailable": "复评状态不可用",
+      "not_requested": "尚未提交复评",
+      "passed": "复评通过",
+      "failed": "复评未通过，已回到修复"
+    },
+    "verdict": {
+      "fix": "需修复",
+      "build": "建议新建能力",
+      "delete_sunset": "可下线",
+      "": "待首次评估"
+    },
+    "escalation": {
+      "acknowledgement": "负责人接单已超时",
+      "reevaluation": "复评已超时"
+    },
+    "event": {
+      "nextAt": "· 原计划 {0}",
+      "escalation": "{0} · 原截止 {1}"
+    },
+    "basis": {
+      "message": "同一消息",
+      "turn_invocation": "同一轮调用",
+      "legacy_invocation": "历史调用",
+      "single_signal": "单条报告"
+    },
+    "responsibility": {
+      "unreviewed": "尚无业务出口",
+      "bound_in_repair": "修复责任已绑定",
+      "signature_waiting": "等待独立签署",
+      "blocked": "有结构化阻塞",
+      "terminal": "已终结"
+    },
+    "continuation": {
+      "review_required": "待审阅",
+      "route_pending": "待分派",
+      "repair_active": "修复中",
+      "duplicate_following": "跟随原问题",
+      "verified_outcome": "已验证",
+      "no_action": "无需处理",
+      "observe": "观察中"
+    },
+    "report": {
+      "basisLine": "确定性分组：{0}",
+      "state": {
+        "open": "问题仍开放{0}",
+        "resolved": "问题已解决{0}"
+      },
+      "overdue": {
+        "true": " · 72h+"
+      },
+      "count": "{0}{1}",
+      "unseen": {
+        "true": " · 未看 {0}"
+      },
+      "age": {
+        "true": "处置耗时"
+      }
+    },
+    "ledger": {
+      "backup": "未指定",
+      "next": {
+        "true": "下次 {0}",
+        "false": "自动调度已停"
+      },
+      "verdict": {
+        "true": "已过期"
+      },
+      "last": {
+        "true": "上次结论：{0}"
+      }
+    }
+  },
+  "wsLive": {
+    "load": {
+      "loading": "正在同步项目里的运行状态…",
+      "error": "当前无法验证项目里的运行状态。",
+      "stale": "同步暂时失败，以上为最近一次已验证状态。"
+    },
+    "activity": {
+      "full_gate": "完整检查",
+      "test": "测试",
+      "build": "构建",
+      "lint": "代码检查",
+      "check": "专项检查",
+      "command": "命令"
+    },
+    "blocked": {
+      "control_plane_unavailable": "控制面暂不可用，无法安全停止",
+      "terminalizing": "正在收尾，已不可停止",
+      "foreign_principal": "由排程发起，占用中；你不是发起方"
+    },
+    "status": {
+      "state": {
+        "true": "在跑{0}",
+        "false": "回复中"
+      }
+    },
+    "entry": {
+      "timeTip": "已运行 {0}"
+    },
+    "wait": {
+      "state": {
+        "label": {
+          "ready_to_return": "可以接回",
+          "unknown": "暂不能判定",
+          "waiting_for_update": "等待更新"
+        }
+      },
+      "reason": {
+        "label": {
+          "deployment_evidence_unavailable": "暂时读不到运行状态，这项等待先保留。",
+          "deployment_evidence_incomplete": "运行状态信息不足，还不能确认条件已满足",
+          "deployment_match_pending_recheck": "检测到可能就绪，正在复核并安排原猫接回。"
+        },
+        "fallback": {
+          "unknown": "暂时无法判定条件是否已满足"
+        }
+      },
+      "condition": {
+        "prefix": {
+          "true": "运行版本已包含",
+          "false": "等待运行版本包含"
+        },
+        "postfix": {
+          "true": "，{0} 已就绪",
+          "false": "，{0} 就绪"
+        },
+        "servicePrefix": {
+          "true": "已出现新启动，{0} 已就绪",
+          "false": "等待新启动，{0} 就绪"
+        }
+      },
+      "item": {
+        "ownerLabel": {
+          "false": "待确认负责猫"
+        },
+        "nextPrefix": {
+          "true": "可以继续：",
+          "false": "接回后："
+        },
+        "nextText": {
+          "null": "回原任务确认下一步",
+          "undefined": "回原任务确认下一步",
+          "": "回原任务确认下一步"
+        }
+      },
+      "list": {
+        "rest": "· 截至 {0} · 预计满足 {1} 项",
+        "more": "· 另有 {0} 项证据待确认"
+      }
+    },
+    "stop": {
+      "title": "停止{0}的{1}？",
+      "stopConsequences": "只停止当前这一次执行。正在处理的工作可能无法继续。"
+    },
+    "live": "执行中",
+    "liveEmpty": "现在没有在跑的。",
+    "waits": "等待中",
+    "hold": {
+      "label": "等待唤醒",
+      "wakeAt": "预计 {0} 接回",
+      "cancel": "取消等待"
+    }
+  },
+  "wsPreview": {
+    "closeTab": "关闭标签页",
+    "newTab": "新建标签页",
+    "back": "后退",
+    "forward": "前进",
+    "address": "预览地址",
+    "screenshot": "截图",
+    "console": "控制台",
+    "addressHint": "没有打开的页面",
+    "clear": "清空",
+    "discovered": "已发现的服务",
+    "load": {
+      "loading": "正在加载预览…",
+      "error": "预览网关不可用。",
+      "empty": "暂无预览。"
+    },
+    "navigate": {
+      "toast": "不是有效的 localhost 地址",
+      "text": "这看起来是 Clowder AI Hub 页面，不是 dev 服务器；页面预览面向 Vite、Next.js 等 dev 服务。"
+    },
+    "storybook": "Storybook"
+  },
+  "wsTrace": {
+    "searchPlaceholder": "调用 ID、会话 ID 或内容",
+    "notFound": "没有找到。",
+    "timeline": "轨迹",
+    "raw": "原始记录",
+    "status": {
+      "label": {
+        "timeout": "超时"
+      }
+    },
+    "source": {
+      "host_cli": "本机",
+      "unknown": "来源未知",
+      "mcp": "MCP",
+      "plugin_connector": "插件",
+      "undefined": ""
+    },
+    "event": {
+      "toolIcon": {
+        "error": "alert",
+        "success": "wrench",
+        "ok": "wrench",
+        "undefined": "wrench"
+      },
+      "kindLabel": {
+        "error": "出错",
+        "subexecution": "子 agent",
+        "terminal": "终端",
+        "system": "系统",
+        "pending": "还在进行…"
+      },
+      "roleLabel": {
+        "status": "状态"
+      },
+      "channelLabel": {
+        "final": "最终回复",
+        "analysis": "过程",
+        "commentary": "过程",
+        "undefined": "过程"
+      },
+      "toolTip": {
+        "true": "输入：{0}\n结果：{1}"
+      },
+      "result": {
+        "": "结果未知",
+        "undefined": "结果未知",
+        "null": "结果未知"
+      },
+      "msTone": {
+        "error": "danger",
+        "success": "",
+        "ok": "",
+        "undefined": ""
+      },
+      "msTip": {
+        "error": "{0}",
+        "success": "",
+        "ok": "",
+        "undefined": ""
+      }
+    },
+    "overview": {
+      "preview": "尚无可核验的首条输出",
+      "toolsTip": "{0} 个工具 · {1} 条消息 · {2} 条状态",
+      "durTip": "开始于 {0}",
+      "sealed": {
+        "true": "（已封存）"
+      },
+      "tokens": {
+        "true": "输入 {0} · 输出 {1}",
+        "false": "token 未报告"
+      },
+      "output": {
+        "null": "未报告"
+      },
+      "errorTip": {
+        "true": "{0} 处出错"
+      }
+    },
+    "messageJump": {
+      "toast": "原消息不在当前视图里"
+    }
+  },
+  "wsReplay": {
+    "load": {
+      "loading": "正在读取回放…",
+      "error": "回放暂不可用。"
+    },
+    "speed": {
+      "text": "最快"
+    },
+    "chapter": {
+      "session_start": "开始",
+      "invocation": "新一轮",
+      "pass_ball": "传球",
+      "post_idle": "空闲后继续",
+      "session_end": "结束"
+    },
+    "controls": {
+      "label": "播放速度",
+      "skipIdle": "跳过空闲",
+      "tip": "跳过空闲：自动跳过长空闲，传球时放慢；倍速不变",
+      "navigateEvents": "上一个 / 下一个事件、章节",
+      "playLabel": {
+        "true": "暂停回放"
+      },
+      "stoppedLabel": {
+        "true": "重新播放",
+        "false": "播放回放"
+      },
+      "modeTip": {
+        "true": "保真：显示心里话和工具",
+        "false": "电影效果：只看对话"
+      }
+    },
+    "menu": {
+      "label": "上一个事件",
+      "nextEvent": "下一个事件",
+      "chapter": "{0} · {1}"
+    },
+    "empty": "暂无可回放的记录。"
+  },
+  "execDetail": {
+    "task": "后台任务",
+    "close": "关闭详情",
+    "stop": "停止任务",
+    "log": "输出与执行记录",
+    "noOutput": "暂时没有输出",
+    "state": {
+      "queued": "待启动",
+      "running": "正在运行",
+      "failed": "执行失败",
+      "cancelled": "已停止",
+      "timed_out": "已超时",
+      "lost": "执行中断，未重跑"
+    },
+    "feedback": "同时告诉它结束原因",
+    "forceReset": {
+      "title": "强制清除执行槽"
+    }
+  },
+  "workspaceOwners": {
+    "overwrite": "仍然覆盖",
+    "earlierEvents": "更早",
+    "source": "播放来源",
+    "depth": "深度",
+    "limit": "条数",
+    "raw": "原文",
+    "totalFiles": "文件总数",
+    "markdownFiles": "Markdown 文件",
+    "secretFindings": "敏感项",
+    "safe": "安全",
+    "unsafe": "有风险",
+    "index": "索引状态",
+    "world": "世界",
+    "domain": "领域",
+    "research": "研究",
+    "indexing": "索引中",
+    "ready": "已就绪",
+    "configure": "重新配置",
+    "port": "端口",
+    "originalCard": "去原卡",
+    "actor": "使用者",
+    "contextTrigger": "场景与触发",
+    "objectState": "对象与状态",
+    "successSignal": "成功信号",
+    "sourceDetail": "来源详情",
+    "decisionOwner": "决策人",
+    "confidence": "置信度",
+    "originalText": "原始需求",
+    "clarity": "清晰度",
+    "necessity": "必要性",
+    "coupling": "耦合度",
+    "sizeBand": "规模",
+    "triage": "分诊",
+    "category": "类别",
+    "insight": "经验",
+    "methodology": "方法",
+    "risk_pattern": "风险模式",
+    "resolution_strategy": "解决策略",
+    "answer": "回答",
+    "escalate": "升级",
+    "clarification": "澄清",
+    "newSlice": "新建切片",
+    "editSlice": "更新切片",
+    "detectRisks": "检测风险",
+    "sliceType": "切片类型",
+    "cardIds": "需求卡",
+    "workflow": "流程",
+    "verifiableOutcome": "可验证结果",
+    "learning": "探索",
+    "value": "价值",
+    "hardening": "加固",
+    "delivered": "已交付",
+    "limitError": "条数须为 1–20",
+    "open": "待回答",
+    "escalated": "已升级",
+    "risk": {
+      "hollow_verbs": "目标空泛",
+      "missing_actors": "缺少使用者",
+      "unknown_data_source": "数据源未知",
+      "missing_success_signal": "缺少成功信号",
+      "missing_edge_cases": "缺少边界情况",
+      "hidden_dependencies": "隐含依赖",
+      "ai_fake_specificity": "未经核实的细节",
+      "scope_creep": "范围扩大"
+    },
+    "severity": {
+      "critical": "严重",
+      "medium": "中"
+    },
+    "projectSetup": {
+      "initialize": "初始化 Git",
+      "clone": "从地址克隆",
+      "prepare": "开始准备",
+      "later": "稍后"
+    }
+  },
+  "wsItems": {
+    "worksEmpty": "这条对话还没有作品。",
+    "notifications": {
+      "phase": "编码",
+      "unmarked": "未标记",
+      "importCompleted": "导入完成：新增 {0}，跳过 {1}",
+      "wsImportProject": "项目名称和路径不能为空"
+    }
+  },
+  "wsTasks": {
+    "load": {
+      "loading": "正在读取任务…",
+      "error": "任务暂时不可读。",
+      "empty": "这条对话还没有任务。"
+    },
+    "state": {
+      "blocked": "阻塞中",
+      "todo": "待办"
+    },
+    "kind": {
+      "tip": {
+        "pr_tracking": "PR 跟踪{0}",
+        "issue_tracking": "Issue 跟踪{0}"
+      }
+    },
+    "item": {
+      "tip": "改为{1}",
+      "label": "状态：{0}",
+      "updatedTip": "更新于 {0}",
+      "created": "{0} 创建于 {1}",
+      "sourceMessage": "来源消息 ↗",
+      "owner": {
+        "true": "负责：{0} {1}",
+        "false": "未分配"
+      },
+      "kindSubject": {
+        "true": " · {0}"
+      }
+    },
+    "list": {
+      "emptyState": {
+        "true": "没有{0}的任务。"
+      }
+    },
+    "create": {
+      "assignee": "负责",
+      "value": "砚砚 @sol"
+    },
+    "newTask": "新任务"
+  },
+  "hub": {
+    "load": {
+      "loading": "正在加载 Backlog…",
+      "error": "请求失败：Backlog 暂时不可读。",
+      "empty": "还没有 Backlog。"
+    },
+    "state": {
+      "label": {
+        "open": "待建议",
+        "suggested": "待审批"
+      }
+    },
+    "item": {
+      "priTip": "优先级 {0}",
+      "leaseTip": "认领：{0} · {1}到期"
+    },
+    "detail": {
+      "label": "建议详情",
+      "threadStatus": "线程态势",
+      "suggestedMember": "建议的猫",
+      "reason": "理由",
+      "stage": "阶段",
+      "decision": "决定",
+      "assignedTo": "分配到",
+      "missingThread": "缺少对话",
+      "claim": "认领",
+      "updated": "更新于 {0} · {1}",
+      "baton": "接力棒",
+      "focus": "焦点",
+      "phase": {
+        "research": "研究",
+        "brainstorm": "讨论"
+      },
+      "claimScope": {
+        "disabled": "禁用",
+        "once": "仅一次"
+      }
+    },
+    "feature": {
+      "threadsTip": "{0} 个关联对话",
+      "dependencyTip": {
+        "true": "{0} {1}",
+        "false": "{1} 不在当前 Backlog 里"
+      },
+      "acceptance": {
+        "": "暂无 AC"
+      },
+      "progressHint": {
+        "true": "",
+        "false": "已完成 / 事项",
+        "undefined": "已完成 / 事项"
+      }
+    },
+    "dependencies": {
+      "label": "仅有依赖",
+      "active": "活跃",
+      "summary": "{0} 个 Feature · {1} 条依赖"
+    },
+    "external": {
+      "intentTitle": "需求卡：{0}",
+      "blocked": "受阻",
+      "label": "已澄清",
+      "msg": "已标记澄清",
+      "governanceHealth": "治理健康度",
+      "dispatchProgress": "派遣进展",
+      "riskAlerts": "风险预警",
+      "clarifications": "澄清队列",
+      "slicePlan": "切片计划",
+      "feedback": "经验回流",
+      "notice": "第 0 步“定位”未完成",
+      "documentCoverage": "文档覆盖",
+      "expiredRequirements": "过期需求",
+      "empty": "暂无功能。",
+      "triage": "清晰度 {0} · 依据 {1} · 必要性 {2} · 耦合度 {3} · 规模 {4}",
+      "requirementTracking": "需求追踪"
+    },
+    "summary": {
+      "policy": "自领被拦下：这只猫已经有一个进行中的认领，请先释放或回收。",
+      "name": "已完成",
+      "nTip": "{0} 个事项"
+    },
+    "suggestion": {
+      "title": "建议领取：{0}",
+      "value": "宪宪 @opus",
+      "ok": "提交建议"
+    },
+    "rejection": {
+      "title": "拒绝这个建议？",
+      "label": "备注（可选）",
+      "ok": "拒绝，回到待建议"
+    },
+    "graph": {
+      "label": "Feature 依赖图",
+      "tail": "实线 演化 · 虚线 阻塞 · 点线 关联",
+      "empty": "当前筛选下没有有依赖关系的 Feature。"
+    },
+    "menu": {
+      "label": "导入 Backlog…",
+      "importProject": "导入项目…"
+    },
+    "create": {
+      "title": "新建 Backlog 事项",
+      "placeholder": "标题",
+      "valueSummary": "一句话价值",
+      "priority": "优先级"
+    },
+    "importBacklogDialog": {
+      "title": "从文档导入活跃 Feature？",
+      "text": "会读取  docs/ROADMAP.md  和  docs/features/ ，把还没登记的活跃 Feature 加到 Backlog。已有的不会重复。"
+    },
+    "importProject": {
+      "placeholder": "项目名称",
+      "projectPath": "项目路径",
+      "backlogPath": "Backlog 路径",
+      "description": "描述",
+      "descriptionPlaceholder": "简要描述"
+    },
+    "requirement": {
+      "title": "需求审计 · 六个定位问题",
+      "problem": "解决什么问题",
+      "currentApproach": "现在怎么做",
+      "urgency": "为什么现在做",
+      "successCriteria": "怎么算做成",
+      "exclusions": "不做什么",
+      "audience": "给谁用"
+    },
+    "add": "新建",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "resetZoom": "复位",
+    "evolvedFrom": "演化自",
+    "blocked": "被阻塞",
+    "related": "关联",
+    "openFeature": "打开这个 Feature",
+    "importBacklog": "导入项目 Backlog",
+    "sections": "分区",
+    "editAudit": "编辑需求审计",
+    "newIntent": "新建需求卡",
+    "recordLesson": "记录一条经验",
+    "suggestClaim": "建议领取…",
+    "approveDispatch": "批准并分配",
+    "retryDispatch": "重试分配",
+    "renewLease": "续期",
+    "releaseLease": "释放认领",
+    "takeLease": "自领",
+    "selfClaimPolicy": "自领策略",
+    "reclaimLease": "回收认领",
+    "noSop": "暂无流程说明数据",
+    "noLinkedThreads": "暂无执行中的关联对话",
+    "participants": "参与：{0}",
+    "lastActive": "最近活跃"
+  },
+  "wsTerminal": {
+    "load": {
+      "loading": "正在连接终端…",
+      "error": "终端服务不可用。",
+      "empty": "这个工作区还没有终端。"
+    },
+    "close": {
+      "title": "关闭我的终端？",
+      "text": "会结束这个终端里正在跑的命令。猫的终端不受影响。"
+    },
+    "closeTerminal": "结束终端",
+    "mine": "我的终端"
+  },
+  "wsGit": {
+    "worktree": {
+      "tip": "工作区：{0} · {1} @ {2}",
+      "option": "{0} · {1}"
+    },
+    "readOnlyHelp": "只读：这里不做提交、推送或开 PR",
+    "clean": "工作区干净",
+    "behindMain": "落后 main 的提交",
+    "mergedBranches": "已合入的分支",
+    "worktrees": "工作区",
+    "orphan": "孤立：目录还在，已没有分支在用"
+  },
+  "wsCode": {
+    "files": {
+      "filename": "文件名",
+      "lineTip": "第 {0} 行",
+      "line": "L{0}"
+    },
+    "changes": {
+      "countText": "{0} 个文件有改动",
+      "targets": "未提交改动",
+      "baseBranch": "相对分支",
+      "specificCommit": "指定提交",
+      "customDescription": "自定义说明",
+      "modes": "当前会话",
+      "separateCodexThread": "独立 Codex 线程",
+      "sub": "正在审查…",
+      "state": {
+        "running": "正在审查",
+        "failed": "没能完成"
+      }
+    },
+    "git": {
+      "branchTip": "分支 {0}",
+      "label": "改动",
+      "health": "健康",
+      "driftHint": {
+        "true": "runtime 领先 main {0} · 落后 {1}\nruntime {2} · main {3}",
+        "false": "与 main 的偏离未知"
+      },
+      "group": {
+        "staged": "已暂存",
+        "untracked": "未跟踪"
+      },
+      "worktreeState": {
+        "true": "孤立"
+      },
+      "listId": {
+        "staged": "wcGit-已暂存",
+        "modified": "wcGit-已修改",
+        "untracked": "wcGit-未跟踪"
+      }
+    },
+    "terminal": {
+      "roTip": "只读：这是 {0} 的终端",
+      "state": {
+        "connecting": "连接中…",
+        "disconnected": "已断开",
+        "crashed": "已崩溃"
+      },
+      "paneTip": {
+        "true": "我的终端 · {2}",
+        "undefined": "{0} {1} · {2} · {3}",
+        "false": "{0} {1} · {2} · {3}"
+      }
+    },
+    "preview": {
+      "title": "新标签页",
+      "down": "localhost:{0} 已停止或不可达",
+      "connectionTip": {
+        "unreachable": "localhost:{0} 无响应，预览目标已停止或不可达",
+        "hmr": "热更新已连接 · localhost:{0}",
+        "disconnected": "热更新已断开"
+      }
+    }
+  },
+  "wsFiles": {
+    "create": {
+      "uploadFile": "上传文件",
+      "fields": {
+        "title": {
+          "file": "新建文件"
+        }
+      }
+    },
+    "delete": {
+      "title": "删除 {0}？",
+      "confirm": {
+        "true": "文件夹里的 {0} 个文件会一起删除。删除后可以在“变更”里看到，提交前都能找回。",
+        "false": "删除后可以在“变更”里看到，提交前都能找回。"
+      }
+    },
+    "newUpload": "新建、上传",
+    "searchPlaceholder": "搜索文件",
+    "noMatch": "没有找到匹配的文件。"
+  },
+  "wsChanges": {
+    "fileState": {
+      "label": {
+        "A": "新增",
+        "D": "已删除",
+        "R": "重命名"
+      }
+    },
+    "reviewStart": {
+      "reviewStarted": "Codex 开始审查，结果会{0}",
+      "returnToThread": "回到当前对话",
+      "inSeparateThread": "在独立线程里"
+    },
+    "review": "审查改动",
+    "unified": "合并",
+    "split": "并排",
+    "reviewTarget": "审查目标",
+    "runMode": "运行方式",
+    "baseBranch": "对比分支",
+    "commit": "提交",
+    "commitSha": "提交 SHA",
+    "notePlaceholder": "明确审查范围与风险",
+    "startReview": "开始审查",
+    "recentResults": "最近结果",
+    "noReviews": "还没有审查记录"
+  },
+  "wsStatus": {
+    "copySessionId": "复制会话 ID",
+    "sessions": {
+      "warn": "{0} 同时有多个当前会话"
+    }
+  },
+  "wsSessions": {
+    "sealReason": {
+      "budget_exhausted": "上下文预算用完",
+      "cat_initiated_handoff": "猫主动交接",
+      "threshold": "到达压缩阈值",
+      "cli_session_replaced": "CLI 会话被替换",
+      "manual": "手动封存",
+      "oversized_retire": "会话过大退役"
+    },
+    "context": {
+      "tip": {
+        "value": {
+          "true": "{0} / {1}（输入上限） · {2}",
+          "false": "上限未知"
+        },
+        "source": {
+          "exact": "实测",
+          "approx": "估算",
+          "undefined": "估算"
+        }
+      }
+    },
+    "compression": {
+      "title": "压缩{0}的上下文？",
+      "compressionHelp": "把这段会话的早期内容压成摘要，会话 ID 不变。当前占用 {0}。",
+      "ok": "压缩",
+      "value": {
+        "false": "压缩次数未知"
+      },
+      "known": {
+        "true": "已压缩 {0} 次",
+        "false": "未压缩"
+      }
+    },
+    "member": {
+      "ctxTip": "上下文 {0}",
+      "ctxWarn": "接近上限，下一轮会{0}",
+      "noCurrentSession": "没有当前会话",
+      "compressNext": {
+        "true": "自动压缩"
+      },
+      "overviewLabel": {
+        "usage": "用量"
+      },
+      "overviewValue": {
+        "usage": "输入 {0} · 输出 {1} · 缓存命中 {2}% · 花费 ${3}",
+        "started": "{7} · {8} 条消息 · {9}"
+      },
+      "sessionAt": {
+        "false": "{0}封存"
+      }
+    },
+    "notifications": {
+      "sealed": "已封存 #{0}",
+      "restored": "已恢复 #{0}"
+    },
+    "empty": "这条对话还没有猫发过言，没有会话。",
+    "pastMembers": "以往成员",
+    "copyThreadId": "复制 Thread ID",
+    "record": "执行记录",
+    "showThinking": "显示心里话",
+    "showWhisper": "显示悄悄话",
+    "plan": "计划",
+    "sessions": "会话",
+    "runtime": "运行时",
+    "started": "开始",
+    "sealed": "已封存"
+  },
+  "reviewDetail": {
+    "round": "第 {0} 轮",
+    "historyKind": {
+      "add_visual_marks": "添加标绘",
+      "delete_visual_mark": "移除标绘",
+      "annotate": "添加批注",
+      "edit": "编辑批注",
+      "set_annotation_state": "变更批注状态",
+      "judge_response": "判断修改结果",
+      "prepare": "开始审阅"
+    },
+    "useNext": "下一版换上新的正典：{0}。{1}",
+    "canonical": "正典",
+    "experimental": "实验",
+    "ratio": "画面比例",
+    "canon": "正典素材",
+    "keep": "这版不换",
+    "nextVersion": "下一版换上"
+  },
+  "memory": {
+    "docSource": "文档原文 · {0}",
+    "desc": "猫们记住的关于你、项目和约定的事。",
+    "searchPlaceholder": "搜索记忆、文档和对话",
+    "sortTaste": "偏好排序",
+    "sortRecent": "最近记录",
+    "sortHits": "检索命中最多",
+    "eventsError": "暂时读不到事件。",
+    "loadMore": "读取更多",
+    "confirmSentence": "确认这句",
+    "viewSource": "查看原消息 ↗",
+    "recallLog": "所有对话的召回流水",
+    "allSources": "全部来源",
+    "catSearch": "猫发起的检索",
+    "systemDelivery": "系统递送",
+    "delivery": "递送",
+    "locateReply": "定位回复",
+    "noRecall": "没有符合条件的召回记录。",
+    "topTaste": "检索命中最多的偏好",
+    "last7d": "最近 7 天",
+    "last30d": "最近 30 天",
+    "last90d": "最近 90 天",
+    "allTime": "全部时间",
+    "moreBrakes": "读取更多干预记录",
+    "brakeDetail": "干预详情",
+    "collectTo": "收录到",
+    "skipCollect": "不收录",
+    "collect": "收录",
+    "nothingToCollect": "没有待收录的内容。",
+    "newLibrary": "新建资料库",
+    "updatedAt": "最近更新",
+    "libraryActions": "资料库操作",
+    "index": "索引",
+    "reread": "重读",
+    "knowledgePlaceholder": "搜索知识或锚点",
+    "candidateNodes": "候选节点",
+    "stats": "统计",
+    "relationTypes": "关系类型",
+    "graphOnly": "只影响这张图怎么显示。",
+    "semanticService": "语义搜索服务",
+    "refreshStatus": "刷新状态",
+    "rebuildIndex": "重建索引…",
+    "warmupPending": "待建索引",
+    "continueWarmup": "继续补全",
+    "flagsHelp": "三档：先在影子模式里观察，再开启。",
+    "configRef": "配置参考",
+    "health": "健康度",
+    "evaluate": "评估",
+    "closeSearch": "关闭搜索",
+    "noResults": "没有结果。",
+    "recallCount": "被想起的次数",
+    "serviceActions": "服务操作",
+    "confidence": "可信度",
+    "configReminders": "{0} 项配置提醒",
+    "meetingsMissing": "会议记忆还没接进来。",
+    "allCats": "全部猫",
+    "rebuilding": "重建中…"
+  },
+  "wsExec": {
+    "title": "执行",
+    "loading": "正在读取执行记录…",
+    "error": "执行记录暂时不可读。",
+    "copyRunId": "复制运行 ID",
+    "session": "会话 #{0}",
+    "current": "当前"
+  },
+  "wsMem": {
+    "allMemory": "全部记忆"
+  },
+  "wsSchedule": {
+    "empty": "当天没有安排",
+    "undated": "未排期",
+    "month": "月",
+    "week": "周",
+    "previous": "上一段",
+    "next": "下一段",
+    "loading": "正在读取日程…",
+    "error": "日程暂时无法读取。"
+  },
+  "evolutionFlow": {
+    "pairedSubset": "只比较配对上的 {0} 个样本",
+    "sourceThread": "查看原对话",
+    "objects": "对象范围",
+    "success": "成功标准",
+    "measurement": "测量计划",
+    "baseline": "基线诊断",
+    "preparationHistory": "准备材料",
+    "exploration": "探索结果",
+    "thisRound": "本轮",
+    "reason": "依据",
+    "choiceSource": "决定来源",
+    "summary": "摘要",
+    "choice": {
+      "explore": "纳入探索",
+      "fixed": "保持固定",
+      "excluded": "本轮排除"
+    },
+    "stage": {
+      "constituting": "准备",
+      "instrumenting": "接入",
+      "observing": "观察",
+      "evaluating": "评估",
+      "attributing": "归因",
+      "awaiting_intervention": "干预",
+      "awaiting_approval": "审批",
+      "writing_back": "写回",
+      "revalidating": "复验",
+      "deciding": "判断"
+    },
+    "decision": {
+      "keep": "采纳这次改进",
+      "tune": "继续调整",
+      "rollback": "回退版本",
+      "sunset": "停止这项进化"
+    },
+    "change": {
+      "pending": "等待批准",
+      "approved": "已同意，等待生效回执",
+      "changed": "已执行，等待复验",
+      "no_change": "执行方确认未改动",
+      "outcome": "复验记录已返回",
+      "superseded": "已被替代",
+      "target_drift": "目标已变化"
+    },
+    "use": {
+      "applied": "已沿用",
+      "dismissed": "本次未沿用",
+      "unconfirmed": "沿用情况待确认"
+    },
+    "intent": {
+      "explore": "继续探索",
+      "adopt": "请求采用这一版"
+    },
+    "reading": "阅读对象",
+    "experiment": "实验记录",
+    "comparison": "对照记录",
+    "noComparison": "不对照",
+    "request": "请求",
+    "requestPlaceholder": "想继续核对什么",
+    "progress": "请成员推进",
+    "remind": "再次催询",
+    "sync": "同步执行与复验结果",
+    "rollbackSource": "查看回退依据",
+    "publicationChanged": "公开探索记录已更新",
+    "readCurrent": "读取当前来源",
+    "evidenceInsufficient": "证据不足",
+    "preparationUnavailable": "准备材料尚未读到",
+    "explorationUnavailable": "探索记录尚未读到",
+    "noCases": "尚无案例记录",
+    "requestText": "@{0}\n请在现有能力项目 {1} 继续{2}。\n{3}\n\n固定的请求对象：\n{4}\n沿原对话已有任务及 owner 审批执行；补测归回原版本。请求送达不代表实际采用，不新建重复项目或绕过授权。请回报真实动作、结果与剩余缺口。",
+    "requestIntent": {
+      "explore": "探索改进",
+      "retest": "补测这一版",
+      "adopt": "核对并请求采用这一版",
+      "progress": "推进当前工作",
+      "remind": "跟进当前工作"
+    },
+    "newGoalText": "请核对已有能力项目与真实 owner，再评估这个目标；不要新建重复项目：\n> {0}"
+  },
+  "serviceState": {
+    "stopping": "停止中",
+    "uninstalling": "卸载中"
+  },
+  "films": {
+    "syncPending": "{0} 条审片意见还没导入（原消息都在）。",
+    "syncRetry": "补导入",
+    "story": "分镜",
+    "assets": "素材",
+    "review": "审片",
+    "register": "登记成片",
+    "import": "导入项目",
+    "summary": "{0} 个分镜 · {1} 个成片版本",
+    "version": "第 {0} 版",
+    "inputVersion": "输入版本 {0}",
+    "noCompare": "不对比",
+    "compare": "对比版本",
+    "compareResult": "和新成片对比",
+    "current": "当前版本",
+    "reference": "参考版本",
+    "locate": "定位",
+    "reopen": "重新打开",
+    "generated": "生成画面",
+    "sourceChanged": "来源已变化",
+    "source": "定位至来源",
+    "history": "经过",
+    "noProjects": "还没有视频项目",
+    "noScreening": "还没有登记成片",
+    "noStory": "没有分镜",
+    "noAssets": "没有素材",
+    "noUses": "这版未引用",
+    "noOpinions": "没有审片意见",
+    "archived": "项目已归档",
+    "loading": "正在读取视频项目…",
+    "error": "视频项目暂时不可读",
+    "filmTitle": "成片名称",
+    "path": "文件路径",
+    "mapping": "时间对应文件",
+    "output": "成片",
+    "invalidFile": "项目文件格式不正确",
+    "mediaMissing": "成片文件不可用",
+    "conflict": "内容已有变化，请刷新后重试",
+    "outsideFrame": "选区超出影片画面",
+    "contextConflict": "请先发送或移除输入框里已有的位置",
+    "opinionState": {
+      "modified": "已修改",
+      "open": "待处理"
+    },
+    "historyKind": {
+      "created": "已提出",
+      "replied": "已回复",
+      "reopened": "已重新打开",
+      "resolved": "已关闭",
+      "unchanged": "未修改"
+    }
+  },
+  "log": {
+    "level": {
+      "log": "日志",
+      "info": "信息",
+      "warn": "警告",
+      "error": "错误"
+    },
+    "empty": {
+      "true": "该级别暂无输出",
+      "false": "暂无控制台输出"
+    }
+  },
+  "terminalData": {
+    "owner": "{0} 的终端"
+  },
+  "timelinePlayer": {
+    "scrub": {
+      "label": "回放进度",
+      "value": "{0} / {1} 个事件"
+    },
+    "note": {
+      "text": "本段空闲 {0}",
+      "unit": {
+        "hours": "{0} 小时",
+        "minutes": "{0} 分钟"
+      }
+    }
+  },
+  "stats": {
+    "uptime": "{0} 时 {1} 分"
+  },
+  "graph": {
+    "nodeText": "{0} {1}"
+  },
+  "signals": {
+    "fetchSummary": "新增 {0} · 获取 {1} · 重复 {2}"
+  }
+}

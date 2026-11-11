@@ -1,0 +1,14 @@
+$ pnpm --filter @cat-cafe/api exec node --import tsx --test test/plugin-pdl.test.ts
+
+✔ admits the PDL manifest extension without weakening base manifest or package identity checks (21.14975ms)
+✔ exposes only current admitted installed fragments through the authenticated manager endpoint (210.264417ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22812.52875
+
+Exit code: 0

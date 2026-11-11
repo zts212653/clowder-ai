@@ -1,0 +1,3748 @@
+views:
+  modal.capAudit:
+    vm: capAudit
+    title: t:placement.audit
+    blocks:
+      - type: list
+        id: cap-audit
+        rows: 8
+        from: $.items
+        load: $.load
+        error: t:frame.loadError
+        retry:
+          act: refresh
+          args: {k: cap-audit}
+        row:
+          layout: two
+          key: "@key"
+          title:
+            parts:
+              - {text: "@action"}
+              - {text: "@capabilityId"}
+            sep: " · "
+          sub:
+            parts:
+              - {text: "@timestamp"}
+              - {text: "@userId"}
+            sep: " · "
+          expand:
+            - type: kv
+              from:
+                - k: before
+                  v: {of: "@before", fmt: json}
+                - k: after
+                  v: {of: "@after", fmt: json}
+  page.system:
+    error: t:system.loadError
+    vm: system
+    page: true
+    blocks:
+      - {type: head, title: t:env.title, note: "1"}
+      - type: ordered
+        order: [general, notify, network, storage, ttl, log, safety, env, update]
+        blocks: {$frag: SYSTEM_DESKTOP_SECTIONS}
+        when: "!$.legacyRoute"
+      - type: ordered
+        order: [general, notify, network, storage, ttl, log, safety, env, update]
+        blocks: {$frag: SYSTEM_SECTIONS}
+        when: $.legacyRoute
+  dialog.push:
+    vm: pushDiag
+    blocks:
+      - type: each
+        from:
+          - {}
+        item:
+          rows:
+            - kind: permission
+              code:
+                of: $.permission
+                map:
+                  granted: permission_granted
+                  denied: permission_denied
+                  default: permission_default
+                  unsupported: permission_unsupported
+            - kind: service
+              code:
+                of: $.capability.enabled
+                map: {"true": service_true, _: service_false}
+            - kind: vapid
+              code:
+                of: $.capability.vapidPublicKeyConfigured
+                map: {"true": configured_true, _: configured_false}
+            - kind: serviceConfig
+              code:
+                of: $.capability.pushServiceConfigured
+                map: {"true": configured_true, _: configured_false}
+            - kind: subscriptions
+              raw: true
+              value: $.subscriptions.count
+              code:
+                of: $.subscriptions.count
+                gte: 1
+                map: {"true": subscriptions_true, _: subscriptions_false}
+            - kind: delivery
+              code:
+                of: $.delivery.lastResult
+                map:
+                  ok: delivery_ok
+                  error: delivery_error
+                  not_attempted: delivery_not_attempted
+            - from: $.subscriptions.targets
+              item:
+                kind: target
+                raw: true
+                label: "@uaFamily"
+                value: "@endpoint"
+                code: plain
+            - kind: time
+              raw: true
+              value: $.attemptAt
+              code: plain
+              when:
+                of: $.attemptAt
+                map: {"0": true, _: $.attemptAt}
+            - kind: http
+              raw: true
+              value: $.delivery.lastHttpStatus
+              code:
+                of: $.delivery.lastResult
+                map: {ok: http_ok, error: http_error, not_attempted: http_not_attempted}
+              when: $.hasHttpStatus
+            - kind: error
+              raw: true
+              value: $.delivery.lastError
+              code: error
+              when: $.delivery.lastError
+            - from: $.errorHints
+              item:
+                kind: error
+                code:
+                  of: "@code"
+                  map:
+                    push_vapid_key_missing: hint_push_vapid_key_missing
+                    push_not_configured: hint_push_not_configured
+                    push_subscription_missing: hint_push_subscription_missing
+                    push_last_delivery_failed: hint_push_last_delivery_failed
+            - kind: result
+              raw: true
+              label:
+                of: $.result.kind
+                map:
+                  error: t:settingsUi.system.pushLabel.error
+                  _: t:system.pushConfiguration.listLabel
+              value:
+                of: $.result.kind
+                map:
+                  generated: t:system.pushConfiguration.generated
+                  saved: t:settings.notifications.pushSaved
+                  _: $.result.message
+              tone:
+                of: $.result.kind
+                map: {error: warn, _: ok}
+              code: result
+              when: $.result
+        blocks:
+          - type: settings
+            from: "@rows"
+            row:
+              label:
+                of: "@kind"
+                map:
+                  permission:
+                    t: system.pushConfiguration.permissionLabel
+                    args: ["@label"]
+                  service:
+                    t: system.pushConfiguration.pushService
+                    args: ["@label"]
+                  vapid:
+                    t: settingsUi.system.pushLabel.vapid
+                    args: ["@label"]
+                  serviceConfig:
+                    t: system.pushConfiguration.serviceConfig
+                    args: ["@label"]
+                  subscriptions:
+                    t: system.pushConfiguration.boundDevices
+                    args: ["@label"]
+                  delivery:
+                    t: system.pushConfiguration.lastDelivery
+                    args: ["@label"]
+                  time:
+                    t: system.pushConfiguration.deliveryTime
+                    args: ["@label"]
+                  http:
+                    t: settingsUi.system.pushLabel.http
+                    args: ["@label"]
+                  error:
+                    t: settingsUi.system.pushLabel.error
+                    args: ["@label"]
+                  target: "@label"
+                  result: "@label"
+                  _: "@kind"
+              ctls:
+                - type: status
+                  text:
+                    of: "@kind"
+                    map:
+                      time: {of: "@value", fmt: datetime}
+                      _: "@value"
+                  tone:
+                    of: "@code"
+                    map:
+                      plain: ""
+                      error: warn
+                      result: "@tone"
+                      subscriptions_true: ok
+                      subscriptions_false: warn
+                      service_true: ok
+                      service_false: warn
+                      configured_true: ok
+                      configured_false: warn
+                      permission_granted: ok
+                      permission_denied: warn
+                      permission_default: warn
+                      permission_unsupported: warn
+                      delivery_ok: ok
+                      delivery_error: warn
+                      delivery_not_attempted: ""
+                      http_ok: ""
+                      http_error: warn
+                      http_not_attempted: ""
+                      hint_push_vapid_key_missing: warn
+                      hint_push_not_configured: warn
+                      hint_push_subscription_missing: warn
+                      hint_push_last_delivery_failed: warn
+                      _: "@code"
+                  when: "@raw"
+                - type: status
+                  text:
+                    of: "@code"
+                    map:
+                      permission_granted: t:system.pushConfiguration.permission.granted
+                      permission_denied: t:common.status.permissionDenied
+                      permission_default: t:system.pushConfiguration.permission.default
+                      permission_unsupported: t:settingsUi.member.hooks.unsupported
+                      service_true: t:system.pushConfiguration.service.true
+                      service_false: t:system.pushConfiguration.service.false
+                      configured_true: t:system.pushConfiguration.configured.true
+                      configured_false: t:common.status.notConfigured
+                      delivery_ok: t:system.pushConfiguration.delivery.ok
+                      delivery_error: t:chat.deliveryState.failed
+                      delivery_not_attempted: t:system.pushConfiguration.delivery.not_attempted
+                      hint_push_vapid_key_missing: t:system.pushConfiguration.hints.push_vapid_key_missing
+                      hint_push_not_configured: t:system.pushConfiguration.hints.push_not_configured
+                      hint_push_subscription_missing: t:system.pushConfiguration.hints.push_subscription_missing
+                      hint_push_last_delivery_failed: t:system.pushConfiguration.hints.push_last_delivery_failed
+                      _: "@code"
+                  tone:
+                    of: "@code"
+                    map:
+                      plain: ""
+                      error: warn
+                      result: ""
+                      subscriptions_true: ok
+                      subscriptions_false: warn
+                      service_true: ok
+                      service_false: warn
+                      configured_true: ok
+                      configured_false: warn
+                      permission_granted: ok
+                      permission_denied: warn
+                      permission_default: warn
+                      permission_unsupported: warn
+                      delivery_ok: ok
+                      delivery_error: warn
+                      delivery_not_attempted: ""
+                      http_ok: ""
+                      http_error: warn
+                      http_not_attempted: ""
+                      hint_push_vapid_key_missing: warn
+                      hint_push_not_configured: warn
+                      hint_push_subscription_missing: warn
+                      hint_push_last_delivery_failed: warn
+                      _: "@code"
+                  when: "!@raw"
+      - type: toolbar
+        items:
+          - type: button
+            label: t:system.pushConfiguration.subscribe
+            act: pushSubscribe
+            when: $.canSubscribe
+          - type: button
+            label: t:system.pushConfiguration.unsubscribe
+            act: pushUnsubscribe
+            when: $.canUnsubscribe
+          - type: button
+            label: t:system.pushConfiguration.sendTest
+            act: pushTest
+            when: $.canTest
+      - type: section
+        title: t:system.pushConfiguration.listLabel
+        help: t:system.pushConfiguration.privateKeyHelp
+        blocks:
+          - type: settings
+            rows:
+              - kind: field
+                label: t:settingsUi.system.pushLabel.vapid
+                id: vp-pub
+                control:
+                  type: input
+                  id: vp-pub
+                  value: $.vapid.pub
+                  mono: true
+                  input: vp
+                  args: {k: pub}
+              - kind: field
+                label: t:system.pushConfiguration.pushPrivateKey
+                id: vp-priv
+                control:
+                  type: input
+                  id: vp-priv
+                  value: $.vapid.priv
+                  mono: true
+                  secret: true
+                  input: vp
+                  args: {k: priv}
+              - kind: field
+                label: t:system.pushConfiguration.contactInfo
+                id: vp-sub
+                control:
+                  type: input
+                  id: vp-sub
+                  value: $.vapid.sub
+                  mono: true
+                  input: vp
+                  args: {k: sub}
+          - type: toolbar
+            items:
+              - type: button
+                label: t:system.pushConfiguration.generateKey
+                act: vapidGen
+                when: $.canGenerate
+              - {type: button, label: t:common.save, act: vapidSave, when: $.canSave}
+  page.env:
+    vm: env
+    page: true
+    blocks:
+      - {type: head, title: t:env.envVars}
+      - type: notice
+        tone: warn
+        text:
+          t: env.system.pendingText
+          args: [$.pending]
+        when: $.pending
+      - type: section
+        id: sys-envedit
+        key: envedit
+        title: t:env.editableHere
+        help: t:env.editableHelp
+        open: $.help.envedit
+        from: $.editable
+        row:
+          label: "@label"
+          help:
+            - {text: "@key", mono: true}
+            - {text: t:env.system.restart, when: "!@runtime"}
+          ctls:
+            - type: text
+              variant: value
+              text: {of: "@value", max: 18}
+              mono: true
+              when: "!@secret"
+            - type: text
+              variant: value
+              text:
+                of: "@hasValue"
+                map:
+                  "true": t:settingsUi.system.secretValue.true
+                  "false": t:pcf.unset
+                  _: "@hasValue"
+              when: "@secret"
+            - type: button
+              label: t:common.edit
+              act: envOpen
+              args: {kind: env, k: "@key"}
+      - type: section
+        id: sys-envall
+        key: envall
+        title: t:env.allVars
+        help: t:env.restOnlyFile
+        open: $.help.envall
+        from: $.cats
+        row:
+          label: "@label"
+          ctls:
+            - type: text
+              variant: value
+              text:
+                t: env.system.count
+                args: ["@count"]
+  page.members:
+    error: t:members.loadError
+    vm: members
+    page: true
+    blocks:
+      - type: head
+        title: t:member.title
+        note: "2"
+        actNote: "1"
+        actions:
+          - {type: slot, slot: members.actions}
+      - type: section
+        title: t:members.defaults
+        note: "3"
+        help: t:members.defaultsHelp
+        blocks:
+          - type: settings
+            rows:
+              - label: t:members.defaultCat
+                ctls:
+                  - type: select
+                    variant: member
+                    id: um-default
+                    options: $.onOpts
+                    value: $.defaultCat
+                    label: t:members.defaultCat
+                    change: umDefault
+              - label: t:members.dispatchPrefs
+                ctls:
+                  - type: text
+                    variant: value
+                    parts:
+                      - text:
+                          t: settingsUi.member.prefsLead
+                          args: [$.prefsCount]
+                      - text:
+                          t: members.page.pendingReviewSuffix
+                          args: [$.stale]
+                        when: $.stale
+                  - type: button
+                    label: t:members.manage
+                    act: open
+                    args: {node: team, anchor: panel}
+              - label: t:system.owner
+                ctls:
+                  - type: text
+                    variant: value
+                    parts:
+                      - {text: $.owner.name}
+                      - {text: " "}
+                      - {text: $.owner.tags.0}
+                  - type: button
+                    label: t:system.editMore
+                    act: ownerOpen
+                    args: {kind: owner}
+      - type: section
+        title: t:member.title
+        help: t:members.listHelp
+        actions:
+          - type: button
+            iconOnly: true
+            icon: plus
+            label: t:members.add
+            act: open
+            args: {page: memberNew}
+        blocks:
+          - type: toolbar
+            items:
+              - type: seg
+                value: $.filter
+                options:
+                  - v: on
+                    label: t:system.pushConfiguration.service.true
+                    count: $.counts.on
+                  - {v: off, label: t:common.status.disabled, count: $.counts.off}
+                  - {v: all, label: t:common.all, count: $.counts.all}
+                act: set
+                args: {path: s.memberFilter}
+              - type: select
+                id: access-filter
+                options:
+                  - {v: all, label: t:members.page.accessOpts}
+                  - CLI
+                  - SDK
+                  - App Server
+                  - ACP
+                  - AGY Native
+                  - {v: cloud, label: t:members.page.cloud}
+                value: $.access
+                label: t:members.carriers
+                change: accessFilter
+          - type: list
+            id: members
+            from: $.rows
+            item:
+              availabilityWhen:
+                of: "@on"
+                map:
+                  "true":
+                    of: "@cloud"
+                    map: {"true": false, _: true}
+                  _: false
+              inline:
+                lit:
+                  - control: {type: status, text: t:members.page.cloud}
+                    when: ["@on", "@cloud"]
+              sub:
+                lit:
+                  - {text: "@model", when: "@model"}
+                  - {text: t:members.page.model, when: "!@model"}
+              ctl:
+                lit:
+                  - type: switch
+                    value: "@on"
+                    act: setStatus
+                    args: {entity: member, id: "@id"}
+                    label:
+                      t: settingsUi.member.switch
+                      args: ["@on", "@name", "@handle"]
+              tone:
+                of: "@on"
+                map: {"true": "", _: past}
+              act: open
+              args: {page: member, p: "@id"}
+            row: member.row
+            order: umOrder
+            empty: t:members.noMatch
+            emptyAction:
+              type: button
+              label: t:skills.clearFilter
+              act: set
+              args: {path: s.memberFilter|ss.access, v: all|all}
+  page.accounts:
+    error: t:accounts.loadError
+    vm: accounts
+    page: true
+    blocks:
+      - type: head
+        title: t:accounts.title
+        help: t:accounts.desc
+        actions:
+          - type: button
+            iconOnly: true
+            icon: plus
+            label: t:accounts.add
+            items: {$frag: ADD_ACCOUNT_ITEMS}
+      - type: notice
+        note: "4"
+        strong:
+          t: accounts.list.mixedHead
+          args: [$.mixedCount]
+        parts:
+          - parts: $.accountUse
+            sep: ，
+            each:
+              text:
+                t: accounts.list.memberCount
+                args: ["@name", "@count"]
+        when: $.mixed
+        action:
+          type: button
+          label: t:common.select
+          items: {$frag: CODEX_ACCOUNT_ITEMS}
+      - type: toolbar
+        items:
+          - type: seg
+            value: $.filter
+            options:
+              - {v: all, label: t:common.all, count: $.counts.all}
+              - {v: oauth, label: t:accounts.list.login, count: $.counts.oauth}
+              - {v: key, label: t:accounts.list.apiKey, count: $.counts.key}
+            act: set
+            args: {path: s.accountFilter}
+          - {type: grow}
+          - type: search
+            id: acc-search
+            placeholder: t:accounts.searchPlaceholder
+            value: $.q
+            input: accQ
+      - type: section
+        title:
+          t: settingsUi.account.groupTitle.login
+          args: [$.login.count]
+        note: "1"
+        help: t:accounts.builtinHelp
+        when: $.login
+        blocks:
+          - type: list
+            from: $.login.items
+            row: accounts.account
+            empty:
+              t: settingsUi.account.empty
+              args: [$.login.hasAny]
+      - type: section
+        title:
+          t: settingsUi.account.groupTitle.key
+          args: [$.keys.count]
+        note: "2"
+        when: $.keys
+        blocks:
+          - type: list
+            from: $.keys.items
+            row: accounts.account
+            empty:
+              t: settingsUi.account.empty
+              args: [$.keys.hasAny]
+      - type: disclosure
+        when: $.legacy
+        key: acc-legacy
+        title:
+          text:
+            t: accounts.list.unusableAccounts
+            args: [$.legacy.count]
+        blocks:
+          - {type: settings, from: $.legacy.rows}
+  page.profiles:
+    error: t:profiles.loadError
+    vm: profiles
+    page: true
+    blocks:
+      - type: head
+        title: t:profiles.title
+        note: "2"
+        help: t:profiles.desc
+        actions:
+          - type: more
+            items:
+              - label: t:memberForm.viewInStatus
+                act: open
+                args: {node: team, anchor: panel}
+      - type: section
+        title: t:profiles.byModel
+        note: "1"
+        help:
+          t: profiles.page.desc
+          args: [$.coverage, $.total, $.modelCount]
+        blocks:
+          - type: list
+            id: profModels
+            from: $.models
+            row:
+              layout: two
+              key: "@model"
+              title: "@model"
+              sub:
+                text:
+                  t: settingsUi.profile.modelSub
+                  args: ["@hasProfiles", "@profiles"]
+              cols:
+                - {v: "@count", w: num, tip: t:profiles.catsSuffix}
+              expand:
+                - type: list
+                  inline: true
+                  from: "@cats"
+                  row: member.row
+                  item:
+                    sub:
+                      lit:
+                        - parts:
+                            - {text: "@breed"}
+                            - {text: " · "}
+                            - {text: "@id", mono: true}
+                            - {text: " · "}
+                            - text: {of: "@client", case: lower}
+                            - {text: t:profiles.page.subPost, when: "!@hasProfile"}
+                    more:
+                      lit: {$frag: PROFILE_BODY}
+                    acts:
+                      - label: t:profiles.addObservation
+                        icon: plus
+                        act: profObs
+                        args: {id: "@id"}
+                      - label:
+                          t: settingsUi.profile.evidenceAction
+                          args: ["@evidenceOpen"]
+                        icon: trace
+                        act: toggle
+                        args:
+                          path: ss.evOpen.{id}
+                          id: "@id"
+  page.rules:
+    error: t:rules.loadError
+    vm: rules
+    page: true
+    blocks:
+      - {type: head, title: t:rules.title, note: "1", help: t:rules.desc}
+      - type: toolbar
+        items:
+          - type: seg
+            value: $.view
+            act: set
+            args: {path: s.rulesView}
+            options:
+              - {v: life, label: t:rules.lifecycle}
+              - {v: agent, label: t:rules.memberRules}
+      - type: section
+        note: "2"
+        blocks:
+          - type: steps
+            variant: flow
+            from:
+              - {session: true, kind: session, icon: refresh}
+              - {events: true, kind: events, icon: bolt, tone: ev}
+            item:
+              title:
+                t: settingsUi.rules.flowTitle
+                args: ["@kind"]
+              items:
+                - nodes:
+                    - i: 0
+                      label:
+                        of: $.flow.0.name
+                        map:
+                          session-start: t:lifeStage.session-start
+                          session-init: t:lifeStage.session-init
+                          turn-build: t:lifeStage.turn-build
+                          client-invoke: t:lifeStage.client-invoke
+                          turn-close: t:lifeStage.turn-close
+                          session-close: t:lifeStage.session-close
+                          hook-events: t:lifeStage.hook-events
+                          _: $.flow.0.name
+                      tip: $.flow.0.description
+                      count: $.flow.0.count
+                      state:
+                        of: $.flow.0.selected
+                        map:
+                          "true": on
+                          _:
+                            of: $.flow.0.affected
+                            map: {"true": aff, _: ""}
+                    - i: 1
+                      label:
+                        of: $.flow.1.name
+                        map:
+                          session-start: t:lifeStage.session-start
+                          session-init: t:lifeStage.session-init
+                          turn-build: t:lifeStage.turn-build
+                          client-invoke: t:lifeStage.client-invoke
+                          turn-close: t:lifeStage.turn-close
+                          session-close: t:lifeStage.session-close
+                          hook-events: t:lifeStage.hook-events
+                          _: $.flow.1.name
+                      tip: $.flow.1.description
+                      count: $.flow.1.count
+                      state:
+                        of: $.flow.1.selected
+                        map:
+                          "true": on
+                          _:
+                            of: $.flow.1.affected
+                            map: {"true": aff, _: ""}
+                  when: "@session"
+                - loop:
+                    tone: inner
+                    icon: refresh
+                    title: t:profiles.lifecycle.turnLoop
+                    items:
+                      - nodes:
+                          - i: 2
+                            label:
+                              of: $.flow.2.name
+                              map:
+                                session-start: t:lifeStage.session-start
+                                session-init: t:lifeStage.session-init
+                                turn-build: t:lifeStage.turn-build
+                                client-invoke: t:lifeStage.client-invoke
+                                turn-close: t:lifeStage.turn-close
+                                session-close: t:lifeStage.session-close
+                                hook-events: t:lifeStage.hook-events
+                                _: $.flow.2.name
+                            tip: $.flow.2.description
+                            count: $.flow.2.count
+                            state:
+                              of: $.flow.2.selected
+                              map:
+                                "true": on
+                                _:
+                                  of: $.flow.2.affected
+                                  map: {"true": aff, _: ""}
+                          - i: 3
+                            label:
+                              of: $.flow.3.name
+                              map:
+                                session-start: t:lifeStage.session-start
+                                session-init: t:lifeStage.session-init
+                                turn-build: t:lifeStage.turn-build
+                                client-invoke: t:lifeStage.client-invoke
+                                turn-close: t:lifeStage.turn-close
+                                session-close: t:lifeStage.session-close
+                                hook-events: t:lifeStage.hook-events
+                                _: $.flow.3.name
+                            tip: $.flow.3.description
+                            count: $.flow.3.count
+                            state:
+                              of: $.flow.3.selected
+                              map:
+                                "true": on
+                                _:
+                                  of: $.flow.3.affected
+                                  map: {"true": aff, _: ""}
+                            icon: eye
+                          - i: 4
+                            label:
+                              of: $.flow.4.name
+                              map:
+                                session-start: t:lifeStage.session-start
+                                session-init: t:lifeStage.session-init
+                                turn-build: t:lifeStage.turn-build
+                                client-invoke: t:lifeStage.client-invoke
+                                turn-close: t:lifeStage.turn-close
+                                session-close: t:lifeStage.session-close
+                                hook-events: t:lifeStage.hook-events
+                                _: $.flow.4.name
+                            tip: $.flow.4.description
+                            count: $.flow.4.count
+                            state:
+                              of: $.flow.4.selected
+                              map:
+                                "true": on
+                                _:
+                                  of: $.flow.4.affected
+                                  map: {"true": aff, _: ""}
+                        back: t:profiles.lifecycle.back
+                  when: "@session"
+                - nodes:
+                    - i: 5
+                      label:
+                        of: $.flow.5.name
+                        map:
+                          session-start: t:lifeStage.session-start
+                          session-init: t:lifeStage.session-init
+                          turn-build: t:lifeStage.turn-build
+                          client-invoke: t:lifeStage.client-invoke
+                          turn-close: t:lifeStage.turn-close
+                          session-close: t:lifeStage.session-close
+                          hook-events: t:lifeStage.hook-events
+                          _: $.flow.5.name
+                      tip: $.flow.5.description
+                      count: $.flow.5.count
+                      state:
+                        of: $.flow.5.selected
+                        map:
+                          "true": on
+                          _:
+                            of: $.flow.5.affected
+                            map: {"true": aff, _: ""}
+                  when: "@session"
+                - nodes:
+                    - i: 6
+                      label:
+                        of: $.flow.6.name
+                        map:
+                          session-start: t:lifeStage.session-start
+                          session-init: t:lifeStage.session-init
+                          turn-build: t:lifeStage.turn-build
+                          client-invoke: t:lifeStage.client-invoke
+                          turn-close: t:lifeStage.turn-close
+                          session-close: t:lifeStage.session-close
+                          hook-events: t:lifeStage.hook-events
+                          _: $.flow.6.name
+                      tip: $.flow.6.description
+                      count: $.flow.6.count
+                      state:
+                        of: $.flow.6.selected
+                        map:
+                          "true": on
+                          _:
+                            of: $.flow.6.affected
+                            map: {"true": aff, _: ""}
+                  when: "@events"
+            act: fold
+            args: {path: s.lifeOpen, cast: num}
+            when:
+              of: $.view
+              map: {life: true, _: false}
+          - type: label
+            when:
+              - $.stage
+              - of: $.view
+                map: {life: true, _: false}
+            text: $.stage.name
+            count:
+              t: settingsUi.rules.stageCount
+              args:
+                - {of: $.stage.count, gte: 1}
+                - $.stage.count
+            help: $.stage.desc
+          - type: box
+            variant: expand
+            when:
+              - $.stage
+              - of: $.view
+                map: {life: true, _: false}
+            blocks:
+              - type: each
+                from:
+                  - {}
+                when: $.stage.where
+                item:
+                  facts:
+                    - {kind: scope, value: $.stage.scope}
+                    - {kind: placement, value: $.stage.where}
+                    - from: $.stage.mechanisms
+                      item: {kind: mechanism, label: "@0", value: "@1", mechanism: true}
+                blocks:
+                  - type: settings
+                    from: "@facts"
+                    row:
+                      label:
+                        of: "@kind"
+                        map:
+                          scope:
+                            t: settingsUi.rules.factLabel.scope
+                            args: ["@label"]
+                          placement:
+                            t: settingsUi.rules.factLabel.placement
+                            args: ["@label"]
+                          mechanism: "@label"
+                          _: "@kind"
+                      ctls:
+                        - {type: text, variant: value, text: "@value", mono: "@mechanism"}
+              - type: list
+                id: ruleL0
+                when:
+                  of: $.stage.groupKind
+                  map: {init: true, _: false}
+                from:
+                  - {}
+                row:
+                  layout: two
+                  lead: {icon: file, size: m}
+                  title: t:rules.l0Title
+                  sub:
+                    - {text: assets/system-prompts/system-prompt-l0.md, mono: true}
+                    - t:rules.l0Source
+                  act: dialog
+                  args: {kind: l0}
+              - type: settings
+                when: $.stage.preview
+                rows:
+                  - label: t:rules.previewFor
+                    ctls:
+                      - type: select
+                        variant: member
+                        id: preview-cat
+                        options: $.previewOpts
+                        value: $.previewCat
+                        none: t:rules.pickMember
+                        label: t:rules.pickMember
+                        change: previewCat
+                      - type: button
+                        primary: true
+                        label: t:media.preview
+                        act: compiledOpen
+                        args: {kind: compiled}
+                        disabled:
+                          of: $.previewCat
+                          map: {"": true, _: false}
+              - type: each
+                from: $.stage.groups
+                blocks:
+                  - type: box
+                    blocks:
+                      - type: label
+                        text:
+                          t: settingsUi.rules.caption
+                          args: ["@caption", "@count"]
+                      - type: list
+                        from: "@items"
+                        row:
+                          layout: two
+                          title:
+                            - {text: "@id", mono: true}
+                            - "@name"
+                          inline:
+                            - dot: warn
+                              tip: t:rules.knownIssues
+                              when:
+                                of: "@kind"
+                                map: {issue: true, _: false}
+                          sub:
+                            parts:
+                              - {text: t:profiles.segment.sub, when: "@overridden"}
+                              - text:
+                                  of: "@kind"
+                                  map:
+                                    edit: t:settingsUi.rules.segmentMode.edit
+                                    cfg: t:settingsUi.mcp.tag.readonly
+                                    rule: t:settingsUi.mcp.tag.readonly
+                                    hook: t:settingsUi.mcp.tag.readonly
+                                    issue: t:settingsUi.rules.segmentMode.issue
+                                    tpl: t:settingsUi.mcp.tag.readonly
+                                    _: "@kind"
+                              - {text: " · ", when: "@pending"}
+                              - {text: t:common.effectSession, when: "@pending"}
+                            sep: ""
+                          tone:
+                            of: "@selected"
+                            map: {"true": selected, "false": "", _: "@selected"}
+                          act:
+                            of: "@viewable"
+                            map: {"true": segOpen, _: fold}
+                          args:
+                            of: "@viewable"
+                            map:
+                              "true": {id: "@id"}
+                              _: {path: ss.lifeItem, v: "@id"}
+                          moreWhen:
+                            of: "@selected"
+                            map:
+                              "true":
+                                of: "@viewable"
+                                map: {"true": false, _: true}
+                              _: false
+                          more:
+                            - type: text
+                              parts:
+                                - t:rules.sourceType
+                                - text:
+                                    of: "@kind"
+                                    map:
+                                      edit: t:settingsUi.rules.segmentKind.edit
+                                      cfg: t:settingsUi.rules.segmentKind.cfg
+                                      rule: t:settingsUi.rules.segmentKind.rule
+                                      hook: t:settingsUi.rules.segmentKind.hook
+                                      issue: t:settingsUi.rules.segmentKind.issue
+                                      tpl: ""
+                                      _: "@kind"
+                            - type: text
+                              parts:
+                                - t:rules.source
+                                - text:
+                                    of: "@kind"
+                                    map: {rule: cat-cafe-skills/refs/shared-rules.md, _: cat-config.json}
+                                  mono: true
+                            - type: text
+                              parts:
+                                - t:rules.trigger
+                                - text:
+                                    t: settingsUi.rules.trigger
+                                    args:
+                                      - of: "@id"
+                                        slice: [0, 1]
+                                        map: {R: round, _: session}
+                            - type: text
+                              parts:
+                                - t:rules.purpose
+                                - text:
+                                    t: profiles.segment.purpose
+                                    args: ["@name"]
+              - type: empty
+                text: t:rules.noSegments
+                when: ["!$.stage.groupKind", "!$.stage.preview"]
+          - type: each
+            from: $.files
+            when:
+              of: $.view
+              map: {life: false, _: true}
+            blocks:
+              - type: box
+                blocks:
+                  - {type: label, text: "@title", help: "@desc", when: "!@extra"}
+                  - type: label
+                    text: t:rules.page.files
+                    help: t:rules.page.customRulesHelp
+                    when: "@extra"
+                  - type: list
+                    from: "@items"
+                    row:
+                      layout: two
+                      title: "@title"
+                      inline:
+                        - {dot: warn, tip: t:rules.fileMissing, when: "@missing"}
+                      sub:
+                        - {text: "@path", mono: true}
+                        - parts:
+                            - {text: "· "}
+                            - {text: "@use"}
+                            - {text: " · "}
+                            - {text: "@who"}
+                            - {text: " · ", when: "@pending"}
+                            - {text: t:common.effectSession, when: "@pending"}
+                      tone:
+                        of: "@on"
+                        map: {"true": "", "false": past, _: "@on"}
+                      cols:
+                        - control:
+                            - type: switch
+                              value: "@on"
+                              act: set
+                              args:
+                                path: s.rulesOn.{k}
+                                k: "@k"
+                                v:
+                                  of: "@on"
+                                  map: {"true": false, _: true}
+                                cast: bool
+                              label: "@title"
+                      acts:
+                        - label: t:common.view
+                          icon: eye
+                          act: ruleEdit
+                          args:
+                            k: "@k"
+                            t: "@title"
+                            p: "@path"
+                            missing:
+                              of: "@missing"
+                              map: {"true": "1", _: ""}
+                          when: "@missing"
+                        - label: t:common.edit
+                          icon: pen
+                          act: ruleEdit
+                          args:
+                            k: "@k"
+                            t: "@title"
+                            p: "@path"
+                            missing:
+                              of: "@missing"
+                              map: {"true": "1", _: ""}
+                          when: "!@missing"
+      - {type: view, id: settings.watcher}
+  page.voice:
+    error: t:voice.loadError
+    vm: voice
+    page: true
+    blocks:
+      - type: head
+        title: t:voice.title
+        help: t:voice.desc
+        actions:
+          - type: more
+            items:
+              - label: t:voice.page.label
+                act: reset
+                args: {scope: voice}
+                tone: danger
+      - type: section
+        title: t:voice.service
+        note: "1"
+        blocks:
+          - type: list
+            from: $.svc
+            row:
+              layout: two
+              title:
+                - "@name"
+                - {text: "@impl", variant: meta}
+              inline:
+                - dot: danger
+                  tip: t:voice.options.tip
+                  when:
+                    of: "@state"
+                    map: {error: true, _: false}
+                - dot: ok
+                  tip: t:common.status.running
+                  when:
+                    of: "@state"
+                    map: {running: true, _: false}
+                - dot: info
+                  tip: t:voice.options.installing
+                  when:
+                    of: "@state"
+                    map: {installing: true, _: false}
+              sub:
+                parts:
+                  - text:
+                      of: "@state"
+                      map:
+                        none: t:common.status.notInstalled
+                        installing: t:ext.installing
+                        stopped: t:settingsUi.voice.state.stopped
+                        running: t:common.status.running
+                        error: t:voice.options.tip
+                        not_configured: t:common.status.notConfigured
+                        starting: t:memoryOwners.service.state.starting
+                        stopping: t:serviceState.stopping
+                        uninstalling: t:serviceState.uninstalling
+                        _: "@state"
+                  - {text: "@log", when: "@log"}
+                  - text:
+                      t: settingsUi.voice.installPhase
+                      args: ["@installPhase"]
+                    when: ["!@log", "@installPhase"]
+                  - {text: t:common.effectLaunch, when: "@pending"}
+                sep: " · "
+              cols:
+                - control:
+                    - type: button
+                      link: true
+                      label: t:common.install
+                      act: svcInstall
+                      args: {i: "@i"}
+                      when: "@canInstall"
+                    - type: button
+                      link: true
+                      label: t:common.retry
+                      act: svcInstall
+                      args: {i: "@i"}
+                      when: "@canRetry"
+                    - type: switch
+                      value:
+                        of: "@state"
+                        map: {running: true, _: false}
+                      act: setStatus
+                      args:
+                        entity: svc
+                        id: "@i"
+                        v:
+                          of: "@state"
+                          map: {running: stopped, _: running}
+                      label:
+                        t: settingsUi.voice.switch
+                        args:
+                          - of: "@state"
+                            map: {running: true, _: false}
+                          - "@name"
+                      when:
+                        of: "@state"
+                        map: {stopped: true, running: true, _: false}
+              acts:
+                - label: t:common.moreActions
+                  icon: more
+                  args: {k: "@key"}
+                  items:
+                    - label: t:voice.serviceMenu.editPortOrModel
+                      act: voiceInstallOpen
+                      args: {kind: install, id: "@i", modify: "1"}
+                      when:
+                        of: "@state"
+                        map: {stopped: true, _: false}
+                    - label: t:common.uninstall
+                      act: setStatus
+                      args: {entity: svc, id: "@i", v: none}
+                      tone: danger
+                      when:
+                        of: "@state"
+                        map: {stopped: true, _: false}
+                    - scope: t:voice.serviceMenu.group
+                      when:
+                        of: "@state"
+                        map: {running: true, _: false}
+                  when:
+                    - of: "@state"
+                      map: {stopped: true, running: true, _: false}
+                    - of: "@state"
+                      map: {running: false, _: true}
+              moreWhen:
+                - of: "@state"
+                  map: {none: false, _: true}
+                - of: "@state"
+                  map: {installing: false, _: true}
+              moreAfter: true
+              more:
+                - type: box
+                  variant: expand
+                  blocks:
+                    - type: text
+                      variant: para
+                      when:
+                        of: "@state"
+                        map: {error: true, _: false}
+                      parts:
+                        parts:
+                          - t:voice.serviceError
+                          - {text: "@errorText", mono: true}
+                        sep: ""
+                    - type: disclosure
+                      key: "@detailKey"
+                      title: t:voice.techDetails
+                      blocks:
+                        - type: text
+                          variant: para
+                          parts:
+                            - t:voice.options.endpoint
+                            - {text: "@model", mono: true, when: "@model"}
+                            - {text: t:voice.options.text, mono: true, when: "!@model"}
+                            - {br: true}
+                            - t:voice.options.endpointPrefix
+                            - {text: "@endpoint", mono: true}
+      - type: section
+        title: t:voice.glossary
+        note: "2"
+        help: t:voice.glossaryHelp
+        blocks:
+          - type: settings
+            from: $.terms
+            empty: t:voice.noRules
+            row:
+              label:
+                t: settingsUi.voice.pair
+                args: ["@a", "@b"]
+              swap:
+                when: "@editing"
+                blocks:
+                  - type: toolbar
+                    items:
+                      - type: input
+                        id: te-a
+                        label: t:voice.heard
+                        value: "@a"
+                        more:
+                          - {id: te-b, label: t:voice.shouldBe, value: "@b"}
+                        go: termEditSave
+                        cancel: close
+                        args: {path: ss.termEdit}
+                        goLabel: t:common.save
+              ctls:
+                - type: button
+                  label: t:common.edit
+                  act: set
+                  args: {path: ss.termEdit, v: "@i", cast: num}
+                - type: button
+                  label: t:common.delete
+                  act: remove
+                  args: {entity: voiceTerm, id: "@i"}
+            rows:
+              - blocks:
+                  - type: toolbar
+                    items:
+                      - type: input
+                        id: term-wrong
+                        placeholder: t:voice.heard
+                        more:
+                          - {id: term-right, placeholder: t:voice.shouldBe}
+                        go: add
+                        args: {entity: voiceTerm}
+                        goLabel: t:common.add
+              - blocks:
+                  - type: disclosure
+                    key: voice-dict
+                    title: t:voice.builtinDict
+                    count: $.dictCount
+                    blocks:
+                      - type: text
+                        parts:
+                          - parts: $.dict
+                            sep: ""
+                            each:
+                              parts:
+                                - parts: ["@a", " → ", "@b"]
+                                  sep: ""
+      - type: section
+        title: t:voice.recognition
+        blocks:
+          - type: settings
+            rows:
+              - label: t:voice.language
+                ctls:
+                  - type: select
+                    id: stt-lang
+                    options:
+                      - {v: zh, label: t:voice.langZh}
+                      - {v: en, label: t:voice.langEn}
+                      - {v: auto, label: t:voice.autoDetect}
+                    value: $.sttLang
+                    label: t:voice.language
+                    change: sttLang
+              - kind: field
+                label: t:voice.whisperPrompt
+                id: stt-prompt
+                help: t:voice.whisperHelp
+                control:
+                  type: input
+                  id: stt-prompt
+                  rows: 3
+                  input: sttPrompt
+                  value: $.prompt
+                  placeholder: t:voice.useDefaultPrompt
+  theme.bg:
+    vm: themeBg
+    bare: true
+    blocks:
+      - type: each
+        from:
+          - {}
+        item:
+          options:
+            - {v: none, label: t:themeBackground.none}
+            - {v: bg.dusk, label: t:themeBackground.preset.duskCafe}
+            - {v: bg.night, label: t:themeBackground.preset.nightCafe}
+            - from: $.presets
+              item:
+                v: "@v"
+                label: {of: "@name", fmt: stem}
+                remove:
+                  act: bgRemove
+                  args: {id: "@v"}
+                  label: t:common.delete
+        blocks:
+          - type: settings
+            rows:
+              - label: t:themeBackground.image
+                ctls:
+                  - type: select
+                    span: 3
+                    id: $.ids.home
+                    options: "@options"
+                    value: $.home
+                    label: t:themeBackground.image
+                    change: bgPick
+                    args: {k: home}
+                  - type: button
+                    iconOnly: true
+                    icon: plus
+                    label: t:themeBackground.pickImage
+                    act: bgUpload
+                    disabled: $.full
+                    tip: t:themeBackground.limit
+              - label: t:themeBackground.opacity
+                ctls:
+                  - type: range
+                    id: $.ids.homeOp
+                    min: 0
+                    max: 100
+                    step: 1
+                    value: $.homeTr
+                    unit: "%"
+                    input: bgOp
+                    args: {k: homeTr}
+                    label: t:themeBackground.opacity
+          - type: notice
+            tone: danger
+            text:
+              of: $.feedback
+              map:
+                unsupportedImage: t:themeBackground.unsupportedImage
+                limit: t:themeBackground.limit
+                tooLarge: t:themeBackground.tooLarge
+                saveFailed: t:themeBackground.saveFailed
+                readFailed: t:themeBackground.readFailed
+                _: $.feedback
+            when: $.feedback
+  theme.themes:
+    vm: themeThemes
+    bare: true
+    blocks:
+      - type: section
+        title: t:system.theme
+        actions:
+          - {type: button, label: t:common.import, act: pdlThemeImport}
+          - type: button
+            label: t:theme.calculator
+            act: set
+            args: {path: s.calc.open, v: "true", cast: bool}
+        blocks:
+          - type: list
+            id: pdl-themes
+            from: $.items
+            row:
+              layout: two
+              key: "@id"
+              lead:
+                - {swatch: "@accent", when: "@accent"}
+                - {swatch: var(--accent), when: "!@accent"}
+              title:
+                - {text: "@name", when: "@name"}
+                - text:
+                    t: pdlDoc.sysName
+                    args: ["@n"]
+                  when: "!@name"
+              sub:
+                text:
+                  of: "@kind"
+                  map:
+                    system:
+                      t: pdlDoc.sysSub
+                      args: ["@source", "@version"]
+                    pack: "@source"
+                    custom:
+                      t: settingsUi.theme.source.custom
+                      args: ["@source", "@version"]
+                    _: "@kind"
+              tone:
+                of: "@active"
+                map: {"true": selected, "false": "", _: "@active"}
+              act: pdlThemeUse
+              args: {id: "@id"}
+              cols:
+                - {v: t:pdlDoc.inUse, w: time, when: "@active"}
+              acts:
+                - label: t:common.export
+                  icon: download
+                  act: pdlThemeExport
+                  args: {id: "@id"}
+                - label: t:pdlDoc.dup
+                  icon: copy
+                  act: pdlThemeDup
+                  args: {id: "@id"}
+                - label: t:common.rename
+                  icon: edit
+                  act: rename
+                  args: {entity: theme, id: "@id"}
+                  when: "@custom"
+                - label: t:common.delete
+                  icon: delete
+                  act: remove
+                  args: {entity: theme, id: "@id"}
+                  when: "@custom"
+            rows: 5
+          - type: list
+            id: pdl-archive
+            from: $.archived
+            row:
+              layout: two
+              key: "@key"
+              lead: {icon: clock}
+              title:
+                text:
+                  t: pdlDoc.archivedTitle
+                  args: ["@version"]
+              sub:
+                text:
+                  of: "@tried"
+                  map: {"true": t:pdlDoc.archivedFails, "false": t:pdlDoc.archivedSub, _: "@tried"}
+              act: pdlArchiveApply
+              args: {k: "@key"}
+              acts:
+                - label: t:common.delete
+                  icon: delete
+                  act: remove
+                  args: {entity: archive, id: "@key"}
+            optional: true
+  page.theme:
+    vm: theme
+    page: true
+    blocks:
+      - type: head
+        title: t:system.theme
+        actions:
+          - type: more
+            items:
+              - label: t:theme.page.label
+                act: reset
+                args: {scope: style}
+              - label:
+                  t: settingsUi.theme.rail
+                  args: [$.inRail]
+                act: rail
+                args: {k: appearance}
+      - type: section
+        title: t:theme.appearance
+        blocks:
+          - type: choices
+            from:
+              - {v: system}
+              - {v: light}
+              - {v: dark}
+            item:
+              active:
+                of: $.mode
+                map:
+                  system:
+                    of: "@v"
+                    map: {system: true, _: false}
+                  light:
+                    of: "@v"
+                    map: {light: true, _: false}
+                  dark:
+                    of: "@v"
+                    map: {dark: true, _: false}
+              thumb:
+                - palette: $.palette
+                  mode: light
+                  when:
+                    of: "@v"
+                    map: {system: true, light: true, _: false}
+                - palette: $.palette
+                  mode: dark
+                  when:
+                    of: "@v"
+                    map: {system: true, dark: true, _: false}
+            act: set
+            args: {path: s.tweaks.theme}
+      - {type: view, id: theme.themes}
+      - type: section
+        title: t:theme.textSize
+        blocks:
+          - type: settings
+            rows:
+              - label: t:theme.readSize
+                ctls:
+                  - type: seg
+                    value: $.style.readSize
+                    options:
+                      - {v: "14", label: "14"}
+                      - {v: "15", label: t:settingsUi.theme.defaultReadSize}
+                      - {v: "16", label: "16"}
+                      - {v: "17", label: "17"}
+                      - {v: "18", label: "18"}
+                    act: setStatus
+                    args: {entity: style, field: readSize}
+              - label: t:theme.uiSize
+                ctls:
+                  - type: seg
+                    value: $.style.uiScale
+                    options:
+                      - {v: "0.93", label: t:theme.scale.text}
+                      - {v: "1", label: t:theme.scale.standard}
+                      - {v: "1.07", label: t:theme.scale.large}
+                    act: setStatus
+                    args: {entity: style, field: uiScale}
+      - type: section
+        title: t:theme.motion
+        blocks:
+          - type: settings
+            rows:
+              - label: t:theme.motion
+                ctls:
+                  - type: seg
+                    value: $.style.motion
+                    options:
+                      - {v: system, label: t:theme.followSystem}
+                      - {v: reduce, label: t:theme.motionOptions.reduce}
+                      - {v: normal, label: t:theme.motionOptions.normal}
+                    act: setStatus
+                    args: {entity: style, field: motion}
+      - type: section
+        title: t:theme.font
+        blocks:
+          - type: settings
+            rows:
+              - label: t:theme.font
+                ctls:
+                  - type: select
+                    id: st-font
+                    options:
+                      - {v: bundled, label: t:theme.fontOptions.bundled}
+                      - {v: system, label: t:theme.fontOptions.system}
+                    value: $.style.font
+                    label: t:theme.font
+                    change: stylePick
+                    args: {k: font}
+      - type: section
+        title: t:themeBackground.image
+        blocks:
+          - {type: view, id: theme.bg}
+      - type: section
+        title: t:theme.shapeDensity
+        blocks:
+          - type: settings
+            rows:
+              - label: t:theme.layout
+                ctls:
+                  - type: select
+                    id: st-layout
+                    options:
+                      - [three, t:theme.threeCol]
+                      - [two, t:theme.twoCol]
+                    value: $.layout
+                    label: t:theme.layout
+                    change: layoutPick
+              - label: t:theme.radius
+                ctls:
+                  - type: select
+                    id: st-radius
+                    options:
+                      - {v: tight, label: t:theme.compact}
+                      - {v: normal, label: t:theme.radiusOptions.normal}
+                      - {v: round, label: t:theme.radiusOptions.round}
+                    value: $.style.radius
+                    label: t:theme.radius
+                    change: stylePick
+                    args: {k: radius}
+              - label: t:theme.density
+                ctls:
+                  - type: select
+                    id: st-density
+                    options:
+                      - [comfort, t:theme.comfy]
+                      - [compact, t:theme.compact]
+                    value: $.density
+                    label: t:theme.density
+                    change: densityPick
+  page.skills:
+    vm: skills
+    page: true
+    blocks:
+      - type: split
+        picked: $.picked
+        left:
+          - type: head
+            title: Skill
+            help: t:skills.desc
+            actions:
+              - type: more
+                items:
+                  - label: t:skills.add
+                    act: open
+                    args: {page: market, path: s.mkKind, v: skill}
+                  - label:
+                      t: skills.page.label
+                      args: [$.count]
+                    act: capBulk
+                    args: {v: "1"}
+                  - label:
+                      t: skills.page.disableFiltered
+                      args: [$.count]
+                    act: capBulk
+                    args: {v: "0"}
+                  - label: t:mcp.page.allProjectExceptions
+                    act: driftOpen
+                    args: {kind: drift, k: skill}
+                  - label: t:skills.page.syncAll
+                    act: capSync
+                    args: {k: skill, all: "1"}
+                  - label: t:placement.audit
+                    act: capAudit
+                    args: {capabilityType: skill}
+          - type: search
+            id: skill-q
+            placeholder: t:skills.filter
+            value: $.q
+            input: skillQ
+          - type: toolbar
+            items:
+              - type: select
+                id: cap-proj
+                options:
+                  - {v: default, label: t:frame.rail}
+                  - from: $.projects
+                    item:
+                      v: "@id"
+                      label:
+                        of: "@duplicate"
+                        map:
+                          "true":
+                            t: settingsUi.project.label.true
+                            args: ["@name", "@parent"]
+                          "false": "@name"
+                          _: ""
+                value: $.scopeV
+                prefix: t:mcp.scopePrefix
+                label: t:mcp.scope
+                change: capProject
+              - type: select
+                id: sk-cat
+                options:
+                  - {v: all, label: t:common.all}
+                  - from: $.cats
+                    item:
+                      v: "@v"
+                      label:
+                        of: "@v"
+                        map: {"": t:threadRow.unassigned, _: "@v"}
+                value: $.cat
+                prefix: t:skills.catPrefix
+                label: t:skills.category
+                change: skillCat
+              - type: chip
+                label: t:capabilities.mcp.exception
+                faint: $.bad.n
+                tone: warn
+                pressed: $.bad.on
+                act: toggle
+                args: {path: s.skillFilter, values: all|bad}
+                when: $.bad
+              - {type: grow}
+              - type: button
+                icon: layers
+                label:
+                  t: capabilities.skills.label
+                  args: [$.mount.n]
+                tip:
+                  of: $.mount.scope
+                  map:
+                    global: t:skills.mountRules.heading.global
+                    project: t:capabilities.skills.projectMountRules
+                    _: $.mount.scope
+                act: dialog
+                args: {kind: mountRules}
+          - type: list
+            id: sk
+            scroll: true
+            from: $.items
+            row: cap.item
+            load: $.cardsLoad
+            empty: t:skills.noMatch
+            emptyAction:
+              type: button
+              label: t:skills.clearFilter
+              act: set
+              args: {path: s.skillQuery|s.skillCat, v: "|all"}
+        right:
+          - {type: empty, icon: bolt, text: t:skills.pickOne, when: "!$.picked"}
+          - {type: view, id: page.skill, when: $.picked}
+  dlg.mountRules:
+    vm: mountRules
+    title:
+      t: skills.mountRules.heading
+      args: [$.scope, $.projectName]
+    help:
+      t: skills.mountRules.hint
+      args: [$.scope]
+    noFieldFocus: true
+    blocks:
+      - {type: list, inline: true, from: $.std, row: mount.row}
+      - type: list
+        inline: true
+        optional: true
+        from: $.custom
+        row: mount.row
+      - type: toolbar
+        when: $.adding
+        items:
+          - type: input
+            id: mt-alias
+            placeholder: t:common.name
+            label: t:skills.customName
+            mono: true
+            more:
+              - id: mt-path
+                placeholder: .opencode/skills
+                label: t:skills.customPath
+                mono: true
+            go: add
+            args: {entity: mountCustom}
+            goLabel: t:common.add
+      - type: toolbar
+        items:
+          - type: button
+            iconOnly: true
+            icon: plus
+            label: t:skills.customPath
+            act: toggle
+            args: {path: s.dialog.adding}
+            pressed: $.adding
+          - type: text
+            variant: meta
+            parts:
+              - {text: t:common.add}
+              - {text: t:skills.customPath}
+  dlg.skillMounts:
+    vm: skillMounts
+    title:
+      t: skills.mountRules.heading.project
+      args: [$.name]
+    text: t:skills.mountList.text
+    noFieldFocus: true
+    blocks:
+      - {type: list, inline: true, from: $.mounts, row: mount.row}
+  page.mcp:
+    vm: mcp
+    page: true
+    blocks:
+      - type: split
+        picked: $.picked
+        left:
+          - type: head
+            title: MCP
+            help: t:mcp.desc
+            actions:
+              - type: more
+                items:
+                  - label: t:mcp.addMenu.label
+                    act: open
+                    args: {page: mcpNew}
+                  - {label: t:mcp.addMenu.syncSystemConfiguration, act: capSysSync}
+                  - label: t:mcp.page.label
+                    act: download
+                    args: {text: $.export, name: mcp.json}
+                  - label: t:mcp.page.allProjectExceptions
+                    act: driftOpen
+                    args: {kind: drift, k: mcp}
+                  - label: t:placement.audit
+                    act: capAudit
+                    args: {capabilityType: mcp}
+          - type: search
+            id: mcp-q
+            placeholder: t:mcp.filter
+            value: $.q
+            input: mcpQ
+          - type: toolbar
+            items:
+              - type: select
+                id: cap-proj
+                options:
+                  - {v: default, label: t:frame.rail}
+                  - from: $.projects
+                    item:
+                      v: "@id"
+                      label:
+                        of: "@duplicate"
+                        map:
+                          "true":
+                            t: settingsUi.project.label.true
+                            args: ["@name", "@parent"]
+                          "false": "@name"
+                          _: ""
+                value: $.scopeV
+                prefix: t:mcp.scopePrefix
+                label: t:mcp.scope
+                change: capProject
+              - {type: grow}
+              - type: select
+                id: mcp-src
+                options:
+                  - {v: all, label: t:mcp.allSources}
+                  - {v: builtin, label: t:settingsUi.mcp.tag.builtin}
+                  - {v: plugin, label: t:mcp.fromPlugin}
+                  - {v: external, label: t:mcp.external}
+                  - {v: market, label: t:mcp.market}
+                value: $.src
+                label: t:common.source
+                change: mcpSrc
+              - type: chip
+                label: t:capabilities.mcp.exception
+                faint: $.bad.n
+                tone: warn
+                pressed: $.bad.on
+                act: toggle
+                args: {path: s.mcpFilter, values: all|bad}
+                when: $.bad
+          - type: list
+            id: mc
+            scroll: true
+            from: $.items
+            row: cap.item
+            load: $.cardsLoad
+            empty: t:mcp.noMatch
+        right:
+          - {type: empty, icon: box, text: t:mcp.pickOne, when: "!$.picked"}
+          - type: view
+            id:
+              of: $.isNew
+              map: {"true": page.mcpNew, "false": page.mcpItem}
+            when: $.picked
+  page.skill:
+    vm: skill
+    blocks:
+      - type: head
+        title: $.name
+        note: "1"
+        help: $.desc
+        meta:
+          - chips: $.tags
+            each:
+              chip:
+                of: "@k"
+                map:
+                  src_builtin:
+                    t: settingsUi.mcp.tag.builtin
+                    args: ["@v"]
+                  src_plugin:
+                    t: capabilities.skill.tag.src_plugin
+                    args: ["@v"]
+                  src_market:
+                    t: settingsUi.mcp.tag.market
+                    args: ["@v"]
+                  ov_default:
+                    t: settingsUi.mcp.tag.default
+                    args: ["@v"]
+                  ov_project:
+                    t: settingsUi.mcp.tag.project
+                    args: ["@v"]
+                  cat: "@v"
+                  cat_none:
+                    t: threadRow.unassigned
+                    args: ["@v"]
+                  trigger: "@v"
+                  more:
+                    t: capabilities.skill.tag.more
+                    args: ["@v"]
+                  dep_ready:
+                    t: capabilities.skill.tag.dep_ready
+                    args: ["@v"]
+                  dep_off:
+                    t: capabilities.skill.tag.dep_off
+                    args: ["@v"]
+                  dep_missing:
+                    t: capabilities.skill.tag.dep_missing
+                    args: ["@v"]
+                  synced:
+                    t: capabilities.skill.tag.synced
+                    args: ["@v"]
+                  _: "@k"
+              act: "@act"
+              args: "@args"
+          - {br: true}
+          - parts:
+              - {text: t:skill.filePath}
+              - control:
+                  type: copy
+                  value: $.path
+                  label: t:capabilities.skill.copyFilePath
+                  mono: true
+        actions:
+          - type: button
+            icon: layers
+            label:
+              t: capabilities.skills.label
+              args: [$.mounted]
+            tip: t:capabilities.skills.projectMountRules
+            act: dialog
+            args: {kind: skillMounts}
+          - type: switch
+            value: $.on
+            act: capSkill
+            args: {n: $.name}
+            label: t:control.enable
+          - type: more
+            items:
+              - label: t:capabilities.skill.copyFilePath
+                act: copy
+                args: {v: $.path}
+              - {label: t:control.reveal, act: reveal}
+              - label: t:capabilities.skill.srcLabel
+                act: open
+                args: {page: $.srcTo}
+                when: $.src.market
+              - label: t:mcpForm.viewPlugin
+                act: open
+                args: {page: $.srcTo}
+                when: $.src.plugin
+              - label:
+                  of: $.ov
+                  map:
+                    default: t:capabilities.ov.reset.default
+                    project: t:capabilities.ov.reset.project
+                    _: $.ov
+                act: reset
+                args: {scope: $.resetScope}
+                when: $.ov
+      - type: notice
+        from: $.issues.dep
+        tone: warn
+        note: "2"
+        strong: t:capabilities.issue.head.dep
+        parts:
+          - {text: t:capabilities.dep.lead}
+          - parts: "@deps"
+            sep: 、
+            each:
+              text:
+                t: capabilities.dep.state
+                args: ["@st", "@id"]
+          - {text: 。}
+        action:
+          - type: button
+            label: t:capabilities.skill.label
+            act: open
+            args: {page: market, path: s.mkKind, v: mcp_server}
+            when: "@missing"
+          - type: button
+            label: t:capabilities.skill.enableMcp
+            act: open
+            args: {page: mcp}
+            when: "!@missing"
+      - type: notice
+        from: $.issues.drift
+        tone: warn
+        note: "2"
+        strong:
+          of: "@code"
+          map:
+            dep: t:capabilities.issue.head.dep
+            xproj: t:capabilities.issue.head.xproj
+            conflict: t:settingsUi.mcp.issue.conflict
+            stale_mount: t:settingsUi.mcp.issue.stale_mount
+            unregistered: t:settingsUi.mcp.issue.unregistered
+            mount_missing: t:settingsUi.mcp.issue.mount_missing
+            new_config: t:settingsUi.mcp.issue.new_config
+            config_residue: t:settingsUi.mcp.issue.config_residue
+            ghost: t:settingsUi.mcp.issue.ghost
+            global_added: t:settingsUi.mcp.issue.global_added
+            config_mismatch: t:settingsUi.mcp.issue.config_mismatch
+            residual_config: t:settingsUi.mcp.issue.residual_config
+            detect_failed: t:settingsUi.mcp.issue.detect_failed
+            _: "@code"
+        parts:
+          - {text: "@text"}
+          - {text: 。}
+          - {text: t:capabilities.skill.projectOverridesSuffix, when: "@ov"}
+        action:
+          type: button
+          label:
+            of: "@code"
+            map:
+              conflict: t:capabilities.issue.fix.conflict
+              stale_mount: t:capabilities.issue.fix.stale_mount
+              unregistered: t:capabilities.issue.fix.unregistered
+              mount_missing: t:capabilities.issue.fix.mount_missing
+              new_config: t:capabilities.issue.fix.new_config
+              config_residue: t:capabilities.issue.fix.config_residue
+              ghost: t:capabilities.issue.fix.ghost
+              global_added: t:capabilities.issue.fix.new_config
+              config_mismatch: t:capabilities.issue.fix.config_mismatch
+              residual_config: t:capabilities.issue.fix.residual_config
+              detect_failed: t:wsCommunity.sync
+              _: "@code"
+          act: capFix
+          args: {k: skill, n: $.name, t: "@code"}
+      - type: notice
+        from: $.issues.xproj
+        tone: warn
+        note: "2"
+        strong: t:capabilities.issue.head.xproj
+        parts:
+          - text:
+              t: capabilities.projectSync.text
+              args: ["@same", "@total"]
+          - {text: 。}
+        action:
+          type: button
+          label: t:mcpItem.actions.viewProjects
+          act: driftOpen
+          args: {kind: drift, k: skill}
+      - type: section
+        title: t:skill.content
+        note: "4"
+        blocks:
+          - type: box
+            variant: group
+            blocks:
+              - type: empty
+                when: $.doc.missing
+                text:
+                  t: capabilities.skill.missingText
+                  args: [$.path]
+              - {type: markdown, text: $.doc.md, when: $.doc.md}
+  page.mcpItem:
+    vm: mcpItem
+    blocks:
+      - type: head
+        title: $.name
+        note: "1"
+        meta:
+          - chips: $.tags
+            each:
+              chip:
+                t: settingsUi.mcp.tag
+                args: ["@k", "@v"]
+        actions:
+          - type: switch
+            value: $.on
+            act: setStatus
+            args: {entity: mcp, id: $.name}
+            label: t:control.enable
+          - type: more
+            args: {k: $.idx}
+            items:
+              - label: t:capabilities.mcp.copyLaunchCommand
+                act: copy
+                args: {v: $.command}
+              - label: t:capabilities.mcp.copyConfigurationJson
+                act: copy
+                args: {v: $.json}
+              - {label: t:capabilities.mcp.viewLog, why: t:capabilities.mcp.logLocation}
+              - label: t:capabilities.mcp.uninstallMenu
+                act: remove
+                args: {entity: mcpServer, id: $.idx}
+                tone: danger
+                when: $.src.external
+              - label: t:capabilities.mcp.manageInExtensions
+                act: open
+                args: {page: $.srcTo}
+                when: $.src.plugin
+              - label: t:capabilities.skill.srcLabel
+                act: open
+                args: {page: $.srcTo}
+                when: $.src.market
+              - label:
+                  t: capabilities.ov.reset
+                  args: [$.ov]
+                act: reset
+                args: {scope: $.resetScope}
+                when: $.ov
+              - label: t:mcpItem.resetConfig
+                act: reset
+                args: {scope: $.cfgResetScope}
+                when: $.cfgOv
+      - type: notice
+        from: $.issues
+        tone: warn
+        strong:
+          of: "@code"
+          map:
+            conflict:
+              t: settingsUi.mcp.issue.conflict
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            stale_mount:
+              t: settingsUi.mcp.issue.stale_mount
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            unregistered:
+              t: settingsUi.mcp.issue.unregistered
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            mount_missing:
+              t: settingsUi.mcp.issue.mount_missing
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            new_config:
+              t: settingsUi.mcp.issue.new_config
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            config_residue:
+              t: settingsUi.mcp.issue.config_residue
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            ghost:
+              t: settingsUi.mcp.issue.ghost
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            global_added:
+              t: settingsUi.mcp.issue.global_added
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            config_mismatch:
+              t: settingsUi.mcp.issue.config_mismatch
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            residual_config:
+              t: settingsUi.mcp.issue.residual_config
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            detect_failed:
+              t: settingsUi.mcp.issue.detect_failed
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            error:
+              t: settingsUi.mcp.issue.error
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            xproj:
+              t: settingsUi.mcp.issue.xproj
+              args:
+                - of: "@text"
+                  map: {"": t:capabilities.connectionIssue.disconnected, _: "@text"}
+                - "@n"
+            _: "@code"
+        parts:
+          - {text: "@text", when: "@drift"}
+          - text:
+              t: capabilities.projectSync.text
+              args: ["@same", "@total"]
+            when: "@xproj"
+          - text: 。
+            when: ["!@error", "@drift"]
+          - {text: 。, when: "@xproj"}
+        action:
+          - type: button
+            label:
+              of: "@code"
+              map:
+                conflict: t:capabilities.issue.fix.conflict
+                stale_mount: t:capabilities.issue.fix.stale_mount
+                unregistered: t:capabilities.issue.fix.unregistered
+                mount_missing: t:capabilities.issue.fix.mount_missing
+                new_config: t:capabilities.issue.fix.new_config
+                config_residue: t:capabilities.issue.fix.config_residue
+                ghost: t:capabilities.issue.fix.ghost
+                global_added: t:capabilities.issue.fix.new_config
+                config_mismatch: t:capabilities.issue.fix.config_mismatch
+                residual_config: t:capabilities.issue.fix.residual_config
+                detect_failed: t:wsCommunity.sync
+                _: "@code"
+            act: capFix
+            args: {k: mcp, n: $.name}
+            when: "@drift"
+          - type: button
+            label: t:mcpItem.actions.viewProjects
+            act: driftOpen
+            args: {k: mcp}
+            when: "@xproj"
+      - {$frag: MCP_FORM}
+      - type: section
+        title: t:mcpItem.whoCanUse
+        note: "2"
+        help:
+          t: settingsUi.mcp.catsHelp
+          args: [$.scope]
+        blocks:
+          - type: box
+            variant: group
+            key: cats
+            blocks:
+              - type: list
+                inline: true
+                from: $.cats.items
+                item:
+                  mark:
+                    of: "@scope"
+                    map:
+                      default:
+                        of: "@source"
+                        map: {default: t:settingsUi.mcp.catMark.default, _: ""}
+                      _:
+                        of: "@source"
+                        map: {project: t:settingsUi.mcp.catMark.project, _: ""}
+                  ctl:
+                    lit:
+                      - type: switch
+                        value: "@on"
+                        act: setStatus
+                        args: {entity: mcpCat, id: "@entityId"}
+                        label:
+                          t: settingsUi.mcp.catSwitch
+                          args: ["@on", "@name", "@handle"]
+                row: member.row
+              - type: text
+                variant: meta
+                text:
+                  t: mcp.members.foot
+                  args: [$.cats.off]
+                when: $.cats.off
+  page.mcpNew:
+    vm: mcpNew
+    blocks:
+      - {type: head, title: t:mcpNew.title, note: "1", help: t:mcpNew.desc}
+      - {$frag: MCP_FORM}
+  page.member:
+    error: t:runtime.readError
+    retry:
+      act: memberProviderSetup
+      args: {op: inspect}
+    vm: member
+    page: true
+    blocks:
+      - type: head
+        lead: {who: $.id, size: xl}
+        title: $.name
+        label: $.handle
+        meta:
+          parts:
+            - {text: $.breed}
+            - {text: $.id, mono: true}
+            - {text: $.model}
+            - control: {type: status, tone: warn, text: $.note}
+              when: [$.on, $.state, "!$.is.ok"]
+          sep: " · "
+        note: "1"
+        actions:
+          - type: switch
+            value: $.on
+            act: setStatus
+            args: {entity: member, id: $.id}
+            label: t:control.enable
+          - type: more
+            items:
+              - label: t:members.menu.label
+                act: open
+                args: {node: team, anchor: panel}
+              - label: t:members.menu.protectedMember
+                act: noop
+                args: {entity: member, id: $.id}
+                when: $.form.cloud
+              - label: t:members.delete.ok
+                act: remove
+                args: {entity: member, id: $.id}
+                tone: danger
+                when: "!$.form.cloud"
+        actNote: "2"
+      - {$frag: MEMBER_FORM}
+  page.memberNew:
+    error: t:runtime.readError
+    retry:
+      act: memberProviderSetup
+      args: {op: inspect}
+    vm: memberNew
+    page: true
+    blocks:
+      - {type: head, title: t:members.add, note: "1", help: t:memberNew.desc}
+      - type: toolbar
+        note: "3"
+        load: $.tplLoad
+        error: t:memberNew.templatesError
+        items:
+          - type: select
+            id: mn-tpl
+            options:
+              - from: $.templates
+                item: {v: "@id", label: "@name"}
+              - {v: blank, label: t:memberNew.notifications.title}
+            value: $.tpl
+            prefix: t:memberNew.fromHome
+            label: t:memberNew.fromHome
+            change: pickTpl
+      - {$frag: MEMBER_FORM}
+  page.plug:
+    error: t:runtime.readError
+    retry: {act: companionRead}
+    vm: plug
+    page: full
+    blocks:
+      - type: head
+        title: $.name
+        note: "1"
+        help: t:pluginPage.desc
+        actions:
+          - type: button
+            label: t:pluginPage.settings
+            act: open
+            args: {page: $.to}
+      - type: notice
+        tone: warn
+        text: t:runtime.companionLost
+        when: $.frame.state
+        action:
+          type: button
+          label: t:runtime.companionRestore
+          act: companionRestore
+          args: {lossId: $.frame.lossId}
+          when: $.frame.canRestore
+      - {type: frame, plugin: $.key, src: $.src, what: $.name, tall: true}
+  accounts.switch:
+    vm: accountSwitch
+    error: t:runtime.readError
+    retry:
+      act: accSwitch
+      args: {k: $.id}
+    blocks:
+      - type: list
+        label: t:runtime.affected
+        from: $.targets
+        row: record.row
+        optional: true
+      - type: list
+        label: t:runtime.exceptions
+        from: $.exceptions
+        row: record.row
+        optional: true
+      - type: settings
+        rows:
+          - label: t:runtime.includeOverrides
+            ctls:
+              - type: switch
+                disabled: $.busy
+                value: $.includeOverrides
+                label: t:runtime.includeOverrides
+                act: toggle
+                args: {path: ss.accountSwitch.includeOverrides}
+      - type: toolbar
+        items:
+          - type: button
+            primary: true
+            label: t:accounts.confirmSwitch
+            act: accSwitchOk
+            args: {k: $.id}
+            disabled: "!$.canCommit"
+  dlg.mcpUninstall:
+    title: t:mcp.uninstall.title
+    text:
+      - t: mcp.uninstall.text
+        args:
+          - {parts: $.name, mono: true}
+    ok: t:common.uninstall
+  dlg.pluginUninstall:
+    title:
+      t: settingsUi.plugin.uninstallTitle
+      args: [$.name]
+    text:
+      t: settingsUi.plugin.uninstallEffect
+      args: [$.effect, $.entryLabel]
+    ok: t:common.uninstall
+  dlg.pluginEnable:
+    title:
+      t: pluginPage.toggle.title
+      args: [$.name]
+    text:
+      - {text: $.text}
+    ok: t:control.enable
+  dlg.pluginUpdate:
+    title:
+      t: pluginPage.update.title
+      args: [$.name, $.version]
+    text:
+      t: settingsUi.plugin.updateText
+      args: [$.on]
+    ok: t:ext.needAct.update
+  dlg.pluginDisconnect:
+    title: t:placement.disconnect
+    text:
+      - {text: $.key}
+    ok: t:placement.disconnect
+    danger: true
+  dlg.pluginFile:
+    title: t:ext.offlineInstall
+    fields:
+      - label: t:capabilities.fileError.label
+        id: cap-file
+        help: t:capabilities.fileError.help
+        file: {accept: ".tgz,.gz,.zip", change: capFile}
+        foot: $.error
+        footTone: err
+    ok: t:guide.next
+  dlg.pluginFileInspect:
+    bare: true
+    title:
+      t: runtime.installConfirm
+      args: [$.name]
+    text:
+      - t: capabilities.notifications.unverifiedLocalFile
+        args:
+          - {parts: $.file, mono: true}
+    ok: t:common.install
+    blocks:
+      - type: settings
+        from:
+          - {label: t:ext.version, version: true}
+          - {label: t:capabilities.notifications.provides, connector: true}
+        item:
+          parts:
+            - {text: $.version, mono: true, when: "@version"}
+            - text:
+                t: settingsUi.plugin.connectorValue
+                args: [$.connector]
+              when: "@connector"
+  dlg.marketSourceDelete:
+    title: t:common.delete
+    text:
+      - {text: $.url}
+  dlg.memberHooksSync: {title: t:runtime.hooks.sync, ok: t:wsCommunity.sync}
+  dlg.push:
+    vm: pushDiag
+    bare: true
+    title: t:system.pushDiag
+    blocks:
+      - {type: view, id: dialog.push}
+  dlg.pcfConfirm:
+    title: $.label
+    text:
+      - {text: $.text}
+    ok: $.label
+    danger: true
+  dlg.routingRedirect:
+    title: t:chat.routingRedirect.title
+    text:
+      - t: chat.routingRedirect.unavailable
+        args:
+          - {of: $.unavailable, item: "@displayName", sep: 、}
+      - t: chat.routingRedirect.targets
+        args:
+          - {of: $.targets, item: "@displayName", sep: 、}
+    ok: t:chat.routingRedirect.confirm
+  dlg.owner:
+    title: t:system.owner
+    ok: t:common.save
+    fields:
+      - label: t:common.name
+        id: ow-name
+        value: $.name
+        placeholder: t:members.ownerForm.placeholder
+        req: true
+      - label: t:memberForm.fields.nickname
+        id: ow-nickname
+        value: $.nickname
+        max: 64
+      - label: t:memberNew.avatar
+        id: ow-ava
+        avatar:
+          lead:
+            name: $.name
+            color: {of: $.lead, fmt: color}
+      - label: t:memberForm.fields.identityColor
+        id: c1
+        color: {value: $.lead}
+      - label: t:memoryOwners.aliases
+        id: ow-alias
+        chips:
+          vals: $.aliases
+          ph: t:memoryOwners.aliases
+          label: t:members.ownerForm.addAlias
+      - label: {lit: t:memberForm.handle}
+        id: ow-tags
+        req: true
+        help: t:members.ownerForm.help
+        chips:
+          vals: $.tags
+          kind: handle
+          ph: {lit: "@co-creator"}
+          label: t:members.ownerForm.addHandle
+  dlg.acc:
+    okArgs:
+      name:
+        t: settingsUi.account.defaults.loginName
+        args: [$.loginCounter.n]
+      customVendor: t:settingsUi.account.defaults.customVendor
+    title:
+      of: $.edit
+      map:
+        "true": t:settingsUi.account.dialogTitle.true
+        "false": t:accounts.add
+        _: $.edit
+    ok:
+      of: $.mode
+      map: {oauth: t:accounts.form.oauth, key: t:common.save, _: $.mode}
+    panes:
+      cur: $.mode
+      locked: $.edit
+      items:
+        - {v: oauth, label: t:accounts.form.label}
+        - {v: key, label: API Key}
+      ok: {oauth: t:accounts.form.oauth, key: t:common.save}
+    fields:
+      - pane: oauth
+        label: t:accounts.form.noteName
+        id: acc-note
+        placeholder: t:wsSignals.memo
+        help: t:accounts.form.help
+      - pane: oauth
+        label: t:accounts.form.vendor
+        id: acc-vendor
+        change: accVendorSet
+        options: $.loginVendors
+        value: $.vendor
+        help: t:accounts.form.codexLoginHelp
+      - pane: key
+        label: t:accounts.form.accountName
+        id: acc-name
+        value: $.name
+        placeholder: t:accounts.form.accountName
+        req: true
+      - pane: key
+        label: t:accounts.form.apiKeyOwnership
+        id: acc-owner
+        change: accOwnerSet
+        options: $.keyOwners
+        value: $.owner
+      - pane: key
+        label: t:accounts.form.apiEndpoint
+        id: acc-url
+        value: $.url
+        placeholder: $.urlPlaceholder
+        mono: true
+        req: true
+      - pane: key
+        label: API Key
+        id: acc-key
+        placeholder:
+          of: $.edit
+          map: {"true": t:settingsUi.env.secretPlaceholder.true, "false": sk-..., _: $.edit}
+        mono: true
+        type: {lit: password}
+        req: $.newAccount
+      - pane: key
+        label: t:accounts.form.availableModels
+        id: acc-models
+        req: true
+        chips:
+          vals: $.models
+          ph: t:settingsUi.member.modelPh.
+          label: t:accounts.form.addModel
+          empty: t:accounts.form.empty
+      - pane: key
+        label: t:env.envVars
+        id: acc-env
+        help: t:accounts.form.environmentHelp
+        env:
+          open: false
+          rows: []
+          toggle: t:control.envToggle
+  dlg.token:
+    okArgs:
+      name: t:accounts.token.longLivedToken
+      sub: t:accounts.token.longLivedToken
+    title: t:accounts.token.title
+    ok: t:accounts.token.ok
+    fields:
+      - label: t:accounts.token.label
+        id: tk-note
+        value: $.name
+        placeholder: t:wsSignals.memo
+      - label: t:accounts.token.longLivedToken
+        id: tk-token
+        placeholder: sk-ant-oat01-…
+        mono: true
+        type: {lit: password}
+        req: true
+        help: t:accounts.token.help
+        links:
+          - label: t:accounts.token.officialDocs
+            href: https://code.claude.com/docs/en/authentication#generate-a-long-lived-token
+  dlg.canonAvatar:
+    title: t:members.avatarCorrection.open
+    ok: t:common.save
+    fields:
+      - id: canon-v
+        value: $.current
+        radios:
+          - from: $.versions
+            item:
+              v: "@id"
+              title: "@label"
+              sub:
+                of: "@superseded"
+                map:
+                  "true":
+                    t: settingsUi.canon.version.true
+                    args: ["@at", "@supersededReason"]
+                  "false": "@at"
+                  _: "@superseded"
+      - id: canon-file
+        label: t:members.avatarCorrection.upload
+        file: {accept: "image/png,image/jpeg,image/webp"}
+      - {id: dlg-in, label: t:hub.detail.reason}
+  dlg.env:
+    title: t:env.form.title
+    ok: t:env.form.ok
+    fields:
+      - label: $.key
+        id: env-in
+        mono: true
+        area: $.json
+        type: null
+        value: $.value
+        placeholder: $.defaultValue
+        help:
+          of: $.rule
+          map:
+            port:
+              t: settingsUi.env.help.port
+              args:
+                - $.label
+                - {of: $.enumValues, sep: " / "}
+            enum:
+              t: settingsUi.env.help.enum
+              args:
+                - $.label
+                - {of: $.enumValues, sep: " / "}
+            json:
+              t: settingsUi.env.help.json
+              args:
+                - $.label
+                - {of: $.enumValues, sep: " / "}
+            cats:
+              t: settingsUi.env.help.cats
+              args:
+                - $.label
+                - {of: $.enumValues, sep: " / "}
+            secret:
+              t: settingsUi.env.help.secret
+              args:
+                - $.label
+                - {of: $.enumValues, sep: " / "}
+            text: $.label
+            _: $.rule
+        foot:
+          t: settingsUi.env.foot
+          args: [$.runtime]
+        when: "!$.secret"
+      - label: $.key
+        id: env-in
+        mono: true
+        area: false
+        type: {lit: password}
+        value: ""
+        placeholder:
+          t: settingsUi.env.secretPlaceholder
+          args: [$.stored]
+        help:
+          of: $.rule
+          map:
+            port:
+              t: settingsUi.env.help.port
+              args: [$.label]
+            enum:
+              t: settingsUi.env.help.enum
+              args: [$.label]
+            json:
+              t: settingsUi.env.help.json
+              args: [$.label]
+            cats:
+              t: settingsUi.env.help.cats
+              args: [$.label]
+            secret:
+              t: settingsUi.env.help.secret
+              args: [$.label]
+            text: $.label
+            _: $.rule
+        foot:
+          t: settingsUi.env.foot
+          args: [$.runtime]
+        when: $.secret
+  dlg.profileObservation:
+    title:
+      t: profiles.observation.title
+      args: [$.name, $.handle]
+    fields:
+      - label: t:profiles.observation.placeholder
+        id: obs-in
+        area: true
+        placeholder: t:profiles.observation.placeholder
+        help: t:profiles.observation.help
+    ok: t:wsChanges.commit
+  dlg.ruleMissing:
+    title: $.title
+    text:
+      - t: rules.edit.text
+        args:
+          - {parts: $.path, mono: true}
+    ok: t:common.gotIt
+  dlg.ruleEdit:
+    title:
+      t: rules.edit.title
+      args: [$.title]
+    doc:
+      path: $.path
+      meta: t:rules.edit.meta
+      edit: true
+      id: rule-text
+      label: t:rules.edit.label
+      text: $.text
+    ok: t:common.save
+    sync: true
+  dlg.memberDelete:
+    title:
+      t: members.delete.title
+      args: [$.name, $.handle]
+    text: t:members.delete.text
+    ok: t:members.delete.ok
+  dlg.accountDelete:
+    title:
+      t: accounts.delete.title
+      args: [$.name]
+    text: t:accounts.delete.text
+    ok: t:accounts.delete.ok
+  dlg.serviceUninstall:
+    title:
+      t: voice.uninstall.title
+      args: [$.name]
+    text:
+      t: voice.uninstall.text
+      args:
+        - {of: $.sizeBytes, fmt: bytes}
+    ok: t:common.uninstall
+  dlg.l0:
+    vm: l0
+    okAct: copy
+    okArgs: {v: $.text}
+    title: t:rules.l0Title
+    doc:
+      path: $.path
+      meta:
+        t: rules.previewMeta.meta
+        args: [$.lines]
+      text: $.text
+    ok: t:work.copyContent
+    sync: true
+  dlg.drift:
+    bare: true
+    title:
+      of: $.scoped
+      map:
+        "true":
+          of: [0, 1, 2]
+          item:
+            of: "@"
+            map:
+              "0":
+                of: $.project.home
+                map:
+                  "true":
+                    t: settingsUi.project.scope.true
+                    args:
+                      - of: $.project.duplicate
+                        map:
+                          "true":
+                            t: settingsUi.project.label.true
+                            args: [$.project.name, $.project.parent]
+                          "false": $.project.name
+                          _: ""
+                  "false":
+                    of: $.project.duplicate
+                    map:
+                      "true":
+                        t: settingsUi.project.label.true
+                        args: [$.project.name, $.project.parent]
+                      "false": $.project.name
+                      _: ""
+                  _: ""
+              "1": " · "
+              "2":
+                t: settingsUi.drift.kind
+                args: [$.k]
+          sep: ""
+        "false":
+          t: settingsUi.drift.title.false
+          args:
+            - of: $.project.home
+              map:
+                "true":
+                  t: settingsUi.project.scope.true
+                  args:
+                    - of: $.project.duplicate
+                      map:
+                        "true":
+                          of: [0, 1, 2]
+                          item:
+                            of: "@"
+                            map: {"0": $.project.name, "1": " · ", "2": $.project.parent}
+                          sep: ""
+                        "false": $.project.name
+                        _: ""
+                "false":
+                  of: $.project.duplicate
+                  map:
+                    "true":
+                      of: [0, 1, 2]
+                      item:
+                        of: "@"
+                        map: {"0": $.project.name, "1": " · ", "2": $.project.parent}
+                      sep: ""
+                    "false": $.project.name
+                    _: ""
+                _: ""
+            - t: settingsUi.drift.kind
+              args: [$.k]
+        _: $.scoped
+    ack: true
+    ok:
+      t: settingsUi.drift.ok
+      args: [$.scoped]
+    blocks:
+      - type: component
+        use: wideBody
+        when: $.nodes
+        props:
+          blocks:
+            - type: empty
+              text:
+                t: capabilities.drift.details.emptyState
+                args:
+                  - of: $.scoped
+                    map:
+                      "true": t:capabilities.drift.details.currentProject
+                      "false": t:capabilities.drift.details.allProjects
+              when: "!$.projectCount"
+            - type: tree
+              id: $.tree
+              nodes: $.nodes
+              row: drift.row
+              ready: true
+              divider: true
+              when: $.projectCount
+  dlg.mcpOrphans:
+    title:
+      t: capabilities.drift.sync.title
+      args: [$.count]
+    text:
+      - t: capabilities.drift.sync.text
+        args:
+          - parts: $.items
+            sep: 、
+            each:
+              parts:
+                - {text: "@name", mono: true}
+                - {text: （}
+                - text:
+                    of: "@default"
+                    map: {"true": t:settingsUi.project.scope.true, "false": "@scope"}
+                - {text: ）}
+              sep: ""
+    ok: t:capabilities.drift.sync.ok
+    danger: true
+  dlg.mcpImport:
+    bare: true
+    title: t:mcp.systemSync.title
+    text:
+      - t: settingsUi.mcp.importText
+        args: [$.scope, $.projectName]
+    ok: t:mcp.systemSync.ok
+    blocks:
+      - type: settings
+        from: $.sources
+        row:
+          label: "@client"
+          ctls: []
+          help:
+            - {parts: "@paths", sep: " · ", mono: true}
+  dlg.mcpImportResult:
+    bare: true
+    title:
+      t: settingsUi.mcp.importTitle
+      args: [$.added, $.total]
+    text:
+      - t: settingsUi.mcp.importResultText
+        args:
+          - $.added
+          - parts: $.names
+            sep: 、
+            each: {text: "@", mono: true}
+    ack: true
+    ok: t:common.gotIt
+    blocks:
+      - type: component
+        use: wideBody
+        props:
+          blocks:
+            - type: list
+              id: capSyncRes
+              from: $.sources
+              row:
+                layout: two
+                title:
+                  text:
+                    of: "@copied"
+                    map: {"true": t:capabilities.notifications.push, "false": "@client"}
+                sub:
+                  - use: longText
+                    props:
+                      parts:
+                        - {parts: "@found", sep: 、, mono: true, when: "@found"}
+                        - {text: t:capabilities.notifications.sub, when: "!@found"}
+                cols:
+                  - v:
+                      text:
+                        t: capabilities.notifications.importSummary
+                        args: ["@found.length", "@added.length", "@skipped.length"]
+                    w: auto
+  dlg.pluginInstall:
+    bare: true
+    title:
+      of: $.customLabel
+      map:
+        "true":
+          of: [0, 1, 2, 3]
+          item:
+            of: "@"
+            map: {"0": $.label, "1": " ", "2": $.name, "3": ？}
+          sep: ""
+        "false":
+          t: settingsUi.plugin.installTitle.false
+          args: [$.label, $.name]
+        _: $.customLabel
+    text:
+      - parts: [$.publisher, " · ", $.version]
+        sep: ""
+    ok:
+      of: $.customLabel
+      map:
+        "true": $.label
+        "false":
+          t: common.install
+          args: [$.label]
+        _: $.customLabel
+    blocks:
+      - type: component
+        use: bulletList
+        props:
+          title: t:capabilities.install.body
+          from: $.provides
+          item:
+            t: settingsUi.plugin.installContribution
+            args:
+              - t: settingsUi.contribution.kind
+                args: ["@kind"]
+              - parts: "@items"
+                sep: 、
+                each:
+                  text:
+                    of: "@titleMode"
+                    map:
+                      plain: "@title"
+                      entry:
+                        t: settingsUi.contribution.title.entry
+                        args: ["@title"]
+                      legacy:
+                        t: settingsUi.contribution.title.legacy
+                        args: ["@title"]
+                      _: "@titleMode"
+  dlg.seg:
+    title:
+      of: [0, 1, 2]
+      item:
+        of: "@"
+        map: {"0": $.id, "1": " ", "2": $.name}
+      sep: ""
+    doc:
+      meta:
+        t: settingsUi.rules.segmentMeta
+        args: [$.editable]
+      edit: true
+      readonly: $.readonly
+      id: seg-text
+      label:
+        of: [0, 1, 2]
+        item:
+          of: "@"
+          map: {"0": $.id, "1": " ", "2": $.name}
+        sep: ""
+      text: $.text
+      acts:
+        - from: $.resets
+          item:
+            label:
+              of: "@previous"
+              map:
+                "true": t:settingsUi.rules.resetAction.true
+                "false": t:theme.reset
+                _: "@previous"
+            sm: true
+            act: reset
+            args: {scope: "@scope"}
+    ok:
+      of: $.editable
+      map: {"true": t:common.save, "false": t:work.copyContent, _: $.editable}
+    sync: true
+  dlg.compiled:
+    title:
+      t: profiles.compiled.title
+      args:
+        - of: $.catId
+          map:
+            "": ""
+            _: {of: $.catId, fmt: identityHandle}
+    doc:
+      meta:
+        t: profiles.segment.copy.text
+        args: [$.lines, $.chars]
+      num: true
+      metaId: cp-meta
+      id: cp-text
+      text: $.text
+      segs:
+        - label: t:profiles.compiled.label
+          act: set
+          args:
+            path: ss.cp.{g}
+          items:
+            - g: when
+              v: first
+              label: t:profiles.compiled.firstMessage
+              active:
+                of: $.when
+                map: {first: true, _: false}
+            - g: when
+              v: next
+              label: t:profiles.compiled.laterTurns
+              active:
+                of: $.when
+                map: {next: true, _: false}
+            - g: when
+              v: handoff
+              label: t:profiles.compiled.afterHandoff
+              active:
+                of: $.when
+                map: {handoff: true, _: false}
+        - label: t:profiles.compiled.position
+          act: set
+          args:
+            path: ss.cp.{g}
+          items:
+            - g: where
+              v: sys
+              label: t:profiles.compiled.systemPrompt
+              active:
+                of: $.where
+                map: {sys: true, _: false}
+            - g: where
+              v: user
+              label: t:profiles.compiled.userMessage
+              active:
+                of: $.where
+                map: {user: true, _: false}
+    blocks:
+      - type: disclosure
+        key: compiled-identity
+        title: t:memberForm.runtime.identitySources
+        when: $.identityResolution
+        blocks:
+          - type: kv
+            from:
+              - k: t:memberForm.fields.roleDescription
+                v: $.identityResolution.roleDescription
+              - {k: t:memberForm.fields.personality, v: $.identityResolution.personality}
+              - k: t:memberForm.fields.specialties
+                v: $.identityResolution.rosterDescription
+          - type: kv
+            from: $.identityResolution.fieldSources
+            item:
+              k:
+                of: "@field"
+                map:
+                  roleDescription: t:memberForm.fields.roleDescription
+                  personality: t:memberForm.fields.personality
+                  teamStrengths: t:memberForm.fields.specialties
+                  _: "@field"
+              v:
+                t: memberForm.runtime.identitySource
+                args: ["@source"]
+          - type: text
+            parts:
+              - {text: t:memberForm.runtime.suppressed}
+              - {of: $.identityResolution.suppressedDossierFields, sep: 、}
+            when: $.identityResolution.suppressedDossierFields
+    ok: t:work.copyContent
+    sync: true
+  dlg.install:
+    title:
+      t: settingsUi.voice.installTitle
+      args: [$.modify, $.name]
+    help:
+      of: $.modify
+      map: {"true": t:settingsUi.voice.installHelp.true, "false": "", _: $.modify}
+    ok:
+      t: settingsUi.voice.installOk
+      args: [$.modify]
+    fields:
+      - kv:
+          - [t:voice.installation.kv, $.host.platform]
+          - [GPU, $.host.gpu]
+          - [t:voice.installation.memory, $.host.memory]
+          - [t:voice.installation.availableDisk, $.host.diskFree]
+          - [Python, $.host.python]
+        when: $.host.python
+      - kv:
+          - [t:voice.installation.kv, $.host.platform]
+          - [GPU, $.host.gpu]
+          - [t:voice.installation.memory, $.host.memory]
+          - [t:voice.installation.availableDisk, $.host.diskFree]
+          - - Python
+            - t: voice.installation.nativeArchitecture
+              args: [$.host.bundledPython]
+        when: "!$.host.python"
+      - label: t:runtime.model
+        id: svc-model
+        opts:
+          cur: $.model
+          items:
+            - from: $.models
+              item:
+                v: "@id"
+                title:
+                  of: "@id"
+                  map: {custom: t:settingsUi.voice.modelSub.custom, _: "@id"}
+                sub:
+                  of: "@kind"
+                  map:
+                    choice: "@description"
+                    current:
+                      t: settingsUi.capGroup.recommended
+                      args: ["@description"]
+                    custom:
+                      t: settingsUi.voice.modelSub.custom
+                      args: ["@description"]
+                    _: "@kind"
+          custom: {id: svc-custom, placeholder: org/model-name}
+        when: $.models
+      - label: t:system.serverPort
+        id: svc-port
+        value: $.portValue
+        placeholder: $.port
+        type: {lit: number}
+        min: 1
+        maxv: 65535
+        help:
+          t: voice.installation.help
+          args: [$.portNote]
+        foot:
+          t: voice.installation.foot
+          args: [$.port]
+    foot:
+      text:
+        of: $.modify
+        map: {"true": "", "false": t:settingsUi.voice.installFoot.false, _: $.modify}
+      links:
+        - {label: t:voice.installation.offlineGuide, act: openUrl}
+  dlg.fileOverwrite:
+    title: t:settingsUi.confirm.fileOverwrite.title
+    text:
+      t: settingsUi.confirm.fileOverwrite.text
+      args: [$.name]
+    ok: t:common.confirm
+  dlg.routingPreferenceRetire:
+    title: t:settingsUi.confirm.routingPreferenceRetire
+    fields:
+      - {id: dlg-reason, label: t:chatCards.field.reason, area: true}
+    ok: t:common.confirm
+  settings.watcher:
+    vm: watcherSettings
+    blocks:
+      - type: section
+        title: t:chatMessage.watcher.title
+        blocks:
+          - type: settings
+            rows:
+              - label: t:chatMessage.watcher.enabled
+                control:
+                  type: switch
+                  label: t:chatMessage.watcher.enabled
+                  value: $.config.enabled
+                  act: watcherConfigSet
+                  args:
+                    field: enabled
+                    value:
+                      of: $.config.enabled
+                      map: {"true": false, _: true}
+              - label: t:chatMessage.watcher.scope
+                control:
+                  type: select
+                  id: watcher-scope
+                  value: $.config.scope
+                  change: watcherConfig
+                  args: {field: scope}
+                  options:
+                    - {v: all, label: t:common.all}
+                    - {v: selected, label: t:chatMessage.watcher.selected}
+              - label: t:member.title
+                control:
+                  type: select
+                  id: watcher-member
+                  value: $.config.memberCatId
+                  change: watcherConfig
+                  args: {field: memberCatId}
+                  options:
+                    - from: $.members
+                      item:
+                        v: "@catId"
+                        label: "@displayName"
+                        why:
+                          of: "@capability.supported"
+                          map: {"true": "", _: "@capability.reason"}
+          - type: choices
+            variant: multi
+            from: $.availableLabels
+            item: {label: "@name", active: "@muted"}
+            act: watcherQuietLabel
+            args: {id: "@id"}
+          - type: box
+            load:
+              of: $.error.length
+              gte: 1
+              map: {"true": error, _: ""}
+            error: $.error
+            retry:
+              act: set
+              args: {path: ss.watcherError, v: ""}
+            blocks: []
+rows:
+  member.row:
+    layout: two
+    key: "@id"
+    lead:
+      - {text: "@rank", num: true, variant: meta, when: "@rank"}
+      - {who: "@id", form: avatar}
+    title: {who: "@id", form: title}
+    inline:
+      - control:
+          type: status
+          tone:
+            of: "@availability"
+            map: {tight: warn, limited: warn, unavailable: danger, _: ""}
+          text:
+            of: "@availability"
+            map:
+              available: t:member.availability.label.available
+              tight: t:members.routing.quotaTight
+              limited: t:member.availability.label.limited
+              unavailable: t:memoryOwners.stateNote.unavailable
+              unknown: t:member.availability.label.unknown
+              _: "@availability"
+        when:
+          - of: "@availability"
+            map: {available: false, _: true}
+          - of: "@availabilityWhen"
+            map: {"false": false, _: true}
+      - {parts: "@inline"}
+      - {dot: "@run.tone", tip: "@run.tip", when: "@run"}
+      - {text: "@run.timer", num: true, when: "@run.timer"}
+      - {text: "@mark", variant: meta, when: "@mark"}
+    sub:
+      - {parts: "@sub"}
+    cols:
+      - v:
+          - {control: "@ctl", when: "@ctl"}
+        w: ctl
+      - v:
+          - {parts: "@stat"}
+        w: auto
+        when: "@stat"
+      - {v: "@ctx.label", w: num, tone: "@ctx.tone", tip: "@ctx.tip", when: "@ctx"}
+    acts: {slot: "@slot", ctx: "@actsCtx", items: "@acts"}
+    tone: "@tone"
+    color: {who: "@id"}
+    bar: {pct: "@bar.pct", tone: "@bar.tone"}
+    act: "@act"
+    args: "@args"
+    expand: "@expand"
+    more: "@more"
+  accounts.account:
+    layout: two
+    key: "@id"
+    title:
+      - control:
+          type: input
+          id: acc-rn
+          value: "@name"
+          label: t:accounts.editNote
+          go: rename
+          cancel: close
+          args: {entity: account, id: "@id", path: s.renaming}
+          goLabel: t:common.save
+        when: "@renaming"
+      - {text: "@name", when: "!@renaming"}
+      - text:
+          of: "@using"
+          map:
+            "true":
+              t: settingsUi.account.vendor.true
+              args: ["@vendor"]
+            "false": "@vendor"
+            _: "@using"
+        variant: meta
+        when: "!@renaming"
+    sub:
+      - control:
+          type: status
+          text:
+            t: settingsUi.account.exception
+            args: ["@state"]
+          tone:
+            of: "@state"
+            map:
+              none: warn
+              nokey: warn
+              expired: warn
+              login: info
+              cancelled: ""
+              conflict: warn
+              _: "@state"
+        when: {$frag: ACCOUNT_EXCEPTION}
+      - text:
+          of: "@state"
+          map:
+            ok: t:settingsUi.account.normal.ok
+            key: t:settingsUi.account.normal.key
+            token: t:settingsUi.account.normal.token
+            none: t:settingsUi.account.normal.none
+            nokey: t:settingsUi.account.normal.nokey
+            cancelled: t:settingsUi.account.normal.cancelled
+            expired: ""
+            login: ""
+            conflict: ""
+            _: "@state"
+        when:
+          of: {$frag: ACCOUNT_EXCEPTION}
+          map: {"true": false, _: true}
+    cols:
+      - v:
+          - {text: "@usersCount", when: "@hasUsers"}
+          - {lit: —, when: "!@hasUsers"}
+        w: num
+        tip:
+          t: settingsUi.account.usersTip
+          args: ["@hasUsers", "@usersCount"]
+    act: toggle
+    args:
+      path: ss.accOpen.{k}
+      k: "@id"
+    tone:
+      of: "@open"
+      map: {"true": selected, "false": "", _: "@open"}
+    moreWhen: "@open"
+    more:
+      - type: settings
+        when: "@open"
+        rows:
+          - label: t:accounts.detail.label
+            ctls:
+              - type: text
+                variant: value
+                parts:
+                  - parts: "@users"
+                    sep: 、
+                    each:
+                      parts:
+                        - parts: ["@name", " ", "@handle"]
+                          sep: ""
+                when: "@hasUsers"
+              - {type: text, variant: value, text: t:chip.empty, when: "!@hasUsers"}
+          - label: t:accounts.detail.loginIdentity
+            when: "@email"
+            control: {type: text, variant: value, text: "@email"}
+          - label: t:accounts.detail.endpoint
+            when: "@is.key"
+            control: {type: text, variant: value, text: "@url", mono: true}
+          - label: t:accounts.form.availableModels
+            when: "@is.key"
+            ctls:
+              - type: text
+                variant: value
+                parts:
+                  - parts: "@models"
+                    sep: 、
+                    each: {text: "@"}
+                mono: true
+                when: "@models"
+              - type: text
+                variant: value
+                text: t:pcf.unset
+                mono: true
+                when: "!@models"
+          - label: t:accounts.detail.loginDirectory
+            when: "@dir"
+            control: {type: text, variant: value, text: "@dir", mono: true}
+          - label: t:accounts.quota
+            when: "@quota"
+            ctls:
+              - type: status
+                tone:
+                  of: "@quotaData.fail"
+                  map:
+                    renewal_required: warn
+                    signin_required: warn
+                    service_unreachable: danger
+                    _: "@quotaData.fail"
+                text:
+                  t: accounts.quotaFailure
+                  args: ["@quotaData.fail"]
+                when: "@quotaData.fail"
+              - type: status
+                tone: danger
+                text: t:settings.quotaOut
+                when: ["@quotaData.out", "!@quotaData.fail"]
+              - type: text
+                variant: value
+                parts:
+                  - parts: "@quotaData.items"
+                    sep: " · "
+                    each:
+                      parts:
+                        - {text: "@label"}
+                        - {text: " "}
+                        - text:
+                            t: settings.quotaLeft
+                            args: ["@left"]
+                tip: {of: "@quotaData.resets", sep: " · "}
+                when: "@quotaData.items"
+              - type: text
+                variant: value
+                text: {of: "@quotaData.at", fmt: hm}
+                faint: true
+                num: true
+                when: "@quotaData.hasAt"
+              - type: button
+                label: t:accounts.switchAway
+                items: {$frag: CODEX_ACCOUNT_ITEMS}
+                when: "@quotaData.out"
+              - type: button
+                label:
+                  t: settingsUi.account.quotaLabel
+                  args: ["@quotaBusy"]
+                act: accQuota
+                args: {k: "@id"}
+                disabled: "@quotaBusy"
+                when: "!@quotaData.out"
+          - label:
+              t: settingsUi.account.actionsLabel
+              args: ["@builtin"]
+            ctls:
+              - type: button
+                label: t:accounts.switchTo
+                act: accSwitch
+                args: {k: "@id"}
+                when: "@canSwitch"
+              - type: button
+                label: t:accounts.resolve
+                act: accLogin
+                args: {k: "@id", v: go}
+                when:
+                  of: "@state"
+                  map: {login: true, _: false}
+              - type: button
+                label: t:common.cancel
+                act: accLogin
+                args: {k: "@id", v: cancel}
+                when:
+                  of: "@state"
+                  map: {login: true, _: false}
+              - type: button
+                label: t:common.retry
+                act: accLogin
+                args: {k: "@id", v: refresh}
+                when:
+                  of: "@state"
+                  map: {cancelled: true, _: false}
+              - type: button
+                label: t:accounts.deleteEntry
+                act: accConflict
+                args: {k: "@id", v: drop}
+                when:
+                  of: "@state"
+                  map: {conflict: true, _: false}
+              - type: button
+                label: t:accounts.keep
+                act: accConflict
+                args: {k: "@id", v: keep}
+                when:
+                  of: "@state"
+                  map: {conflict: true, _: false}
+              - type: more
+                args: {k: "@id"}
+                size: m
+                items:
+                  - {scope: t:accounts.menu.group, when: "@builtin"}
+                  - {label: t:accounts.menu.label, act: noop, when: "@builtin"}
+                  - label: t:accounts.menu.editNote
+                    act: rename
+                    args: {entity: account, id: "@id"}
+                    when: "!@builtin"
+                  - label: t:accounts.menu.loginAgain
+                    act: accRelogin
+                    args: {id: "@id"}
+                    when: ["!@builtin", "@managed"]
+                  - label: t:common.edit
+                    act: accOpen
+                    args: {kind: acc, v: key, id: "@id"}
+                    when: ["!@builtin", "@is.key"]
+                  - label: t:accounts.menu.updateToken
+                    act: tokenOpen
+                    args: {kind: token, id: "@id"}
+                    when: ["!@builtin", "@is.token"]
+                  - label:
+                      t: accounts.menu.deleteUsedRegistration
+                      args: ["@usersCount"]
+                    why:
+                      t: accounts.delete.toast
+                      args: ["@usersCount"]
+                    tone: danger
+                    when: ["!@builtin", "@hasUsers"]
+                  - label: t:accounts.delete.ok
+                    act: remove
+                    args: {entity: account, id: "@id"}
+                    tone: danger
+                    when: ["!@builtin", "!@hasUsers"]
+  mount.row:
+    layout: two
+    key: "@name"
+    title: "@name"
+    sub: {text: "@path", mono: true}
+    inline:
+      - text:
+          of: "@ov"
+          map:
+            project: t:settingsUi.mcp.tag.project
+            default: t:settingsUi.mcp.tag.default
+            _: "@ov"
+        variant: meta
+        when: "@ov"
+      - {text: t:capabilities.skill.mark, variant: meta, when: "@pointOff"}
+      - text: t:capabilities.skill.text
+        variant: meta
+        tone: warn
+        when: "@broken"
+    cols:
+      - control:
+          type: switch
+          value: "@on"
+          act: setStatus
+          args: {entity: mount, id: "@name"}
+          label:
+            t: skills.mount.sw
+            args: ["@on", "@name"]
+        when: "@rule"
+      - control:
+          type: switch
+          value: "@on"
+          disabled: "@pointOff"
+          act: capSkillMount
+          args: {n: "@skill", m: "@name"}
+          label:
+            t: capabilities.skill.mountSw
+            args: ["@on", "@name"]
+        when: "@skill"
+    acts:
+      - label: t:common.remove
+        icon: delete
+        act: remove
+        args: {entity: mountCustom, id: "@i"}
+        when: "@custom"
+  drift.row:
+    layout: two
+    lead:
+      - icon:
+          of: "@home"
+          map: {"true": home, "false": folder}
+        size: s
+        when: "@dir"
+    title:
+      - text:
+          of: "@home"
+          map:
+            "true": t:settingsUi.project.scope.true
+            "false":
+              of: "@duplicate"
+              map:
+                "true":
+                  t: settingsUi.project.label.true
+                  args: ["@name", "@parent"]
+                "false": "@name"
+                _: ""
+        when: "@dir"
+      - text: "@name"
+        mono: true
+        when: ["!@dir", "@name"]
+      - text: t:capabilities.drift.kind.detect_failed
+        when: ["!@dir", "!@name"]
+    sub:
+      text: "@projectPath"
+      mono: true
+      when: ["@dir", "@projectPath"]
+    inline:
+      - control:
+          type: status
+          tone: warn
+          text:
+            t: capabilities.drift.details.count
+            args: ["@items.length"]
+        when: "@dir"
+      - control:
+          type: status
+          tone: warn
+          text:
+            t: settingsUi.drift.itemText
+            args:
+              - t: capabilities.drift.kind
+                args: ["@type"]
+              - "@text"
+        when: ["!@dir", "@name"]
+      - control:
+          type: status
+          tone: warn
+          text: t:capabilities.drift.details.syncUnavailable
+        when: ["!@dir", "!@name"]
+    cols:
+      - w:
+          of: "@dir"
+          map: {"true": ctl, "false": icon}
+        v:
+          - control:
+              type: button
+              label: t:wsCommunity.sync
+              iconOnly: true
+              icon: refresh
+              act: capSync
+              args: {k: $.k, s: "@id"}
+            when: "@dir"
+          - icon: pen
+            size: s
+            when: ["!@dir", "@ov"]
+        tip:
+          of: "@ov"
+          map: {"true": t:capabilities.drift.details.tip, _: ""}

@@ -1,5 +1,9 @@
 import { type CloudBindingRefusal, catRegistry } from '@cat-cafe/shared';
-import { resolveCloudConversationCat } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import {
+  type CloudConversationProvider,
+  cloudConversationProviderOf,
+  resolveCloudConversationCat,
+} from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
 import { pluginPrTitleReader } from './plugin/pr-artifact-title-reader.js';
 /**
  * Thread API Routes
@@ -92,6 +96,7 @@ const WRITE_OPS = new Set(['edit', 'create', 'delete']);
 const recentWorksQuerySchema = z
   .object({
     view: z.literal('recent-works'),
+    projectId: z.string().min(1).max(4096).optional(),
     limit: z.coerce.number().int().min(1).max(12).default(3),
   })
   .strict();
@@ -1446,7 +1451,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // F202 h3c-2: which cat's binding is the thread's ChatGPT conversation is the Host's answer, not
     // a fixed id — the panel lists the binding of the configured cloud cat, and none when the
     // provider has no cat or several.
-    return { bindings, cloudCat: resolveCloudConversationCat(catRegistry, 'chatgpt') };
+    // The contract provider each cloud cat converses through: a client draws a cat's conversation
+    // choice by provider, without knowing the Host's cat → provider table.
+    const providers: Record<string, CloudConversationProvider> = {};
+    for (const catId of Object.keys(catRegistry.getAllConfigs())) {
+      const provider = cloudConversationProviderOf(catRegistry, catId);
+      if (provider) providers[catId] = provider;
+    }
+    return { bindings, cloudCat: resolveCloudConversationCat(catRegistry, 'chatgpt'), providers };
   });
 
   // PATCH /api/threads/:id/cloud-bindings — STRICT user-owned only.
@@ -1818,6 +1830,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return readRecentWorksView({
         userId,
         limit: parsed.data.limit,
+        projectId: parsed.data.projectId,
         threadStore,
         messageStore,
         independent: opts.artifactWorkLineage?.independent,

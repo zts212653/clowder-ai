@@ -264,26 +264,37 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     return { manifest };
   });
 
-  app.get<{ Params: { collectionId: string } }>('/api/library/:collectionId/documents', async (request, reply) => {
-    const ip = request.ip;
-    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
-      reply.status(403);
-      return { error: 'Forbidden: localhost only' };
-    }
-    const { collectionId } = request.params;
-    const manifest = opts.catalog.get(collectionId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: `Collection "${collectionId}" not found` };
-    }
-    const store = opts.stores.get(manifest.id) as StoreWithDb | undefined;
-    const db = store?.getDb?.();
-    if (!db) {
-      return { collectionId, groups: [] };
-    }
-    const groups = CollectionReadModel.computeDocumentGroups(collectionId, db);
-    return { collectionId, groups };
-  });
+  app.get<{ Params: { collectionId: string }; Querystring: { offset: number } }>(
+    '/api/library/:collectionId/documents',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: { offset: { type: 'integer', minimum: 0, maximum: 1000000, default: 0 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ip = request.ip;
+      if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+        reply.status(403);
+        return { error: 'Forbidden: localhost only' };
+      }
+      const { collectionId } = request.params;
+      const manifest = opts.catalog.get(collectionId);
+      if (!manifest) {
+        reply.status(404);
+        return { error: `Collection "${collectionId}" not found` };
+      }
+      const store = opts.stores.get(manifest.id) as StoreWithDb | undefined;
+      const db = store?.getDb?.();
+      if (!db) {
+        return { collectionId, groups: [] };
+      }
+      const groups = CollectionReadModel.computeDocumentGroups(collectionId, db, 20, request.query.offset);
+      return { collectionId, groups };
+    },
+  );
 
   app.post<{ Params: { collectionId: string } }>('/api/library/:collectionId/rebuild', async (request, reply) => {
     const ip = request.ip;

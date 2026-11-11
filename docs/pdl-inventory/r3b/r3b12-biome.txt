@@ -1,0 +1,366 @@
+$ python3 /tmp/pdl-r3b12-biome.py
+
+$ pnpm exec biome check packages/web/public/pdl-app/project.js packages/web/src/components/__tests__/f190-visual-contract.test.ts packages/web/src/components/rich/__tests__/original-terminal-effect.test.tsx packages/web/src/pdl/__tests__/delivery-models.test.ts packages/web/src/pdl/__tests__/memory-bindings.test.ts packages/web/src/pdl/__tests__/operations-bindings.test.ts packages/web/src/pdl/__tests__/r115-bindings.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/delivery-models.ts packages/web/src/pdl/owner-api.ts packages/web/src/pdl/useBoardBindings.ts packages/web/src/pdl/useHomeBindings.ts packages/web/src/pdl/useMemoryBindings.tsx packages/web/src/pdl/useOpsBindings.ts packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useWorkbenchBindings.ts packages/web/src/pdl/__tests__/owner-api.test.ts
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:54:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    52 │     id: 'profile',
+    53 │     revision: 'profile-r0',
+  > 54 │     content: prefix + 'Original body',
+       │              ^^^^^^^^^^^^^^^^^^^^^^^^
+    55 │     title: 'Profile',
+    56 │     type: 'profile',
+
+  i Unsafe fix: Use a template literal.
+
+     52  52 │       id: 'profile',
+     53  53 │       revision: 'profile-r0',
+     54     │ - ····content:·prefix·+·'Original·body',
+         54 │ + ····content:·`${prefix}Original·body`,
+     55  55 │       title: 'Profile',
+     56  56 │       type: 'profile',
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:83:42 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    81 │       return response({
+    82 │         readStatus: 'ready',
+  > 83 │         entries: [{ ...person, personId: 'person-' + offset }],
+       │                                          ^^^^^^^^^^^^^^^^^^
+    84 │         meta: { count: 1, limit: 20, offset, hasMore: offset < 2, nextOffset: offset < 2 ? offset + 1 : undefined },
+    85 │       });
+
+  i Unsafe fix: Use a template literal.
+
+     81  81 │         return response({
+     82  82 │           readStatus: 'ready',
+     83     │ - ········entries:·[{·...person,·personId:·'person-'·+·offset·}],
+         83 │ + ········entries:·[{·...person,·personId:·`person-${offset}`·}],
+     84  84 │           meta: { count: 1, limit: 20, offset, hasMore: offset < 2, nextOffset: offset < 2 ? offset + 1 : undefined },
+     85  85 │         });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:108:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    106 │     if (url.pathname === '/api/memory/events')
+    107 │       return response({ events: [], meta: { count: 0, offset: 0, hasMore: false } });
+  > 108 │     throw new Error('Unexpected memory owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    109 │   });
+    110 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    106 106 │       if (url.pathname === '/api/memory/events')
+    107 107 │         return response({ events: [], meta: { count: 0, offset: 0, hasMore: false } });
+    108     │ - ····throw·new·Error('Unexpected·memory·owner·'·+·path);
+        108 │ + ····throw·new·Error(`Unexpected·memory·owner·${path}`);
+    109 109 │     });
+    110 110 │   });
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:157:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    155 │     action: 'replace_content',
+    156 │     expectedRevision: 'profile-r0',
+  > 157 │     content: prefix + 'Changed body',
+        │              ^^^^^^^^^^^^^^^^^^^^^^^
+    158 │   });
+    159 │   expect(hook.result.current.models().memoryDetail?.entry.revision).toBe('profile-r1');
+
+  i Unsafe fix: Use a template literal.
+
+    155 155 │       action: 'replace_content',
+    156 156 │       expectedRevision: 'profile-r0',
+    157     │ - ····content:·prefix·+·'Changed·body',
+        157 │ + ····content:·`${prefix}Changed·body`,
+    158 158 │     });
+    159 159 │     expect(hook.result.current.models().memoryDetail?.entry.revision).toBe('profile-r1');
+
+
+packages/web/src/pdl/__tests__/r115-bindings.test.ts:54:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    52 │             eventNo: Number(url.searchParams.get('cursor')),
+    53 │             role: 'assistant',
+  > 54 │             content: 'owner page ' + url.searchParams.get('cursor'),
+       │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    55 │             timestamp: 1,
+    56 │           },
+
+  i Unsafe fix: Use a template literal.
+
+     52  52 │               eventNo: Number(url.searchParams.get('cursor')),
+     53  53 │               role: 'assistant',
+     54     │ - ············content:·'owner·page·'·+·url.searchParams.get('cursor'),
+         54 │ + ············content:·`owner·page·${url.searchParams.get('cursor')}`,
+     55  55 │               timestamp: 1,
+     56  56 │             },
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:101:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+     99 │       return response(task);
+    100 │     }
+  > 101 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    102 │   });
+    103 │ });
+
+  i Unsafe fix: Use a template literal.
+
+     99  99 │         return response(task);
+    100 100 │       }
+    101     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        101 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    102 102 │     });
+    103 103 │   });
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:99:5 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     97 │       mid: '',
+     98 │     });
+   > 99 │     notice.source!.meta = { cloudBridgeOutboundReceipt: { ...receipt, dispatchInvocationId: 'previous-attempt' } };
+        │     ^^^^^^^^^^^^^^
+    100 │     expect(deliveryView(source, messages, [])[0].state).toBe('unknown');
+    101 │   });
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:119:12 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    117 │       ...messages[1],
+    118 │       lifecycle: {
+  > 119 │         ...messages[1].lifecycle!,
+        │            ^^^^^^^^^^^^^^^^^^^^^^
+    120 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+    121 │       },
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:120:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    118 │       lifecycle: {
+    119 │         ...messages[1].lifecycle!,
+  > 120 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+        │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    121 │       },
+    122 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    118 118 │         lifecycle: {
+    119 119 │           ...messages[1].lifecycle!,
+    120     │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+        120 │ + ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs?.[0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+    121 121 │         },
+    122 122 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:120:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    118 │       lifecycle: {
+    119 │         ...messages[1].lifecycle!,
+  > 120 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], inputRead: { status: 'read', at: 2200 } }],
+        │                             ^^^^^^^^^^^^^^^^^^^^^^
+    121 │       },
+    122 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    118 118 │         lifecycle: {
+    119 119 │           ...messages[1].lifecycle!,
+    120     │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+        120 │ + ········dispatchRefs:·[{·...messages[1].lifecycle?.dispatchRefs![0],·inputRead:·{·status:·'read',·at:·2200·}·}],
+    121 121 │         },
+    122 122 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:132:12 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    130 │       ...messages[1],
+    131 │       lifecycle: {
+  > 132 │         ...messages[1].lifecycle!,
+        │            ^^^^^^^^^^^^^^^^^^^^^^
+    133 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+    134 │       },
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:133:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    131 │       lifecycle: {
+    132 │         ...messages[1].lifecycle!,
+  > 133 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+        │                             ^^^^^^^^^^^^^^^^^^^^^^
+    134 │       },
+    135 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    131 131 │         lifecycle: {
+    132 132 │           ...messages[1].lifecycle!,
+    133     │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+        133 │ + ········dispatchRefs:·[{·...messages[1].lifecycle?.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+    134 134 │         },
+    135 135 │       };
+
+
+packages/web/src/pdl/__tests__/delivery-models.test.ts:133:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    131 │       lifecycle: {
+    132 │         ...messages[1].lifecycle!,
+  > 133 │         dispatchRefs: [{ ...messages[1].lifecycle!.dispatchRefs![0], statusMessageId: 'other-reply' }],
+        │                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    134 │       },
+    135 │     };
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    131 131 │         lifecycle: {
+    132 132 │           ...messages[1].lifecycle!,
+    133     │ - ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs![0],·statusMessageId:·'other-reply'·}],
+        133 │ + ········dispatchRefs:·[{·...messages[1].lifecycle!.dispatchRefs?.[0],·statusMessageId:·'other-reply'·}],
+    134 134 │         },
+    135 135 │       };
+
+
+packages/web/src/pdl/__tests__/memory-bindings.test.ts:63:61 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 30 detected (max: 15).
+
+    61 │     proposals: [],
+    62 │   };
+  > 63 │   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+       │                                                             ^^^
+    64 │     const url = new URL(String(path), 'https://api.test');
+    65 │     if (init?.method === 'POST') {
+
+  i Please refactor this function to reduce its complexity score from 30 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:52:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    50 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    51 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 52 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    53 │     const path = String(raw),
+    54 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/delivery-models.ts:13:82 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 41 detected (max: 15).
+
+    11 │ /** Read evidence and reply progress remain separate, as in the existing lifecycle projection. */
+    12 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+  > 13 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+       │                                                                                  ^^^
+    14 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+    15 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+
+  i Please refactor this function to reduce its complexity score from 41 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/delivery-models.ts:14:17 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    12 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+    13 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 14 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^
+    15 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    16 │     if (isNativeCloudTarget(projection.targetId)) {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    12 12 │   export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+    13 13 │     return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+    14    │ - ····const·ref·=·message.lifecycle!.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+       14 │ + ····const·ref·=·message.lifecycle?.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+    15 15 │       const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    16 16 │       if (isNativeCloudTarget(projection.targetId)) {
+
+
+packages/web/src/pdl/delivery-models.ts:14:17 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    12 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+    13 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 14 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    15 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    16 │     if (isNativeCloudTarget(projection.targetId)) {
+
+
+packages/web/src/pdl/delivery-models.ts:14:17 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    12 │ export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+    13 │   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+  > 14 │     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    15 │     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    16 │     if (isNativeCloudTarget(projection.targetId)) {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    12 12 │   export function deliveryView(message: ChatMessage, timeline: ChatMessage[], runs: readonly LifecycleActiveRun[]) {
+    13 13 │     return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+    14    │ - ····const·ref·=·message.lifecycle!.dispatchRefs!.find((r)·=>·r.targetId·===·projection.targetId)!;
+       14 │ + ····const·ref·=·message.lifecycle!.dispatchRefs?.find((r)·=>·r.targetId·===·projection.targetId)!;
+    15 15 │       const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    16 16 │       if (isNativeCloudTarget(projection.targetId)) {
+
+
+packages/web/src/pdl/useHomeBindings.ts:105:21 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 59 detected (max: 15).
+
+    103 │     return false;
+    104 │   };
+  > 105 │   const models = () => {
+        │                     ^^^
+    106 │     const now = Date.now();
+    107 │     const runs = data.executions.map((x) => {
+
+  i Please refactor this function to reduce its complexity score from 59 to the max allowed complexity 15.
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 500.
+Checked 18 files in 272ms. No fixes applied.
+Found 467 warnings.
+Found 53 infos.
+
+Exit code: 0

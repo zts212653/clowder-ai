@@ -1,0 +1,117 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 组件库 · 复合组件的样式（js/widgets.js）：终端、差异、日志、媒体查看器、时间线播放器、关系图、柱状图、卡片网格。
+   只用 token；页面不再给这些组件写样式。 */
+/* 终端 */
+/* 日期网格：月 / 周共用日期单元格，容器宽度决定七列的宽度。 */
+.calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-xs); }
+.calendar-weekdays { text-align: center; padding-block: var(--sp-s); }
+.calendar-day { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: var(--row-h-1); padding: var(--sp-xs); background: transparent; border: 0; border-radius: var(--r-s); font-family: inherit; cursor: pointer; }
+.calendar-day:hover { background: var(--btn-soft-hover); }
+.calendar-day[aria-pressed="true"] { background: var(--btn-soft); }
+.calendar-day[data-outside="true"] > span:first-child { color: var(--fg-faint); }
+.calendar-day[data-today="true"] > span:first-child { text-decoration: underline; text-underline-offset: var(--sp-xs); }
+.calendar-count { min-height: 1em; line-height: 1; }
+.tm { position: relative; flex: 1; min-height: calc(6 * var(--row-h-1)); display: flex; flex-direction: column; background: var(--term-bg); border-radius: 0 var(--r-m) var(--r-m) var(--r-m); }
+.tm-screen { flex: 1; min-height: 0; padding: var(--sp-s) var(--sp-m) var(--sp-m); font: var(--fs-s) var(--font-mono); color: var(--term-fg); }
+.tm.ro .tm-screen { cursor: default; }
+.tm.off .tm-screen { opacity: var(--op-disabled); }
+/* 差异 */
+.wc-diff { margin: var(--sp-hair) 0 var(--sp-xs); font: var(--fs-s)/1.6 var(--font-mono); background: var(--diff-bg); border-radius: var(--r-m); padding: var(--sp-xs) 0; }
+.wc-diff.empty-diff { font-family: inherit; color: var(--fg-faint); padding: var(--sp-s) var(--sp-m); }
+.wc-hunk { padding: var(--sp-hair) var(--sp-m); color: var(--fg-faint); grid-column: 1 / -1; }
+.wc-dl { padding: 0 var(--sp-m) 0 0; white-space: pre; color: var(--fg-strong); }
+.wc-sign { display: inline-block; width: var(--ctl-xs); text-align: center; color: var(--fg-faint); }
+.wc-dl.add, .wc-sl.add { background: var(--ok-wash); }
+.wc-dl.del, .wc-sl.del { background: var(--danger-wash); }
+.wc-diff.split { display: grid; grid-template-columns: 1fr 1fr; }
+.wc-sl { padding: 0 var(--sp-s); white-space: pre; overflow: clip; text-overflow: ellipsis; min-height: 1.6em; }
+.wc-sl.gap { background: var(--bg-hover); }
+/* 日志 */
+.wpv-log { padding-bottom: var(--sp-xs); max-height: calc(8 * var(--row-h)); }   /* 日志自己滚动：条目多了不把所在的页面往下推 */
+.wpv-ce { display: flex; align-items: baseline; gap: var(--sp-s); padding: var(--sp-hair) var(--sp-m); font-size: var(--fs-s); }
+.wpv-ce:hover { background: var(--bg-hover); }
+.wpv-ce:is([data-tone="warn"], [data-tone="danger"]) { background: var(--tone-soft); }   /* 留意 / 出错的一条：浅色调底（色点是共用的状态点 .dot） */
+.wpv-ce[data-tone="danger"] { color: var(--tone-c); }
+.wpv-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wpv-ce .num { width: calc(15 * var(--unit)); flex: none; text-align: right; }
+/* 媒体本体与原始像素坐标上的标记；标题和操作不属于本体。 */
+.media-content { position: relative; width: 100%; line-height: 0; }
+.media-content > img, .media-content > video, .media-content > audio { display: block; width: 100%; height: auto; border-radius: var(--r-m); }
+.media-content[data-pick] > img, .media-content[data-pick] > video { cursor: crosshair; touch-action: none; }
+.media-marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; stroke: var(--fg-strong); stroke-width: 2; }
+.media-marks > * { vector-effect: non-scaling-stroke; filter: drop-shadow(0 1px 1px var(--bg-page)); }
+.media-mark { position: absolute; left: calc(var(--mark-x) / var(--media-w) * 100%); top: calc(var(--mark-y) / var(--media-h) * 100%); translate: -50% -50%; }
+.annotation-quote { background: var(--accent-soft); color: inherit; border-radius: var(--r-xs); }
+.annotation-mark { vertical-align: middle; }
+/* 时间线播放器：只画控制条，正文共用消息流。 */
+.rp { min-height: 0; }
+/* 回放剧场：铺满的弹窗框架；中间是消息流（对话区同一个消息模板），底下是播放器的控制条 */
+.rp-dock { flex: none; position: sticky; bottom: 0; margin: 0 calc(-1 * var(--sp-xs)); padding: var(--sp-s) var(--sp-m) var(--sp-s); border-radius: var(--r-full); background: var(--bg-raised); box-shadow: var(--shadow-dock); }
+.rp-scrub { position: relative; height: var(--av-s); }
+.rp-scrub svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rp-track { stroke: var(--line); }
+.rp-done { stroke: var(--fg); }
+.rp-scrub input { position: absolute; inset: 0; width: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.rp-skip { display: flex; align-items: center; gap: var(--sp-xs); margin: var(--sp-hair) 0 0; font-size: var(--fs-s); color: var(--fg-muted); }
+.rp-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-xs); padding-top: var(--sp-xs); }
+.rp-time { display: flex; flex-direction: column; font-size: var(--fs-s); line-height: 1.3; margin-left: var(--sp-xs); }
+/* 关系图：card 节点（圆角块 + 状态点）、bubble 节点（圆 + 名字在下）；可拖动平移的图手型光标 */
+.g-wrap { padding: var(--sp-s); overflow: hidden; }
+.graph { width: 100%; height: auto; display: block; }
+.graph.pan { cursor: grab; touch-action: none; }
+.graph line { stroke: var(--line-strong); stroke-width: 1.5; }
+.graph text { fill: var(--fg); font: var(--fs-s) var(--font-text); }
+.g-node { cursor: pointer; }
+.g-node.card rect { fill: var(--bg-field); }
+.g-node.card.on rect { fill: var(--bg-selected); stroke: var(--fg-strong); stroke-width: 1.5; }
+.g-node.card text { fill: var(--fg-strong); }
+.g-node.dim { opacity: var(--op-disabled); }
+.g-st.warn { fill: var(--warn); }
+.g-st.info { fill: var(--info); }
+.g-st.ok { fill: var(--ok); }
+.g-st.idle { fill: var(--fg-faint); }
+.g-node.bubble circle { fill: var(--bg-field); stroke: var(--fg-muted); stroke-width: 1.5; }
+.g-node.bubble.hub circle { fill: var(--bg-selected); stroke: var(--fg-strong); }
+.g-node.bubble:hover circle { stroke: var(--fg-strong); }
+.g-legend { white-space: normal; }   /* 图例是一句话，窄的面板里换行，不伸出面板 */
+.g-legend > span + span { margin-left: var(--sp-xs); }
+.g-legend .dot { margin-right: var(--sp-hair); }
+/* 柱状图 */
+.bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--sp-s); align-items: end; height: calc(3 * var(--row-h-1)); padding: var(--sp-m) var(--sp-m) var(--sp-s); }
+.bars > div { display: flex; flex-direction: column; align-items: center; gap: var(--sp-xs); height: 100%; justify-content: flex-end; }
+.bars span { width: 100%; max-width: var(--ctl-s); background: var(--fg-muted); border-radius: var(--r-xs) var(--r-xs) 0 0; display: flex; flex-direction: column; }
+.bars span i { display: block; background: var(--fg-faint); border-radius: var(--r-xs) var(--r-xs) 0 0; }
+.bars em { font-style: normal; }
+/* 卡片网格 */
+.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--span-3)), 1fr)); gap: var(--sp-m); }
+.cgrid-card { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-xs); display: flex; flex-direction: column; gap: var(--sp-xs); min-width: 0; }
+.cgrid-prev { aspect-ratio: 16 / 9; width: 100%; border: 0; border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-muted); display: grid; place-items: center; cursor: pointer; }
+.cgrid-prev:hover { background: var(--bg-selected); color: var(--fg-strong); }
+.cgrid-prev > :is(img, video) { width: 100%; height: 100%; object-fit: cover; pointer-events: none; border-radius: inherit; }
+.cgrid-meta { padding: var(--sp-hair) var(--sp-xs) var(--sp-xs); display: flex; flex-direction: column; gap: var(--sp-hairline); min-width: 0; flex: 1; }
+.cgrid-t { overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2lh; }
+.cgrid-foot { margin-top: auto; display: flex; align-items: center; gap: var(--sp-s); }
+.cgrid-foot > .cgrid-s { flex: 1; min-width: 0; }
+.cgrid-s { overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+/* 选一项的格子（tiles 控件）：小卡 / 色块头像；上传按钮里的文件框藏起来 */
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(50 * var(--unit)), 1fr)); gap: var(--sp-s); }
+.tpl { display: flex; gap: var(--sp-s); align-items: flex-start; text-align: left; padding: var(--sp-m); border: 0; border-radius: var(--r-l); background: var(--bg-group); cursor: pointer; color: var(--fg-strong); min-width: 0; }
+.tpl:hover { background: var(--bg-hover); }
+.tpl[aria-pressed="true"] { background: var(--bg-selected); }
+.tpl-t { display: flex; flex-direction: column; gap: var(--sp-hairline); min-width: 0; }
+@media (max-width: 640px) { .tpl-grid { grid-template-columns: minmax(0, 1fr); } }
+/* 组件库的修饰类：静态的是档位修饰；随数据变的值由脚本只写成自定义属性 --u-*，画法在这里。
+   放在最后加载的组件库文件里，压过所在组件的默认值 */
+.u-m0 { margin: 0; } .u-p0 { padding: 0; } .u-pt0 { padding-top: 0; } .u-p-xs { padding: var(--sp-xs); } .u-p-m { padding: var(--sp-m); }
+.u-p-empty { padding: var(--sp-l) var(--sp-s); } .u-p-foot { padding: 0 var(--sp-m) var(--sp-m); } .u-mt-s { margin-top: var(--sp-s); } .u-m-chip { margin: 0 var(--sp-xs) var(--sp-s); }
+.t-s { font-size: var(--fs-s); } .t-m { font-size: var(--fs-m); } .t-title { font-size: var(--fs-title); }
+.u-w-normal { font-weight: 400; } .u-strong { font-weight: 500; color: var(--fg-strong); } .u-nowrap { white-space: nowrap; } .u-mw-none { max-width: none; } .u-disabled { opacity: var(--op-disabled); pointer-events: none; }
+.u-v-width { width: var(--u-width); } .u-v-height { height: var(--u-height); } .u-v-background { background: var(--u-background); }
+.tile-av { border: 0; padding: 0; background: none; border-radius: var(--r-full); cursor: pointer; }
+.tile-av[aria-pressed="true"] .avatar { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3.5px var(--fg-strong); }   /* 选中：和色调选择同一个选中环 */
+
+/* 选择时命中标绘；绘画时把手势交给底下的媒体。文字和线条保持媒体像素尺寸。 */
+.media-marks [data-markup-id] { vector-effect: none; }
+.media-content[data-markup-mode="select"] [data-markup-id] { pointer-events: visiblePainted; cursor: pointer; }
+.media-marks [data-selected="true"] { filter: drop-shadow(0 0 var(--sp-xs) var(--fg-strong)); }
+.media-marks text { font-family: var(--font-text); }

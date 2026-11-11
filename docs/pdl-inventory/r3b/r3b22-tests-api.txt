@@ -1,0 +1,51 @@
+$ pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test --test-concurrency=1 test/config/appearance-config.test.ts test/config/user-preferences-write-failure.test.ts test/config/cat-order-store.test.js test/routes/cat-order-route.test.js test/config-co-creator-route.test.js test/co-creator-presentation.test.ts
+
+✔ reported development instructions use configured names and aliases literally (248.91975ms)
+✔ Eval Hub sunset copy follows the configured person, including changes in the same process (9.45625ms)
+✔ configured familiar address reaches history labels and timestamps without changing message identity (7.989417ms)
+✔ an existing owner without nickname does not acquire the install template nickname (17.898708ms)
+▶ PATCH /api/config/co-creator
+  ✔ refreshes an unlocked address after a same-process catalog settings save (354.309709ms)
+  ✔ rejects oversized, multiline and markup handles before persisting and accepts literal punctuation (26.879375ms)
+  ✔ persists owner identity fields into the runtime catalog and returns updated snapshot (22.578833ms)
+  ✔ preserves aliases changed by another editor when the You form saves only its owned fields (25.934875ms)
+  ✔ rejects owner mention patterns that overlap cat aliases (435.806291ms)
+  ✔ rejects invalid owner timezone before writing runtime catalog (192.575959ms)
+✔ PATCH /api/config/co-creator (1079.629916ms)
+✔ ignores legacy backgrounds without read-time writes or deletion when saving the new appearance (426.039333ms)
+✔ persists original PDL theme documents and mode/style/tokens across a fresh API instance (45.614459ms)
+✔ owns uploaded image bytes and catalogue, rejects forged sources, and clears the selected image on removal (403.146875ms)
+✔ requires the real owner and does not overwrite malformed preference files (48.005833ms)
+▶ cat-order-store
+  ✔ loadCatOrder returns [] when preferences file does not exist (33.396291ms)
+  ✔ saveCatOrder then loadCatOrder roundtrips (55.081583ms)
+  ✔ saveCatOrder preserves other user-preferences fields (52.985209ms)
+  ✔ loadCatOrder ignores non-string entries (8.460416ms)
+  ✔ loadCatOrder returns [] when file contains invalid JSON (41.995875ms)
+✔ cat-order-store (193.228125ms)
+✔ runs pin rollback even when rename and temporary unlink both fail, preserving the rename cause (11.014292ms)
+✔ runs temporary and pin rollback even if closing an open failed-write descriptor also fails (149.293667ms)
+✔ preserves all secondary cleanup failures and later collects the failed generation pin (275.246708ms)
+✔ does not delete a file that open(wx) rejected before ownership was acquired (43.604042ms)
+✔ preserves generation-verification failure when pin removal fails and still removes the temporary file (155.788959ms)
+✔ continues collecting other orphan pins if one old pin cannot be removed (25.1195ms)
+▶ GET/PUT /api/config/cat-order (F166)
+  ✔ GET returns empty array when no order saved (132.144375ms)
+  ✔ PUT by owner persists catOrder to preferences file (13.661917ms)
+  ✔ GET reflects persisted order after PUT (93.568417ms)
+  ✔ PUT by non-owner → 403 (2.903375ms)
+  ✔ PUT without user header → 400 (7.206542ms)
+  ✔ PUT with unknown catId → 400 (12.6105ms)
+  ✔ PUT with duplicate catIds deduplicates (keeps first occurrence) (3.478333ms)
+  ✔ PUT with empty array clears order (7.519334ms)
+✔ GET/PUT /api/config/cat-order (F166) (1696.87025ms)
+ℹ tests 33
+ℹ suites 3
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65777.795667
+
+Exit code: 0

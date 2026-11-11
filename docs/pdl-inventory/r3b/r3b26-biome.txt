@@ -1,0 +1,5 @@
+$ pnpm exec biome check --diagnostic-level=error packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/chat-models.ts packages/web/src/pdl/cloud-models.ts packages/web/src/pdl/proposal-models.ts packages/web/src/pdl/memory-message-proposals.tsx packages/web/src/pdl/message-selection.ts packages/web/src/pdl/useSidebarBindings.ts packages/web/src/pdl/useGeneralBindings.ts packages/web/src/pdl/plugin-spaces.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/sidebar.js packages/web/public/pdl-app/plugin-config.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/home.js
+
+Checked 14 files in 88ms. No fixes applied.
+
+Exit code: 0

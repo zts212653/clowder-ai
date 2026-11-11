@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/plugin-spaces.test.ts -t 'admitted plugin|declaration authority|invent a Collective|original appearance|rejected appearance' --maxWorkers=1
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (50 tests | 47 skipped) 2279ms
+     ✓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner  862ms
+     ✓ binds the original appearance page, theme documents, calculator tokens and global background to one server owner  824ms
+     ✓ rolls back rejected appearance writes and uses engine error deduplication until the owner recovers  591ms
+ ✓ src/pdl/__tests__/plugin-spaces.test.ts (2 tests) 3ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed | 47 skipped (52)
+   Start at  02:24:51
+   Duration  5.50s (transform 1.59s, setup 58ms, import 2.68s, tests 2.28s, environment 243ms)
+
+
+Exit code: 0

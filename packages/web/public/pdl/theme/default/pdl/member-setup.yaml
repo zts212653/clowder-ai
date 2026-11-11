@@ -1,0 +1,166 @@
+modules:
+  - id: member-setup
+    inserts:
+      - id: members.detect
+        anchor: members.actions
+        at: inside
+        node:
+          title: t:nativeSetup.title
+          icon: search
+          scope: page
+          open: {node: members.setup.window, as: float}
+    popups:
+      nativeSetup:
+        at: center
+        exit: [x, esc]
+        drag: true
+        focus: true
+        close: guideEntryDismiss
+    views:
+      members.setup.window:
+        bare: true
+        popup: nativeSetup
+        vm: nativeSetup
+        blocks:
+          - type: dialog
+            pop: nativeSetup
+            title: t:nativeSetup.title
+            wide: true
+            actions:
+              - type: button
+                icon: refresh
+                label: t:nativeSetup.detect
+                act: nativeDetect
+              - type: button
+                primary: true
+                label: t:nativeSetup.create
+                act: nativeCreate
+                disabled: $.createDisabled
+              - type: button
+                label: t:common.done
+                act: guideEntryComplete
+                when: $.hasMembers
+            blocks:
+              - type: list
+                id: native-partners
+                from: $.items
+                row:
+                  layout: two
+                  key: "@id"
+                  lead:
+                    - control:
+                        type: check
+                        variant: row
+                        value: "@selected"
+                        label: "@name"
+                        act: nativeSelect
+                        args: {id: "@id"}
+                      when: "@selectable"
+                  title: "@name"
+                  sub: "@runtime.label"
+                  cols:
+                    - v:
+                        text:
+                          of: "@state"
+                          map:
+                            created: t:nativeSetup.created
+                            ready: t:nativeSetup.ready
+                            unavailable: t:common.status.notInstalled
+                            _: "@state"
+                      w: auto
+                    - w: ctl
+                      control:
+                        type: button
+                        label:
+                          of: "@adjusting"
+                          map: {"true": t:common.collapse, _: t:nativeSetup.adjust}
+                        act: nativeAdjust
+                        args: {id: "@id"}
+                        disabled: "@existingId"
+                        when: "@runtime.installed"
+                  moreWhen: "@adjusting"
+                  more:
+                    - type: settings
+                      rows:
+                        - kind: field
+                          label: t:runtime.model
+                          id: "@fieldIds.model"
+                          control:
+                            - type: input
+                              id: "@fieldIds.model"
+                              value: "@payload.defaultModel"
+                              input: nativePreference
+                              change: nativePreference
+                              args: {k: model, id: "@id"}
+                              mono: true
+                              placeholder: t:memberForm.runtime.follow
+                              listFrom:
+                                - v: ""
+                                  label: t:memberForm.runtime.follow
+                                  sub:
+                                    of: "@preferences.catalog.defaultModelLabel.length"
+                                    gte: 1
+                                    map:
+                                      "true":
+                                        t: memberForm.runtime.inherited
+                                        args:
+                                          - of: "@preferences.catalog.defaultModelSource"
+                                            map: {$frag: MEMBER_MODEL_SOURCE}
+                                          - "@preferences.catalog.defaultModelLabel"
+                                      _: ""
+                                - from: "@preferences.catalog.models"
+                                  item: {v: "@value", label: "@label", sub: "@description"}
+                          foot:
+                            - text:
+                                t: memberForm.runtime.inherited
+                                args:
+                                  - of: "@preferences.catalog.defaultModelSource"
+                                    map: {$frag: MEMBER_MODEL_SOURCE}
+                                  - "@preferences.catalog.defaultModelLabel"
+                              when: "@preferences.catalog.defaultModelLabel"
+                        - kind: field
+                          label: t:memberForm.fields.reasoningEffort
+                          id: "@fieldIds.effort"
+                          control:
+                            - type: select
+                              id: "@fieldIds.effort"
+                              value: "@payload.cliEffort"
+                              change: nativePreference
+                              args: {k: effort, id: "@id"}
+                              options:
+                                - {v: "", label: t:memberForm.runtime.follow}
+                                - from: "@preferences.efforts"
+                                  item: {v: "@value", label: "@label"}
+                              when: "@preferences.efforts"
+                            - type: input
+                              id: "@fieldIds.effort"
+                              value: "@payload.cliEffort"
+                              input: nativePreference
+                              args: {k: effort, id: "@id"}
+                              placeholder: t:memberForm.fields.clientDefault
+                              when: "!@preferences.efforts"
+                          foot:
+                            - text:
+                                t: memberForm.runtime.inherited
+                                args:
+                                  - of: "@preferences.effortSource"
+                                    map: {$frag: MEMBER_MODEL_SOURCE}
+                                  - "@preferences.effortLabel"
+                              when: "@preferences.effortLabel"
+                            - text: t:memberForm.runtime.invalidEffort
+                              tone: danger
+                              when: "@preferences.invalidEffort"
+                      when: "@adjusting"
+              - type: notice
+                tone: danger
+                parts:
+                  - text:
+                      t: nativeSetup.createFailed
+                      args: [$.failedPartner.name, $.failedPartner.client]
+                    when: $.failedPartner
+                  - text:
+                      of: $.submitError
+                      map:
+                        runtime_preference_required: t:memberForm.runtime.preferenceRequired
+                        _: $.submitError
+                when: $.submitError

@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/chat-models.test.ts -t 'recall|real reply groups'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (46 tests | 44 skipped) 7117ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  3059ms
+     ✓ renders real reply groups and connects the r129 older link without excluding a focused older reply  4015ms
+ ✓ src/pdl/__tests__/chat-models.test.ts (10 tests | 8 skipped) 133ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed | 52 skipped (56)
+   Start at  00:32:49
+   Duration  47.08s (transform 25.03s, setup 620ms, import 33.84s, tests 7.25s, environment 3.44s)
+
+
+Exit code: 0

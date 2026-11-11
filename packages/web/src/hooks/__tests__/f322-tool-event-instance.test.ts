@@ -8,6 +8,7 @@ import {
   threadCodexStreamBubbles,
 } from './useAgentMessages-codex-tool-text-convergence.helpers';
 
+const meta = '<recall-meta>{"resultStatus":"counted","resultCount":1}</recall-meta>';
 const event = (type: 'tool_use' | 'tool_result', threadId: string) => ({
   type,
   catId: 'codex',
@@ -18,7 +19,9 @@ const event = (type: 'tool_use' | 'tool_result', threadId: string) => ({
   timestamp: 1,
   toolName: 'Read',
   toolUseId: 'native-pair',
-  content: type === 'tool_result' ? 'done' : undefined,
+  content: type === 'tool_result' ? 'done\n' + meta : undefined,
+  toolInput: { path: '/source.ts' },
+  toolResultStatus: 'error' as const,
   toolEventId: type === 'tool_use' ? 'tool-api-use' : 'toolr-api-result',
   toolExecutionRef: 'child',
 });
@@ -31,6 +34,8 @@ describe('API event instance identity in real active tool handling', () => {
     active.send(event('tool_use', 'thread-1'));
     active.send(event('tool_result', 'thread-1'));
     const tools = flatCodexStreamBubbles().flatMap((message) => message.toolEvents ?? []);
+    expect(tools[0]).toMatchObject({ toolName: 'Read', detail: '{"path":"/source.ts"}' });
+    expect(tools[1]).toMatchObject({ status: 'error', detail: 'done', resultMeta: meta });
     expect(tools.map((tool) => tool.toolUseId)).toEqual(['native-pair', 'native-pair']);
     expect(tools.map((tool) => [tool.id, tool.executionRef])).toEqual([
       ['tool-api-use', 'child'],
@@ -50,6 +55,8 @@ describe('API event instance identity in real background tool handling', () => {
       ['tool-api-use', 'child'],
       ['toolr-api-result', 'child'],
     ]);
+    expect(tools[0]).toMatchObject({ toolName: 'Read', detail: '{"path":"/source.ts"}' });
+    expect(tools[1]).toMatchObject({ status: 'error', detail: 'done', resultMeta: meta });
     expect(tools.map((tool) => tool.toolUseId)).toEqual(['native-pair', 'native-pair']);
   });
 });

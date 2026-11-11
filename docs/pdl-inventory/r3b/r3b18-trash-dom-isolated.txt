@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts -t 'renders only the declared restore'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (42 tests | 41 skipped) 4282ms
+     ✓ renders only the declared restore action and waits for its owner before removing a trash row  4279ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 41 skipped (42)
+   Start at  22:46:22
+   Duration  24.45s (transform 13.36s, setup 271ms, import 18.14s, tests 4.28s, environment 0ms)
+
+
+Exit code: 0

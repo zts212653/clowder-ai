@@ -1,0 +1,3 @@
+Same PRIVACY expression as tag checks/lib/run.js; standalone scan, not a full run.sh.
+Isolated r106 build privacy-grep: 0
+Project public runtime privacy-grep: 0

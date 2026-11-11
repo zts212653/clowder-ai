@@ -1,4 +1,3 @@
-import type { EvolutionAttributionExplanation } from './EvolutionAttributionPanel';
 import { isOwnerRef } from './evolution-lineage';
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -65,4 +64,44 @@ export function isAttribution(value: unknown): value is EvolutionAttributionExpl
       );
     })
   );
+}
+
+/**
+ * F311 Phase 3 — F307 Attribution panel (AC-34).
+ *
+ * Pure projection of the API-side attribution explanation: current evidence, competing
+ * attributions, confidence bound, the layers nobody looked at, and why we are not changing
+ * anything yet. It renders owner refs, never owner payload, and it holds no state of its own.
+ */
+
+export type EvolutionAttributionLayer = 'execution' | 'harness' | 'rubric' | 'observation';
+
+export interface EvolutionAttributionExplanation {
+  schemaVersion: 1;
+  verdict: 'attributed' | 'unresolved' | 'insufficient' | 'incomparable';
+  headline: string;
+  primaryLayer?: { layer: EvolutionAttributionLayer; label: string };
+  evidence: Array<{
+    label: string;
+    ownerFeatureId: string;
+    ownerStateRef: string;
+    version?: string;
+    assetKind?: string;
+    assetId?: string;
+    /** Collision-free identity: rubric v3 and v4 are two entries, not one duplicated key. */
+    identity: string;
+  }>;
+  competingAttributions: Array<{ layer: EvolutionAttributionLayer; label: string; discriminating: boolean }>;
+  notAssessedLayers: Array<{ layer: EvolutionAttributionLayer; label: string }>;
+  confidence: { basis: 'interval' | 'power' | 'not_estimable' | 'unknown'; label: string; ownerStateRef?: string };
+  comparability: { status: 'comparable' | 'incomparable'; label: string };
+  whyNotChange: string[];
+  /**
+   * Tri-state: an attribution with no gate evaluation yet is "pending", never "ready"; only a
+   * canonical intervention_linked event opens Change Review.
+   */
+  gate: {
+    status: 'pending' | 'blocked' | 'ready';
+    blockers: Array<{ code: string; label: string; ownerFeatureId: string }>;
+  };
 }

@@ -1,0 +1,355 @@
+$ pnpm exec biome check packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/plugin-config.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/project.js packages/web/public/pdl-app/sidebar.js packages/web/src/components/cloud-binding-recovery.ts packages/web/src/components/rich/profile-update-actions.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/ProjectDataBinding.tsx packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/cloud-models.test.ts packages/web/src/pdl/__tests__/general-bindings.test.ts packages/web/src/pdl/__tests__/memory-message-proposals.test.ts packages/web/src/pdl/__tests__/message-selection.test.ts packages/web/src/pdl/__tests__/plugin-spaces.test.ts packages/web/src/pdl/__tests__/project-data-host.test.tsx packages/web/src/pdl/__tests__/proposal-models.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/sidebar-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/cloud-models.ts packages/web/src/pdl/memory-message-proposals.tsx packages/web/src/pdl/message-selection.ts packages/web/src/pdl/plugin-spaces.ts packages/web/src/pdl/proposal-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/types.ts packages/web/src/pdl/useGeneralBindings.ts packages/web/src/pdl/useSidebarBindings.ts docs/pdl-inventory/r3b/r3b25-baseline-comparison.json
+
+packages/web/src/pdl/__tests__/memory-message-proposals.test.ts:43:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    41 │           v: 1,
+    42 │           kind: 'card',
+  > 43 │           id: 'eval-repair-proposal-' + id,
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    44 │           title: 'Repair',
+    45 │           meta: { approval: { producerId: 'F266', canonicalProposalId: id } },
+
+  i Unsafe fix: Use a template literal.
+
+     41  41 │             v: 1,
+     42  42 │             kind: 'card',
+     43     │ - ··········id:·'eval-repair-proposal-'·+·id,
+         43 │ + ··········id:·`eval-repair-proposal-${id}`,
+     44  44 │             title: 'Repair',
+     45  45 │             meta: { approval: { producerId: 'F266', canonicalProposalId: id } },
+
+
+packages/web/src/pdl/__tests__/memory-message-proposals.test.ts:168:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    166 │         {
+    167 │           v: 1,
+  > 168 │           id: 'event-memory-correction-' + id,
+        │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    169 │           kind: 'card',
+    170 │           title: 'Correct event',
+
+  i Unsafe fix: Use a template literal.
+
+    166 166 │           {
+    167 167 │             v: 1,
+    168     │ - ··········id:·'event-memory-correction-'·+·id,
+        168 │ + ··········id:·`event-memory-correction-${id}`,
+    169 169 │             kind: 'card',
+    170 170 │             title: 'Correct event',
+
+
+packages/web/src/pdl/__tests__/memory-message-proposals.test.ts:181:24 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    179 │   >;
+    180 │   const memory = {
+  > 181 │     event: { revision: 'sha256:' + 'a'.repeat(64) },
+        │                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    182 │     proposal: { proposalId: id, status: 'pending', expectedRevision: 'sha256:' + 'a'.repeat(64) },
+    183 │   } as Awaited<ReturnType<typeof readCorrectionMemory>>;
+
+  i Unsafe fix: Use a template literal.
+
+    179 179 │     >;
+    180 180 │     const memory = {
+    181     │ - ····event:·{·revision:·'sha256:'·+·'a'.repeat(64)·},
+        181 │ + ····event:·{·revision:·`sha256:${'a'.repeat(64)}`·},
+    182 182 │       proposal: { proposalId: id, status: 'pending', expectedRevision: 'sha256:' + 'a'.repeat(64) },
+    183 183 │     } as Awaited<ReturnType<typeof readCorrectionMemory>>;
+
+
+packages/web/src/pdl/__tests__/memory-message-proposals.test.ts:182:70 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    180 │   const memory = {
+    181 │     event: { revision: 'sha256:' + 'a'.repeat(64) },
+  > 182 │     proposal: { proposalId: id, status: 'pending', expectedRevision: 'sha256:' + 'a'.repeat(64) },
+        │                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    183 │   } as Awaited<ReturnType<typeof readCorrectionMemory>>;
+    184 │   vi.mocked(readPublishedCorrection).mockResolvedValue(item);
+
+  i Unsafe fix: Use a template literal.
+
+    180 180 │     const memory = {
+    181 181 │       event: { revision: 'sha256:' + 'a'.repeat(64) },
+    182     │ - ····proposal:·{·proposalId:·id,·status:·'pending',·expectedRevision:·'sha256:'·+·'a'.repeat(64)·},
+        182 │ + ····proposal:·{·proposalId:·id,·status:·'pending',·expectedRevision:·`sha256:${'a'.repeat(64)}`·},
+    183 183 │     } as Awaited<ReturnType<typeof readCorrectionMemory>>;
+    184 184 │     vi.mocked(readPublishedCorrection).mockResolvedValue(item);
+
+
+packages/web/src/pdl/__tests__/memory-message-proposals.test.ts:203:84 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    201 │     undefined,
+    202 │   );
+  > 203 │   acknowledge(Response.json({ proposalId: id, status: 'approved', appliedRevision: 'sha256:' + 'b'.repeat(64) }));
+        │                                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    204 │   await pending;
+    205 │   expect(refresh).toHaveBeenCalledOnce();
+
+  i Unsafe fix: Use a template literal.
+
+    201 201 │       undefined,
+    202 202 │     );
+    203     │ - ··acknowledge(Response.json({·proposalId:·id,·status:·'approved',·appliedRevision:·'sha256:'·+·'b'.repeat(64)·}));
+        203 │ + ··acknowledge(Response.json({·proposalId:·id,·status:·'approved',·appliedRevision:·`sha256:${'b'.repeat(64)}`·}));
+    204 204 │     await pending;
+    205 205 │     expect(refresh).toHaveBeenCalledOnce();
+
+
+packages/web/src/components/cloud-binding-recovery.ts:47:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    45 │ }
+    46 │
+  > 47 │ export function latestRecoveryForSource(
+       │                 ^^^^^^^^^^^^^^^^^^^^^^^
+    48 │   source: ChatMessage,
+    49 │   timelineMessages: readonly ChatMessage[],
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:142:18 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 16 detected (max: 15).
+
+    140 │   useLayoutEffect(() => {
+    141 │     changed({
+  > 142 │       models: () => {
+        │                  ^^^
+    143 │         const values = readBindingModels(modelReaders, window.clowderChat, readFailures.current);
+    144 │         const { workbench: bench, voice: audio, document: docs } = values;
+
+  i Please refactor this function to reduce its complexity score from 16 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:158:45 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    156 │                 filePage: {
+    157 │                   ...bench.filePage,
+  > 158 │                   documentReview: current ? docs!.documentReview : null,
+        │                                             ^^^^^
+    159 │                   annotations: current ? docs!.documentAnnotations : [],
+    160 │                 },
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    156 156 │                   filePage: {
+    157 157 │                     ...bench.filePage,
+    158     │ - ··················documentReview:·current·?·docs!.documentReview·:·null,
+        158 │ + ··················documentReview:·current·?·docs?.documentReview·:·null,
+    159 159 │                     annotations: current ? docs!.documentAnnotations : [],
+    160 160 │                   },
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:159:42 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    157 │                   ...bench.filePage,
+    158 │                   documentReview: current ? docs!.documentReview : null,
+  > 159 │                   annotations: current ? docs!.documentAnnotations : [],
+        │                                          ^^^^^
+    160 │                 },
+    161 │               }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    157 157 │                     ...bench.filePage,
+    158 158 │                     documentReview: current ? docs!.documentReview : null,
+    159     │ - ··················annotations:·current·?·docs!.documentAnnotations·:·[],
+        159 │ + ··················annotations:·current·?·docs?.documentAnnotations·:·[],
+    160 160 │                   },
+    161 161 │                 }
+
+
+packages/web/src/pdl/ProjectDataBinding.tsx:165:43 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 26 detected (max: 15).
+
+    163 │         };
+    164 │       },
+  > 165 │       action: async (name, args, element) => {
+        │                                           ^^^
+    166 │         for (const [owner, binding] of Object.entries(bindings)) {
+    167 │           if (!('action' in binding)) continue;
+
+  i Please refactor this function to reduce its complexity score from 26 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:92:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    90 │       },
+    91 │     ];
+  > 92 │     const exec = chatModels(data, fixtureUi()).chatStream.items[1].exec!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    93 │     expect(exec.live).toBe(true);
+    94 │     expect(exec.groups.map((group) => group.key)).toEqual(['thinking', 'subagents', 'tools']);
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:120:12 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    118 │     ]);
+    119 │     message.isStreaming = false;
+  > 120 │     expect(chatModels(data, fixtureUi()).chatStream.items[1].exec!.live).toBe(false);
+        │            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    121 │   });
+    122 │   it('shows canonical routing recipients instead of inferring a preferred member or displaying automatic twice', () => {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    118 118 │       ]);
+    119 119 │       message.isStreaming = false;
+    120     │ - ····expect(chatModels(data,·fixtureUi()).chatStream.items[1].exec!.live).toBe(false);
+        120 │ + ····expect(chatModels(data,·fixtureUi()).chatStream.items[1].exec?.live).toBe(false);
+    121 121 │     });
+    122 122 │     it('shows canonical routing recipients instead of inferring a preferred member or displaying automatic twice', () => {
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:234:5 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    232 │     expect(JSON.stringify(vm)).not.toContain('private recalled body');
+    233 │     expect(vm.chatStream.items[0].md).toBe('已撤回 · 曾读取');
+  > 234 │     data.messages[0].extra.recall!.exposure = 'none';
+        │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    235 │     vm = chatModels(data, fixtureUi());
+    236 │     expect(vm.chatStream.items.map((m) => m.mid)).toEqual(['reply-1']);
+
+
+packages/web/src/pdl/__tests__/plugin-spaces.test.ts:49:18 lint/style/noNonNullAssertion ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    47 │   );
+    48 │   const result = await readPluginSpaces('https://host.test:3013');
+  > 49 │   const frames = result.fragments['official.collective-connector']!.frames!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    50 │   expect(frames.client!.src).toBe('https://real-service.test/?hostOrigin=https%3A%2F%2Fhost.test%3A3013');
+    51 │   expect(result.fragments['other.plugin']!.frames!.client!.src).toBe('https://other.test/');
+
+
+packages/web/src/pdl/__tests__/proposal-models.test.ts:46:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    44 │       meta: { approval: { producerId: 'F231', canonicalProposalId: 'profile-1' } },
+    45 │     };
+  > 46 │     const profile = proposalTarget(block, 'thread-1', 'message-1')!;
+       │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    47 │     transport.read.mockResolvedValue({
+    48 │       proposal: {
+
+
+packages/web/src/pdl/__tests__/proposal-models.test.ts:112:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    110 │       actions: [{ label: '同意', action: 'handoff:approve', payload: { proposalId: 'handoff-1' } }],
+    111 │     };
+  > 112 │     const handoff = proposalTarget(block, 'thread-1', 'message-1')!;
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    113 │     transport.read.mockResolvedValue({
+    114 │       proposal: {
+
+
+packages/web/src/pdl/useSidebarBindings.ts:46:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    44 │         const command = JSON.parse(args.value) as ThreadAttentionGroupCommand;
+    45 │         const preferences = await write<ThreadAttentionPreferences>('/api/config/thread-attention/groups', command);
+  > 46 │         accept({ ...read.current.owner!, preferences });
+       │                     ^^^^^^^^^^^^^^^^^^^
+    47 │         await invalidateSidebarProjection();
+    48 │         return true;
+
+
+packages/web/src/pdl/useSidebarBindings.ts:52:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    50 │       case 'sidebarLabelCreate': {
+    51 │         const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+  > 52 │         accept({ ...read.current.owner!, labels: [...read.current.owner!.labels, label] });
+       │                     ^^^^^^^^^^^^^^^^^^^
+    53 │         return true;
+    54 │       }
+
+
+packages/web/src/pdl/useSidebarBindings.ts:52:54 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    50 │       case 'sidebarLabelCreate': {
+    51 │         const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+  > 52 │         accept({ ...read.current.owner!, labels: [...read.current.owner!.labels, label] });
+       │                                                      ^^^^^^^^^^^^^^^^^^^
+    53 │         return true;
+    54 │       }
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+     50  50 │         case 'sidebarLabelCreate': {
+     51  51 │           const label = await write<ThreadLabel>('/api/labels', { name: args.name, color: args.color });
+     52     │ - ········accept({·...read.current.owner!,·labels:·[...read.current.owner!.labels,·label]·});
+         52 │ + ········accept({·...read.current.owner!,·labels:·[...read.current.owner?.labels,·label]·});
+     53  53 │           return true;
+     54  54 │         }
+
+
+packages/web/src/pdl/useSidebarBindings.ts:35:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook does not specify its dependency on load.
+
+    33 │     }
+    34 │   };
+  > 35 │   useEffect(() => {
+       │   ^^^^^^^^^
+    36 │     void load().catch(() => {});
+    37 │   }, []);
+
+  i This dependency is being used here, but is not specified in the hook dependency list.
+
+    34 │   };
+    35 │   useEffect(() => {
+  > 36 │     void load().catch(() => {});
+       │          ^^^^
+    37 │   }, []);
+    38 │   const action = async (name: string, args: Record<string, string>) => {
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Failing to specify dependencies can result in Effects not updating correctly when state changes.
+    These "stale closures" are a common source of surprising bugs.
+
+  i Either include it or remove the dependency array.
+
+  i Unsafe fix: Add the missing dependency to the list.
+
+    37 │ ··},·[load]);
+       │       ++++
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 938.
+Checked 30 files in 426ms. No fixes applied.
+Found 888 warnings.
+Found 70 infos.
+
+Exit code: 0

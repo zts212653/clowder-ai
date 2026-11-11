@@ -1,0 +1,15 @@
+$ python3 /tmp/build-pdl-r3b18.py
+
+功能清单生成失败 odules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    '/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/pdl-r3b18-r126-2c4lyub3/prototype/features-gen.js'
+  ]
+}
+
+Node.js v24.15.0
+
+Exit code: 1

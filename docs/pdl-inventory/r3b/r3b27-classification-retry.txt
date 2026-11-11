@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/sidebar-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/sidebar-bindings.test.ts (2 tests) 14ms
+ ✓ src/pdl/__tests__/r136-owners.test.ts (9 tests) 37ms
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  13:15:43
+   Duration  1.82s (transform 1.36s, setup 68ms, import 1.95s, tests 51ms, environment 845ms)
+
+
+Exit code: 0

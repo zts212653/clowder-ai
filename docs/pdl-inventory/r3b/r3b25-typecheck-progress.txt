@@ -1,0 +1,12 @@
+$ pnpm --filter @cat-cafe/web exec tsc --noEmit
+
+src/pdl/__tests__/chat-models.test.ts(12,72): error TS2339: Property 'args' does not exist on type '{ sel?: boolean | undefined; title: string; handle: string; lead: { icon: string; who?: undefined; } | { who: string; icon?: undefined; }; sub: string; act: string; args: { insert: string; }; } | { sel?: boolean | undefined; ... 4 more ...; args: { ...; }; } | ... 7 more ... | { ...; }'.
+  Property 'args' does not exist on type '{ sel?: boolean | undefined; title: string; }'.
+src/pdl/__tests__/runtime.test.ts(122,69): error TS2322: Type '{ kind: string; messageId: string; text: string; renderedOccurrences: number; selectionStart: number; selectionEnd: number; }' is not assignable to type '{ kind: "quote"; messageId: string; text: string; comment?: string | undefined; selectionStart?: number | undefined; selectionEnd?: number | undefined; renderedOccurrences?: number | undefined; }'.
+  Types of property 'kind' are incompatible.
+    Type 'string' is not assignable to type '"quote"'.
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
+
+Exit code: 1

@@ -1,0 +1,332 @@
+$ pnpm exec biome check packages/api/src/domains/cats/services/agents/routing/route-helpers.ts packages/api/src/domains/cats/services/stores/ports/MessageStore.ts packages/api/test/pdl-tool-detail.test.ts packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts packages/web/src/hooks/agent-messages/tool-events.ts packages/web/src/pdl/__tests__/chat-models.test.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/stores/chat-types.ts
+
+packages/api/test/pdl-tool-detail.test.ts:9:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+     7 │   const input = { path: 'x'.repeat(600) },
+     8 │     meta = '<recall-meta>{"resultStatus":"counted","resultCount":1}</recall-meta>',
+   > 9 │     content = 'actual result '.repeat(400) + '\n' + meta;
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    10 │   const use = toStoredToolEvent(
+    11 │     {
+
+  i Unsafe fix: Use a template literal.
+
+     7  7 │     const input = { path: 'x'.repeat(600) },
+     8  8 │       meta = '<recall-meta>{"resultStatus":"counted","resultCount":1}</recall-meta>',
+     9    │ - ····content·=·'actual·result·'.repeat(400)·+·'\n'·+·meta;
+        9 │ + ····content·=·`${'actual·result·'.repeat(400)}\n${meta}`;
+    10 10 │     const use = toStoredToolEvent(
+    11 11 │       {
+
+
+packages/api/test/pdl-tool-detail.test.ts:33:24 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    31 │     'turn',
+    32 │   )!;
+  > 33 │   const boundedInput = JSON.stringify(input).slice(0, 200) + '…';
+       │                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    34 │   assert.equal(use.detail, boundedInput);
+    35 │   assert.equal(use.inputDetail, undefined);
+
+  i Unsafe fix: Use a template literal.
+
+    31 31 │       'turn',
+    32 32 │     )!;
+    33    │ - ··const·boundedInput·=·JSON.stringify(input).slice(0,·200)·+·'…';
+       33 │ + ··const·boundedInput·=·`${JSON.stringify(input).slice(0,·200)}…`;
+    34 34 │     assert.equal(use.detail, boundedInput);
+    35 35 │     assert.equal(use.inputDetail, undefined);
+
+
+packages/api/test/pdl-tool-detail.test.ts:37:31 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    35 │   assert.equal(use.inputDetail, undefined);
+    36 │   assert.equal(use.toolName, 'read_file');
+  > 37 │   assert.equal(result.detail, content.slice(0, 1500) + '…');
+       │                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    38 │   assert.equal(result.inputDetail, boundedInput);
+    39 │   assert.equal('resultDetail' in result, false);
+
+  i Unsafe fix: Use a template literal.
+
+    35 35 │     assert.equal(use.inputDetail, undefined);
+    36 36 │     assert.equal(use.toolName, 'read_file');
+    37    │ - ··assert.equal(result.detail,·content.slice(0,·1500)·+·'…');
+       37 │ + ··assert.equal(result.detail,·`${content.slice(0,·1500)}…`);
+    38 38 │     assert.equal(result.inputDetail, boundedInput);
+    39 39 │     assert.equal('resultDetail' in result, false);
+
+
+packages/web/src/hooks/__tests__/f322-tool-event-instance.test.ts:21:37 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    19 │   toolName: 'Read',
+    20 │   toolUseId: 'native-pair',
+  > 21 │   content: type === 'tool_result' ? 'done\n' + meta : undefined,
+       │                                     ^^^^^^^^^^^^^^^
+    22 │   toolInput: { path: '/source.ts' },
+    23 │   toolResultStatus: 'error' as const,
+
+  i Unsafe fix: Use a template literal.
+
+    19 19 │     toolName: 'Read',
+    20 20 │     toolUseId: 'native-pair',
+    21    │ - ··content:·type·===·'tool_result'·?·'done\n'·+·meta·:·undefined,
+       21 │ + ··content:·type·===·'tool_result'·?·`done\n${meta}`·:·undefined,
+    22 22 │     toolInput: { path: '/source.ts' },
+    23 23 │     toolResultStatus: 'error' as const,
+
+
+packages/web/src/pdl/chat-models.ts:120:12 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    118 │   if (!output && stdout)
+    119 │     tools.unshift({
+  > 120 │       key: message.id + '-stdout',
+        │            ^^^^^^^^^^^^^^^^^^^^^^
+    121 │       title: stdout.split('\n').find((line) => line.trim()),
+    122 │       icon: 'chat',
+
+  i Unsafe fix: Use a template literal.
+
+    118 118 │     if (!output && stdout)
+    119 119 │       tools.unshift({
+    120     │ - ······key:·message.id·+·'-stdout',
+        120 │ + ······key:·`${message.id}-stdout`,
+    121 121 │         title: stdout.split('\n').find((line) => line.trim()),
+    122 122 │         icon: 'chat',
+
+
+packages/web/src/pdl/chat-models.ts:148:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    146 │         title: 'chat.chatExecVM.label',
+    147 │         items: message.thinking
+  > 148 │           ? [{ key: message.id + '-thinking', icon: 'spark', title: message.thinking, markdown: message.thinking }]
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^
+    149 │           : [],
+    150 │       },
+
+  i Unsafe fix: Use a template literal.
+
+    146 146 │           title: 'chat.chatExecVM.label',
+    147 147 │           items: message.thinking
+    148     │ - ··········?·[{·key:·message.id·+·'-thinking',·icon:·'spark',·title:·message.thinking,·markdown:·message.thinking·}]
+        148 │ + ··········?·[{·key:·`${message.id}-thinking`,·icon:·'spark',·title:·message.thinking,·markdown:·message.thinking·}]
+    149 149 │             : [],
+    150 150 │         },
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:976:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 34 detected (max: 15).
+
+    974 │  * skips for span synthesis but still surfaces in the Hub history view.
+    975 │  */
+  > 976 │ export function toStoredToolEvent(
+        │                 ^^^^^^^^^^^^^^^^^
+    977 │   msg: AgentMessage,
+    978 │   executionRef = msg.turnInvocationId ?? msg.invocationId,
+
+  i Please refactor this function to reduce its complexity score from 34 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:1741:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 118 detected (max: 15).
+
+    1739 │ }
+    1740 │
+  > 1741 │ async function assembleIncrementalContextInternal(
+         │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1742 │   deps: RouteStrategyDeps,
+    1743 │   userId: string,
+
+  i Please refactor this function to reduce its complexity score from 118 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2137:86 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    2135 │   const baseMap = new Map(buildMessageMap(relevant));
+    2136 │   const missingReplyIds = [
+  > 2137 │     ...new Set(capped.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+         │                                                                                      ^^^^^^^^^^
+    2138 │   ];
+    2139 │   if (missingReplyIds.length > 0) {
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2292:16 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 130 detected (max: 15).
+
+    2290 │  * Burst detection → tombstone → evidence recall → tool scrub → compact context.
+    2291 │  */
+  > 2292 │ async function assembleSmartWindowContext(
+         │                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2293 │   deps: RouteStrategyDeps,
+    2294 │   relevant: StoredMessage[],
+
+  i Please refactor this function to reduce its complexity score from 130 to the max allowed complexity 15.
+
+
+packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:2491:93 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    2489 │   const baseMap = new Map(buildMessageMap(relevant));
+    2490 │   const missingReplyIds = [
+  > 2491 │     ...new Set(scrubbedBurst.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+         │                                                                                             ^^^^^^^^^^
+    2492 │   ];
+    2493 │   if (missingReplyIds.length > 0) {
+
+
+packages/api/test/pdl-tool-detail.test.ts:10:15 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+     8 │     meta = '<recall-meta>{"resultStatus":"counted","resultCount":1}</recall-meta>',
+     9 │     content = 'actual result '.repeat(400) + '\n' + meta;
+  > 10 │   const use = toStoredToolEvent(
+       │               ^^^^^^^^^^^^^^^^^^
+  > 11 │     {
+        ...
+  > 19 │     'turn',
+  > 20 │   )!;
+       │   ^^
+    21 │   const result = toStoredToolEvent(
+    22 │     {
+
+
+packages/api/test/pdl-tool-detail.test.ts:21:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    19 │     'turn',
+    20 │   )!;
+  > 21 │   const result = toStoredToolEvent(
+       │                  ^^^^^^^^^^^^^^^^^^
+  > 22 │     {
+        ...
+  > 31 │     'turn',
+  > 32 │   )!;
+       │   ^^
+    33 │   const boundedInput = JSON.stringify(input).slice(0, 200) + '…';
+    34 │   assert.equal(use.detail, boundedInput);
+
+
+packages/api/test/pdl-tool-detail.test.ts:43:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    41 │   assert.equal(result.status, 'error');
+    42 │   assert.equal(result.executionRef, use.executionRef);
+  > 43 │   const absent = toStoredToolEvent({ type: 'tool_result', catId: 'codex' as CatId, timestamp: 3 }, 'turn')!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    44 │   assert.equal('resultDetail' in absent, false);
+    45 │   assert.equal(absent.resultMeta, undefined);
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:78:18 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    76 │       },
+    77 │     ];
+  > 78 │     const exec = chatModels(data, fixtureUi()).chatStream.items[1].exec!;
+       │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    79 │     expect(exec.live).toBe(true);
+    80 │     expect(exec.groups.map((group) => group.key)).toEqual(['thinking', 'subagents', 'tools']);
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:106:12 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    104 │     ]);
+    105 │     message.isStreaming = false;
+  > 106 │     expect(chatModels(data, fixtureUi()).chatStream.items[1].exec!.live).toBe(false);
+        │            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    107 │   });
+    108 │   it('shows canonical routing recipients instead of inferring a preferred member or displaying automatic twice', () => {
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    104 104 │       ]);
+    105 105 │       message.isStreaming = false;
+    106     │ - ····expect(chatModels(data,·fixtureUi()).chatStream.items[1].exec!.live).toBe(false);
+        106 │ + ····expect(chatModels(data,·fixtureUi()).chatStream.items[1].exec?.live).toBe(false);
+    107 107 │     });
+    108 108 │     it('shows canonical routing recipients instead of inferring a preferred member or displaying automatic twice', () => {
+
+
+packages/web/src/pdl/__tests__/chat-models.test.ts:220:5 lint/style/noNonNullAssertion ━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    218 │     expect(JSON.stringify(vm)).not.toContain('private recalled body');
+    219 │     expect(vm.chatStream.items[0].md).toBe('已撤回 · 曾读取');
+  > 220 │     data.messages[0].extra.recall!.exposure = 'none';
+        │     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    221 │     vm = chatModels(data, fixtureUi());
+    222 │     expect(vm.chatStream.items.map((m) => m.mid)).toEqual(['reply-1']);
+
+
+packages/web/src/pdl/chat-models.ts:95:19 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    93 │         },
+    94 │       ];
+  > 95 │     const event = events.find((event) => event.id === entry.id)!;
+       │                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    96 │     const key = pairKey(event);
+    97 │     if (seen.has(key)) return [];
+
+
+packages/web/src/pdl/chat-models.ts:157:17 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 150 detected (max: 15).
+
+    155 │ }
+    156 │
+  > 157 │ export function chatModels(data: ChatData, ui: ChatUiState) {
+        │                 ^^^^^^^^^^
+    158 │   const messages = data.messages
+    159 │     .filter((m) => m.extra?.recall?.exposure !== 'none')
+
+  i Please refactor this function to reduce its complexity score from 150 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/chat-models.ts:209:49 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 159 detected (max: 15).
+
+    207 │     .filter((m) => !m.queuedEntryId)
+    208 │     .filter((m) => !ui.viewCat || m.type === 'user' || m.catId === ui.viewCat);
+  > 209 │   const items = sourceMessages.map((message, i) => {
+        │                                                 ^^^
+    210 │     const from =
+    211 │       message.from ??
+
+  i Please refactor this function to reduce its complexity score from 159 to the max allowed complexity 15.
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 68.
+Checked 9 files in 78ms. No fixes applied.
+Found 73 warnings.
+Found 15 infos.
+
+Exit code: 0

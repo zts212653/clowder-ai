@@ -1,0 +1,4 @@
+$ node --check <each project public/pdl and public/pdl-app .js>
+JS files checked: 74
+Syntax failures: 0
+Exit code: 0

@@ -1,0 +1,76 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ❯ src/pdl/__tests__/runtime.test.ts (12 tests | 2 failed) 2791ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 245ms
+     ✓ uses the full-window export frame, exact mids and the same readonly message nodes 80ms
+     × preserves the typed work reference through the actual copied canon button 178ms
+     × preserves the contracted annotationId through the actual copied review judgment button 171ms
+     ✓ settles only after an asynchronous rich-body render is complete (r111 contract) 138ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 142ms
+     ✓ sends input through the registered action without replacing the active textarea 257ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations 235ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  304ms
+     ✓ resolves draft-append consent only from the engine dialog decision 246ms
+     ✓ leaves text paste native while forwarding image paste through the application port 115ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  679ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > preserves the typed work reference through the actual copied canon button
+AssertionError: expected '[object Object]' to deeply equal { contentRef: 'work-one', …(1) }
+
+- Expected:
+{
+  "contentRef": "work-one",
+  "ownerRevision": 3,
+}
+
++ Received:
+"[object Object]"
+
+ ❯ src/pdl/__tests__/runtime.test.ts:124:93
+    122|       button.click();
+    123|       await vi.waitFor(() => expect(action.mock.calls.some((args) => a…
+    124|       expect(action.mock.calls.find((args) => args[0] === 'assetCanonR…
+       |                                                                                             ^
+    125|     } finally {
+    126|       dom.window.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > preserves the contracted annotationId through the actual copied review judgment button
+AssertionError: expected undefined to be 'annotation-one' // Object.is equality
+
+- Expected:
+"annotation-one"
+
++ Received:
+undefined
+
+ ❯ src/pdl/__tests__/runtime.test.ts:145:93
+    143|       button.click();
+    144|       await vi.waitFor(() => expect(action.mock.calls.some((args) => a…
+    145|       expect(action.mock.calls.find((args) => args[0] === 'reviewJudge…
+       |                                                                                             ^
+    146|     } finally {
+    147|       dom.window.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  08:37:21
+   Duration  3.89s (transform 551ms, setup 27ms, import 921ms, tests 2.79s, environment 0ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts
+
+Exit code: 1

@@ -45,6 +45,21 @@ function parseBlock(payload: unknown, expected: { messageId: string; blockId: st
   };
 }
 
+export async function readArtifactWidgetBlock(
+  coordinates: { threadId: string; messageId: string; blockId: string },
+  signal?: AbortSignal,
+): Promise<WidgetBlockState> {
+  const { threadId, messageId, blockId } = coordinates;
+  const response = await apiFetch(
+    `/api/threads/${encodeURIComponent(threadId)}/artifacts/${encodeURIComponent(messageId)}/blocks/${encodeURIComponent(blockId)}`,
+    { signal },
+  );
+  if (response.status === 404 || response.status === 403) return { status: 'unavailable' };
+  if (!response.ok) throw new Error(`widget block read failed: ${response.status}`);
+  const block = parseBlock(await response.json(), { messageId, blockId });
+  return block ? { status: 'ready', block } : { status: 'error' };
+}
+
 export function useArtifactWidgetBlock(artifact: ThreadArtifactDTO | null, threadId: string | null): WidgetBlockResult {
   // 只依赖原始坐标，不依赖 DTO 对象身份：父组件重渲染不该重新发请求。
   const coordinates =
@@ -71,18 +86,9 @@ export function useArtifactWidgetBlock(artifact: ThreadArtifactDTO | null, threa
     const controller = new AbortController();
     let cancelled = false;
     setLoaded({ key, state: { status: 'loading' } });
-    const path =
-      `/api/threads/${encodeURIComponent(thread)}/artifacts/` +
-      `${encodeURIComponent(messageId)}/blocks/${encodeURIComponent(blockId)}`;
-    apiFetch(path, { signal: controller.signal })
-      .then(async (response) => {
-        if (response.status === 404 || response.status === 403) {
-          if (!cancelled) setLoaded({ key, state: { status: 'unavailable' } });
-          return;
-        }
-        if (!response.ok) throw new Error(`widget block read failed: ${response.status}`);
-        const block = parseBlock(await response.json(), { messageId, blockId });
-        if (!cancelled) setLoaded({ key, state: block ? { status: 'ready', block } : { status: 'error' } });
+    readArtifactWidgetBlock({ threadId: thread, messageId, blockId }, controller.signal)
+      .then((state) => {
+        if (!cancelled) setLoaded({ key, state });
       })
       .catch((error: unknown) => {
         if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;

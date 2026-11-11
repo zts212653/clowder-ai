@@ -35,14 +35,26 @@ export const MessageQuoteSourceSchema = z
   })
   .strict();
 
-export const CliOutputQuoteSourceSchema = z
-  .object({
-    kind: z.literal('cli_output'),
-    threadId: boundedId,
-    messageId: boundedId,
-    segmentId: boundedMetadata.optional(),
-  })
-  .strict();
+export const CliOutputQuoteSourceSchema = z.union([
+  z
+    .object({
+      kind: z.literal('cli_output'),
+      threadId: boundedId,
+      messageId: boundedId,
+      segmentId: boundedMetadata.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('cli_output'),
+      threadId: boundedId,
+      messageId: boundedId,
+      toolUseId: boundedId,
+      executionRef: boundedId,
+      part: z.enum(['call', 'input', 'result', 'meta']),
+    })
+    .strict(),
+]);
 
 export const WorkspaceFileQuoteSourceSchema = withValidLineRange({
   kind: z.literal('workspace_file'),
@@ -107,7 +119,8 @@ export const QuoteContextAttachmentSchema = z
       });
     }
     if (value.source.kind === 'cli_output') {
-      const hasSegment = value.source.segmentId !== undefined;
+      const hasSegment =
+        ('segmentId' in value.source && value.source.segmentId !== undefined) || 'toolUseId' in value.source;
       if (hasStart && !hasSegment) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

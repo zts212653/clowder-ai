@@ -1,0 +1,116 @@
+/* 由 build.py 从 library/library.js 生成（文字角色 LIB_TEXT、文字色调 LIB_TEXT_TONE），不要手改：改清单再构建 */
+/* hero：落地区的问候（空页面上的一句大字） */
+h1.greet { color: var(--fg-strong); font-size: var(--fs-hero); font-weight: var(--fw-display); }
+/* heading：页面和对话框的标题 */
+.page-title,
+.dialog h3 { color: var(--fg-strong); font-size: var(--fs-title); font-weight: var(--fw-display); }
+/* section：页面里一个小节的标题 */
+.section-title,
+.ws-h { color: var(--fg-strong); font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+/* title：一件东西的名字（卡片、格子、侧栏、对话的标题） */
+.vw-card-t,
+.cgrid-t,
+.nav-title,
+.chat-title,
+.ws-side-h,
+.tpl-t b { color: var(--fg-strong); font-size: var(--fs-l); font-weight: var(--fw-bold); }
+/* strong：一句话里要强调的几个字（跟着所在文字的字号） */
+.vw-strong,
+.notice b,
+.frame b { color: var(--fg-strong); font-weight: var(--fw-bold); }
+/* compact：紧凑一行里的正文（记录行、树行、键值、目标选择） */
+.lr:is([data-layout="record"], [data-layout="tree"]) .lr-title,
+.kvg dd,
+.target,
+.qchip,
+.tpl-t,
+.cafe-ul,
+.rules,
+.cat-rules,
+.calendar-day > span:first-child { color: var(--fg-strong); font-size: var(--fs-m); font-weight: var(--fw-normal); }
+/* body：界面里的正文：一行的标题、设置和字段的名字、一段说明、导航和菜单的项 */
+.lr-title,
+.row-title,
+.field > label,
+.field > .label,
+.field .value,
+.vw-para,
+.lr-text,
+.nav-item,
+.menu button { color: var(--fg-strong); font-size: var(--fs-l); font-weight: var(--fw-normal); }
+/* prose：阅读的内容（消息、Markdown、文档） */
+.msg-body,
+.md,
+.prose,
+.bubble,
+.card-ul { color: var(--fg-strong); font-size: var(--fs-xl); font-weight: var(--fw-normal); line-height: var(--lh-read); }
+/* value：名字后面的值或补充（只读的设置值、@句柄、必填星号）：跟着所在那一行的字号，次要墨色 */
+.sys-v,
+.row.setting .row-trail,
+.lr-title .plain,
+.row-title .plain,
+.who-line .plain,
+.req,
+.select-p { color: var(--fg-muted); font-weight: var(--fw-normal); }
+/* meta：次要信息：时间、数量、来源、副行、状态说明、备注 */
+.lr-sub,
+.row-sub,
+.lr-aside-t,
+.lr-aside-b,
+.lr-col,
+.lr-meta,
+.lr-line > :not(.lr-title),
+.c:not(pre *),
+.msg-head .time,
+.msg-head .h,
+.msg-meta,
+.msg-meta .sep,
+.msg-meta button,
+.meta-btn,
+.nav-item .trail,
+.vw-meta,
+.vw-label,
+.cgrid-s,
+.cafe-tagt,
+.field-foot,
+.status,
+.kv span,
+.kvg dt,
+.day,
+.vw-marker,
+.rt-stripe-i,
+.edit-bar-t,
+.calendar-weekdays > span,
+.calendar-count,
+.cat-use,
+.cat-na,
+.cat-miss,
+.cat-note,
+.cat-roles,
+.cat-props summary,
+.calc-mark,
+.calc-help,
+.calc-row output,
+.bars em,
+.pop-foot,
+.pop-run,
+.faint,
+.muted { color: var(--fg-muted); font-size: var(--fs-s); font-weight: var(--fw-normal); }
+/* label：一组东西上面的小标签（分组名、表头、眉题） */
+.lr-section-label,
+.lloop-h,
+th,
+.ws-eyebrow,
+.cap-dlg-h { color: var(--fg-faint); font-size: var(--fs-s); font-weight: var(--fw-medium); }
+/* 色调 warn */
+.vw-t-warn, .vw-warn-t, .c.warn, .lr-col.warn, .lr-text.warn, .cap-sm.failed .cap-state { color: var(--warn); }
+/* 色调 danger */
+.vw-t-danger, .lr-col.danger { color: var(--danger); }
+/* 色调 ok */
+.vw-t-ok, .lr-col.ok { color: var(--ok); }
+/* 色调 info */
+.vw-t-info { color: var(--info); }
+/* 色调 faint */
+.vw-t-faint, .cap-sm.unknown .cap-state { color: var(--fg-faint); }
+/* 色调 muted */
+.vw-t-muted { color: var(--fg-muted); }

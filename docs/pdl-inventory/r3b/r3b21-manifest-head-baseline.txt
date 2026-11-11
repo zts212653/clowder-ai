@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/api exec node --import tsx test/.r3b21-manifest-baseline.mts
+
+[console.log] legacy: HEAD=true; worktree=true; identical complete result
+[console.log] published: HEAD=true; worktree=true; identical complete result
+[console.log] foreignId: HEAD=true; worktree=true; identical complete result
+[console.log] alpha25: HEAD=true; worktree=true; identical complete result
+[console.log] alpha23: HEAD=true; worktree=true; identical complete result
+[console.log] grants: HEAD=true; worktree=true; identical complete result
+[console.log] HEAD also fails the original manifest-bytes assertion: legacy features.capabilities is normalized away by the installed contract.
+{"level":30,"time":"2026-11-04T10:13:55.310Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"legacy: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.311Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"published: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.316Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"foreignId: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.318Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"alpha25: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.319Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"alpha23: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.325Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"grants: HEAD=true; worktree=true; identical complete result"}
+{"level":30,"time":"2026-11-04T10:13:55.365Z","pid":85031,"hostname":"langdeMacBook-Pro.local","module":"console","msg":"HEAD also fails the original manifest-bytes assertion: legacy features.capabilities is normalized away by the installed contract."}
+
+Exit code: 0

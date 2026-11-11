@@ -1,0 +1,406 @@
+$ pnpm exec biome check packages/web/src/hooks/recall-reply-lookup.ts packages/web/src/hooks/useRecallEvents.ts packages/web/src/hooks/__tests__/recall-reply-lookup.test.ts packages/web/src/hooks/__tests__/useThreadRecall.test.tsx packages/web/src/pdl/chat-models.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/useWorkbenchBindings.ts packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:121:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    119 │       return response(task);
+    120 │     }
+  > 121 │     throw new Error('Unexpected workbench owner ' + path);
+        │                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    122 │   });
+    123 │ });
+
+  i Unsafe fix: Use a template literal.
+
+    119 119 │         return response(task);
+    120 120 │       }
+    121     │ - ····throw·new·Error('Unexpected·workbench·owner·'·+·path);
+        121 │ + ····throw·new·Error(`Unexpected·workbench·owner·${path}`);
+    122 122 │     });
+    123 123 │   });
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:63:23 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    61 │       const source = result ? recallSourceArgs(result) : null;
+    62 │       return {
+  > 63 │         key: result ? event.id + ':' + i : event.id,
+       │                       ^^^^^^^^^^^^^^^^^^
+    64 │         title: result ? recallResultTitle(result) : event.query,
+    65 │         sub: result
+
+  i Unsafe fix: Use a template literal.
+
+     61  61 │         const source = result ? recallSourceArgs(result) : null;
+     62  62 │         return {
+     63     │ - ········key:·result·?·event.id·+·':'·+·i·:·event.id,
+         63 │ + ········key:·result·?·`${event.id}:${i}`·:·event.id,
+     64  64 │           title: result ? recallResultTitle(result) : event.query,
+     65  65 │           sub: result
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:417:27 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    415 │           form.append('editSessionToken', owner.token);
+    416 │           form.append('file', file);
+  > 417 │           return apiFetch('/api/workspace/upload' + (overwrite ? '?overwrite=true' : ''), {
+        │                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    418 │             method: 'POST',
+    419 │             body: form,
+
+  i Unsafe fix: Use a template literal.
+
+    415 415 │             form.append('editSessionToken', owner.token);
+    416 416 │             form.append('file', file);
+    417     │ - ··········return·apiFetch('/api/workspace/upload'·+·(overwrite·?·'?overwrite=true'·:·''),·{
+        417 │ + ··········return·apiFetch(`/api/workspace/upload${overwrite·?·'?overwrite=true'·:·''}`,·{
+    418 418 │               method: 'POST',
+    419 419 │               body: form,
+
+
+packages/web/src/hooks/useRecallEvents.ts:107:27 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 21 detected (max: 15).
+
+    105 │     let active = true;
+    106 │     const controller = new AbortController();
+  > 107 │     setHistory((previous) => ({
+        │                           ^^^
+    108 │       threadId,
+    109 │       events: previous.threadId === threadId ? previous.events : [],
+
+  i Please refactor this function to reduce its complexity score from 21 to the max allowed complexity 15.
+
+
+packages/web/src/hooks/useRecallEvents.ts:142:33 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 20 detected (max: 15).
+
+    140 │         const events = body.events;
+    141 │         if (active)
+  > 142 │           setHistory((previous) => ({
+        │                                 ^^^
+    143 │             threadId,
+    144 │             events,
+
+  i Please refactor this function to reduce its complexity score from 20 to the max allowed complexity 15.
+
+
+packages/web/src/hooks/useRecallEvents.ts:217:81 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 31 detected (max: 15).
+
+    215 │       for (let offset = 0; offset < ids.length && active; offset += 4) {
+    216 │         await Promise.all(
+  > 217 │           ids.slice(offset, offset + 4).map(async ({ id: invocationId, token }) => {
+        │                                                                                 ^^^
+    218 │             const cacheKey = `${threadId}:${invocationId}`;
+    219 │             const cached = cueCache.current.get(cacheKey);
+
+  i Please refactor this function to reduce its complexity score from 31 to the max allowed complexity 15.
+
+
+packages/web/src/hooks/useRecallEvents.ts:287:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 29 detected (max: 15).
+
+    285 │     ].map((event) => ({
+    286 │       ...event,
+  > 287 │       results: event.results?.map((item): RecallResultItem => {
+        │                                                            ^^^
+    288 │         const key = cueViewKey({ ...event, anchor: item.anchor });
+    289 │         const view = event.cueId ? cueViews.get(key) : item.anchor ? views.get(item.anchor) : undefined;
+
+  i Please refactor this function to reduce its complexity score from 29 to the max allowed complexity 15.
+
+
+packages/web/src/hooks/useRecallEvents.ts:69:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: threadId.
+
+    67 │   const olderReads = useRef(Promise.resolve());
+    68 │   const olderAbort = useRef<AbortController | null>(null);
+  > 69 │   useEffect(() => () => olderAbort.current?.abort(), [threadId]);
+       │   ^^^^^^^^^
+    70 │   const [deliveries, setDeliveries] = useState<{
+    71 │     threadId: string | null;
+
+  i This dependency can be removed from the list.
+
+    67 │   const olderReads = useRef(Promise.resolve());
+    68 │   const olderAbort = useRef<AbortController | null>(null);
+  > 69 │   useEffect(() => () => olderAbort.current?.abort(), [threadId]);
+       │                                                       ^^^^^^^^
+    70 │   const [deliveries, setDeliveries] = useState<{
+    71 │     threadId: string | null;
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    69 │ ··useEffect(()·=>·()·=>·olderAbort.current?.abort(),·[threadId]);
+       │                                                       --------
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:80:60 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 38 detected (max: 15).
+
+    78 │   useTaskStore.getState().setTasks([task], 'pdl-test');
+    79 │   useChatStore.setState({ workspaceWorktreeId: 'wt' });
+  > 80 │   vi.mocked(apiFetch).mockImplementation(async (raw, init) => {
+       │                                                            ^^^
+    81 │     const path = String(raw),
+    82 │       url = new URL(path, 'https://api.test'),
+
+  i Please refactor this function to reduce its complexity score from 38 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/__tests__/workbench-bindings.test.ts:205:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    203 │     marks: [],
+    204 │   });
+  > 205 │   expect(new URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        │                  ^^^^^
+    206 │ });
+    207 │ it.each([
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    203 203 │       marks: [],
+    204 204 │     });
+    205     │ - ··expect(new·URL(page!.actions.source).searchParams.get('path')).toBe(path);
+        205 │ + ··expect(new·URL(page?.actions.source).searchParams.get('path')).toBe(path);
+    206 206 │   });
+    207 207 │   it.each([
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:60:77 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 25 detected (max: 15).
+
+    58 │     const mid = findRecallReply(event, messages)?.id ?? event.messageId;
+    59 │     const reply = mid ? { kind: 'msg', mid, thread: threadId } : null;
+  > 60 │     return (event.results?.length ? event.results : [null]).map((result, i) => {
+       │                                                                             ^^^
+    61 │       const source = result ? recallSourceArgs(result) : null;
+    62 │       return {
+
+  i Please refactor this function to reduce its complexity score from 25 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:202:37 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    200 │       worktreeId = workspace.worktreeId;
+    201 │     if (!worktreeId) throw new Error('请先选择工作区');
+  > 202 │     if (store.workspaceEditToken && store.workspaceEditTokenExpiry! > Date.now())
+        │                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    203 │       return { worktreeId, token: store.workspaceEditToken };
+    204 │     const lease = await write<{ token: string; expiresIn: number }>('/api/workspace/edit-session', { worktreeId });
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:304:87 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 68 detected (max: 15).
+
+    302 │     };
+    303 │   }, [fileScope]);
+  > 304 │   const action = async (name: string, args: Record<string, string>): Promise<boolean> => {
+        │                                                                                       ^^^
+    305 │     if (await execution.action(name, args)) return true;
+    306 │     switch (name) {
+
+  i Please refactor this function to reduce its complexity score from 68 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:459:21 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 87 detected (max: 15).
+
+    457 │     }
+    458 │   };
+  > 459 │   const models = () => {
+        │                     ^^^
+    460 │     const ui = state.current,
+    461 │       wt = workspace.worktrees.find((w) => w.id === workspace.worktreeId),
+
+  i Please refactor this function to reduce its complexity score from 87 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:486:53 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    484 │           media: mediaKind
+    485 │             ? {
+  > 486 │                 id: `file:${file.absolutePath ?? `${opened!.worktreeId}:${file.path}`}`,
+        │                                                     ^^^^^^^
+    487 │                 kind: mediaKind,
+    488 │                 src: `${API_URL}/api/workspace/file/raw?${fileParams}`,
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    484 484 │             media: mediaKind
+    485 485 │               ? {
+    486     │ - ················id:·`file:${file.absolutePath·??·`${opened!.worktreeId}:${file.path}`}`,
+        486 │ + ················id:·`file:${file.absolutePath·??·`${opened?.worktreeId}:${file.path}`}`,
+    487 487 │                   kind: mediaKind,
+    488 488 │                   src: `${API_URL}/api/workspace/file/raw?${fileParams}`,
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:616:53 lint/complexity/noExcessiveCognitiveComplexity ━━━━━━━━━━
+
+  ! Excessive complexity of 23 detected (max: 15).
+
+    614 │           askVal: ui.review.ask,
+    615 │         },
+  > 616 │         reviews: native.reviews.slice(0, 5).map((r) => ({
+        │                                                     ^^^
+    617 │           id: r.id,
+    618 │           tone: r.status === 'completed' ? 'ok' : ['failed', 'unavailable'].includes(r.status) ? 'danger' : 'info',
+
+  i Please refactor this function to reduce its complexity score from 23 to the max allowed complexity 15.
+
+
+packages/web/src/pdl/useWorkbenchBindings.ts:237:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook does not specify its dependency on nativeRead.
+
+    235 │     if (!signal?.aborted) setNative({ ...result, load: '' });
+    236 │   };
+  > 237 │   useEffect(() => {
+        │   ^^^^^^^^^
+    238 │     const abort = new AbortController();
+    239 │     const read = () =>
+
+  i This dependency is being used here, but is not specified in the hook dependency list.
+
+    238 │     const abort = new AbortController();
+    239 │     const read = () =>
+  > 240 │       void nativeRead(abort.signal).catch(() => {
+        │            ^^^^^^^^^^
+    241 │         if (!abort.signal.aborted) setNative({ load: 'error', reviews: [], nativeTargets: [] });
+    242 │       });
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Failing to specify dependencies can result in Effects not updating correctly when state changes.
+    These "stale closures" are a common source of surprising bugs.
+
+  i Unsafe fix: Add the missing dependency to the list.
+
+    249 │ ··},·[data.threadId,·generation,·nativeRead]);
+        │                                ++++++++++++
+
+packages/web/src/pdl/useWorkbenchBindings.ts:237:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: data.threadId, generation.
+
+    235 │     if (!signal?.aborted) setNative({ ...result, load: '' });
+    236 │   };
+  > 237 │   useEffect(() => {
+        │   ^^^^^^^^^
+    238 │     const abort = new AbortController();
+    239 │     const read = () =>
+
+  i This dependency can be removed from the list.
+
+    247 │       clearInterval(timer);
+    248 │     };
+  > 249 │   }, [data.threadId, generation]);
+        │       ^^^^^^^^^^^^^
+    250 │   const refresh = useCallback(() => setGeneration((n) => n + 1), []);
+    251 │   useEffect(() => {
+
+  i This dependency can be removed from the list.
+
+    247 │       clearInterval(timer);
+    248 │     };
+  > 249 │   }, [data.threadId, generation]);
+        │                      ^^^^^^^^^^
+    250 │   const refresh = useCallback(() => setGeneration((n) => n + 1), []);
+    251 │   useEffect(() => {
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    249 │ ··},·[data.threadId,·generation]);
+        │       -------------------------
+
+packages/web/src/pdl/useWorkbenchBindings.ts:251:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook specifies more dependencies than necessary: generation.
+
+    249 │   }, [data.threadId, generation]);
+    250 │   const refresh = useCallback(() => setGeneration((n) => n + 1), []);
+  > 251 │   useEffect(() => {
+        │   ^^^^^^^^^
+    252 │     const abort = new AbortController(),
+    253 │       id = workspace.worktreeId;
+
+  i This dependency can be removed from the list.
+
+    283 │       });
+    284 │     return () => abort.abort();
+  > 285 │   }, [workspace.worktreeId, generation]);
+        │                             ^^^^^^^^^^
+    286 │   const fileScope = JSON.stringify([opened?.worktreeId, opened?.file.path]);
+    287 │   useEffect(() => {
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Specifying more dependencies than required can lead to unnecessary re-rendering
+    and degraded performance.
+
+  i Unsafe fix: Remove the extra dependencies from the list.
+
+    285 │ ··},·[workspace.worktreeId,·generation]);
+        │                           ------------
+
+packages/web/src/pdl/useWorkbenchBindings.ts:287:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook does not specify its dependency on opened?.file.
+
+    285 │   }, [workspace.worktreeId, generation]);
+    286 │   const fileScope = JSON.stringify([opened?.worktreeId, opened?.file.path]);
+  > 287 │   useEffect(() => {
+        │   ^^^^^^^^^
+    288 │     const file = opened?.file,
+    289 │       worktreeId = opened?.worktreeId;
+
+  i This dependency is being used here, but is not specified in the hook dependency list.
+
+    286 │   const fileScope = JSON.stringify([opened?.worktreeId, opened?.file.path]);
+    287 │   useEffect(() => {
+  > 288 │     const file = opened?.file,
+        │                  ^^^^^^^^^^^^
+    289 │       worktreeId = opened?.worktreeId;
+    290 │     let current = true;
+
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Failing to specify dependencies can result in Effects not updating correctly when state changes.
+    These "stale closures" are a common source of surprising bugs.
+
+  i Unsafe fix: Add the missing dependency to the list.
+
+    303 │ ··},·[fileScope,·opened?.file]);
+        │                ++++++++++++++
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 600.
+Checked 11 files in 744ms. No fixes applied.
+Found 591 warnings.
+Found 29 infos.
+
+Exit code: 0

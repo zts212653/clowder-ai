@@ -1,0 +1,11 @@
+$ pnpm --filter @cat-cafe/web exec tsc --noEmit --incremental false
+
+src/pdl/__tests__/chat-models.test.ts(29,5): error TS2322: Type '{ subexecutionEvents: ProviderSubexecutionSemanticEvent[]; cliDiagnostics?: CliDiagnostics; executionAccount?: import("/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/shared/dist/codex-account").ExecutionAccountSnapshot; ... 9 more ...; usage?: TokenUsage; }' is not assignable to type 'ChatMessageMetadata'.
+  Types of property 'provider' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit --incremental false
+
+Exit code: 1

@@ -1,0 +1,48 @@
+{
+ "wsPreview": {
+  "discovered": "Discovered services"
+ },
+ "execDetail": {
+  "feedback": "Also tell the cat why it ended",
+  "forceReset": {
+   "title": "Force clear execution slots"
+  }
+ },
+ "workspaceOwners": {
+  "projectSetup": {
+   "initialize": "Initialize Git",
+   "clone": "Clone from URL",
+   "prepare": "Start preparation",
+   "later": "Later"
+  }
+ },
+ "voiceReview": {
+  "advisory": {
+   "dnd": "Do not disturb",
+   "mode": "Advisory mode",
+   "passive": "Passive",
+   "active": "Active"
+  },
+  "pageAction": {
+   "title": "Current page",
+   "inspect": "Inspect"
+  }
+ },
+ "workbench": {
+  "pageActionResult": {
+   "applied": "Applied",
+   "no_effect": "No effect",
+   "denied": "Denied"
+  },
+  "pageActionState": {
+   "ready": "Ready to inspect",
+   "inspecting": "Inspecting",
+   "awaiting_consent": "Awaiting consent"
+  },
+  "pageActionField": {
+   "operation": "Action",
+   "expires": "Expires",
+   "result": "Result"
+  }
+ }
+}

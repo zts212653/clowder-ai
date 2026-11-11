@@ -953,6 +953,8 @@ export class InventoryPluginManagerInstalledPackages implements PluginManagerIns
 
 export interface PluginManagerRuntimeCompositionOptions {
   readonly additionalStateProjection?: PluginManagerStateProjectionPort;
+  /** Told when a plugin's install / update / uninstall starts or ends. */
+  readonly pluginOperationChanged?: (pluginId: string) => void;
   readonly runtime: DormantPluginRuntimeComposition;
   readonly catalogProvider: OfficialPluginCatalogProvider;
   /** Catalog authority used by the pre-Manager official routes during Train B compatibility. */
@@ -1083,6 +1085,7 @@ export function createPluginManagerRuntimeComposition(
   const manager = new PluginManagerService({
     addressedTargets,
     delivery: options.runtime.supervisor,
+    ...(options.pluginOperationChanged ? { operationChanged: options.pluginOperationChanged } : {}),
     catalog,
     inventory: options.runtime.inventoryStore,
     installedPackages,

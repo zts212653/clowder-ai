@@ -1,0 +1,23 @@
+{
+  "current": 253,
+  "head": 251,
+  "shared": 251,
+  "currentOnly": [
+    "src/pdl/__tests__/cloud-models.test.ts > keeps recovery on the real notice, exact source and dispatch, and shows an attested reply without another retry",
+    "src/pdl/__tests__/memory-message-proposals.test.ts > reads an evaluation repair from its exact publication and shows a result only after the canonical result owner confirms it"
+  ],
+  "headOnly": [],
+  "matchedFirstErrors": 249,
+  "differentFirstErrors": [
+    {
+      "case": "src/components/__tests__/AppShell-presentation-kd1.test.tsx > F226 KD-1: presentation float survives route change (AppShell-root mount) > Esc still closes the float when only a non-interactive backdrop is present (砚砚 R4)",
+      "current": "Error: Test timed out in 10000ms.",
+      "head": "AssertionError: expected { content: { …(8) }, …(5) } to be null"
+    },
+    {
+      "case": "src/stores/__tests__/chatStore-multithread.test.ts > chatStore multi-thread state > snapshotActive lastActivity (sidebar sort stability) > uses deliveredAt over timestamp when snapshotting idle thread",
+      "current": "AssertionError: expected 1793811335204 to be 1793811450204 // Object.is equality",
+      "head": "AssertionError: expected 1793812363701 to be 1793812478701 // Object.is equality"
+    }
+  ]
+}

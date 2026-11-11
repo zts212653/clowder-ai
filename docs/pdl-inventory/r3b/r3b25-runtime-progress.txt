@@ -1,0 +1,243 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/runtime.test.ts (60 tests | 5 failed) 27108ms
+     ✓ opens the message selection toolbar and forwards its exact quote through the existing dialog  632ms
+     ✓ opens real member candidates at the caret and chooses one without sending or losing the input suffix  362ms
+     ✓ renders canonical sidebar groups and keeps organize drafts on owner rejection before submitting the original snapshot  556ms
+     × renders native update state in the declared system section and waits for the install owner 260ms
+     ✓ renders one expandable paired tool row from existing details and metadata, actual group icons and live following 247ms
+     ✓ uses the shared recent-work view below component-owned recent tabs and opens command details in live  410ms
+     ✓ loads a src-only plugin workbench tool from its declared entry metadata without a route or another painter 275ms
+     ✓ keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there  528ms
+     ✓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials  705ms
+     ✓ keeps unknown agent identities from their own from name or id without borrowing another member 193ms
+     × registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner 652ms
+     ✓ keeps appearance preferences and complete custom theme documents in the original local store with no server writes  571ms
+     ✓ exposes retained per-thread background data for v2 while the default theme intentionally reads only the local global choice 165ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  387ms
+     ✓ renders only the declared restore action and waits for its owner before removing a trash row  359ms
+     ✓ renders r126 file media and generic Office metadata through the original file view  390ms
+     ✓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys  564ms
+     × reads project pins and display names from the real preference snapshot and dispatches their existing writers 202ms
+     × opens the owner source thread from the declared task row action and respects rejected navigation 425ms
+     × opens the real author member card through r124 declarations and inserts its actual handle 1307ms
+     ✓ renders two independently selectable screenings and dispatches the result comparison through the copied film view  832ms
+     ✓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media  682ms
+     ✓ offers rollback only for one source-current version with one parent while leaving history available  666ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  658ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  449ms
+     ✓ renders real reply groups and connects the r129 older link without excluding a focused older reply  563ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  530ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  458ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  350ms
+     ✓ retains the existing owner read-error component once without adding a toast  411ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  620ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  607ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  639ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  606ms
+     ✓ does not show the history marker or load-older action for a new empty thread (r116) 166ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  399ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  539ms
+     ✓ uses the r114 report collection and actual telemetry condition without sample facts 236ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  409ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen 299ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  408ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  388ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  571ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  348ms
+     ✓ opens and leaves Team details through the native workbench stack  390ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  358ms
+     ✓ paints the entire shell and chat from the copied theme, including rich-body platform calls 188ms
+     ✓ uses the full-window export frame, exact mids and the same readonly message nodes 76ms
+     ✓ preserves the typed work reference through the actual copied canon button 242ms
+     ✓ preserves the contracted annotationId through the actual copied review judgment button 238ms
+     ✓ settles only after an asynchronous rich-body render is complete (r111 contract) 145ms
+     ✓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111 210ms
+     ✓ sends input through the registered action without replacing the active textarea  323ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  315ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  418ms
+     ✓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection  734ms
+     ✓ closes chat.modal through the declared cancel and Esc exits without sending  420ms
+     ✓ resolves draft-append consent only from the engine dialog decision  340ms
+     ✓ leaves text paste native while forwarding image paste through the application port 193ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1488ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > renders native update state in the declared system section and waits for the install owner
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/pdl/__tests__/runtime.test.ts:193:68
+    191|       w.eval("go('system')");
+    192|       await w.__settled();
+    193|       expect(w.document.getElementById('sys-update')?.textContent).toC…
+       |                                                                    ^
+    194|       await w.eval("A.desktopUpdate({op:'check'})");
+    195|       expect(action).toHaveBeenLastCalledWith('desktop:check', {}, und…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st Mock call:
+
+    Array [
+      [TypeError: Cannot read properties of undefined (reading 'plugin')],
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pdl/__tests__/runtime.test.ts:577:26
+    575|       await w.__settled();
+    576|       expect(w.document.querySelector('[data-view="page.ext"]')?.textC…
+    577|       expect(errors).not.toHaveBeenCalled();
+       |                          ^
+    578|     } finally {
+    579|       dom.window.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > reads project pins and display names from the real preference snapshot and dispatches their existing writers
+AssertionError: expected [ Object{ label: '取消固定', …(2) }, …(3) ] to match object [ { act: 'setStatus', …(1) }, …(1) ]
+
+- Expected
++ Received
+
+@@ -4,14 +4,32 @@
+      "data": {
+        "entity": "proj",
+        "field": "pinned",
+        "id": "/project/pinned.owner",
+      },
++     "label": "取消固定",
+    },
+    {
+      "act": "rename",
++     "data": {
++       "entity": "proj",
++       "id": "/project/pinned.owner",
++     },
++     "label": "改显示名称（只改本机）…",
++   },
++   {
++     "act": "sidebarReveal",
++     "data": {
++       "id": "/project/pinned.owner",
++     },
++     "label": "在 Finder 中打开",
++   },
++   {
++     "act": "remove",
++     "danger": 1,
+      "data": {
+        "entity": "proj",
+        "id": "/project/pinned.owner",
+      },
++     "label": "归档这个项目的所有对话…",
+    },
+  ]
+
+ ❯ src/pdl/__tests__/runtime.test.ts:842:45
+    840|       expect(w.document.querySelector('[data-view="nav.threads"]').tex…
+    841|       w.eval(`S.menuTarget=${JSON.stringify(pinned)}`);
+    842|       expect(w.eval('MENU_FNS.cafeProj()')).toMatchObject([
+       |                                             ^
+    843|         { act: 'setStatus', data: { entity: 'proj', id: pinned, field:…
+    844|         { act: 'rename', data: { entity: 'proj', id: pinned } },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > opens the owner source thread from the declared task row action and respects rejected navigation
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st Mock call:
+
+    Array [
+      [ReferenceError: themeList is not defined],
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/pdl/__tests__/runtime.test.ts:907:26
+    905|       expect(action).toHaveBeenCalledWith('thread', { id: 'unreadable-…
+    906|       expect(w.eval('S.route')).toBe('system');
+    907|       expect(errors).not.toHaveBeenCalled();
+       |                          ^
+    908|     } finally {
+    909|       dom.window.close();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > opens the real author member card through r124 declarations and inserts its actual handle
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'compose', …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   "compose",
++   "preview:visible",
+    {
+-     "v": "@owner-handle ",
++     "v": "false",
+    },
+    undefined,
+  ]
+
+  2nd vi.fn() call:
+
+  [
+-   "compose",
++   "terminal:visible",
+    {
+-     "v": "@owner-handle ",
++     "v": "false",
+    },
+    undefined,
+  ]
+
+  3rd vi.fn() call:
+
+  [
+    "compose",
+    {
++     "pos": "14",
+      "v": "@owner-handle ",
+    },
+-   undefined,
+  ]
+
+
+Number of calls: 3
+
+ ❯ src/pdl/__tests__/runtime.test.ts:940:45
+    938|       expect(card.querySelector('[role="dialog"]').getAttribute('aria-…
+    939|       card.querySelector('[data-kind="mention"]').click();
+    940|       await vi.waitFor(() => expect(action).toHaveBeenCalledWith('comp…
+       |                                             ^
+    941|       expect(ui.memberCard).toBeNull();
+    942|       expect(w.document.querySelector('[data-pop="memberCard"]')).toBe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 55 passed (60)
+   Start at  08:34:40
+   Duration  29.52s (transform 1.34s, setup 38ms, import 2.25s, tests 27.11s, environment 0ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts
+
+Exit code: 1

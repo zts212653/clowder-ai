@@ -1,0 +1,2 @@
+node --check: 56 JavaScript files (55 copied + project chat binding)
+Syntax failures: 0

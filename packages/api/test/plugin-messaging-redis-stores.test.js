@@ -412,7 +412,7 @@ describe('Plugin messaging Redis stores', { skip: redisIsolationSkipReason(REDIS
       const loaded = await store.getById(message.id);
       assert.equal(loaded.extra.isExplicitPost, true);
       assert.deepEqual(loaded.extra.pluginMessage, pluginMessage);
-      assert.deepEqual(loaded.extra.rich, { v: 1, blocks: [] });
+      assert.equal(loaded.extra.rich, undefined, 'a plugin message reads rich only from its elements');
 
       const [rawHostExtra, rawPluginMessage] = await redis.hmget(`msg:${message.id}`, 'extra', 'pluginMessage');
       assert.equal(JSON.parse(rawHostExtra).pluginMessage, undefined, 'host extra does not duplicate plugin payload');

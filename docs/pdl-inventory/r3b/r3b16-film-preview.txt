@@ -1,0 +1,14 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/film-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/film-bindings.test.ts (10 tests) 40ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  21:48:21
+   Duration  1.24s (transform 534ms, setup 31ms, import 751ms, tests 40ms, environment 228ms)
+
+
+Exit code: 0

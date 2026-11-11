@@ -1,0 +1,982 @@
+views:
+  ws.live:
+    loading: t:wsLive.load.loading
+    error: t:wsLive.load.error
+    stale: t:wsLive.load.stale
+    vm: live
+    blocks:
+      - {type: view, id: ws.execDetail, when: $.execDetail}
+      - type: section
+        title: t:wsLive.live
+        label: $.count
+        blocks:
+          - type: list
+            id: live
+            from: $.runs
+            item:
+              actions:
+                id: "@actions.id"
+                inv: "@actions.inv"
+                thread: "@actions.thread"
+                cmd: "@actions.cmd"
+                name: "@actions.name"
+                what:
+                  of: "@actions.cmd"
+                  map:
+                    "true":
+                      t: wsLive.activity
+                      args: ["@actions.activity"]
+                    "false":
+                      t: workbench.liveActionWhat.false
+                      args:
+                        - t: wsLive.activity
+                          args: ["@actions.activity"]
+                    _: "@actions.cmd"
+                activity: "@actions.activity"
+                cancel: "@actions.cancel"
+            row: live.run
+            empty: t:wsLive.liveEmpty
+      - type: section
+        title: t:wsLive.waits
+        label: $.waits.count
+        blocks:
+          - type: list
+            id: waits
+            from: $.waits.items
+            item:
+              expand:
+                of: "@kind"
+                map:
+                  hold_ball: null
+                  _:
+                    lit: {$frag: LIVE_WAIT_DETAILS}
+            row: live.wait
+            optional: true
+      - type: toolbar
+        when: $.waits.candidate
+        parts:
+          - {text: t:chatCards.field.candidate}
+          - text:
+              of: $.waits.candidate.rev
+              slice: [0, 7]
+            mono: true
+          - text:
+              t: wsLive.wait.list.rest
+              args: [$.waits.candidate.observed, $.waits.candidate.satisfiable]
+          - text:
+              t: wsLive.wait.list.more
+              args: [$.waits.candidate.unknown]
+            tone: warn
+            when: $.waits.candidate.unknown
+  ws.execDetail:
+    vm: execDetail
+    blocks:
+      - type: section
+        key: execDetail
+        title: t:execDetail.task
+        actions:
+          - type: status
+            tone:
+              of: $.failed
+              map:
+                "true": danger
+                "false":
+                  of: $.live
+                  map: {"true": info, "false": "", _: $.live}
+                _: $.failed
+            text:
+              of: $.state
+              map:
+                queued: t:execDetail.state.queued
+                running: t:execDetail.state.running
+                cancelling: t:composer.stopping
+                succeeded: t:common.status.completed
+                failed: t:execDetail.state.failed
+                cancelled: t:execDetail.state.cancelled
+                timed_out: t:execDetail.state.timed_out
+                lost: t:execDetail.state.lost
+                _: $.state
+          - type: button
+            label: t:execDetail.stop
+            act: opLiveStop
+            args: {k: $.id}
+            when: $.cancelable
+          - type: each
+            from:
+              - {}
+            when: $.threadId
+            control:
+              type: more
+              items:
+                - label: t:execDetail.forceReset.title
+                  act: opForceReset
+                  args: {threadId: $.threadId}
+                  tone: danger
+          - type: button
+            iconOnly: true
+            icon: close
+            label: t:execDetail.close
+            act: close
+            args: {path: ws.execDetail}
+        blocks:
+          - {type: pre, text: $.command}
+          - type: kv
+            from:
+              - k: t:workbench.execField.elapsed
+                v:
+                  t: format.duration.seconds
+                  args: [$.elapsed]
+              - k: t:workbench.execField.exit
+                v: $.exitCode
+                when:
+                  of: $.exitCode
+                  map: {"0": true, _: $.exitCode}
+              - k: t:workbench.execField.thread
+                v: $.thread
+                act: goThread
+                args: {id: $.threadId}
+                when: $.threadId
+              - k: t:workbench.execField.blocked
+                v:
+                  of: $.blocked
+                  map:
+                    control_plane_unavailable: t:wsLive.blocked.control_plane_unavailable
+                    terminalizing: t:wsLive.blocked.terminalizing
+                    foreign_principal: t:wsLive.blocked.foreign_principal
+                    cancellation_pending: t:composer.stopping
+                    _: $.blocked
+                warn: true
+                when: $.blocked
+          - type: disclosure
+            key: exec-log
+            title: t:execDetail.log
+            blocks:
+              - {type: pre, text: $.tail, when: $.tail}
+              - {type: pre, text: t:execDetail.noOutput, when: "!$.tail"}
+              - type: list
+                id: exec-trace
+                from: $.trace
+                row:
+                  layout: record
+                  key: "@key"
+                  title:
+                    text:
+                      of: "@state"
+                      map:
+                        queued: t:execDetail.state.queued
+                        running: t:execDetail.state.running
+                        cancelling: t:composer.stopping
+                        succeeded: t:common.status.completed
+                        failed: t:execDetail.state.failed
+                        cancelled: t:execDetail.state.cancelled
+                        timed_out: t:execDetail.state.timed_out
+                        lost: t:execDetail.state.lost
+                        _: "@state"
+                  cols:
+                    - v: {of: "@time", fmt: clock}
+                      w: num
+                optional: true
+  ws.schedule:
+    vm: schedule
+    loading: t:wsSchedule.loading
+    error: t:wsSchedule.error
+    blocks:
+      - type: toolbar
+        items:
+          - type: button
+            iconOnly: true
+            icon: left
+            label: t:wsSchedule.previous
+            act: set
+            args: {path: ws.scheduleDate, v: $.previous, cast: num}
+          - type: button
+            iconOnly: true
+            icon: right
+            label: t:wsSchedule.next
+            act: set
+            args: {path: ws.scheduleDate, v: $.next, cast: num}
+          - type: text
+            text:
+              t: schedule.monthTitle
+              args: [$.year, $.month]
+          - {type: grow}
+          - type: button
+            label: t:format.today
+            act: set
+            args: {path: ws.scheduleDate, v: $.today, cast: num}
+          - type: seg
+            value: $.mode
+            act: set
+            args: {path: ws.scheduleMode}
+            options:
+              - {v: month, label: t:wsSchedule.month}
+              - {v: week, label: t:wsSchedule.week}
+      - type: component
+        use: calendar
+        props:
+          anchor: $.calendar.anchor
+          value: $.calendar.value
+          today: $.calendar.today
+          mode: $.calendar.mode
+          marks: $.calendar.marks
+          act: set
+          args: {path: ws.scheduleDate, cast: num}
+      - {type: notice, when: $.partial, text: t:schedule.partial, tone: warn}
+      - type: list
+        id: schedule-day
+        label: {of: $.selectedTitle, fmt: date}
+        from: $.items
+        row: schedule.work
+        empty: t:wsSchedule.empty
+      - type: list
+        id: schedule-undated
+        label: t:wsSchedule.undated
+        from: $.undated
+        row: schedule.work
+        optional: true
+  ws.eval:
+    loading: t:wsEval.load.loading
+    error: t:wsEval.load.error
+    empty: t:wsEval.load.empty
+    vm: eval
+    blocks:
+      - type: stats
+        variant: counters
+        items:
+          - {value: $.counts.act, label: t:wsEval.attention}
+          - {value: $.counts.settled, label: t:wsEval.closedObserving}
+          - value: $.counts.stale
+            label: t:wsEval.expired
+            tone: warn
+            when: $.counts.stale
+      - type: toolbar
+        left:
+          - type: seg
+            value: $.view
+            act: set
+            args: {path: ws.evalView}
+            options:
+              - {v: overview, label: t:wsEval.overview}
+              - {v: events, label: t:settingsUi.contribution.kind.events}
+      - type: section
+        title: t:wsEval.dutySettings
+        help: t:wsEval.onCallHelp
+        keep: true
+        when: $.ledger
+        blocks:
+          - type: settings
+            rows:
+              - label: t:wsEval.primary
+                ctls:
+                  - type: select
+                    id: op-duty-p
+                    options:
+                      - {v: t:wsEval.ledger.backup, label: t:wsEval.ledger.backup}
+                      - from: $.ledger.cats
+                        item:
+                          v:
+                            t: workbench.identity
+                            args: ["@name", "@handle"]
+                          label:
+                            t: workbench.identity
+                            args: ["@name", "@handle"]
+                    value:
+                      of: $.ledger.duty.hasPrimary
+                      map:
+                        "true":
+                          of: [0, 1, 2]
+                          item:
+                            of: "@"
+                            map: {"0": $.ledger.duty.primary.name, "1": " ", "2": $.ledger.duty.primary.handle}
+                          sep: ""
+                        "false": t:wsEval.ledger.backup
+                        _: $.ledger.duty.hasPrimary
+                    label: t:wsEval.primary
+                    change: opDutySave
+                    args: {field: primary}
+              - label: t:wsEval.backup
+                ctls:
+                  - type: select
+                    id: op-duty-b
+                    options:
+                      - {v: t:wsEval.ledger.backup, label: t:wsEval.ledger.backup}
+                      - from: $.ledger.cats
+                        item:
+                          v:
+                            t: workbench.identity
+                            args: ["@name", "@handle"]
+                          label:
+                            t: workbench.identity
+                            args: ["@name", "@handle"]
+                    value:
+                      of: $.ledger.duty.hasBackup
+                      map:
+                        "true":
+                          of: [0, 1, 2]
+                          item:
+                            of: "@"
+                            map: {"0": $.ledger.duty.backup.name, "1": " ", "2": $.ledger.duty.backup.handle}
+                          sep: ""
+                        "false": t:wsEval.ledger.backup
+                        _: $.ledger.duty.hasBackup
+                    label: t:wsEval.backup
+                    change: opDutySave
+                    args: {field: backup}
+      - type: label
+        text: t:wsEval.domains
+        count: $.ledger.domainCount
+        when: $.ledger
+      - type: list
+        id: eval-domains
+        from: $.ledger.domains
+        row:
+          layout: two
+          key: "@key"
+          tone:
+            of: "@enabled"
+            map: {"true": "", "false": past, _: "@enabled"}
+          title:
+            - {text: "@name"}
+            - {text: "@id", mono: true, tone: muted}
+          sub:
+            - {text: "@frequency"}
+            - {text: ·}
+            - text:
+                t: wsEval.ledger.next
+                args: ["@hasNext", "@next"]
+          cols:
+            - v: {who: "@cat", form: avatar}
+              w: icon
+            - v:
+                text:
+                  of: "@stale"
+                  map:
+                    "true":
+                      t: wsEval.ledger.verdict.true
+                      args:
+                        - of: "@verdict"
+                          map:
+                            keep_observe: t:wsEval.life.observing
+                            fix: t:wsEval.verdict.fix
+                            build: t:wsEval.verdict.build
+                            delete_sunset: t:wsEval.verdict.delete_sunset
+                            "": t:wsEval.verdict.
+                            _: "@verdict"
+                    "false":
+                      of: "@verdict"
+                      map:
+                        keep_observe: t:wsEval.life.observing
+                        fix: t:wsEval.verdict.fix
+                        build: t:wsEval.verdict.build
+                        delete_sunset: t:wsEval.verdict.delete_sunset
+                        "": t:wsEval.verdict.
+                        _: "@verdict"
+                    _: "@stale"
+              w: label
+              tip:
+                of: "@stale"
+                map:
+                  "true":
+                    t: wsEval.ledger.last.true
+                    args:
+                      - of: "@verdict"
+                        map:
+                          keep_observe: t:wsEval.life.observing
+                          fix: t:wsEval.verdict.fix
+                          build: t:wsEval.verdict.build
+                          delete_sunset: t:wsEval.verdict.delete_sunset
+                          "": t:wsEval.verdict.
+                          _: "@verdict"
+                  "false": ""
+                  _: "@stale"
+              tone:
+                of: "@stale"
+                map: {"true": warn, "false": "", _: "@stale"}
+          expand:
+            - {type: label, text: t:wsEval.metrics, count: "@metrics.length"}
+            - type: list
+              from: "@metrics"
+              empty: t:wsEval.noMetrics
+              row:
+                layout: two
+                key: "@key"
+                title: "@label"
+                sub:
+                  - {text: t:wsEval.metricField}
+                  - {text: "@key", mono: true, tip: "@key"}
+                more:
+                  - type: text
+                    variant: para
+                    parts:
+                      - {text: t:wsEval.metricDescription}
+                      - {text: "@means"}
+                      - text:
+                          t: wsOps.metricDirection
+                          args: ["@direction"]
+                  - type: text
+                    variant: meta
+                    tone: warn
+                    text: "@badWhen"
+                    when: "@badWhen"
+            - type: text
+              parts:
+                - {text: t:wsEval.evalCat, variant: meta}
+              actions:
+                - type: select
+                  id: "@selId"
+                  options:
+                    - from: $.ledger.cats
+                      item:
+                        v:
+                          t: workbench.identity
+                          args: ["@name", "@handle"]
+                        label:
+                          t: workbench.identity
+                          args: ["@name", "@handle"]
+                  value:
+                    t: workbench.identity
+                    args: ["@catName", "@catHandle"]
+                  label: t:wsEval.evalCat
+                  change: opDomCat
+                  args: {k: "@id"}
+                - type: button
+                  label: t:wsEval.runNow
+                  act: opEvalRun
+                  args: {k: "@id", op: trigger}
+                - type: button
+                  label: t:wsEval.concludeNow
+                  act: opEvalRun
+                  args: {k: "@id", op: generate}
+        when: $.ledger
+      - type: toolbar
+        when: $.paw.source
+        items:
+          - {type: text, text: $.paw.source, mono: true}
+          - {type: button, label: t:common.all, act: pawSourceClear}
+      - {type: notice, tone: warn, text: $.paw.error, when: $.paw.error}
+      - type: toolbar
+        when: "!$.ledger"
+        left:
+          - type: seg
+            value: $.paw.filter
+            act: set
+            args: {path: ws.pawF}
+            options:
+              - {v: active, label: t:wsEval.pending, count: $.paw.counts.active}
+              - {v: all, label: t:common.all, count: $.paw.counts.all}
+              - {v: overdue, label: 72h+, count: $.paw.counts.overdue}
+              - {v: disposed, label: t:wsEval.handled, count: $.paw.counts.disposed}
+      - type: list
+        id: paw
+        from: $.paw.items
+        row:
+          layout: two
+          key: "@key"
+          lead:
+            dot:
+              of: "@resolution"
+              map:
+                open:
+                  of: "@overdue"
+                  map: {"true": danger, "false": warn, _: "@overdue"}
+                resolved: idle
+                _: "@resolution"
+            tip:
+              t: wsEval.report.state
+              args:
+                - "@resolution"
+                - of: "@overdue"
+                  map: {"true": t:wsEval.report.overdue.true, "false": "", _: "@overdue"}
+          title:
+            - parts: "@previews"
+              each:
+                text:
+                  of: "@available"
+                  map: {"true": "@text", "false": t:work.noSource, _: "@available"}
+              sep: " · "
+          sub:
+            - text:
+                t: wsEval.continuation
+                args: ["@continuation"]
+              tone:
+                of: "@validExit"
+                map:
+                  "false": warn
+                  "true":
+                    of: "@continuation"
+                    map:
+                      review_required: ""
+                      route_pending: ""
+                      repair_active: ""
+                      duplicate_following: ""
+                      verified_outcome: ok
+                      no_action: ""
+                      observe: ""
+                      _: "@continuation"
+                  _: "@validExit"
+              tip:
+                t: wsEval.responsibility
+                args: ["@responsibility"]
+          cols:
+            - v:
+                text:
+                  t: wsTeam.list.evDesc
+                  args: ["@reportCount"]
+              w: num
+              tip:
+                t: wsEval.report.count
+                args:
+                  - t: wsEval.basis
+                    args: ["@basis"]
+                  - of: "@hasUnseen"
+                    map:
+                      "true":
+                        t: wsEval.report.unseen.true
+                        args: ["@unseen"]
+                      "false": ""
+                      _: "@hasUnseen"
+          acts: {slot: ws.eval.report, ctx: "@actions"}
+          expand:
+            - {type: label, text: t:wsEval.rawReport, count: "@reportCount"}
+            - type: list
+              inline: true
+              from: "@reports"
+              row:
+                layout: record
+                lead: {who: "@cat", form: avatar}
+                title: "@at"
+                inline:
+                  - {text: "@msg", mono: true, tip: t:wsEval.sourceMessage}
+                cols:
+                  - v:
+                      text:
+                        of: "@ageTimestamp"
+                        map:
+                          "true": {of: "@age", fmt: ago}
+                          _: "@age"
+                    w: time
+                    tip:
+                      of: "@validExit"
+                      map:
+                        "true": t:wsEval.report.age.true
+                        "false": t:workbench.observe.uptime
+                        _: "@validExit"
+            - type: text
+              parts:
+                - text:
+                    t: wsEval.report.basisLine
+                    args:
+                      - t: wsEval.basis
+                        args: ["@basis"]
+        empty: t:wsEval.noReports
+        when: "!$.ledger"
+      - type: list
+        id: eval-act
+        label: t:wsEval.needsAttention
+        count: $.actCount
+        from: $.act
+        row: eval.event
+        empty: t:wsOps.eval.noAct
+        when: "!$.ledger"
+      - type: list
+        id: eval-settled
+        label:
+          t: wsOps.eval.settled
+          args: [$.settledResolved]
+        count: $.settledCount
+        from: $.settled
+        row: eval.event
+        optional: true
+        when: "!$.ledger"
+  dlg.opLiveStop:
+    title:
+      t: wsLive.stop.title
+      args:
+        - $.name
+        - of: $.command
+          map:
+            "true":
+              t: wsLive.activity
+              args: [$.activity]
+            "false":
+              t: workbench.liveActionWhat.false
+              args:
+                - t: wsLive.activity
+                  args: [$.activity]
+            _: $.command
+    help: t:wsLive.stop.stopConsequences
+    ok: t:common.stop
+    danger: true
+    fields:
+      - {id: stop-feedback, check: t:execDetail.feedback, when: $.command}
+  dlg.opForceReset:
+    title: t:execDetail.forceReset.title
+    ok: t:execDetail.forceReset.title
+    danger: true
+rows:
+  live.run:
+    layout: two
+    key: "@key"
+    lead: {who: "@who", form: avatar}
+    title: {who: "@who", form: title}
+    inline:
+      - dot:
+          of: "@command"
+          map: {"true": warn, "false": info, _: "@command"}
+        tip:
+          t: wsLive.status.state
+          args:
+            - "@command"
+            - t: wsLive.activity
+              args: ["@activity"]
+      - {text: "@carrier", variant: meta, when: "@carrier"}
+    sub: "@thread"
+    tone:
+      of: "@here"
+      map: {"true": here, "false": "", _: "@here"}
+    cols:
+      - v: {of: "@time", fmt: clock}
+        w: num
+        tip:
+          t: wsLive.entry.timeTip
+          args:
+            - {of: "@time", fmt: clock}
+    acts: {slot: ws.live.run, ctx: "@actions"}
+    act:
+      of: "@command"
+      map: {"true": execOpen, "false": goThread, _: execOpen}
+    args:
+      k:
+        of: "@command"
+        map: {"true": "@key", "false": "@actions.thread", _: "@command"}
+  live.wait:
+    layout: two
+    key: "@key"
+    lead:
+      icon:
+        of: "@state"
+        map:
+          ready_to_return: check
+          unknown: circleq
+          waiting_for_update: clock
+          _: clock
+      size: m
+      tone:
+        of: "@state"
+        map: {ready_to_return: ok, unknown: warn, waiting_for_update: "", _: "@state"}
+      tip:
+        of: "@kind"
+        map:
+          hold_ball: t:wsLive.hold.label
+          _:
+            t: wsLive.wait.state.label
+            args: ["@state"]
+    title: "@title"
+    inline:
+      control:
+        type: status
+        text: t:wsLive.hold.label
+        when:
+          of: "@kind"
+          map: {hold_ball: true, _: false}
+    sub:
+      - text:
+          t: wsLive.hold.wakeAt
+          args:
+            - {of: "@wakeAt", fmt: at}
+        when: "@wakeAt"
+      - parts:
+          - of:
+              of: "@condition"
+              map:
+                revision_included: 0
+                services_ready: 0
+                services_healthy: 0
+                new_boot: 0
+                _: -1
+            map:
+              "0":
+                parts:
+                  - "@waited"
+                  - " · "
+                  - of: "@condition"
+                    map:
+                      revision_included:
+                        t: wsLive.wait.condition.prefix
+                        args: ["@ready"]
+                      services_ready:
+                        t: wsLive.wait.condition.servicePrefix
+                        args:
+                          - "@ready"
+                          - of: "@services"
+                            item: {of: "@", case: upper}
+                            sep: " + "
+                      services_healthy:
+                        t: wsLive.wait.condition.servicePrefix
+                        args:
+                          - "@ready"
+                          - of: "@services"
+                            item: {of: "@", case: upper}
+                            sep: " + "
+                      new_boot:
+                        t: wsLive.wait.condition.servicePrefix
+                        args:
+                          - "@ready"
+                          - of: "@services"
+                            item: {of: "@", case: upper}
+                            sep: " + "
+                      _: "@condition"
+                sep: ""
+              _: "@condition"
+      - text:
+          of: "@revision"
+          slice: [0, 7]
+        mono: true
+        when: "@revision"
+      - text:
+          of: "@condition"
+          map:
+            revision_included:
+              t: wsLive.wait.condition.postfix
+              args:
+                - "@ready"
+                - of: "@services"
+                  item: {of: "@", case: upper}
+                  sep: " + "
+            services_ready: ""
+            services_healthy: ""
+            new_boot: ""
+            _: "@condition"
+    cols:
+      - v:
+          - {who: "@owner", when: "@owner"}
+          - {text: —, when: "!@owner"}
+        w: icon
+        tip:
+          of: "@hasOwner"
+          map:
+            "true":
+              t: wsTasks.item.owner.true
+              args: ["@ownerName", "@ownerHandle"]
+            "false":
+              t: wsLive.wait.item.ownerLabel.false
+              args: ["@ownerName", "@ownerHandle"]
+            _: "@hasOwner"
+    acts: {slot: ws.live.wait, ctx: "@actions"}
+    expand: "@expand"
+  schedule.work:
+    layout: two
+    key: "@id"
+    title:
+      - {text: "@title", when: "!@unknown"}
+      - {text: t:schedule.unknown, when: "@unknown"}
+    sub: "@summary"
+    lead: {who: "@owner", when: "@owner"}
+    inline:
+      control:
+        type: status
+        tone:
+          of: "@state"
+          map:
+            blocked: warn
+            done: ok
+            todo: info
+            doing: info
+            unknown: info
+            _: "@state"
+        text:
+          of: "@state"
+          map:
+            todo: t:schedule.todo
+            doing: t:schedule.doing
+            blocked: t:schedule.blocked
+            done: t:common.status.completed
+            unknown: t:schedule.unknown
+            _: "@state"
+    act:
+      of: "@hasWork"
+      map: {"true": goThread, "false": "", _: "@hasWork"}
+    args: {id: "@threadId"}
+    expand:
+      - type: kv
+        from: "@dates"
+        item:
+          k:
+            of: "@field"
+            map:
+              actual_start: t:schedule.actual_start
+              business_deadline: t:schedule.business_deadline
+              _: "@field"
+          v: {of: "@value", fmt: datetime}
+  eval.event:
+    layout: two
+    key: "@key"
+    lead:
+      dot:
+        of: "@severity"
+        map: {critical: danger, attention: warn, info: idle, _: "@severity"}
+      tip:
+        of: "@severity"
+        map:
+          critical: t:workspaceOwners.severity.critical
+          attention: t:wsEval.attention
+          info: t:log.level.info
+          _: "@severity"
+    title: "@title"
+    sub:
+      - parts:
+          - parts:
+              - "@domain"
+              - " · "
+              - of: "@verdict"
+                map:
+                  keep_observe: t:wsEval.life.observing
+                  fix: t:wsEval.verdict.fix
+                  build: t:wsEval.verdict.build
+                  delete_sunset: t:wsEval.verdict.delete_sunset
+                  "": t:wsEval.verdict.
+                  _: "@verdict"
+            sep: ""
+      - {text: t:wsEval.expiredSuffix, tone: warn, when: "@stale"}
+      - {text: ·}
+      - text:
+          of: "@kind"
+          map:
+            needs_decision:
+              t: wsEval.kind.label.needs_decision
+              args:
+                - t: wsEval.life
+                  args: ["@closure"]
+            needs_action:
+              t: wsEval.kind.label.needs_action
+              args:
+                - t: wsEval.life
+                  args: ["@closure"]
+            awaiting_reeval:
+              t: wsEval.kind.label.awaiting_reeval
+              args:
+                - t: wsEval.life
+                  args: ["@closure"]
+            watching:
+              t: wsEval.continuation.observe
+              args:
+                - t: wsEval.life
+                  args: ["@closure"]
+            escalated:
+              t: wsEval.life
+              args: ["@closure"]
+            resolved:
+              t: wsEval.life
+              args: ["@closure"]
+            _: "@kind"
+        tone:
+          of: "@kind"
+          map:
+            escalated: danger
+            needs_decision: danger
+            needs_action: ""
+            awaiting_reeval: warn
+            resolved: ""
+            watching: ""
+            _: "@kind"
+    cols:
+      - v: {who: "@owner", when: "@owner"}
+        w: ctl
+        tip:
+          of: "@hasOwner"
+          map:
+            "true":
+              t: wsTasks.item.owner.true
+              args: ["@ownerName", "@ownerHandle"]
+            "false":
+              t: wsLive.wait.item.ownerLabel.false
+              args: ["@ownerName", "@ownerHandle"]
+            _: "@hasOwner"
+    acts: {slot: ws.eval.event, ctx: "@actions"}
+    expand:
+      - type: text
+        parts:
+          - {text: "@summary"}
+          - help:
+              parts: "@gloss"
+              sep: |+
+                
+              each:
+                parts:
+                  - parts: ["@label", （, "@key", ）：, "@means"]
+                    sep: ""
+      - type: text
+        parts:
+          - {text: t:wsEval.nowDo, variant: meta}
+          - {text: "@action"}
+      - type: text
+        parts:
+          - {text: t:wsEval.nextLook, variant: meta}
+          - {text: "@nextCheck"}
+          - text:
+              t: wsEval.event.nextAt
+              args: ["@nextAt"]
+            variant: meta
+            when: "@nextAt"
+      - type: text
+        tone: warn
+        when: "@escalation"
+        parts:
+          - text:
+              t: wsEval.event.escalation
+              args:
+                - t: wsEval.escalation
+                  args: ["@escalation.stage"]
+                - "@escalation.dueAt"
+      - type: text
+        parts:
+          - text:
+              t: wsEval.life
+              args: ["@closure"]
+            tip: t:wsEval.progress
+          - {text: ·}
+          - text:
+              t: wsEval.owner
+              args: ["@ownerStatus"]
+            tip: t:wsEval.followUp
+          - {text: ·}
+          - text:
+              of: "@reeval"
+              map:
+                not_required: t:wsEval.reevaluation.not_required
+                unavailable: t:wsEval.reevaluation.unavailable
+                not_requested: t:wsEval.reevaluation.not_requested
+                pending: t:wsEval.life.reeval_pending
+                passed: t:wsEval.reevaluation.passed
+                failed: t:wsEval.reevaluation.failed
+                _: "@reeval"
+            tip: t:wsEval.reeval
+          - {text: "· ", when: "@taskId"}
+          - {text: "@taskId", mono: true, tip: t:wsEval.ownerTask, when: "@taskId"}
+      - type: text
+        actions:
+          - type: button
+            iconOnly: true
+            icon: file
+            label: t:wsEval.conclusion
+            act: wsFile
+            args: {p: "@files.verdict"}
+          - type: button
+            iconOnly: true
+            icon: box
+            label: t:wsEval.snapshot
+            act: wsFile
+            args: {p: "@files.snapshot"}
+          - type: button
+            iconOnly: true
+            icon: layers
+            label: t:wsEval.attribution
+            act: wsFile
+            args: {p: "@files.attribution"}
+          - type: button
+            iconOnly: true
+            icon: trace
+            label: t:wsEval.fixTrace
+            act: runOpen
+            args: {k: "@trace"}
+            when: "@trace"

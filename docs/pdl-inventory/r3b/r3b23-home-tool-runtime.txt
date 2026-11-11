@@ -1,0 +1,45 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/recent-works.test.ts --maxWorkers=1 -t 'paired tool row|component-owned recent|selected draft project|owner read'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/recent-works.test.ts (2 tests | 1 failed) 29ms
+   × shares the selected draft project and current conversation project without fetching a global prefix 23ms
+   ✓ uses the existing list error/retry state for both an error envelope and an incomplete owner read 5ms
+ ✓ src/pdl/__tests__/runtime.test.ts (56 tests | 53 skipped) 1248ms
+     ✓ renders one expandable paired tool row with three raw blocks, actual group icons and live following  423ms
+     ✓ uses the shared recent-work view below component-owned recent tabs and opens command details in live  429ms
+     ✓ retains the existing owner read-error component once without adding a toast  396ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/recent-works.test.ts > shares the selected draft project and current conversation project without fetching a global prefix
+AssertionError: expected undefined to be 'source' // Object.is equality
+
+- Expected:
+"source"
+
++ Received:
+undefined
+
+ ❯ src/pdl/__tests__/recent-works.test.ts:23:70
+     21|   await act(() => hook.result.current.action('cafeRwRetry'));
+     22|   await waitFor(() => expect(apiFetch).toHaveBeenLastCalledWith('/api/…
+     23|   expect(hook.result.current.models().recentWorkOwners[0]?.threadId).t…
+       |                                                                      ^
+     24| });
+     25| it('uses the existing list error/retry state for both an error envelop…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 4 passed | 53 skipped (58)
+   Start at  07:10:10
+   Duration  4.40s (transform 1.60s, setup 51ms, import 2.45s, tests 1.28s, environment 418ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/recent-works.test.ts --maxWorkers=1 -t paired tool row|component-owned recent|selected draft project|owner read
+
+Exit code: 1

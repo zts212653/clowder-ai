@@ -1,0 +1,64 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/delivery-models.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/delivery-models.test.ts (6 tests) 3ms
+ ❯ src/pdl/__tests__/r136-owners.test.ts (8 tests | 1 failed) 44ms
+   ✓ generates suggestions without writes and accepts only the reviewed row using real label ids 11ms
+   ✓ reads authoritative evidence and resolves a workspace file to its retained owner version 15ms
+   × keeps generation source ids separate from read receipts, including unloaded and incomplete sources 6ms
+   ✓ binds a cat source using the existing binding writer without dispatching a retry 1ms
+   ✓ preserves the exact work version and CLI owner leaf in the existing send/read schema 1ms
+   ✓ keeps the real draft receipt after publish failure and retries publish without recreating 3ms
+   ✓ opens the resolved work version through the existing owner without requiring a current catalogue row 3ms
+   ✓ rehydrates an already published native community receipt when create returns its terminal conflict response 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/r136-owners.test.ts > keeps generation source ids separate from read receipts, including unloaded and incomplete sources
+AssertionError: expected { key: 'reply-1:supp', …(3) } to match object { title: '补充消息 · 2', status: '', …(1) }
+(10 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,14 +1,14 @@
+  {
+    "items": [
+      {
+        "mid": "user-1",
+-       "state": "",
++       "state": "读没读查不到",
+      },
+      {
+        "mid": "older-source",
+-       "state": "",
++       "state": "读没读查不到",
+        "unknown": true,
+      },
+    ],
+    "status": "",
+    "title": "补充消息 · 2",
+
+ ❯ src/pdl/__tests__/r136-owners.test.ts:185:19
+    183|   await waitFor(() => expect(hook.result.current.models().generations[…
+    184|   const vm = chatModels({ ...data, ...hook.result.current.models() }, …
+    185|   expect(vm.supp).toMatchObject({
+       |                   ^
+    186|     title: '补充消息 · 2',
+    187|     status: '',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 13 passed (14)
+   Start at  13:00:52
+   Duration  2.11s (transform 1.59s, setup 68ms, import 2.33s, tests 47ms, environment 906ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/delivery-models.test.ts
+
+Exit code: 1

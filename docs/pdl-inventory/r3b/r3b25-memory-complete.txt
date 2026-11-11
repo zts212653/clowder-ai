@@ -1,0 +1,16 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/memory-message-proposals.test.ts src/pdl/__tests__/cloud-models.test.ts src/pdl/__tests__/proposal-models.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/cloud-models.test.ts (1 test) 2ms
+ ✓ src/pdl/__tests__/proposal-models.test.ts (5 tests) 5ms
+ ✓ src/pdl/__tests__/memory-message-proposals.test.ts (4 tests) 60ms
+
+ Test Files  3 passed (3)
+      Tests  10 passed (10)
+   Start at  09:11:20
+   Duration  4.84s (transform 8.35s, setup 249ms, import 10.89s, tests 68ms, environment 1.88s)
+
+
+Exit code: 0

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
+import { unlockAutoplay } from '@/components/voice-autoplay';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
@@ -10,7 +11,6 @@ import { CompanionCard, type CompanionCardModel, cardAction } from './ChatVoiceF
 import { HeadphonesIcon } from './icons/HeadphonesIcon';
 import { MicIcon } from './icons/MicIcon';
 import { InstallPreviewModal } from './settings/InstallPreviewModal';
-import { unlockAutoplay } from './VoiceCompanionButton';
 import {
   ensureVoiceServiceEnabled,
   FEATURE_SERVICES,

@@ -1,0 +1,360 @@
+{
+ "format": {
+  "duration": {
+   "seconds": "{0} 秒",
+   "minutesSeconds": "{0} 分 {1} 秒"
+  },
+  "minutes": "{0}分",
+  "hours": "{0}时",
+  "days": "{0}天",
+  "date": "{0}月{1}日",
+  "todayAt": "今天 {0}",
+  "yesterdayAt": "昨天 {0}",
+  "daysAgo": "{0} 天前",
+  "gb": "{0} GB",
+  "mb": "{0} MB",
+  "kb": "{0} KB",
+  "today": "今天"
+ },
+ "inbox": {
+  "historyMenu": {
+   "label": "已忽略 · {0}",
+   "ignoreTimeSpan": "把这个时间段提到你的消息全部忽略"
+  },
+  "ignore": {
+   "text": "已忽略；你随时可以在“已忽略”里找回。"
+  },
+  "handled": {
+   "toast": "已归档这条提到你的消息"
+  },
+  "batch": {
+   "toast": "已批量{0} {1} 件；可在“已处理”里撤销"
+  },
+  "tabs": {
+   "recover": "找回",
+   "count": "当前范围共 {0} 件",
+   "returnToPending": "放回待办",
+   "handled": "已处理",
+   "pending": "待我处理",
+   "approvalHistory": "审批历史",
+   "acceptLabel": "批量同意 {0}",
+   "origin": "触发原文",
+   "viewNamed": "查看{0}",
+   "approvalCard": "审批卡"
+  },
+  "error": {
+   "partial": "日程来源暂时读不到"
+  },
+  "muteMention": "不再提醒",
+  "submitAnswer": "提交回答",
+  "viewSchedule": "查看日程",
+  "title": "待办",
+  "decide": "等你决定",
+  "review": "待查看",
+  "decideEmpty": "暂时没有等你决定的事。",
+  "mentionEmpty": "这个时间段没有提到 {0} 的消息。",
+  "other": "其它待处理",
+  "ignored": "已忽略",
+  "ignoredHelp": "忽略的事不会再提醒你，也不计入角标。猫仍可能在对话里继续提到它。找回后回到原来的列表。",
+  "ignoredEmpty": "还没有忽略的事项。",
+  "handledMentions": "已处理的提及",
+  "handledEmpty": "没有已处理的提及。",
+  "approvals": "审批记录",
+  "approvalsEmpty": "没有待你处理的审批。",
+  "batchReject": "批量拒绝",
+  "allTypes": "全部类型",
+  "writePerm": "写入权限",
+  "newThread": "新建对话",
+  "runCommand": "运行命令",
+  "noMatch": "没有符合条件的记录。",
+  "apType": {
+   "ask": "需要回答",
+   "proposal": "提议",
+   "memory": "记忆提议"
+  },
+  "span": {
+   "week": "最近七天"
+  }
+ },
+ "composer": {
+  "actions": {
+   "state": "出错了",
+   "silentMinutes": "{0} 分钟没有动静",
+   "label": "发给 {0}",
+   "stopNamed": "停止 {0}",
+   "picked": "已选 {0} 条",
+   "projectTip": "项目：{0}"
+  },
+  "input": {
+   "text": "转写中…",
+   "listening": "正在听…"
+  },
+  "send": {
+   "toast": "有附件没找回：先重试找回，或移除它",
+   "queued": "已排队，等这一轮结束后开始",
+   "replySteered": "已引导当前回复"
+  },
+  "sendMode": {
+   "queue": "排队等待"
+  },
+  "sendModeHelp": {
+   "queue": "等目标空闲后开始新回复",
+   "steer": "能引导时进入当前回复，否则排队"
+  },
+  "stopping": "正在停止",
+  "stop": "停止回复",
+  "running": "正在执行的成员",
+  "jump": "到最新",
+  "jumpTip": "跳到对话底部",
+  "whisperTo": "悄悄话：",
+  "pickOneCat": "请至少选一只猫猫",
+  "attachLost": "部分附件未找回。",
+  "retryRecover": "重试找回",
+  "removeLost": "移除没找回的",
+  "cancelQuote": "取消引用",
+  "addContent": "添加内容",
+  "afterCreate": "建好后",
+  "pin": "置顶",
+  "sendTo": "发给",
+  "exportAs": "导出为",
+  "text": "文本",
+  "longImage": "长图",
+  "forward": "转发",
+  "autoNamed": "自动：{0}"
+ },
+ "queue": {
+  "notifications": {
+   "queuedMessageDeleted": "已删除这条排队消息"
+  },
+  "item": {
+   "label": "现在发出",
+   "recallAndEdit": "撤回并重新编辑"
+  },
+  "send": {
+   "title": "现在发出这条？",
+   "steerReply": "引导当前回复",
+   "sub": "插进 {0} 正在写的这一轮",
+   "interruptAndSend": "打断后发出",
+   "interruptHelp": "停掉这一轮，马上开始新的一轮",
+   "ok": "发出"
+  },
+  "targets": {
+   "title": "改发给谁"
+  },
+  "to": "投给 {0}",
+  "delivery": {
+   "state": {
+    "delivered": "已投递",
+    "read": "已读",
+    "confirming": "正在确认投递",
+    "written": "已写入，等待后续轮",
+    "read_wait": "本轮已读，等待完成",
+    "uncertain": "投递结果未确认",
+    "read_uncertain": "已读，结果未确认",
+    "failed": "没送到"
+   },
+   "repeatWarning": "这会新发一条消息，原消息可能已执行，可能重复执行。"
+  }
+ },
+ "delivery": {
+  "label": "投递状态",
+  "members": "已投递 / 已读的成员",
+  "from": "来自",
+  "delivered": "已投递",
+  "busy": "收到，正在回…",
+  "checking": "正在核对收到没…",
+  "unconfirmed": "已送出，没确认收到",
+  "failed": "没送到",
+  "unknown": "投递结果未知",
+  "received": "已收到",
+  "read": "已读",
+  "recovery": {
+   "repeat": "重发",
+   "jump": "跳到回复",
+   "noReply": "暂无回复",
+   "repeated": "已重发",
+   "unavailable": "不可恢复"
+  }
+ },
+ "frame": {
+  "openInWorkbench": "在工作台里打开{0}",
+  "rail": "全局",
+  "navResize": "调整列表宽度",
+  "navResizeTip": "调整宽度",
+  "focusSuffix": "· 专注",
+  "exitFocus": "退出专注",
+  "exitWide": "退出整窗",
+  "endSplit": "结束并排",
+  "chooseSplit": "选择并排的标签",
+  "menuPin": "固定菜单到右边缘",
+  "menuUnpin": "取消固定菜单",
+  "menuPinned": "已固定",
+  "menuPinItem": "固定到菜单前面",
+  "menuPinItemNamed": "把 {0} 固定到菜单前面",
+  "launcher": "打开工具或文件",
+  "launcherSearch": "搜索文件和工具…",
+  "recentOpened": "最近打开",
+  "alreadyOpen": "（已打开）",
+  "tools": "工具",
+  "byName": "文件名 · {0}",
+  "byBody": "内容 · {0}",
+  "viewAll": "查看全部 {0} 条",
+  "noResults": "没有找到「{0}」相关的文件或工具。",
+  "workbench": "工作台",
+  "panelDivider": "右侧面板分隔条",
+  "loadError": "暂时读不到。",
+  "reload": "重新读取",
+  "stale": "最新一次读取失败，下面是上次成功读到的内容。",
+  "pinRail": "固定到窄栏",
+  "unpinRail": "从窄栏取下",
+  "pinRailNamed": "固定到窄栏 {0}",
+  "unpinRailNamed": "从窄栏取下 {0}",
+  "goInstall": "去安装",
+  "openInPanel": "在右侧工作台打开",
+  "stopSpeaking": "停止朗读",
+  "msgMore": "更多消息操作",
+  "previewTab": "（预览中）",
+  "newActivity": "有新动态",
+  "pinTip": "固定：关闭其他时保留",
+  "pinNamed": "固定 {0}",
+  "unpinNamed": "取消固定 {0}",
+  "closeNamed": "关闭 {0}",
+  "openTabs": "打开的内容",
+  "overflowTabs": "全部标签",
+  "backTo": "回到{0}",
+  "embeddedBy": "插件「{0}」",
+  "menuStripe": "工作台菜单",
+  "speak": "朗读",
+  "stopRecording": "停止录音",
+  "toolTodo": "这个工具还没做。",
+  "unpin": "取消固定"
+ },
+ "list": {
+  "filter": "筛选",
+  "loadMore": "读取更多",
+  "empty": "没有内容",
+  "emptyFolder": "空文件夹",
+  "emptyState": "这里还没有内容。",
+  "noDesc": "没有说明"
+ },
+ "reply": {
+  "name": "{0}：",
+  "jump": "跳到原文"
+ },
+ "message": {
+  "select": "选择这条消息",
+  "actions": "消息操作",
+  "receivedAt": " · 收到 {0}",
+  "jumpSource": "跳到原对话里的这条消息"
+ },
+ "fold": {
+  "collapseMiddle": "收起中间部分",
+  "expandMiddle": "展开中间部分",
+  "expandMiddleN": "展开中间约 {0} 行",
+  "moreHtml": "还有 {0} 条"
+ },
+ "threadRow": {
+  "name": "对话名",
+  "starred": "已收藏",
+  "pinned": "已置顶",
+  "groupMore": "对话组更多操作",
+  "projectMore": "项目更多操作",
+  "fixed": "固定",
+  "otherProjects": "其他项目",
+  "mention": "{0}",
+  "unread": "{0} 条未读",
+  "pending": "{0} 件待你决定",
+  "meta": {
+   "hub": "Hub",
+   "bedroom": "猫卧室",
+   "run": "{0} 执行中 · {1} 分",
+   "running": "{0} 已回复",
+   "replied": "{0} 回复了"
+  },
+  "more": "更多操作：{0}",
+  "section": {
+   "pinned": "置顶",
+   "recent": "最近",
+   "system": "系统",
+   "favorites": "收藏"
+  },
+  "unassigned": "未分类",
+  "empty": {
+   "pinned": "还没有置顶的对话。",
+   "favorites": "还没有收藏的对话。",
+   "project": "30 天内没有对话。"
+  }
+ },
+ "chip": {
+  "remove": "移除 {0}",
+  "empty": "还没有"
+ },
+ "kv": {
+  "deleteItem": "删除这一项",
+  "deleteRow": "删除这一行",
+  "itemN": "第 {0} 项",
+  "key": "键",
+  "value": "值",
+  "valueOf": "{0} 的值",
+  "hide": "隐藏值",
+  "show": "显示值"
+ },
+ "chatNav": {
+  "label": "消息导航",
+  "older": "更早的消息还没加载"
+ },
+ "control": {
+  "helpLabel": "说明：{0}",
+  "color": "颜色",
+  "colorN": "颜色 {0}",
+  "colorWheel": "色相和饱和度",
+  "colorLight": "明度",
+  "upload": "上传",
+  "avatarUploaded": "头像已上传",
+  "envToggle": "高级配置（可选）",
+  "envKey": "变量名",
+  "envAdd": "添加变量",
+  "copied": "已复制 {0}",
+  "reveal": "在访达中显示",
+  "enable": "启用"
+ },
+ "terminal": {
+  "labelLive": "{0}",
+  "labelReadonly": "{0}（只读）"
+ },
+ "who": {
+  "viewMember": "在成员里查看 ",
+  "unknown": "未知来源",
+  "view": "查看 ",
+  "plugin": "插件"
+ },
+ "notice": {
+  "dismiss": "关掉这一条"
+ },
+ "catalog": {
+  "noTone": {
+   "ring_info": "执行中用成员色，不是严重度",
+   "ring_ok": "完成后光圈消失"
+  },
+  "ex": {
+   "resize": "拖动调整宽度",
+   "resizeHint": "悬停方块的右边缘：出现手柄，拖动调整宽度；编辑布局时手柄隐藏，边缘用来移动区域"
+  }
+ },
+ "player": {
+  "pause": "暂停",
+  "play": "播放"
+ },
+ "pop": {
+  "dirtyTitle": "放弃未保存的修改？",
+  "dirtyText": "这个窗口里改过的内容还没保存。",
+  "discard": "放弃",
+  "keepEditing": "继续编辑"
+ },
+ "mediaMarks": {
+  "located": "已定位"
+ },
+ "selectMenu": {
+  "search": "搜索名称或值"
+ }
+}

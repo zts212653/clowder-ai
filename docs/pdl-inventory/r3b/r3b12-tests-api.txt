@@ -1,0 +1,17 @@
+$ pnpm --filter @cat-cafe/api exec node --import tsx --test test/domains/preview/bridge-navigation.test.ts
+
+▶ preview bridge navigation owner
+  ✔ executes back, forward and reload inside the preview page (1.673334ms)
+  ✔ uses the same parent and source check as screenshot requests (0.327792ms)
+  ✔ ignores unknown operations and message kinds (0.278042ms)
+✔ preview bridge navigation owner (2.690125ms)
+ℹ tests 3
+ℹ suites 1
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 155.978209
+
+Exit code: 0

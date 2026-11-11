@@ -1,0 +1,12 @@
+$ pnpm --filter @cat-cafe/web lint
+
+> @cat-cafe/web@0.1.0 lint /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+> next lint
+
+sh: next: command not found
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @cat-cafe/web@0.1.0 lint: `next lint`
+spawn ENOENT
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+
+Exit code: 1

@@ -14,13 +14,17 @@ import type { MemberDraft } from './member-editor-state';
 export async function readMemberResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json();
   if (!response.ok) {
-    const error = body !== null && typeof body === 'object' ? (body as { error?: unknown; message?: unknown }) : {};
-    throw new Error(
-      typeof error.message === 'string'
-        ? error.message
-        : typeof error.error === 'string'
-          ? error.error
-          : `请求失败 (${response.status})`,
+    const error =
+      body !== null && typeof body === 'object' ? (body as { error?: unknown; message?: unknown; code?: unknown }) : {};
+    throw Object.assign(
+      new Error(
+        typeof error.message === 'string'
+          ? error.message
+          : typeof error.error === 'string'
+            ? error.error
+            : `请求失败 (${response.status})`,
+      ),
+      { code: typeof error.code === 'string' ? error.code : undefined },
     );
   }
   return body as T;

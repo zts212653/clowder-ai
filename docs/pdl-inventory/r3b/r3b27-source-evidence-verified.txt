@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/r136-owners.test.ts src/pdl/__tests__/delivery-models.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/delivery-models.test.ts (6 tests) 3ms
+ ✓ src/pdl/__tests__/r136-owners.test.ts (8 tests) 54ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  13:02:59
+   Duration  2.10s (transform 1.58s, setup 74ms, import 2.30s, tests 56ms, environment 886ms)
+
+
+Exit code: 0

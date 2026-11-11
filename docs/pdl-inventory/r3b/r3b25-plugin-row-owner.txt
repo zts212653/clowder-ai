@@ -1,0 +1,127 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/runtime.test.ts -t 'plugin row operation'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/runtime.test.ts (63 tests | 1 failed | 62 skipped) 487ms
+     × awaits a plugin row operation under its original confirmation and keeps an owner refusal in the dialog 486ms
+     ↓ renders real plugin schema branches and retains a rejected config draft until its owner accepts
+     ↓ keeps general UI choices local and sends the busy policy to its real owner
+     ↓ opens the message selection toolbar and forwards its exact quote through the existing dialog
+     ↓ opens real member candidates at the caret and chooses one without sending or losing the input suffix
+     ↓ renders canonical sidebar groups and keeps organize drafts on owner rejection before submitting the original snapshot
+     ↓ renders native update state in the declared system section and waits for the install owner
+     ↓ renders one expandable paired tool row from existing details and metadata, actual group icons and live following
+     ↓ uses the shared recent-work view below component-owned recent tabs and opens command details in live
+     ↓ loads a src-only plugin workbench tool from its declared entry metadata without a route or another painter
+     ↓ keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there
+     ↓ uses declared member rows, subset order, one owner color and template dropdown with account-owned Codex credentials
+     ↓ keeps unknown agent identities from their own from name or id without borrowing another member
+     ↓ registers admitted plugin entries, placement and view or src spaces and refreshes enable intent from the owner
+     ↓ keeps appearance preferences and complete custom theme documents in the original local store with no server writes
+     ↓ exposes retained per-thread background data for v2 while the default theme intentionally reads only the local global choice
+     ↓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data
+     ↓ renders only the declared restore action and waits for its owner before removing a trash row
+     ↓ renders r126 file media and generic Office metadata through the original file view
+     ↓ groups real thread project paths through the existing sidebar declaration and preserves literal collapse keys
+     ↓ reads project pins and display names from the real preference snapshot and dispatches their existing writers
+     ↓ opens the owner source thread from the declared task row action and respects rejected navigation
+     ↓ opens the real author member card through r124 declarations and inserts its actual handle
+     ↓ renders two independently selectable screenings and dispatches the result comparison through the copied film view
+     ↓ uses the r124 media and clip popup declarations, retaining a preview-only selection on its own media
+     ↓ offers rollback only for one source-current version with one parent while leaving history available
+     ↓ renders owner adoption, actual use receipts and version history through the existing evolution declarations
+     ↓ opens the verified recall source and its original reply through one existing row menu
+     ↓ renders real reply groups and connects the r129 older link without excluding a focused older reply
+     ↓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery
+     ↓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary
+     ↓ opens a live child trajectory through the declared run opener and the existing execution view
+     ↓ retains the existing owner read-error component once without adding a toast
+     ↓ keeps the shell and other owner data when the home binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the ops binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the replay binding is absent, with one danger toast
+     ↓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast
+     ↓ does not show the history marker or load-older action for a new empty thread (r116)
+     ↓ opens the existing all-works page with its global owner and reuses the current work controls
+     ↓ binds r115 runtime identity and real evolution detail through the copied declarations
+     ↓ uses the r114 report collection and actual telemetry condition without sample facts
+     ↓ mounts the r114 preview frame and forwards only its own raw message source to the application
+     ↓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen
+     ↓ keeps the actual task dialog busy until its owner settles and retains the draft on failure
+     ↓ keeps entity removal confirmation open while the real terminal owner is pending
+     ↓ renders real source controls and reuses chat messages for the workbench replay player
+     ↓ retains the file rename draft and owner rejection in the native entity dialog
+     ↓ opens and leaves Team details through the native workbench stack
+     ↓ retains terminal deletion confirmation and the exact owner rejection
+     ↓ paints the entire shell and chat from the copied theme, including rich-body platform calls
+     ↓ uses the full-window export frame, exact mids and the same readonly message nodes
+     ↓ preserves the typed work reference through the actual copied canon button
+     ↓ preserves the contracted annotationId through the actual copied review judgment button
+     ↓ settles only after an asynchronous rich-body render is complete (r111 contract)
+     ↓ renders rich card body, user attachments, sandbox widgets and multi-choice coordinates from r111
+     ↓ sends input through the registered action without replacing the active textarea
+     ↓ binds export filtering and file-context input through the existing VM and popup declarations
+     ↓ requires an explicit receiver and forwards canonical message ids through the existing modal row control
+     ↓ keeps the declared forwarding dialog busy, shows its own owner error and retries with the same selection
+     ↓ closes chat.modal through the declared cancel and Esc exits without sending
+     ↓ resolves draft-append consent only from the engine dialog decision
+     ↓ leaves text paste native while forwarding image paste through the application port
+   ↓ renders bound workbench tools and voice settings through the same copied declarations
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/runtime.test.ts > unmodified runtime and project chat bindings > awaits a plugin row operation under its original confirmation and keeps an owner refusal in the dialog
+AssertionError: expected last "vi.fn()" call to have been called with [ …(3) ]
+
+- Expected:
+[
+  "/api/plugins/dev.owner.operations/actions/sessions/remove",
+  {},
+  {
+    "input": {
+      "sessionId": "real-session",
+    },
+    "rowKey": "owner:key",
+  },
+]
+
++ Received:
+undefined
+
+ ❯ src/pdl/__tests__/runtime.test.ts:129:25
+    127|       const submission = w.eval('dialogSubmit()'); await Promise.resol…
+    128|       expect(w.eval('S.dialog.busy')).toBe(true);
+    129|       expect(port.post).toHaveBeenLastCalledWith('/api/plugins/dev.own…
+       |                         ^
+    130|       acknowledge({ ok: false, label: 'owner refused removal' }); awai…
+    131|       expect(w.document.querySelector('.dialog')?.textContent).toConta…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot read properties of undefined (reading 'timeline')
+ ❯ ../../../../../../../pdl/library/lrow.js:197:24
+ ❯ ../../../../../../../pdl/engine/frame.js:431:40
+ ❯ render ../../../../../../../pdl/engine/frame.js:431:17
+ ❯ ../../../../../../../pdl/engine/core.js:713:127
+
+This error originated in "src/pdl/__tests__/runtime.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 62 skipped (63)
+     Errors  1 error
+   Start at  08:45:37
+   Duration  3.05s (transform 1.44s, setup 37ms, import 2.41s, tests 487ms, environment 0ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/runtime.test.ts -t plugin row operation
+
+Exit code: 1

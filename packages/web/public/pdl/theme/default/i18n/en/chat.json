@@ -1,0 +1,28 @@
+{
+ "threadSettings": {
+  "reveal": {
+   "title": "Reveal private messages"
+  }
+ },
+ "runtime": {
+  "hooks": {
+   "label": "Agent hooks",
+   "sync": "Sync Agent hooks",
+   "missing": "Missing",
+   "stale": "Changed"
+  },
+  "connectionFailed": "Connection failed",
+  "noConversationSource": "No cloud conversation source available"
+ },
+ "chat": {
+  "projectGit": {
+   "true": "Git not initialized",
+   "false": "Git unavailable"
+  },
+  "projectIndex": {
+   "missing": "Not prepared",
+   "building": "Preparing",
+   "failed": "Preparation failed"
+  }
+ }
+}

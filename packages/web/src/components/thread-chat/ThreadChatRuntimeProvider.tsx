@@ -34,6 +34,7 @@ interface ThreadChatRuntimeContextValue extends ThreadChatRuntimeRegistration {
 interface ThreadChatRuntimeProviderProps {
   children?: ReactNode;
   routeThreadId?: string | null;
+  neededSources?: ReadonlySet<string>;
 }
 
 const ThreadChatRuntimeContext = createContext<ThreadChatRuntimeContextValue | null>(null);
@@ -49,7 +50,7 @@ export function ThreadChatHistoryAdmissionProvider({ children }: { children?: Re
   );
 }
 
-export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadChatRuntimeProviderProps) {
+export function ThreadChatRuntimeProvider({ children, routeThreadId, neededSources }: ThreadChatRuntimeProviderProps) {
   const registryRef = useRef(createThreadChatRuntimeRegistry());
   const [, advanceRoomRevision] = useReducer((revision: number) => revision + 1, 0);
   const roomRevisionQueuedRef = useRef(false);
@@ -57,7 +58,18 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadCha
   const indexEventHandlersRef = useRef(new Map<symbol, IndexEventHandler>());
   const storeThreadId = useChatStore((state) => state.currentThreadId);
   const activeThreadId = routeThreadId || storeThreadId;
-  const { handleAgentMessage } = useAgentMessages();
+  const neededNow = useRef(neededSources);
+  neededNow.current = neededSources;
+  const threadNow = useRef(activeThreadId);
+  threadNow.current = activeThreadId;
+  const sourceNeeded = useCallback(
+    (source: string, threadId?: string) =>
+      (!threadId || threadId === threadNow.current) &&
+      (neededNow.current === undefined ||
+        [...neededNow.current].some((key) => key === source || key.startsWith(source + '.'))),
+    [],
+  );
+  const { handleAgentMessage } = useAgentMessages(sourceNeeded);
 
   useLayoutEffect(() => {
     runtimeMountedRef.current = true;
@@ -73,9 +85,10 @@ export function ThreadChatRuntimeProvider({ children, routeThreadId }: ThreadCha
     threadId: activeThreadId,
     handleAgentMessage,
     onIndexEvent: dispatchIndexEvent,
+    sourceNeeded,
   });
   const foregroundThreadIds = registryRef.current.snapshot();
-  const { socketConnected, hub } = useSocket(socketCallbacks, activeThreadId, foregroundThreadIds);
+  const { socketConnected, hub } = useSocket(socketCallbacks, activeThreadId, foregroundThreadIds, sourceNeeded);
 
   const scheduleRoomRevision = useCallback(() => {
     if (roomRevisionQueuedRef.current) return;

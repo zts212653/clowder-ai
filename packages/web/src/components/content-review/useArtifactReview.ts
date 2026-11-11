@@ -27,7 +27,7 @@ const messages: Record<string, string> = {
 };
 
 export { reviewDraftPrefix } from './review-access-invalidation';
-export function useArtifactReview(reviewId: string) {
+export function useArtifactReview(reviewId: string, readGeneration = 1) {
   const [view, setView] = useState<ArtifactReviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,13 +113,15 @@ export function useArtifactReview(reviewId: string) {
 
   useEffect(() => {
     generation.current += 1;
-    current.current = null;
-    pendingRef.current = null;
-    settledOperation.current = null;
-    retryStorageAvailable.current = true;
-    setView(null);
-    setPending(null);
-    setLoading(true);
+    if (current.current?.review.reviewId !== reviewId) {
+      current.current = null;
+      pendingRef.current = null;
+      settledOperation.current = null;
+      retryStorageAvailable.current = true;
+      setView(null);
+      setPending(null);
+    }
+    setLoading(current.current === null);
     void refresh();
     const update = () => {
       if (document.visibilityState !== 'hidden') void refresh();
@@ -142,6 +144,7 @@ export function useArtifactReview(reviewId: string) {
     window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', ownerUpdate);
     window.addEventListener(REVIEW_ACCESS_REVOKED, accessRevoked);
     window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
     return () => {
       generation.current += 1;
       controllerRef.current?.abort();
@@ -150,8 +153,9 @@ export function useArtifactReview(reviewId: string) {
       window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', ownerUpdate);
       window.removeEventListener(REVIEW_ACCESS_REVOKED, accessRevoked);
       window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
     };
-  }, [refresh, reviewId, clearRevoked]);
+  }, [refresh, reviewId, clearRevoked, readGeneration]);
 
   const send = useCallback(
     async (command: ArtifactReviewCommand): Promise<boolean> => {

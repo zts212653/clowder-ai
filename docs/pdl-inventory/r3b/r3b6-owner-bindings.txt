@@ -1,0 +1,18 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/voice-bindings.test.ts src/pdl/__tests__/review-bindings.test.tsx src/pdl/__tests__/memory-bindings.test.ts src/pdl/__tests__/workbench-bindings.test.ts src/pdl/__tests__/canon-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/voice-bindings.test.ts (8 tests) 33ms
+ ✓ src/pdl/__tests__/memory-bindings.test.ts (3 tests) 21ms
+ ✓ src/pdl/__tests__/canon-bindings.test.ts (2 tests) 14ms
+ ✓ src/pdl/__tests__/review-bindings.test.tsx (4 tests) 44ms
+ ✓ src/pdl/__tests__/workbench-bindings.test.ts (4 tests) 31ms
+
+ Test Files  5 passed (5)
+      Tests  21 passed (21)
+   Start at  08:16:46
+   Duration  1.32s (transform 1.64s, setup 127ms, import 2.59s, tests 142ms, environment 1.18s)
+
+
+Exit code: 0

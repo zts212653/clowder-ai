@@ -86,6 +86,7 @@ import {
   messageSearchAnswerBlock,
 } from '../message-search-answer-binding.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
+import { withPluginMessageRich } from '../plugin-message-rich.js';
 import type {
   AdvanceLifecycleInputDispatchResult,
   AppendMessageInput,
@@ -1110,6 +1111,8 @@ function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
   custodyOfferV1: CustodyOfferV1 | undefined;
 } {
   const { pluginMessage, custodyOfferV1, ...hostExtra } = extra ?? {};
+  // A plugin message's `rich` is read from its elements (withPluginMessageRich), never stored.
+  if (pluginMessage) delete hostExtra.rich;
   return { hostExtra, pluginMessage, custodyOfferV1 };
 }
 
@@ -1227,7 +1230,7 @@ function hydrateExtra(
             ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}),
             ...(custodyOfferV1 ? { custodyOfferV1 } : {}),
           };
-    return { extra, custodyOfferParseFailure };
+    return { extra: withPluginMessageRich(extra), custodyOfferParseFailure };
   }
   // F288 path: independent field exists. Preserve it even when invalid so
   // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
@@ -1237,7 +1240,11 @@ function hydrateExtra(
   // will detect the malformed payload via readPluginMessageExtra and return null.
   const pluginValue = pluginMessage ?? ({} as StoredPluginMessage);
   return {
-    extra: { ...hostExtra, pluginMessage: pluginValue, ...(custodyOfferV1 ? { custodyOfferV1 } : {}) },
+    extra: withPluginMessageRich({
+      ...hostExtra,
+      pluginMessage: pluginValue,
+      ...(custodyOfferV1 ? { custodyOfferV1 } : {}),
+    }),
     custodyOfferParseFailure,
   };
 }
@@ -1933,6 +1940,7 @@ export class RedisMessageStore {
       ...payload,
       id,
       threadId,
+      ...(payload.extra ? { extra: withPluginMessageRich(payload.extra) } : {}),
     };
     const score = msg.timestamp;
     const hashKey = MessageKeys.detail(id);
@@ -3860,7 +3868,7 @@ return 1`,
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+    const { pluginMessage } = splitMessageExtra(msg.extra);
     const {
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
@@ -3875,7 +3883,7 @@ return 1`,
       collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostPatch
     } = extra as Record<string, unknown>;
-    const merged = { ...current, ...hostPatch };
+    const merged = splitMessageExtra({ ...msg.extra, ...hostPatch }).hostExtra;
     const updated = await this.redis.eval(
       UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
       1,
@@ -3885,7 +3893,11 @@ return 1`,
     );
     if (Number(updated) !== 1) return null;
     const result = await this.getById(id);
-    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
+    if (
+      result &&
+      hostPatch.rich !== undefined &&
+      JSON.stringify(msg.extra?.rich) !== JSON.stringify(result.extra?.rich)
+    )
       notifyMessageTimelineChange(this, result);
     return result;
   }

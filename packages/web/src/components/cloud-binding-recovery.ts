@@ -16,7 +16,7 @@ export interface CloudBindingRecoveryProjection {
   bindingOnly?: true;
 }
 
-function recoveryFromNotice(message: ChatMessage): CloudBridgeRecoveryV1 | undefined {
+export function recoveryFromNotice(message: ChatMessage): CloudBridgeRecoveryV1 | undefined {
   const recovery = message.source?.meta?.cloudBridgeRecovery;
   if (message.source?.connector === 'cloud-bridge-status' && isCloudBridgeRecoveryV1(recovery)) return recovery;
   const info = message.extra?.systemInfo;
@@ -44,7 +44,11 @@ function recoveryFromNotice(message: ChatMessage): CloudBridgeRecoveryV1 | undef
   };
 }
 
-function latestRecoveryForSource(source: ChatMessage, timelineMessages: readonly ChatMessage[], includeLive = true) {
+export function latestRecoveryForSource(
+  source: ChatMessage,
+  timelineMessages: readonly ChatMessage[],
+  includeLive = true,
+) {
   for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
     const candidate = timelineMessages[index];
     if (!candidate) continue;

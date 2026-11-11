@@ -141,7 +141,7 @@ jobs:
           test/host-execution-boundary.test.js
           test/agent-session-contract/persisted-execution-boundary.test.js
           test/agent-session-contract/late-execution-boundary.test.js
-      - name: Native import admission and plugin HTTP panel lifecycle
+      - name: Native import admission and plugin HTTP resource isolation
         run: >-
           pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
@@ -149,12 +149,7 @@ jobs:
           test/f322-import-route.test.ts
           test/f322-recent-sessions.test.ts
           test/plugin-ui-resource.test.ts
-      - name: Sandboxed panels use declared HTTP business routing
-        run: >-
-          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
-          pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
-          src/components/plugins/__tests__/plugin-panel-http.test.ts
-      - name: Provider EOF and plugin UI stop preserve lifecycle fences
+      - name: Provider EOF preserves lifecycle fences
         run: >-
           pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
@@ -165,7 +160,6 @@ jobs:
           test/agent-session-contract/eof-teardown-lifecycle.test.js
           test/agent-session-contract/start-rejection-lifecycle.test.js
           test/agent-session-contract/unconfirmed-prior-admission.test.js
-          test/plugin-ui-stop-publication.test.js
           test/f202-c1-carrier-neutral-lifecycle.test.js
           test/plugin-runtime-info.test.ts
       - name: Managed Codex layout link diagnostic

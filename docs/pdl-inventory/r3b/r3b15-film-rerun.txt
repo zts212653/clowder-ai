@@ -1,0 +1,43 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/film-bindings.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ❯ src/pdl/__tests__/film-bindings.test.ts (6 tests | 1 failed) 34ms
+   × compares the exact opinion/result inputs and annotates each side with its own screening and clock 16ms
+   ✓ does not infer a new screening from an unchanged, reopened, foreign or mismatched result 1ms
+   ✓ keeps both shown inputs unchanged when the comparison read fails and refuses stale comparison args 5ms
+   ✓ freezes registration input and media source across a lost reply and retains a later selected project 6ms
+   ✓ imports a chosen document through its real owner and revalidates the project list 3ms
+   ✓ reads actual opinions, compares frozen inputs, queues a position without writing review, and confirms a lost reopen reply 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pdl/__tests__/film-bindings.test.ts > compares the exact opinion/result inputs and annotates each side with its own screening and clock
+Error: 一条审片意见只能对应同一版成片。请先发送或移除输入框里的原位置，再添加这版成片的位置。
+ ❯ Object.action src/pdl/useFilmBindings.ts:311:44
+    309|             : undefined,
+    310|       });
+    311|       if (queued.kind === 'refused') throw new Error(queued.reason);
+       |                                            ^
+    312|       workbench.clipPreview = null;
+    313|       return true;
+ ❯ src/pdl/__tests__/film-bindings.test.ts:216:34
+ ❯ src/pdl/__tests__/hook-host.tsx:9:19
+ ❯ act ../../node_modules/.pnpm/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Module.act src/pdl/__tests__/hook-host.tsx:8:9
+ ❯ src/pdl/__tests__/film-bindings.test.ts:216:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  20:58:54
+   Duration  1.36s (transform 604ms, setup 34ms, import 848ms, tests 34ms, environment 338ms)
+
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: vitest run src/pdl/__tests__/film-bindings.test.ts
+
+Exit code: 1

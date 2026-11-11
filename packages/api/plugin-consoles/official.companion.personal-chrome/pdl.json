@@ -1,0 +1,117 @@
+{
+  "ns": "personalChrome",
+  "templates": [
+    {
+      "slot": "chat.rich",
+      "id": "cloudRecovery",
+      "keys": ["cloudRecovery.chatgpt"],
+      "node": {
+        "vm": "personalChromeRecovery",
+        "blocks": [
+          {
+            "type": "box",
+            "load": "$.load",
+            "error": "t:personalChrome.readError",
+            "retry": {
+              "act": "personalChromeRead"
+            },
+            "blocks": [
+              {
+                "type": "kv",
+                "when": "$.only",
+                "from": [
+                  {
+                    "k": "t:chatCards.field.conversation",
+                    "v": {
+                      "t": "chat.cloudConversation",
+                      "args": ["$.only.displayTitle"]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "select",
+                "id": "$.selectId",
+                "value": "$.value",
+                "options": [
+                  {
+                    "v": "",
+                    "label": "t:runtime.chooseConversation"
+                  },
+                  {
+                    "from": "$.candidates",
+                    "item": {
+                      "v": "@chatUrl",
+                      "label": {
+                        "t": "chat.cloudConversation",
+                        "args": ["@displayTitle"]
+                      }
+                    }
+                  }
+                ],
+                "label": "t:runtime.chooseConversation",
+                "change": "personalChromePick",
+                "when": "$.canChoose"
+              },
+              {
+                "type": "notice",
+                "tone": "warn",
+                "text": {
+                  "t": "personalChrome.issue",
+                  "args": ["$.connectionIssue"]
+                },
+                "when": "$.connectionIssue",
+                "action": {
+                  "type": "button",
+                  "label": "t:personalChrome.settings",
+                  "act": "open",
+                  "args": "$.settings"
+                }
+              },
+              {
+                "type": "notice",
+                "text": {
+                  "t": "personalChrome.issue",
+                  "args": ["$.titleSync.kind", "$.titleSync.n"]
+                },
+                "when": "$.titleSync"
+              },
+              {
+                "type": "status",
+                "text": "t:common.status.connected",
+                "when": "$.bound"
+              },
+              {
+                "type": "toolbar",
+                "items": [
+                  {
+                    "type": "button",
+                    "primary": true,
+                    "label": "t:home.reconnect",
+                    "act": "bindRetry",
+                    "args": "$.submit",
+                    "when": ["$.canSubmit", "$.bindOnly"]
+                  },
+                  {
+                    "type": "button",
+                    "primary": true,
+                    "label": "t:runtime.bindRetry",
+                    "act": "bindRetry",
+                    "args": "$.submit",
+                    "when": ["$.canSubmit", "!$.bindOnly"]
+                  },
+                  {
+                    "type": "button",
+                    "label": "t:personalChrome.refreshTitles",
+                    "act": "personalChromeRefreshTitles",
+                    "when": "!$.bound"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

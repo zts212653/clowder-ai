@@ -1,0 +1,5 @@
+$ pnpm exec biome format --write packages/web/public/pdl-app/plugins.js packages/web/src/pdl/__tests__/runtime.test.ts docs/pdl-inventory/r3b/r3b21-runtime-dependencies.json
+
+Formatted 3 files in 181ms. Fixed 2 files.
+
+Exit code: 0

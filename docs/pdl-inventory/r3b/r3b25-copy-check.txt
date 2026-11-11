@@ -1,0 +1,7 @@
+Source: design-accepted-r133 (unchanged)
+Verification: independent git show, existing source-manifest sha256
+Files checked: 81
+Byte mismatches: 0
+Extra files: 0
+mock / proto / local files: 0
+Exit code: 0

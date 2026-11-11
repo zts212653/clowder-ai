@@ -1,0 +1,43 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/operations-bindings.test.ts src/pdl/__tests__/r115-bindings.test.ts src/pdl/__tests__/runtime.test.ts src/pdl/__tests__/remaining-bindings.test.ts src/components/capability-evolution/__tests__/evolution-version-view.test.ts
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/r115-bindings.test.ts (7 tests) 61ms
+ ✓ src/pdl/__tests__/operations-bindings.test.ts (8 tests) 55ms
+ ✓ src/pdl/__tests__/remaining-bindings.test.ts (6 tests) 46ms
+ ✓ src/components/capability-evolution/__tests__/evolution-version-view.test.ts (7 tests) 4ms
+ ✓ src/pdl/__tests__/runtime.test.ts (34 tests) 13472ms
+     ✓ renders owner adoption, actual use receipts and version history through the existing evolution declarations  828ms
+     ✓ opens the verified recall source and its original reply through one existing row menu  406ms
+     ✓ uses r118 engine errors for an API error envelope, deduplicates and notifies again after recovery  553ms
+     ✓ isolates errors in r118 pdlView and sidebar VM reads without a host error boundary  438ms
+     ✓ opens a live child trajectory through the declared run opener and the existing execution view  348ms
+     ✓ retains the existing owner read-error component once without adding a toast  397ms
+     ✓ keeps the shell and other owner data when the home binding is absent, with one danger toast  585ms
+     ✓ keeps the shell and other owner data when the ops binding is absent, with one danger toast  579ms
+     ✓ keeps the shell and other owner data when the replay binding is absent, with one danger toast  596ms
+     ✓ keeps the shell and other owner data when the evolution binding is absent, with one danger toast  588ms
+     ✓ opens the existing all-works page with its global owner and reuses the current work controls  376ms
+     ✓ binds r115 runtime identity and real evolution detail through the copied declarations  514ms
+     ✓ mounts the r114 preview frame and forwards only its own raw message source to the application  409ms
+     ✓ appends ANSI output through the copied terminal io and sends raw control input without replacing its screen  378ms
+     ✓ keeps the actual task dialog busy until its owner settles and retains the draft on failure  419ms
+     ✓ keeps entity removal confirmation open while the real terminal owner is pending  373ms
+     ✓ renders real source controls and reuses chat messages for the workbench replay player  331ms
+     ✓ retains the file rename draft and owner rejection in the native entity dialog  334ms
+     ✓ opens and leaves Team details through the native workbench stack  365ms
+     ✓ retains terminal deletion confirmation and the exact owner rejection  338ms
+     ✓ sends input through the registered action without replacing the active textarea  329ms
+     ✓ binds export filtering and file-context input through the existing VM and popup declarations  312ms
+     ✓ requires an explicit receiver and forwards canonical message ids through the existing modal row control  400ms
+     ✓ resolves draft-append consent only from the engine dialog decision  326ms
+   ✓ renders bound workbench tools and voice settings through the same copied declarations  1313ms
+
+ Test Files  5 passed (5)
+      Tests  62 passed (62)
+   Start at  20:28:28
+   Duration  16.28s (transform 4.29s, setup 133ms, import 6.54s, tests 13.64s, environment 1.70s)
+
+
+Exit code: 0

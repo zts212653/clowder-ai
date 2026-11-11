@@ -7,7 +7,13 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ActiveContext, OpenThreadRows, TimeoutDiagnosticsStash } from './agent-messages/active-context';
 import { handleActiveAgentMessage } from './agent-messages/active-handler';
-import { handleBackgroundAgentMessage } from './agent-messages/background-handler';
+import {
+  finishHeldStream,
+  handleBackgroundAgentMessage,
+  holdStreamEvent,
+  rememberHeldStream,
+} from './agent-messages/background-handler';
+import { isRecoverableInFlightError } from './agent-messages/error-rows';
 import { processThreadSeq } from './agent-messages/thread-seq';
 import type { AgentMsg } from './agent-messages/types';
 
@@ -21,6 +27,8 @@ export type {
   HandleBackgroundMessageOptions,
 } from './agent-messages/types';
 
+const allSourcesNeeded = () => true;
+
 /**
  * Socket `agent_message` dispatch for every thread (F173 KD-1). The open thread and background
  * threads keep separate entries; both write each event only into the message it names
@@ -29,7 +37,7 @@ export type {
  * Returns:
  * - handleAgentMessage: socket event handler
  */
-export function useAgentMessages() {
+export function useAgentMessages(sourceNeeded: (source: string, threadId?: string) => boolean = allSourcesNeeded) {
   const resolveCatName = useCatNameResolver();
   const actions = useChatStore(
     useShallow((s) => ({
@@ -82,6 +90,14 @@ export function useAgentMessages() {
   const handleAgentMessage = useCallback(
     (msg: AgentMsg) => {
       const store = useChatStore.getState();
+      const eventThread = msg.threadId ?? store.currentThreadId;
+      if (msg.isFinal || msg.type === 'done' || (msg.type === 'error' && !isRecoverableInFlightError(msg)))
+        finishHeldStream(eventThread, msg.messageId, msg.invocationId);
+      if (!sourceNeeded('chat.messages', eventThread)) {
+        if (!msg.isFinal && msg.type !== 'done' && msg.type !== 'error')
+          holdStreamEvent({ ...msg, threadId: eventThread, timestamp: msg.timestamp ?? Date.now() });
+        return;
+      }
       const isOpenThread = Boolean(msg.threadId && store.currentThreadId && msg.threadId === store.currentThreadId);
       // F183 Phase C: sequence gaps request a history catch-up before any dispatch.
       processThreadSeq(msg, store);
@@ -96,13 +112,15 @@ export function useAgentMessages() {
             resolveCatName,
           },
         );
+        rememberHeldStream({ ...msg, threadId: eventThread, timestamp: msg.timestamp ?? Date.now() });
         return;
       }
 
       const ctx: ActiveContext = { actions, rows, resolveCatName, timeoutDiagnostics };
       handleActiveAgentMessage(msg, ctx);
+      rememberHeldStream({ ...msg, threadId: eventThread, timestamp: msg.timestamp ?? Date.now() });
     },
-    [actions, rows, resolveCatName, timeoutDiagnostics],
+    [actions, rows, resolveCatName, timeoutDiagnostics, sourceNeeded],
   );
 
   return { handleAgentMessage };

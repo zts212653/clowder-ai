@@ -1,0 +1,8 @@
+Source: existing routing-context-ownership.test.ts (unchanged)
+Assertion: WorkspacePanel source contains workspaceMode === 'team'
+HEAD: abdbcd2bf3ec990d5a73ed9d91761c896237e00d
+WorkspacePanel HEAD SHA256: 1bb6a117be72b69ffeacb1ed83ea86cc25eb76712ca179031b6990503a821cb0
+WorkspacePanel worktree SHA256: 1bb6a117be72b69ffeacb1ed83ea86cc25eb76712ca179031b6990503a821cb0
+File unchanged in r3b10: True
+Expected legacy expression exists in HEAD: False
+Test not changed; no old JSX restored.

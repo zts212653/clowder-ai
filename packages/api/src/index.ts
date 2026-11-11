@@ -5731,6 +5731,8 @@ async function main(): Promise<void> {
     './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
   const pluginManagerRuntime = createPluginManagerRuntimeComposition({
+    pluginOperationChanged: (pluginId) =>
+      socketManager?.emitToUser(privateUserId, 'plugin_operation_changed', { pluginId }),
     runtime: pluginRuntime,
     catalogProvider: pluginManagerCatalog,
     marketplaces: { sources: marketplaceSources, repository: marketplaceRepository },
@@ -5964,12 +5966,7 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, {
-    webhooks: pluginRuntime.supervisor,
-    ui: pluginRuntime.supervisor.ui,
-  });
-  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
-  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are

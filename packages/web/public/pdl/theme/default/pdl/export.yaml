@@ -1,0 +1,11 @@
+modules:
+  - id: export
+    views:
+      thread.export:
+        route: export
+        open: {anchor: window, as: cover}
+        page: true
+        vm: threadExport
+        readonly: true
+        blocks:
+          - {type: stream, id: export, from: $.items}

@@ -1,0 +1,15 @@
+$ pnpm --filter @cat-cafe/web exec vitest run --maxWorkers=1 src/pdl/__tests__/runtime.test.ts -t 'actual profile opening'
+
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/pdl/__tests__/runtime.test.ts (45 tests | 44 skipped) 882ms
+     ✓ renders actual profile opening modes and usage types through the existing memory detail without mutating owner data  881ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 44 skipped (45)
+   Start at  23:35:22
+   Duration  4.85s (transform 2.20s, setup 88ms, import 3.69s, tests 882ms, environment 0ms)
+
+
+Exit code: 0

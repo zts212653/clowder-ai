@@ -46,16 +46,24 @@ export async function saveMemberRecord(input: {
         )
       ) {
         commit(rebaseMemberDraft({ ...snapshot, pendingWrite: undefined }, member, pending.form));
-        throw new Error('已找回上次保存的成员并保留新草稿，请核对后再次保存。');
+        throw Object.assign(new Error('已找回上次保存的成员并保留新草稿，请核对后再次保存。'), {
+          code: 'recovered_draft',
+        });
       }
       return member;
     }
     if (member && (pending.create || member.configurationRevision !== pending.payload.expectedRevision)) {
       input.conflict();
-      throw new Error('该成员已有其他配置，未重复创建或覆盖；草稿已保留，请核对。');
+      throw Object.assign(new Error('该成员已有其他配置，未重复创建或覆盖；草稿已保留，请核对。'), {
+        code: 'member_changed',
+      });
     }
-    if (pending.catId !== catId) throw new Error('上次创建结果尚未确认，请先核对原成员 ID，不能换 ID 重复创建。');
-    if (!pending.create && !member) throw new Error('该成员已不存在，草稿已保留。');
+    if (pending.catId !== catId)
+      throw Object.assign(new Error('上次创建结果尚未确认，请先核对原成员 ID，不能换 ID 重复创建。'), {
+        code: 'member_id_changed',
+      });
+    if (!pending.create && !member)
+      throw Object.assign(new Error('该成员已不存在，草稿已保留。'), { code: 'member_missing' });
   }
   const finalForm =
     snapshot.pendingWrite?.form ?? (await trace.phase('member.prepare', () => prepareNativeMember(form, baseline)));

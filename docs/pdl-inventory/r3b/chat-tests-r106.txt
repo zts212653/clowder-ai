@@ -1,0 +1,21 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/pdl/__tests__/platform.test.ts src/hooks/__tests__/useSendMessage-routing.test.ts src/components/thread-chat/__tests__/thread-chat-runtime-registry.test.ts
+
+ RUN  v4.0.18 /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web
+
+ ✓ src/components/thread-chat/__tests__/thread-chat-runtime-registry.test.ts (4 tests) 2ms
+ ✓ src/pdl/__tests__/platform.test.ts (4 tests) 17ms
+stderr | src/hooks/__tests__/useSendMessage-routing.test.ts > SplitPaneView input routing (P1-1) > onSend prop receives splitPaneTargetId as overrideThreadId
+Warning: The current testing environment is not configured to support act(...)
+
+stderr | src/hooks/__tests__/useSendMessage-routing.test.ts > SplitPaneView input routing (P1-1) > onSend prop receives splitPaneTargetId as overrideThreadId
+Warning: The current testing environment is not configured to support act(...)
+
+ ✓ src/hooks/__tests__/useSendMessage-routing.test.ts (1 test) 16ms
+
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+   Start at  21:20:19
+   Duration  1.36s (transform 735ms, setup 85ms, import 1.00s, tests 34ms, environment 726ms)
+
+
+Exit code: 0

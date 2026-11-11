@@ -1,0 +1,6 @@
+$ pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useSendMessage-routing.test.ts src/components/thread-chat/__tests__/thread-chat-runtime-registry.test.ts
+undefined
+/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "vitest" not found
+
+Exit code: 254

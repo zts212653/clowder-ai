@@ -1,0 +1,27 @@
+$ node checks/lib/run.js --quick catalog contrast -j 1 (isolated r105 archive)
+node:internal/modules/cjs/loader:1479
+  throw err;
+  ^
+
+Error: Cannot find module 'playwright'
+Require stack:
+- /private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-r105-r3b-fp_82kna/checks/lib/run.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1094:12)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1576:12)
+    at require (node:internal/modules/helpers:153:16)
+    at Object.<anonymous> (/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-r105-r3b-fp_82kna/checks/lib/run.js:7:22)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    '/private/var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/clowder-r105-r3b-fp_82kna/checks/lib/run.js'
+  ]
+}
+
+Node.js v24.15.0
+
+Exit code: 1

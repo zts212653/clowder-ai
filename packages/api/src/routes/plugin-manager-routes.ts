@@ -50,6 +50,8 @@ import { warnPluginPackageFailure } from './plugin-package-diagnostics.js';
 type PluginManagerRouteService = Pick<
   PluginManagerService,
   | 'list'
+  | 'pdl'
+  | 'pdlSubtree'
   | 'listLocal'
   | 'search'
   | 'searchLocal'

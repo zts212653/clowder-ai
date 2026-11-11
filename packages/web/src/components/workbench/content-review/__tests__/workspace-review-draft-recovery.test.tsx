@@ -10,8 +10,8 @@ import { discussionView, reviewId, mediaView as view } from './WorkspaceContentR
 const api = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => api.fetch(...args) }));
 let root: Root, container: HTMLDivElement, model: ReturnType<typeof useWorkspaceContentReview>;
-function Probe({ path = 'cover.png' }: { path?: string }) {
-  model = useWorkspaceContentReview({ worktreeId: 'worktree-a', path });
+function Probe({ path = 'cover.png', generation = 1 }: { path?: string; generation?: number }) {
+  model = useWorkspaceContentReview({ worktreeId: 'worktree-a', path }, generation);
   return <span>{model.view?.review.contentRef}</span>;
 }
 async function mount(path = 'cover.png') {
@@ -53,6 +53,25 @@ it('restores an unsent body and its exact selection after a fresh owner read on 
   expect(model.draft).toBe('尚未发出的原意图');
   expect(model.target).toEqual(target);
   expect(api.fetch.mock.calls.every(([url]) => url.endsWith('/prepare'))).toBe(true);
+});
+
+it('re-pulls the current review on reconnect and keeps its full base until that read completes', async () => {
+  api.fetch.mockImplementation(async () => new Response(JSON.stringify(view())));
+  await mount();
+  const held = model.view;
+  let release!: (response: Response) => void;
+  api.fetch.mockImplementation((url: string) => {
+    expect(url).toBe('/api/workspace/content-reviews/' + reviewId);
+    return new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+  });
+  await act(async () => root.render(<Probe generation={2} />));
+  expect(model.view).toBe(held);
+  const next = view();
+  next.review.revision += 1;
+  await act(async () => release(new Response(JSON.stringify(next))));
+  expect(model.view?.review.revision).toBe(next.review.revision);
 });
 
 it('does not infer that its state-changing action succeeded just because another actor left the same state', async () => {

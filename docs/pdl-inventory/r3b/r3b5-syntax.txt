@@ -1,0 +1,2 @@
+JS files checked: 66
+Syntax failures: 0
