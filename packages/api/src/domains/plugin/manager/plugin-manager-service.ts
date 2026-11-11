@@ -312,16 +312,17 @@ export class PluginManagerService {
   }
 
   async pdlSubtree(pluginId: string): Promise<PluginPdlSubtree> {
-    const fragment = (await this.installedFragments()).get(pluginId);
+    const fragment = (await this.installedFragments(pluginId)).get(pluginId);
     if (!fragment) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
     return pluginPdlSplit(fragment).subtree;
   }
 
-  private async installedFragments(): Promise<Map<string, PluginPdlFragment>> {
-    const inventory = await this.options.inventory.snapshot();
+  private async installedFragments(pluginId?: string): Promise<Map<string, PluginPdlFragment>> {
+    const inventory = await this.options.inventory.snapshot(pluginId === undefined ? undefined : { pluginId });
     const out = new Map<string, PluginPdlFragment>();
     for (const instance of inventory.instances) {
-      if (instance.lifecycleState !== 'installed') continue;
+      if (instance.lifecycleState !== 'installed' || (pluginId !== undefined && instance.pluginId !== pluginId))
+        continue;
       const pkg = inventory.packages.find((item) => item.packageDigest === instance.packageDigest);
       if (!pkg || pkg.packageState !== 'installed' || !pkg.manifest) continue;
       const manifest = pkg.manifest as typeof pkg.manifest & { pdl?: PluginPdlFragment };
