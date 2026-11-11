@@ -166,6 +166,7 @@ it('keeps the existing name filter and carries the same find return through a wo
     closeSearch: vi.fn(),
     registerReadingPort: vi.fn(() => () => {}),
     navigateResult: vi.fn(),
+    jumpInThread: vi.fn(() => false),
     moveTo: vi.fn(),
     returnToOrigin: vi.fn(),
   };

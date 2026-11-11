@@ -2,11 +2,14 @@ import { releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import { type MessageFindContext, parseMessageFindContext } from './message-find-state';
 import { interruptMessageReadingTrip, type MessageReadingTrip } from './message-reading-trip';
 
+export type MessageReadingSessionSource = 'search' | 'jump';
+
 export interface MessageReadingSession {
   id: string;
   originPersisted: boolean;
   trip: MessageReadingTrip;
   find?: MessageFindContext;
+  source?: MessageReadingSessionSource;
 }
 
 // Browser-local navigation metadata uses the existing browser persistence carrier.
@@ -85,16 +88,26 @@ function parseSession(value: unknown): MessageReadingSession | null {
     typeof value.originPersisted !== 'boolean'
   )
     return null;
+  if (value.source !== undefined && value.source !== 'search' && value.source !== 'jump') return null;
   const find = value.find === undefined ? undefined : parseMessageFindContext(value.find);
   if (find === null) return null;
   const trip = parseTrip(value.trip, find !== undefined);
-  return trip ? { id: value.id, originPersisted: value.originPersisted, trip, ...(find ? { find } : {}) } : null;
+  return trip
+    ? {
+        id: value.id,
+        originPersisted: value.originPersisted,
+        trip,
+        ...(find ? { find } : {}),
+        ...(value.source ? { source: value.source } : {}),
+      }
+    : null;
 }
 
 export function startMessageReadingSession(
   trip: MessageReadingTrip,
   originPersisted: boolean,
   find?: MessageFindContext,
+  source?: MessageReadingSessionSource,
 ): {
   session: MessageReadingSession;
   persisted: boolean;
@@ -107,6 +120,7 @@ export function startMessageReadingSession(
     trip: snapshot,
     originPersisted,
     ...(findSnapshot ? { find: findSnapshot } : {}),
+    ...(source ? { source } : {}),
   };
   let persisted = false;
   if (typeof window !== 'undefined') {
