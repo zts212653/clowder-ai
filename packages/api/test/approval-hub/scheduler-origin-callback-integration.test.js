@@ -214,12 +214,22 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
         afterContent: 'NEW primer written during a timer-driven turn',
         rationale: 'Observed while the scheduler had the ball',
         signalKind: 'cat-declared',
+        clientRequestId: 'scheduler-profile-retry',
       });
 
       assert.equal(res.statusCode, 200, res.body);
       const [proposal] = await store.listPending(OWNER);
       assert.ok(proposal, 'the profile-update route must have created a proposal');
       await assertAnchoredToWakeRow(store, proposal.proposalId, 'thread_1', wake);
+      const retry = await post(app, '/api/callbacks/propose-profile-update', auth, {
+        afterContent: 'NEW primer written during a timer-driven turn',
+        rationale: 'Observed while the scheduler had the ball',
+        signalKind: 'cat-declared',
+        clientRequestId: 'scheduler-profile-retry',
+      });
+      assert.equal(retry.statusCode, 200, retry.body);
+      assert.equal(retry.json().proposalId, proposal.proposalId);
+      assert.equal(retry.json().deduped, true);
     } finally {
       await app.close();
       rmSync(dataDir, { recursive: true, force: true });
@@ -270,12 +280,9 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
     }
   });
 
-  it('F221 — a producer whose adapter permits a body-chosen origin gets no exemption on the same path', async () => {
-    // Not "this request's origin is unbound" — here it comes off the record exactly as F225's
-    // does. The catalog gate is per PRODUCER, not per request: F221's deriveTasteOriginRef
-    // prefers a body-supplied sourceMessageId with no equality check, so no request of its
-    // shape can be attested. This is the negative the earlier fabricated-F128 case should
-    // have been, and it is the case that dies if anyone widens the exemption back to global.
+  it('F221 retains its forbidden scheduler exemption after exact-message admission is added', async () => {
+    // F221 now binds the invocation message before reservation, but binding alone does not
+    // change its catalogued owner requirement. A scheduler wake is still not this owner's source.
     const { ApprovalIngress } = await load('domains/approval-hub/ApprovalIngress');
     const { InvocationRegistry } = await load('domains/cats/services/agents/invocation/InvocationRegistry');
     const { MessageStore } = await load('domains/cats/services/stores/ports/MessageStore');
@@ -308,12 +315,9 @@ describe('F167 scheduler-origin exemption over real callback routes', () => {
         clientRequestId: 'f167-scheduler-origin-taste',
       });
 
-      assert.ok(res.statusCode >= 500, `expected the ingress to reject, got ${res.statusCode}`);
-      assert.match(
-        res.body,
-        /owner mismatch/i,
-        'must fail on the owner check specifically — any other 500 would pass this case for the wrong reason',
-      );
+      assert.equal(res.statusCode, 409, res.body);
+      assert.equal(res.json().error, 'origin_not_eligible');
+      assert.deepEqual(await store.listPending(OWNER), []);
       for (const proposal of await store.listPending(OWNER)) {
         assert.notEqual((await store.getPublication(proposal.id))?.state, 'anchored');
       }

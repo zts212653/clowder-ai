@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { SessionMutex } from '../src/domains/cats/services/agents/invocation/SessionMutex.js';
+import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { CompanionF221SyntheticDecision } from '../src/domains/concierge/live/CompanionF221SyntheticDecision.js';
 import { CompanionF221Trial } from '../src/domains/concierge/live/CompanionF221Trial.js';
 import type { CompanionOwnerClient } from '../src/domains/concierge/live/companion-owner-client.js';
@@ -9,25 +10,38 @@ import { approveTasteProposal } from '../src/domains/taste/services/approveTaste
 import { tasteDecisionSnapshot } from '../src/domains/taste/services/taste-decision-snapshot.js';
 import { InMemoryTasteProposalStore } from '../src/domains/taste/stores/InMemoryTasteProposalStore.js';
 
-async function anchoredProposal(store: InMemoryTasteProposalStore) {
+async function anchoredProposal(
+  store: InMemoryTasteProposalStore,
+  messages: MessageStore,
+  privacy: 'sensitive' | 'public',
+) {
+  const origin = messages.append({
+    userId: 'owner',
+    threadId: 'home',
+    from: { kind: 'user', userId: 'owner' },
+    content: 'Original owner source',
+    timestamp: Date.now(),
+  });
+  const originRef = { kind: 'message' as const, threadId: 'home', messageId: origin.id };
   const proposal = store.create({
     proposalId: randomUUID(),
     userId: 'owner',
     catId: 'codex',
     threadId: 'home',
-    sourceMessageId: 'source-1',
+    sourceMessageId: origin.id,
+    approvalOriginRef: originRef,
     scene: '讨论留白',
     quote: '不要塞满',
     tags: ['留白'],
     dimension: 'visual-quality',
-    privacy: 'sensitive',
+    privacy,
   });
   await store.commitEnvelope(proposal.id, {
     canonicalProposalId: proposal.id,
     sourceFeatureId: 'F221',
     ownerUserId: 'owner',
     requesterCatId: 'codex',
-    originRef: { kind: 'message', threadId: 'home', messageId: 'source-1' },
+    originRef,
     approvalCardRef: { threadId: 'home', messageId: 'card-1' },
     createdAt: proposal.createdAt,
   });
@@ -36,9 +50,13 @@ async function anchoredProposal(store: InMemoryTasteProposalStore) {
   return anchored;
 }
 
-async function syntheticCandidate(writeVignette?: (proposalId: string) => Promise<{ slug: string; path: string }>) {
+async function syntheticCandidate(
+  writeVignette?: (proposalId: string) => Promise<{ slug: string; path: string }>,
+  privacy: 'sensitive' | 'public' = 'sensitive',
+) {
   const store = new InMemoryTasteProposalStore();
-  const proposal = await anchoredProposal(store);
+  const messages = new MessageStore();
+  const proposal = await anchoredProposal(store, messages, privacy);
   let clock = 1000;
   let context = { generation: 7, callId: '22222222-2222-4222-8222-222222222222' };
   let authorized = true;
@@ -64,6 +82,7 @@ async function syntheticCandidate(writeVignette?: (proposalId: string) => Promis
     current,
     () => authorized,
     store,
+    messages,
     approvalCoordinator,
     async (currentProposal) => {
       writes++;
@@ -73,6 +92,7 @@ async function syntheticCandidate(writeVignette?: (proposalId: string) => Promis
   );
   return {
     store,
+    messages,
     proposal,
     candidate,
     lock,
@@ -283,4 +303,21 @@ test('lost final approval and rejection replies read the settled producer state'
     state: 'applied',
     producerStatus: 'rejected',
   });
+});
+
+test('public Host approval verifies the original owner message and refuses its withdrawal', async () => {
+  const valid = await syntheticCandidate(undefined, 'public');
+  const preview = await valid.candidate.inspect(valid.proposal.id);
+  assert.equal((await valid.candidate.decide(preview.snapshot.nonce, 'approve')).state, 'applied');
+  assert.equal(valid.counts().writes, 1);
+
+  const withdrawn = await syntheticCandidate(undefined, 'public');
+  const prior = await withdrawn.candidate.inspect(withdrawn.proposal.id);
+  assert.ok(withdrawn.proposal.sourceMessageId);
+  withdrawn.messages.softDelete(withdrawn.proposal.sourceMessageId, 'owner');
+  assert.deepEqual(await withdrawn.candidate.decide(prior.snapshot.nonce, 'approve'), {
+    state: 'unknown',
+    producerStatus: 'pending',
+  });
+  assert.equal(withdrawn.counts().writes, 0);
 });

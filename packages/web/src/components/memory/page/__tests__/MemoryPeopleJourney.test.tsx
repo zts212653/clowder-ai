@@ -96,7 +96,9 @@ beforeEach(() => {
               entries: [person],
               meta: { count: 1, limit: 20, offset: 0, hasMore: false },
             })
-          : response(detail),
+          : path.startsWith('/api/memory/people/deferred?')
+            ? response({ entries: [], nextCursor: null })
+            : response(detail),
   );
   host = document.createElement('div');
   document.body.append(host);
@@ -132,19 +134,21 @@ it('preserves loaded people when the next page fails and recovers without duplic
   apiFetch.mockImplementation(async (path: string) =>
     path === '/api/memory/taste'
       ? response({ readStatus: 'ready', entries: [], coverage: null })
-      : path.includes('offset=0')
-        ? response({
-            readStatus: 'ready',
-            entries: [person],
-            meta: { count: 1, limit: 20, offset: 0, hasMore: true, nextOffset: 1 },
-          })
-        : ++attempt === 1
-          ? response({ error: 'unavailable' }, 503)
-          : response({
+      : path.startsWith('/api/memory/people/deferred?')
+        ? response({ entries: [], nextCursor: null })
+        : path.includes('offset=0')
+          ? response({
               readStatus: 'ready',
-              entries: [person, { ...person, personId: 'person-b', displayName: '小周' }],
-              meta: { count: 2, limit: 20, offset: 1, hasMore: false },
-            }),
+              entries: [person],
+              meta: { count: 1, limit: 20, offset: 0, hasMore: true, nextOffset: 1 },
+            })
+          : ++attempt === 1
+            ? response({ error: 'unavailable' }, 503)
+            : response({
+                readStatus: 'ready',
+                entries: [person, { ...person, personId: 'person-b', displayName: '小周' }],
+                meta: { count: 2, limit: 20, offset: 1, hasMore: false },
+              }),
   );
   await act(async () => root.render(<MemoryTaste />));
   await click('人物');

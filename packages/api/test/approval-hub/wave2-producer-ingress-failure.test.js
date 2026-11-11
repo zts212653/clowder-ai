@@ -1,3 +1,4 @@
+import { tasteSourceStore } from '../helpers/taste-source-fixture.js';
 /**
  * F246 Phase I Wave 2: Ingress failure safety tests.
  *
@@ -16,33 +17,16 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { createTestApprovalIngress } from './helpers.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** ApprovalIngress mock that always throws on publish. */
 function createFailingIngress() {
   return {
+    ...createTestApprovalIngress(),
     publish: async () => {
       throw new Error('simulated ingress failure: card append failed');
-    },
-  };
-}
-
-/** ApprovalIngress mock that succeeds (commits envelope via store). */
-function createSucceedingIngress() {
-  return {
-    publish: async (draft, store) => {
-      const envelope = {
-        canonicalProposalId: draft.canonicalProposalId,
-        sourceFeatureId: draft.producerId,
-        ownerUserId: draft.ownerUserId,
-        requesterCatId: draft.requesterCatId,
-        originRef: draft.originRef,
-        approvalCardRef: { threadId: draft.cardThreadId, messageId: 'msg-card-ok' },
-        createdAt: draft.createdAt,
-      };
-      await store.commitEnvelope(draft.canonicalProposalId, envelope);
-      return envelope;
     },
   };
 }
@@ -132,10 +116,11 @@ describe('P1-1/P1-2: F260 entity proposal ingress failure', () => {
     const store = new InMemoryEntityProposalStore();
     let callCount = 0;
     const ingress = {
+      ...createTestApprovalIngress(),
       publish: async (draft, s) => {
         callCount++;
         if (callCount === 1) throw new Error('simulated first-call failure');
-        return createSucceedingIngress().publish(draft, s);
+        return createTestApprovalIngress().publish(draft, s);
       },
     };
     await app.register(callbackProposeEntityRoutes, {
@@ -194,6 +179,7 @@ describe('P1-1/P1-2: F221 taste proposal ingress failure', () => {
     app.addHook('preHandler', (request, _reply, done) => {
       request.callbackAuth = {
         invocationId: 'inv-test-2',
+        originTriggerMessageId: 'taste-ingress-source',
         callbackToken: 'tok-test',
         catId: 'opus',
         threadId: 'thread-taste',
@@ -225,6 +211,7 @@ describe('P1-1/P1-2: F221 taste proposal ingress failure', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry: mockRegistry,
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['taste-ingress-source'], threadId: 'thread-taste' }),
       socketManager: mockSocket(),
       approvalIngress: createFailingIngress(),
     });
@@ -238,15 +225,17 @@ describe('P1-1/P1-2: F221 taste proposal ingress failure', () => {
     const store = new InMemoryTasteProposalStore();
     let callCount = 0;
     const ingress = {
+      ...createTestApprovalIngress(),
       publish: async (draft, s) => {
         callCount++;
         if (callCount === 1) throw new Error('simulated first-call failure');
-        return createSucceedingIngress().publish(draft, s);
+        return createTestApprovalIngress().publish(draft, s);
       },
     };
     await app.register(callbackProposeTasteRoutes, {
       registry: mockRegistry,
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['taste-ingress-source'], threadId: 'thread-taste' }),
       socketManager: mockSocket(),
       approvalIngress: ingress,
     });
@@ -283,15 +272,17 @@ describe('P1-1/P1-2: F221 taste proposal ingress failure', () => {
       releasePublish = resolve;
     });
     const ingress = {
+      ...createTestApprovalIngress(),
       async publish(draft, publicationStore) {
         publishStarted();
         await canPublish;
-        return createSucceedingIngress().publish(draft, publicationStore);
+        return createTestApprovalIngress().publish(draft, publicationStore);
       },
     };
     await app.register(callbackProposeTasteRoutes, {
       registry: mockRegistry,
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['taste-ingress-source'], threadId: 'thread-taste' }),
       socketManager: mockSocket(),
       approvalIngress: ingress,
     });
@@ -325,6 +316,7 @@ describe('P1-1/P1-2: F221 taste proposal ingress failure', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry: mockRegistry,
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['taste-ingress-source'], threadId: 'thread-taste' }),
       socketManager: spySocket,
       // approvalIngress intentionally omitted
     });

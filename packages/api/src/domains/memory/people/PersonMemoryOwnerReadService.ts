@@ -11,6 +11,7 @@ import {
   type PersonMemoryOwnerSourceReaderDeps,
 } from './PersonMemoryOwnerSourceReader.js';
 import type { PersonMemoryStore } from './PersonMemoryStore.js';
+import { readApprovedClaimTexts } from './person-memory-owner-claim-presentation.js';
 import { personDeliveryRevision, readPersonDelivery } from './person-memory-owner-delivery.js';
 import { readPersonMemoryProposals } from './person-memory-owner-proposals.js';
 import {
@@ -133,11 +134,16 @@ export class PersonMemoryOwnerReadService {
       if (current !== deliveryRevision) return { status: 'version_changed' as const };
     }
     const proposalProjection = await readPersonMemoryProposals(this.deps.store, ownerUserId, person, MAX_DETAIL_ITEMS);
+    const selectedClaims = [...claims]
+      .sort((left, right) => right.recordedAt - left.recordedAt)
+      .slice(0, MAX_DETAIL_ITEMS);
+    const approvedTexts = await readApprovedClaimTexts(this.deps.store, ownerUserId, personId, selectedClaims);
     return {
       status: 'ready' as const,
       detail: {
         personId: person.personId,
         personRevision: personAggregateOwnerRevision({ person, claims, relationships, events }),
+        readRevision: personDeliveryRevision(loaded),
         displayName: person.displayName,
         aliases: person.privateAliases,
         status: person.status,
@@ -152,20 +158,18 @@ export class PersonMemoryOwnerReadService {
               },
             }
           : {}),
-        claims: [...claims]
-          .sort((left, right) => right.recordedAt - left.recordedAt)
-          .slice(0, MAX_DETAIL_ITEMS)
-          .map((claim) => ({
-            claimId: claim.claimId,
-            revision: personClaimOwnerRevision(claim),
-            payload: claim.payload,
-            status: claim.status,
-            recordedAt: claim.recordedAt,
-            ...(claim.validFrom !== undefined ? { validFrom: claim.validFrom } : {}),
-            ...(claim.validTo !== undefined ? { validTo: claim.validTo } : {}),
-            ...(claim.supersedesClaimId ? { supersedesClaimId: claim.supersedesClaimId } : {}),
-            sourceCount: sourceCount(claim),
-          })),
+        claims: selectedClaims.map((claim) => ({
+          claimId: claim.claimId,
+          revision: personClaimOwnerRevision(claim),
+          payload: claim.payload,
+          status: claim.status,
+          recordedAt: claim.recordedAt,
+          ...(claim.validFrom !== undefined ? { validFrom: claim.validFrom } : {}),
+          ...(claim.validTo !== undefined ? { validTo: claim.validTo } : {}),
+          ...(claim.supersedesClaimId ? { supersedesClaimId: claim.supersedesClaimId } : {}),
+          sourceCount: sourceCount(claim),
+          ...(approvedTexts.has(claim.claimId) ? { approvedText: approvedTexts.get(claim.claimId) } : {}),
+        })),
         relationships: [...relationships]
           .sort((left, right) => relationshipRecordedAt(right) - relationshipRecordedAt(left))
           .slice(0, MAX_DETAIL_ITEMS)
@@ -212,14 +216,19 @@ export class PersonMemoryOwnerReadService {
   readDelivery = (owner: string, id: string, revision: string) =>
     readPersonDelivery(owner, id, revision, (owner, id) => this.loadOwnedPerson(owner, id), this.sourceReader);
 
-  async readSource(ownerUserId: string, personId: PersonIdentity['personId'], selector: PersonMemorySourceSelector) {
+  async readSource(
+    ownerUserId: string,
+    personId: PersonIdentity['personId'],
+    selector: PersonMemorySourceSelector,
+    onUnavailable?: (reason: string) => void,
+  ) {
     const person = await this.deps.store.getPerson(ownerUserId, personId);
     if (!person || person.ownerUserId !== ownerUserId || person.personId !== personId) {
       return { status: 'not_available' as const };
     }
     const item = await this.sourceItem(ownerUserId, person, selector);
     if (item.status !== 'ready') return item;
-    return this.sourceReader.read(ownerUserId, item.value);
+    return this.sourceReader.read(ownerUserId, item.value, onUnavailable);
   }
 
   private async listEntry(ownerUserId: string, person: PersonIdentity) {

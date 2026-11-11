@@ -9,7 +9,7 @@ function requestHeaders(request: Request, credentials: readonly string[]): Heade
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers ?? {})) {
     if (
-      /^(?:authorization|host|content-length|content-type|transfer-encoding|connection|cookie|proxy-.*|x-api-key|x-goog-api-key)$/i.test(
+      /^(?:authorization|host|content-length|content-type|transfer-encoding|connection|cookie|proxy-.*|x-api-key|x-goog-api-key|x-goog-user-project)$/i.test(
         name,
       )
     )

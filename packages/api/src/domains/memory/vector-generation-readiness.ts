@@ -8,6 +8,13 @@ import { ELIGIBLE_VECTOR_PASSAGE } from './vector-source-fields.js';
 
 export interface VectorGenerationCoverage {
   ready: boolean;
+  reason?:
+    | 'tables_unavailable'
+    | 'quarantined'
+    | 'identity_mismatch'
+    | 'registry_not_ready'
+    | 'coverage_incomplete'
+    | 'concurrent_mutation';
   sourceCutHash?: string;
   documents: number;
   passages: number;
@@ -48,9 +55,9 @@ function inspectSnapshot(
     !generationVectorTableMatches(db, model.dim, 'documents', tables) ||
     !generationVectorTableMatches(db, model.dim, 'passages', tables)
   )
-    return absent;
-  if (generationInvalidationState(db, tables).quarantined) return absent;
-  if (!vectorIdentityMatches(db, model)) return absent;
+    return { ...absent, reason: 'tables_unavailable' };
+  if (generationInvalidationState(db, tables).quarantined) return { ...absent, reason: 'quarantined' };
+  if (!vectorIdentityMatches(db, model)) return { ...absent, reason: 'identity_mismatch' };
   const registry = db.prepare('SELECT fingerprint,state FROM vector_generations WHERE id=?').get(tables.generationId) as
     | { fingerprint: string; state: string }
     | undefined;
@@ -64,7 +71,7 @@ function inspectSnapshot(
       registry?.fingerprint !== model.representationFingerprint ||
       meta?.value !== model.representationFingerprint)
   )
-    return absent;
+    return { ...absent, reason: 'registry_not_ready' };
   const missingDocuments = count(`SELECT count(*) AS n FROM evidence_docs d
     LEFT JOIN ${tables.documentSources} s ON s.anchor=d.anchor
     LEFT JOIN ${tables.documents}_rowids v ON v.id=d.anchor
@@ -99,6 +106,7 @@ function inspectSnapshot(
   }
   return {
     ready,
+    ...(!ready ? { reason: 'coverage_incomplete' as const } : {}),
     ...(sourceCutHash ? { sourceCutHash } : {}),
     documents,
     passages,

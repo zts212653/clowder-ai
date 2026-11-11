@@ -35,6 +35,7 @@ export function namedAlphaFixture(t) {
     'scripts/lib/process-resource-lease-lock.mjs',
     'scripts/lib/alpha-redis-process.mjs',
     'scripts/lib/alpha-identity-diagnostics.mjs',
+    'scripts/lib/alpha-git-trace.mjs',
     'scripts/lib/alpha-redis-leases.mjs',
     'scripts/lib/process-identity.mjs',
     'scripts/lib/process-birth-identity.mjs',

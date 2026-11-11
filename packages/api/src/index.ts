@@ -3549,6 +3549,8 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // F048 Phase C: prior-process executions belong to startup recovery until it finishes.
+    isStartupRecoveryComplete: () => registry.isStartupRecoveryComplete(),
     // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
     ...(process.platform === 'win32'
       ? {
@@ -3585,6 +3587,8 @@ async function main(): Promise<void> {
     | import('./domains/collaborative-content/asset-canon/member-service.js').MemberCanonService
     | undefined;
   await app.register(catsRoutes, {
+    ...(redis ? { connectionCheckRedis: redis } : {}),
+    resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
     addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
@@ -3730,9 +3734,13 @@ async function main(): Promise<void> {
   });
   await app.register(personMemoryOwnerReadRoutes, {
     ownerUserId: privateUserId,
+    readEvidenceDb: memoryServices.store.getDb(),
     store: personMemoryStore,
     messageStore,
     threadStore,
+    ...(deferredPersonMemoryReceiptStore ? { deferredReceiptStore: deferredPersonMemoryReceiptStore } : {}),
+    ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
+    ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
   await app.register(entityMemoryOwnerRoutes, {
     ownerUserId: privateUserId,
@@ -6774,6 +6782,7 @@ async function main(): Promise<void> {
   // F221 Phase B: taste proposal approve/reject (user-auth; two-phase CAS approve)
   registerTasteProposalDecisionRoutes(app, {
     tasteProposalStore,
+    messageStore,
     socketManager,
     writeVignette: tasteProposalWriter,
     getIndexProjection: () => memoryServices.publishedDocuments?.getStatus(),
@@ -7516,6 +7525,7 @@ async function main(): Promise<void> {
   // F227: Event Memory query route (GET /api/memory/events)
   await app.register(eventsRoutes, {
     eventMemoryStore: memoryServices.eventMemoryStore,
+    readEvidenceDb: memoryServices.store.getDb(),
     lifecycleService: eventMemoryLifecycleService,
     correctionProposalStore: eventMemoryCorrectionProposalStore,
     socketEmit: (event, data, room) => {

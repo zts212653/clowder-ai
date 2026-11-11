@@ -74,6 +74,16 @@ function projectPayload(
     out.consumed = true;
     return;
   }
+  if (parsed.type === 'session_seal_requested') {
+    const sealedCatId = stringField(parsed, 'catId');
+    if (sealedCatId) {
+      port.setCatInvocation(sealedCatId, { sessionSeq: parsed.sessionSeq as number | undefined, sessionSealed: true });
+    }
+    if (parsed.reason !== 'native_binding_changed') {
+      out.consumed = Boolean(sealedCatId);
+      return;
+    }
+  }
   const visible = formatVisibleSystemInfo(parsed, port.resolveCatName);
   if (visible) {
     out.content = visible.content;
@@ -84,13 +94,6 @@ function projectPayload(
   if (projectBodySystemInfo(parsed, msg, port) || projectStatusSystemInfo(parsed, msg, port)) {
     out.consumed = true;
     return;
-  }
-  if (parsed.type === 'session_seal_requested') {
-    // Client-internal continuity: update the existing invocation, never create a result row.
-    const sealedCatId = stringField(parsed, 'catId');
-    if (!sealedCatId) return;
-    port.setCatInvocation(sealedCatId, { sessionSeq: parsed.sessionSeq as number | undefined, sessionSealed: true });
-    out.consumed = true;
   }
 }
 

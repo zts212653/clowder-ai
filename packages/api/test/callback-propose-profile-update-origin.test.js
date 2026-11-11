@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { memoryProposalNativeClient } from './helpers/memory-proposal-native-client.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F231 approval origin authentication', () => {
@@ -125,6 +126,103 @@ describe('F231 approval origin authentication', () => {
     assert.deepEqual(await proposalStore.listPending('alice'), []);
   });
 
+  it('recovers an unchanged explicit profile source through two real MCP invocations', async () => {
+    const source = await appendUserMessage('Original profile request');
+    const later = await appendUserMessage('Continue the original request');
+    const auth = (origin) => registry.create('alice', 'opus', 'thread_1', undefined, undefined, undefined, origin.id);
+    const api = await app.listen({ port: 0, host: '127.0.0.1' });
+    let client = await memoryProposalNativeClient(api, await auth(source), dataDir);
+    try {
+      const input = {
+        afterContent: 'NEW primer',
+        rationale: 'Observed preference',
+        signalKind: 'cat-declared',
+        sourceMessageId: source.id,
+        clientRequestId: 'native-profile-explicit-source',
+      };
+      const call = (args) => client.callTool({ name: 'cat_cafe_propose_profile_update', arguments: args });
+      const first = await call(input);
+      assert.notEqual(first.isError, true, JSON.stringify(first));
+      const id = JSON.parse(first.content[0].text).proposalId;
+      await client.close();
+      client = await memoryProposalNativeClient(api, await auth(later), dataDir);
+      const retry = await call(input);
+      assert.notEqual(retry.isError, true, JSON.stringify(retry));
+      assert.equal(JSON.parse(retry.content[0].text).proposalId, id);
+      const changed = await call({ ...input, sourceMessageId: later.id });
+      assert.equal(changed.isError, true, JSON.stringify(changed));
+      assert.ok(JSON.stringify(changed).includes('client_request_conflict'));
+      assert.equal((await proposalStore.get(id)).signalProvenance.sourceMessageId, source.id);
+    } finally {
+      await client.close();
+    }
+  });
+
+  for (const staged of [false, true]) {
+    it(`recovers an unchanged explicit profile source from a later invocation (${staged ? 'staged' : 'anchored'})`, async () => {
+      const source = await appendUserMessage('Original profile request');
+      const later = await appendUserMessage('Continue that request');
+      const payload = { clientRequestId: 'profile-explicit-retry' };
+      const commit = proposalStore.commitEnvelope.bind(proposalStore);
+      if (staged)
+        proposalStore.commitEnvelope = async () => {
+          throw new Error('Interrupted after original card');
+        };
+      const first = await propose(source.id, source.id, payload);
+      assert.equal(first.statusCode, staged ? 500 : 200, first.body);
+      proposalStore.commitEnvelope = commit;
+      const savedId = await proposalStore.getDedupProposalId('alice', payload.clientRequestId);
+      const retried = await propose(source.id, later.id, payload);
+      assert.equal(retried.statusCode, 200, retried.body);
+      assert.equal(retried.json().proposalId, savedId);
+      assert.equal((await proposalStore.get(savedId)).signalProvenance.sourceMessageId, source.id);
+      const changed = await propose(later.id, later.id, payload);
+      assert.equal(changed.statusCode, 409, changed.body);
+      assert.equal(changed.json().error, 'client_request_conflict');
+      await messageStore.softDelete(later.id, 'alice');
+      const invalidCaller = await propose(source.id, later.id, payload);
+      assert.equal(invalidCaller.statusCode, 409, invalidCaller.body);
+      assert.equal(invalidCaller.json().error, 'origin_not_eligible');
+      await messageStore.softDelete(source.id, 'alice');
+      const freshCaller = await appendUserMessage('A later valid caller');
+      const withdrawn = await propose(source.id, freshCaller.id, payload);
+      assert.equal(withdrawn.statusCode, 409, withdrawn.body);
+      assert.equal(withdrawn.json().error, 'origin_not_eligible');
+    });
+  }
+
+  it('rejects a deleted or foreign origin before reserving or creating a proposal', async () => {
+    const deleted = await appendUserMessage('source later withdrawn');
+    await messageStore.softDelete(deleted.id, 'alice');
+    const foreign = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        threadId: 'thread_1',
+        content: 'private',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
+    const masqueradingSystem = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: 'opus',
+        threadId: 'thread_1',
+        content: 'not a system wake',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
+    for (const source of [deleted, foreign, masqueradingSystem]) {
+      const response = await propose(source.id, source.id, { clientRequestId: `origin-${source.id}` });
+      assert.equal(response.statusCode, 409);
+      assert.equal(response.json().error, 'origin_not_eligible');
+      assert.equal(await proposalStore.getDedupProposalId('alice', `origin-${source.id}`), null);
+    }
+    assert.deepEqual(await proposalStore.listPending('alice'), []);
+  });
+
   it('keeps the original authenticated origin when a later invocation recovers a staged dedup proposal', async () => {
     const originalOrigin = await appendUserMessage('Original profile request');
     const retryOrigin = await appendUserMessage('Retry from a later invocation');
@@ -149,7 +247,7 @@ describe('F231 approval origin authentication', () => {
       createdBy: 'alice',
     });
 
-    const response = await propose(retryOrigin.id, retryOrigin.id, { clientRequestId: 'origin-retry' });
+    const response = await propose(undefined, retryOrigin.id, { clientRequestId: 'origin-retry' });
 
     assert.equal(response.statusCode, 200);
     const stored = await proposalStore.get(proposalId);
@@ -159,5 +257,9 @@ describe('F231 approval origin authentication', () => {
       threadId: 'thread_1',
       messageId: originalOrigin.id,
     });
+    await messageStore.softDelete(originalOrigin.id, 'alice');
+    const revokedRetry = await propose(undefined, retryOrigin.id, { clientRequestId: 'origin-retry' });
+    assert.equal(revokedRetry.statusCode, 409, 'a fresh invocation cannot restore a withdrawn original source');
+    assert.equal(revokedRetry.json().error, 'origin_not_eligible');
   });
 });
