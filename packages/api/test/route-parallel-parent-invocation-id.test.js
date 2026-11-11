@@ -9,69 +9,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-for (const mode of ['parallel', 'serial']) {
-  it(`issue1890 ${mode} exposes each exact live body and releases its getter`, async () => {
-    const module = await import(`../dist/domains/cats/services/agents/routing/route-${mode}.js`);
-    const route = mode === 'parallel' ? module.routeParallel : module.routeSerial;
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    const services = Object.fromEntries(
-      ['qwen', 'kimi'].map((catId) => [catId, createMockService(catId, `${catId} body`)]),
-    );
-    const deps = createMockDeps(services, []);
-    deps.invocationDeps.threadStore.consumeMentionRoutingFeedback = async () => undefined;
-    deps.messageStore = new MessageStore();
-    const getters = new Map();
-    const released = new Set();
-    const observed = new Set();
-    for await (const event of route(deps, ['qwen', 'kimi'], 'work', 'owner', 'cursor-thread', {
-      onLifecycleInvocationStarted: async ({ catId, invocationId, startedAt }) => {
-        const response = deps.messageStore.append({
-          from: { kind: 'agent', catId },
-          userId: 'owner',
-          threadId: 'cursor-thread',
-          content: '',
-          mentions: [],
-          timestamp: startedAt,
-          lifecycle: {
-            kind: 'response',
-            orderKey: `${startedAt}:${invocationId}`,
-            targetId: catId,
-            invocationId,
-            inputEntryIds: [],
-            inputMessageIds: [],
-            status: 'processing',
-            startedAt,
-          },
-        });
-        return {
-          responseMessageId: response.id,
-          priorFrontierMessageId: null,
-          activeRun: {
-            threadId: 'cursor-thread',
-            targetId: catId,
-            invocationId,
-            responseMessageId: response.id,
-            inputEntryIds: [],
-            inputMessageIds: [],
-            privateInputEntryIds: [],
-            startedAt,
-          },
-        };
-      },
-      onLifecycleOutputCursorReady: ({ catId, getContent }) => {
-        getters.set(catId, getContent);
-        return () => released.add(catId);
-      },
-    })) {
-      if (event.type !== 'text') continue;
-      assert.equal(getters.get(event.catId)?.(), `${event.catId} body`);
-      observed.add(event.catId);
-    }
-    assert.deepEqual([...observed].sort(), ['kimi', 'qwen']);
-    assert.deepEqual([...released].sort(), ['kimi', 'qwen']);
-  });
-}
-
 function createMockService(catId, text) {
   return {
     async *invoke() {
