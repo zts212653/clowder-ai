@@ -19,7 +19,9 @@ export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）�
 export const HANDLE_CONTINUATION_RE = /[a-z0-9_./-]|\\/;
 const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 const LINE_START_MARKDOWN_PREFIX_PATTERN = String.raw`\s*(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))*`;
-const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_./\\-])`;
+// A slash can end a handle when another mention follows immediately.
+const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[/\\]@|${TOKEN_BOUNDARY_RE.source}|[^a-z0-9_./\\-])`;
+const HANDLE_END_BOUNDARY_RE = new RegExp(`^${HANDLE_BOUNDARY_PATTERN}`);
 
 export interface MentionHandle {
   readonly catId: string;
@@ -98,9 +100,11 @@ function readLineStartHandles(
 }
 
 export function startsWithMentionHandle(segment: string, pattern: string): boolean {
-  if (!segment.startsWith(pattern)) return false;
-  const charAfter = segment[pattern.length];
-  return !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
+  return segment.startsWith(pattern) && isMentionHandleEndBoundary(segment, pattern.length);
+}
+
+export function isMentionHandleEndBoundary(text: string, end: number): boolean {
+  return HANDLE_END_BOUNDARY_RE.test(text.slice(end));
 }
 
 function buildWhitespaceTolerantMentionPattern(pattern: string): RegExp {

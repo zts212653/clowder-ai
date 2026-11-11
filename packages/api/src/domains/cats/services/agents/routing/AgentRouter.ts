@@ -19,7 +19,13 @@
  */
 
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, deploymentDefaults, escapeRegExp, HANDLE_CONTINUATION_RE } from '@cat-cafe/shared';
+import {
+  catRegistry,
+  deploymentDefaults,
+  escapeRegExp,
+  HANDLE_CONTINUATION_RE,
+  isMentionHandleEndBoundary,
+} from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -273,21 +279,16 @@ function isInsideSpan(pos: number, spans: readonly [number, number][]): boolean 
 }
 
 function isUserMentionLeftBoundary(message: string, pos: number): boolean {
-  if (pos === 0) return true;
-  const prev = message[pos - 1];
-  if (!prev) return true;
+  const prev = message.charAt(pos - 1);
+  if (prev === '/' || prev === '\\') return true;
   return !HANDLE_CONTINUATION_RE.test(prev) && !QUOTE_BEFORE_MENTION_RE.test(prev);
 }
 
 function isMentionEndBoundary(message: string, end: number): boolean {
-  const next = message[end];
-  if (!next) return true;
-  if (next === '.') {
-    const suffixStart = message[end + 1];
-    if (suffixStart !== undefined && DOMAIN_SUFFIX_START_RE.test(suffixStart)) return false;
+  if (message[end] === '.' && DOMAIN_SUFFIX_START_RE.test(message.charAt(end + 1))) {
+    return false;
   }
-  if (MENTION_TOKEN_BOUNDARY_RE.test(next)) return true;
-  return !HANDLE_CONTINUATION_RE.test(next);
+  return isMentionHandleEndBoundary(message, end);
 }
 
 function getOpeningRouteMarkdownMarkers(message: string, pos: number): MarkdownMentionMarkerRun | null {

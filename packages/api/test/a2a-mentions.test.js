@@ -40,6 +40,14 @@ describe('parseA2AMentions', () => {
     );
   });
 
+  it('routes the first handle before a slash-separated alternative without a warning', async () => {
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(analyzeA2AMentions('@opus/@codex', 'kimi'), {
+      mentions: ['opus'],
+      routing_warnings: [],
+    });
+  });
+
   it('reserves the configured owner nickname without suggesting a cat', async (t) => {
     const { _resetCachedConfig, getCoCreatorConfig, loadResolvedCatConfig } = await import(
       '../dist/config/cat-config-loader.js'

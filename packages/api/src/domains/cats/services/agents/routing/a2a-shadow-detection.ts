@@ -7,15 +7,13 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, HANDLE_CONTINUATION_RE, isMentionHandleEndBoundary } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import {
   AFTER_HANDOFF_RE,
   BEFORE_HANDOFF_RE,
   detectInlineActionMentions,
-  HANDLE_CONTINUATION_RE,
   type InlineActionMention,
-  TOKEN_BOUNDARY_RE,
 } from './a2a-mentions.js';
 
 import { getCatRoutingHandles } from './cat-routing-handles.js';
@@ -93,9 +91,7 @@ export function detectInlineActionMentionsWithShadow(
         searchFrom = idx + 1;
         if (idx === 0) continue; // line-start → handled by parseA2AMentions
         if (HANDLE_CONTINUATION_RE.test(normalized[idx - 1]!)) continue;
-        const charAfter = normalized[idx + entry.pattern.length];
-        const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
-        if (!isBoundary) continue;
+        if (!isMentionHandleEndBoundary(normalized, idx + entry.pattern.length)) continue;
 
         const before = normalized.slice(0, idx);
         const after = normalized.slice(idx + entry.pattern.length);

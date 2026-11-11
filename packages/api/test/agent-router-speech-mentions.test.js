@@ -51,8 +51,16 @@ test('user routing resolves a registered ID even when only a nickname was config
     const result = await router.resolveTargetsAndIntent('请 @CODEX 看一下', 'thread-text');
     assert.equal(result.hasMentions, true);
     assert.deepEqual(result.targetCats, ['codex']);
-    const path = await router.resolveTargetsAndIntent('@CODEX/docs 已更新', 'thread-text');
-    assert.equal(path.hasMentions, false);
+    for (const message of ['@opus/@CODEX 帮我看看', '@opus\\@CODEX 帮我看看']) {
+      const grouped = await router.resolveTargetsAndIntent(message, 'thread-text');
+      assert.equal(grouped.hasMentions, true);
+      assert.deepEqual(grouped.targetCats, ['opus', 'codex']);
+    }
+    for (const message of ['@CODEX/docs 已更新', '@types/node 已验证', 'example.com/@codex']) {
+      const path = await router.resolveTargetsAndIntent(message, 'thread-text');
+      assert.equal(path.hasMentions, false);
+      assert.deepEqual(path.routing_warnings, []);
+    }
   } finally {
     catRegistry.reset();
     for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);

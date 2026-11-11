@@ -18,10 +18,10 @@ import type { CatId, CatRoutingError } from '@cat-cafe/shared';
 import {
   findLineStartMentions,
   HANDLE_CONTINUATION_RE,
+  isMentionHandleEndBoundary,
   isReservedGroupMentionHandle,
   MAX_A2A_MENTION_TARGETS,
   startsWithMentionHandle,
-  TOKEN_BOUNDARY_RE,
 } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { getCatRoutingHandles, type PluginMention, reservedOwnerMentionHandles } from './cat-routing-handles.js';
@@ -31,9 +31,6 @@ import { resolveCatTarget } from './cat-target-resolver.js';
 export function getMaxA2ADepth(): number {
   return Number(process.env.MAX_A2A_DEPTH) || 15;
 }
-
-/** @internal Re-exported for a2a-shadow-detection.ts; the grammar lives in @cat-cafe/shared. */
-export { HANDLE_CONTINUATION_RE, TOKEN_BOUNDARY_RE };
 
 export interface A2AMentionAnalysis {
   readonly mentions: CatId[];
@@ -78,7 +75,7 @@ export function analyzeA2AMentions(
     const handle = /^@[\p{L}\p{N}_][\p{L}\p{N}_.-]{0,63}(?=$|[^\p{L}\p{N}_.-])/u.exec(segment)?.[0];
     if (
       handle &&
-      !HANDLE_CONTINUATION_RE.test(segment.charAt(handle.length)) &&
+      isMentionHandleEndBoundary(segment, handle.length) &&
       !excluded.some((pattern) => startsWithMentionHandle(segment, pattern)) &&
       !isReservedGroupMentionHandle(handle)
     ) {
@@ -199,9 +196,7 @@ export function detectInlineActionMentions(
         if (idx === 0) continue;
         // Left boundary: @ must not be preceded by word-like chars (avoids "foo@codex")
         if (HANDLE_CONTINUATION_RE.test(normalized[idx - 1]!)) continue;
-        const charAfter = normalized[idx + entry.pattern.length];
-        const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
-        if (!isBoundary) continue;
+        if (!isMentionHandleEndBoundary(normalized, idx + entry.pattern.length)) continue;
         // Already routed via line-start: skip this entry but keep scanning other cats on same line.
         if (routedSet.has(entry.catId)) break;
         const before = normalized.slice(0, idx);

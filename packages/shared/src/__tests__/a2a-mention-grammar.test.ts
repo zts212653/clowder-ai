@@ -52,6 +52,11 @@ describe('findLineStartMentions', () => {
     expect(findLineStartMentions('@opus/docs\n- @codex\\notes\n@codex 请复核', handles)).toEqual(['codex']);
   });
 
+  it('recognizes the first handle before a slash-separated alternative', () => {
+    expect(findLineStartMentions('@opus/@codex', handles)).toEqual(['opus']);
+    expect(findLineStartMentions('@ opus\\@codex', handles)).toEqual(['opus']);
+  });
+
   it('stops a line at the first handle it does not know', () => {
     expect(findLineStartMentions('@co-creator @codex', handles)).toEqual([]);
   });
