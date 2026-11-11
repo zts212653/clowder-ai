@@ -6,10 +6,34 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
+import { AcpProtocolError } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { captureAcpMcpSources } from '../src/domains/cats/services/agents/providers/acp/configuration/acp-mcp-source.js';
 import { RedisDshMemberConnectionCheckStore } from '../src/domains/cats/services/stores/redis/RedisDshMemberConnectionCheckStore.js';
 import { dshDefinitionOnlyServers, readDshToolManifest } from '../src/routes/dsh-tool-manifest.js';
-import { registerDshMemberConnectionChecks } from '../src/routes/member-connection-check.js';
+import {
+  dshConnectionFailureReason,
+  registerDshMemberConnectionChecks,
+} from '../src/routes/member-connection-check.js';
+
+test('DSH checks retain the standard ACP error message when optional data is absent or unrelated', () => {
+  for (const data of [undefined, { request_id: 'installed-alpha24-regression' }]) {
+    assert.equal(
+      dshConnectionFailureReason(
+        new AcpProtocolError(-32603, 'Internal error: Invalid schema for function collective', data),
+      ),
+      'tool_schema_rejected',
+    );
+  }
+});
+
+test('DSH checks also recognize structured provider error data without inventing an unknown cause', () => {
+  assert.equal(
+    dshConnectionFailureReason(new AcpProtocolError(-32603, 'Internal error', { message: 'is not a "regex"' })),
+    'tool_schema_rejected',
+  );
+  assert.equal(dshConnectionFailureReason(new Error('dsh_setup_credential_missing')), 'dsh_setup_credential_missing');
+  assert.equal(dshConnectionFailureReason(new Error('unclassified fixture failure')), 'check_result_unknown');
+});
 
 function factStore() {
   const data = new Map<string, string>();

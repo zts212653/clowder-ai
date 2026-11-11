@@ -8,6 +8,56 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { dshDefinitionOnlyServers, readDshToolManifest } from '../src/routes/dsh-tool-manifest.js';
 
+test('independent definition sources are read concurrently while their manifest order stays stable', async (t) => {
+  const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, 'timeout', () => originalTimeout(1_500));
+  const waiting: (() => void)[] = [];
+  let calls = 0;
+  const server = createServer(async (request, response) => {
+    if (request.method !== 'POST') return response.writeHead(405).end();
+    let text = '';
+    for await (const part of request) text += part;
+    const message = JSON.parse(text) as { id?: number; method: string };
+    if (message.method === 'tools/call') calls += 1;
+    if (message.id === undefined) return response.writeHead(202).end();
+    if (message.method === 'tools/list') {
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve);
+        if (waiting.length === 2)
+          waiting.forEach((release) => {
+            release();
+          });
+      });
+    }
+    const result =
+      message.method === 'initialize'
+        ? { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+        : { tools: [{ name: request.url?.includes('first') ? 'first' : 'second', inputSchema: { type: 'object' } }] };
+    response
+      .writeHead(200, { 'Content-Type': 'application/json' })
+      .end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const sources = ['first', 'second'].map((name) => ({
+    name,
+    type: 'http' as const,
+    url: `http://127.0.0.1:${address.port}/${name}`,
+    headers: [],
+  }));
+  const manifest = await readDshToolManifest(sources, process.cwd());
+  assert.deepEqual(
+    manifest.servers.map(({ name, tools }) => [name, tools[0]?.name]),
+    [
+      ['first', 'first'],
+      ['second', 'second'],
+    ],
+  );
+  assert.equal(calls, 0);
+});
+
 test('the check reads every tools/list page, retains schema and namespace, and detects schema-only changes', async (t) => {
   const cursors: unknown[] = [];
   let businessCalls = 0;
@@ -91,7 +141,7 @@ test('the check reads every tools/list page, retains schema and namespace, and d
   {
     name: 'the complete manifest retains a bounded total deadline',
     sources: 2,
-    pages: 1,
+    pages: 2,
     totalExpires: true,
     fails: true,
   },

@@ -48,7 +48,7 @@ export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
   if (view.state === 'stale') return '配置或工具定义已变化，先前检查仅供历史参考。可重新检查，也可直接聊天。';
   if (view.state === 'unchecked') return '尚无此配置的连接检查结果。可检查连接，也可直接聊天。';
   const reasons: Record<string, string> = {
-    tool_schema_rejected: '模型拒绝了工具参数定义。请更新相关插件后刷新检查状态，再重试。',
+    tool_schema_rejected: '工具配置被模型拒绝，暂时无法回复。请更新出错插件；无需重新添加成员。',
     dsh_setup_auth_refresh_required: 'Desktop 登录需要更新。请先在 DSH Desktop 重新登录，再重试检查。',
     dsh_setup_credential_missing: 'Desktop 未提供所选路线的认证。请在 Desktop 配置该路线后重试。',
     dsh_setup_credential_invalid: '无法读取 Desktop 认证文件。请先在 Desktop 修复认证，再重试。',
@@ -59,16 +59,16 @@ export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
     check_store_unavailable: '检查记录服务暂不可用，尚未发送模型检查请求。稍后刷新状态再试。',
     model_reply_unconfirmed: '检查已结束，但未确认正常的文本回复。可重试或直接聊天查看结果。',
   };
-  return `成员与配置已保留。${reasons[view.reasonCode ?? ''] ?? '未能确认本次连接结果，原因尚不明确。可刷新状态、重试检查或直接聊天；不会自动重发模型请求。'}`;
+  return `成员与配置已保留。${reasons[view.reasonCode ?? ''] ?? '未能确认本次连接结果，原因尚不明确。请在成员设置中查看检查详情、刷新状态；不会自动重发模型请求。'}`;
 }
 
 /** Keep failure and recovery visible after either creation entry navigates away. */
 export function showDshConnectionCheckResult(name: string, view: DshConnectionCheckView) {
   if (view.state === 'passed') return;
   useToastStore.getState().addToast({
-    type: 'info',
-    title: `已保存 ${name}，连接尚待确认`,
-    message: `${dshConnectionCheckMessage(view)} 打开设置 → 猫猫团队 → 该成员的模型与工具，可刷新状态或重试检查。`,
+    type: view.state === 'failed' ? 'error' : 'info',
+    title: `${name}已添加`,
+    message: `${dshConnectionCheckMessage(view)} 打开设置 → 猫猫团队 → 该成员的模型与工具查看检查详情。`,
     duration: 0,
   });
 }

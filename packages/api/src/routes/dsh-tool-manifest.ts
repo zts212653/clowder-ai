@@ -9,45 +9,51 @@ import { loadMcpClient, loadMcpHttp, loadMcpStdio } from '../utils/lazy-mcp-sdk.
 /** Same admitted servers as the member, with complete pages and original schema. */
 export async function readDshToolManifest(servers: AcpMcpServer[], cwd: string) {
   const { Client } = await loadMcpClient();
-  const snapshots: { name: string; tools: Tool[] }[] = [];
   // Leave room for the 60s model check and cleanup within the client's 100s request.
   const manifestDeadline = AbortSignal.timeout(30_000);
-  for (const server of servers) {
-    const signal = AbortSignal.any([manifestDeadline, AbortSignal.timeout(20_000)]);
-    const headers =
-      'headers' in server ? Object.fromEntries(server.headers.map(({ name, value }) => [name, value])) : {};
-    const transport =
-      'command' in server
-        ? new (await loadMcpStdio()).StdioClientTransport({
-            command: server.command,
-            args: server.args,
-            cwd,
-            env: {
-              ...(await loadMcpStdio()).getDefaultEnvironment(),
-              ...Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
-            },
-            stderr: 'ignore',
-          })
-        : server.type === 'sse'
-          ? new (await import('@modelcontextprotocol/sdk/client/sse.js')).SSEClientTransport(new URL(server.url), {
-              requestInit: { headers },
+  const results = await Promise.allSettled(
+    servers.map(async (server) => {
+      const signal = AbortSignal.any([manifestDeadline, AbortSignal.timeout(20_000)]);
+      const headers =
+        'headers' in server ? Object.fromEntries(server.headers.map(({ name, value }) => [name, value])) : {};
+      const transport =
+        'command' in server
+          ? new (await loadMcpStdio()).StdioClientTransport({
+              command: server.command,
+              args: server.args,
+              cwd,
+              env: {
+                ...(await loadMcpStdio()).getDefaultEnvironment(),
+                ...Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
+              },
+              stderr: 'ignore',
             })
-          : new (await loadMcpHttp()).StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } });
-    const client = new Client({ name: 'clowder-member-schema-check', version: '1' }, { capabilities: {} });
-    try {
-      await client.connect(transport, { signal, timeout: 20_000 });
-      const tools: Tool[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await client.listTools(cursor ? { cursor } : undefined, { signal, timeout: 20_000 });
-        tools.push(...page.tools);
-        cursor = page.nextCursor;
-      } while (cursor);
-      snapshots.push({ name: server.name, tools });
-    } finally {
-      await client.close();
-    }
-  }
+          : server.type === 'sse'
+            ? new (await import('@modelcontextprotocol/sdk/client/sse.js')).SSEClientTransport(new URL(server.url), {
+                requestInit: { headers },
+              })
+            : new (await loadMcpHttp()).StreamableHTTPClientTransport(new URL(server.url), {
+                requestInit: { headers },
+              });
+      const client = new Client({ name: 'clowder-member-schema-check', version: '1' }, { capabilities: {} });
+      try {
+        await client.connect(transport, { signal, timeout: 20_000 });
+        const tools: Tool[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = await client.listTools(cursor ? { cursor } : undefined, { signal, timeout: 20_000 });
+          tools.push(...page.tools);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return { name: server.name, tools };
+      } finally {
+        await client.close();
+      }
+    }),
+  );
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+  const snapshots = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
   return { servers: snapshots, hash: createHash('sha256').update(JSON.stringify(snapshots)).digest('hex') };
 }
 

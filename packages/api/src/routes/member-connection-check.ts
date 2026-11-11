@@ -21,10 +21,12 @@ interface DshConnectionTarget {
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-function failureReason(error: unknown) {
+export function dshConnectionFailureReason(error: unknown) {
   const message = error instanceof Error ? error.message : '';
-  if (/Invalid schema for function|is not a "regex"/i.test(message)) return 'tool_schema_rejected';
-  if (/dsh_desktop_auth_read_only|Credential store modify failed/.test(message))
+  const detail = error instanceof Error && 'data' in error ? JSON.stringify(error.data) : '';
+  const diagnostic = `${message}\n${detail ?? ''}`;
+  if (/Invalid schema for function|is not a \\?"regex\\?"/i.test(diagnostic)) return 'tool_schema_rejected';
+  if (/dsh_desktop_auth_read_only|Credential store modify failed/.test(diagnostic))
     return 'dsh_setup_auth_refresh_required';
   return /^dsh_[a-z_]+$/.test(message) ? message : 'check_result_unknown';
 }
@@ -82,17 +84,13 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
     effectiveFingerprint: digest([binding.launch, binding.patchText, model, effort, source.state.revision]),
     toolManifestHash: manifest.hash,
     run: async () => {
-      const [
-        { AcpClient, AcpProtocolError },
-        { applySessionConfiguration },
-        { prepareDshSecretPatch },
-        { dshSetupBootstrap },
-      ] = await Promise.all([
-        import('../domains/cats/services/agents/providers/acp/AcpClient.js'),
-        import('../domains/cats/services/agents/providers/acp/session-configuration.js'),
-        import('../domains/cats/services/agents/providers/dsh-secret-patch.js'),
-        import('./dsh-setup-launch.js'),
-      ]);
+      const [{ AcpClient }, { applySessionConfiguration }, { prepareDshSecretPatch }, { dshSetupBootstrap }] =
+        await Promise.all([
+          import('../domains/cats/services/agents/providers/acp/AcpClient.js'),
+          import('../domains/cats/services/agents/providers/acp/session-configuration.js'),
+          import('../domains/cats/services/agents/providers/dsh-secret-patch.js'),
+          import('./dsh-setup-launch.js'),
+        ]);
       const isolated = createDshCheckLaunch(binding);
       let client: InstanceType<typeof AcpClient> | undefined;
       let timedOut = false;
@@ -144,8 +142,7 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
           : { outcome: 'partial', reasonCode: 'model_reply_unconfirmed' };
       } catch (error) {
         if (timedOut) return { outcome: 'unknown', reasonCode: 'check_timed_out' };
-        const detail = error instanceof AcpProtocolError ? new Error(JSON.stringify(error.data)) : error;
-        return { outcome: 'failed', reasonCode: failureReason(detail) };
+        return { outcome: 'failed', reasonCode: dshConnectionFailureReason(error) };
       } finally {
         clearTimeout(deadline);
         await client?.close();
@@ -237,7 +234,7 @@ export function registerDshMemberConnectionChecks(
             return current(scope, await store.attempt(scope, fact.attemptId), target);
           const result = await target
             .run()
-            .catch((error) => ({ outcome: 'failed' as const, reasonCode: failureReason(error) }));
+            .catch((error) => ({ outcome: 'failed' as const, reasonCode: dshConnectionFailureReason(error) }));
           const finished = { ...fact, phase: 'terminal' as const, ...result, finishedAt: Date.now() };
           await store.finish(scope, finished);
           return current(scope, finished, target);
@@ -249,7 +246,7 @@ export function registerDshMemberConnectionChecks(
           active.delete(key);
         }
       } catch (error) {
-        return { state: 'unknown', reasonCode: failureReason(error) } satisfies DshConnectionCheckView;
+        return { state: 'unknown', reasonCode: dshConnectionFailureReason(error) } satisfies DshConnectionCheckView;
       }
     },
   });
