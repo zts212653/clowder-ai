@@ -5206,7 +5206,7 @@ describe('Callback Routes', () => {
   test('#1951 callback write failures retain the buffered question without an early actionable broadcast', async (t) => {
     const threadId = 'thread-1951-callback-failure';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
-    const { invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
+    const { response, invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
     const app = await createApp({ invocationTracker });
     t.after(() => app.close());
     messageStore.augmentStreamMetadata = async () => {
@@ -5228,7 +5228,27 @@ describe('Callback Routes', () => {
     assert.equal(created.statusCode, 200, created.body);
     assert.equal(socketManager.getMessages().length, 0);
     const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
-    assert.deepEqual(await getRichBlockBuffer().consume(threadId, 'opus', invocationId), [block]);
+    const buffered = await getRichBlockBuffer().consume(threadId, 'opus', invocationId);
+    assert.deepEqual(buffered, [block]);
+    const { commitLifecycleResponseFromAppendInput } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    await commitLifecycleResponseFromAppendInput(
+      messageStore,
+      response.id,
+      invocationId,
+      { status: 'completed', completedAt: Date.now() },
+      {
+        from: { kind: 'agent', catId: 'opus' },
+        userId: 'user-1',
+        threadId,
+        content: 'Finished',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: { rich: { v: 1, blocks: buffered } },
+      },
+    );
+    assert.deepEqual(messageStore.getById(response.id).extra.rich.blocks, [block]);
   });
 
   test('rich blocks remain writable after an interim post and reject callbacks after final consume', async () => {
