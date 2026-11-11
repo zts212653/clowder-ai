@@ -77,25 +77,6 @@ function hasConfiguredValue(value: unknown): boolean {
 export function projectBuiltinCloudIdentityProtection(
   candidate: BuiltinCloudIdentityCandidate,
 ): BuiltinCloudIdentityProtection | undefined {
-  if (candidate.id === 'gpt-dot') {
-    const driftedFields: BuiltinCloudIdentityProtectedField[] = [];
-    if (candidate.clientId !== 'openai') driftedFields.push('clientId');
-    if (candidate.provider !== 'openai-chatgpt-pro') driftedFields.push('provider');
-    if (candidate.defaultModel !== 'ChatGPT dot') driftedFields.push('defaultModel');
-    if (candidate.mcpSupport !== true) driftedFields.push('mcpSupport');
-    if (hasConfiguredValue(candidate.cli)) driftedFields.push('cli');
-    if (hasConfiguredValue(candidate.commandArgs)) driftedFields.push('commandArgs');
-    if (hasConfiguredValue(candidate.cliConfigArgs)) driftedFields.push('cliConfigArgs');
-    if (hasConfiguredValue(candidate.acp)) driftedFields.push('acp');
-    if (hasConfiguredValue(candidate.agentProvider)) driftedFields.push('agentProvider');
-    if (!candidate.mentionPatterns?.includes('@dot')) driftedFields.push('mentionPatterns');
-    return {
-      kind: 'builtin-cloud',
-      state: driftedFields.length ? 'drifted' : 'healthy',
-      lockedFields: [...BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS],
-      driftedFields,
-    };
-  }
   if (!isBuiltinGptProIdentity(candidate.id)) return undefined;
 
   const driftedFields: BuiltinCloudIdentityProtectedField[] = [];

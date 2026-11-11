@@ -1,6 +1,9 @@
 import { type CatId, type ConnectorSource, getConnectorDefinition, type MessageContent } from '@cat-cafe/shared';
+import { emitStoredMessageUpdated } from '../cats/services/agents/invocation/lifecycle-message-update.js';
+import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { MessagingError } from './contract/host-types.js';
 import type { MessagingLedger } from './ledger.js';
+import { settlePublishedTargetResponse } from './target-response/state.js';
 
 export type PluginMessageWake = 'auto' | { readonly catId: string; readonly exact?: true };
 
@@ -53,6 +56,9 @@ export function broadcastIngress(
     readonly messageId: string;
     readonly instanceId: string;
     readonly content: string;
+    readonly extra?: { readonly targetResponseResult: import('@cat-cafe/shared').TargetResponseResult };
+    readonly replyTo?: string;
+    readonly contentBlocks?: readonly MessageContent[];
     readonly source: ConnectorSource;
     readonly timestamp: number;
   },
@@ -64,6 +70,9 @@ export function broadcastIngress(
       type: 'connector' as const,
       from: { kind: 'plugin' as const, instanceId: input.instanceId },
       content: input.content,
+      ...(input.extra ? { extra: input.extra } : {}),
+      ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
       source: input.source,
       timestamp: input.timestamp,
     },
@@ -94,13 +103,31 @@ export async function deliverIngressEffectsOnce(
     userId: string;
     messageId: string;
     content: string;
+    replyTo?: string;
     contentBlocks?: readonly MessageContent[];
     sender?: { readonly id: string; readonly name?: string };
     timestamp: number;
     ingress: ResolvedIngress;
+    messageStore?: IMessageStore;
   },
 ): Promise<void> {
   const { ingress } = input;
+  let resultMetadata: import('@cat-cafe/shared').TargetResponseResult | undefined;
+  if (input.messageStore) {
+    const stored = await input.messageStore.getById(input.messageId);
+    resultMetadata = stored?.extra?.targetResponseResult;
+    const carrier = stored ? await settlePublishedTargetResponse(input.messageStore, stored) : undefined;
+    if (carrier)
+      emitStoredMessageUpdated(
+        {
+          emitToUser(_owner, event, data) {
+            ingress.deps.socketManager?.broadcastToRoom(`thread:${input.threadId}`, event, data);
+          },
+        },
+        input.userId,
+        carrier,
+      );
+  }
   const receipt = { messageId: input.messageId };
   const { instanceId, idempotencyKey } = input;
 
@@ -115,6 +142,9 @@ export async function deliverIngressEffectsOnce(
         messageId: input.messageId,
         instanceId: input.instanceId,
         content: input.content,
+        ...(resultMetadata ? { extra: { targetResponseResult: resultMetadata } } : {}),
+        ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+        ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
         source: ingress.source,
         timestamp: input.timestamp,
       });

@@ -21,7 +21,14 @@ test('owner can close an obsolete intermediate PR snapshot after squash without 
     git(f.repo, 'update-ref', 'refs/remotes/origin/main', mergedAt);
     git(p, 'checkout', '--detach', intermediate);
     assert.throws(() => f.finish(p, { sourceRef }), /not-merged/);
-    const readPr = () => ({ sourceRef, state: 'MERGED', head: final, mergedAt, commits: [intermediate, final] });
+    const readPr = () => ({
+      sourceRef,
+      state: 'MERGED',
+      baseRef: 'main',
+      head: final,
+      mergedAt,
+      commits: [intermediate, final],
+    });
     const receipt = f.finish(p, { sourceRef, mergedPr: sourceRef, readPr });
     assert.equal(receipt.state, 'released');
     assert.equal(receipt.mergedPr, sourceRef);
@@ -37,7 +44,7 @@ test('PR state, exact member commit and source identity are mandatory; dirty sou
   try {
     const p = f.make();
     const head = git(p, 'rev-parse', 'HEAD').trim();
-    const truth = { sourceRef, state: 'MERGED', head, mergedAt: head, commits: [head] };
+    const truth = { sourceRef, state: 'MERGED', baseRef: 'main', head, mergedAt: head, commits: [head] };
     for (const override of [
       { state: 'OPEN' },
       { commits: [] },

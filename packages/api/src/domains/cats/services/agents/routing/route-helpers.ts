@@ -131,15 +131,13 @@ export interface RouteBroadcaster {
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  addressedPlugins?: import('../../../../plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets;
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
   /** Rebuild stale configuration before retrying preflight; never invokes a provider. */
   refreshServices?: () => Promise<void>;
   unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
-  dotReplyTarget?: (
-    source: import('../../cloud-bridge/dot/dot-reply-authority.js').DotReplyCandidate,
-  ) => Promise<boolean>;
   messageStore: IMessageStore;
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */

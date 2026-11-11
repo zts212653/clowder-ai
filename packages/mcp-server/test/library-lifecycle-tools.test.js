@@ -246,32 +246,11 @@ describe('MCP Library Lifecycle Tools (AC-I4)', () => {
     assert.ok(text.includes('10'));
   });
 
-  test('handleLibraryArchive calls /api/library/:id/archive', async () => {
-    const { handleLibraryArchive } = await import('../dist/tools/library-lifecycle-tools.js');
-
-    let capturedUrl;
-    globalThis.fetch = async (url) => {
-      capturedUrl = url;
-      return {
-        ok: true,
-        json: async () => ({
-          manifest: { id: 'domain:finance', status: 'archived', displayName: 'Finance' },
-        }),
-      };
-    };
-
-    const result = await handleLibraryArchive({ collectionId: 'domain:finance' });
-    assert.ok(String(capturedUrl).includes('/api/library/domain:finance/archive'));
-    const text = result.content[0].text;
-    assert.ok(text.includes('archived'));
-  });
-
   test('tool exports have correct names and count', async () => {
     const { libraryLifecycleTools } = await import('../dist/tools/library-lifecycle-tools.js');
-    assert.equal(libraryLifecycleTools.length, 6);
+    assert.equal(libraryLifecycleTools.length, 5);
     const names = libraryLifecycleTools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      'cat_cafe_library_archive',
       'cat_cafe_library_create',
       'cat_cafe_library_dry_run',
       'cat_cafe_library_list',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { taskProbeSource } from '../dist/domains/cats/services/stores/ports/TaskProbeSource.js';
 import { RedisTaskStore } from '../dist/domains/cats/services/stores/redis/RedisTaskStore.js';
 import { recoveryGuarded, withinRecoveryDeadline } from '../dist/infrastructure/recovery/recovery-deadline.js';
@@ -8,6 +8,12 @@ import { recoveryRedis } from '../dist/infrastructure/recovery/recovery-redis.js
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
 const fixture = ownedRedisFixture('1843-recovery-transactions');
+
+async function assertConnectionEnded(client) {
+  // disconnect requests socket shutdown; its end event confirms asynchronous disposal.
+  if (client.status !== 'end') await once(client, 'end', { signal: AbortSignal.timeout(5000) });
+  assert.equal(client.status, 'end');
+}
 
 test('a late WATCH read cannot start a new Task transaction, and its exclusive connection is disposed', async () => {
   const redis = fixture.client('watch:');
@@ -90,8 +96,7 @@ test('a late WATCH read cannot start a new Task transaction, and its exclusive c
     await completion.catch(() => {});
   }
   assert.equal(lateWrite, false);
-  await delay(0);
-  assert.equal(session.status, 'end');
+  await assertConnectionEnded(session);
   assert.equal(cleanupCalls, 1, 'unwatch is permitted even after the scope expires');
   assert.equal((await actual.get(task.id)).status, 'blocked');
   assert.equal(await redis.ping(), 'PONG', 'the shared owner connection remains usable');
@@ -115,17 +120,23 @@ test('fluent MULTI/pipeline builders retain their creating scope; valid transact
     assert.equal(await raw.get(`late-${kind}`), null);
     assert.equal(await raw.get(`valid-${kind}`), 'yes');
   }
-  let owned;
+  let owned,
+    disconnectCalls = 0;
   await withinRecoveryDeadline(
     performance.now() + 1000,
     () => performance.now(),
     async () => {
       owned = redis.duplicate();
+      const disconnect = owned.disconnect;
+      owned.disconnect = (...args) => {
+        disconnectCalls++;
+        return disconnect(...args);
+      };
       assert.equal(await owned.ping(), 'PONG');
     },
   );
-  await delay(0);
-  assert.equal(owned.status, 'end');
+  assert.equal(disconnectCalls, 1, 'scope exit immediately requests disposal of its owned connection');
+  await assertConnectionEnded(owned);
   await owned.unwatch().catch(() => {});
   owned.disconnect();
   assert.equal(await raw.ping(), 'PONG');

@@ -330,6 +330,31 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f202-addressed-plugins",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F202-plugin-framework.md",
+      "anchor": "## Follow-up direction: addressable plugins and Dot (2026-10-18)"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginAddressSettings.tsx",
+      "anchor": "PluginAddressSettings"
+    },
+    "bodySource": {
+      "path": "docs/features/F202-plugin-framework.md",
+      "anchor": "A delivery receipt"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想在对话里直接找插件？启用支持对话投递的插件后，在输入框打 @ 选择它。到插件详情的「在对话中」可以改别名和图标；改名不会改变已经排队的收件人。「已接收」表示插件收到了输入，回复会另发一条消息。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "打开插件设置",
+      "surfaceId": "settings.plugins"
+    },
+    "owner": "astra"
+  },
+  {
     "id": "feature-f322-work-discussion",
     "kind": "feature",
     "sourceRef": {
@@ -3557,15 +3582,15 @@
       "anchor": "PluginManagerLiveContent"
     },
     "bodySource": {
-      "path": "packages/web/src/components/settings/plugin-manager/DotConnectionDetail.tsx",
-      "anchor": "ChatGPT 云端 · dot 会话"
+      "path": "packages/api/src/domains/plugin/chatgpt-dot-manifest.ts",
+      "anchor": "CHATGPT_DOT_PLUGIN_MANIFEST"
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo"],
-    "body": "想在原对话召唤同一只 dot？从头像 → 设置与管理 → 连接与扩展 → 插件集成找到 ChatGPT 云端。沿用已连接的猫咖插件，为目标 dot 准备订阅；订阅后先测两处原对话的往返，再启用；图片传输单独显示验证结果。",
+    "body": "想在原对话召唤同一只 dot？从头像 → 设置与管理 → 连接与扩展 → 插件集成安装 ChatGPT Dot。先启用插件，再点“准备连接”，按配对说明在目标云端对话订阅；随后用“发起往返测试”核对读取与回复。",
     "action": {
       "type": "open_capability_surface",
-      "label": "准备 dot 订阅",
+      "label": "连接 ChatGPT Dot",
       "surfaceId": "settings.plugins"
     },
     "owner": "codex61-sol"
@@ -3794,6 +3819,34 @@
       "sourceRef": {
         "path": "docs/TIPS.md",
         "anchor": "16. 素材正典"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f048-restart-continue",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F048-restart-recovery.md",
+      "anchor": "重启后继续原工作"
+    },
+    "structureSource": {
+      "path": "packages/api/src/domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.ts",
+      "anchor": "continueRestartInterruptedCats"
+    },
+    "bodySource": {
+      "path": "docs/features/F048-restart-recovery.md",
+      "anchor": "重启后继续原工作"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "更新并重启后，系统尝试在原对话叫回被中断的猫；主动停止、已排队或连续中断的自动续做不重复叫回，也不复活旧授权。首次实际重启验收仍待确认；没有消息时先核对原任务。",
+    "action": {
+      "type": "open_source",
+      "label": "了解重启后怎样继续原工作",
+      "sourceRef": {
+        "path": "docs/features/F048-restart-recovery.md",
+        "anchor": "重启后继续原工作"
       }
     },
     "owner": "codex61-sol"

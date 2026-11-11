@@ -126,8 +126,6 @@ export interface CallbackAuthHookOptions {
   notifier?: Pick<CallbackAuthSystemMessageNotifier, 'notify'>;
   /** F178 Phase C: agent-key registry for persistent agent auth. */
   agentKeyRegistry?: AgentKeyAuthRegistry;
-  /** Only the canonical writer with DotReturn admission may accept a dot facade key. */
-  allowDotSourceBoundReturn?: boolean;
   /** Session hooks reuse invocation auth but own a distinct, scope-bound action policy. */
   enforceToolExecutionPolicy?: boolean;
   /** Only the native action route supplies this Host token-registry resolver. */
@@ -216,18 +214,10 @@ export function registerCallbackAuthHook(
           reply.status(401).send(makeCallbackAuthError(akResult.reason));
           return;
         }
-        // Dot's URL credential belongs to its event-bound MCP facade, not to
-        // the general callback surface. The writer must still admit the exact
-        // event/source/grant; every other hook and route rejects this principal.
-        if (
-          akResult.record.catId === 'gpt-dot' &&
-          !(
-            options.allowDotSourceBoundReturn === true &&
-            request.method === 'POST' &&
-            request.routeOptions.url === '/api/callbacks/post-message'
-          )
-        ) {
-          reply.status(403).send({ error: 'dot_facade_required', reason: 'dot_callback_scope_denied' });
+        // Retired Dot facade keys never become ordinary callback principals. The
+        // package owns its credential and enters only through declared webhooks.
+        if (akResult.record.catId === 'gpt-dot') {
+          reply.status(403).send({ error: 'dot_plugin_required', reason: 'dot_callback_scope_retired' });
           return;
         }
         // F202 h3c-2: a key of the cloud return boundary whose cat is no longer the configured cloud

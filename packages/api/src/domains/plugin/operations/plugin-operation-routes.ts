@@ -5,6 +5,7 @@ import {
   type PluginTestResult,
   validateOperationRowsResult,
 } from '@clowder-ai/plugin-contract';
+import { resolveConfigurationVariant } from '@clowder-ai/plugin-contract/variant';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from '../../../routes/plugin-access-guards.js';
 import type { PluginSettingsInvocation } from '../builtin-runtime/carriers/module-plugin-settings.js';
@@ -22,6 +23,7 @@ import { assertExecutablePackage } from '../host-inventory/stored-manifest.js';
 import type { ExecutablePluginPackageRecord, PluginInstanceRecord } from '../host-inventory/types.js';
 import type { PersonalChromeSetup } from '../manager/chrome-setup/personal-chrome-setup.js';
 import { isChromeSetupRequest } from '../manager/chrome-setup/personal-chrome-setup-policy.js';
+import { PluginSharedExtensionError } from '../shared-extension/plugin-shared-extension.js';
 import { type OperationState, transitionOperationState } from './operation-state-machine.js';
 import { expiredOperation, type PluginOperationCommitFence } from './plugin-operation-fence.js';
 
@@ -158,6 +160,20 @@ function operation(manifest: PluginManifest, key: string): OperationField | unde
   return (manifest.configuration ?? []).find(
     (field): field is OperationField => field.kind === 'operation' && field.key === key,
   );
+}
+
+function operationAvailableForConfiguration(
+  manifest: PluginManifest,
+  operationKey: string,
+  values: Readonly<Record<string, unknown>>,
+): boolean {
+  const variants = manifest.configurationVariants;
+  if (!variants) return true;
+  const claimed = variants.branches.some((branch) => branch.fields.includes(operationKey));
+  if (!claimed) return true;
+  const resolution = resolveConfigurationVariant(manifest, values);
+  if (resolution.status !== 'selected') return false;
+  return variants.branches.find((branch) => branch.id === resolution.branchId)?.fields.includes(operationKey) === true;
 }
 
 class PluginInvocationTimeoutError extends Error {}
@@ -317,6 +333,8 @@ export class InstalledPluginOperations {
 
     const currentValues = await this.options.configuration.readActionInput(pluginId);
     const input = { ...currentValues, ...((body ?? {}) as Readonly<Record<string, unknown>>) };
+    if (!operationAvailableForConfiguration(active.packageRecord.manifest, operationKey, input))
+      return response(409, { error: 'Operation is unavailable for the selected configuration' });
     await assertCurrent();
     const currentState = await this.options.configuration.readOperationState(pluginId, operationKey);
     const params = {
@@ -344,15 +362,21 @@ export class InstalledPluginOperations {
         throw new PluginSettingsUnavailableError('Plugin has no loaded settings handler');
       return this.options.invocation.invoke(active.instance.pluginInstanceId, action.action.method, params);
     };
-    const rawResult = await (request
-      ? withOwnerOperationInvocation(
-          request,
-          active.instance.pluginInstanceId,
-          action.action.method,
-          assertCurrent,
-          invoke,
-        )
-      : invoke());
+    let rawResult: unknown;
+    try {
+      rawResult = await (request
+        ? withOwnerOperationInvocation(
+            request,
+            active.instance.pluginInstanceId,
+            action.action.method,
+            assertCurrent,
+            invoke,
+          )
+        : invoke());
+    } catch (error) {
+      if (error instanceof PluginSharedExtensionError) return response(error.statusCode, { error: error.code });
+      throw error;
+    }
     await assertCurrent();
     const result = rowsChecked(declaredOperation, operationResult(rawResult));
     if (!result) return response(502, { error: 'Plugin operation returned an invalid response' });
@@ -497,6 +521,7 @@ export const pluginOperationRoutes: FastifyPluginAsync<PluginOperationRoutesOpti
         actionId: request.params.action,
         userId: access.operator,
         requestId: request.id,
+        ...(request.sessionBindingId === undefined ? {} : { sessionBindingId: request.sessionBindingId }),
         signal: cancellation.signal,
         assertCurrent: () => {
           if (cancellation.signal.aborted) expiredOperation();

@@ -248,6 +248,62 @@ test('with-test-home strips the runtime Claude carrier from outer shell', () => 
   assert.equal(result.stdout.trim(), '');
 });
 
+test('with-test-home strips managed-command authority from test children', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      withTestHome,
+      'node',
+      '-e',
+      `console.log(JSON.stringify({
+        managed: Object.keys(process.env).filter((key) => key.startsWith('CAT_CAFE_MANAGED_')).sort(),
+        marker: process.env.TEST_HOME_FIXTURE_MARKER,
+      }))`,
+    ],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        CAT_CAFE_MANAGED_JOB_ID: 'outer-gate',
+        CAT_CAFE_MANAGED_JOB_DESCRIPTOR: '/outer/descriptor.json',
+        CAT_CAFE_MANAGED_GATE_RECOVERY_PROTOCOL: '2',
+        TEST_HOME_FIXTURE_MARKER: 'preserved',
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { managed: [], marker: 'preserved' });
+});
+
+test('with-test-home strips exported outer-shell functions from test children', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      withTestHome,
+      'node',
+      '-e',
+      `console.log(JSON.stringify({
+        functions: Object.keys(process.env).filter((key) => key.startsWith('BASH_FUNC_')).sort(),
+        marker: process.env.TEST_HOME_FIXTURE_MARKER,
+      }))`,
+    ],
+    {
+      cwd: resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        'BASH_FUNC_compile_packages%%': '() {  echo inherited;\n}',
+        TEST_HOME_FIXTURE_MARKER: 'preserved',
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { functions: [], marker: 'preserved' });
+});
+
 for (const field of ['CODEX_HOME', 'CODEX_SQLITE_HOME']) {
   test(`with-test-home strips inherited ${field} before account fixtures load`, () => {
     const result = spawnSync(process.execPath, [withTestHome, 'node', '-p', `process.env.${field} ?? ""`], {

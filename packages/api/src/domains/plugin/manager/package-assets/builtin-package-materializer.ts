@@ -5,7 +5,7 @@ import { isDeepStrictEqual, promisify } from 'node:util';
 import { packageDirectoryName } from '../../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../../external-runtime/package-staging.js';
 import { stageVerifiedPackageArchive } from '../../external-runtime/package-staging.js';
-import type { PluginPackageProvenance } from '../../host-inventory/types.js';
+import type { PluginDependencyClosure, PluginPackageProvenance } from '../../host-inventory/types.js';
 import { resolveNpmInvocation } from '../npm-invocation.js';
 
 import type {
@@ -341,6 +341,7 @@ export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPlugin
     readonly packageDigest: string;
     readonly packageName?: string;
     readonly sourceKind: PluginPackageProvenance['kind'];
+    readonly dependencyClosure?: PluginDependencyClosure;
   }): Promise<MaterializedBuiltinPluginPackage> {
     await mkdir(this.materializationsRoot, { recursive: true, mode: 0o700 });
     const root = await mkdtemp(resolve(this.materializationsRoot, '.builtin-'));
@@ -365,7 +366,9 @@ export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPlugin
         Object.keys(packageJson.dependencies).length + Object.keys(packageJson.optionalDependencies).length;
       const registryOnly = input.sourceKind === 'catalog';
       const shippedDependencyRoot =
-        dependencyCount > 0 && !registryOnly ? await dependencyDirectory(located.rootDir) : undefined;
+        dependencyCount > 0 && input.dependencyClosure === 'shipped'
+          ? await dependencyDirectory(located.rootDir)
+          : undefined;
       if (dependencyCount > 0 && shippedDependencyRoot === undefined) {
         const shrinkwrap = await readDependencyShrinkwrap(located.rootDir, packageJson, registryOnly);
         const env = installEnvironment(root, registryOnly);

@@ -14,6 +14,7 @@ import {
 import { migrateOwnedCodexProjectMcp } from './codex-managed-mcp-migration.js';
 import { isSameCapabilityRoot, resolveDeclaredCapabilityRoot } from './invoke-capability-root.js';
 import { migrateOwnedRetiredProbes } from './retired-probe-migration.js';
+import { migrateLegacyPlaywrightToSharedBrowser } from './shared-browser-migration.js';
 
 const log = createModuleLogger('startup-cli-config');
 
@@ -76,7 +77,9 @@ export async function migrateStartupCodexMcpConfig(
         projectRoot,
         env.CAT_CAFE_RUNTIME_ROOT?.trim() || binaryRoot,
       ]);
-      return [...new Set([...retiredProbes, ...selfMcp])];
+      // F333: the seeded per-session Playwright entry moves onto the shared browser (exact match only).
+      const sharedBrowser = (await migrateLegacyPlaywrightToSharedBrowser(projectRoot)).length ? ['playwright'] : [];
+      return [...new Set([...retiredProbes, ...selfMcp, ...sharedBrowser])];
     });
   } catch {
     // Parser diagnostics can quote private TOML contents. Report only the path.

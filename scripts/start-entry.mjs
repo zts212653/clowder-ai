@@ -20,6 +20,41 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
 
 const IS_WINDOWS = process.platform === 'win32';
+const signalExitCodes = { SIGINT: 130, SIGTERM: 143 };
+
+function spawnJoined(command, args, options) {
+  const child = spawn(command, args, options);
+  let forwardedSignal = null;
+
+  const signalHandlers = Object.fromEntries(
+    Object.keys(signalExitCodes).map((signal) => [
+      signal,
+      () => {
+        if (forwardedSignal) return;
+        forwardedSignal = signal;
+        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+      },
+    ]),
+  );
+  for (const [signal, handler] of Object.entries(signalHandlers)) process.on(signal, handler);
+
+  const removeSignalHandlers = () => {
+    for (const [signal, handler] of Object.entries(signalHandlers)) process.off(signal, handler);
+  };
+
+  child.once('error', (error) => {
+    removeSignalHandlers();
+    console.error(error);
+    process.exit(1);
+  });
+  child.once('exit', (code, signal) => {
+    removeSignalHandlers();
+    if (forwardedSignal) process.exit(signalExitCodes[forwardedSignal]);
+    if (signal) process.exit(signalExitCodes[signal] ?? 1);
+    process.exit(code ?? 1);
+  });
+}
+
 // First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
 
@@ -29,11 +64,10 @@ if (mode === 'status') {
   } else {
     const cmd = resolve(__dirname, 'runtime-worktree.sh');
     const args = ['daemon-status'];
-    const child = spawn('bash', [cmd, ...args], {
+    spawnJoined('bash', [cmd, ...args], {
       cwd: projectRoot,
       stdio: 'inherit',
     });
-    child.on('exit', (code) => process.exit(code ?? 1));
   }
 } else if (IS_WINDOWS) {
   // Map Unix-style flags to PowerShell switch params
@@ -54,8 +88,7 @@ if (mode === 'status') {
     const mapped = flagMap[arg];
     psArgs.push(mapped ?? arg);
   }
-  const child = spawn('powershell', psArgs, { cwd: projectRoot, stdio: 'inherit', env: childEnv });
-  child.on('exit', (code) => process.exit(code ?? 1));
+  spawnJoined('powershell', psArgs, { cwd: projectRoot, stdio: 'inherit', env: childEnv });
 } else {
   // Unix: dispatch based on mode
   const hasProfile = rest.some((a) => a.startsWith('--profile'));
@@ -88,6 +121,5 @@ if (mode === 'status') {
     console.error(`Unknown mode: ${mode}. Use: start, start:direct, dev:direct, status`);
     process.exit(1);
   }
-  const child = spawn('bash', [cmd, ...args], { cwd: projectRoot, stdio: 'inherit', env });
-  child.on('exit', (code) => process.exit(code ?? 1));
+  spawnJoined('bash', [cmd, ...args], { cwd: projectRoot, stdio: 'inherit', env });
 }

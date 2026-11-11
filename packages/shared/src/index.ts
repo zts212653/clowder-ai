@@ -81,6 +81,7 @@ export type {
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
+export { DEFAULT_MESSAGE_SEARCH_SORT } from './message-search.js';
 export * from './message-search-answer.js';
 export * from './message-search-notice.js';
 export * from './message-search-selection.js';
@@ -108,6 +109,7 @@ export { richBlockSchema } from './schemas/rich-block.schema.js';
 export * from './shared-markdown-selection.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
+export * from './target-response.js';
 export * from './text-utils.js';
 export * from './thread-works.js';
 export * from './types/approval-decision-receipt.js';

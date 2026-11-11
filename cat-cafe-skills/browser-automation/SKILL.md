@@ -1,6 +1,6 @@
 ---
 name: browser-automation
-tips_exempt: "2026-10-28: background browser defaults and agent routing repair an existing workflow; no new end-user entry or setup action."
+tips_exempt: "Renewed 2026-11-10: document the existing thread-shared Playwright carrier names, retired optional MCP backends and CLI routing. Human browser requests and login consent stay on their existing paths; no new Hub entry or setup action."
 description: >
   浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。
   Use when: 需要操作外部网站、登录页、JS 重页面、没有 webfetch/VL 但需要浏览器、或需要在多种浏览器工具之间路由。
@@ -79,25 +79,27 @@ triggers:
 3. **目的是给人展示 localhost 页面吗？**
    是 → `browser-preview` 的 Hub 内嵌面板
 4. **客户端已经有稳定可用的 Playwright MCP 吗？**
-   是 → `refs/playwright-mcp.md`（MCP ID: `playwright`）
+   是 → `refs/playwright-mcp.md`（MCP ID: `playwright`；Codex app-server 里是 `playwright_shared`）
 5. **本任务明确获准接手人类现有 Chrome 会话吗？**
    是 → 用 `claude-in-chrome` MCP（工具前缀 `mcp__claude-in-chrome__*`），参考 `refs/playwriter.md`；复杂 iframe、多 tab 本身不要求接管人的会话
 6. **这是 CLI 型猫，没 webfetch / 没 VL，但能跑命令吗？**
-   是 → `refs/agent-browser.md`（MCP ID: `agent-browser`，社区 wrapper，使用前先做本机验活）
-7. **需要长驻 daemon、持久 session、HTTP-first 服务吗？**
-   是 → `refs/pinchtab.md`（MCP ID: `pinchtab`，优先 native binary `pinchtab mcp`，不要默认相信 npm wrapper）
+   是 → `refs/agent-browser.md`（CLI 工具，用 Bash 调 `agent-browser`；它的 MCP 已于 2026-11-09 停用）
+7. **需要持久登录态、重复批任务吗？**
+   用 Playwright MCP：同一工作目录的猫共用一份登录。PinchTab MCP 已于 2026-11-09 停用，不要再找 `pinchtab` 工具。
 
 ## 路由矩阵
+
+MCP ID 按载体不同：Codex app-server 注册的服务名是 `playwright_shared`（同名的 `playwright` 是一个已关闭的占位条目，不用管它），其他载体都是 `playwright`；工具名一样都是 `browser_*`。
 
 | 场景 | 默认 | MCP ID | 状态 |
 |------|------|--------|------|
 | 本地前端页面预览 | `browser-preview` | — | 独立 skill |
-| 本地 WebApp 测试 / 回归 | `webapp-testing` + Playwright | `playwright` | 已接入 |
-| MCP 原生客户端的常规网页自动化 | 无头 `Playwright MCP` | `playwright` | 受管描述符显式指定 `--headless` |
+| 本地 WebApp 测试 / 回归 | `webapp-testing` + Playwright | `playwright`（Codex：`playwright_shared`） | 已接入 |
+| MCP 原生客户端的常规网页自动化 | 无头 `Playwright MCP` | `playwright`（Codex：`playwright_shared`） | 受管描述符显式指定 `--headless` |
 | 明确要求可见操作 / 明确包含自有 profile 可见首次登录 | 自有可见 Playwright 会话 | — | 按 `refs/playwright-mcp.md`，保持全局默认无头 |
 | 明确获准接手人的已登录 Chrome | `claude-in-chrome` | `claude-in-chrome` | Chrome 扩展直接操作人的会话，后台导航也会改变其 tab |
 | CLI 型猫、没 webfetch / 没 VL | `agent-browser` | — (CLI 工具) | ✅ 可用 — `npm i -g agent-browser`，通过 Bash tool 调 CLI |
-| 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — native binary `pinchtab mcp`（外网 URL 用 eval 导航，见 ref） |
+| 服务化浏览器、持久化 session、重复批任务 | 无头 `Playwright MCP` | `playwright`（Codex：`playwright_shared`） | PinchTab MCP 已于 2026-11-09 停用；登录态按工作目录共用 |
 
 ## 常用组合打法
 
@@ -106,16 +108,16 @@ triggers:
 | 外部网站调研 + 本地页面实现 | `browser-automation` + `browser-preview` | 前者看参考站，后者看我们自己的 localhost |
 | 本地 WebApp 开发验收 | `browser-preview` + `webapp-testing` | 一个看效果，一个做确定性验证 |
 | 接手人类已登录会话 | `browser-automation` + `refs/playwriter.md` | 明确是谁的 session，再做操作 |
-| 重复批量抓取 / 长驻任务 | `browser-automation` + `refs/pinchtab.md` | 不是临时调试，而是服务化执行 |
+| 重复批量抓取 / 长驻任务 | `browser-automation` + `refs/playwright-mcp.md` | PinchTab 已停用；同一工作目录同一时间只能一只猫开浏览器，见 ref |
 
 ## 读取哪些 refs
 
 | Ref | MCP ID | 场景 |
 |-----|--------|------|
-| `refs/playwright-mcp.md` | `playwright` | 常规 MCP 原生网页自动化（默认） |
+| `refs/playwright-mcp.md` | `playwright`（Codex：`playwright_shared`） | 常规 MCP 原生网页自动化（默认） |
 | `refs/playwriter.md` | `claude-in-chrome` | 已登录 Chrome / iframe-heavy / 多 tab（实际用 `mcp__claude-in-chrome__*` 工具） |
 | `refs/agent-browser.md` | — (CLI 工具) | CLI 型猫 / 无 webfetch / 无 VL |
-| `refs/pinchtab.md` | `pinchtab` | 服务化、持久 session、HTTP-first |
+| `refs/pinchtab.md` | `pinchtab`（2026-11-09 停用） | 只留作历史和重新启用时参考 |
 
 ## 交付要求
 

@@ -3,9 +3,22 @@ feature_ids: [F332]
 related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F276, F278, F281, F282, F287, F296, F312, F316, F321, F324, F335]
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F332-experience-informed-memory.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F332-experience-informed-memory.md"
+    toolName: cat_cafe_revise_person_memory
+    resourceFamily: person-memory
+    boundaryKind: side-effect-boundary
+    decision: accepted
+  - ref: "file:docs/features/F332-experience-informed-memory.md"
+    toolName: cat_cafe_library_verify
+    resourceFamily: library
+    boundaryKind: side-effect-boundary
+    decision: accepted
 created: 2026-10-23
-updated: 2026-11-04
-tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
+updated: 2026-11-10
+tips_exempt: "Renewed 2026-11-10 for public/source partitioning: preserve prior public guidance and accepted person-revision/document-verification contracts; move operational evidence into Internal Notes. No new human control, enabled watcher or shipped follow-up is introduced."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
 description_author: codex-astra
@@ -19,6 +32,22 @@ description_updated_at: 2026-10-24T00:01:00Z
 Architecture cell: `memory`
 Map delta: none
 Map delta why: 聚合用户结果与既有责任，不在本轮另建 store、planner、后台服务或统一审批权威；实现选型在对应 Phase 明确。
+
+## Current tool contract
+
+Person-memory corrections use `cat_cafe_revise_person_memory` with one of
+`correct_claim`, `retire_claim` or `amend_event`. Each action retains its original
+owner-private authorization, source qualification, version checks and request-key
+semantics. Retiring a claim preserves its history; it does not permanently erase it.
+The former three separate correction tool names leave the exposed registry together.
+
+`cat_cafe_library_verify` keeps its existing four actions and HTTP endpoints.
+It changes document review state and audit records, so its governance and MCP
+annotations identify a non-destructive write. It does not archive a collection,
+rebuild an index or change access to stored content.
+
+These are accepted interface boundaries. They do not declare the broader memory
+project complete, enable a watcher, or certify a running deployment.
 
 ## Why
 

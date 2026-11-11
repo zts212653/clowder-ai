@@ -441,17 +441,17 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
 export interface AgentRouterOptions {
   scopedMemberRouting?: import('./scoped-member-routing.js').ScopedMemberRoutingPort;
   messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  addressedPlugins?: import('../../../../plugin/manager/addressing/plugin-addressed-targets.js').PluginAddressedTargets;
   resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   resolveInvocationPluginMcpView?: import('../invocation/invoke-single-cat.js').InvocationDeps['resolveInvocationPluginMcpView'];
   agentRegistry: AgentRegistry;
   refreshServices?: () => Promise<void>;
   registry: InvocationRegistry;
-  dotReplyTarget?: (
-    source: import('../../cloud-bridge/dot/dot-reply-authority.js').DotReplyCandidate,
-  ) => Promise<boolean>;
   messageStore: IMessageStore;
   /** F045 Gap #4: Redis-backed task progress snapshots */
   taskProgressStore?: TaskProgressStore;
+  /** Scheduler system delivery for the owner-ask correction wake. */
+  ownerAskCorrectionDeliver?: import('../invocation/invoke-single-cat.js').InvocationDeps['ownerAskCorrectionDeliver'];
   sessionStore?: SessionStore;
   deliveryCursorStore?: DeliveryCursorStore;
   threadStore?: IThreadStore;
@@ -570,6 +570,7 @@ export interface AgentRouterOptions {
  */
 export class AgentRouter {
   private scopedMemberRouting?: AgentRouterOptions['scopedMemberRouting'];
+  addressedPlugins?: AgentRouterOptions['addressedPlugins'];
   private readonly services: Record<string, AgentService>;
   private readonly refreshServices?: AgentRouterOptions['refreshServices'];
   private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
@@ -598,6 +599,7 @@ export class AgentRouter {
   private sessionSealer: ISessionSealer | undefined;
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
+  private ownerAskCorrectionDeliver: import('../invocation/invoke-single-cat.js').InvocationDeps['ownerAskCorrectionDeliver'];
   private taskStore: ITaskStore | undefined;
   private ordinaryTaskHandoffs?: AgentRouterOptions['ordinaryTaskHandoffs'];
   private ownedWaitStatusReader:
@@ -637,7 +639,6 @@ export class AgentRouter {
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
-  private dotReplyTarget?: AgentRouterOptions['dotReplyTarget'];
   private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
   private cloudReturnGrantStore?: import('../../cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore;
   private turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
@@ -679,6 +680,7 @@ export class AgentRouter {
 
   constructor(options: AgentRouterOptions) {
     this.scopedMemberRouting = options.scopedMemberRouting;
+    this.addressedPlugins = options.addressedPlugins;
     this.services = {};
     this.refreshServices = options.refreshServices;
     this.speechMentionRe = /$^/;
@@ -714,6 +716,7 @@ export class AgentRouter {
     this.sessionSealer = options.sessionSealer;
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
+    this.ownerAskCorrectionDeliver = options.ownerAskCorrectionDeliver;
     this.taskStore = options.taskStore;
     this.ordinaryTaskHandoffs = options.ordinaryTaskHandoffs;
     this.ownedWaitStatusReader = options.ownedWaitStatusReader;
@@ -739,7 +742,6 @@ export class AgentRouter {
     this.frustrationIssueStore = options.frustrationIssueStore;
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
-    this.dotReplyTarget = options.dotReplyTarget;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
     this.cloudReturnGrantStore = options.cloudReturnGrantStore;
     this.turnExecutionStore = options.turnExecutionStore;
@@ -837,6 +839,12 @@ export class AgentRouter {
     );
   }
 
+  /** Inventory snapshot belongs to one Queue admission, not a process identity cache. */
+  async resolveQueueTargetKinds(requested: readonly string[]): Promise<ReadonlyMap<string, 'member' | 'plugin'>> {
+    const plugins = new Set((await this.addressedPlugins?.list(true))?.map((plugin) => plugin.id) ?? []);
+    return new Map(requested.map((id) => [id, plugins.has(id) ? 'plugin' : 'member'] as const));
+  }
+
   /** Validate before first persistence; bound/explicit recipients never follow successors. */
   resolveAdmissionTargets(requested: readonly string[], implicit = false): CatId[] {
     const targets = requested.map((id) => {
@@ -862,14 +870,20 @@ export class AgentRouter {
     threadId: string,
     options?: { persist?: boolean; bound?: boolean },
   ): Promise<CatId[]> {
+    const pluginIds = new Set((await this.addressedPlugins?.list(true))?.map((plugin) => plugin.id) ?? []);
+    const requestedMemberIds = requestedCatIds.filter((id) => !pluginIds.has(id));
     // First admission validates the whole explicit request. A bound Queue row
     // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
-    const resolved = options?.bound
-      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
-      : this.resolveAdmissionTargets(requestedCatIds);
+    const resolvedMembers = options?.bound
+      ? requestedMemberIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
+      : this.resolveAdmissionTargets(requestedMemberIds);
+    const memberIds = new Set(resolvedMembers);
+    const resolved = [...new Set(requestedCatIds)].filter(
+      (id) => memberIds.has(id as CatId) || pluginIds.has(id),
+    ) as CatId[];
     if (!options?.bound && resolved.length !== requestedCatIds.length) return [];
     if (options?.persist && this.threadStore) {
-      await this.threadStore.addParticipants(threadId, resolved);
+      await this.threadStore.addParticipants(threadId, this.filterKnownCats(resolved));
     }
     return resolved;
   }
@@ -891,8 +905,14 @@ export class AgentRouter {
   ): Promise<CatId[]> {
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
-    const hinted = this.filterRoutableCats(requestedCatIds);
+    const plugins = new Set((await this.addressedPlugins?.list())?.map((plugin) => plugin.id) ?? []);
+    const hinted = [
+      ...new Set(requestedCatIds.flatMap((id) => (plugins.has(id) ? [id as CatId] : this.filterRoutableCats([id])))),
+    ];
     if (hinted.length > 0) return hinted;
+    if ((await Promise.all(requestedCatIds.map((id) => this.addressedPlugins?.isInstanceId(id)))).some(Boolean)) {
+      return [];
+    }
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
   }
 
@@ -993,7 +1013,10 @@ export class AgentRouter {
    * F182 KD-10: match-time resolver check (different patch from a2a-mentions pattern-build stage).
    * Raw variant returns ParsedMention[] with position info for order-aware merging.
    */
-  private parseMentionsRaw(message: string): { mentions: ParsedMention[]; routing_warnings: CatRoutingError[] } {
+  private parseMentionsRaw(
+    message: string,
+    plugins: readonly { id: string; alias: string }[] = [],
+  ): { mentions: ParsedMention[]; routing_warnings: CatRoutingError[] } {
     const lowerMessage = message.toLowerCase();
     const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
@@ -1005,6 +1028,7 @@ export class AgentRouter {
         allPatterns.push({ pattern: pattern.toLowerCase(), catId: config.id });
       }
     }
+    for (const plugin of plugins) allPatterns.push({ pattern: `@${plugin.alias}`, catId: plugin.id as CatId });
     allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first
 
     // 2-4. User-authored messages accept explicit @mentions anywhere in prose.
@@ -1031,8 +1055,13 @@ export class AgentRouter {
     }
 
     mentions.sort((a, b) => a.position - b.position);
+    const pluginIds = new Set(plugins.map((plugin) => plugin.id));
     return {
       mentions: mentions.filter(({ catId }) => {
+        // Plugin instances are admitted by PluginAddressedTargets, not the
+        // member registry. Keep their already-resolved stable identity while
+        // retaining next's successor/disabled diagnostics for real members.
+        if (pluginIds.has(catId)) return true;
         const target = resolveCatTarget(catId);
         if ('ok' in target) return true;
         routing_warnings.push(target.error);
@@ -1189,12 +1218,13 @@ export class AgentRouter {
     threadId: string,
     options?: { allowGroupFallback?: boolean },
   ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[] }> {
+    const plugins = (await this.addressedPlugins?.list(true)) ?? [];
     const groupResult = await this.parseGroupMentions(message, threadId, {
       allowFallback: options?.allowGroupFallback,
     });
     if (groupResult !== null) {
       // Position-aware union: merge individual mentions around group based on message position
-      const individual = this.parseMentionsRaw(message);
+      const individual = this.parseMentionsRaw(message, plugins);
       const groupPos = groupResult.matchPosition;
       const groupSet = new Set<string>(groupResult.cats.map(String));
 
@@ -1214,7 +1244,11 @@ export class AgentRouter {
         routing_warnings: individual.routing_warnings,
       };
     }
-    return this.parseMentions(message);
+    const individual = this.parseMentionsRaw(message, plugins);
+    return {
+      mentions: individual.mentions.map((mention) => mention.catId),
+      routing_warnings: individual.routing_warnings,
+    };
   }
 
   private applyRoutingPolicyForPreview(
@@ -1251,12 +1285,16 @@ export class AgentRouter {
       : await this.parseAllMentions(message, threadId, {
           allowGroupFallback: !options?.publicConversation,
         });
-    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : [...mentionedCats];
+    const pluginIds = new Set((await this.addressedPlugins?.list())?.map((plugin) => plugin.id) ?? []);
+    const targets = options?.publicConversation
+      ? mentionedCats.filter((id) => this.isRoutableCat(id) || pluginIds.has(id))
+      : [...mentionedCats];
     if (targets.length > 0 || routing_warnings.length > 0) {
       const unavailableTargets = options?.publicConversation
         ? [
             ...this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id)),
             ...routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+            ...mentionedCats.filter((id) => !this.filterKnownCats([id]).length && !pluginIds.has(id)),
           ]
         : [];
       // A disabled explicit identity may propose its configured successor, but
@@ -1272,6 +1310,10 @@ export class AgentRouter {
         reason: { kind: 'current_message_mentions' },
         ...(unavailableTargets.length ? { unavailableTargets, requiresConfirmation: true } : {}),
       };
+    }
+    const namedPlugin = mentionedCats.filter((id) => !this.filterKnownCats([id]).length);
+    if (namedPlugin.length > 0) {
+      return { targetCats: [], reason: { kind: 'current_message_mentions' }, unavailableTargets: namedPlugin };
     }
     const result = await this.resolveImplicitTargetPreview(message, threadId, options);
     const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
@@ -1390,7 +1432,7 @@ export class AgentRouter {
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
     const preview = await this.resolveTargetPreview(message, threadId);
     if (preview.reason.kind === 'current_message_mentions' && this.threadStore) {
-      await this.threadStore.addParticipants(threadId, preview.targetCats);
+      await this.threadStore.addParticipants(threadId, this.filterKnownCats(preview.targetCats));
     }
     return preview.targetCats;
   }
@@ -1401,6 +1443,7 @@ export class AgentRouter {
     return {
       ...(this.messageSearchAnswerService ? { messageSearchAnswerService: this.messageSearchAnswerService } : {}),
       services: this.services,
+      ...(this.addressedPlugins ? { addressedPlugins: this.addressedPlugins } : {}),
       ...(this.refreshServices ? { refreshServices: this.refreshServices } : {}),
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
@@ -1416,6 +1459,7 @@ export class AgentRouter {
         apiUrl: `http://127.0.0.1:${apiPort}`,
         ...(this.turnExecutionStore ? { turnExecutionStore: this.turnExecutionStore } : {}),
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
+        ...(this.ownerAskCorrectionDeliver ? { ownerAskCorrectionDeliver: this.ownerAskCorrectionDeliver } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
         ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
         hookAuthenticationReady: this.hookAuthenticationReady,
@@ -1463,7 +1507,6 @@ export class AgentRouter {
         ...(this.profileRepository ? { profileRepository: this.profileRepository } : {}),
       },
       messageStore: this.messageStore,
-      ...(this.dotReplyTarget ? { dotReplyTarget: this.dotReplyTarget } : {}),
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.taskStore ? { taskStore: this.taskStore } : {}),
       ...(this.ownedWaitStatusReader ? { ownedWaitStatusReader: this.ownedWaitStatusReader } : {}),
@@ -1523,7 +1566,7 @@ export class AgentRouter {
     if (options?.allowFallback === false) {
       targetCats = allMentions.mentions;
       if (options.persist && targetCats.length > 0 && this.threadStore) {
-        await this.threadStore.addParticipants(resolvedThreadId, targetCats);
+        await this.threadStore.addParticipants(resolvedThreadId, this.filterKnownCats(targetCats));
       }
     } else {
       targetCats = options?.persist

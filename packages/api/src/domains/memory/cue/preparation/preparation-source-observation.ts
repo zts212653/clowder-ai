@@ -1,3 +1,5 @@
+import { type MessageReadProgress, safeMessageReadProgress } from '../../message-search-lifetime.js';
+
 export type PreparationSourcePhase = 'read' | 'project' | 'revalidate';
 export type PreparationOwnerFamily = 'project_knowledge' | 'message_evidence' | 'matter' | 'taste';
 type Outcome = 'completed' | 'failed';
@@ -17,6 +19,12 @@ const empty = (): PhaseObservation => ({ calls: 0, settled: 0, failed: 0, elapse
 /** One preparation call only. Outer cancellation does not settle an observed child Promise. */
 export class PreparationSourceObservations {
   private readonly sources = new Map<PreparationOwnerFamily, Record<PreparationSourcePhase, PhaseObservation>>();
+  private latestMessageRead?: { value: MessageReadProgress; receivedAt: number };
+
+  readonly messageRead = (progress: MessageReadProgress) => {
+    const value = safeMessageReadProgress(progress);
+    if (value) this.latestMessageRead = { value, receivedAt: performance.now() };
+  };
 
   begin(family: PreparationOwnerFamily, phase: PreparationSourcePhase) {
     if (!families.includes(family) || !phases.includes(phase)) return undefined;
@@ -41,6 +49,27 @@ export class PreparationSourceObservations {
     const now = performance.now();
     return [...this.sources].map(([family, source]) => ({
       family,
+      ...(family === 'message_evidence' && this.latestMessageRead
+        ? {
+            readProgress: {
+              ...this.latestMessageRead.value,
+              elapsedMs: Math.round(
+                this.latestMessageRead.value.elapsedMs +
+                  (this.latestMessageRead.value.state === 'pending' ? now - this.latestMessageRead.receivedAt : 0),
+              ),
+              ...(this.latestMessageRead.value.native
+                ? {
+                    native: {
+                      ...this.latestMessageRead.value.native,
+                      observationAgeMs: Math.round(
+                        this.latestMessageRead.value.native.observationAgeMs + now - this.latestMessageRead.receivedAt,
+                      ),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
       phases: Object.fromEntries(
         phases.map((phase) => {
           const value = source[phase];
