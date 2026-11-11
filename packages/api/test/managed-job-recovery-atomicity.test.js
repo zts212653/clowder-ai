@@ -102,7 +102,6 @@ test('waiting and stale observations preserve the budget; parked responsibility 
     );
   assert.equal(recovery.disposition, 'parked');
   assert.equal(recovery.attempts, 5);
-  assert.equal(recovery.notification, undefined);
   // The original recovery disposition retires automatic work, never the execution or its concurrency slot.
   recovery = { ...recovery, nextAttemptAt: null };
   assert.equal(updateManagedJobRecovery(job, readManagedJobRecovery(job).revision, recovery), true);

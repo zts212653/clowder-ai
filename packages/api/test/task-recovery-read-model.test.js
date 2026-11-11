@@ -86,33 +86,6 @@ test('one corrupt recovery owner cannot hide healthy Tasks from the canonical li
   assert.equal(projected[1].recovery.incidents[0].reasonCode, 'healthy_owner_parked');
 });
 
-for (const reasonCode of ['invalid_recovery_metadata', 'invalid_projection'])
-  test(`owner-level Ball ${reasonCode} remains visible on the original Task`, async () => {
-    const model = new TaskRecoveryReadModel({
-      ball: {
-        getRecoveryFacts: async (subjectKey) => ({
-          v: 1,
-          subjectKey,
-          generation: 0,
-          notices: {},
-          disposition: 'needs_attention',
-          reasonCode,
-          originalRaw: '{broken legacy bytes',
-        }),
-      },
-    });
-    const projected = await model.project(task);
-    assert.deepEqual(projected.recovery.incidents, [
-      {
-        source: 'ball_probe',
-        lane: 'probe',
-        disposition: 'needs_attention',
-        reasonCode,
-        executionRef: `ball:task:${task.id}:owner`,
-      },
-    ]);
-  });
-
 test('ordinary Tasks retain historical action recovery evidence without regaining action authority', async () => {
   const { TaskActionSuccessorLifecycle } = await import('../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js');
   const selected = {

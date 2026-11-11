@@ -72,7 +72,7 @@ test('audit failures leave automatic recovery after five attempts, retaining exa
   assert.deepEqual(await store.listWakeAudits(1, 1_000_000), []);
 });
 
-test('a permanent probe recovery error remains on the original task owner without a status Message', async () => {
+test('a permanent probe recovery error remains on the original task owner and schedules no notice work', async () => {
   const { redis, store, candidate } = await prepare('owner-disposition');
   await store.finishRecovery(candidate, 'permanent_error', 2000, {
     userId: 'user',

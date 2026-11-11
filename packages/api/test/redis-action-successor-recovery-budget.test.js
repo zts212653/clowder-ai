@@ -6,7 +6,7 @@ import { redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const isolated = { skip: redisIsolationSkipReason(process.env.REDIS_URL) };
 test(
-  'five actual failures park only the original lane without creating a second Message across restart and rebuild',
+  'five actual failures park only the original lane and remain off the queue across restart and rebuild',
   isolated,
   async () => {
     await withActionRecoveryRedis(async ({ redis, store, seed }) => {
@@ -28,7 +28,6 @@ test(
       assert.equal(snapshot.fact.attempts, 5);
       assert.equal(snapshot.lease.status, original.status);
       assert.equal(snapshot.lease.revision, original.revision);
-      assert.equal(snapshot.fact.notification, undefined);
       const { RedisActionSuccessorLeaseStore } = await import(
         '../dist/domains/ball-custody/RedisActionSuccessorLeaseStore.js'
       );

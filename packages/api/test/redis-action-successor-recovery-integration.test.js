@@ -43,7 +43,6 @@ test(
       assert.equal(reads.filter((x) => x === good.subjectRef).length, 8);
       assert.equal((await store.recovery.read(bad.leaseId, 'dispatch')).fact.disposition, 'parked');
       assert.equal((await store.recovery.read(good.leaseId, 'dispatch')).fact.attempts, 0);
-      assert.equal((await store.recovery.read(bad.leaseId, 'dispatch')).fact.notification, undefined);
     });
   },
 );

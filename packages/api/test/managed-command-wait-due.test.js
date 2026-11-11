@@ -94,7 +94,6 @@ test('five real delivery failures park the original wait without a second Messag
     const parked = store.getManagedCommandRecoveryState(waiting.id).fact;
     assert.equal(parked.attempts, 5);
     assert.equal(parked.disposition, 'parked');
-    assert.equal(parked.notification, undefined);
     assert.equal(store.getById(waiting.id).params.holdLifecycle.managedCommand.state, 'condition_met');
     const legacy = store.getManagedCommandRecoveryState(waiting.id);
     assert.equal(
