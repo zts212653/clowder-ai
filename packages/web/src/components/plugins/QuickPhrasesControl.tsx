@@ -7,7 +7,7 @@ import { useShellCopy } from '../shell/shell-copy';
 import { QuickPhraseConfirmation } from './QuickPhraseConfirmation';
 import { QuickPhrasesList } from './QuickPhrasesList';
 import { quickPhrasesCopy } from './quick-phrases.shell-copy';
-import { type QuickPhrasesEntry, useQuickPhrasesEntry } from './quick-phrases-api';
+import { type QuickPhrasesEntry, recordQuickPhraseUse, useQuickPhrasesEntry } from './quick-phrases-api';
 
 type Props = {
   draft: string;
@@ -77,9 +77,11 @@ function QuickPhrasesButton({ draft, disabled, presentation, onSelect, entry }: 
           ) : (
             <QuickPhrasesList
               entry={entry}
-              onSelect={(text) => {
+              onSelect={(phrase) => {
                 setSnapshot(undefined);
-                if (!draft.trim()) onSelect(text);
+                if (draft.trim()) return;
+                onSelect(phrase.text);
+                void recordQuickPhraseUse(entry, phrase.id);
               }}
             />
           )}

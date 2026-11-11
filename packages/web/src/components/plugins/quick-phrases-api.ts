@@ -54,4 +54,17 @@ export async function readQuickPhrases(entry: QuickPhrasesEntry, query: string, 
   return pageSchema.parse(response.body);
 }
 
+/** Best-effort usage signal; selection already succeeded locally and must not depend on it. */
+export async function recordQuickPhraseUse(entry: QuickPhrasesEntry, id: string) {
+  try {
+    const response = await requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } });
+    // A 409 means the CAS did not apply, so retrying cannot double-count this selection.
+    if (response.status === 409) {
+      await requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } });
+    }
+  } catch {
+    // Counting is best-effort: a stale plugin generation or network failure must not surface.
+  }
+}
+
 export type QuickPhrasesPage = Awaited<ReturnType<typeof readQuickPhrases>>;
