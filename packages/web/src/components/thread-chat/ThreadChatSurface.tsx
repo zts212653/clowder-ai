@@ -4,6 +4,7 @@ import type { CapabilityTipContext, LifecycleActiveRun } from '@cat-cafe/shared'
 import { useRouter } from 'next/navigation';
 import type { ReactNode, Ref } from 'react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { InteractiveSendDetail } from '@/components/rich/interactive-block-client';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -305,20 +306,24 @@ export function ThreadChatSurface({
 
   useEffect(() => {
     const handleInteractiveSend = (event: Event) => {
-      const detail = (event as CustomEvent<{ text?: string; sendContext?: string; targetThreadId?: string }>).detail;
+      const detail = (event as CustomEvent<InteractiveSendDetail>).detail;
       const ownsContext = detail.sendContext === interactiveSendContext;
       const ownsUnscoped =
         acceptUnscopedInteractiveSend &&
         !detail.sendContext &&
         (!detail.targetThreadId || detail.targetThreadId === threadId);
       if ((!ownsContext && !ownsUnscoped) || !detail.text) return;
-      void handleSend(detail.text).then((sent) => {
-        if (sent) onRealMessageSent?.();
-      });
+      void handleSend(detail.text).then(
+        (sent) => {
+          detail.onResult?.(sent === true);
+          if (sent) onRealMessageSent?.();
+        },
+        () => detail.onResult?.(false),
+      );
     };
     window.addEventListener('cat-cafe:interactive-send', handleInteractiveSend);
     return () => window.removeEventListener('cat-cafe:interactive-send', handleInteractiveSend);
-  }, [acceptUnscopedInteractiveSend, handleSend, interactiveSendContext, threadId]);
+  }, [acceptUnscopedInteractiveSend, handleSend, interactiveSendContext, threadId, onRealMessageSent]);
 
   const surface = (
     <section

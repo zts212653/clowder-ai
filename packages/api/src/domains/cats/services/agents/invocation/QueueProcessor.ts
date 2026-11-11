@@ -154,6 +154,7 @@ import {
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
 import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
+import { persistStreamedInteractiveBlock } from './persist-streamed-interactive-block.js';
 import { queueEntryId } from './queue-ledger/QueueLedger.js';
 import {
   type ContinuationOutcome,
@@ -6589,6 +6590,11 @@ export class QueueProcessor {
         // History owns one response lifecycle for every admitted dispatch.
         // Action-successor custody may still accept/reject the terminal commit,
         // but it must not create a second, terminal-only presentation protocol.
+        await persistStreamedInteractiveBlock(
+          messageStore,
+          visibleMessage,
+          typeof msg.catId === 'string' ? lifecycleResponseMessageIdByCat.get(msg.catId) : undefined,
+        );
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.

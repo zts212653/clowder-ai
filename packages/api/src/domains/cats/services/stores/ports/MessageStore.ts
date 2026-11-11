@@ -46,6 +46,7 @@ import {
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  preserveInteractiveBlockStates,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
@@ -1665,6 +1666,12 @@ export function lifecycleResponseTerminalPatchFromAppendInput(
   const publicInputIds = new Set(current.lifecycle?.kind === 'response' ? current.lifecycle.inputMessageIds : []);
   const responseReplyTo = [message.replyTo, current.replyTo].find((id) => id && publicInputIds.has(id));
   const extra = { ...current.extra, ...message.extra };
+  if (extra.rich && current.extra?.rich) {
+    extra.rich = {
+      ...extra.rich,
+      blocks: preserveInteractiveBlockStates(extra.rich.blocks, current.extra.rich.blocks),
+    };
+  }
   // Stop may close the route before its buffered Runner cancellation reaches the writer.
   // The canonical response terminal still settles the same persisted startup projection.
   if (

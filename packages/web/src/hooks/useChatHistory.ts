@@ -3,6 +3,7 @@
 import {
   type CliDiagnostics,
   mergeCodexStartupRecovery,
+  preserveInteractiveBlockStates,
   type ReplyPreview,
   timelineMessageKind,
 } from '@cat-cafe/shared';
@@ -423,7 +424,7 @@ function mergeRichPayload(
     seen.add(block.id);
     blocks.push(block);
   }
-  return { v: 1 as const, blocks };
+  return { v: 1 as const, blocks: preserveInteractiveBlockStates(blocks, fallback?.blocks ?? []) };
 }
 
 type RequiredMessageExtraFields = {
