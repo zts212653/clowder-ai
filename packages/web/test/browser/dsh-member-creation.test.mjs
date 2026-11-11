@@ -28,6 +28,7 @@ for (const width of [1024, 390])
       acp: { command: '/desktop/dsh.cmd', startupArgs: ['--profile', 'acp'] },
     };
     try {
+      await page.route('**/api/agent-providers', (route) => route.fulfill({ json: { libraries: [] } }));
       await page.route('**/api/cats/native-runtimes*', (route) =>
         route.fulfill({
           json: {
@@ -77,9 +78,17 @@ for (const width of [1024, 390])
         const payload = route.request().postDataJSON();
         order.push('saved');
         assert.deepEqual(payload.env, { DSH_HOME: '/private/home' });
+        assert.ok(!payload.accountRef, 'native Desktop creation must not reuse another member account');
+        assert.equal(payload.configurationSource, 'native_tool');
         assert.equal(payload.defaultModel, '["custom","chosen"]');
         assert.deepEqual(payload.acp.startupArgs, ['--profile', 'acp', '--patch', '/private/member.yml']);
-        const cat = { ...state.cats[0], ...payload, id: payload.catId, configurationRevision: 'saved' };
+        const cat = {
+          ...state.cats[0],
+          accountRef: undefined,
+          ...payload,
+          id: payload.catId,
+          configurationRevision: 'saved',
+        };
         state.cats.push(cat);
         return route.fulfill({ status: 201, json: { cat } });
       });
@@ -121,7 +130,16 @@ for (const width of [1024, 390])
       await editor.getByRole('button', { name: '添加伙伴', exact: true }).click();
       await checking;
       await editor.getByRole('button', { name: '已保存，正在检查…', exact: true }).waitFor();
+      assert.equal(
+        await editor.getByTestId('member-save-bar').getByText('准备好就可以添加伙伴', { exact: true }).count(),
+        0,
+        'the saved member must not still be described as waiting to be added',
+      );
+      await editor.getByTestId('member-save-bar').getByText('成员已添加，正在检查连接', { exact: true }).waitFor();
       assert.equal(state.cats.at(-1).env.DSH_HOME, '/private/home');
+      assert.ok(!state.cats.at(-1).accountRef);
+      assert.equal(state.cats.at(-1).configurationSource, 'native_tool');
+      if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-checking-${width}.png`) });
       finishCheck();
       await editor.waitFor({ state: 'detached' });
       await page.getByText(width === 390 ? '原因尚不明确' : '模型拒绝了工具参数定义', { exact: false }).waitFor();
@@ -130,7 +148,10 @@ for (const width of [1024, 390])
       assert.equal(order.filter((step) => step === 'saved').length, 1);
       assert.equal(order.filter((step) => step === 'checked').length, 1);
       if (width === 1024) assert.ok(discoveryReads >= 2, 'saving refreshes an initially empty Desktop discovery');
-      if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-added-check-failed-${width}.png`) });
+      if (screenshots) {
+        await page.waitForTimeout(400); // Capture the settled toast, not its entrance transition.
+        await page.screenshot({ path: path.join(screenshots, `dsh-added-check-failed-${width}.png`) });
+      }
     } finally {
       finishCheck();
       await context.close();
