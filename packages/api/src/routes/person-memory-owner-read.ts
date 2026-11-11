@@ -16,6 +16,7 @@ import {
 import type { PersonMemoryStore } from '../domains/memory/people/PersonMemoryStore.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
+import { registerPersonMemoryProposalForgetRoutes } from './person-memory-proposal-forget-routes.js';
 
 const listQuerySchema = z
   .object({
@@ -119,6 +120,8 @@ export const personMemoryOwnerReadRoutes: FastifyPluginAsync<PersonMemoryOwnerRe
     if (sessionUserId !== deps.ownerUserId) return reply.code(403).send({ error: 'Owner required' });
   });
 
+  registerPersonMemoryProposalForgetRoutes(app, deps);
+
   app.get('/api/memory/people', async (request, reply) => {
     if (!service) return reply.code(503).send(unavailableList());
     const query = listQuerySchema.safeParse(request.query);
@@ -139,7 +142,13 @@ export const personMemoryOwnerReadRoutes: FastifyPluginAsync<PersonMemoryOwnerRe
     const params = personParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: 'not_available' });
     try {
-      const result = await service.readDetail(deps.ownerUserId, params.data.personId);
+      const query = z
+        .object({ deliveryRevision: ownerActionRevisionSchema.optional() })
+        .strict()
+        .safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: 'invalid_request' });
+      const result = await service.readDetail(deps.ownerUserId, params.data.personId, query.data.deliveryRevision);
+      if (result.status === 'version_changed') return reply.code(409).send({ error: 'Revision changed' });
       if (result.status === 'not_available') return reply.code(404).send({ error: 'not_available' });
       return result.detail;
     } catch (error) {

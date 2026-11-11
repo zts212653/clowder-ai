@@ -23,6 +23,7 @@ async function fixture(t, ready = true) {
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
   const vectors = new VectorStore(db, 4);
+  vectors.initMeta({ modelId: 'controlled', modelRev: '1', dim: 4 });
   const passages = new PassageVectorStore(db, 4);
   let embeddings = 0;
   store.setEmbedDeps({
@@ -258,4 +259,17 @@ test('retired worker cannot reset the original deadline to obtain a lexical resu
   );
   assert.equal(sent(), 1);
   assert.equal(f.embeddingCount(), 1);
+});
+
+test('an unknown legacy vector identity stays lexical in the real worker without reaching query RPC', async (t) => {
+  const f = await fixture(t);
+  f.db.prepare("DELETE FROM embedding_meta WHERE key IN ('embedding_model_id','embedding_dim')").run();
+  const result = await f.store.searchWithMeta('needle', { mode: 'hybrid', scope: 'docs', limit: 1 });
+  assert.equal(result.meta.effectiveMode, 'lexical');
+  assert.equal(result.meta.degraded, true);
+  assert.deepEqual(
+    result.items.map((x) => x.anchor),
+    ['beta-doc'],
+  );
+  assert.equal(f.embeddingCount(), 0);
 });

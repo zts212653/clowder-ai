@@ -36,6 +36,7 @@ export function MemoryPersonClaim({
   submit: (input: PersonOwnerCommand) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [sourceState, setSourceState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [retiring, setRetiring] = useState(false);
   const payload = claim.payload;
   const [draft, setDraft] = useState(editableText(payload));
@@ -55,18 +56,26 @@ export function MemoryPersonClaim({
     <article className="space-y-3 rounded-lg bg-cafe-surface-sunken p-4">
       <p className="whitespace-pre-wrap break-words text-sm">{personClaimText(payload)}</p>
       <p className="text-xs text-cafe-muted">
-        {claim.status === 'current' ? '当前判断' : '历史判断'} · {formatMemoryDate(claim.recordedAt)}
+        {payload.kind === 'reported_fact'
+          ? '你说的事实'
+          : payload.kind === 'user_assessment'
+            ? `你的看法 · ${{ endorsed: '认同', rejected: '不认同', uncertain: '拿不准' }[payload.stance]}`
+            : '已忘掉'}{' '}
+        · {claim.status === 'current' ? '当前判断' : '历史判断'} · {formatMemoryDate(claim.recordedAt)}
       </p>
-      <MemoryPersonSource personId={personId} kind="claim" itemId={claim.claimId} />
+      <MemoryPersonSource personId={personId} kind="claim" itemId={claim.claimId} onReadState={setSourceState} />
       {claim.status === 'current' && payload.kind !== 'redacted' && (
         <div className="flex gap-3 text-compact text-cafe-accent">
-          <button type="button" disabled={busy} onClick={() => setEditing(!editing)}>
-            修改判断
+          <button type="button" disabled={busy || sourceState !== 'ready'} onClick={() => setEditing(!editing)}>
+            编辑
           </button>
           <button type="button" disabled={busy} onClick={() => setRetiring(!retiring)}>
             不再成立
           </button>
         </div>
+      )}
+      {sourceState === 'unavailable' && (
+        <p className="text-xs text-cafe-muted">来源读不到，暂时不能编辑。可以重读来源，或者不再使用、忘掉这条。</p>
       )}
       {editing && (
         <form
@@ -115,13 +124,18 @@ export function MemoryPersonClaim({
               </select>
             </label>
           )}
+          <p className="text-xs text-cafe-muted">改的是这条记忆，原对话里的消息不会改。</p>
           {error && (
             <p role="alert" className="text-compact">
               {error}
             </p>
           )}
-          <button type="submit" disabled={busy} className="text-compact text-cafe-accent underline">
-            保存修改
+          <button
+            type="submit"
+            disabled={busy || sourceState !== 'ready'}
+            className="text-compact text-cafe-accent underline"
+          >
+            保存
           </button>
         </form>
       )}

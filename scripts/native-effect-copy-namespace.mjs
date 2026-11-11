@@ -2,7 +2,8 @@ import { executedInvocations } from './lib/shell-invocation.mjs';
 import { isExactNonRecursiveCopy } from './native-effect-media-classifier.mjs';
 import { segmentCommandText } from './native-effect-segment-locations.mjs';
 import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
-import { isShellBinding } from './native-effect-shell-expansion.mjs';
+import { isLocalProgramBinding, isShellBinding } from './native-effect-shell-expansion.mjs';
+import { shellInvocation } from './native-effect-shell-tokenizer.mjs';
 
 // These programs may create, truncate, or remove ordinary nodes, but cannot
 // create a symlink/hard link or move an existing alias onto a later target.
@@ -29,6 +30,18 @@ export function copyNamespaceStability(units, initial = true) {
   });
 }
 
+/** Filesystem topology and command environment are separate observations. */
+export function programNamespaceStability(units, initial = true) {
+  let stable = initial;
+  return units.map(({ segment }) => {
+    const before = stable;
+    stable &&= isShellBinding(segment)
+      ? isLocalProgramBinding(segment)
+      : !segment.trim() || (classifyShellSegment(segment) === 'read' && segmentPreservesCopyNamespace(segment));
+    return before;
+  });
+}
+
 /** Fold every executed segment, including a substitution body, into one stability fact. */
 export function shellTextPreservesCopyNamespace(raw) {
   const parts = splitShellExecutionSegmentsWithSeparators(raw);
@@ -38,7 +51,10 @@ export function shellTextPreservesCopyNamespace(raw) {
 
 export function segmentPreservesCopyNamespace(segment) {
   if (!segment.trim()) return true;
-  if (isShellBinding(segment)) return false;
+  if (isShellBinding(segment)) {
+    const parsed = shellInvocation(segment);
+    return parsed.complete && !parsed.redirections.length && parsed.words.every((word) => word.literal);
+  }
   const reader = executedInvocations(segment);
   if (!reader.complete || reader.unresolvedEvidence?.length) return false;
   const calls = reader.pipelines.flat();

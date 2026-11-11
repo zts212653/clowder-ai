@@ -73,7 +73,7 @@ export function MemoryTasteCard({
         )}
         <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-cafe-muted">
           {entry.recall === null ? (
-            <span>暂时读不到被想起记录</span>
+            <span>暂时读不到使用记录</span>
           ) : (
             <>
               {entry.recall.namedDelivery && entry.recall.namedDelivery.counts.presented > 0 && (

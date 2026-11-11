@@ -127,7 +127,7 @@ function cardTokenEstimate(card: Omit<RelationshipCard, 'estimatedTokens'>): num
   );
 }
 
-function boundedRelationshipCard(input: {
+export function boundedRelationshipCard(input: {
   personId: RelationshipCard['personId'];
   displayName: string;
   relationship: PersonRelationship;

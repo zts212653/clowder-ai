@@ -16,11 +16,10 @@ import {
 } from './memory-process-protocol.js';
 import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import { describePassageVectorRead } from './native-vector-read-context.js';
-import { PassageVectorStore } from './PassageVectorStore.js';
+import { openVectorGeneration } from './open-vector-generation.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
 import { repackPassageVectorDatabase } from './repack-passage-vectors.js';
 import { lookupShadowRanking, SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { VectorStore } from './VectorStore.js';
 
 let rpcSequence = 0;
 const pending = new Map<number, { resolve(value: Extract<ParentMessage, { type: 'embedding-result' }>): void }>();
@@ -76,7 +75,7 @@ async function execute(
   }
   if (job.kind === 'vector-repack') {
     started();
-    return repackPassageVectorDatabase(job.dbPath);
+    return repackPassageVectorDatabase(job.dbPath, job.generationId);
   }
   const readJob = job.kind === 'message-search';
   if (readJob) report({ phase: 'database-initialization' });
@@ -111,14 +110,21 @@ async function execute(
         for (const key of Object.keys(process.env))
           if (key.startsWith('F163_') || key.startsWith('F200_')) delete process.env[key];
         Object.assign(process.env, job.flags);
-        if (job.embedding) {
-          const dim = job.embedding.model.dim;
-          store.setEmbedDeps({
-            embedding: embeddingProxy(job.embedding),
-            mode: job.embedding.mode,
-            vectorStore: new VectorStore(db, dim),
-            ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim, readVectorQuery) } : {}),
-          });
+        if (job.embedding?.ready && job.options?.mode !== 'lexical') {
+          try {
+            const backend = openVectorGeneration(db, job.embedding.model, {
+              readQuery: readVectorQuery,
+              passages: job.embedding.passages,
+            });
+            store.setEmbedDeps({
+              embedding: embeddingProxy(job.embedding),
+              mode: job.embedding.mode,
+              vectorStore: backend.vectorStore,
+              ...(job.embedding.passages ? { passageVectorStore: backend.passageVectorStore } : {}),
+            });
+          } catch {
+            // An absent, unknown or retired accelerator cannot suppress the canonical lexical read.
+          }
         }
         if (job.kind === 'message-search')
           return await store.searchMessagePassages(job.query, {

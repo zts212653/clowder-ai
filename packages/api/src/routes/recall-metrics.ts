@@ -27,6 +27,7 @@ export interface RecallMetricsRoutesOptions {
   /** Optional: pass messageStore + taskStore to enable AC-D2.1/D2.2/D2.3 auto-detection. */
   messageStore?: SignalMessageStore & RecallReplyMessageStore;
   personMemoryStore?: RecallSourceReaders['personMemoryStore'];
+  personDeliveryReader?: RecallSourceReaders['personDeliveryReader'];
   cueSourceReader?: RecallSourceReaders['cueSourceReader'];
   profileMemoryStore?: RecallSourceReaders['profileMemoryStore'];
   tasteSources?: RecallSourceReaders['tasteSources'];

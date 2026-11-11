@@ -16,6 +16,7 @@ export function MemoryPersonInteraction({
   submit: (command: PersonOwnerCommand) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [sourceState, setSourceState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [headline, setHeadline] = useState(item.headline);
   const [topic, setTopic] = useState(item.importanceOrTopic ?? '');
   const [notes, setNotes] = useState(item.uncertaintyNotes?.join('\n') ?? '');
@@ -49,7 +50,10 @@ export function MemoryPersonInteraction({
     <article className="space-y-3 rounded-lg bg-cafe-surface-sunken p-4">
       <p className="whitespace-pre-wrap break-words text-sm">{item.headline}</p>
       <p className="text-xs text-cafe-muted">
-        记录于 {formatMemoryDate(item.recordedAt)} · {item.status === 'active' ? '当前记录' : '历史记录'}
+        {{ conversation: '对话', meeting: '见面', message: '消息', milestone: '重要时刻', other: '其他' }[
+          item.eventKind
+        ] || '类型没有记录下来'}{' '}
+        · 记录于 {formatMemoryDate(item.recordedAt)} · {item.status === 'active' ? '当前记录' : '历史记录'}
       </p>
       {item.importanceOrTopic && <p className="text-compact">{item.importanceOrTopic}</p>}
       {item.uncertaintyNotes?.map((note) => (
@@ -57,16 +61,19 @@ export function MemoryPersonInteraction({
           还不确定：{note}
         </p>
       ))}
-      <MemoryPersonSource personId={personId} kind="event" itemId={item.eventId} />
+      <MemoryPersonSource personId={personId} kind="event" itemId={item.eventId} onReadState={setSourceState} />
       {item.status === 'active' && (
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || sourceState !== 'ready'}
           onClick={() => setEditing(!editing)}
           className="text-compact text-cafe-accent underline"
         >
-          修改经历
+          编辑
         </button>
+      )}
+      {sourceState === 'unavailable' && (
+        <p className="text-xs text-cafe-muted">来源读不到，暂时不能编辑。可以重读来源，或者不再使用、忘掉这条。</p>
       )}
       {editing && (
         <form
@@ -107,10 +114,10 @@ export function MemoryPersonInteraction({
               onChange={(event) => setNotes(event.target.value)}
             />
           </label>
-          <p className="text-xs text-cafe-muted">原记录的日期和时长保持原样，不推测缺失日期。</p>
+          <p className="text-xs text-cafe-muted">改的是这条记忆，原对话里的消息不会改。</p>
           {error && <p role="alert">{error}</p>}
-          <button type="submit" disabled={busy} className="text-cafe-accent underline">
-            保存经历
+          <button type="submit" disabled={busy || sourceState !== 'ready'} className="text-cafe-accent underline">
+            保存
           </button>
         </form>
       )}

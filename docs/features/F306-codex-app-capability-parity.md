@@ -70,6 +70,12 @@ operator experience：
 
 ## Current State / 现状基线
 
+### 非 D native guard 误拦修复（2026-11-09）
+
+PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）已合入：普通 `cp` 从 runtime 向外导出、Git fetch 的引用方向、环境变量与程序路径、受管 `gh`、SQLite/HTTP/日志输出及 help/status 的目标归属得到修正；拒绝账本补充脱敏 cwd、触发子句与截断标记。保护目标、敏感程序环境、未知执行和 owner 依赖的停机边界继续拒绝。
+
+**加载与续办**：`main=landed`，生产实际加载及原消费者恢复尚待核验。原 Task3168 已登记 runtime 部署等待 g11，条件为包含上述合入提交且 API ready；匹配后由原线程核对实际两 provider hook、打包字节与正负例。旧 executionRef 保留，不以记账 blocked 停止已授权工作。D/PR6263/OpenCode 继续暂停；本 PR 不关闭 F306、Task3168 或独立的 Git 保护 Task559。
+
 ### Codex root/subexecution isolation（2026-09-14）
 
 operator source `[thread-id]#private-source-id` 要求家里区分 Codex root agent 与 subagent；用户可见反例为 `[thread-id]#private-source-id`。原始 provider archive 证明 child `turn/completed` 曾提前关闭 root `TurnExecution`，使后续 root callback 返回 `401 reason=completed`；child commentary/final 被拼进 root 正文，而约 97 秒后到达的真实 root final 没有持久化。

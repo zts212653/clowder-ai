@@ -48,6 +48,10 @@ export class TasteMemoryLifecycleStore {
     return row.status;
   }
 
+  sourceDisposition(ownerUserId: string, sourcePath: string) {
+    return this.readLifecycle(ownerUserId, sourcePath)?.status ?? null;
+  }
+
   isReadable(ownerUserId: string, sourcePath: string, revision: string, includeRetired = false): boolean {
     const status = this.lifecycleStatus(ownerUserId, sourcePath, revision, 'active');
     return status === 'active' || (includeRetired && status === 'retired');

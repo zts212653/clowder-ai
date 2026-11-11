@@ -1,6 +1,9 @@
+import { embedCurrentDocuments } from './embed-current-documents.js';
 import type { EvidenceItem, IEmbeddingService } from './interfaces.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
+import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import type { VectorStore } from './VectorStore.js';
+import type { VectorSourceSnapshot } from './vector-source-binding.js';
 
 // Background indexing uses the existing small warmup batch, not the transport's
 // 64-input maximum. Long document summaries also share the unchanged 3s deadline.
@@ -12,9 +15,14 @@ export interface EmbedPipelineContext {
   vectorStore: VectorStore;
   allDocsProvider?: () => EvidenceItem[];
   onVectorReset?: () => void;
+  sourceStore?: SqliteEvidenceStore;
 }
 
 export async function embedIndexedItems(ctx: EmbedPipelineContext): Promise<void> {
+  if (ctx.sourceStore) {
+    await embedCurrentDocuments(ctx.sourceStore, ctx, new Set(), () => ctx.embedding.isReady());
+    return;
+  }
   if (ctx.items.length === 0) return;
   await ctx.embedding.reprobeIfNeeded();
   if (!ctx.embedding.isReady()) return;
@@ -46,6 +54,7 @@ export interface PassageEmbeddingRow {
   docAnchor: string;
   passageId: string;
   content: string;
+  sourceSnapshot?: VectorSourceSnapshot;
 }
 
 export interface PassageEmbedPipelineContext {

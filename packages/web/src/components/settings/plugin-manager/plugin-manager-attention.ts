@@ -60,10 +60,7 @@ export function pluginBlockedEnableReason(
 ) {
   if (plugin.actions?.blockingReasons.includes('package-incompatible'))
     return presentation === 'v2' ? pluginIncompatibleHint(plugin, locale) : pluginManagerText(locale).incompatibleHint;
-  if (plugin.id !== 'official.chatgpt-dot') return '请先完成右侧配置或连接，再启用。';
-  return plugin.auth === 'connected'
-    ? '还在等待 dot 读原文并回帖；两处都完成后才能开启。'
-    : '请先完成订阅和两处往返验证，再启用 dot。';
+  return '请先完成右侧配置或连接，再启用。';
 }
 
 /** Classify current state, not a historical diagnostic or an absent candidate's default config. */

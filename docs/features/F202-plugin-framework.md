@@ -386,9 +386,9 @@ remaining framework development is Dot migration and C2. Runtime restarts remain
 ## Follow-up direction: addressable plugins and Dot (2026-10-18)
 
 Dot migration remains assigned to `@mindfn` in the maintainer follow-up workstream. Completion of C1
-intake and the initial package publication does not complete the Dot migration; Dot is still built in.
+intake and the initial package publication does not complete the Dot migration. The separate Dot delivery is tracked by [clowder-ai#1923](https://github.com/zts212653/clowder-ai/pull/1923), [plugins#209](https://github.com/zts212653/clowder-ai-plugins/pull/209), and home Intake [#6924](https://github.com/zts212653/clowder-ai/issues/6924).
 
-Deferred direction; not implemented in C1. It spans target resolution, dispatch, UI and Dot's external
+Accepted follow-up direction, separate from C1. It spans target resolution, dispatch, UI and Dot's external
 connection. The intended behavior and remaining implementation are:
 
 - Use the existing stable plugin instance identity as a message target, independently of its
@@ -442,6 +442,39 @@ and send inbound messages via `messaging.send`. Host subscription behavior lives
 `packages/api/src/domains/plugin/host-surface/plugin-messaging-subscription-host.ts` and
 `packages/api/src/domains/messaging/subscription-delivery.ts`. This is not an implicit declaration
 of addressability and must not be changed into a global subscription for the Dot migration.
+
+## Dot migration intake (2026-11-10)
+
+The paired public changes merged as Host `0d04ce8f24a5` and plugin `717a417690bd`; the
+bundled Dot is `0.2.0-alpha.52`. The public SDK and contract publication completed, with
+consumer download, npm registry signatures and provenance attestations verified. Dot itself is a
+private bundled package. The author confirmed a final-version real connection and ordinary reply
+in [public issue #1932](https://github.com/zts212653/clowder-ai/issues/1932#issuecomment-6768560336).
+operator waived this pair's seven-day calendar wait after that confirmation; the actual pre-merge
+soak remains `MISSED`, not a seven-day PASS.
+
+This home candidate moves addressed delivery, queue handoff, Settings actions and new replies
+through the ordinary plugin mechanisms. Its migration is owner-checked, idempotent and
+non-destructive. Compatibility is confined to the original installation and package lineage:
+revoked credentials cannot be adopted, replacement installations cannot rebind the old source,
+and the legacy original-image URL is a visibility-checked read-only reader. New plugin state is
+not dual-written into retired Host Dot stores; disable/uninstall never revives built-in execution.
+See [the public compatibility contract](../architecture/dot-migration-compatibility.md).
+
+Home queue hydration, routing-context preflight, memory owner reads, history cursors, branding
+and the prepared-build/shared-MCP commands remain home-owned. API migration and media
+checks, ordinary shared-MCP consumers, package-driven Settings desktop/mobile journeys and
+the addressed-plugin browser journey provide the candidate's validation. The addressed journey
+adds one F202 browser unit (14.89 seconds execution in the author run); the existing F247 Settings
+unit is retained and updated (20.54 seconds for desktop/mobile). Their positive import census
+preserves existing consumers and leaves unknown browser inputs unverified.
+
+The F327 music installation fixture is a known baseline RED: its parent-thread fetch mock predates
+an already-merged execution Worker and cannot intercept the provider request there. Clean base
+`81ef1973` and this candidate fail at the same OAuth assertion with identical fixture and package
+bytes. This does not certify music, other Dot deltas or a production migration. This intake neither
+closes the whole F202 feature nor reopens Task 778, and does not install, enable or restart the
+owner's live runtime.
 
 ## Agent Tool Admission
 
