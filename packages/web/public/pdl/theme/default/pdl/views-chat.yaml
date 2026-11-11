@@ -2235,7 +2235,7 @@ views:
                 label: t:chatPage.nextHit
                 act: findStep
                 args: {v: "1"}
-              - {type: button, label: t:chatPage.backToPrev, act: findBack}
+              - {type: button, iconOnly: true, icon: back, label: t:chatPage.backToPrev, act: findBack}
               - type: button
                 iconOnly: true
                 icon: close
