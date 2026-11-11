@@ -222,8 +222,9 @@ for (const width of [1920, 1024, 390])
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-checking-${width}.png`) });
       finishCheck();
       await editor.waitFor({ state: 'detached' });
-      await page.getByText(width === 390 ? '原因尚不明确' : '模型拒绝了工具参数定义', { exact: false }).waitFor();
-      await page.getByText('成员与配置已保留', { exact: false }).waitFor();
+      await page.getByText(width === 390 ? '原因尚不明确' : '工具配置被模型拒绝', { exact: false }).waitFor();
+      await page.getByText('小鲸鱼已添加', { exact: true }).waitFor();
+      assert.equal(await page.getByText('成员与配置已保留', { exact: false }).count(), 0);
       assert.equal(order.filter((step) => step === 'prepare').length, 1);
       assert.equal(order.filter((step) => step === 'saved').length, 1);
       assert.equal(order.filter((step) => step === 'checked').length, 1);
