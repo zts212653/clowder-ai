@@ -94,6 +94,13 @@ export function logPluginStartFailure(report: PluginStartFailureReport): void {
   log.error({ ...report }, 'plugin runtime failed to start');
 }
 
+export function logPluginStopFailure(pluginInstanceId: string, reason: string, error: unknown): void {
+  log.error(
+    { pluginInstanceId, reason, error: safeErrorProjection(error, HOST_RECOGNITION) },
+    'plugin runtime failed to stop',
+  );
+}
+
 /** Records a runtime start failure without retaining plugin-provided text. */
 export function startFailureRecord(occurredAt: number): {
   readonly record: PluginRuntimeErrorRecord;

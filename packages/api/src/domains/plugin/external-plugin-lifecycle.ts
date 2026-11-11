@@ -1,6 +1,7 @@
 import { hasRetainedDesktopLoss } from './desktop-window-runtime/desktop-loss.js';
 import {
   logPluginStartFailure,
+  logPluginStopFailure,
   type PluginStartPhase,
   pluginStartFailureReport,
   startFailureRecord,
@@ -475,7 +476,8 @@ export class ExternalPluginLifecycleService {
   private async stopOrFail(instanceId: string, revision: number, reason: string): Promise<void> {
     try {
       await this.options.supervisor.stop(instanceId, reason);
-    } catch {
+    } catch (error) {
+      logPluginStopFailure(instanceId, reason, error);
       await this.advance(instanceId, revision, { activationState: 'error' });
       throw new PluginLifecycleError('STOP_FAILED', 'official plugin runtime failed to stop');
     }
