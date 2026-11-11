@@ -1,5 +1,5 @@
 'use client';
-import type { DshConnectionCheckView, MemberVisualAssets } from '@cat-cafe/shared';
+import type { MemberVisualAssets } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { isDshMember, useMemberModelCatalogs } from '@/lib/member-model-display';
@@ -17,11 +17,6 @@ import {
   toStrategyForm,
 } from '../../hub-cat-editor.model';
 import type { CatStrategyEntry } from '../../hub-strategy-types';
-import {
-  checkSavedDshMember,
-  dshConnectionCheckMessage,
-  showDshConnectionCheckResult,
-} from './dsh-connection-check-client';
 import { commitMemberAvatar } from './member-avatar-draft';
 import {
   changedFields,
@@ -34,7 +29,6 @@ import {
 import { matchesRuntime, patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
 import { readMemberResponse as readResponse, saveMemberExtras } from './member-save-extras';
 import { saveMemberRecord } from './member-save-record';
-import { needsDshPreparation } from './prepare-native-member';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
 
 export function useMemberEditor(
@@ -43,7 +37,6 @@ export function useMemberEditor(
   onSaved: (cat: CatData, trace?: MemberSaveTrace) => Promise<void>,
   onBeforeCreate?: () => Promise<void>,
 ) {
-  const [connectionCheck, setConnectionCheck] = useState<DshConnectionCheckView>();
   const [draft, setDraft] = useState<MemberDraft>({
     version: 1,
     form: initialState(cat),
@@ -286,14 +279,6 @@ export function useMemberEditor(
       persistMemberDraft(storageKey.current, null);
       setDraft({ ...next, strategyBaseline: next.strategy });
       setNotice('已保存。正在运行的回合不变，后续调用使用新设置。');
-      if (!snapshot.pendingWrite && needsDshPreparation(form, baseline)) {
-        setConnectionCheck({ state: 'checking' });
-        setNotice('成员已保存，正在检查连接…');
-        const result = await trace.phase('member.check', () => checkSavedDshMember(member));
-        setConnectionCheck(result);
-        setNotice(dshConnectionCheckMessage(result));
-        showDshConnectionCheckResult(member.displayName, result, baseline ? 'saved' : 'added');
-      }
       await trace
         .phase('refresh', () => onSaved(member, trace))
         .catch(() => setNotice('配置已保存，成员列表刷新失败，请重新打开列表。'));
@@ -314,7 +299,6 @@ export function useMemberEditor(
     templates,
     ready,
     saving,
-    connectionCheck,
     error,
     notice,
     storageWarning,

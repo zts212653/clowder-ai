@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { scene, screenshots } from './f322-members-fixture.mjs';
 
 for (const width of [1920, 1024, 390])
-  test(`DSH has one entry and adds with automatic preparation and a retained failed check (${width}px)`, async () => {
+  test(`DSH has one entry and adds with automatic preparation without a model probe (${width}px)`, async () => {
     const { context, page, state } = await scene(width, false, false, false, { deviceScaleFactor: 2 });
     const alternateLabel = 'Other model with a long provider-specific name and a retained explicit route';
     const expectedModel = width === 1920 ? 'other' : 'chosen';
@@ -12,14 +12,6 @@ for (const width of [1920, 1024, 390])
     const errors = [];
     let discoveryReads = 0;
     page.on('pageerror', (error) => errors.push(error.message));
-    let finishCheck;
-    const release = new Promise((resolve) => {
-      finishCheck = resolve;
-    });
-    let began;
-    const checking = new Promise((resolve) => {
-      began = resolve;
-    });
     let beginInspection;
     const inspecting = new Promise((resolve) => {
       beginInspection = resolve;
@@ -126,16 +118,7 @@ for (const width of [1920, 1024, 390])
       await page.route('**/api/cats/*/connection-check', async (route) => {
         if (route.request().method() === 'GET') return route.fulfill({ json: { state: 'unchecked' } });
         order.push('checked');
-        assert.ok(order.indexOf('saved') < order.indexOf('checked'));
-        assert.equal(state.cats.at(-1).defaultModel, JSON.stringify(['custom', expectedModel]));
-        began();
-        await release;
-        return route.fulfill({
-          json:
-            width === 390
-              ? { state: 'unknown', reasonCode: 'check_result_unknown' }
-              : { state: 'failed', reasonCode: 'tool_schema_rejected' },
-        });
+        return route.fulfill({ json: { state: 'unknown', reasonCode: 'check_result_unknown' } });
       });
       await page.getByRole('button', { name: '添加成员', exact: true }).click();
       const editor = page.getByTestId('member-settings-page');
@@ -182,13 +165,8 @@ for (const width of [1920, 1024, 390])
         await page.setViewportSize({ width, height: 900 });
       }
       await picker.scrollIntoViewIfNeeded();
-      const fee = editor.getByTestId('member-save-bar').getByText('费用取决于模型和工具定义规模', { exact: false });
-      await fee.waitFor();
-      const feeRect = await fee.boundingBox();
-      assert.ok(
-        feeRect && feeRect.y >= 0 && feeRect.y + feeRect.height <= page.viewportSize().height,
-        'fee disclosure is visible beside the primary action',
-      );
+      assert.equal(await editor.getByText('保存后自动检查连接', { exact: false }).count(), 0);
+      await editor.getByRole('button', { name: '添加伙伴', exact: true }).scrollIntoViewIfNeeded();
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-add-ready-${width}.png`) });
       if (width === 390) await inspecting;
       const freshDiscovery =
@@ -202,40 +180,22 @@ for (const width of [1920, 1024, 390])
         assert.equal(inspectionRequests, 1, 'save must reuse the unfinished panel inspection');
         finishInspection();
       }
-      await checking;
-      await editor.getByRole('button', { name: '已保存，正在检查…', exact: true }).waitFor();
-      assert.match(
-        await picker.locator('option:checked').innerText(),
-        /DSH.*已安装/,
-        'the saved Desktop must use the discovery confirmed during preparation',
-      );
-      await model.getByText(width === 1920 ? alternateLabel : 'Chosen model', { exact: false }).waitFor();
-      assert.equal(
-        await editor.getByTestId('member-save-bar').getByText('准备好就可以添加伙伴', { exact: true }).count(),
-        0,
-        'the saved member must not still be described as waiting to be added',
-      );
-      await editor.getByTestId('member-save-bar').getByText('成员已添加，正在检查连接', { exact: true }).waitFor();
+      await editor.waitFor({ state: 'detached' });
       assert.equal(state.cats.at(-1).env.DSH_HOME, '/private/home');
       assert.ok(!state.cats.at(-1).accountRef);
       assert.equal(state.cats.at(-1).configurationSource, 'native_tool');
-      if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-checking-${width}.png`) });
-      finishCheck();
-      await editor.waitFor({ state: 'detached' });
-      await page.getByText(width === 390 ? '原因尚不明确' : '工具配置被模型拒绝', { exact: false }).waitFor();
-      await page.getByText('小鲸鱼已添加', { exact: true }).waitFor();
+      assert.equal(await page.getByText('原因尚不明确', { exact: false }).count(), 0);
+      assert.equal(await page.getByText('工具配置被模型拒绝', { exact: false }).count(), 0);
       assert.equal(await page.getByText('成员与配置已保留', { exact: false }).count(), 0);
       assert.equal(order.filter((step) => step === 'prepare').length, 1);
       assert.equal(order.filter((step) => step === 'saved').length, 1);
-      assert.equal(order.filter((step) => step === 'checked').length, 1);
+      assert.equal(order.filter((step) => step === 'checked').length, 0);
       if (width === 1024) assert.ok(discoveryReads >= 2, 'saving refreshes an initially empty Desktop discovery');
       if (screenshots) {
-        await page.waitForTimeout(400); // Capture the settled toast, not its entrance transition.
-        await page.screenshot({ path: path.join(screenshots, `dsh-added-check-failed-${width}.png`) });
+        await page.screenshot({ path: path.join(screenshots, `dsh-added-without-probe-${width}.png`) });
       }
     } finally {
       finishInspection();
-      finishCheck();
       await context.close();
     }
   });

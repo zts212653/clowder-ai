@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import { NativeGoalStep } from './first-run-quest/NativeGoalStep';
 import { NativePartnerCard } from './first-run-quest/NativePartnerCard';
 import { useNativeOnboarding } from './first-run-quest/useNativeOnboarding';
-import { DSH_CHECK_FEE_MESSAGE } from './settings/members/dsh-connection-check-client';
 
 interface FirstRunQuestWizardProps {
   open: boolean;
@@ -172,9 +171,6 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           )}
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--console-border-soft)] px-6 py-4">
-          {selected.some(
-            (partner) => partner.runtime.dshDesktop && !partner.existingId && !draft?.created[partner.id],
-          ) && <p className="w-full text-sm text-cafe-secondary">{DSH_CHECK_FEE_MESSAGE[0]}</p>}
           <button
             type="button"
             disabled={Boolean(busy)}

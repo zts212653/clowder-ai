@@ -160,6 +160,7 @@ it('preselects native clients, automatically prepares DSH and creates the comple
   expect(created).toHaveBeenCalledOnce();
   expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/test'))).toBe(false);
   expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path.endsWith('/prepare'))).toHaveLength(1);
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/connection-check'))).toBe(false);
 });
 
 it('shows installation help and blocks creation when no supported tools are found', async () => {

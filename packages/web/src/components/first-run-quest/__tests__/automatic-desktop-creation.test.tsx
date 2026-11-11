@@ -10,7 +10,7 @@ vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ refresh: vi.fn() }) 
 it.each([
   'goal',
   'members',
-] as const)('prepares, durably saves, checks, then navigates in %s mode; reopening never bills again', async (mode) => {
+] as const)('prepares and durably saves without a synthetic model request in %s mode; reopening never bills', async (mode) => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   localStorage.clear();
   useToastStore.setState({ toasts: [] });
@@ -32,11 +32,6 @@ it.each([
     acp: { command: '/desktop/dsh.cmd', startupArgs: ['--profile', 'acp'] },
   };
   const writes: Record<string, unknown>[] = [];
-  let finish!: (response: Response) => void;
-  let entered!: () => void;
-  const checking = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/session') return Response.json({ userId: 'owner' });
     if (path.startsWith('/api/cats/native-runtimes')) return Response.json({ runtimes: [runtime] });
@@ -77,10 +72,7 @@ it.each([
         JSON.parse(localStorage.getItem(localStorage.key(index)!)!),
       ).find((value) => value.created);
       expect(Object.keys(stored.created)).toHaveLength(1);
-      entered();
-      return new Promise<Response>((resolve) => {
-        finish = resolve;
-      });
+      return new Promise<Response>(() => {});
     }
     if (path === '/api/threads') return Response.json({ id: 'thread' });
     throw Error(`Unexpected ${path}`);
@@ -91,24 +83,15 @@ it.each([
     let started!: Promise<void>;
     await act(async () => {
       started = setup.start();
-      await checking;
     });
-    expect(onCreated).not.toHaveBeenCalled();
+    expect(onCreated).toHaveBeenCalledOnce();
     expect(writes[0]).toMatchObject({
       defaultModel: '["custom","chosen"]',
       env: { DSH_HOME: '/private/home' },
       acp: { startupArgs: ['--profile', 'acp', '--patch', '/private/member.yml'] },
     });
-    await act(async () => {
-      finish(Response.json({ state: 'failed', reasonCode: 'tool_schema_rejected' }));
-      await started;
-    });
-    expect(onCreated).toHaveBeenCalledOnce();
-    expect(
-      useToastStore
-        .getState()
-        .toasts.some((toast) => toast.message.includes('工具配置被模型拒绝') && toast.title.endsWith('已添加')),
-    ).toBe(true);
+    await started;
+    expect(useToastStore.getState().toasts).toHaveLength(0);
     await act(async () => root.render(null));
     await act(async () => root.render(<Harness />));
     expect(Object.keys(setup.draft?.created ?? {})).toHaveLength(1);
@@ -117,7 +100,7 @@ it.each([
     expect(writes).toHaveLength(1);
     const calls = vi.mocked(apiFetch).mock.calls;
     expect(calls.filter(([path]) => path.endsWith('/prepare'))).toHaveLength(1);
-    expect(calls.filter(([path]) => path.endsWith('/connection-check'))).toHaveLength(1);
+    expect(calls.filter(([path]) => path.endsWith('/connection-check'))).toHaveLength(0);
     expect(calls.some(([path]) => path.endsWith('/test'))).toBe(false);
   } finally {
     await act(async () => root.unmount());

@@ -44,7 +44,7 @@ it('lets a Desktop partner be selected without manually reading configuration or
     expect(checkbox.checked).toBe(true);
     expect(host.textContent).toContain('添加时自动配置');
     expect(host.textContent).not.toContain('已验证当前配置');
-    expect(host.textContent).toContain('费用取决于模型和工具定义规模');
+    expect(host.textContent).not.toContain('保存后自动检查连接');
   } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();

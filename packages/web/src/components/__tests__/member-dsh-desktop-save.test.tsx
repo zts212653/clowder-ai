@@ -75,6 +75,7 @@ it.each([
         });
     if (url.endsWith('/connection-check')) {
       if (request?.method === 'POST') order.push('checked');
+      if (request?.method === 'POST' && mode === 'check-failed') return new Promise<Response>(() => {});
       return Response.json({
         state: request?.method === 'POST' ? (mode === 'check-failed' ? 'failed' : 'passed') : 'unchecked',
       });
@@ -118,13 +119,13 @@ it.each([
       expect(savedPayload).toBeUndefined();
       expect(onSaved).not.toHaveBeenCalled();
     } else if (mode !== 'metadata') {
+      expect(onSaved).toHaveBeenCalledOnce();
       expect(savedPayload).toMatchObject({
         defaultModel: '["custom","flash"]',
         env: { DSH_HOME: '/host/private-home' },
         acp: { command: runtime.acp.command, startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'] },
       });
-      expect(order).toEqual(['saved', 'checked']);
-      expect(onSaved).toHaveBeenCalledOnce();
+      expect(order).toEqual(['saved']);
     } else {
       expect(savedPayload).toMatchObject({ displayName: 'Renamed Whale' });
       expect(savedPayload?.acp).toBeUndefined();

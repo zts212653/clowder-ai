@@ -13,7 +13,6 @@ import { useShellCopy } from '../../shell/shell-copy';
 import { useShellLanguage } from '../../shell/shell-language';
 import { settingsDetailCopy } from '../settings-detail.shell-copy';
 import { DshConnectionStatus } from './DshConnectionStatus';
-import { DSH_CHECK_FEE_MESSAGE } from './dsh-connection-check-client';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
@@ -21,7 +20,6 @@ import { MemberCodexOptions } from './MemberCodexOptions';
 import { MemberDeleteButton } from './MemberDeleteButton';
 import { MemberRuntimeFields } from './MemberRuntimeFields';
 import { pickRuntime } from './member-runtime-draft';
-import { needsDshPreparation } from './prepare-native-member';
 import { useMemberEditor } from './useMemberEditor';
 
 const sections = [
@@ -58,7 +56,6 @@ export function MemberSettingsPage({
   const editor = useMemberEditor(cat, cats, onSaved, onBeforeCreate);
   const dshMember = useIsDshMember();
   const { draft, accounts, ready, saving, dirtyCount } = editor;
-  const checkingConnection = editor.connectionCheck?.state === 'checking';
   const { form, baseline, section } = draft;
   const runtimeUnchanged =
     baseline && JSON.stringify(pickRuntime(form)) === JSON.stringify(pickRuntime(initialState(baseline)));
@@ -245,11 +242,7 @@ export function MemberSettingsPage({
                     onValidityChange={setRuntimeValid}
                   />
                   {baseline && dshMember(baseline) && (
-                    <DshConnectionStatus
-                      key={baseline.configurationRevision}
-                      member={baseline}
-                      result={editor.connectionCheck}
-                    />
+                    <DshConnectionStatus key={baseline.configurationRevision} member={baseline} />
                   )}
                 </div>
               )}
@@ -295,7 +288,7 @@ export function MemberSettingsPage({
               {t('重新读取，保留我的修改并核对', 'Reload latest and keep my edits for review')}
             </button>
           )}
-          {editor.notice && !checkingConnection && (
+          {editor.notice && (
             <p role="status" className="mt-4 text-sm text-cafe-secondary">
               {editor.notice}
             </p>
@@ -318,16 +311,7 @@ export function MemberSettingsPage({
                 {editor.error}
               </div>
             )}
-            {!draft.pendingWrite && needsDshPreparation(form, baseline) && (
-              <p className="w-full text-sm text-cafe-secondary">{t(...DSH_CHECK_FEE_MESSAGE)}</p>
-            )}
-            {checkingConnection ? (
-              <span className="text-sm" role="status">
-                {cat
-                  ? t('成员已保存，正在检查连接', 'Teammate saved, checking the connection')
-                  : t('成员已添加，正在检查连接', 'Teammate added, checking the connection')}
-              </span>
-            ) : draft.pendingWrite ? (
+            {draft.pendingWrite ? (
               <span className="text-sm" role="status">
                 {t(
                   '上次保存结果待核对，当前草稿已保留。',
@@ -373,9 +357,7 @@ export function MemberSettingsPage({
                 className="min-h-11 rounded-lg bg-cafe-accent px-5 text-sm font-semibold text-[var(--cafe-surface)] disabled:opacity-50"
               >
                 {saving
-                  ? checkingConnection
-                    ? t('已保存，正在检查…', 'Saved, checking…')
-                    : t('保存中…', 'Saving…')
+                  ? t('保存中…', 'Saving…')
                   : draft.pendingWrite
                     ? t('核对上次保存', 'Reconcile previous save')
                     : cat

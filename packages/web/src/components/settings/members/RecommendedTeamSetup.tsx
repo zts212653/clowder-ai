@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { NativePartnerCard } from '../../first-run-quest/NativePartnerCard';
 import { useNativeOnboarding } from '../../first-run-quest/useNativeOnboarding';
 import { finishOnboardingNavigation } from '../../onboarding-demo/onboarding-performance';
-import { DSH_CHECK_FEE_MESSAGE } from './dsh-connection-check-client';
 
 export function RecommendedTeamSetup({
   onCreated,
@@ -123,9 +122,6 @@ export function RecommendedTeamSetup({
                   ? '所选伙伴已加入团队'
                   : '可以选择一位、多位，或暂不创建')}
           </p>
-          {pending.some((partner) => partner.runtime.dshDesktop && !partner.existingId) && (
-            <p className="mt-2 text-sm text-cafe-secondary">{DSH_CHECK_FEE_MESSAGE[0]}</p>
-          )}
           <button type="button" disabled={Boolean(busy)} onClick={onManual} className="mt-2 min-h-8 text-cafe-accent">
             手动创建单个伙伴
           </button>

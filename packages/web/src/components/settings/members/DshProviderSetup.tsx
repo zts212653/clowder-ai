@@ -4,7 +4,7 @@ import { dshModelLabel } from '@/lib/dsh-model-label';
 import { type DshInspection, dshSetupError, dshSetupRequest } from './dsh-setup-client';
 import { MemberChoicePicker } from './MemberChoicePicker';
 
-/** Reading is free; preparing and checking belong to the explicit save action. */
+/** Reading is free; saving prepares the actual binding without a model request. */
 export function DshProviderSetup({
   runtimeId,
   selectedModel,

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { initialState, splitCommandArgs } from '../hub-cat-editor.model';
-import { checkSavedDshMember, showDshConnectionCheckResult } from '../settings/members/dsh-connection-check-client';
 import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
 import { matchesRuntime } from '../settings/members/member-runtime-draft';
 import { needsDshPreparation, prepareNativeMember } from '../settings/members/prepare-native-member';
@@ -267,9 +266,9 @@ export function useNativeOnboarding(
         let partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
         const id = partner.id;
         if (progress.created[id]) continue;
-        const checkAfterSaving =
+        const prepareBeforeSaving =
           !!partner.runtime.dshDesktop && !partner.existingId && needsDshPreparation(partner.form);
-        if (checkAfterSaving && !partner.creationForm) {
+        if (prepareBeforeSaving && !partner.creationForm) {
           setBusy(`正在准备 ${partner.form.displayName} 的 Desktop 配置…`);
           const form = await prepareNativeMember(partner.form);
           partner = {
@@ -336,11 +335,6 @@ export function useNativeOnboarding(
           },
         };
         persist(progress);
-        if (checkAfterSaving) {
-          setBusy(`已添加 ${result.cat.displayName}，正在检查连接…`);
-          const checked = await checkSavedDshMember(result.cat);
-          showDshConnectionCheckResult(result.cat.displayName, checked);
-        }
       }
       const lead = progress.created[selected.find((p) => p.id === current.lead)?.id ?? selected[0].id];
       if (mode === 'members') {

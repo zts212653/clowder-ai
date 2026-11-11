@@ -1,11 +1,6 @@
 import type { DshConnectionCheckView } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
-import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-export const DSH_CHECK_FEE_MESSAGE = [
-  '保存后自动检查连接，费用取决于模型和工具定义规模。检查失败保留成员，不会自动重试。',
-  'A connection check follows saving. Charges depend on the model and tool definitions. Failed checks keep the member and are not retried automatically.',
-] as const;
 
 export async function readDshConnectionCheck(catId: string): Promise<DshConnectionCheckView> {
   return apiFetch(`/api/cats/${encodeURIComponent(catId)}/connection-check`)
@@ -15,7 +10,7 @@ export async function readDshConnectionCheck(catId: string): Promise<DshConnecti
     .catch(() => ({ state: 'unknown', reasonCode: 'check_result_unknown' }));
 }
 
-/** A fresh attempt is created only by saving a changed connection or an explicit retry. */
+/** A model request is sent only by the explicit diagnostic action. */
 export async function checkSavedDshMember(
   member: Pick<CatData, 'id' | 'configurationRevision'>,
 ): Promise<DshConnectionCheckView> {
@@ -43,15 +38,17 @@ export async function checkSavedDshMember(
 }
 
 export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
-  const toolIssues = view.toolIssues ?? view.fact?.toolIssues ?? [];
-  if (view.state === 'passed' && toolIssues.length) {
-    const plugins = [...new Set(toolIssues.map(({ pluginId }) => pluginId))].join('、');
-    return `模型已连接。插件工具暂不可用：${plugins}（工具定义无效）。基本聊天可用；需要这些工具的任务请先修复相应插件。`;
-  }
+  const toolIssues = view.toolIssues ?? (view.state === 'passed' ? view.fact?.toolIssues : undefined) ?? [];
+  const plugins = [...new Set(toolIssues.map(({ pluginId }) => pluginId))].join('、');
+  const toolNotice = plugins
+    ? `插件工具暂不可用：${plugins}（工具定义无效）。需要这些工具的任务请先修复相应插件。`
+    : '';
+  if (view.state === 'passed' && toolNotice) return `模型已连接，基本聊天可用。${toolNotice}`;
   if (view.state === 'passed') return '已收到所选模型的回复，工具定义已被接受。此检查不执行工具。';
-  if (view.state === 'checking') return '成员已保存，正在检查连接。检查结束后可继续聊天。';
-  if (view.state === 'stale') return '配置或工具定义已变化，先前检查仅供历史参考。可重新检查，也可直接聊天。';
-  if (view.state === 'unchecked') return '尚无此配置的连接检查结果。可检查连接，也可直接聊天。';
+  if (view.state === 'checking') return `正在检查连接，可以继续聊天，无需等待检查完成。${toolNotice}`;
+  if (view.state === 'stale')
+    return `配置或工具定义已变化，先前检查仅供历史参考。可重新检查，也可直接聊天。${toolNotice}`;
+  if (view.state === 'unchecked') return `尚未运行独立连接检查，可以直接聊天。${toolNotice}`;
   const reasons: Record<string, string> = {
     tool_schema_rejected: '工具配置被模型拒绝，暂时无法回复。请更新出错插件；无需重新添加成员。',
     dsh_setup_auth_refresh_required: 'Desktop 登录需要更新。请先在 DSH Desktop 重新登录，再重试检查。',
@@ -64,23 +61,5 @@ export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
     check_store_unavailable: '检查记录服务暂不可用，尚未发送模型检查请求。稍后刷新状态再试。',
     model_reply_unconfirmed: '检查已结束，但未确认正常的文本回复。可重试或直接聊天查看结果。',
   };
-  return `成员与配置已保留。${reasons[view.reasonCode ?? ''] ?? '未能确认本次连接结果，原因尚不明确。请在成员设置中查看检查详情、刷新状态；不会自动重发模型请求。'}`;
-}
-
-/** Keep failure and recovery visible after either creation entry navigates away. */
-export function showDshConnectionCheckResult(
-  name: string,
-  view: DshConnectionCheckView,
-  change: 'added' | 'saved' = 'added',
-) {
-  if (view.state === 'passed' && !(view.toolIssues ?? view.fact?.toolIssues)?.length) return;
-  useToastStore.getState().addToast({
-    type: view.state === 'failed' ? 'error' : 'info',
-    title: `${name}${change === 'added' ? '已添加' : '已保存'}`,
-    message:
-      view.state === 'passed'
-        ? '模型已连接，基本聊天可用。部分插件工具暂不可用，详见成员设置。'
-        : dshConnectionCheckMessage(view).replace(/^成员与配置已保留。/, ''),
-    duration: 0,
-  });
+  return `成员与配置已保留。${reasons[view.reasonCode ?? ''] ?? '未能确认本次连接结果，原因尚不明确。请在成员设置中查看检查详情、刷新状态；不会自动重发模型请求。'}${toolNotice}`;
 }
