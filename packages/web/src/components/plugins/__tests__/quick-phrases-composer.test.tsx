@@ -97,6 +97,7 @@ it('selects a saved phrase and sends the draft to storage only after confirmatio
   await click(saved);
   await vi.waitFor(() => expect(usageWrites()).toHaveLength(1));
   expect(bodyOf(usageWrites()[0])).toEqual({ id: 'saved' });
+  expect(usageWrites()[0]?.[2]).toEqual({ notifyFailure: false });
   const textarea = container.querySelector('textarea');
   expect(textarea?.value).toBe(saved);
   expect(onSend).not.toHaveBeenCalled();
@@ -111,6 +112,7 @@ it('selects a saved phrase and sends the draft to storage only after confirmatio
   await click('是');
   const [write] = saveWrites();
   expect(bodyOf(write)).toEqual({ text: next });
+  expect(write?.[2]).toBeUndefined();
   expect(textarea?.value).toBe(next);
   expect(onSend).not.toHaveBeenCalled();
 });

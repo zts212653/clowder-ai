@@ -56,11 +56,15 @@ export async function readQuickPhrases(entry: QuickPhrasesEntry, query: string, 
 
 /** Best-effort usage signal; selection already succeeded locally and must not depend on it. */
 export async function recordQuickPhraseUse(entry: QuickPhrasesEntry, id: string) {
+  const send = () =>
+    requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } }, undefined, {
+      notifyFailure: false,
+    });
   try {
-    const response = await requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } });
+    const response = await send();
     // A 409 means the CAS did not apply, so retrying cannot double-count this selection.
     if (response.status === 409) {
-      await requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } });
+      await send();
     }
   } catch {
     // Counting is best-effort: a stale plugin generation or network failure must not surface.
