@@ -1,5 +1,0 @@
-$ node /tmp/r3b21-static.cjs
-
-privacy: isolated 0; project 0; JS files 69; syntax failures 0
-
-Exit code: 0

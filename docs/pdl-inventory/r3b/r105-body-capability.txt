@@ -1,8 +1,0 @@
-r105 body capability probe (unmodified source; standalone renderer, not app integration)
-math input: "$$\nx^2+y^2=z^2\n$$"
-math output: <div class="md"><p>$$</p><p>x^2+y^2=z^2</p><p>$$</p></div>
-FAIL math renders as formula
-mermaid input: "```mermaid\ngraph TD\nA[Start] --> B[End]\n```"
-mermaid output: <div class="md"><pre><code>graph TD
-A[Start] --&gt; B[End]</code></pre></div>
-FAIL mermaid renders as diagram

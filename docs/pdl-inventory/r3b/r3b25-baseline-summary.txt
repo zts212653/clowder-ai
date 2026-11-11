@@ -1,5 +1,0 @@
-Full Web: 77 failed | 1681 passed (1758) files; 253 failed | 13945 passed | 1 skipped (14199) tests; 7 errors.
-HEAD b2bdc0eec6 isolated rerun: 75 failed files; 251 failed | 467 passed (718) tests; 7 errors.
-251 failure names recur in HEAD; 249 first errors match exactly; one only changes epoch timestamps; one current timeout is an assertion failure in HEAD.
-Two current-only failures are new cloud/evaluation repair tests reading in-progress source while the full suite ran. Final frozen owner run: 10 passed files / 99 passed tests.
-No old tests or implementation mechanisms changed to suppress these failures.

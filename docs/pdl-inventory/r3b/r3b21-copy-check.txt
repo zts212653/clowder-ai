@@ -1,9 +1,0 @@
-Source: design-accepted-r130
-Commit: fea418e8a9aa35285a23763f6345be7c10f5c165
-Scope: engine / platform / library / theme/default; app/api.js and app/copy/*.js
-Verification: independent git show of every tagged source
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0
-Exit code: 0

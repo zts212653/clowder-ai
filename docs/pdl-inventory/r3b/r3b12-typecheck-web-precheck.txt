@@ -1,8 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-src/pdl/__tests__/operations-bindings.test.ts(234,40): error TS18048: 'detail.facts' is possibly 'undefined'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
-
-Exit code: 1

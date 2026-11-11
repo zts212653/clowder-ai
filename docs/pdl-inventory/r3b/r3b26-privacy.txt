@@ -1,5 +1,0 @@
-Source: design-accepted-r135 checks/lib/run.js PRIVACY
-Scope: project public/pdl + public/pdl-app
-Project public runtime privacy-grep: 0
-
-Exit code: 0

@@ -1,6 +1,0 @@
-Source: design-accepted-r114
-Commit: 26d340ba0d03a1406bde033b03efb638f321f0b9
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

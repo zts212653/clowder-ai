@@ -1,3 +1,0 @@
-Standalone scan using unchanged r110 checks/lib/run.js PRIVACY expression; not a full run.sh.
-Isolated r110 build privacy-grep: 0
-Project public runtime privacy-grep: 0

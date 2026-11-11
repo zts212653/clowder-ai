@@ -1,5 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec next lint --file src/pdl/PdlAppHost.tsx
-
-✔ No ESLint warnings or errors
-
-Exit code: 0

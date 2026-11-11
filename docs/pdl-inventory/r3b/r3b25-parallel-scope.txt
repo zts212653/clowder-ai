@@ -1,5 +1,0 @@
-HEAD: b2bdc0eec6
-W2/W3 progress rows changed: 0
-Reserved binding diff exit: 0
-Copied runtime diff exit: 0
-Diff whitespace exit: 0

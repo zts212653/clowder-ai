@@ -1,4 +1,0 @@
-$ biome format --write <modified application/source/test files>
-Formatted 43 files in 393ms. Fixed 18 files.
-
-Exit code: 0

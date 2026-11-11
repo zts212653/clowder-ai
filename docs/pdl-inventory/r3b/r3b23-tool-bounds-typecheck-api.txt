@@ -1,4 +1,0 @@
-$ pnpm --filter @cat-cafe/api exec tsc
-
-
-Exit code: 0

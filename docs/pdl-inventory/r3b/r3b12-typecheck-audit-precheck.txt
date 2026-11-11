@@ -1,9 +1,0 @@
-src/pdl/__tests__/r115-bindings.test.ts(114,44): error TS2339: Property 'rt' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; } | { daemon: { has: boolean; emptyText: string; attach: boolean; rows: { id: string; title: { text: string; mono: boolean; }[]; sub: string | undefined; meta: string; tone: string; trail: { ...; }[]; controls: { ...; }; }[]; diag: { ...; }[]; }...'.
-  Property 'rt' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; }'.
-src/pdl/__tests__/r115-bindings.test.ts(119,44): error TS2339: Property 'rt' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; } | { daemon: { has: boolean; emptyText: string; attach: boolean; rows: { id: string; title: { text: string; mono: boolean; }[]; sub: string | undefined; meta: string; tone: string; trail: { ...; }[]; controls: { ...; }; }[]; diag: { ...; }[]; }...'.
-  Property 'rt' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; }'.
-src/pdl/__tests__/r115-bindings.test.ts(129,44): error TS2339: Property 'obs' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; } | { daemon: { has: boolean; emptyText: string; attach: boolean; rows: { id: string; title: { text: string; mono: boolean; }[]; sub: string | undefined; meta: string; tone: string; trail: { ...; }[]; controls: { ...; }; }[]; diag: { ...; }[]; }...'.
-  Property 'obs' does not exist on type '{ cur: string; sections: { v: string; label: string; }[]; load: string; }'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit

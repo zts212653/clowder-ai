@@ -1,8 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-src/pdl/__tests__/memory-message-proposals.test.ts(59,9): error TS2741: Property 'navigation' is missing in type '{ proposalId: string; sourceFeatureId: "F260"; ownerUserId: string; summary: string; requesterCatId: string; resolution: "open"; inlineApprovable: true; detail: { conflict: { version: 1; reason: "existing-entity-change"; ... 5 more ...; allowedActions: ("polysemy" | "reject")[]; }; }; materialization: { ...; }; crea...' but required in type 'ApprovalHubItem'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
-
-Exit code: 1

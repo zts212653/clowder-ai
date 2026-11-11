@@ -1,9 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-src/pdl/__tests__/memory-message-proposals.test.ts(64,5): error TS2322: Type '{ state: "anchored"; approvalCardRef: { threadId: string; messageId: string; }; }' is not assignable to type 'ApprovalNavigation'.
-  Property 'originRef' is missing in type '{ state: "anchored"; approvalCardRef: { threadId: string; messageId: string; }; }' but required in type '{ state: "anchored"; originRef: ApprovalOriginRef; approvalCardRef: ApprovalCardRef; }'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
-
-Exit code: 1

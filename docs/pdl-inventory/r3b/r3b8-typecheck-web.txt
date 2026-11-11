@@ -1,4 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-
-Exit code: 0

@@ -1,7 +1,0 @@
-Source: design-accepted-r122
-Commit: d6de4620eb36f3eb0cc13b8fa874d09178ef34bf
-Verification: independent git show of every tagged source
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

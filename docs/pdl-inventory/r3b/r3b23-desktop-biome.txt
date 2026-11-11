@@ -1,5 +1,0 @@
-$ pnpm exec biome check desktop/preload.js desktop/desktop-update-runtime.js desktop/update-prompt-controller.js desktop/preload.test.js desktop/update-prompt-controller.test.js packages/web/src/desktop-bridge.d.ts packages/web/src/components/__tests__/DesktopUpdateSettingsPanel.test.tsx packages/web/src/components/__tests__/DesktopUpdatePrompt.test.tsx packages/web/src/pdl/useDesktopUpdateBindings.ts packages/web/src/pdl/__tests__/desktop-update-bindings.test.ts
-
-Checked 10 files in 44ms. No fixes applied.
-
-Exit code: 0

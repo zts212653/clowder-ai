@@ -1,4 +1,0 @@
-Baseline: a35307a2da
-Project source / copied files / old tests diff exit: 0
-W2.md / W3.md / README diff exit: 0
-Diff whitespace exit: 0

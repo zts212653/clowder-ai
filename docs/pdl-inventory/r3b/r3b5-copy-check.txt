@@ -1,6 +1,0 @@
-Source: design-accepted-r110
-Commit: 5825138d71208c2df0ba44da75c12b8555c389ee
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

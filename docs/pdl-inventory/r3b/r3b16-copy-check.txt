@@ -1,7 +1,0 @@
-Source: design-accepted-r124
-Commit: 97134d445d89fbad6f2b0fea95315b8f47ef9e21
-Verification: independent git show of every tagged source
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

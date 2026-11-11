@@ -1,6 +1,0 @@
-Source: design-accepted-r112
-Commit: 24d0b16a36e93ef452a8b6529c026a42c1377e50
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

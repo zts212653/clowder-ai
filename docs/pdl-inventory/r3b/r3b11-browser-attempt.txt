@@ -1,13 +1,0 @@
-Read-only attempts to inspect the existing service; no server was started or stopped.
-
-CUA browser: The browser access host is unavailable
-CUA native Chrome fallback: Computer Use was not approved to use Google Chrome
-
-$ curl -I --max-time 5 http://127.0.0.1:3013
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-curl: (7) Failed to connect to 127.0.0.1 port 3013 after 0 ms: Couldn't connect to server
-
-Exit code: 7
-No screenshot captured. Similarity snapshots deferred until final migration.

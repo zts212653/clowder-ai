@@ -1,8 +1,0 @@
-$ pnpm --filter @cat-cafe/api lint
-
-
-> @cat-cafe/api@0.1.0 lint /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/api
-> tsc --noEmit
-
-
-Exit code: 0

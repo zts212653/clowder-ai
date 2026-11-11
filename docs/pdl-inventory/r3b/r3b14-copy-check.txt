@@ -1,7 +1,0 @@
-Source: design-accepted-r119
-Commit: 6f87660a480d3aa99b6eb99f27a8bdf4ad45444d
-Verification: independent git show of every tagged source
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0

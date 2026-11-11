@@ -1,6 +1,0 @@
-Source: design-accepted-r135
-Files checked: 81
-Byte mismatches: 0
-Extra files: 0
-mock / proto / local files: 0
-Exit code: 0

@@ -1,3 +1,0 @@
-Copied baseline remains design-accepted-r106. r108 not copied.
-Files checked: 71
-Byte mismatches from recorded tag manifest: 0

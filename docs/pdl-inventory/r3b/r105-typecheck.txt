@@ -1,6 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit --incremental false
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "tsc" not found
-
-Exit code: 254

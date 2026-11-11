@@ -1,4 +1,0 @@
-Command: pnpm --filter @cat-cafe/api exec tsc --noEmit
-
-
-Exit code: 0

@@ -1,8 +1,0 @@
-$ pnpm --filter @cat-cafe/mcp-server build
-
-> @cat-cafe/mcp-server@0.1.0 build /Users/lang/workspace/github-lab/clowder-ai-pdl/packages/mcp-server
-> node ./scripts/prepare-secret-runtime.mjs && tsc
-
-Secret runtime: staged 94 package-local inputs
-
-Exit code: 0

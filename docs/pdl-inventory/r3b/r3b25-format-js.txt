@@ -1,5 +1,0 @@
-$ pnpm exec biome format --write packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/plugin-config.js packages/web/public/pdl-app/plugins.js packages/web/public/pdl-app/project.js packages/web/public/pdl-app/sidebar.js
-
-Formatted 5 files in 86ms. Fixed 5 files.
-
-Exit code: 0

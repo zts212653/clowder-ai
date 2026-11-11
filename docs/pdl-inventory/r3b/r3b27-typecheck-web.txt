@@ -1,9 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-src/pdl/__tests__/r136-owners.test.ts(37,53): error TS2322: Type '{ id: string; kind: "card"; title: string; meta: { kind: string; proposedTitle: string; proposedBody: string; }; }' is not assignable to type 'RichBlock'.
-  Property 'v' is missing in type '{ id: string; kind: "card"; title: string; meta: { kind: string; proposedTitle: string; proposedBody: string; }; }' but required in type 'RichCardBlock'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
-
-Exit code: 1

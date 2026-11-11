@@ -1,4 +1,0 @@
-{
-  "math": "$$\nx^2+y^2=z^2\n$$",
-  "mermaid": "```mermaid\ngraph TD\nA[Start] --> B[End]\n```"
-}

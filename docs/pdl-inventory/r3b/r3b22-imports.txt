@@ -1,5 +1,0 @@
-$ pnpm exec biome check --write --only=assist/source/organizeImports packages/api/src/config/user-preferences-appearance.ts packages/api/test/config/appearance-config.test.ts packages/web/public/pdl-app/chat.js packages/web/public/pdl-app/project.js packages/web/src/hooks/useArtifactWidgetBlock.ts packages/web/src/pdl/PdlAppHost.tsx packages/web/src/pdl/__tests__/memory-bindings.test.ts packages/web/src/pdl/__tests__/review-bindings.test.tsx packages/web/src/pdl/__tests__/runtime.test.ts packages/web/src/pdl/__tests__/workbench-bindings.test.ts packages/web/src/pdl/chat-models.ts packages/web/src/pdl/runtime.ts packages/web/src/pdl/useMemoryBindings.tsx packages/web/src/pdl/useReviewBindings.tsx packages/web/src/pdl/useWorkbenchBindings.ts packages/web/public/pdl-app/members.js packages/web/src/pdl/member-actions.ts packages/web/src/pdl/__tests__/member-actions.test.ts
-
-Checked 18 files in 147ms. No fixes applied.
-
-Exit code: 0

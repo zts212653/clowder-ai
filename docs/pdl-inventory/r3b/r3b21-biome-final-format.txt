@@ -1,5 +1,0 @@
-$ pnpm exec biome format --write packages/api/src/routes/config-chat-background.ts packages/api/test/config/appearance-config.test.ts packages/web/public/pdl-app/appearance.js
-
-Formatted 3 files in 499ms. Fixed 1 file.
-
-Exit code: 0

@@ -1,9 +1,0 @@
-$ pnpm --filter @cat-cafe/web exec tsc --noEmit
-
-src/pdl/__tests__/memory-bindings.test.ts(161,49): error TS2339: Property 'openingReference' does not exist on type '{}'.
-src/pdl/__tests__/memory-bindings.test.ts(188,55): error TS2339: Property 'openingReference' does not exist on type '{}'.
-undefined
-/Users/lang/workspace/github-lab/clowder-ai-pdl/packages/web:
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 2: tsc --noEmit
-
-Exit code: 1
