@@ -25,15 +25,11 @@ export function NativeReplyText({
       data-source-content-start={run.start}
       data-source-content-end={run.end}
     >
-      {run.literal ? (
-        <div className={`markdown-content whitespace-pre-wrap break-words ${className ?? ''}`}>{run.text}</div>
-      ) : (
-        <CollapsibleMarkdown
-          content={run.text}
-          className={className}
-          disclosureKey={disclosureKey ? `${disclosureKey}:native:${run.id}` : undefined}
-        />
-      )}
+      <CollapsibleMarkdown
+        content={run.text}
+        className={className}
+        disclosureKey={disclosureKey ? `${disclosureKey}:native:${run.id}` : undefined}
+      />
     </div>
   );
 }

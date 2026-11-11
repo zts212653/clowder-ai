@@ -42,12 +42,6 @@ export function replyOutputSelectionOffsets(
 ): { start: number; end: number } | null {
   const run = sources.get(element);
   if (!run || findGeneratedTextConstructs(run.text).length) return null;
-  if (run.literal) {
-    const index = run.text.indexOf(selectedText);
-    return index >= 0 && selectedText.length > 0 && run.text.indexOf(selectedText, index + 1) === -1
-      ? { start: run.start + index, end: run.start + index + selectedText.length }
-      : null;
-  }
   const projection = normalize(projectMarkdownReadableTextWithSourceMap(run.text));
   const text = selectedText.trim().replace(/\s+/gu, ' ');
   if (!text) return null;

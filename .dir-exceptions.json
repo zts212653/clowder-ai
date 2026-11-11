@@ -52,21 +52,21 @@
     {
       "path": "packages/api/src/domains/concierge/live",
       "owner": "codex-astra",
-      "reason": "2026-11-11 public-tree reassessment: 26 direct TypeScript files. CompanionHostBridge still composes conversation history, text submission and current call/owner checks; separating its readers requires the shared call lifecycle to be reviewed. Preserve the owner/ticket as responsibility metadata. Bounded renewal aligned with clowder-ai#1916 through 2026-11-16; no threshold, clock or guard change.",
+      "reason": "2026-11-11 UTC rollover reassessment: 26 direct TypeScript files in the reviewed source, 26 in the current public tree. Live-call state, transcript projection and observation readers remain coupled through CompanionHostBridge and LiveCompanionCall; moving a subgroup requires moving its reader/adapter consumers together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
       "expiresAt": "2026-11-16",
       "ticket": "F317 / clowder-ai#1589 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/domains/concierge/live/host",
       "owner": "codex-astra",
-      "reason": "2026-11-11 public-tree reassessment: 33 direct TypeScript files. Recovery, context readers and page-action adapters still share Host scope, cancellation and result return; existing page-action/unified subgroups do not remove those caller contracts. Preserve the owner/ticket as responsibility metadata. Bounded renewal aligned with clowder-ai#1916 through 2026-11-16; no threshold, clock or guard change.",
+      "reason": "2026-11-11 UTC rollover reassessment: 33 direct TypeScript files in the reviewed source, 33 in the current public tree. Conversation readers, late-result returns and page-action adapters share the Host lease and recovery binding; splitting requires reviewing their import graph together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
       "expiresAt": "2026-11-16",
       "ticket": "F317 / clowder-ai#1589 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/domains/growing",
       "owner": "codex-astra",
-      "reason": "2026-11-11 public-tree reassessment: 33 direct TypeScript files. EntrustedWorkLifecycleService, execution evidence, terminal receipts and artifact return still share TaskStore and custody projections; a count-only move would not establish their lifecycle boundary. Preserve the owner/ticket as responsibility metadata. Bounded renewal aligned with clowder-ai#1916 through 2026-11-16; no threshold, clock or guard change.",
+      "reason": "2026-11-11 UTC rollover reassessment: 33 direct TypeScript files in the reviewed source, 33 in the current public tree. Task execution evidence, human terminal receipts and artifact return adapters share EntrustedWork lifecycle and custody projections; subgrouping must move those projections together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
       "expiresAt": "2026-11-16",
       "ticket": "F310 / clowder-ai#1589 / clowder-ai#1731"
     },
@@ -171,14 +171,14 @@
     {
       "path": "packages/api/src/config/capabilities",
       "owner": "codex-astra",
-      "reason": "2026-11-11 public-tree reassessment: 29 direct TypeScript files. MCP source readers, root validation, environment references and plugin exposure share the invocation capability context, including the DSH check consumer; splitting requires caller coverage. Preserve the owner/ticket as responsibility metadata. Bounded renewal aligned with clowder-ai#1916 through 2026-11-16; no threshold, clock or guard change.",
+      "reason": "2026-11-11 UTC rollover reassessment: 29 direct TypeScript files in the reviewed source, 29 in the current public tree. Native MCP binding, managed Codex migration and per-project plugin exposure share the invocation capability root and launch owner; subgrouping requires moving callers together. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
       "expiresAt": "2026-11-16",
       "ticket": "F333/F327 / cat-cafe#6237/#6252 / clowder-ai#1731"
     },
     {
       "path": "packages/api/src/infrastructure/harness-eval/paw-feel-disposition",
       "owner": "codex-astra",
-      "reason": "2026-11-11 public-tree reassessment: 25 direct TypeScript files. Service, schema, event log and projector still share persisted source/receipt semantics; existing projection and service-internals subgroups require a reviewed persistence boundary before further separation. Preserve the owner/ticket as responsibility metadata. Bounded renewal aligned with clowder-ai#1916 through 2026-11-16; no threshold, clock or guard change.",
+      "reason": "2026-11-11 UTC rollover reassessment: 25 direct TypeScript files in the reviewed source, 25 in the current public tree. Task-native handoff evidence and the bounded inbox scanner share the disposition receipt and source projection alongside existing subgroups. Retain the existing owner/ticket as responsibility metadata; this review creates no new assignment. Bounded exception through 2026-11-16; no threshold, clock or guard change.",
       "expiresAt": "2026-11-16",
       "ticket": "F167/F267/F278 / cat-cafe#6232/#5974 / clowder-ai#1731"
     }

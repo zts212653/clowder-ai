@@ -55,8 +55,6 @@ interface ActiveInvocation {
   activeRun?: LifecycleActiveRun;
   /** Live provider adapter for the exact activeRun; never serialized or recovered. */
   activeRunDispatcher?: AgentClientActiveRunDispatcher;
-  /** Exact live body getter for the active run; non-durable, never cloned or serialized. */
-  outputCursorGetter?: () => string;
 }
 
 /** F-parallel-cancel: observable slot lifecycle state for callers that need to distinguish
@@ -626,56 +624,6 @@ export class InvocationTracker {
   getLifecycleResponseMessageId(threadId: string, catId: string, invocationId: string): string | undefined {
     const run = this.active.get(this.slotKey(threadId, catId))?.activeRun;
     return run?.invocationId === invocationId ? run.responseMessageId : undefined;
-  }
-
-  /**
-   * Bind the exact live body getter for this Active Run. The route owns the closure;
-   * adoption reads it once and computes the durable cut. A newer route for the same
-   * exact run may replace the getter; the old release is identity-fenced.
-   */
-  bindLifecycleOutputCursor(
-    threadId: string,
-    catId: string,
-    expected: { invocationId: string; responseMessageId: string },
-    getter: () => string,
-  ): (() => void) | null {
-    const key = this.slotKey(threadId, catId);
-    const inv = this.active.get(key);
-    const run = inv?.activeRun;
-    if (
-      !inv ||
-      inv.state !== 'active' ||
-      !run ||
-      run.invocationId !== expected.invocationId ||
-      run.responseMessageId !== expected.responseMessageId
-    ) {
-      return null;
-    }
-    inv.outputCursorGetter = getter;
-    return () => {
-      const current = this.active.get(key);
-      if (current?.outputCursorGetter === getter) delete current.outputCursorGetter;
-    };
-  }
-
-  /** Exact live body getter for an Active Run; identity mismatch returns undefined. */
-  getLifecycleOutputCursor(
-    threadId: string,
-    catId: string,
-    expected: { invocationId: string; responseMessageId: string },
-  ): (() => string) | undefined {
-    const inv = this.active.get(this.slotKey(threadId, catId));
-    const run = inv?.activeRun;
-    if (
-      !inv ||
-      inv.state !== 'active' ||
-      !run ||
-      run.invocationId !== expected.invocationId ||
-      run.responseMessageId !== expected.responseMessageId
-    ) {
-      return undefined;
-    }
-    return inv.outputCursorGetter;
   }
 
   /** Mirror a durably admitted Append onto the non-durable Active Run projection. */
