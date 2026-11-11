@@ -385,7 +385,8 @@ jobs:
             "https://github.com/redis/redis/archive/refs/tags/${version}.tar.gz" \
             --output "$RUNNER_TEMP/redis.tar.gz"
           tar -xzf "$RUNNER_TEMP/redis.tar.gz" -C "$source_dir" --strip-components=1
-          make -C "$source_dir" -j"$(nproc)" BUILD_TLS=no MALLOC=libc redis-server redis-cli
+          # GCC 15 in ubuntu-26.04 ICEs while LTO-linking redis-cli from Redis 8.0.5.
+          make -C "$source_dir" -j"$(nproc)" BUILD_TLS=no MALLOC=libc OPTIMIZATION=-O2 redis-server redis-cli
           install -m 0755 "$source_dir/src/redis-server" "$bin_dir/redis-server"
           install -m 0755 "$source_dir/src/redis-cli" "$bin_dir/redis-cli"
           "$bin_dir/redis-server" --version
