@@ -120,10 +120,10 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
           // Plugin skills are project-scoped: skip HOME fallback for standard providers
           const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
           for (const dir of dirs) {
-            if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already reported this target's conflicts.
             const linkPath = join(dir, ps.skillName);
             const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
             if (shouldMount && status === 'missing') {
+              if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already reported this target's conflicts.
               // Guard: reject symlinked provider dirs to prevent writing outside project
               try {
                 const dirStat = await lstat(dir);

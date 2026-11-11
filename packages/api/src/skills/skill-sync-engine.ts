@@ -359,49 +359,49 @@ async function syncProjectUnlocked(
             path: join(skillsDir, skillName),
           })),
         );
-        continue;
-      }
-      let isLegacyManaged = false;
-      try {
-        isLegacyManaged = await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
-      } catch {
-        /* */
-      }
-      if (isLegacyManaged) continue;
-      try {
-        if ((await lstat(skillsDir)).isSymbolicLink()) {
-          if (force) {
-            await rm(skillsDir, { force: true });
-          } else {
-            for (const sn of targetEnabled)
-              result.conflicts.push({ skillName: sn, mountPointId: target.id, path: skillsDir });
-            continue;
-          }
+      } else {
+        let isLegacyManaged = false;
+        try {
+          isLegacyManaged = await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+        } catch {
+          /* */
         }
-      } catch {
-        /* ENOENT — will be created below */
-      }
-      await mkdir(skillsDir, { recursive: true });
-      const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
-      if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
-        result.conflicts.push({
-          skillName: SHARED_SKILL_REFS_ALIAS,
-          mountPointId: target.id,
-          path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
-        });
-      }
+        if (isLegacyManaged) continue;
+        try {
+          if ((await lstat(skillsDir)).isSymbolicLink()) {
+            if (force) {
+              await rm(skillsDir, { force: true });
+            } else {
+              for (const sn of targetEnabled)
+                result.conflicts.push({ skillName: sn, mountPointId: target.id, path: skillsDir });
+              continue;
+            }
+          }
+        } catch {
+          /* ENOENT — will be created below */
+        }
+        await mkdir(skillsDir, { recursive: true });
+        const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
+        if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
+          result.conflicts.push({
+            skillName: SHARED_SKILL_REFS_ALIAS,
+            mountPointId: target.id,
+            path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
+          });
+        }
 
-      for (const skillName of targetEnabled) {
-        validateSkillName(skillName);
-        const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
-        const linkPath = join(skillsDir, skillName);
-        const status = await classifyMountPath(linkPath, effSource, skillName);
-        if (status === 'missing' || (status === 'conflict' && force)) {
-          if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
-          await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
-          result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
-        } else if (status === 'conflict') {
-          result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
+        for (const skillName of targetEnabled) {
+          validateSkillName(skillName);
+          const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
+          const linkPath = join(skillsDir, skillName);
+          const status = await classifyMountPath(linkPath, effSource, skillName);
+          if (status === 'missing' || (status === 'conflict' && force)) {
+            if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
+            await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
+            result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
+          } else if (status === 'conflict') {
+            result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
+          }
         }
       }
 

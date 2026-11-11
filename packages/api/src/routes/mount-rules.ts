@@ -251,12 +251,12 @@ async function reconcilePluginMounts(
   for (const ps of pluginSkills) {
     const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
     for (const dir of allDirs) {
-      if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already warned about rejected targets.
       const linkPath = join(dir, ps.skillName);
       const target = enabledTargets.find((t) => t.candidates.includes(dir));
       const shouldMount = ps.enabled && !!target && (!allowed || allowed.has(target.id));
       const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
       if (shouldMount && status === 'missing') {
+        if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already warned about rejected targets.
         // Guard: reject symlinked provider dirs to prevent writing outside project
         try {
           const dirStat = await lstat(dir);
