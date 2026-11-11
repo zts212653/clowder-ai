@@ -244,6 +244,8 @@ export interface ScheduleBinding {
   proposal: ScheduleMutationProposal | null;
   current: boolean;
   blocked: boolean;
+  /** The task changed after the proposal: it can only be rejected. */
+  drifted: boolean;
   error: string | null;
   templates?: { templateId: string; paramSchema: Record<string, { description?: string }> }[];
   templateError?: string | null;

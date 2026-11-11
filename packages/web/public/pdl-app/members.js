@@ -237,7 +237,9 @@ function bindMembers() {
         (form.carrier !== 'acp' ||
           (form.acpAgentProvider
             ? row.form.acpAgentProvider === form.acpAgentProvider
-            : row.form.acpCommand === form.acpCommand && row.form.acpStartupArgs === form.acpStartupArgs))
+            : row.form.acpCommand === form.acpCommand &&
+              row.form.acpStartupArgs === form.acpStartupArgs &&
+              (row.form.acpTransport || 'stdio') === (form.acpTransport || 'stdio')))
       );
     });
   }
@@ -1232,7 +1234,7 @@ function bindMembers() {
           runtime: p.runtime,
           selected: p.selected,
           existingId: p.existingId,
-          selectable: p.selectable && !p.existingId,
+          selectable: p.selectable && !p.existingId && !p.identityConflict,
           payload: { defaultModel: p.form.defaultModel, cliEffort: p.form.cliEffort },
           fieldIds: {
             model: 'probe-' + p.id + '-model',
@@ -1243,13 +1245,13 @@ function bindMembers() {
           get preferences() {
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
-          state: p.existingId ? 'created' : p.selectable ? 'ready' : 'unavailable',
+          state: p.existingId ? 'created' : p.identityConflict ? 'conflict' : p.selectable ? 'ready' : 'unavailable',
         };
       }),
       createDisabled:
         g.busy ||
         !g.partners.some(function (p) {
-          return p.selected && p.selectable && !p.existingId;
+          return p.selected && p.selectable && !p.existingId && !p.identityConflict;
         }),
       hasMembers: cats().length > 0,
       submitError: g.submitError,
@@ -1289,9 +1291,23 @@ function bindMembers() {
     setup.failedPartner = null;
     render(true);
     let selected;
+    // Two picked partners with the same name would make two members with one identity: refuse before any write.
+    const names = setup.partners
+      .filter(function (row) {
+        return row.selected && row.selectable && !row.existingId && !row.identityConflict;
+      })
+      .map(function (row) {
+        return (row.form.nickname || row.form.displayName).trim().normalize('NFKC').toLowerCase();
+      });
+    if (new Set(names).size !== names.length) {
+      setup.busy = false;
+      setup.submitError = tc('nativeSetup.conflict');
+      render(true);
+      return;
+    }
     try {
       for (const partner of setup.partners.filter(function (row) {
-        return row.selected && row.selectable && !row.existingId;
+        return row.selected && row.selectable && !row.existingId && !row.identityConflict;
       })) {
         selected = partner;
         const preference = memberPreferences(

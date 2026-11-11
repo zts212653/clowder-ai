@@ -490,6 +490,7 @@ function ChatBinding({
       previous[key]?.proposal === binding.proposal &&
       previous[key]?.current === binding.current &&
       previous[key]?.blocked === binding.blocked &&
+      previous[key]?.drifted === binding.drifted &&
       previous[key]?.error === binding.error &&
       previous[key]?.decide === binding.decide
         ? previous
@@ -2240,6 +2241,7 @@ function ScheduleRecordBinding({
       proposal: source.proposal,
       current: !source.checking && !source.unknown && !!source.proposal,
       blocked: source.blocked,
+      drifted: source.drifted,
       error: source.error,
       templates,
       templateError,
@@ -2253,6 +2255,7 @@ function ScheduleRecordBinding({
     source.checking,
     source.unknown,
     source.blocked,
+    source.drifted,
     source.error,
     templates,
     templateError,

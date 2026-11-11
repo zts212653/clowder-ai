@@ -238,6 +238,7 @@ function bindSetup() {
         }),
       );
     }
+    const restriction = (picker && CS.ppPick && (picker.directories[CS.ppPick] || {}).projectRestriction) || '';
     return Object.assign({}, vm, {
       browse: {
         root: picker && picker.browse ? picker.browse.current : '',
@@ -252,7 +253,9 @@ function bindSetup() {
                   return { path: entry.path, name: entry.name };
                 })
             : [],
-        noPick: !CS.ppPick,
+        // a browsed folder the host says cannot become a project (the runtime folder): browse only
+        restriction: restriction,
+        noPick: !CS.ppPick || !!restriction,
       },
     });
   };

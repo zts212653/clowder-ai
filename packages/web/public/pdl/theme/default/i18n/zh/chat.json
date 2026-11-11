@@ -1091,7 +1091,11 @@
     "quote": "引用",
     "forwardMore": "转发…",
     "addToChat": "加入对话",
-    "folderNotFound": "没有这个文件夹：{0}"
+    "folderNotFound": "没有这个文件夹：{0}",
+    "restriction": {
+      "runtime_read_only": "运行目录只能浏览，换一个目录做项目，以免影响重启和更新",
+      "configuration_unknown": "运行目录或工作区配置异常，暂时不能选项目"
+    }
   },
   "importSession": {
     "notifications": {

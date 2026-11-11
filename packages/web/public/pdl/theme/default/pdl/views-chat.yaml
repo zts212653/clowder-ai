@@ -1897,6 +1897,12 @@ views:
                 label: t:composerPop.useFolder
                 act: cafeUseFolder
                 disabled: $.browse.noPick
+                tip:
+                  of: $.browse.restriction
+                  map:
+                    runtime_read_only: t:composerPop.restriction.runtime_read_only
+                    configuration_unknown: t:composerPop.restriction.configuration_unknown
+                    _: ""
           - type: toolbar
             when: $.ref
             items:
@@ -2218,10 +2224,12 @@ views:
               - type: text
                 parts:
                   - {icon: search, size: xs}
+                when: $.find.q
               - type: text
                 text:
                   t: chatPage.actions.label
                   args: [$.find.q, $.find.index, $.find.count]
+                when: $.find.q
               - {type: grow}
               - type: button
                 iconOnly: true
@@ -2229,12 +2237,14 @@ views:
                 label: t:chatPage.prevHit
                 act: findStep
                 args: {v: "-1"}
+                when: $.find.q
               - type: button
                 iconOnly: true
                 icon: next
                 label: t:chatPage.nextHit
                 act: findStep
                 args: {v: "1"}
+                when: $.find.q
               - {type: button, label: t:chatPage.backToPrev, act: findBack}
               - type: button
                 iconOnly: true
@@ -6075,6 +6085,7 @@ nodes:
                   args: ["@card.schedule.mutation.kind"]
                 act: scheduleDecide
                 args: {mid: "@mid", decision: approve}
+                when: "@card.canApproveSchedule"
               - type: button
                 label: t:common.reject
                 act: scheduleDecide
@@ -8156,6 +8167,7 @@ nodes:
                   args: ["@card.schedule.mutation.kind"]
                 act: scheduleDecide
                 args: {mid: "@mid", decision: approve}
+                when: "@card.canApproveSchedule"
               - type: button
                 label: t:common.reject
                 act: scheduleDecide
@@ -8593,6 +8605,7 @@ nodes:
                   args: ["@card.schedule.mutation.kind"]
                 act: scheduleDecide
                 args: {mid: "@mid", decision: approve}
+                when: "@card.canApproveSchedule"
               - type: button
                 label: t:common.reject
                 act: scheduleDecide

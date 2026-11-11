@@ -71,7 +71,7 @@ export interface ChatData {
   queue: QueueEntry[];
   executions: ActiveExecutionProjection[];
   activeRuns?: readonly LifecycleActiveRun[];
-  /** Addressed plugin instances: @ candidates, and who a plugin receipt or reply belongs to. */
+  /** Addressed plugin instances: the @ candidates. */
   pluginTargets?: import('@/hooks/usePluginMentionTargets').PluginTargets;
   live?: Record<string, Record<string, string>>;
   preparingImages: boolean;
@@ -562,8 +562,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
       const from = messageSender(message),
         { output, body, stdout, md } = text(message);
       // A plugin's reply frame: the plugin, and its reply status on the replying line
-      const frame = pluginDeliveryReceipt(message) ? projectTargetReply(message, timeline) : undefined,
-        framePlugin = frame && data.pluginTargets?.knownTargets.find((t) => t.id === frame.targetId)?.pluginId;
+      const frame = pluginDeliveryReceipt(message) ? projectTargetReply(message, timeline) : undefined;
       const execution = executionVM(message, output, stdout, data.threadId);
       const toolCount = execution?.groups[2].items.filter((row) => row.kind === 'tool').length ?? 0;
       const slot = replying(message)
@@ -631,8 +630,8 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         key: message.id,
         mid: message.id,
         i,
-        who: frame ? (framePlugin ?? frame.targetId) : message.catId,
-        from: frame ? ({ kind: 'plugin', instanceId: framePlugin ?? frame.targetId } as typeof from) : from,
+        who: frame ? frame.targetId : message.catId,
+        from: frame ? ({ kind: 'plugin', instanceId: frame.targetId } as typeof from) : from,
         source: message.source,
         time: message.timestamp,
         chips: (message.contentBlocks ?? []).flatMap((b) =>
@@ -666,7 +665,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                     schedule: scheduleRecord,
                     task: scheduleTask(scheduleRecord),
                     load: schedule!.current || scheduleSettled ? '' : 'loading',
-                    canApproveSchedule: !scheduleSettled && !schedule!.blocked,
+                    canApproveSchedule: !scheduleSettled && !schedule!.blocked && !schedule!.drifted,
                     changes: (() => {
                       const mutation = scheduleRecord.mutation;
                       if (mutation.kind !== 'update') return [];
@@ -746,13 +745,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           fromMember: from.kind === 'agent',
           speaking: ui.speaking === message.id,
         },
-        delivery: deliveryView(
-          message,
-          timeline,
-          data.activeRuns ?? [],
-          data.threadId,
-          () => data.pluginTargets?.knownTargets ?? [],
-        ).map((item) => {
+        delivery: deliveryView(message, timeline, data.activeRuns ?? [], data.threadId).map((item) => {
           // The delivery moves with the member's run in this thread while delivered or being read; nothing once read
           // or when delivery failed. Its text is separate.
           const member = data.live?.[data.threadId]?.[item.who];

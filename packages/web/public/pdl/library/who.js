@@ -37,7 +37,8 @@ function senderDef(id) {
   /* 图标写的是包内的名字（插件清单贡献的图标登记成 plugin:<包>/<名字>），找不到就当内置图标名 */
   const EXT = WHO_DATA.plugins(), ic = function (k, n) { return n && ICONS['plugin:' + k + '/' + n] ? 'plugin:' + k + '/' + n : n; };
   for (const k in EXT) { const hit = (EXT[k].identities || []).find(function (d) { return d.id === id; }); if (hit) return Object.assign({ plugin: k }, hit, { icon: ic(k, hit.icon) }); }
-  return EXT[id] ? { id: id, plugin: id, displayName: EXT[id].name, icon: ic(id, EXT[id].icon), color: EXT[id].themeColor } : null;
+  const k = EXT[id] ? id : Object.keys(EXT).find(function (x) { return EXT[x].instanceId === id; });   /* 插件实例 id（收件人、收据、回复）也认 */
+  return k ? { id: id, plugin: k, displayName: EXT[k].name, icon: ic(k, EXT[k].icon), color: EXT[k].themeColor } : null;
 }
 /* 声明了颜色的身份：只取色相（数据），明度 / 彩度跟当前主题的成员色走——CSS 相对颜色直接算，主题变了自动跟着变，不在渲染时读样式 */
 function senderHue(hex) { return Math.round(hexOk(hex).H); }

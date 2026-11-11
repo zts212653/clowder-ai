@@ -37,7 +37,7 @@ function bindPluginSpaces() {
   WHO_DATA.plugins = function () {
     return Object.fromEntries(
       pluginRows().map(function (plugin) {
-        return [plugin.pluginId, { name: plugin.displayName, icon: plugin.icon }];
+        return [plugin.pluginId, { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId }];
       }),
     );
   };

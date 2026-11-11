@@ -66,6 +66,7 @@ modules:
                             created: t:nativeSetup.created
                             ready: t:nativeSetup.ready
                             unavailable: t:common.status.notInstalled
+                            conflict: t:nativeSetup.conflict
                             _: "@state"
                       w: auto
                     - w: ctl

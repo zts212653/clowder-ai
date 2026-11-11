@@ -38,6 +38,8 @@ interface ProjectDirectory {
   current: string;
   parent: string | null;
   entries: { name: string; path: string; isDirectory: boolean }[];
+  /** Why this folder cannot become a project (browse only), when it cannot. */
+  projectRestriction?: 'runtime_read_only' | 'configuration_unknown';
 }
 interface ProjectSetupRead {
   load: string;

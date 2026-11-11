@@ -76,6 +76,7 @@ it('projects schedule update parameters and requires the matching durable checkp
       proposal,
       current: true,
       blocked: false,
+      drifted: false,
       error: null,
       templates: [{ templateId: task.templateId, paramSchema: { text: { description: 'Owner description' } } }],
       decide: vi.fn(),

@@ -1,4 +1,4 @@
-import type { LifecycleActiveRun, PluginMentionTarget, TargetResponseStatus } from '@cat-cafe/shared';
+import type { LifecycleActiveRun, TargetResponseStatus } from '@cat-cafe/shared';
 import { cloudDispatchReceipt, isNativeCloudTarget } from '@/components/cloud-dispatch-receipt';
 import {
   appendedInputReadDisplay,
@@ -28,21 +28,18 @@ export function deliveryView(
   timeline: ChatMessage[],
   runs: readonly LifecycleActiveRun[],
   threadId: string,
-  plugins: () => readonly PluginMentionTarget[] = () => [],
 ) {
   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
     const carrier = timeline.find((m) => m.id === projection.statusMessageId);
     if (pluginDeliveryReceipt(carrier)) {
-      // only a plugin's receipt reads which plugin the target is
-      const plugin = plugins().find((target) => target.id === projection.targetId);
       const reply = projectTargetReply(carrier!, timeline);
       const result = reply?.resultMessageId && reply.resultMessageId !== carrier?.id ? reply.resultMessageId : '';
       return {
         cloud: false,
         canRepeat: false,
-        who: plugin?.pluginId ?? projection.targetId,
+        who: projection.targetId,
         state: PLUGIN_STATE[reply?.status ?? 'delivering'],
         time: read.time,
         detail: [],
