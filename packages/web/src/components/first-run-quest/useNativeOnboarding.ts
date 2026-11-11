@@ -39,11 +39,21 @@ interface SetupDraft {
   /** Only a new, verified empty roster may prepare the personal entry reminder. */
   initialRosterEmpty?: boolean;
 }
+class NativeCreationRejected extends Error {}
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init);
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `请求失败 (${response.status})`);
+    const body = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    const message = body?.error ?? `请求失败 (${response.status})`;
+    // These responses precede catalog mutation. Generic 400s may come from post-write readback.
+    if (
+      path === '/api/cats' &&
+      init?.method === 'POST' &&
+      response.status === 400 &&
+      (body?.error === 'Invalid request' || body?.code === 'acp_profile_invalid')
+    )
+      throw new NativeCreationRejected(message);
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }
@@ -365,6 +375,23 @@ export function useNativeOnboarding(
       refresh();
       onCreated(progress.threadId, lead.name);
     } catch (cause) {
+      if (pendingPartner && cause instanceof NativeCreationRejected) {
+        const rejectedId = pendingPartner.id;
+        progress = {
+          ...progress,
+          partners: progress.partners.map((partner) =>
+            partner.id === rejectedId
+              ? {
+                  ...partner,
+                  creationForm: undefined,
+                  creationRequestKey: newNativeRequestKey(),
+                  legacySharedRequestKey: undefined,
+                }
+              : partner,
+          ),
+        };
+        persist(progress);
+      }
       const message = cause instanceof Error ? cause.message : '保存失败，请重试；已添加的伙伴会保留。';
       setError(
         pendingPartner
