@@ -1026,7 +1026,12 @@ export class AgentRouter {
     const lowerMessage = message.toLowerCase();
     const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
-    const allPatterns = getCatRoutingHandles(plugins).sort((a, b) => b.pattern.length - a.pattern.length);
+    const allPatterns = getCatRoutingHandles(plugins);
+    // Reject an explicit legacy sentinel alias instead of treating it as prose and falling back.
+    for (const pattern of catRegistry.tryGet('__none__')?.config.mentionPatterns ?? []) {
+      allPatterns.push({ catId: '__none__' as CatId, pattern: pattern.toLowerCase() });
+    }
+    allPatterns.sort((a, b) => b.pattern.length - a.pattern.length);
 
     // 2-4. User-authored messages accept explicit @mentions anywhere in prose.
     // A2A/callback handoffs still use the stricter line-start parser in a2a-mentions.ts.

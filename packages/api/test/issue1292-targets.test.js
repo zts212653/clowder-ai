@@ -92,6 +92,8 @@ it('the reserved sentinel cannot become a member through a registered alias', as
   });
   assert.ok('error' in resolveCatTarget('@not-a-member'));
   const result = await h.router.resolveTargetsAndIntent('@not-a-member work', h.threadId, { persist: true });
+  assert.equal(result.hasMentions, true);
+  assert.equal(result.routing_warnings[0]?.kind, 'cat_not_found');
   assert.deepEqual(result.targetCats, []);
   assert.deepEqual(h.threads.get(h.threadId).participants, []);
 });

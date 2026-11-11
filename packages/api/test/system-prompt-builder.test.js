@@ -1236,8 +1236,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('A2A 球权检查'), 'Parallel mode should not encourage @mention chaining');
   });
 
-  // F167 L2 AC-A6: parallel 模式明确告知 @句柄 无路由语义
-  test('buildInvocationContext injects parallel-mode no-mention hint in parallel mode', async () => {
+  test('buildInvocationContext tells parallel participants how to return results without chaining', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -1246,11 +1245,13 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.ok(ctx.includes('并行模式'), 'parallel mode prompt should mention 并行模式');
-    assert.ok(ctx.includes('无路由语义'), 'parallel mode should say @句柄 无路由语义');
+    assert.match(ctx, /并行模式/);
+    assert.match(ctx, /供发起者汇总/);
+    assert.match(ctx, /正文 @ 不会启动新回合/);
+    assert.match(ctx, /只在该串行轮 @ 下一棒/);
   });
 
-  test('buildInvocationContext does NOT inject parallel-mode no-mention hint in serial/independent mode', async () => {
+  test('buildInvocationContext omits the parallel-only hint in independent mode', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -1259,7 +1260,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.ok(!ctx.includes('无路由语义'), 'non-parallel mode should not inject parallel hint');
+    assert.doesNotMatch(ctx, /正文 @ 不会启动新回合|供发起者汇总/);
   });
 
   test('buildInvocationContext injects mention routing feedback when provided', async () => {
