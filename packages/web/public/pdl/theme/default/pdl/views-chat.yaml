@@ -1387,7 +1387,7 @@ views:
                   - sec:
                       t: composerPop.options.sec
                       args: [$.find.count]
-                    when: [$.find.done, $.find]
+                    when: [$.find.done, $.find, $.results]
                   - from: "@results"
                     item:
                       title: "@snippet"
@@ -1415,7 +1415,7 @@ views:
                       args: [$.find.q]
                     when:
                       - [$.find.done, "!$.results"]
-                      - $.find
+                      - $.find.q
                   - from: "@sendModes"
                     item:
                       title:
