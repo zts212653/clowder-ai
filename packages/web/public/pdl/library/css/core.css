@@ -197,7 +197,7 @@ textarea.input { height: auto; min-height: calc(3lh + 2 * var(--sp-s)); padding:
 .opt .row-sub { white-space: normal; }
 .chips { display: flex; gap: var(--sp-xs); flex-wrap: wrap; align-items: center; }
 .tag-ed > .chip { margin-block: calc((var(--ctl-m) - var(--ctl-s)) / 2); }   /* 标签外占一个输入控件的行高；新增框换行时已有标签不随行高跳动。 */
-.chip { height: var(--ctl-s); padding: 0 var(--sp-s); border-radius: var(--r-full); background: var(--bg-field); color: var(--fg-strong); display: inline-flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-m); border: 0; white-space: nowrap; max-width: 100%; overflow: hidden; }   /* 一行高：文字不在标签里折行（窄栏里折行会压到下一行上） */
+.chip { height: var(--ctl-s); padding: 0 var(--sp-s); border-radius: var(--r-full); background: var(--bg-field); color: var(--fg-strong); display: inline-flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-m); border: 0; white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; }   /* 一行高：文字不在标签里折行（窄栏里折行会压到下一行上）；不被挤窄，放不下整个换行 */
 .chip-thumb { width: var(--ctl-xs); height: var(--ctl-xs); object-fit: cover; border-radius: var(--r-s); flex: none; }
 button.chip { cursor: pointer; color: var(--fg-muted); }
 button.chip:hover { color: var(--fg-strong); }

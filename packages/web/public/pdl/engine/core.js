@@ -820,7 +820,7 @@ document.addEventListener('keydown', function (e) {
     if (k != null) { e.preventDefault(); items[k].focus({ preventScroll: true }); keySelShow(items[k]); }
     return;
   }
-  if (e.key === 'Escape') return;   /* 弹窗的 Esc 在上面的 popEsc；别的（抽屉等）由各自登记在 KEY_FNS 里 */
+  if (e.key === 'Escape') { keyDeclared(e); return; }   /* 弹窗的 Esc 在上面的 popEsc；控件自己声明的 esc（data-on-esc）在这里；别的（抽屉等）由各自登记在 KEY_FNS 里 */
   const el = e.target;
   if ((e.key === 'Enter' || e.key === ' ') && el.matches && el.matches('[role="button"][data-act], tr[data-act], .opt[data-act]')) { e.preventDefault(); el.click(); }
   keyDeclared(e);   /* 控件自己声明的按键（data-on-enter 等，见 ui.js） */
