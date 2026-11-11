@@ -43,28 +43,28 @@ describe('CollectionIndexBuilder embedding integration (bug #6)', () => {
     const manifest = makeManifest(dir);
     const scanner = new FlatScanner('test:embed');
 
-    const embedded = [];
+    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
     const mockEmbedding = {
       isReady: () => true,
       reprobeIfNeeded: async () => {},
       embed: async (texts) => texts.map(() => new Float32Array([0.1, 0.2])),
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
     };
-    const mockVectorStore = {
-      upsert: (anchor) => embedded.push(anchor),
-      checkMetaConsistency: () => ({ consistent: true, reason: 'ok' }),
-      clearAll: () => {},
-      initMeta: () => {},
-    };
+    const vectors = openVectorGeneration(store.getDb(), mockEmbedding.getModelInfo(), { create: true }).vectorStore;
 
     const builder = new CollectionIndexBuilder(store, manifest, scanner, {
       getEmbeddingService: () => mockEmbedding,
-      vectorStore: mockVectorStore,
+      vectorStore: vectors,
     });
     const result = await builder.rebuild();
 
     assert.equal(result.indexed, 2, 'should index 2 docs');
-    assert.equal(embedded.length, 2, 'should produce 2 embeddings');
+    assert.equal(vectors.count(), 2, 'should produce 2 native vectors');
+    assert.equal(
+      store.getDb().prepare('SELECT count(*) AS n FROM document_vector_sources WHERE revision_hash IS NOT NULL').get()
+        .n,
+      2,
+    );
   });
 
   it('revokes a captured embedding capability before an in-flight rebuild reaches vector generation', async () => {

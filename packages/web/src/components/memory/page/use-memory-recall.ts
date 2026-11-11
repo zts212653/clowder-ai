@@ -1,6 +1,9 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { readScopedRecallJson } from '@/hooks/recall-scoped-read';
+import { useRecallRefresh } from '@/hooks/useRecallRefresh';
 import { apiFetch } from '@/utils/api-client';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { isRecallPage, type MemoryRecallPageData } from './recall-page-types';
 
 function mergeRecallPages(previous: MemoryRecallPageData, next: MemoryRecallPageData): MemoryRecallPageData {
@@ -39,7 +42,11 @@ async function readRecallContinuation(
   cursor: string,
   signal: AbortSignal,
 ) {
-  const response = await apiFetch(`${path}&cursor=${encodeURIComponent(cursor)}`, { signal });
+  const response = await apiFetch(
+    `${path}&cursor=${encodeURIComponent(cursor)}`,
+    { signal },
+    { afterCurrentGet: true },
+  );
   if (!response.ok) throw new Error('Recall page unavailable');
   const body: unknown = await response.json();
   if (!isRecallContinuation(body, previous, cursor)) throw new Error('Invalid recall continuation');
@@ -48,7 +55,13 @@ async function readRecallContinuation(
 export function useMemoryRecall(days: number, source: string, catId: string) {
   const path = `/api/memory/recall?days=${days}&source=${source}${catId ? `&catId=${encodeURIComponent(catId)}` : ''}`;
   const [attempt, setAttempt] = useState(0);
-  const generation = `${path}:${attempt}`;
+  const refresh = useRecallRefresh();
+  const session = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const generation = `${path}:${attempt}:${refresh.sourceGeneration}:${session.generation}`;
   const pending = {
     data: null as MemoryRecallPageData | null,
     loading: true,
@@ -74,10 +87,8 @@ export function useMemoryRecall(days: number, source: string, catId: string) {
     inFlight.current = false;
     let active = true;
     setState({ generation, data: null, loading: true, error: false, moreLoading: false, moreError: false });
-    apiFetch(path, { signal: current.controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Recall unavailable');
-        const body: unknown = await response.json();
+    readScopedRecallJson(path, generation, current.controller.signal)
+      .then((body: unknown) => {
         if (!isRecallPage(body) || body.days !== days) throw new Error('Invalid recall page');
         if (active)
           setState({ generation, data: body, loading: false, error: false, moreLoading: false, moreError: false });

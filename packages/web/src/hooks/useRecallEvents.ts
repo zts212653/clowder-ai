@@ -34,7 +34,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     apiSessionIdentity.getSnapshot,
   );
   const scope = JSON.stringify([threadId, session.generation]);
-  const { generation, retry } = useRecallRefresh();
+  const { generation, sourceGeneration, retry } = useRecallRefresh();
   const [cueViewGeneration, setCueViewGeneration] = useState(0);
   const requestedCueViews = useRef({ scope, keys: new Set<string>() });
   const [history, setHistory] = useState<{
@@ -47,6 +47,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     cueInvocationIds?: string[];
     sourceViews?: RecallSourceView[];
     cueViewGeneration?: number;
+    sourceGeneration?: number;
   }>({
     scope: '',
     threadId: null,
@@ -77,11 +78,11 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     .map((message) => `${message.id}:${message.toolEvents?.length ?? 0}`)
     .join('|');
   const historyRequest = useMemo(
-    () => ({ threadId, scope, generation, finished, cueViewGeneration }),
-    [threadId, scope, generation, finished, cueViewGeneration],
+    () => ({ threadId, scope, generation, sourceGeneration, finished, cueViewGeneration }),
+    [threadId, scope, generation, sourceGeneration, finished, cueViewGeneration],
   );
   useEffect(() => {
-    const { threadId, scope, cueViewGeneration } = historyRequest;
+    const { threadId, scope, cueViewGeneration, sourceGeneration } = historyRequest;
     let active = true;
     const controller = new AbortController();
     setHistory((previous) => ({
@@ -93,6 +94,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
       cueInvocationIds: previous.scope === scope ? previous.cueInvocationIds : [],
       sourceViews: previous.scope === scope ? previous.sourceViews : [],
       cueViewGeneration: previous.scope === scope ? previous.cueViewGeneration : 0,
+      sourceGeneration: previous.scope === scope ? previous.sourceGeneration : undefined,
       status: 'loading',
     }));
     if (!threadId) {
@@ -127,6 +129,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
             events: body.events,
             sourceViews: body.sourceViews ?? [],
             cueViewGeneration,
+            sourceGeneration,
             status: 'ready',
             cueInvocationIds: body.cueInvocationIds ?? [],
             replies,
@@ -180,7 +183,8 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
     setCueViewGeneration((value) => value + 1);
   }, [scope, history, deliveries]);
   const events = useMemo(() => {
-    const sourceViews = history.scope === scope ? (history.sourceViews ?? []) : [];
+    const sourceViews =
+      history.scope === scope && history.sourceGeneration === sourceGeneration ? (history.sourceViews ?? []) : [];
     const views = new Map(sourceViews.filter((view) => !view.cueId).map((view) => [view.anchor, view]));
     const cueViews = new Map(sourceViews.filter((view) => view.cueId).map((view) => [cueViewKey(view), view]));
     return [
@@ -210,6 +214,8 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
             titleStatus: view.titleStatus,
             sourceType: view.kind ?? item.sourceType,
             href: view.href,
+            messageHref: view.messageHref,
+            memoryHref: view.memoryHref,
             sourceUnavailableReason: view.sourceUnavailableReason,
           };
         if (!event.cueId) return item;
@@ -223,7 +229,7 @@ export function useThreadRecall(options: { threadId?: string; messages?: readonl
         return { ...item, href: null, titleStatus: pending ? 'loading' : 'unavailable' };
       }),
     }));
-  }, [live, historyEvents, deliveries, history, scope, cueViewGeneration]);
+  }, [live, historyEvents, deliveries, history, scope, cueViewGeneration, sourceGeneration]);
   const findReply = async (event: RecallEvent, signal: AbortSignal) => {
     if (!threadId) return undefined;
     return lookupRecallReply({

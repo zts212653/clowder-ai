@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,9 +8,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { build } from 'vite';
 
-const { chromium } = await import(
-  process.env.F202_PLAYWRIGHT_MODULE ?? '../../../ppt-forge/node_modules/playwright/index.mjs'
-);
+const { chromium } = await import(process.env.F202_PLAYWRIGHT_MODULE ?? 'playwright');
 
 import { createHash } from 'node:crypto';
 import { MemoryPluginInventoryStore } from '../../../api/dist/domains/plugin/host-inventory/stores.js';
@@ -28,62 +26,62 @@ test(
   async () => {
     const evidence = await mkdtemp(path.join(tmpdir(), 'f202-addressed-ui-'));
     const digest = `sha512-${createHash('sha512').update('browser-fixture').digest('base64')}`;
-    const inventory = new MemoryPluginInventoryStore(
-      {
-        schemaVersion: 1,
-        packages: [
-          {
-            packageDigest: digest,
+    const manifest = JSON.parse(
+      await readFile(
+        new URL(
+          '../../../api/src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.52/manifest.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    const inventory = new MemoryPluginInventoryStore({
+      schemaVersion: 1,
+      packages: [
+        {
+          packageDigest: digest,
+          pluginId: 'example.dot',
+          version: '1.0.0',
+          contractVersion: manifest.contractVersion,
+          manifest: {
+            ...manifest,
             pluginId: 'example.dot',
             version: '1.0.0',
-            contractVersion: '0.1.0',
-            manifest: {
-              pluginId: 'example.dot',
-              version: '1.0.0',
-              contractVersion: '0.1.0',
-              name: 'Dot',
-              features: [],
-              addressedDelivery: { method: 'deliverMessage' },
-            },
-            signalSchemas: {},
-            packageState: 'installed',
-            verifiedAt: 1,
-            updatedAt: 1,
+            name: 'Dot',
+            call: { alias: 'dot', displayName: 'Dot' },
           },
-        ],
-        instances: [
-          {
-            pluginInstanceId: 'pi_dot',
-            pluginId: 'example.dot',
-            packageDigest: digest,
-            lifecycleState: 'installed',
-            configReadiness: 'ready',
-            activationState: 'enabled',
-            runtimeState: 'healthy',
-            lifecycleRevision: 1,
-            installedAt: 1,
-            updatedAt: 1,
-          },
-        ],
-        grants: [
-          {
-            pluginInstanceId: 'pi_dot',
-            requestedCapabilities: [],
-            effectiveGrants: [],
-            grantRevision: 1,
-            updatedAt: 1,
-          },
-        ],
-      },
-      {
-        contract: {
-          manifestContractVersions: ['0.1.0'],
-          validateManifest: (manifest) => ({ valid: true, manifest, errors: [] }),
-          validateEffectiveGrants: () => true,
+          signalSchemas: {},
+          packageState: 'installed',
+          verifiedAt: 1,
+          updatedAt: 1,
         },
-      },
-    );
+      ],
+      instances: [
+        {
+          pluginInstanceId: 'pi_dot',
+          pluginId: 'example.dot',
+          packageDigest: digest,
+          lifecycleState: 'installed',
+          configReadiness: 'ready',
+          activationState: 'enabled',
+          runtimeState: 'healthy',
+          lifecycleRevision: 1,
+          installedAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      grants: [
+        {
+          pluginInstanceId: 'pi_dot',
+          requestedCapabilities: [],
+          effectiveGrants: [],
+          grantRevision: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
     const addressedTargets = new PluginAddressedTargets({ inventory, memberAliases: () => ['opus'] });
+    assert.equal((await addressedTargets.resolve('@dot'))?.id, 'pi_dot');
     const app = Fastify();
     app.addHook('preHandler', async (request) => {
       request.sessionUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
@@ -155,6 +153,10 @@ test(
       const page = await browser.newPage({ viewport: { width: 1100, height: 1000 } });
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
+      page.on('requestfailed', (request) => {
+        const url = new URL(request.url());
+        console.log('Browser request failed', url.origin, url.pathname, request.failure()?.errorText);
+      });
       page.on('response', (response) => {
         if (response.status() >= 400) console.log('HTTP failure', response.status(), response.url());
       });

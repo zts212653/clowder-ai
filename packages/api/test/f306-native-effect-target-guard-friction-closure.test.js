@@ -217,9 +217,10 @@ test('HTTP argv is a candidate and cannot prove protected reads without its exec
 });
 
 // Source 0001790737200774-000216-d7b33565: equivalent SQL; original SQL is unavailable.
-test('SQLite recognizes a single readonly statement with SQL-aware termination', () => {
+test('SQLite recognizes readonly statement sequences with SQL-aware termination', () => {
   for (const sql of [
     'select count(*) from recall_events;',
+    'select 1; select 2;',
     "select '; kill update runtime'; -- comment",
     '/* comment */ SELECT 1;',
     'with t as (select 1) select * from t;',
@@ -228,7 +229,6 @@ test('SQLite recognizes a single readonly statement with SQL-aware termination',
     parity(`sqlite3 -readonly /tmp/evidence.sqlite ${JSON.stringify(sql)}`, 'allow');
   }
   for (const sql of [
-    'select 1; select 2;',
     'select 1; ATTACH "/tmp/x" AS x;',
     'select writefile("/tmp/x", "x");',
     'select load_extension("/tmp/x");',

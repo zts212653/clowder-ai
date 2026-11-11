@@ -67,6 +67,23 @@ for (const sensitivity of ['restricted', 'private']) {
       const storeBefore = storeDigest();
       const manifestPath = join(dataDir, 'library', 'collections.json');
       const savedBefore = readFileSync(manifestPath, 'utf8');
+      const assertRestoredPolicy = () => {
+        const saved = JSON.parse(savedBefore);
+        const current = JSON.parse(readFileSync(manifestPath, 'utf8'));
+        const actual = current.find((entry) => entry.id === id);
+        assert.equal(actual.status, 'active');
+        assert.ok(Date.parse(actual.updatedAt) >= Date.parse(now));
+        // Rebuilding updates lifecycle fields, while every saved policy field,
+        // identity and unrelated offline record must remain exact.
+        const expected = saved.map((entry) =>
+          entry.id === id ? { ...entry, status: 'active', updatedAt: actual.updatedAt } : entry,
+        );
+        assert.deepEqual(current, expected);
+        const registered = catalog.get(id);
+        assert.equal(registered.status, 'active');
+        assert.ok(Date.parse(registered.updatedAt) >= Date.parse(now));
+        assert.deepEqual(registered, { ...manifest, status: 'active', updatedAt: registered.updatedAt });
+      };
 
       rmSync(project, { recursive: true, force: true });
       const catalog = new LibraryCatalog();
@@ -113,18 +130,17 @@ for (const sensitivity of ['restricted', 'private']) {
         });
       assert.equal((await bootstrap()).statusCode, 202);
       const result = await pending;
-      assert.equal(readFileSync(manifestPath, 'utf8'), savedBefore);
       if (scenario === 'restore') {
         assert.equal(result.status, 'ready');
-        assert.deepEqual(catalog.get(id), manifest);
+        assertRestoredPolicy();
         assert.equal(stores.size, 1);
         fingerprint++;
         assert.equal((await bootstrap()).statusCode, 202);
         assert.equal((await pending).status, 'ready');
-        assert.deepEqual(catalog.get(id), manifest);
-        assert.equal(readFileSync(manifestPath, 'utf8'), savedBefore);
+        assertRestoredPolicy();
         assert.equal(stores.get(id).getDb().prepare('SELECT COUNT(*) AS n FROM evidence_docs').get().n, 1);
       } else {
+        assert.equal(readFileSync(manifestPath, 'utf8'), savedBefore);
         assert.equal(result.status, 'failed');
         const expected = {
           'other-owner': 'project_collection_owner_mismatch',

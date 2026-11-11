@@ -300,6 +300,7 @@ import { ProactiveMemoryCandidateDetector } from './domains/memory/ProactiveMemo
 import { ProactiveMemoryNudgeService } from './domains/memory/ProactiveMemoryNudgeService.js';
 import { PersonMemoryDispositionProofResolver } from './domains/memory/people/PersonMemoryDispositionProofResolver.js';
 import { PersonMemoryDispositionSubjectProofResolver } from './domains/memory/people/PersonMemoryDispositionSubjectProofResolver.js';
+import { PersonMemoryOwnerReadService } from './domains/memory/people/PersonMemoryOwnerReadService.js';
 import { PersonMemoryProposalStatusContextResolver } from './domains/memory/people/PersonMemoryProposalStatusContextResolver.js';
 import { PersonMemoryRecallService } from './domains/memory/people/PersonMemoryRecallService.js';
 import { RedisPersonMemoryStore } from './domains/memory/people/RedisPersonMemoryStore.js';
@@ -2417,8 +2418,20 @@ async function main(): Promise<void> {
           const service = memoryServices.embeddingLifecycle.getService();
           const vectors = memoryServices.embeddingLifecycle.getVectorStore();
           if (!service?.isReady() || !vectors) return;
+          const { captureVectorSource, commitVectorSource } = await import('./domains/memory/vector-source-binding.js');
+          const source = captureVectorSource(memoryServices.store.getDb(), 'documents', anchor);
+          if (!source || source.text !== text) return;
+          const model = structuredClone(service.getModelInfo());
           const [vector] = await service.embed([text]);
-          vectors.upsert(anchor, vector);
+          await memoryServices.store.runExclusive(() => {
+            if (
+              memoryServices.embeddingLifecycle.getService() !== service ||
+              memoryServices.embeddingLifecycle.getVectorStore() !== vectors ||
+              JSON.stringify(service.getModelInfo()) !== JSON.stringify(model)
+            )
+              return;
+            commitVectorSource(memoryServices.store.getDb(), vectors, source, vector, model);
+          });
         },
       });
     } catch (error) {
@@ -3647,7 +3660,13 @@ async function main(): Promise<void> {
     });
   }
   // F200 Phase B: Recall metrics API
+  const personOwnerReadService = personMemoryStore
+    ? new PersonMemoryOwnerReadService({ store: personMemoryStore, messageStore, threadStore })
+    : null;
   const recallOwnerMessageSources = {
+    ...(personOwnerReadService
+      ? { personDeliveryReader: personOwnerReadService.readDelivery.bind(personOwnerReadService) }
+      : {}),
     tasteSources: {
       ownerUserId: privateUserId,
       repository: tasteRepository,
@@ -4151,7 +4170,7 @@ async function main(): Promise<void> {
       taskOutcomeStore,
       frustrationIssueStore,
       harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
-      ...(memoryServices.embeddingService ? { embeddingService: memoryServices.embeddingService } : {}),
+      getLegacyEmbeddingService: () => memoryServices.legacyEmbeddingService,
     });
     verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(
       frictionProvider,
@@ -7098,10 +7117,12 @@ async function main(): Promise<void> {
   await app.register(servicesRoutes, {
     lifecycle: {
       autoStartEnabled: true,
-      onServiceReady: async ({ service, operator, reason }) => {
+      onServiceReady: async ({ service, operator, reason, configuredModel }) => {
         if (service.id !== 'embedding-model' || !memoryServices.indexBuilder) return;
         const activationMode = resolvedEmbedMode === 'shadow' ? 'shadow' : 'on';
-        const activation = await memoryServices.embeddingLifecycle.activate(activationMode);
+        const activation = await memoryServices.embeddingLifecycle.activate(activationMode, {
+          rebuildLegacyModel: configuredModel,
+        });
         if (!activation.ok) {
           const detail = activation.reason ?? activation.status;
           appendServiceLog(service.id, `[start] memory embedding activation degraded: ${detail}\n`);
@@ -7134,7 +7155,7 @@ async function main(): Promise<void> {
       },
       onServiceUnavailable: ({ service, operator, reason }) => {
         if (service.id !== 'embedding-model') return;
-        memoryServices.embeddingLifecycle.deactivate();
+        memoryServices.embeddingLifecycle.deactivate({ retainLegacy: true });
         appendServiceLog(service.id, `[${reason}] memory embedding dependencies deactivated\n`);
         app.log.info(
           { serviceId: service.id, operator, reason },
@@ -7485,6 +7506,7 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
     getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
+    getEmbeddingGenerationStatus: () => memoryServices.embeddingLifecycle.getGenerationStatus(),
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
     rebuildJobTracker,

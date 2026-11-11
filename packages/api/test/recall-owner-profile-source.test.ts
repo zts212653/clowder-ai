@@ -50,7 +50,11 @@ for (const [memoryId, anchor] of [
     const first = (await read())[0];
     assert.ok(first?.href?.includes(`memoryId=${encodeURIComponent(memoryId)}`), JSON.stringify(first));
     assert.equal(first.profileMemoryId, memoryId);
-    assert.match(first.title ?? '', /^开场递送/);
+    assert.equal(
+      memoryId === 'capsule' ? first.title : first.title?.endsWith('关系画像'),
+      memoryId === 'capsule' ? '关于你' : true,
+    );
+    assert.ok(!first.title?.includes('开场递送'));
     assert.equal(first.sourceRevision, entry.revision);
     writeFileSync(entry.path, 'NEW_OWNER_PROFILE_BODY');
     const changed = (await read())[0];
@@ -93,7 +97,7 @@ it('opens the exact owner primer without borrowing an expired model opportunity'
     },
   });
   assert.equal(modelDrills, 0, 'owner display must use its existing owner reader, not a model drill grant');
-  assert.equal(views[0]?.title, entry.title);
+  assert.equal(views[0]?.title, '与 宪宪 的关系画像');
   assert.equal(
     views[0]?.href,
     `/memory?family=profile&memoryId=primer%3Aragdoll&revision=${encodeURIComponent(entry.revision)}&from=thread`,
@@ -213,7 +217,7 @@ it('projects the owner link and later invalidation through the actual memory rec
     const initial = response.json().records[0].event;
     assert.equal(initial.sourceRevision, entry.revision);
     assert.ok(initial.results[0].href.includes('memoryId=primer%3Aragdoll'));
-    assert.equal(initial.results[0].title, entry.title);
+    assert.equal(initial.results[0].title, '与 宪宪 的关系画像');
     writeFileSync(entry.path, 'NEW_OWNER_BODY');
     const changed = (await f.get('?source=push')).json().records[0].event;
     assert.equal(changed.sourceRevision, entry.revision);

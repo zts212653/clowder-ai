@@ -31,6 +31,15 @@ function cleanScan(retiredName = oldEntry.name): CutoverConsumerScan {
   };
 }
 
+function absenceLayers(retiredNames: readonly string[]): AtomicCutoverManifest['layers'] {
+  return Object.fromEntries(
+    REQUIRED_CUTOVER_LAYERS.map((layer) => [
+      layer,
+      { status: 'not-applicable', rationale: 'fixed-root scan is empty', absenceEvidence: retiredNames },
+    ]),
+  ) as AtomicCutoverManifest['layers'];
+}
+
 function manifest(overrides: Partial<AtomicCutoverManifest> = {}): AtomicCutoverManifest {
   return {
     resource: { kind: 'family', resourceFamily: 'subject' },
@@ -40,12 +49,7 @@ function manifest(overrides: Partial<AtomicCutoverManifest> = {}): AtomicCutover
       [newEntry.name]: ['full', 'readonly'],
     },
     rollbackRevision: 'a'.repeat(40),
-    layers: Object.fromEntries(
-      REQUIRED_CUTOVER_LAYERS.map((layer) => [
-        layer,
-        { status: 'not-applicable', rationale: 'fixed-root scan is empty', absenceEvidence: [oldEntry.name] },
-      ]),
-    ) as AtomicCutoverManifest['layers'],
+    layers: absenceLayers([oldEntry.name]),
     ...overrides,
   };
 }
@@ -125,6 +129,71 @@ describe('F286 atomic cutover guard', () => {
       ],
     });
     assert.ok(resurrected.findings.some((finding) => finding.code === 'stale-retired-reference'));
+  });
+
+  it('does not compare a completed same-family manifest with a later cutover delta', () => {
+    const historicalRetired = 'cat_cafe_previous_person_tool';
+    const historicalCanonical: CutoverSurfaceEntry = {
+      name: 'cat_cafe_revise_person_memory',
+      resourceFamily: 'person-memory',
+      runtimeProfiles: ['full'],
+    };
+    const historicalManifest = manifest({
+      resource: { kind: 'family', resourceFamily: 'person-memory' },
+      retiredNames: [historicalRetired],
+      canonicalNames: [historicalCanonical.name],
+      expectedProfiles: { [historicalCanonical.name]: ['full'] },
+      layers: absenceLayers([historicalRetired]),
+    });
+    const currentRetirements: CutoverSurfaceEntry[] = [
+      { name: 'cat_cafe_example_person', resourceFamily: 'person-memory', runtimeProfiles: ['full'] },
+      {
+        name: 'cat_cafe_example_person_proposal',
+        resourceFamily: 'person-memory',
+        runtimeProfiles: ['full'],
+      },
+    ];
+
+    for (const retired of [currentRetirements.slice(0, 1), currentRetirements]) {
+      const retiredNames = retired.map((entry) => entry.name);
+      const currentManifest = manifest({
+        resource: { kind: 'family', resourceFamily: 'person-memory' },
+        retiredNames,
+        canonicalNames: [],
+        expectedProfiles: {},
+        layers: absenceLayers(retiredNames),
+      });
+      const result = validateAtomicCutovers({
+        before: [historicalCanonical, ...retired],
+        after: [historicalCanonical],
+        manifests: [historicalManifest, currentManifest],
+        scans: [historicalRetired, ...retiredNames].map((name) => cleanScan(name)),
+      });
+
+      assert.deepEqual(result.findings, []);
+      assert.equal(result.ok, true);
+    }
+  });
+
+  it('keeps profile-only deltas inside current-manifest applicability checks', () => {
+    const after = { ...oldEntry, runtimeProfiles: ['full'] as const };
+    const result = validateAtomicCutovers({
+      before: [oldEntry],
+      after: [after],
+      manifests: [
+        manifest({
+          retiredNames: [],
+          canonicalNames: [],
+          expectedProfiles: {
+            [oldEntry.name]: ['full'],
+            cat_cafe_profile_ghost: [],
+          },
+        }),
+      ],
+      scans: [],
+    });
+
+    assert.ok(result.findings.some((finding) => finding.code === 'cutover-set-mismatch'));
   });
 
   it('keeps cross-family validation active for historical manifests', () => {

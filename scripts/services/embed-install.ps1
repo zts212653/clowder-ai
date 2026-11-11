@@ -21,6 +21,12 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $BootstrapPython = Resolve-BootstrapPython
 Assert-Python310 -Bootstrap $BootstrapPython
+# A pinned MLX recipe cannot be installed by a Windows ONNX/torch fallback.
+$RecipeArgs = @((Join-Path $PSScriptRoot 'embedding_generation_install.py'), '--check-platform')
+if ($env:EMBED_GENERATION) { $RecipeArgs += @('--generation', $env:EMBED_GENERATION) }
+& $BootstrapPython.Path @($BootstrapPython.PrefixArgs + $RecipeArgs)
+if ($LASTEXITCODE -ne 0) { throw 'Pinned embedding generation unsupported on this platform; nothing installed' }
+
 Assert-DiskSpace -RequiredGB 2
 Assert-Network
 

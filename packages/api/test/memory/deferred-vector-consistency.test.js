@@ -177,12 +177,14 @@ for (const disk of [false, true]) {
         f.write('alpha-doc', 'Gamma');
         await f.builder.rebuild({ deferThreadIndexing: true });
       }
+      const retainedVectors = f.vectors.count();
+      assert.equal(retainedVectors, change === 'model' ? 2 : 1, 'source mutation already invalidates its old vector');
       const builder = new IndexBuilder(f.store, f.root, f.deps);
       f.db.exec(`CREATE TRIGGER reject_vector_preparation BEFORE DELETE ON document_vector_sources
         BEGIN SELECT RAISE(ABORT, 'controlled projection preparation failure'); END`);
       await assert.rejects(builder.rebuild(deferred), /controlled projection preparation failure/);
       assert.equal(f.calls.length, 0, 'failed preparation must not call the provider');
-      assert.equal(f.vectors.count(), 2, 'SQLite rollback preserves the existing corpus');
+      assert.equal(f.vectors.count(), retainedVectors, 'SQLite rollback preserves the projection at writer admission');
       if (change === 'model') assert.equal(f.vectors.getMeta().embedding_model_id, 'model-A');
       else {
         const revision = await f.store.getIndexedSourceRevision('alpha-doc');
@@ -287,9 +289,13 @@ test('late activation cannot expose an old model before catch-up and a mode-only
   );
   t.after(() => lifecycle.deactivate());
   f.setModel('model-B');
-  assert.equal((await lifecycle.activate('on')).ok, true);
-  assert.equal((await search(f)).meta.degraded, true, 'provider activation alone does not validate the corpus');
-  await f.builder.embedMissingDocumentVectors();
+  assert.equal((await lifecycle.activate('on')).ok, false, 'a new provider cannot acquire old persisted geometry');
+  assert.equal((await search(f)).meta.degraded, true);
+  assert.equal(
+    (await lifecycle.activate('on', { rebuildLegacyModel: 'model-B' })).ok,
+    true,
+    'controlled rebuilding completes before publication',
+  );
   assert.equal((await search(f)).items[0].anchor, 'alpha-doc');
   await lifecycle.activate('shadow');
   await lifecycle.activate('on');

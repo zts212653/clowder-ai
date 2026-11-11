@@ -2,11 +2,17 @@ import { executedInvocations, executionChainInvocations } from './lib/shell-invo
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
 import { codexAuthenticationEffect } from './native-auth-effect.mjs';
-import { copyNamespaceStability, shellTextPreservesCopyNamespace } from './native-effect-copy-namespace.mjs';
+import {
+  copyNamespaceStability,
+  programNamespaceStability,
+  shellTextPreservesCopyNamespace,
+} from './native-effect-copy-namespace.mjs';
 import { contextualGitMutationCandidates } from './native-effect-git-context.mjs';
 import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
+import { httpOutputTargets } from './native-effect-http-classifier.mjs';
 import { withoutInterpreterSource } from './native-effect-interpreter-source.mjs';
+import { boundGitDirectoryView, withoutPathTargets } from './native-effect-invocation-targets.mjs';
 import {
   explicitCopyRoles,
   isConstrainedLocalMediaObservation,
@@ -71,8 +77,8 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   const sequentialRead =
     !hasConcurrentShellExecution(lexical, raw, true) &&
     parts.every((part, index) => part.text === units[index].segment);
-  const readProgramNamespaceStable = copyNamespaceStability(
-    units,
+  const readProgramNamespaceStable = programNamespaceStability(
+    parts.map((part) => ({ segment: part.text })),
     initialCopyNamespaceStable && (!hasConcurrentShellExecution(lexical, raw) || sequentialRead),
   );
   for (let index = 0; index < parts.length; index++) {
@@ -107,18 +113,21 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
       const targetEvidence = dataConsumer ? text : [text, ...unresolvedBindings].join(' ').replace(/\r?\n/g, ' ');
       return [
         ...nested,
-        segmentCandidate(
-          isShellBinding(execution.text) ? '' : execution.text,
-          directory,
-          previewDecisions[index]?.operation,
-          source,
-          preserved,
-          targetEvidence,
-          !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
-          units[index].segment,
-          copyNamespaceStable[index],
-          readProgramNamespaceStable[index],
-        ),
+        {
+          ...segmentCandidate(
+            isShellBinding(execution.text) ? '' : execution.text,
+            directory,
+            previewDecisions[index]?.operation,
+            source,
+            preserved,
+            targetEvidence,
+            !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
+            units[index].segment,
+            copyNamespaceStable[index],
+            readProgramNamespaceStable[index],
+          ),
+          offendingClause: units[index].segment,
+        },
       ];
     }),
   );
@@ -127,7 +136,12 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   if (pipelineBoundary) candidates.push(pipelineBoundary);
   // Child policy decisions may deny an otherwise ordinary target (for example
   // an unbounded managed-preview operation). Do not reinterpret them as candidates.
-  const decisions = candidates.map((candidate) => (candidate.decision ? candidate : decideNativeEffect(candidate)));
+  const decisions = candidates.map((candidate) => {
+    const decision = candidate.decision ? candidate : decideNativeEffect(candidate);
+    return decision.decision === 'deny' && candidate.offendingClause
+      ? { ...decision, offendingClause: candidate.offendingClause }
+      : decision;
+  });
   const rank = (candidate) => SHELL_EFFECT_PRIORITY.get(candidate.effect) ?? -1;
   const denials = decisions.filter((decision) => decision.decision === 'deny');
   if (denials.length) return denials.reduce((best, candidate) => (rank(candidate) > rank(best) ? candidate : best));
@@ -160,7 +174,7 @@ function codeInputBoundary(raw, parts, contexts, cwd, source) {
   const root = executedInvocations(withoutInterpreterSource(raw), { cwd });
   if (codexAuthenticationEffect(root.pipelines.flat()) === 'auth_mutation')
     return decideNativeEffect({ effect: 'auth_mutation', target: classifyTarget(raw, cwd, 'auth_mutation'), source });
-  const original = protectedBranchBoundary(root, cwd, source);
+  const original = protectedBranchBoundary(root, cwd, source, { deferDirectories: true });
   if (original) return original;
   for (let index = 0; index < parts.length; index++) {
     const start = pipelineChainStart(parts, index);
@@ -169,7 +183,7 @@ function codeInputBoundary(raw, parts, contexts, cwd, source) {
     const chain = raw.slice(parts[start].start, parts[end].end);
     for (const { directory, bindings } of contexts[start] ?? [{ directory: cwd }]) {
       const reader = executionChainInvocations(withoutInterpreterSource(chain), { cwd: directory, bindings });
-      const branch = protectedBranchBoundary(reader, directory, source);
+      const branch = protectedBranchBoundary(reader, directory, source, { bindings });
       if (branch) return branch;
       const unproved = reader.pipelines.flat().find((call) => call.generatedCode && insideMainCheckout(call.cwd));
       if (unproved)
@@ -183,9 +197,16 @@ function codeInputBoundary(raw, parts, contexts, cwd, source) {
   return null;
 }
 
-function protectedBranchBoundary(reader, cwd, source) {
+function protectedBranchBoundary(reader, cwd, source, { deferDirectories = false, bindings } = {}) {
   const evidence = [
-    ...reader.pipelines.flat().flatMap((call) => shellExecutionEvidence(call, cwd)),
+    ...reader.pipelines.flat().flatMap((call) => {
+      const directory = boundGitDirectoryView(call, bindings);
+      if (deferDirectories && directory?.defer) return [];
+      const calls = directory?.text
+        ? executedInvocations(directory.text, { cwd: call.cwd ?? cwd }).pipelines.flat()
+        : [call];
+      return calls.flatMap((entry) => shellExecutionEvidence(entry, cwd));
+    }),
     ...(reader.unresolvedEvidence ?? []).map((text) => ({ text, cwd })),
   ];
   for (const item of evidence) {
@@ -238,7 +259,8 @@ function segmentCandidate(
     argvPreserved &&
     !unprovedReadProgram &&
     (constrainedGhApiOperation(command) ?? constrainedGhPullRequestOperation(command));
-  const copy = argvPreserved ? explicitCopyRoles(command) : null;
+  const copy = argvPreserved ? explicitCopyRoles(command, location ?? cwd) : null;
+  const http = argvPreserved && copyNamespaceStable ? httpOutputTargets(command, location ?? cwd) : null;
   const explicitTarget = argvPreserved ? (explicitTemporaryWorktreeTarget(command) ?? copy?.destination) : undefined;
   const locatedSource = location ? { ...source, cwd: location } : source;
   if (copy && (!copy.complete || !copyNamespaceStable)) {
@@ -247,15 +269,24 @@ function segmentCandidate(
       'protected_target_unparsed',
     );
   }
+  if (http && !http.complete)
+    return deny(
+      { effect: 'unknown', target: { kind: 'ordinary', value: http.targetText }, source: locatedSource },
+      'protected_target_unparsed',
+    );
   if (managedPreview)
     return { effect, target: { kind: 'ordinary', value: managedPreview.target }, source: locatedSource };
   if (remoteOperation)
     return { effect, target: { kind: 'remote_repository', value: remoteOperation.target }, source: locatedSource };
   const target = classifyTarget(
-    copy?.targetText ??
-      explicitTarget ??
-      observedSegmentTarget(segment, unresolvedText, targetText ?? command, roles, effect),
-    explicitTarget ? undefined : targetCwd,
+    withoutPathTargets(
+      http?.targetText ??
+        copy?.targetText ??
+        explicitTarget ??
+        observedSegmentTarget(segment, unresolvedText, targetText ?? command, roles, effect),
+      location ?? cwd,
+    ),
+    explicitTarget || http ? undefined : targetCwd,
     effect,
     explicitTarget,
   );

@@ -5,12 +5,10 @@ export function describePassageVectorRead(
   sql: string,
   bindings: readonly unknown[],
 ): SqliteNativeReadContext | undefined {
-  const prefix = 'SELECT passage_key as passageKey, distance FROM passage_vectors';
-  if (
-    !sql.startsWith(prefix) ||
-    sql.slice(prefix.length).trim().replace(/\s+/g, ' ') !== 'WHERE embedding MATCH ? AND k = ?'
-  )
-    return;
+  const prefix = sql.match(
+    /^SELECT passage_key as passageKey, distance FROM (?:passage_vectors_g1|passage_vectors)\b/,
+  )?.[0];
+  if (!prefix || sql.slice(prefix.length).trim().replace(/\s+/g, ' ') !== 'WHERE embedding MATCH ? AND k = ?') return;
   const [vector, requestedK] = bindings;
   if (
     bindings.length !== 2 ||

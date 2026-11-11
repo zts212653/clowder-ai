@@ -113,10 +113,16 @@ test('reviewed bundled Dot archive starts through the generic module carrier', a
       },
     }),
   );
-  assert.equal(
+  assert.deepEqual(
     runtime.supervisor.resolvePluginWebhook(dot.pluginId, 'mcp', 'POST'),
-    undefined,
-    'the external MCP bridge uses the fixed plugin handle port, not a webhook contribution',
+    {
+      contributionId: 'dot-mcp-ingress',
+      path: 'mcp',
+      methods: ['POST'],
+      anonymous: true,
+      requestBodyLimitBytes: 15 * 1024 * 1024,
+    },
+    'the package declares its bounded HTTP ingress; the shared MCP projection still uses the fixed handle',
   );
   await runtime.lifecycle.disable(installed.pluginInstanceId, enabled.lifecycleRevision);
 });

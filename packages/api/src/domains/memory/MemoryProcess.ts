@@ -16,6 +16,7 @@ import {
   type WalCheckpointResult,
 } from './memory-process-protocol.js';
 import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-execution.js';
+import { ReadStopError } from './read-stop-diagnostics.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
 
 function decodeError(error: ProcessError): Error {
@@ -78,7 +79,8 @@ class MemoryProcess {
         error === undefined ? resolve(value as T) : reject(error);
       };
       const abort = () => {
-        const reason = options?.signal?.reason ?? new DOMException('Memory search deadline exceeded', 'TimeoutError');
+        const reason =
+          options?.signal?.reason ?? new ReadStopError('deadline_exceeded', 'Memory search deadline exceeded');
         controller.abort(reason);
         if (active) {
           // SIGKILL also interrupts native SQLite. Its open transaction rolls back.
@@ -262,10 +264,14 @@ export function runMemoryCheckpoint(
 }
 export function runMemoryVectorRepack(
   dbPath: string,
-  options: { signal?: AbortSignal; deadlineAt?: number } = {},
+  options: {
+    signal?: AbortSignal;
+    deadlineAt?: number;
+    generationId?: import('./vector-generation-tables.js').VectorGenerationId;
+  } = {},
 ): Promise<VectorRepackResult> {
   return projections.run<VectorRepackResult>(
-    { kind: 'vector-repack', dbPath },
+    { kind: 'vector-repack', dbPath, generationId: options.generationId },
     { ...options, deadlineAt: options.deadlineAt ?? Date.now() + 120_000 },
   );
 }

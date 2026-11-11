@@ -189,7 +189,10 @@ The vectorcleanuptoken appears only in this markdown passage.
 
     const coldStore = new SqliteEvidenceStore(dbPath);
     await coldStore.initialize();
-    assert.equal(coldStore.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name = 'vec0'").get(), undefined);
+    assert.ok(
+      coldStore.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name = 'vec0'").get(),
+      'cold canonical writers prepare existing invalidation capabilities before any source write',
+    );
     await assert.doesNotReject(() => coldStore.deleteByAnchor(anchor));
     assert.equal(
       coldStore

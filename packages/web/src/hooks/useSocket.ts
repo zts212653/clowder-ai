@@ -29,6 +29,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { API_URL, refreshApiSession } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
+import { MEMORY_CHANGED } from './memory-changed';
 import { writeStoredSnapshot } from './named-message-writer';
 import {
   deliverPreviewAutoOpenEvent,
@@ -641,7 +642,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       }
     });
     socket.on('memory_matter_changed', () => {
-      window.dispatchEvent(new Event('cat-cafe:memory-matter-changed'));
+      window.dispatchEvent(new Event(MEMORY_CHANGED));
     });
     socket.on('runtime_interaction_updated', (interaction: { interactionId: string; status: string }) => {
       if (typeof window !== 'undefined') {
