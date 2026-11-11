@@ -29,6 +29,7 @@ import {
 } from '../config/mount/mount-rules-store.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
+import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
@@ -250,6 +251,7 @@ async function reconcilePluginMounts(
   for (const ps of pluginSkills) {
     const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
     for (const dir of allDirs) {
+      if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already warned about rejected targets.
       const linkPath = join(dir, ps.skillName);
       const target = enabledTargets.find((t) => t.candidates.includes(dir));
       const shouldMount = ps.enabled && !!target && (!allowed || allowed.has(target.id));

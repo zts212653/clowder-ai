@@ -18,6 +18,7 @@ import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capab
 import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
+import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
@@ -119,6 +120,7 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
           // Plugin skills are project-scoped: skip HOME fallback for standard providers
           const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
           for (const dir of dirs) {
+            if (await resolveForeignAgentMountRoot(dir)) continue; // syncProject already reported this target's conflicts.
             const linkPath = join(dir, ps.skillName);
             const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
             if (shouldMount && status === 'missing') {

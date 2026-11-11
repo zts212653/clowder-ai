@@ -19,6 +19,7 @@ import {
   type StandardMountPointId,
   type StandardMountPointRule,
 } from '@cat-cafe/shared';
+import { isForeignAgentPrivatePath } from '../../utils/foreign-agent-mount-guard.js';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../capabilities/capability-orchestrator.js';
 
 const STANDARD_MOUNT_POINT_SET = new Set<string>(STANDARD_MOUNT_POINT_IDS);
@@ -268,6 +269,7 @@ export function validateMountRules(input: unknown): MountRules | null {
   for (const id of STANDARD_MOUNT_POINT_IDS) {
     const entry = validateStandardMountPointRule(mountPointsObj[id]);
     if (!entry) return null;
+    if (isForeignAgentPrivatePath(entry.path)) return null;
     validatedMountPoints[id] = entry;
   }
 
@@ -279,6 +281,7 @@ export function validateMountRules(input: unknown): MountRules | null {
   for (const cp of customPaths ?? []) {
     const entry = validateCustomMountPointRule(cp);
     if (!entry) return null;
+    if (isForeignAgentPrivatePath(entry.path)) return null;
     if (customAliases.has(entry.alias)) return null;
     customAliases.add(entry.alias);
     validatedCustomPaths.push(entry);

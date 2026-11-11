@@ -15,6 +15,7 @@ import {
   resolveEffectiveSkillMountPaths,
   validateSkillName,
 } from '../config/governance/skill-sync.js';
+import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
 import { pathsEqual } from '../utils/project-path.js';
 import {
   buildProjectSkillMountDirs,
@@ -316,10 +317,20 @@ async function syncProjectUnlocked(
     removed: removedNames,
     syncedHash: '',
   };
+  const protectedDirs = new Set(
+    (
+      await Promise.all(
+        [...new Set(activeTargets.flatMap((target) => target.dirs))].map(async (dir) =>
+          (await resolveForeignAgentMountRoot(dir)) ? dir : null,
+        ),
+      )
+    ).filter((dir): dir is string => dir !== null),
+  );
   // Phase 1: Convert legacy directory-level mounts (always attempt — plugins need individual symlinks)
   for (const target of activeTargets) {
     const targetEnabled = enabledNames.filter((n) => mountTargetIdsBySkill.get(n)?.has(target.id));
     for (const dir of target.dirs) {
+      if (protectedDirs.has(dir)) continue;
       const converted = await convertDirectoryLevelMount(dir, skillsSource, targetEnabled, effectiveSourceMap);
       if (converted) {
         // Disabled skills + enabled skills filtered by mount policy are implicitly unmounted
@@ -339,6 +350,17 @@ async function syncProjectUnlocked(
     const outOfPolicy = enabledNames.filter((n) => !mountTargetIdsBySkill.get(n)?.has(target.id));
 
     for (const skillsDir of target.dirs) {
+      if (protectedDirs.has(skillsDir)) {
+        console.warn(`[syncProject] Skipping skill mount in foreign agent private directory: ${skillsDir}`);
+        result.conflicts.push(
+          ...targetEnabled.map((skillName) => ({
+            skillName,
+            mountPointId: target.id,
+            path: join(skillsDir, skillName),
+          })),
+        );
+        continue;
+      }
       let isLegacyManaged = false;
       try {
         isLegacyManaged = await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);

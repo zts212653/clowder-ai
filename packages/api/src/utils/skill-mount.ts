@@ -1,6 +1,7 @@
 import { lstat, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import { assertMountLinkAllowed } from './foreign-agent-mount-guard.js';
 import { pathsEqual } from './project-path.js';
 import { resolveStartupProjectRoot } from './startup-root.js';
 
@@ -177,7 +178,8 @@ export function symlinkTargetFor(linkPath: string, sourcePath: string): string {
  * without special privileges for directories. `symlinkTargetFor()` already
  * returns an absolute path on Windows, which junctions require.
  */
-export async function createSkillSymlink(target: string, path: string): Promise<void> {
+export async function createSkillSymlink(target: string, path: string, home?: string): Promise<void> {
+  await assertMountLinkAllowed(path, home);
   try {
     await symlink(target, path);
   } catch (err) {

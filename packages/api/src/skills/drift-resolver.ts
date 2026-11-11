@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import type { MountRules } from '@cat-cafe/shared';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { isValidSkillName } from '../config/governance/skill-sync.js';
+import { resolveForeignAgentMountRoot } from '../utils/foreign-agent-mount-guard.js';
 import { buildSkillMountTargets } from '../utils/skill-mount.js';
 import type { DriftResult } from './drift-detector.js';
 import { syncProject } from './skill-sync-engine.js';
@@ -94,12 +95,16 @@ async function syncDriftUnlocked(
       continue;
     }
 
-    overriddenSkills.add(conflict.skill);
     const target = targets.find((t) => t.id === conflict.mountPointId);
     if (!target) continue;
     // Standard mount points: only use project path (candidates[0]), skip HOME fallback.
     const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
     for (const dir of dirs) {
+      if (await resolveForeignAgentMountRoot(dir)) {
+        skippedSkills.add(conflict.skill);
+        continue;
+      }
+      overriddenSkills.add(conflict.skill);
       // If the mount point dir path is not a directory (symlink or file blocking it),
       // back up the blocker itself — don't follow symlinks into the source.
       try {
