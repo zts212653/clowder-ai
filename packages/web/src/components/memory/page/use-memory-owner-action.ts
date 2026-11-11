@@ -1,5 +1,7 @@
 import type { MemoryOwnerAction, MemoryOwnerActionReceipt } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
+import { notifyMemoryChanged } from '@/hooks/memory-changed';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { memoryObject } from './owner-memory-read';
 
@@ -74,6 +76,22 @@ export function useMemoryOwnerAction(
       if (response.ok && appliedReceipt(body, memoryId, current.action)) {
         command.current = null;
         setState({ busy: false, error: '', retryable: false });
+        notifyMemoryChanged();
+        if (endpoint.startsWith('/api/memory/taste/') || endpoint.startsWith('/api/memory/events/')) {
+          useToastStore.getState().addToast({
+            type: 'success',
+            title: current.action.startsWith('hard_forget')
+              ? '已忘掉'
+              : current.action.startsWith('retire')
+                ? '已不再使用'
+                : '已保存',
+            message:
+              current.action.startsWith('hard_forget') || current.action.startsWith('retire')
+                ? '之后不会再读取这条记忆。'
+                : '之后读取这条记忆时用新版',
+            duration: 6000,
+          });
+        }
         onApplied(body);
       } else {
         setState(failedResponse(body, response));

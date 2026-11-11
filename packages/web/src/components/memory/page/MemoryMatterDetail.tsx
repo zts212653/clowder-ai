@@ -2,6 +2,7 @@
 import type { MatterEntryView, MatterPage, MatterSourceInput, MessageFrom } from '@cat-cafe/shared';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ExternalLinkIcon } from '@/components/HubConfigIcons';
 import { useCatData } from '@/hooks/useCatData';
 import { MemoryMatterActions } from './MemoryMatterActions';
 import { MemoryMatterSourceForm } from './MemoryMatterSourceForm';
@@ -69,7 +70,7 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
       </Link>
       {removed ? (
         <p role="status" className="text-sm text-cafe-muted">
-          已忘记这件事
+          已忘掉这件事
         </p>
       ) : (
         <>
@@ -161,7 +162,7 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
                     className="shell-focusable text-sm text-cafe-accent underline"
                     disabled={action.busy}
                   >
-                    保存修改
+                    保存
                   </button>
                 </form>
               )}
@@ -192,9 +193,10 @@ export function MemoryMatterDetail({ matterId, from }: { matterId: string; from?
                     <div className="flex flex-wrap gap-4 text-sm">
                       <Link
                         href={`/thread/${encodeURIComponent(entry.source.threadId)}?message=${encodeURIComponent(entry.source.messageId)}`}
-                        className="shell-focusable text-cafe-accent hover:underline"
+                        className="shell-focusable inline-flex items-center gap-1 text-cafe-accent hover:underline"
                       >
-                        出处 ›
+                        查看原消息
+                        <ExternalLinkIcon />
                       </Link>
                       {entry.status === 'active' && (
                         <>

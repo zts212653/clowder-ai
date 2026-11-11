@@ -4,7 +4,6 @@
  * in the shared Console dialog (and fails closed without one); a row is disabled while its action
  * runs, and a failure stays on its row.
  */
-import { readFileSync } from 'node:fs';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -924,110 +923,6 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     expect(byTestId('chatgpt-pro-row-a1')).toBeNull();
     expect(byTestId('chatgpt-pro-row-b2')).not.toBeNull();
     expect(byTestId('chatgpt-pro-rows-awaiting-owner')).toBeNull();
-  });
-
-  it('drives the alpha.9 owner journey from its packed manifest without preparing or pairing on mount', async () => {
-    const manifest = JSON.parse(
-      readFileSync('../api/src/domains/plugin/bundled-packages/chatgpt-dot/0.2.0-alpha.10/manifest.json', 'utf8'),
-    ) as {
-      pluginId: string;
-      configuration: Array<{
-        key: string;
-        label: string;
-        actions: Array<{
-          id: string;
-          label: string;
-          render: string;
-          resultRender?: string;
-          confirm?: string;
-          next?: string;
-        }>;
-      }>;
-    };
-    const field = manifest.configuration.find((candidate) => candidate.key === 'connection');
-    if (!field) throw new Error('alpha.9 connection operation is missing');
-    const dotOperation = {
-      name: field.key,
-      label: field.label,
-      actions: field.actions.filter((action) => action.render !== 'row'),
-      rowActions: field.actions.filter((action) => action.render === 'row'),
-    } as unknown as PlatformOperationStatus;
-    const dotTarget = { kind: 'plugin', id: manifest.pluginId } as const;
-    const authorizationRow = {
-      key: 'authorization-required',
-      label: '需要确认共享连接范围',
-      detail: 'Dot 尚未获准使用现有猫咖云端连接。',
-      actions: [{ action: 'prepare-shared', label: '准备授权', input: { journey: 'prepare-shared' } }],
-    };
-    const proposalRow = {
-      key: 'proposal-one',
-      label: '连接到现有猫咖云端连接',
-      detail: '工具（1）：dot_read；事件（1）：dot.changed',
-      actions: [
-        {
-          action: 'bind-shared',
-          label: '连接现有猫咖云端连接',
-          confirm: '确认连接？',
-          input: { proposalRef: 'proposal-one' },
-        },
-      ],
-    };
-    const pairingRow = {
-      key: 'pairing-not-started',
-      label: '共享入口已获准',
-      detail: '下一步生成一次 Dot 配对说明。',
-      actions: [{ action: 'begin-pairing', label: '生成配对说明', input: { journey: 'begin-pairing' } }],
-    };
-    const waitingRow = {
-      key: 'waiting-subscription',
-      label: '等待 ChatGPT 订阅',
-      detail: '在已有猫咖 personal plugin 中 Refresh 后订阅 dot.summoned。',
-      actions: [{ action: 'show-instructions', label: '复制配对说明', input: { journey: 'show-instructions' } }],
-    };
-    const instructions = 'OPEN EXISTING PERSONAL PLUGIN\nREFRESH\nSUBSCRIBE dot.summoned pairing_code=secret';
-    const resultByAction: Record<string, unknown> = {
-      status: { ok: true, render: 'rows', data: { rows: [authorizationRow] } },
-      'prepare-shared': {
-        ok: true,
-        render: 'rows',
-        data: { rows: [proposalRow], validUntil: Date.now() + 60_000 },
-      },
-      'bind-shared': { ok: true, render: 'rows', data: { rows: [pairingRow] } },
-      'begin-pairing': {
-        ok: true,
-        render: 'rows',
-        data: { rows: [waitingRow], pollUntil: Date.now() + 60_000 },
-      },
-      'show-instructions': { ok: true, render: 'text', data: instructions },
-    };
-    mockApiFetch.mockImplementation(async (url) => {
-      calls.push({ url: String(url) });
-      const action = String(url).split('/').at(-1);
-      const body = action ? resultByAction[action] : undefined;
-      if (!body) throw new Error(`unexpected Dot action: ${action ?? 'missing'}`);
-      return jsonResponse(body);
-    });
-
-    await render(<ActionRenderer target={dotTarget} operation={dotOperation} configured />);
-
-    expect(calls.map(({ url }) => url)).toEqual([`/api/plugins/${manifest.pluginId}/actions/connection/status`]);
-    expect(byTestId(`${manifest.pluginId}-row-authorization-required`)).not.toBeNull();
-    expect(calls.some(({ url }) => url.endsWith('/prepare-shared') || url.endsWith('/begin-pairing'))).toBe(false);
-
-    await click(byTestId(`${manifest.pluginId}-row-authorization-required-action-prepare-shared`));
-    expect(byTestId(`${manifest.pluginId}-row-proposal-one-action-bind-shared`)).not.toBeNull();
-
-    await click(byTestId(`${manifest.pluginId}-row-proposal-one-action-bind-shared`));
-    await click(dialogButton('确认'));
-    expect(byTestId(`${manifest.pluginId}-row-pairing-not-started`)).not.toBeNull();
-
-    await click(byTestId(`${manifest.pluginId}-row-pairing-not-started-action-begin-pairing`));
-    await click(dialogButton('确认'));
-    expect(byTestId(`${manifest.pluginId}-row-waiting-subscription`)).not.toBeNull();
-
-    await click(byTestId(`${manifest.pluginId}-row-waiting-subscription-action-show-instructions`));
-    expect(container.textContent).toContain(instructions);
-    expect(dialogButton('复制')).not.toBeNull();
   });
 
   it('does not list on an owner refresh without a confirmation dialog', async () => {

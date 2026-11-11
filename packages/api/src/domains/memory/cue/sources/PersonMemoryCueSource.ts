@@ -1,16 +1,12 @@
-import { createHash } from 'node:crypto';
 import { messageFrom } from '../../../cats/services/stores/message-from.js';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
 import { isDelivered } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { PersonMemoryRecallService } from '../../people/PersonMemoryRecallService.js';
+import { personMemoryCardRevision } from '../../people/person-memory-card-revision.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
 import type { PersonEntityCueSource } from '../resolvers/PersonEntityCueResolver.js';
 
 const PERSON_MEMORY_ANCHOR_PREFIX = 'person-memory:';
-
-function revisionOf(value: unknown): string {
-  return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
-}
 
 export type PersonMemoryCueReadResult =
   | { status: 'ok'; payload: unknown }
@@ -66,7 +62,7 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
         recalled.card.facts.length === 1 ? '' : 's'
       }).`,
       anchor: `${PERSON_MEMORY_ANCHOR_PREFIX}${recalled.card.personId}`,
-      revision: revisionOf(recalled.card),
+      revision: personMemoryCardRevision(recalled.card),
       asOf: recalled.asOf,
       visibility: 'owner_private',
       drillFamily: 'person_memory',
@@ -86,7 +82,7 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
     if (recalled.status !== 'resolved') {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
-    if (revisionOf(recalled.card) !== input.expectedRevision) {
+    if (personMemoryCardRevision(recalled.card) !== input.expectedRevision) {
       return { status: 'not_available', invalidationReason: 'source_corrected' };
     }
     for (const ref of recalled.card.provenanceRefs) {

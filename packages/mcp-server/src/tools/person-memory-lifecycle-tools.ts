@@ -59,17 +59,6 @@ export const redactPersonMemoryItemInputSchema = {
     .describe('Exact item whose payload and source refs must be purged.'),
   clientRequestId: z.string().trim().min(1).max(200).optional(),
 };
-export const forgetPersonInputSchema = {
-  personId: personIdSchema.describe('Exact active private person ID to purge. This is a destructive owner action.'),
-  clientRequestId: z.string().trim().min(1).max(140).optional(),
-};
-export const forgetPersonMemoryProposalInputSchema = {
-  proposalId: captureCandidateIdSchema.describe(
-    'Exact terminal F276 proposal ID to purge. Person-bound proposals fail closed and require cat_cafe_forget_person.',
-  ),
-  clientRequestId: z.string().trim().min(1).max(140).optional(),
-};
-
 export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, callbackGet: CallbackGet) {
   const revision = createPersonMemoryRevisionTool(callbackPost);
   const handleGetPersonMemoryProposalStatus = (input: {
@@ -108,29 +97,12 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
       requestId: input.clientRequestId ?? `redaction_${randomUUID()}`,
     });
 
-  const handleForgetPerson = (input: { personId: z.infer<typeof personIdSchema>; clientRequestId?: string }) =>
-    callbackPost('/api/callbacks/person-memory/forget', {
-      personId: input.personId,
-      requestId: `person_forget_${input.clientRequestId ?? randomUUID()}`,
-    });
-
-  const handleForgetPersonMemoryProposal = (input: {
-    proposalId: z.infer<typeof captureCandidateIdSchema>;
-    clientRequestId?: string;
-  }) =>
-    callbackPost('/api/callbacks/person-memory/forget-proposal', {
-      proposalId: input.proposalId,
-      requestId: `person_forget_proposal_${input.clientRequestId ?? randomUUID()}`,
-    });
-
   return {
     handleGetPersonMemoryProposalStatus,
     handleRecallPersonRelationship,
     handleDrillPersonMemory,
     handleRevisePersonMemory: revision.handleRevisePersonMemory,
     handleRedactPersonMemoryItem,
-    handleForgetPerson,
-    handleForgetPersonMemoryProposal,
     tools: [
       defineTool({
         name: 'cat_cafe_get_person_memory_proposal_status',
@@ -180,32 +152,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
         handler: handleRedactPersonMemoryItem,
         governance: {
           implementationExport: 'handleRedactPersonMemoryItem',
-          action: 'close',
-          risk: { level: 'destructive', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
-      defineTool({
-        name: 'cat_cafe_forget_person',
-        description:
-          'Permanently hard-forget one exact owner-private person and all canonical/private derived surfaces. Destructive; requires an explicit owner request.',
-        inputSchema: forgetPersonInputSchema,
-        handler: handleForgetPerson,
-        governance: {
-          implementationExport: 'handleForgetPerson',
-          action: 'close',
-          risk: { level: 'destructive', openWorld: false },
-          runtimeProfiles: ['full'],
-        },
-      }),
-      defineTool({
-        name: 'cat_cafe_forget_person_memory_proposal',
-        description:
-          'Permanently purge one exact owner-private terminal F276 proposal lineage, including producer feedback and matching F281 episode indexes. Use when: the owner explicitly asks to delete an unbound rejected or withdrawn proposal by its exact proposalId. NOT for: active, pending, or person-bound proposals; person-bound memory must use cat_cafe_forget_person. Output: a content-free deletion receipt or an equalized absent result. GOTCHA: destructive and owner-authenticated; aliases, names, and inferred person IDs are never accepted.',
-        inputSchema: forgetPersonMemoryProposalInputSchema,
-        handler: handleForgetPersonMemoryProposal,
-        governance: {
-          implementationExport: 'handleForgetPersonMemoryProposal',
           action: 'close',
           risk: { level: 'destructive', openWorld: false },
           runtimeProfiles: ['full'],

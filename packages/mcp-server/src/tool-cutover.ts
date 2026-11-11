@@ -134,8 +134,16 @@ function manifestSetFindings(
       .map((entry) => entry.name),
   ]);
   const hasCurrentDelta = expectedRetired.length > 0 || expectedCanonical.length > 0 || expectedProfileNames.length > 0;
+  const currentDeltaNames = new Set([...expectedRetired, ...expectedCanonical, ...expectedProfileNames]);
+  const manifestNames = [
+    ...manifest.retiredNames,
+    ...manifest.canonicalNames,
+    ...Object.keys(manifest.expectedProfiles),
+  ];
+  const declaresCurrentDelta = manifestNames.length === 0 || manifestNames.some((name) => currentDeltaNames.has(name));
   if (
     hasCurrentDelta &&
+    declaresCurrentDelta &&
     (!equalSet(manifest.retiredNames, expectedRetired) ||
       !equalSet(manifest.canonicalNames, expectedCanonical) ||
       !equalSet(Object.keys(manifest.expectedProfiles), expectedProfileNames))

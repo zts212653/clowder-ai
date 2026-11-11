@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  handleLibraryCreate,
-  handleLibraryDryRun,
-  handleLibraryRebuild,
-} from '../dist/tools/library-lifecycle-tools.js';
+import { handleLibraryList, handleLibraryRebuild } from '../dist/tools/library-lifecycle-tools.js';
 
-test('each library writer carries the configured local user, including the post-create rebuild', async () => {
+// Create and dry-run moved to the owner library page on 2026-11-10; the remaining cat-side calls keep the local user.
+test('each remaining library call carries the configured local user', async () => {
   const previousFetch = globalThis.fetch;
   const previousUser = process.env.CAT_CAFE_USER_ID;
   const requests = [];
@@ -16,10 +13,9 @@ test('each library writer carries the configured local user, including the post-
     return new Response(JSON.stringify({ manifest: { id: 'domain:notes', status: 'archived' }, blocked: false }));
   };
   try {
-    await handleLibraryDryRun({ root: '/isolated/docs' });
-    await handleLibraryCreate({ kind: 'domain', name: 'notes', displayName: 'Notes' });
+    await handleLibraryList({});
     await handleLibraryRebuild({ collectionId: 'domain:notes' });
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 2);
     for (const { init } of requests) {
       const headers = new Headers(init.headers);
       assert.equal(headers.get('x-cat-cafe-user'), 'owner');

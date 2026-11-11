@@ -1,8 +1,6 @@
-export class ContextSourceTimeout extends Error {
-  constructor() {
-    super('context_source_timeout');
-  }
-}
+import { ContextSourceTimeout, ReadStopError } from '../read-stop-diagnostics.js';
+
+export { ContextSourceTimeout } from '../read-stop-diagnostics.js';
 
 /** Invocation-local I/O accounting; waiting/model time never consumes this budget. */
 export class ContextSourceWorkBudget {
@@ -49,7 +47,7 @@ export class ContextSourceWorkBudget {
       if (aborted) signal.removeEventListener('abort', aborted);
       this.remainingMs = Math.max(0, this.remainingMs - (performance.now() - started));
       if (timedOut) this.remainingMs = Math.min(this.remainingMs, reserveMs);
-      controller.abort();
+      controller.abort(new ReadStopError('read_closed', 'This operation was aborted'));
     }
   }
 }

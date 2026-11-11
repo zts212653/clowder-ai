@@ -1,4 +1,5 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
+import type { IEmbeddingService } from '../../../domains/memory/interfaces.js';
 import type { FrictionMetricsProvider } from '../publish-verdict/friction-generator-adapter.js';
 import { captureFrictionMeasurementPilot, type FrictionMeasurementPilotDeps } from './friction-measurement-pilot.js';
 
@@ -14,12 +15,23 @@ import { captureFrictionMeasurementPilot, type FrictionMeasurementPilotDeps } fr
  * — when absent (or not ready) the clusterer fails open to rule-only clustering
  * and marks the downstream measurement degraded rather than hiding uncertainty.
  */
-export type FrictionMetricsProviderDeps = FrictionMeasurementPilotDeps;
+export type FrictionMetricsProviderDeps = FrictionMeasurementPilotDeps & {
+  getLegacyEmbeddingService?: () => IEmbeddingService | undefined;
+};
 
 export class FrictionMetricsProviderImpl implements FrictionMetricsProvider {
   constructor(private readonly deps: FrictionMetricsProviderDeps) {}
 
   async resolve(selector: FrictionRollupSourceSelector) {
-    return captureFrictionMeasurementPilot(this.deps, selector);
+    // Resolve once before capture begins: late service readiness is visible, but
+    // asynchronous source reads cannot change this measurement's geometry.
+    const resolved = this.deps.getLegacyEmbeddingService
+      ? this.deps.getLegacyEmbeddingService()
+      : this.deps.embeddingService;
+    const embeddingService =
+      this.deps.getLegacyEmbeddingService && resolved && (resolved.getModelInfo().generationId ?? 'g0') !== 'g0'
+        ? undefined
+        : resolved;
+    return captureFrictionMeasurementPilot({ ...this.deps, embeddingService }, selector);
   }
 }

@@ -240,7 +240,8 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **坏直觉**：项目 repo 里搜不到就说"没有"
 **场景 trigger**：跨领域知识 / Lexander 虚拟世界 / 多 domain knowledge
-**Tools**：`cat_cafe_library_list` / `cat_cafe_library_dry_run` / `cat_cafe_library_create` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
+**Tools**：`cat_cafe_library_list` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
+**新建、归档资料库**：在主人的记忆页「资料库」里做（新建时先预览扫描，可填不收录的路径），猫侧没有对应工具；需要新库就请主人在页面上建。
 
 ### 18. `video-forge` / `ppt-forge` / `tech-writing` — 对外产出
 

@@ -36,6 +36,9 @@ normalize_socks_proxy_env
 VENV_DIR="${CAT_CAFE_HOME}/embed-venv"
 PORT="${EMBED_PORT:-9880}"
 MODEL="${EMBED_MODEL:-}"
+GENERATION="${EMBED_GENERATION:-$(python3 "$SCRIPT_DIR/embedding_generation.py" --field generation)}"
+RECIPE_MODEL="$(python3 "$SCRIPT_DIR/embedding_generation.py" --generation "$GENERATION" --field model)"
+if [ -n "$RECIPE_MODEL" ]; then MODEL="$RECIPE_MODEL"; fi
 API_SCRIPT="$SCRIPT_DIR/embed-api.py"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$API_SCRIPT; port=$PORT"
 
@@ -71,7 +74,9 @@ source "$VENV_DIR/bin/activate"
 echo "Starting Embedding server: model=$MODEL, port=$PORT"
 echo "[start] launching python: python3 $API_SCRIPT --model $MODEL --port $PORT"
 set +e
-python3 "$API_SCRIPT" --model "$MODEL" --port "$PORT"
+LIMIT_ARGS=()
+if [ -n "${EMBED_MAX_MODEL_MEM_MB:-}" ]; then LIMIT_ARGS=(--max-model-mem-mb "$EMBED_MAX_MODEL_MEM_MB"); fi
+python3 "$API_SCRIPT" --model "$MODEL" --port "$PORT" --generation "$GENERATION" "${LIMIT_ARGS[@]}"
 EXIT_CODE=$?
 set -e
 echo "[start] python exited with code $EXIT_CODE"

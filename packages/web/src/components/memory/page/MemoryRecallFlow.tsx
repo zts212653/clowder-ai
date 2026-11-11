@@ -119,7 +119,6 @@ export function MemoryRecallFlow({ feed }: { feed: ReturnType<typeof useMemoryRe
           </Link>
           <RecallReplyGroup
             group={group}
-            allowDeliveryExpansion={false}
             replyTimeLabel={group.timestamp == null ? undefined : `${memoryTime(group.timestamp)} 的回复`}
             initiallyExpanded={index === 0}
             locating={locating === key}

@@ -30,7 +30,7 @@ export type MemoryProcessJob =
     }
   | ({ kind: 'project-mentions'; dbPath: string; stagingPath: string } & MentionProjectionInput)
   | { kind: 'checkpoint'; dbPath: string }
-  | { kind: 'vector-repack'; dbPath: string }
+  | { kind: 'vector-repack'; dbPath: string; generationId?: import('./vector-generation-tables.js').VectorGenerationId }
   | {
       kind: 'scan';
       scanner: 'cat-cafe' | 'generic';

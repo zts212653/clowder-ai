@@ -2951,8 +2951,6 @@ export const {
   handleDrillPersonMemory,
   handleRevisePersonMemory,
   handleRedactPersonMemoryItem,
-  handleForgetPerson,
-  handleForgetPersonMemoryProposal,
 } = personMemoryLifecycleToolset;
 export const { handlePrepareMemoryContext, handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
 

@@ -41,6 +41,8 @@ async function fixture(t) {
   sqliteVec.load(db);
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
+  const vectorStore = new VectorStore(db, 4);
+  vectorStore.initMeta({ modelId: 'neutral-local-control', modelRev: '1', dim: 4 });
   const vectors = new PassageVectorStore(db, 4);
   const insert = db.prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES (?,?,?,?)');
   const rows = [
@@ -56,7 +58,7 @@ async function fixture(t) {
   let calls = 0;
   store.setEmbedDeps({
     mode: 'on',
-    vectorStore: new VectorStore(db, 4),
+    vectorStore,
     passageVectorStore: vectors,
     embedding: {
       load: async () => {},
@@ -270,6 +272,7 @@ test('actual native hits excluded by index suppression, hidden thread and source
   db.prepare(
     "INSERT INTO message_recall_index_suppressions(doc_anchor,passage_id,lease_id,state,prepared_at) VALUES (?,?,?,'prepared',?)",
   ).run('thread-visible', 'msg-b', 'isolated-lease', '2026-01-01');
+  assert.equal(new PassageVectorStore(db, 4).count(), 4, 'suppression physically removes the old vector');
   const snapshots = [];
   const options = {
     visibleThreadIds: ['visible'],
@@ -288,7 +291,7 @@ test('actual native hits excluded by index suppression, hidden thread and source
   assert.deepEqual(observed, plain);
   assert.ok(!observed.passages.some((row) => ['b', 'c', 'hidden'].includes(row.messageId)));
   const audit = snapshots.at(-1).candidateAudit;
-  assert.equal(audit.nativeCount, 5);
+  assert.equal(audit.nativeCount, 4, 'the native pool contains only the vectors remaining after suppression');
   for (const [anchor, id] of [
     ['thread-visible', 'b'],
     ['thread-visible', 'c'],

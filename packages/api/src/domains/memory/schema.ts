@@ -18,6 +18,12 @@ import { admitThreadOverviewCueFamily } from './curation/thread-cue-schema-migra
 import { migrateEntityMentionProjections } from './entity-mention-projection-schema.js';
 import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
 import { ensureTasteMemoryProjectionFence } from './taste/taste-memory-projection-fence.js';
+import {
+  ensureGenerationVectorTable,
+  type VectorGenerationTables,
+  vectorGenerationTables,
+} from './vector-generation-tables.js';
+import { installVectorSourceBindings } from './vector-source-binding.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -88,7 +94,7 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 80;
+export const CURRENT_SCHEMA_VERSION = 81;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1869,6 +1875,14 @@ export function applyMigrations(db: Database.Database): void {
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(80, new Date().toISOString());
     })();
   }
+  if (currentVersion < 81) {
+    db.transaction(() => {
+      installVectorSourceBindings(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(81, new Date().toISOString());
+    })();
+  } else {
+    installVectorSourceBindings(db);
+  }
 }
 
 /**
@@ -1877,18 +1891,12 @@ export function applyMigrations(db: Database.Database): void {
  * Safe to call multiple times (IF NOT EXISTS).
  * Returns true if table was created/exists, false if extension unavailable.
  */
-export function ensureVectorTable(db: Database.Database, dim: number): boolean {
-  try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vectors USING vec0(
-        anchor TEXT PRIMARY KEY,
-        embedding float[${dim}]
-      )
-    `);
-    return true;
-  } catch {
-    return false; // sqlite-vec not loaded — fail-open
-  }
+export function ensureVectorTable(
+  db: Database.Database,
+  dim: number,
+  tables: VectorGenerationTables = vectorGenerationTables(),
+): boolean {
+  return ensureGenerationVectorTable(db, dim, 'documents', tables);
 }
 
 /**
@@ -1896,16 +1904,10 @@ export function ensureVectorTable(db: Database.Database, dim: number): boolean {
  * Kept separate from evidence_vectors because hydration target is
  * evidence_passages, not evidence_docs.
  */
-export function ensurePassageVectorTable(db: Database.Database, dim: number): boolean {
-  try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(
-        passage_key TEXT PRIMARY KEY,
-        embedding float[${dim}]
-      )
-    `);
-    return true;
-  } catch {
-    return false; // sqlite-vec not loaded — fail-open
-  }
+export function ensurePassageVectorTable(
+  db: Database.Database,
+  dim: number,
+  tables: VectorGenerationTables = vectorGenerationTables(),
+): boolean {
+  return ensureGenerationVectorTable(db, dim, 'passages', tables);
 }

@@ -98,7 +98,7 @@ export function destructiveInvocationEffect({ name, operands = [] } = {}) {
 
 const DATA_PROGRAMS = new Set(
   `base64 bat cat column curl cut diff echo envsubst fmt fold gh grep head jq less md5 md5sum more nl od
-   paste pbcopy printf pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
+   paste pbcopy printf pgrep ps lsof pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
     .trim()
     .split(/\s+/),
 );
@@ -268,7 +268,7 @@ function isLocalObservation(raw) {
   if (['du', 'sleep'].includes(executable)) return true;
   if (executable === 'shasum') return !tokens.slice(1).some((token) => ['-c', '--check', '--status'].includes(token));
   if (isLivenessProbe({ name: executable, operands: tokens.slice(1) })) return true;
-  if (['ps', '/bin/ps', '/usr/bin/ps', 'lsof', '/usr/bin/lsof', '/usr/sbin/lsof'].includes(executable)) return true;
+  if (/^(?:\/(?:usr\/)?s?bin\/)?(?:ps|pgrep|lsof)$/.test(executable)) return true;
   if (['test', '/bin/test', '/usr/bin/test'].includes(executable)) return tokens.length > 1;
   return ['[', '/bin/[', '/usr/bin/['].includes(executable) && tokens.at(-1) === ']';
 }

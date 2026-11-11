@@ -14,10 +14,12 @@ export function MemoryTasteCorrections({
   proposals,
   revision,
   reread,
+  onDecided,
 }: {
   proposals: TasteMemoryCorrectionProposalView[];
   revision: string;
   reread: () => void;
+  onDecided?: () => void;
 }) {
   if (!proposals.length) return null;
   return (
@@ -30,6 +32,7 @@ export function MemoryTasteCorrections({
           proposal={proposal}
           revision={revision}
           reread={reread}
+          onDecided={onDecided}
           noun="品味"
           endpoint="/api/taste-proposals"
           matchesReceipt={matchesReceipt}
