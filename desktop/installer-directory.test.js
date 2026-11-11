@@ -99,7 +99,7 @@ end;
 procedure CurStepChanged(Step: TSetupStep);
 begin
   if Step = ssPostInstall then
-    SaveStringsToUTF8File(ExpandConstant('{param:ReceiptPath}'), [IntToStr(Ord(VisitedDirectory)), InitialDirectory, WizardDirValue], False);
+    SaveStringsToUTF8File(ExpandConstant('{param:ReceiptPath}'), [ExpandConstant('{param:RunId}'), IntToStr(Ord(VisitedDirectory)), InitialDirectory, WizardDirValue], False);
 end;
 `,
           'utf8',
@@ -108,32 +108,38 @@ end;
         try {
           const compiled = await runNativeCommand(root, 'compile', compiler, ['/Q', script]);
           assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
-          const common = ['/SP-', '/SUPPRESSMSGBOXES', '/NORESTART', `/ReceiptPath=${receipt}`];
+          const common = ['/SP-', '/SUPPRESSMSGBOXES', '/NORESTART'];
           if (hasPrevious) {
             const seeded = await runNativeCommand(root, 'seed', path.join(root, 'probe.exe'), [
               ...common,
               '/VERYSILENT',
               `/DIR=${initial}`,
+              `/ReceiptPath=${path.join(root, 'seed-receipt.txt')}`,
+              '/RunId=seed',
             ]);
             assert.equal(seeded.status, 0, seeded.stdout + seeded.stderr);
             assert.equal(fs.existsSync(path.join(initial, 'unins000.exe')), true);
           }
           const installed = await runNativeCommand(root, mode, path.join(root, 'probe.exe'), [
             ...common,
+            `/ReceiptPath=${receipt}`,
+            `/RunId=${mode}`,
             `/SelectedDir=${selected}`,
             `/LOG=${path.join(root, 'setup.log')}`,
             ...silentArguments,
           ]);
           assert.equal(installed.status, 0, installed.stdout + installed.stderr);
-          const [visited, defaultDirectory, actualDirectory] = fs
+          const [runId, visited, defaultDirectory, actualDirectory] = fs
             .readFileSync(receipt, 'utf8')
             .replace(/^\uFEFF/, '')
             .trim()
             .split(/\r?\n/);
+          assert.equal(runId, mode, 'the receipt must come from this install, not its seed');
           assert.equal(defaultDirectory, initial, 'upgrades must default to the previous installation');
           assert.equal(visited, expectedVisited, 'interactive upgrades must show the directory page');
           assert.equal(actualDirectory, selected, 'the directory edit must control the actual installation');
           assert.equal(fs.readFileSync(path.join(selected, 'payload.txt'), 'utf8'), 'installation payload');
+          if (mode === 'relocate') assert.equal(fs.existsSync(path.join(initial, 'payload.txt')), true);
           assert.equal(fs.readFileSync(path.join(root, 'history.txt'), 'utf8'), 'persistent user history');
         } finally {
           await uninstallProbe(root, programs, appId);

@@ -67,8 +67,9 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  ExitCode: Integer;
-  Cmd, AppDir, InstanceRoot, FrontendPort, ApiPort, RedisPort: String;
+  ExitCode, ShutdownIndex: Integer;
+  Cmd, AppDir, PreviousAppDir, InstanceRoot, FrontendPort, ApiPort, RedisPort: String;
+  ShutdownDirs: TArrayOfString;
   Started: Boolean;
   StartedAt: Cardinal;
 begin
@@ -116,17 +117,24 @@ begin
     exit;
   end;
   // Upgrade and uninstall share identity-bound coordinated shutdown and cleanup.
-  Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
-         '\stop-installed-desktop.ps1" -AppDir "' + AppDir + '"';
-  if InstanceRoot <> '' then Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
-  ShowPreparationBody(WizardForm.PreparingLabel, 'SetupWaitForExit');
-  Log('Setup stage shutdown: started');
-  StartedAt := GetTickCount;
-  Started := ExecAsOriginalUser('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  FinishSetupStage('shutdown', StartedAt, ', started=' + IntToStr(Ord(Started)) + ', exit=' + IntToStr(ExitCode));
-  if (not Started) or (ExitCode <> 0) then begin
-    Result := CustomMessage('SetupShutdownFailed');
-    exit;
+  ShutdownDirs := [AppDir];
+  PreviousAppDir := RemoveBackslashUnlessRoot(WizardForm.PrevAppDir);
+  if (PreviousAppDir <> '') and (CompareText(PreviousAppDir, RemoveBackslashUnlessRoot(AppDir)) <> 0) then
+    ShutdownDirs := [PreviousAppDir, AppDir];
+  for ShutdownIndex := 0 to GetArrayLength(ShutdownDirs) - 1 do begin
+    Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
+           '\stop-installed-desktop.ps1" -AppDir "' + ShutdownDirs[ShutdownIndex] + '"';
+    if InstanceRoot <> '' then Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
+    ShowPreparationBody(WizardForm.PreparingLabel, 'SetupWaitForExit');
+    Log('Shutdown helper target: ' + ShutdownDirs[ShutdownIndex]);
+    Log('Setup stage shutdown: started');
+    StartedAt := GetTickCount;
+    Started := ExecAsOriginalUser('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+    FinishSetupStage('shutdown', StartedAt, ', started=' + IntToStr(Ord(Started)) + ', exit=' + IntToStr(ExitCode));
+    if (not Started) or (ExitCode <> 0) then begin
+      Result := CustomMessage('SetupShutdownFailed');
+      exit;
+    end;
   end;
   WizardForm.PreparingLabel.Visible := False;
   FileUseStage := fuPending;
