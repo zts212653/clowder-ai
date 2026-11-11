@@ -7,7 +7,13 @@ import { SessionImplementationRegistry } from '../../dist/domains/cats/services/
 import { RegisteredSessionAgentService } from '../../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { appendRecoveryFixture, recoveryProcessor } from '../helpers/append-recovery-fixture.js';
 
-function fixture({ registered = false, supported = true, ending = 'completed', unknownWrite = false } = {}) {
+function fixture({
+  registered = false,
+  supported = true,
+  ending = 'completed',
+  unknownWrite = false,
+  emptyResume = false,
+} = {}) {
   const listeners = new Set();
   const calls = { hello: 0, steer: [], registered: 0, released: 0 };
   let dispatcher;
@@ -22,7 +28,10 @@ function fixture({ registered = false, supported = true, ending = 'completed', u
     clearRecentCapacitySignal() {},
     cancelSession() {},
     async newSession() {
-      return { sessionId: 'dsh-session', configOptions: [] };
+      return { sessionId: emptyResume ? 'fresh-session' : 'dsh-session', configOptions: [] };
+    },
+    async loadSession(sessionId) {
+      return { sessionId };
     },
     async probeTurnBridge() {
       calls.hello++;
@@ -41,10 +50,11 @@ function fixture({ registered = false, supported = true, ending = 'completed', u
       return { state: read ? 'read' : 'accepted', nativeTurnId: 7 };
     },
     async *promptStream(sessionId) {
-      notify('turn_started');
-      notify('input_read', { deliveryId: 'original-prompt' });
+      if (emptyResume && sessionId === 'dsh-session') return;
+      notify('turn_started', { sessionId });
+      notify('input_read', { sessionId, deliveryId: 'original-prompt' });
       yield { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'waiting' } } };
-      notify('turn_ended', { reason: ending });
+      notify('turn_ended', { sessionId, reason: ending });
     },
   };
   const host = new AcpAgentService({
@@ -75,6 +85,7 @@ function fixture({ registered = false, supported = true, ending = 'completed', u
     });
   }
   const options = {
+    ...(emptyResume ? { sessionId: 'dsh-session' } : {}),
     invocationId: 'invocation-1',
     hostSessionId: 'host-session',
     signal: new AbortController().signal,
@@ -99,6 +110,53 @@ function fixture({ registered = false, supported = true, ending = 'completed', u
       read = true;
     },
   };
+}
+
+for (const registered of [false, true]) {
+  for (const ending of ['completed', 'error']) {
+    test(`fresh recovery retains native input (${registered ? 'registered' : 'direct'}, ${ending})`, async () => {
+      const f = fixture({ registered, ending, emptyResume: true });
+      const sessions = [];
+      const completed = [];
+      let reads = 0;
+      for await (const message of f.service.invoke('resume fixture prompt', f.options)) {
+        assert.notEqual(message.type, 'error', message.error);
+        if (message.type === 'session_init') sessions.push(message.sessionId);
+        if (message.type !== 'text') continue;
+        const dispatcher = f.dispatcher();
+        assert.ok(dispatcher, 'the fresh native turn must expose live input after zero-event recovery');
+        assert.equal(dispatcher.handle.threadId, 'fresh-session');
+        const input = {
+          text: 'fresh turn correction',
+          messageIds: ['source-fresh'],
+          deliveryId: 'fresh-delivery',
+          onInputRead() {
+            reads++;
+          },
+          onInputCompleted(value) {
+            completed.push(value);
+          },
+        };
+        assert.equal(
+          (await dispatcher.dispatch(input, { expectedInvocationId: 'invocation-1', force: false })).accepted,
+          true,
+        );
+        assert.equal(f.calls.steer[0].sessionId, 'fresh-session');
+        f.notify('input_read', { deliveryId: 'fresh-delivery' });
+        await setImmediate();
+        assert.equal(reads, 0, 'late old-session events cannot consume fresh input');
+        f.notify('input_read', { sessionId: 'fresh-session', deliveryId: 'fresh-delivery' });
+        await setImmediate();
+        assert.equal(reads, 1);
+        assert.deepEqual(completed, []);
+      }
+      assert.deepEqual(sessions, ['dsh-session', 'fresh-session']);
+      assert.deepEqual(completed, [ending === 'completed']);
+      assert.equal(f.calls.hello, 1, 'the same process retains its capability negotiation');
+      assert.equal(f.calls.registered, 1);
+      assert.equal(f.calls.released, 1);
+    });
+  }
 }
 
 for (const registered of [false, true]) {

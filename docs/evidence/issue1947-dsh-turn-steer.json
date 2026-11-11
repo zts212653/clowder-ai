@@ -55,5 +55,23 @@
     "persistedHistoryAndUiPassed": true,
     "newModelCalls": 0,
     "nativeEventsUnchanged": true
+  },
+  "freshSessionRecoveryReview": {
+    "reviewedHead": "6ae4047e35a9114c9b9d98fccce9baa1178a3f50",
+    "reviewer": "kimi",
+    "severity": "P2",
+    "findingSource": "0001794395277102-000114-f212be5a",
+    "redFailedTests": 4,
+    "greenPassedTests": 46,
+    "apiTypecheckPassed": true,
+    "fix": "Dispose the old turn-input binding and construct a fresh-session binding after zero-event resume replacement.",
+    "coverage": [
+      "direct and registered sessions",
+      "completed and failed native turns",
+      "fresh append/read/completion",
+      "late old-session events ignored",
+      "single process capability probe"
+    ],
+    "liveProviderFaultInjected": false
   }
 }

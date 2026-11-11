@@ -112,5 +112,17 @@ Why: 只扩展受控 provider 与现有 activeRunDispatch；桥和 DshTurnInput 
 ## 交付与收尾
 
 作者提交：鲸鲸 1b3cf3528846779ca45852f37c4019a3fad558f0；sol 9ec131408105212ccddc3d961a3b1aa6ad893f25。
-尚需完成：独立非作者 exact-HEAD 审查、next PR、评论请求 zts 审查、获批准且门禁通过后合入。
+已创建目标 next 的 Draft PR #1950，并评论请求 zts 审查；尚需独立复审、必要 CI 与 zts approve 后合入。
 验收 worktree、失败样本和持久测试数据默认保留；临时服务在取证完成后停止并记录归属，不删除历史。
+
+### 独立审查发现：fresh-session 恢复绑定（P2）
+
+Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件结束，Host 创建 fresh session 并正常回复，但 DshTurnInput 仍过滤旧 session，fresh turn 无 dispatcher。主路径与已完成的原生实验不受该分支影响；恢复后的同轮输入确实缺失。
+
+- RED：在现有 Host fake seam 中重现 direct/registered × completed/error 四种情况，4/4 因缺失 fresh dispatcher 失败。
+- 修复：sessionId 切换时 dispose 旧 DshTurnInput，在同一已协商进程上为 fresh session 创建新实例；不再次 probe，不增加恢复平台或重试策略。
+- GREEN：Host 输入、resume retry 与原有 Queue/History 恢复合同共 46/46 通过，API tsc 通过，修改文件 Biome exit 0。
+- 回归同时核对 fresh 输入的 accepted/read/completion、旧 session 迟到事件不误读、dispatcher 正确释放及协商只发生一次。
+- 同根因扫描覆盖本函数全部 sessionId 赋值：其他赋值均发生在首次创建 turn 绑定之前，只有这条 retry 是绑定后的 session 切换。
+- 该恢复分支使用 fake 协议边界验证，没有故意让真实供应商产生空回复或重放收费请求；前述真实样本保留其原 SHA，不声称覆盖这条新修复的真实故障注入。
+- 首轮 finding 已通过普通回复送达；reviewer 的 typed MCP 回执因参数序列化失败未落库，保留缺口，不伪造为 approved。

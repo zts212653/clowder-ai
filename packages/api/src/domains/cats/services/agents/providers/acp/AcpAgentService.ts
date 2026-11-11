@@ -1250,6 +1250,10 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          if (dshTurn && options) {
+            await dshTurn.dispose();
+            dshTurn = new DshTurnInput(lease.client as unknown as AcpClient, freshSessionId, options);
+          }
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
