@@ -18,6 +18,16 @@ for (const width of [1024, 390])
     const checking = new Promise((resolve) => {
       began = resolve;
     });
+    let beginInspection;
+    const inspecting = new Promise((resolve) => {
+      beginInspection = resolve;
+    });
+    let finishInspection;
+    const inspected = new Promise((resolve) => {
+      finishInspection = resolve;
+    });
+    let inspectionBusy = false;
+    let inspectionRequests = 0;
     const desktop = {
       id: 'dsh-desktop',
       label: 'DSH Desktop',
@@ -49,10 +59,18 @@ for (const width of [1024, 390])
           },
         }),
       );
-      await page.route('**/api/cats/dsh-setup/*', (route) => {
+      await page.route('**/api/cats/dsh-setup/*', async (route) => {
         const action = new URL(route.request().url()).pathname.split('/').at(-1);
         order.push(action);
         assert.notEqual(action, 'test', 'the old empty-MCP paid test must never be called');
+        if (action === 'inspect' && width === 390) {
+          inspectionRequests += 1;
+          if (inspectionBusy) return route.fulfill({ status: 409, json: { error: 'dsh_setup_busy' } });
+          inspectionBusy = true;
+          beginInspection();
+          await inspected;
+          inspectionBusy = false;
+        }
         return route.fulfill({
           json:
             action === 'inspect'
@@ -127,7 +145,18 @@ for (const width of [1024, 390])
         'fee disclosure is visible beside the primary action',
       );
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-add-ready-${width}.png`) });
+      if (width === 390) await inspecting;
+      const freshDiscovery =
+        width === 390
+          ? page.waitForResponse((response) => new URL(response.url()).pathname === '/api/cats/native-runtimes')
+          : undefined;
       await editor.getByRole('button', { name: '添加伙伴', exact: true }).click();
+      if (freshDiscovery) {
+        await freshDiscovery;
+        await page.waitForTimeout(300);
+        assert.equal(inspectionRequests, 1, 'save must reuse the unfinished panel inspection');
+        finishInspection();
+      }
       await checking;
       await editor.getByRole('button', { name: '已保存，正在检查…', exact: true }).waitFor();
       assert.match(
@@ -159,6 +188,7 @@ for (const width of [1024, 390])
         await page.screenshot({ path: path.join(screenshots, `dsh-added-check-failed-${width}.png`) });
       }
     } finally {
+      finishInspection();
       finishCheck();
       await context.close();
     }
