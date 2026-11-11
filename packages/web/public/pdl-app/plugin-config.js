@@ -69,14 +69,11 @@ function pcfVariantValues(fields, draft) {
 }
 /* 分支：组件库的 oneOf 表单（ui.js 的 oneOfWhen / oneOfKeys），和成员的接入方式是同一个 */
 function pcfActiveKeys(fields, vp, values) {
+  // operation fields a branch claims follow the branch too
   return oneOfKeys(
-    fields
-      .filter(function (f) {
-        return f.kind !== 'operation';
-      })
-      .map(function (f) {
-        return f.key;
-      }),
+    fields.map(function (f) {
+      return f.key;
+    }),
     vp,
     values,
   );
@@ -187,7 +184,7 @@ function pcfCtx(inst) {
     fields: fields,
     vp: vp,
     on: function (f) {
-      return !active || f.kind === 'operation' || !!active[f.key];
+      return !active || !!active[f.key];
     },
   };
 }
@@ -618,6 +615,8 @@ function pcfOpVM(inst, f) {
     armId: sh.arm && sh.arm.id,
     revokeId: sh.revoke && sh.revoke.id,
     currentId: o.cur,
+    // a restart only once the steps have started (or have a result)
+    restartable: sh.mode === 'seq' && !!o.phase && o.phase !== 'idle',
     phase: o.phase,
     last: o.last,
     seconds: Math.max(0, Math.ceil((o.until - Date.now()) / 1000)),
