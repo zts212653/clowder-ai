@@ -1,5 +1,6 @@
 import { isDshLauncher } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { useMemberModelCatalogs } from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
 import { serializeCommandArgs } from '../../hub-cat-editor.acp';
 import { type HubCatEditorFormState, initialState, splitCommandArgs } from '../../hub-cat-editor.model';
@@ -20,9 +21,16 @@ export function needsDshPreparation(form: HubCatEditorFormState, baseline?: CatD
 export async function prepareNativeMember(form: HubCatEditorFormState, baseline?: CatData | null) {
   if (!needsDshPreparation(form, baseline)) return form;
   return (async () => {
+    const runtimeRevision = useMemberModelCatalogs.getState().runtimeRevision + 1;
+    useMemberModelCatalogs.setState({ runtimeRevision });
     const response = await apiFetch('/api/cats/native-runtimes');
     if (!response.ok) throw Error('dsh_setup_custom_startup');
     const { runtimes } = (await response.json()) as { runtimes: RuntimeChoice[] };
+    useMemberModelCatalogs.setState((state) =>
+      state.runtimeConfirmedRevision <= runtimeRevision
+        ? { runtimes, runtimeConfirmedRevision: runtimeRevision }
+        : state,
+    );
     const sources = runtimes.filter((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
     const source =
       sources.find((runtime) => runtime.acp?.command === form.acpCommand) ??

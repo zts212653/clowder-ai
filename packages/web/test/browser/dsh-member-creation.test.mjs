@@ -130,6 +130,12 @@ for (const width of [1024, 390])
       await editor.getByRole('button', { name: '添加伙伴', exact: true }).click();
       await checking;
       await editor.getByRole('button', { name: '已保存，正在检查…', exact: true }).waitFor();
+      assert.match(
+        await picker.locator('option:checked').innerText(),
+        /DSH.*已安装/,
+        'the saved Desktop must use the discovery confirmed during preparation',
+      );
+      await editor.locator('p', { hasText: /^Chosen model · custom$/ }).waitFor();
       assert.equal(
         await editor.getByTestId('member-save-bar').getByText('准备好就可以添加伙伴', { exact: true }).count(),
         0,
