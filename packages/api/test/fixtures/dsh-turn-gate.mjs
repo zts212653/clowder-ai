@@ -23,6 +23,9 @@ export async function apply(ctx, config) {
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     record('claimed', { sessionId: agent.session.id, messageId: message.id, turn });
   });
+  ctx.on('agent/inbox/inserted', ({ agent, message }) => {
+    record('inserted', { sessionId: agent.session.id, messageId: message.id, content: message.content });
+  });
   ctx.on('agent/created', ({ agent }) => {
     const sessionId = agent.session.id;
     agent.ctx.tools.restrict({ allow: [] });
