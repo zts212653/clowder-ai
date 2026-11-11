@@ -81,6 +81,7 @@ import {
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
+import { persistStreamedInteractiveBlock } from '../domains/cats/services/agents/invocation/persist-streamed-interactive-block.js';
 import type { QueueLedgerEntry } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import type { ThreadExecutionSituationSource } from '../domains/cats/services/agents/invocation/thread-execution-situation.js';
@@ -5686,16 +5687,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       invocationId,
     );
     if (addResult === 'added' || addResult === 'updated') {
-      socketManager.broadcastAgentMessage(
-        {
-          type: 'system_info' as const,
-          catId: record.catId,
-          content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
-          ...stampVisibleTurn(effectiveInvId, invocationId),
-          ...(responseMessageId ? { messageId: responseMessageId } : {}),
-          timestamp: Date.now(),
+      const event = {
+        type: 'system_info' as const,
+        catId: record.catId,
+        content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
+        ...stampVisibleTurn(effectiveInvId, invocationId),
+        ...(responseMessageId ? { messageId: responseMessageId } : {}),
+        timestamp: Date.now(),
+      };
+      await persistStreamedInteractiveBlock(messageStore, event, responseMessageId).then(
+        () => socketManager.broadcastAgentMessage(event, record.threadId),
+        (err) => {
+          // Keep the buffered block for terminal publication; don't expose an unpersisted question.
+          app.log.warn({ err, responseMessageId, blockId: resolvedBlock.id }, 'Deferring buffered question broadcast');
         },
-        record.threadId,
       );
     }
 
