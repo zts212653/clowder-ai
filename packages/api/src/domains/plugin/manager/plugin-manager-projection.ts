@@ -75,8 +75,6 @@ function contributionName(contribution: ManifestContribution): string {
       return contribution.displayName;
     case 'tool':
       return contribution.name;
-    case 'ui':
-      return contribution.label;
     default:
       return contribution.id;
   }
