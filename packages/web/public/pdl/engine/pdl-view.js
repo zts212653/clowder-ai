@@ -202,7 +202,7 @@ const PDL_SCHEMA = {
   typed: { slot: 1, of: 1, data: 1, blocks: 1, when: 1 },   /* 按渲染类型画：of 是类型（容器.子类型），data 是这一项交给模板的数据，blocks 是没有模板时宿主的默认画法 */   /* data 显式给子视图的正文 VM；未声明时由子视图自己的 vm 取数。 */
   /* 视图模型里直接给的控件（表单字段的 control） */
   kvlist: { add: 1, del: 1, empty: 1, eye: 1, input: 1, key: 1, keyPh: 1, path: 1, ro: 1, rows: 1, single: 1 },
-  avatar: { args: 1, lead: 1, size: ['$', 'xs', 's', 'm', 'l', 'xl'], upload: 1 },
+  avatar: { lead: 1, size: ['$', 'xs', 's', 'm', 'l', 'xl'], upload: 1 },
   color: { id: 1, input: 1, label: 1, preview: 1, slots: ['name'], value: 1, when: 1 }
 };
 

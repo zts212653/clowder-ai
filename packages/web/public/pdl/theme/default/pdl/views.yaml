@@ -766,38 +766,6 @@ views:
                         args: {op: discard, p: $.sel.config.p}
                       - {type: button, primary: true, label: t:ext.saveConfig, submit: true}
           - type: section
-            title: t:ext.address.title
-            help: t:ext.address.help
-            when: $.sel.address
-            blocks:
-              - type: settings
-                rows:
-                  - label: t:ext.address.alias
-                    ctls:
-                      - type: input
-                        id: plugin-alias
-                        value: $.sel.address.alias
-                        go: pluginAliasSave
-                        args: $.sel.address.args
-                        goLabel: t:common.save
-                  - label: t:ext.address.icon
-                    ctls:
-                      - type: avatar
-                        lead: $.sel.address.who
-                        size: l
-                        upload: {label: t:control.upload, accept: "image/png,image/jpeg,image/webp"}
-                        args: {p: $.sel.address.args.p, inst: $.sel.address.args.inst, change: pluginIcon}
-                      - type: button
-                        label: t:ext.address.iconReset
-                        act: pluginIconReset
-                        args: $.sel.address.args
-                        when: $.sel.address.custom
-              - type: notice
-                text:
-                  t: ext.address.off
-                  args: [$.sel.address.alias]
-                when: $.sel.address.off
-          - type: section
             title: t:ext.connection
             when: $.sel.connection
             actions:
