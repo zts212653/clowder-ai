@@ -62,14 +62,14 @@ describe('K-2A contract-native inventory', () => {
   it('pins the consumed contract candidate archive and preserves older manifest compatibility', () => {
     assert.equal(
       packageJson.dependencies['@clowder-ai/plugin-contract'],
-      'file:vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz',
+      'file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz',
     );
     const archive = readFileSync(
-      new URL('../vendor/clowder-ai-plugin-contract-0.3.3-candidate.1-f202-2c14f0f2fda7.tgz', import.meta.url),
+      new URL('../vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz', import.meta.url),
     );
     assert.equal(
       createHash('sha256').update(archive).digest('hex'),
-      'd8793602f937e5d52cf34bf7fdd2de90f2d5c3ec7efe9f770f3cea004c069204',
+      'c9540ea7876c71df8cf5a8a8d987f07e30508a63772a13353ce9c05dce0966b7',
     );
     assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.3.3-candidate.1');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
@@ -169,7 +169,7 @@ describe('K-2A contract-native inventory', () => {
   });
 
   it('rejects declarations below the compatibility floor or above the implemented contract without writes', async () => {
-    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.3.3-candidate.2', '0.3.3', '0.4.0', '1.0.0']) {
+    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.4.0-candidate.1', '0.3.3', '0.4.0', '1.0.0']) {
       const { store, controlPlane } = harness();
       const before = await store.snapshot();
       await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) })), {
@@ -189,7 +189,7 @@ describe('K-2A contract-native inventory', () => {
   it('rejects a newer contract without admitting any inventory', async () => {
     const { store, controlPlane } = harness();
     await assert.rejects(
-      controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.3.3-candidate.2' }) })),
+      controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.4.0-candidate.1' }) })),
       {
         code: 'CONTRACT_VERSION_MISMATCH',
       },
