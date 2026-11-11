@@ -2,7 +2,6 @@ import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import { cloudDispatchReceipt, isNativeCloudTarget } from '@/components/cloud-dispatch-receipt';
 import {
   appendedInputReadDisplay,
-  pluginDeliveryReceipt,
   projectAppendedInputReceipts,
   projectMessageDispatchAvatars,
 } from '@/components/message-dispatch-projection';
