@@ -117,24 +117,6 @@ export interface LifecycleMessageMetadata {
   readonly appendFailures?: readonly LifecycleAppendFailure[];
 }
 
-/**
- * One admission-time cut in a response body.
- *
- * Coordinates are UTF-16 offsets into the response content after `trimStart()`.
- * `prefixSha256` is the SHA-256 of that whole normalized prefix, so a later
- * replace/trim/sanitize that changes the prefix invalidates the cut instead of
- * silently moving text.
- */
-export interface LifecycleAppendBoundary {
-  readonly inputMessageId: string;
-  readonly contentOffset: number;
-  readonly prefixSha256: string;
-}
-
-export type LifecycleAppendBoundaryInput = Omit<LifecycleAppendBoundary, 'inputMessageId'>;
-
-export const MAX_LIFECYCLE_APPEND_BOUNDARIES = 128;
-
 export interface LifecycleAppendFailure {
   readonly targetId: string;
   readonly invocationId: string;
@@ -228,8 +210,6 @@ export type LifecycleStoredMessageMetadata =
       readonly startedAt: number;
       /** Presentation floor for the latest input admitted to this response. */
       readonly latestInputTimelineOrderAt?: number;
-      /** Admission-time body cuts for public inputs; legacy rows omit this field. */
-      readonly appendBoundaries?: readonly LifecycleAppendBoundary[];
       readonly completedAt?: number;
       readonly reason?: string;
     })
@@ -348,30 +328,6 @@ function isDispatchRef(value: unknown): value is LifecycleDispatchRef {
   );
 }
 
-export function isLifecycleAppendBoundaryInput(value: unknown): value is LifecycleAppendBoundaryInput {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.contentOffset === 'number' &&
-    Number.isSafeInteger(candidate.contentOffset) &&
-    candidate.contentOffset >= 0 &&
-    typeof candidate.prefixSha256 === 'string' &&
-    /^[a-f0-9]{64}$/.test(candidate.prefixSha256)
-  );
-}
-
-export function isLifecycleAppendBoundary(value: unknown): value is LifecycleAppendBoundary {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return isNonEmptyString(candidate.inputMessageId) && isLifecycleAppendBoundaryInput(candidate);
-}
-
-function isLifecycleAppendBoundaries(value: unknown): value is readonly LifecycleAppendBoundary[] {
-  if (!Array.isArray(value) || value.length > MAX_LIFECYCLE_APPEND_BOUNDARIES) return false;
-  if (!value.every(isLifecycleAppendBoundary)) return false;
-  return new Set(value.map((entry) => entry.inputMessageId)).size === value.length;
-}
-
 /** Fail-closed parser guard for the independent Redis lifecycle field. */
 export function isLifecycleStoredMessageMetadata(value: unknown): value is LifecycleStoredMessageMetadata {
   if (!value || typeof value !== 'object') return false;
@@ -385,8 +341,6 @@ export function isLifecycleStoredMessageMetadata(value: unknown): value is Lifec
       (!Array.isArray(candidate.dispatchRefs) || !candidate.dispatchRefs.every(isDispatchRef))) ||
     (candidate.appendFailures !== undefined &&
       (!Array.isArray(candidate.appendFailures) || !candidate.appendFailures.every(isLifecycleAppendFailure))) ||
-    (candidate.appendBoundaries !== undefined &&
-      (candidate.kind !== 'response' || !isLifecycleAppendBoundaries(candidate.appendBoundaries))) ||
     (candidate.producerInvocationId !== undefined && !isNonEmptyString(candidate.producerInvocationId))
   ) {
     return false;
@@ -465,7 +419,6 @@ export interface LifecycleResponseBubble {
   readonly dispatchRefs?: readonly LifecycleDispatchRef[];
   readonly startedAt: number;
   readonly latestInputTimelineOrderAt?: number;
-  readonly appendBoundaries?: readonly LifecycleAppendBoundary[];
   readonly completedAt?: number;
   readonly reason?: string;
 }
