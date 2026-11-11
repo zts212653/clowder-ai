@@ -2892,9 +2892,7 @@ async function main(): Promise<void> {
         return;
       await cliExecutionOwnerService.terminateExact({ ...ref, executionId: ref.parentInvocationId, userId });
     },
-    onExecutionReleased: (threadId) => {
-      queueProcessor.requestDrain(threadId);
-    },
+    onExecutionReleased: (input): Promise<void> => queueProcessor.requestTaskHandoffDrain(input),
   });
   const { createRootMemberSessions } = await import('./domains/plugin/member-sessions/root.js');
   const readMessageTargets = async (threadId: string, messageId: string): Promise<readonly string[]> => {
@@ -8115,6 +8113,7 @@ async function main(): Promise<void> {
   const limbOutboundDelivery = new LimbOutboundDeliveryHook({
     bindingStore: limbEmbodimentBindingStore,
     limbRegistry,
+    onSpeechSkipped: (details) => app.log.warn(details, 'Physical limb speech exceeds the 4096 code-point limit'),
   });
 
   // holdBallDeps is built before composition finishes, and the route reads these at request time

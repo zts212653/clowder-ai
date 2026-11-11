@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 
 for (const wake of [
   { kind: 'legacy', reason: 'carrier_missing' },
@@ -662,7 +663,16 @@ describe('route-serial error persistence (F5 reload)', () => {
   });
 
   for (const fails of [false, true]) {
-    it(`F212 lifecycle A2A admission follows the persisted provider outcome: failure=${fails}`, async () => {
+    it(`F212 lifecycle A2A admission follows the persisted provider outcome: failure=${fails}`, async (t) => {
+      const original = catRegistry.getAllConfigs();
+      catRegistry.reset();
+      t.after(() => {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+      });
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, id === 'opus' ? { ...config, mentionPatterns: ['@宪宪'] } : config);
+      }
       const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
       const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
       const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -729,7 +739,12 @@ describe('route-serial error persistence (F5 reload)', () => {
       assert.ok(response.content.includes(body), 'the same persisted response retains its actual content');
       const pending = await queue.listAllDurable('thread1');
       assert.equal(pending.length, fails ? 0 : 1, 'only successful content may admit a downstream wake');
-      if (!fails) {
+      if (fails) {
+        assert.deepEqual(response.mentions, []);
+        assert.deepEqual(response.extra.routingWarnings, [
+          { kind: 'handoff_blocked_by_failed_turn', catIds: ['opus'], reason: response.lifecycle.reason },
+        ]);
+      } else {
         assert.equal(pending[0].payload.sourceRecordId, responseId);
         assert.deepEqual(pending[0].targets, ['opus']);
       }

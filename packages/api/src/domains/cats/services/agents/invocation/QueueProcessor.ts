@@ -3483,6 +3483,35 @@ export class QueueProcessor {
     return 'owned_deferred_busy';
   }
 
+  /** A Task can have a queued successor in an approved thread other than its home. */
+  async requestTaskHandoffDrain(input: { taskId: string; threadId: string; userId: string }): Promise<void> {
+    const signal = (threadId: string) => {
+      void this.requestDrain(threadId).catch((err) =>
+        this.deps.log.warn({ err, threadId, taskId: input.taskId }, 'Task handoff drain failed'),
+      );
+    };
+    signal(input.threadId);
+    try {
+      const threads = new Set<string>();
+      for (const row of await this.deps.queue.listOwnerDurableEntries(input.userId)) {
+        if (row.threadId === input.threadId || row.kind !== 'message_wake' || threads.has(row.threadId)) continue;
+        const sourceId = row.execution.a2aTriggerMessageId ?? row.payload.messageId;
+        const source = sourceId ? await this.deps.messageStore.getById(sourceId) : null;
+        if (
+          source?.userId === input.userId &&
+          source.threadId === row.threadId &&
+          source.extra?.taskHandoff?.taskId === input.taskId &&
+          source.extra.taskHandoff.targetThreadId === row.threadId
+        ) {
+          threads.add(row.threadId);
+          signal(row.threadId);
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, taskId: input.taskId }, 'Could not find waiting cross-thread Task handoffs');
+    }
+  }
+
   /**
    * Signal the single per-thread admission coordinator. Repeated signals while
    * it is running only set dirty; the current owner must observe that bit before

@@ -1188,6 +1188,22 @@ function ChatMessageContent({
           <AppendedInputReceipts response={message} timelineMessages={threadMessages} getCatById={getCatById} />
           <GenerationMessagesNotice response={message} threadId={renderThreadId} timelineMessages={threadMessages} />
           {dispatchLine}
+          <RoutingWarningNotice
+            warnings={message.extra?.routingWarnings}
+            onReply={
+              renderThreadId && renderThreadId === currentThreadId
+                ? () =>
+                    useChatStore.getState().setReplyTo({
+                      id: message.id,
+                      content: message.content,
+                      from: message.from,
+                      source: message.source,
+                      senderCatId: message.catId ?? null,
+                      threadId: renderThreadId,
+                    })
+                : undefined
+            }
+          />
           {shellPresentation === 'v2' ? cloudBindingCard : null}
         </>
       }

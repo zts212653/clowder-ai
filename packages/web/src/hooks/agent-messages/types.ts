@@ -33,6 +33,7 @@ export interface AgentEventExtra {
   isExplicitPost?: boolean;
   /** F098-C1: explicit target cats from post_message (direction pills). */
   targetCats?: string[];
+  routingWarnings?: NonNullable<ChatMessage['extra']>['routingWarnings'];
   /** Durable child identity projected onto the response before history hydration. */
   turnExecution?: TurnExecutionProjection;
   /** Bodyless child executions that assisted the visible child. */

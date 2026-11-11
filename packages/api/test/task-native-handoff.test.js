@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { OrdinaryTaskHandoffService } from '../dist/domains/ball-custody/OrdinaryTaskHandoffService.js';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ordinaryTaskExpectation } from '../dist/domains/cats/services/stores/ports/OrdinaryTaskMutation.js';
@@ -135,6 +137,51 @@ test('exact approved child stays separate from canonical owner and other proposa
     /task_approved_contract_unavailable|task_delegate_anchor_missing/,
   );
 });
+test('task teardown signals both its home and the exact approved successor thread', async () => {
+  const f = await fixture();
+  const child = await f.threads.create('task-user', 'Approved child', '/fixture');
+  const queue = new InvocationQueue();
+  const processor = new QueueProcessor({ queue, messageStore: f.messages });
+  const drained = [];
+  processor.requestDrain = async (threadId) => {
+    drained.push(threadId);
+  };
+  const service = new OrdinaryTaskHandoffService({
+    ...f.deps,
+    delegates: {
+      async getForTask() {
+        return [{ catId: 'sonnet', threadId: child.id, evidenceRef: 'approved-exact' }];
+      },
+    },
+    onExecutionReleased: (input) => processor.requestTaskHandoffDrain(input),
+  });
+  const initial = await f.append(await service.prepare({ ...f.input, targetCatId: 'codex' }));
+  const actor = { userId: 'task-user', catId: 'codex', threadId: f.home.id, invocationId: 'bound-child' };
+  f.turns.createRunning({ ...actor, parentInvocationId: 'parent', executionKind: 'ordinary', startedAt: 1 });
+  await service.start(initial.id, actor, 'parent');
+  const pending = await f.append(await service.prepare({ ...f.input, targetThreadId: child.id }));
+  const queued = await queue.enqueueDurable({
+    kind: 'message_wake',
+    userId: actor.userId,
+    threadId: child.id,
+    content: '',
+    from: pending.from,
+    targetCats: ['sonnet'],
+    intent: 'execute',
+    messageId: pending.id,
+    a2aTriggerMessageId: pending.id,
+    ownerAuthProvenance: 'strict',
+  });
+  assert.equal(queued.outcome, 'enqueued');
+  assert.equal((await service.apply(pending.id)).kind, 'waiting');
+  assert.deepEqual(drained, []);
+  f.turns.transitionTerminal(actor.invocationId, { status: 'succeeded', endedAt: 2, providerTeardownAt: 2 });
+  await service.finish(f.task.id, actor.invocationId);
+  await service.finish(f.task.id, actor.invocationId);
+  assert.deepEqual(drained, [f.home.id, child.id]);
+  assert.equal((await service.apply(pending.id)).kind, 'applied');
+});
+
 test('restart before provider entry recovers; a started provider without teardown remains unknown', async () => {
   for (const entered of [false, true]) {
     const f = await fixture();

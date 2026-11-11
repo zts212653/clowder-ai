@@ -89,6 +89,7 @@ export function callbackPost(msg: AgentEventFields, timestamp: number): ChatMess
     ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
     ...(msg.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
     ...(msg.extra?.targetCats ? { targetCats: msg.extra.targetCats } : {}),
+    ...(msg.extra?.routingWarnings ? { routingWarnings: msg.extra.routingWarnings } : {}),
     ...(msg.invocationId
       ? { stream: { invocationId: msg.invocationId, ...(turn ? { turnInvocationId: turn } : {}) } }
       : {}),

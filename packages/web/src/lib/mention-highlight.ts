@@ -5,7 +5,7 @@
  * to populate regex with all cats from the runtime catalog.
  */
 
-import { escapeRegExp } from '@cat-cafe/shared';
+import { buildCatMentionHandles, escapeRegExp } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { CO_CREATOR_MENTION_COLOR as CO_CREATOR_MENTION } from '@/lib/color-defaults';
@@ -46,6 +46,7 @@ const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator'];
 
 // Include co-creator as pseudo-cat so @co-creator highlights gold
 let _cats: CatData[] = [];
+let _disabledCats: CatData[] = [];
 let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
 let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
@@ -73,17 +74,28 @@ function rebuildMentionCache(): void {
     color: { primary: CO_CREATOR_COLOR },
   };
   const all = [..._cats, ownerEntry];
-  _mentionToCat = buildMentionToCat(all);
+  const unavailableIds = new Set(_disabledCats.map(({ id }) => id));
+  const handles = buildCatMentionHandles(
+    [..._cats, ..._disabledCats],
+    [..._coCreatorMentionPatterns, '@owner', '@大当家'],
+  );
+  _mentionToCat = Object.fromEntries(
+    handles.filter(({ catId }) => !unavailableIds.has(catId)).map(({ catId, pattern }) => [pattern.slice(1), catId]),
+  );
+  Object.assign(_mentionToCat, buildMentionToCat([ownerEntry]));
+  _unavailableMentionToCat = Object.fromEntries(
+    handles.filter(({ catId }) => unavailableIds.has(catId)).map(({ catId, pattern }) => [pattern.slice(1), catId]),
+  );
   _mentionRe = buildMentionRe(_mentionToCat);
   _mentionColor = buildMentionColor(all);
   _mentionLabel = Object.fromEntries(_cats.map((cat) => [cat.id, formatCatDisplayName(cat)]));
   const canonicalMentionToCat = Object.fromEntries(_cats.map((cat) => [cat.id.toLowerCase(), cat.id]));
-  // Display may humanize a canonical id preserved in prose, but routing
-  // projections must continue to mirror the server's mentionPatterns exactly.
+  // Display can still humanize IDs the routing resolver reserved for another purpose.
   _displayMentionToCat = { ...canonicalMentionToCat, ..._mentionToCat };
   _displayMentionRe = buildMentionRe(_displayMentionToCat);
+  const explicitMentionToCat = buildMentionToCat(all);
   _canonicalOnlyMentionAliases = new Set(
-    Object.keys(canonicalMentionToCat).filter((alias) => _mentionToCat[alias] === undefined),
+    Object.keys(canonicalMentionToCat).filter((alias) => explicitMentionToCat[alias] === undefined),
   );
 }
 
@@ -95,7 +107,7 @@ rebuildMentionCache();
  *  Filters out disabled members (roster.available === false) so they don't highlight. */
 export function refreshMentionData(cats: CatData[]): void {
   _cats = cats.filter((cat) => cat.roster?.available !== false);
-  _unavailableMentionToCat = buildMentionToCat(cats.filter((cat) => cat.roster?.available === false));
+  _disabledCats = cats.filter((cat) => cat.roster?.available === false);
   rebuildMentionCache();
 }
 

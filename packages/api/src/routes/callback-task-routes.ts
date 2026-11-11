@@ -41,6 +41,7 @@ import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerCallbackDevelopmentWorkRoutes } from './callback-development-work-routes.js';
 import { updateOrdinaryTaskFromCallback } from './callback-ordinary-task-update.js';
 import { deriveCallbackActor, getDeletedCallbackThreadGuard, resolveScopedThreadId } from './callback-scope-helpers.js';
+import { readLocalTaskAssignment } from './callback-task-handoff.js';
 import { reconcileOwnedTaskWaits } from './callback-task-reconciliation.js';
 import { admissionSourceContext, assertDirectAdmissionSourceCustody } from './entrusted-work-source-custody.js';
 import { type LiveTaskAuthority, withLiveTaskAuthority } from './live-task-authority.js';
@@ -302,11 +303,18 @@ export function registerCallbackTaskRoutes(
               },
             },
           });
-          if (result.kind !== 'updated' && result.kind !== 'replayed')
+          if (result.kind !== 'updated' && result.kind !== 'replayed') {
+            const reason = result.kind === 'refused' ? result.reason : 'not_found';
+            const assignment =
+              reason === 'task_assignment_changed'
+                ? await readLocalTaskAssignment(taskStore, taskId, actor)
+                : undefined;
             return reply.code(409).send({
               error: 'Task assignment changed',
-              reason: result.kind === 'refused' ? result.reason : 'not_found',
+              reason,
+              ...(assignment ? { assignment } : {}),
             });
+          }
           updated = result.task;
         } else updated = await taskStore.update(taskId, updateData);
       } catch (error) {

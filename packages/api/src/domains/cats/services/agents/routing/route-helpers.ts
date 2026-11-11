@@ -1262,6 +1262,26 @@ export function sanitizeInjectedContent(content: string): string {
   return stripLeakedToolCallPayload(kept.join('\n')).trim();
 }
 
+function formatRoutingFeedback(message: StoredMessage): string {
+  const lines = message.extra?.routingWarnings?.flatMap((warning) => {
+    switch (warning.kind) {
+      case 'unknown_mention_handle':
+        return [
+          `未识别的交接句柄 ${warning.mention}，未投递。可用句柄：${warning.alternatives.map(({ mention }) => mention).join('、') || '查看当前成员列表'}。`,
+        ];
+      case 'handoff_blocked_by_failed_turn':
+        return [
+          `本条回复异常结束，给 ${warning.catIds.join('、')} 的正文交接未提交。核对是否已有单独投递回执后再补发。`,
+        ];
+      case 'parallel_handoff':
+        return ['本条回复指定了多个并行接棒成员。工作有先后依赖时，每轮只交给下一棒。'];
+      default:
+        return [];
+    }
+  });
+  return lines?.length ? `\n[交接状态] ${lines.join(' ')}` : '';
+}
+
 function projectLifecycleResponsePromptContent(message: StoredMessage, content: string): string {
   if (content.trim() || message.lifecycle?.kind !== 'response') return content;
   switch (message.lifecycle.status) {
@@ -2198,7 +2218,7 @@ async function assembleIncrementalContextInternal(
       normalized.content.length > truncateLimit
         ? `\n原文未完整展示，需要时读取: ${formatMessageContextDrill(threadId, m.id)}`
         : '';
-    return `[${m.id}] ${rendered}${recovery}`;
+    return `[${m.id}] ${rendered}${recovery}${formatRoutingFeedback(m)}`;
   });
 
   // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
@@ -2554,7 +2574,7 @@ async function assembleSmartWindowContext(
       normalized.content.length > truncateLimit
         ? `\n原文未完整展示，需要时读取: ${formatMessageContextDrill(threadId, m.id)}`
         : '';
-    return `[${m.id}] ${rendered}${recovery}`;
+    return `[${m.id}] ${rendered}${recovery}${formatRoutingFeedback(m)}`;
   });
 
   // 7. Respect effectiveMaxContextTokens (same as warm path)

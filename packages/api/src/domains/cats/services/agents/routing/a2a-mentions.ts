@@ -16,13 +16,15 @@
 
 import type { CatId, CatRoutingError } from '@cat-cafe/shared';
 import {
-  catRegistry,
   findLineStartMentions,
   HANDLE_CONTINUATION_RE,
+  isReservedGroupMentionHandle,
   MAX_A2A_MENTION_TARGETS,
+  startsWithMentionHandle,
   TOKEN_BOUNDARY_RE,
 } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getCatRoutingHandles, type PluginMention, reservedOwnerMentionHandles } from './cat-routing-handles.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
 /** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
@@ -32,11 +34,6 @@ export function getMaxA2ADepth(): number {
 
 /** @internal Re-exported for a2a-shadow-detection.ts; the grammar lives in @cat-cafe/shared. */
 export { HANDLE_CONTINUATION_RE, TOKEN_BOUNDARY_RE };
-
-interface MentionPatternEntry {
-  readonly catId: CatId;
-  readonly pattern: string;
-}
 
 export interface A2AMentionAnalysis {
   readonly mentions: CatId[];
@@ -56,7 +53,6 @@ export interface InlineActionMention {
  *
  * Line-start @mention = always actionable. No keyword gate.
  */
-type PluginMention = { readonly id: string; readonly alias: string };
 export function parseA2AMentions(text: string, currentCatId?: CatId, plugins: readonly PluginMention[] = []): CatId[] {
   return analyzeA2AMentions(text, currentCatId, plugins).mentions;
 }
@@ -66,26 +62,29 @@ export function analyzeA2AMentions(
   currentCatId?: CatId,
   plugins: readonly PluginMention[] = [],
 ): A2AMentionAnalysis {
-  // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
-  const allConfigs = catRegistry.getAllConfigs();
-
   // F182 KD-10: include ALL cats (including disabled) so patterns participate in matching;
   // availability is checked at match-time via resolveCatTarget, not here.
-  const handles: MentionPatternEntry[] = [];
-  for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue; // Filter self (skip when cross-thread)
-    for (const pattern of config.mentionPatterns) {
-      handles.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
-    }
-  }
-
-  for (const plugin of plugins) {
-    if (plugin.id !== currentCatId) handles.push({ catId: plugin.id as CatId, pattern: `@${plugin.alias}` });
-  }
+  const allHandles = getCatRoutingHandles(plugins);
+  const handles = allHandles.filter(({ catId }) => catId !== currentCatId);
+  const excluded = [
+    ...reservedOwnerMentionHandles(),
+    ...allHandles.filter(({ catId }) => catId === currentCatId).map(({ pattern }) => pattern),
+  ];
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
-  for (const catId of findLineStartMentions(text, handles) as CatId[]) {
+  const unknown = new Set<string>();
+  const matched = findLineStartMentions(text, handles, (segment) => {
+    const handle = /^@[\p{L}\p{N}_][\p{L}\p{N}_.-]{0,63}(?=$|[^\p{L}\p{N}_.-])/u.exec(segment)?.[0];
+    if (
+      handle &&
+      !excluded.some((pattern) => startsWithMentionHandle(segment, pattern)) &&
+      !isReservedGroupMentionHandle(handle)
+    ) {
+      unknown.add(handle);
+    }
+  });
+  for (const catId of matched as CatId[]) {
     if (found.length >= MAX_A2A_MENTION_TARGETS) break; // F27 safety limit
     if (seen.has(catId)) continue;
     seen.add(catId);
@@ -95,7 +94,42 @@ export function analyzeA2AMentions(
     else found.push(catId);
   }
 
+  for (const handle of [...unknown].slice(0, MAX_A2A_MENTION_TARGETS)) {
+    const resolved = resolveCatTarget(handle);
+    if ('error' in resolved && resolved.error.kind === 'cat_not_found') {
+      const alternatives = resolved.error.alternatives
+        .map((candidate) => ({
+          candidate,
+          distance: Math.min(
+            editDistance(handle, `@${candidate.catId}`),
+            editDistance(handle, candidate.mention.toLowerCase()),
+          ),
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 2)
+        .map(({ candidate }) => candidate);
+      routing_warnings.push({ kind: 'unknown_mention_handle', mention: handle, alternatives });
+    }
+  }
   return { mentions: found, routing_warnings };
+}
+
+function editDistance(source: string, target: string): number {
+  let row = Array.from({ length: target.length + 1 }, (_, index) => index);
+  for (let i = 0; i < source.length; i++) {
+    const next = [i + 1];
+    for (let j = 0; j < target.length; j++) {
+      next.push(Math.min(next[j]! + 1, row[j + 1]! + 1, row[j]! + Number(source[i] !== target[j])));
+    }
+    row = next;
+  }
+  return row[target.length]!;
+}
+
+export function blockedHandoffWarning(catIds: CatId[], status: string, reason: string | undefined): CatRoutingError[] {
+  return catIds.length > 0 && (status === 'failed' || status === 'interrupted')
+    ? [{ kind: 'handoff_blocked_by_failed_turn', catIds, reason: reason ?? status }]
+    : [];
 }
 
 /**
@@ -133,16 +167,7 @@ export function detectInlineActionMentions(
   if (!text) return [];
 
   const stripped = text.replace(/```[\s\S]*?```/g, '');
-  const allConfigs = catRegistry.getAllConfigs();
-
-  const entries: MentionPatternEntry[] = [];
-  for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue;
-    if (!isCatAvailable(id)) continue;
-    for (const pattern of config.mentionPatterns) {
-      entries.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
-    }
-  }
+  const entries = getCatRoutingHandles().filter(({ catId }) => catId !== currentCatId && isCatAvailable(catId));
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
 
   const routedSet = new Set(routedMentions ?? []);

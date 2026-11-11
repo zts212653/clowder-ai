@@ -74,12 +74,12 @@ describe('mention highlight cache', () => {
       }),
     ]);
     expect(getMentionToCat().seed).toBe('seed-cat');
-    expect(getMentionToCat()['seed-cat']).toBeUndefined();
+    expect(getMentionToCat()['seed-cat']).toBe('seed-cat');
     expect(getDisplayMentionToCat()['seed-cat']).toBe('seed-cat');
     expect(isCanonicalOnlyMentionAlias('seed-cat')).toBe(true);
     expect(isCanonicalOnlyMentionAlias('seed')).toBe(false);
     expect(getMentionLabel()['seed-cat']).toBe('种子猫（seed）');
-    expect(getMentionRe().exec('@seed-cat')).toBeNull();
+    expect(getMentionRe().exec('@seed-cat')).not.toBeNull();
     expect(getDisplayMentionRe().exec('@seed-cat')).not.toBeNull();
   });
 });

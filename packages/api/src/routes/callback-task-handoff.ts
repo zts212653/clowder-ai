@@ -6,6 +6,18 @@ import type { TaskMutationActor } from '../domains/cats/services/stores/ports/Or
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import { isOrdinaryImplementTask } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 
+export async function readLocalTaskAssignment(
+  tasks: Pick<ITaskStore, 'get'> | undefined,
+  taskId: string | undefined,
+  actor: TaskMutationActor,
+) {
+  if (!tasks || !taskId) return undefined;
+  const task = await tasks.get(taskId);
+  if (!task || task.userId !== actor.userId || task.threadId !== actor.threadId || !isOrdinaryImplementTask(task))
+    return undefined;
+  return { ownerCatId: task.ownerCatId ?? null, ownerRevision: task.ownerRevision ?? 0 };
+}
+
 /** Classify by the actual Task, never by title, namespace guesses or a caller's authority flag. */
 export async function prepareCallbackTaskHandoff(input: {
   action?: ActionSuccessorRequestMetadata;

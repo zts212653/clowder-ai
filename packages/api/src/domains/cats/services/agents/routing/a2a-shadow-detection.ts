@@ -8,7 +8,6 @@
 
 import { createHash } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import {
   AFTER_HANDOFF_RE,
@@ -19,10 +18,7 @@ import {
   TOKEN_BOUNDARY_RE,
 } from './a2a-mentions.js';
 
-interface MentionPatternEntry {
-  readonly catId: CatId;
-  readonly pattern: string;
-}
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 
 /**
  * Relaxed action heuristic for shadow detection.
@@ -74,16 +70,7 @@ export function detectInlineActionMentionsWithShadow(
   const strictHits = detectInlineActionMentions(text, currentCatId, routedMentions);
 
   const stripped = text.replace(/```[\s\S]*?```/g, '');
-  const allConfigs = catRegistry.getAllConfigs();
-
-  const entries: MentionPatternEntry[] = [];
-  for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue;
-    if (!isCatAvailable(id)) continue;
-    for (const pattern of config.mentionPatterns) {
-      entries.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
-    }
-  }
+  const entries = getCatRoutingHandles().filter(({ catId }) => catId !== currentCatId && isCatAvailable(catId));
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
 
   const routedSet = new Set(routedMentions ?? []);

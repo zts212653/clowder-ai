@@ -206,10 +206,17 @@ import {
   ExecutionAdmissionConflict,
   terminalExecutionBindingFailure,
 } from '../registry/AgentServiceUnavailableError.js';
-import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import {
+  analyzeA2AMentions,
+  blockedHandoffWarning,
+  detectInlineActionMentionsWithShadow,
+  getMaxA2ADepth,
+  parseA2AMentions,
+} from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 import { stripTrailingCatSignatures } from './cat-signature-strip.js';
 import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { extractContextEvalSignals } from './context-eval.js';
@@ -2753,7 +2760,9 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
+        const plugins = await deps.addressedPlugins?.list();
+        const handoff = analyzeA2AMentions(storedContent, catId, plugins);
+        a2aMentions = handoff.mentions;
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -2799,19 +2808,12 @@ export async function* routeSerial(
         // Mechanical slot check with zero intent classifier. Runs BEFORE #417
         // inline mention and AC-C7 verdict checks; a syntax hit remains the root
         // correction signal (and keeps setMentionRoutingFeedback for the next turn).
-        const phaseHRosterHandles: string[] = [];
-        {
-          const allCfg = catRegistry.getAllConfigs();
-          for (const cfg of Object.values(allCfg) as CatConfig[]) {
-            for (const pattern of cfg.mentionPatterns) phaseHRosterHandles.push(pattern);
-          }
-        }
         const phaseHResult = validateRoutingSyntax({
           text: storedContent,
           lineStartMentions: routingExitLineStartMentions,
           toolNames: collectedToolNames,
           structuredTargetCats: [...structuredTargetCats],
-          rosterHandles: phaseHRosterHandles,
+          rosterHandles: getCatRoutingHandles(plugins).map(({ pattern }) => pattern),
         });
         const phaseHHit = phaseHResult.kind === 'invalid_route_syntax';
         if (phaseHHit && phaseHResult.kind === 'invalid_route_syntax') {
@@ -3159,11 +3161,24 @@ export async function* routeSerial(
             nativePhases:
               !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
           });
+          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+            aborted: catSignal?.aborted === true,
+            abortReason: catSignal?.reason,
+            failed: hadProviderError,
+            errorCode: doneMsg?.errorCode,
+          });
+          const routingWarnings = [
+            ...handoff.routing_warnings,
+            ...blockedHandoffWarning(handoff.mentions, lifecycleTerminalStatus, lifecycleTerminalReason),
+            ...(lifecycleTerminalStatus === 'completed' && a2aMentions.length > 1
+              ? [{ kind: 'parallel_handoff' as const, catIds: a2aMentions }]
+              : []),
+          ];
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
             userId,
             content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
-            mentions: a2aMentions,
+            mentions: lifecycleTerminalStatus === 'completed' ? a2aMentions : [],
             origin: 'stream',
             timestamp: storedTimestamp,
             threadId,
@@ -3173,6 +3188,7 @@ export async function* routeSerial(
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
+              ...(routingWarnings.length ? { routingWarnings } : {}),
               ...(outputProjection ? { outputLayout: outputProjection.snapshot(persistedContent).layout } : {}),
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(deliveryBoundary ? { deliveryBoundary } : {}),
@@ -3204,12 +3220,6 @@ export async function* routeSerial(
               ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
           };
-          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
-            aborted: catSignal?.aborted === true,
-            abortReason: catSignal?.reason,
-            failed: hadProviderError,
-            errorCode: doneMsg?.errorCode,
-          });
           const lifecycleResponse =
             lifecycleResponseMessageId && lifecyclePriorFrontierMessageId !== undefined && ownInvocationId
               ? {

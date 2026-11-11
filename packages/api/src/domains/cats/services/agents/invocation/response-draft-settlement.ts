@@ -14,6 +14,7 @@ import type {
   TurnOutputFence,
   TurnOutputFenceVerdict,
 } from '../../stores/ports/TurnExecutionStore.js';
+import { blockedHandoffWarning, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { extractRichFromText } from '../routing/rich-block-extract.js';
 import { sanitizeInjectedContent } from '../routing/route-helpers.js';
 
@@ -297,7 +298,12 @@ function terminalPatchFromDraft(
   const streamed = streamedContent(response, draft, input.explanation);
   const toolEvents = draft?.toolEvents ? draft.toolEvents.filter(isStoredToolEvent) : response.toolEvents;
   const thinking = draft?.thinking ?? response.thinking;
-  const extra = withRichBlocks(response.extra, streamed.blocks);
+  let extra = withRichBlocks(response.extra, streamed.blocks);
+  if (draft && (input.status === 'failed' || input.status === 'interrupted')) {
+    const targets = parseA2AMentions(streamed.body, response.catId ?? undefined);
+    const warnings = blockedHandoffWarning(targets, input.status, input.reason);
+    if (warnings.length > 0) extra = { ...extra, routingWarnings: [...(extra?.routingWarnings ?? []), ...warnings] };
+  }
   const startedAt = response.lifecycle?.kind === 'response' ? response.lifecycle.startedAt : input.endedAt;
   return {
     invocationId: input.invocationId,
@@ -333,13 +339,13 @@ function streamedContent(
   response: StoredMessage,
   draft: DraftRecord | undefined,
   explanation: string | undefined,
-): { content: string; blocks: RichBlock[] } {
+): { body: string; content: string; blocks: RichBlock[] } {
   const streamed = draft
     ? extractRichFromText(sanitizeInjectedContent(draft.content))
     : { cleanText: response.content, blocks: [] };
   const body = streamed.cleanText.trim();
   const suffix = explanation && !body.includes(explanation) ? [explanation] : [];
-  return { content: [body, ...suffix].filter(Boolean).join('\n\n'), blocks: streamed.blocks };
+  return { body, content: [body, ...suffix].filter(Boolean).join('\n\n'), blocks: streamed.blocks };
 }
 
 function withRichBlocks(extra: StoredMessage['extra'], blocks: readonly RichBlock[]): StoredMessage['extra'] {

@@ -285,6 +285,22 @@ describe('F148: formatTombstone', () => {
 // --- scrubToolPayloads Tests ---
 
 describe('F148: scrubToolPayloads', () => {
+  it('preserves an earlier agent handoff with tool events, including legacy sender records', () => {
+    const content = '设计方案已完成。\n@宪宪\n请接棒实现。';
+    const fields = {
+      catId: 'opus',
+      content,
+      toolEvents: [{ id: 'result', type: 'tool_result', label: 'read_file', timestamp: 100 }],
+    };
+    const current = makeMsg({ ...fields, from: { kind: 'agent', catId: 'opus' } });
+    const legacy = makeMsg(fields);
+    const projected = scrubToolPayloads([current, legacy, makeMsg()]);
+    assert.deepEqual(
+      projected.slice(0, 2).map((msg) => msg.content),
+      [content, content],
+    );
+  });
+
   it('preserves last message tool content verbatim', () => {
     resetSeq();
     const base = Date.now();

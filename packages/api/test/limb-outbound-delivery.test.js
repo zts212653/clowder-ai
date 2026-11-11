@@ -6,6 +6,36 @@ import { LimbOutboundDeliveryHook } from '../dist/domains/limb/LimbOutboundDeliv
 
 const NOW = Date.parse('2026-08-01T09:16:00.000Z');
 
+test('ignores long replies with no matching binding and reports bound speech over the limit', async () => {
+  const bindingStore = new MemoryLimbEmbodimentBindingStore();
+  await bindingStore.put({
+    nodeId: 'speaker',
+    userId: 'default-user',
+    threadId: 'bound-thread',
+    catId: 'opus',
+    expressionRef: 'replying',
+    voiceProfileRef: 'local',
+    volumePercent: 35,
+    updatedAt: NOW,
+  });
+  const skipped = [];
+  const hook = new LimbOutboundDeliveryHook({
+    bindingStore,
+    onSpeechSkipped: (details) => skipped.push(details),
+    limbRegistry: {
+      async invoke() {
+        assert.fail('oversize speech must not reach the device');
+      },
+    },
+  });
+  const content = '🐾'.repeat(4097);
+  await hook.deliver('unbound-thread', content, 'opus');
+  await hook.deliver('bound-thread', content, 'codex');
+  assert.deepEqual(skipped, []);
+  await hook.deliver('bound-thread', content, 'opus');
+  assert.deepEqual(skipped, [{ threadId: 'bound-thread', catId: 'opus', codePoints: 4097 }]);
+});
+
 test('fans one bound cat final through Limb authority as approved face and voice actions', async () => {
   const bindingStore = new MemoryLimbEmbodimentBindingStore();
   await bindingStore.put({

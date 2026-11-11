@@ -84,6 +84,22 @@ describe('F182 C1 - A class: post_message routing_warnings (soft degradation)', 
     await app.close();
   });
 
+  test('post_message persists the unresolved line-start handoff and reports it to the caller', async () => {
+    const thread = threadStore.create('u1', 'test');
+    const { invocationId, callbackToken } = await registry.create('u1', 'opus', thread.id);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: '设计已完成\n@missing-collaborator\n请接棒。' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json();
+    assert.deepEqual(body.routed, []);
+    assert.equal(body.routing_warnings?.[0]?.kind, 'unknown_mention_handle');
+    assert.deepEqual(messageStore.getById(body.messageId)?.extra?.routingWarnings, body.routing_warnings);
+  });
+
   test('C1-a: disabled explicit target includes routing_warnings in 200 response', async () => {
     const thread = threadStore.create('u1', 'test');
     const { invocationId, callbackToken } = await registry.create('u1', 'opus', thread.id);

@@ -24,6 +24,7 @@ export interface LimbOutboundDeliveryHookOptions {
   };
   readonly now?: () => number;
   readonly createId?: () => string;
+  readonly onSpeechSkipped?: (details: { threadId: string; catId: CatId; codePoints: number }) => void;
 }
 
 export class LimbOutboundDeliveryHook {
@@ -38,13 +39,15 @@ export class LimbOutboundDeliveryHook {
 
   async deliver(threadId: string, content: string, catId?: CatId, triggerMessageId?: string): Promise<void> {
     if (!catId || content.length === 0) return;
-    if (Array.from(content).length > MAX_SPEECH_CODE_POINTS) {
-      throw new Error('physical-limb speech exceeds the 4096 code-point contract bound');
-    }
-
     const bindings = (await this.options.bindingStore.getByThread(threadId)).filter(
       (binding) => binding.catId === catId,
     );
+    if (bindings.length === 0) return;
+    const codePoints = Array.from(content).length;
+    if (codePoints > MAX_SPEECH_CODE_POINTS) {
+      this.options.onSpeechSkipped?.({ threadId, catId, codePoints });
+      return;
+    }
     for (const binding of bindings) {
       if (!triggerMessageId) {
         await this.deliverToBinding(binding, threadId, content, catId);

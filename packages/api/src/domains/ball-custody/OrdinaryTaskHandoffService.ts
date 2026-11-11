@@ -35,7 +35,7 @@ export interface OrdinaryTaskHandoffDeps {
   providerIsStopped?: (ref: NonNullable<TaskItem['executionRef']>, userId: string) => Promise<boolean>;
   stopExecution?: (ref: NonNullable<TaskItem['executionRef']>, userId: string) => Promise<void>;
   tracker?: Pick<InvocationTracker, 'cancelExact'>;
-  onExecutionReleased?: (threadId: string) => void | Promise<void>;
+  onExecutionReleased?: (input: { taskId: string; threadId: string; userId: string }) => void | Promise<void>;
 }
 
 /** Orchestrates existing Task/Message/execution owners. It owns no state or recovery loop. */
@@ -268,6 +268,9 @@ export class OrdinaryTaskHandoffService {
       expected: ordinaryTaskExpectation(task),
       execution: ref,
     });
+    if (result.kind === 'updated' && task.userId) {
+      await this.deps.onExecutionReleased?.({ taskId: task.id, threadId: task.threadId, userId: task.userId });
+    }
     return result.kind === 'updated' || result.kind === 'replayed';
   }
 
@@ -313,7 +316,7 @@ export class OrdinaryTaskHandoffService {
   async finish(taskId: string, invocationId: string): Promise<void> {
     const task = await this.deps.tasks.get(taskId);
     if (task?.executionRef?.invocationId !== invocationId) return;
-    if (await this.releaseStoppedExecution(task)) await this.deps.onExecutionReleased?.(task.threadId);
+    await this.releaseStoppedExecution(task);
   }
 
   async finishInvocation(actor: TaskMutationActor): Promise<void> {

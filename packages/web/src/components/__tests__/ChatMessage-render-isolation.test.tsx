@@ -1,3 +1,4 @@
+import { createCatId } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,6 +118,33 @@ describe('ChatMessage render isolation', () => {
 
     const warning = container.querySelector<HTMLElement>('[data-testid="routing-warning"]');
     expect(warning?.textContent).toContain('@missing-cat 不存在');
+  });
+
+  it('shows the blocked handoff on the cat reply and opens a quoted recovery draft', () => {
+    const message: ChatMessageData = {
+      id: 'interrupted-handoff',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      catId: 'codex-sol',
+      origin: 'stream',
+      content: '方案完成。\n@opus',
+      timestamp: 1,
+      extra: {
+        routingWarnings: [
+          { kind: 'handoff_blocked_by_failed_turn', catIds: [createCatId('opus')], reason: 'process_restart' },
+        ],
+      },
+    };
+    act(() => {
+      root.render(<ChatMessage message={message} threadId="thread-render" getCatById={() => undefined} />);
+    });
+    const warning = container.querySelector<HTMLElement>('[data-testid="routing-warning"]');
+    expect(warning?.textContent).toContain('@opus 的交接未提交');
+    const recover = warning?.querySelector('button');
+    expect(recover?.textContent).toBe('引用这条回复');
+    act(() => recover?.click());
+    expect(useChatStore.getState().replyToMessage?.id).toBe(message.id);
+    useChatStore.getState().clearReplyTo();
   });
 
   it('does not invent a Thinking state before real reasoning or streamed content exists', () => {

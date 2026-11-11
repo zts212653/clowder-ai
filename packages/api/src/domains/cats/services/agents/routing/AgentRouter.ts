@@ -74,6 +74,7 @@ import {
 import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import { findLastUserMentions } from './last-user-mentions.js';
@@ -676,6 +677,9 @@ export class AgentRouter {
     const allConfigs = catRegistry.getAllConfigs();
     const { speechMentionRe } = buildMentionData(allConfigs);
     this.speechMentionRe = speechMentionRe;
+    getCatRoutingHandles([], (catId, handle, holder) =>
+      log.warn({ catId, handle, holder }, 'Stable cat ID conflicts with an existing routing handle'),
+    );
   }
 
   constructor(options: AgentRouterOptions) {
@@ -1020,16 +1024,7 @@ export class AgentRouter {
     const lowerMessage = message.toLowerCase();
     const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
-    // 1. Collect all mentionPatterns → catId, sorted by length descending
-    const allPatterns: MentionPattern[] = [];
-    const allConfigs = catRegistry.getAllConfigs();
-    for (const config of Object.values(allConfigs)) {
-      for (const pattern of config.mentionPatterns) {
-        allPatterns.push({ pattern: pattern.toLowerCase(), catId: config.id });
-      }
-    }
-    for (const plugin of plugins) allPatterns.push({ pattern: `@${plugin.alias}`, catId: plugin.id as CatId });
-    allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first
+    const allPatterns = getCatRoutingHandles(plugins).sort((a, b) => b.pattern.length - a.pattern.length);
 
     // 2-4. User-authored messages accept explicit @mentions anywhere in prose.
     // A2A/callback handoffs still use the stricter line-start parser in a2a-mentions.ts.

@@ -13,6 +13,33 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 describe('parseA2AMentions', () => {
+  it('routes the registered ID when the catalog only declares a nickname', async () => {
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const original = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      catRegistry.register('opus', { ...original.opus, mentionPatterns: ['@宪宪'] });
+      assert.deepEqual(analyzeA2AMentions('设计已完成\n@OPUS\n请接棒。', 'codex').mentions, ['opus']);
+      assert.deepEqual(analyzeA2AMentions('@opus', 'opus'), { mentions: [], routing_warnings: [] });
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+    }
+  });
+
+  it('reports an unknown handoff handle without warning for owner, group, inline or fenced mentions', async () => {
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = analyzeA2AMentions(
+      '邮件 name@example.com\n@owner\n@大当家\n@co-creator\n@all\n```\n@code\n```\n- @opuss\n请接棒。',
+      'codex',
+    );
+    assert.deepEqual(result.mentions, []);
+    assert.deepEqual(
+      result.routing_warnings.map(({ kind, mention }) => ({ kind, mention })),
+      [{ kind: 'unknown_mention_handle', mention: '@opuss' }],
+    );
+  });
+
   it('detects line-start @mention (Chinese name)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = parseA2AMentions('@缅因猫 请 review 这段代码', 'opus');

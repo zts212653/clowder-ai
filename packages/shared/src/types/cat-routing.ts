@@ -10,6 +10,9 @@ export interface CatAlternative {
 
 export type CatRoutingError =
   | { kind: 'cat_not_found'; mention: string; alternatives: CatAlternative[] }
+  | { kind: 'unknown_mention_handle'; mention: string; alternatives: CatAlternative[] }
+  | { kind: 'handoff_blocked_by_failed_turn'; catIds: CatId[]; reason: string }
+  | { kind: 'parallel_handoff'; catIds: CatId[] }
   | { kind: 'cat_disabled'; catId: CatId; displayName: string; alternatives: CatAlternative[] }
   | { kind: 'target_not_in_thread'; catId: CatId; threadId: string }
   | { kind: 'suppressed_by_terminal_ack'; droppedMentions: CatId[] };
@@ -35,6 +38,21 @@ export const CatRoutingErrorSchema: z.ZodType<CatRoutingError, z.ZodTypeDef, unk
       alternatives: z.array(CatAlternativeSchema),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('unknown_mention_handle'),
+      mention: NonEmptyStringSchema,
+      alternatives: z.array(CatAlternativeSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('handoff_blocked_by_failed_turn'),
+      catIds: z.array(CatIdSchema).min(1),
+      reason: NonEmptyStringSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal('parallel_handoff'), catIds: z.array(CatIdSchema).min(2) }).strict(),
   z
     .object({
       kind: z.literal('cat_disabled'),

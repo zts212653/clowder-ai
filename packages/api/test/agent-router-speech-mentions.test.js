@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
 function createNoopService(catId) {
@@ -30,6 +31,31 @@ function createNoopMessageStore() {
     restore: () => null,
   };
 }
+
+test('user routing resolves a registered ID even when only a nickname was configured', async () => {
+  const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+  const original = catRegistry.getAllConfigs();
+  catRegistry.reset();
+  try {
+    for (const [id, config] of Object.entries(original)) {
+      catRegistry.register(id, id === 'codex' ? { ...config, mentionPatterns: ['@砚砚'] } : config);
+    }
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createNoopService('opus'),
+        codexService: createNoopService('codex'),
+        registry: createNoopRegistry(),
+        messageStore: createNoopMessageStore(),
+      }),
+    );
+    const result = await router.resolveTargetsAndIntent('请 @CODEX 看一下', 'thread-text');
+    assert.equal(result.hasMentions, true);
+    assert.deepEqual(result.targetCats, ['codex']);
+  } finally {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+  }
+});
 
 test('resolveTargetsAndIntent supports speech-style "at + nickname" mentions', async () => {
   const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');

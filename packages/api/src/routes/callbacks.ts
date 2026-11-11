@@ -240,7 +240,7 @@ import {
   type CallbackSkillConsumptionDeps,
   registerCallbackSkillConsumptionRoutes,
 } from './callback-skill-consumption-routes.js';
-import { prepareCallbackTaskHandoff } from './callback-task-handoff.js';
+import { prepareCallbackTaskHandoff, readLocalTaskAssignment } from './callback-task-handoff.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
@@ -427,8 +427,12 @@ function buildPostMessageRoutingMessage(
       parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
     } else if (w.kind === 'suppressed_by_terminal_ack') {
       parts.push(`${w.droppedMentions.map((id) => `@${id}`).join('、')} 因 terminal ACK 已记录但未触发新 invocation。`);
-    } else {
-      parts.push(`${w.mention} 不存在，已跳过。`);
+    } else if (w.kind === 'cat_not_found' || w.kind === 'unknown_mention_handle') {
+      const alternatives = w.alternatives
+        .slice(0, 2)
+        .map((candidate) => candidate.mention)
+        .join('、');
+      parts.push(`${w.mention} 未识别，未投递${alternatives ? `；可用句柄：${alternatives}` : ''}。`);
     }
   }
   return parts.length > 0 ? parts.join(' ') : '消息已存储。';
@@ -1621,6 +1625,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // merge this into the cat's CLI stream bubble.
       const localReviewVerdictExtra = localReviewFactInput ? { localReviewVerdict: localReviewFactInput } : {};
       const extraParts = {
+        ...(routing_warnings.length > 0 ? { routingWarnings: routing_warnings } : {}),
         isExplicitPost: true as const,
         ...(deliveredWithoutWake.length
           ? {
@@ -1963,6 +1968,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           invocationId: storedMsg.id,
           // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
           extra: {
+            ...(storedMsg.extra?.routingWarnings?.length ? { routingWarnings: storedMsg.extra.routingWarnings } : {}),
             isExplicitPost: true,
             ...(storedMsg.extra?.cloudBridgeReturn ? { cloudBridgeReturn: storedMsg.extra.cloudBridgeReturn } : {}),
             ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
@@ -2238,9 +2244,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (taskHandoff && !action) action = proposedAction;
     } catch (error) {
       if (!(error instanceof OrdinaryTaskHandoffError)) throw error;
-      return reply
-        .code(error.code === 'task_handoff_unavailable' ? 503 : 409)
-        .send({ status: 'task_handoff_refused', reason: error.code });
+      const subjectRef = (action ?? proposedAction)?.subjectRef;
+      const assignment =
+        error.code === 'task_assignment_changed' || error.code === 'expected_owner_revision_required'
+          ? await readLocalTaskAssignment(taskStore, subjectRef?.match(/^subject:task:(\S+)$/)?.[1], actor)
+          : undefined;
+      return reply.code(error.code === 'task_handoff_unavailable' ? 503 : 409).send({
+        status: 'task_handoff_refused',
+        reason: error.code,
+        ...(assignment ? { assignment } : {}),
+        message:
+          'Task assignment and its wake were not submitted. Read the current Task before retrying the assignment.',
+        ...(!isCrossThread
+          ? {
+              collaboration:
+                'For same-thread collaboration without changing the Task owner, post a separate message with targetCats and without action or assign_work.',
+            }
+          : {}),
+      });
     }
     if (isCrossThread) {
       const hasRawLineStartMention = hasPlausibleLineStartMention(content);
@@ -3199,6 +3220,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const targetCatsExtra =
         !suppressTerminalRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
       const extraParts = {
+        ...(routing_warnings.length > 0 ? { routingWarnings: routing_warnings } : {}),
         ...standaloneExplicitPostExtra,
         ...(bufferedBlocks.length ? { richBlockPublicationId: reservation.publicationId } : {}),
         ...(deliveredWithoutWake.length
@@ -3759,6 +3781,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ...stampVisibleTurn(effectiveInvId, invocationId),
           // F52+F098-C1: Include crossPost + targetCats in real-time broadcast.
           extra: {
+            ...(storedMsg.extra?.routingWarnings?.length ? { routingWarnings: storedMsg.extra.routingWarnings } : {}),
             ...standaloneExplicitPostExtra,
             ...(isCrossThread
               ? {

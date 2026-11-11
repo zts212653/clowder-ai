@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InMemoryQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import { settleResponseFromDraft } from '../dist/domains/cats/services/agents/invocation/response-draft-settlement.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { commitFailedResponseAndEnqueueA2ACaller } from '../dist/routes/callback-a2a-trigger.js';
@@ -122,6 +123,35 @@ test('startup failed response settles through the original response/caller-wake 
   await f.recovery().reconcile({ processStartedAt: 200 });
   assert.equal((await wakeRows(f)).length, 1);
   assert.equal(f.messages.getByThread('thread').length, 2);
+});
+
+test('restart preserves an interrupted draft handoff as unsubmitted without admitting a successor', async () => {
+  const f = await fixture({ status: 'interrupted' });
+  await settleResponseFromDraft(
+    {
+      messageStore: f.messages,
+      turnStore: f.turns,
+      draftStore: {
+        getByThread: async () => [{ invocationId: 'child', content: '设计已完成。\n@codex\n请接棒。' }],
+        delete() {},
+      },
+    },
+    {
+      userId: 'owner',
+      threadId: 'thread',
+      invocationId: 'child',
+      status: 'interrupted',
+      endedAt: 120,
+      reason: 'process_restart',
+    },
+  );
+  const response = f.messages.getById(f.response.id);
+  assert.equal(response.lifecycle.status, 'interrupted');
+  assert.deepEqual(response.extra?.routingWarnings, [
+    { kind: 'handoff_blocked_by_failed_turn', catIds: ['codex'], reason: 'process_restart' },
+  ]);
+  assert.deepEqual(response.mentions, []);
+  assert.deepEqual(await f.queue.listAllDurable('thread'), []);
 });
 
 test('failed atomic wake admission keeps response processing and recovery obligation until retry', async () => {
