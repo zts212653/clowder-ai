@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
+import { getResolvedCats } from '../config/resolved-cats.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveDshDesktopHome } from '../utils/dsh-desktop-launch.js';
@@ -25,6 +27,7 @@ const prepare = selection
     revision: z.string().regex(/^[a-f0-9]{64}$/),
     provider: z.string().min(1).max(256),
     model: z.string().min(1).max(512),
+    memberId: z.string().min(1).max(160).optional(),
   })
   .strict();
 const preferences = z.object({
@@ -94,14 +97,15 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
   );
   route('prepare', prepare, async (input, owner) => {
     await audit('dsh-acp-preparation', owner);
+    const desktop = input.sourceProfile === undefined ? await resolveDesktop(input.runtimeId) : undefined;
+    const root = desktop?.cwd ?? resolveActiveProjectRoot();
+    const existing = input.memberId ? getResolvedCats(root)[input.memberId] : undefined;
+    const existingAcp = input.memberId ? getRegisteredAcpConfig(input.memberId, root) : undefined;
+    if (input.memberId && (!existing || !desktop || existingAcp?.command !== desktop.command))
+      throw Error('dsh_setup_changed');
     const value =
       input.sourceProfile === undefined
-        ? await prepareDshDesktopSetup(
-            await resolveDesktop(input.runtimeId),
-            input.revision,
-            input.provider,
-            input.model,
-          )
+        ? await prepareDshDesktopSetup(desktop!, input.revision, input.provider, input.model, existing?.env?.DSH_HOME)
         : await prepareDshSetup(
             await resolveLaunch(input.runtimeId),
             input.sourceProfile,

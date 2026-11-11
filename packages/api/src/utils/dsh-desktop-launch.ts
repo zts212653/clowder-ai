@@ -4,39 +4,37 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 
-const desktopShim = [
-  '@echo off',
-  'setlocal DisableDelayedExpansion',
-  'set "ELECTRON_RUN_AS_NODE=1"',
-  '"%~dp0..\\..\\..\\..\\DeepSeek Harness.exe" --expose-internals "%~dp0..\\..\\..\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\cli.js" %*',
-  'exit /b %errorlevel%',
-].join('\n');
-
-/** Only the shipped Desktop shim is normalized; arbitrary wrappers keep their existing handling. */
+/** Validate the co-located Desktop launch contract, independently of release version/formatting. */
 export function resolveDshDesktopLaunch(command: string, args: readonly string[]) {
   if (!/^dsh\.cmd$/i.test(basename(command))) return null;
   try {
-    if (readFileSync(command, 'utf8').replaceAll('\r\n', '\n').trim() !== desktopShim) return null;
-    const root = resolve(dirname(command), '../../../..');
-    const resources = join(root, 'resources');
-    const metadata: unknown = JSON.parse(readFileSync(join(resources, 'runtime/primary-runtime/runtime.json'), 'utf8'));
+    const lines = readFileSync(command, 'utf8')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !/^(?:rem\s|::)/i.test(line));
     if (
-      !metadata ||
-      typeof metadata !== 'object' ||
-      !('desktopVersion' in metadata) ||
-      typeof metadata.desktopVersion !== 'string' ||
-      !['0.2.1-rc.2', '0.2.2-rc.1'].includes(metadata.desktopVersion)
+      lines.length !== 5 ||
+      !/^@echo\s+off$/i.test(lines[0]!) ||
+      !/^setlocal\s+DisableDelayedExpansion$/i.test(lines[1]!) ||
+      !/^set\s+"ELECTRON_RUN_AS_NODE=1"$/i.test(lines[2]!) ||
+      !/^exit\s+\/b\s+%errorlevel%$/i.test(lines[4]!)
     )
       return null;
+    const launch = /^"(%~dp0[^"\r\n]+)"\s+--expose-internals\s+"(%~dp0[^"\r\n]+)"\s+%\*$/i.exec(lines[3]!);
+    if (!launch) return null;
+    const root = resolve(dirname(command), '../../../..');
+    const resources = join(root, 'resources');
     const executable = join(root, 'DeepSeek Harness.exe');
+    const entry = join(resources, 'app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js');
+    if (
+      resolve(dirname(command), launch[1]!.slice(5).replaceAll('\\', '/')).toLowerCase() !== executable.toLowerCase() ||
+      resolve(dirname(command), launch[2]!.slice(5).replaceAll('\\', '/')).toLowerCase() !== entry.toLowerCase()
+    )
+      return null;
     if (!existsSync(executable) || !existsSync(join(resources, 'app.asar'))) return null;
     return {
       command: executable,
-      args: [
-        '--expose-internals',
-        join(resources, 'app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'),
-        ...args,
-      ] satisfies [string, string, ...string[]],
+      args: ['--expose-internals', entry, ...args] satisfies [string, string, ...string[]],
       env: { ELECTRON_RUN_AS_NODE: '1' },
     };
   } catch {

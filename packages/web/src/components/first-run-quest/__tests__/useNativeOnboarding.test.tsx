@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import { dshConnectionKey } from '../../settings/members/member-runtime-draft';
 import { getThreadDraft } from '../../thread-drafts';
 import { useNativeOnboarding } from '../useNativeOnboarding';
 
@@ -95,10 +94,6 @@ it('creates both colliding ACP profiles and restores each exact draft after redi
     setup.draft!.partners.forEach((partner) =>
       setup.patchPartner(partner.id, {
         selected: true,
-        runtime: {
-          ...partner.runtime,
-          connectionVerification: { key: dshConnectionKey(partner.form), checkedAt: Date.now() },
-        },
       }),
     ),
   );
@@ -439,12 +434,11 @@ it('restores the verified Desktop private HOME and route after rediscovery of th
     ...desktop,
     env: form.env,
     acp: { ...desktop.acp, startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'] },
-    connectionVerification: { key: dshConnectionKey(form), checkedAt: Date.now() },
   };
   await act(async () => setup.patchPartner(partner.id, { form, runtime: prepared, selected: true }));
   await act(async () => setup.reload());
   expect(setup.draft!.partners[0].form.env).toEqual(form.env);
   expect(setup.draft!.partners[0].form.defaultModel).toBe(form.defaultModel);
-  expect(setup.draft!.partners[0].runtime.connectionVerification).toEqual(prepared.connectionVerification);
+  expect(setup.draft!.partners[0].runtime.env).toEqual(form.env);
   expect(setup.draft!.partners[0].selected).toBe(true);
 });

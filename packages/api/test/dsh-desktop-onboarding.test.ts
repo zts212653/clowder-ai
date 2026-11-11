@@ -98,7 +98,10 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
                   api: 'openai-completions',
                   baseURL: `${origin}/custom/v1`,
                   ...(authentication === 'record' ? {} : { apiKeyEnv: 'ISSUE1925_CUSTOM_KEY' }),
-                  models: [{ id: 'only-custom-model', contextWindow: 131072, maxTokens: 1024 }],
+                  models: [
+                    { id: 'only-custom-model', contextWindow: 131072, maxTokens: 1024 },
+                    { id: 'other-model', contextWindow: 131072, maxTokens: 1024 },
+                  ],
                 },
               },
             },
@@ -226,11 +229,52 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       assert.equal(customRequests.length, 1, 'catalog discovery sends no model prompt');
       let sessionId: string | undefined;
       for (let restart = 0; restart < 2; restart += 1) {
+        if (restart === 1) {
+          const oldPatch = readFileSync(prepared.startupArgs.at(-1), 'utf8');
+          const marker = join(prepared.env.DSH_HOME, 'session-preservation-marker');
+          writeFileSync(marker, sessionId!);
+          const updated = await app.inject({
+            method: 'POST',
+            url: '/api/cats/dsh-setup/prepare',
+            payload: {
+              runtimeId: 'dsh',
+              memberId: saved.id,
+              revision: view.revision,
+              provider: 'custom',
+              model: 'other-model',
+            },
+          });
+          assert.equal(updated.statusCode, 200, updated.body);
+          const binding = updated.json();
+          assert.equal(
+            binding.env.DSH_HOME,
+            prepared.env.DSH_HOME,
+            'model changes retain the member HOME and ACP sessions',
+          );
+          assert.notDeepEqual(binding.startupArgs, prepared.startupArgs, 'new route uses a new immutable patch');
+          assert.equal(readFileSync(prepared.startupArgs.at(-1), 'utf8'), oldPatch);
+          assert.equal(readFileSync(marker, 'utf8'), sessionId);
+          const patched = await members.inject({
+            method: 'PATCH',
+            url: `/api/cats/${saved.id}`,
+            headers: { 'x-cat-cafe-user': 'fixture-owner' },
+            payload: {
+              expectedRevision: saved.configurationRevision,
+              defaultModel: '["custom","other-model"]',
+              acp: { command: binding.command, startupArgs: binding.startupArgs, transport: 'stdio' },
+              env: binding.env,
+            },
+          });
+          assert.equal(patched.statusCode, 200, patched.body);
+        }
         _resetCachedConfig();
         const config = getResolvedCats(cwd)[saved.id];
         assert.ok(config);
         assert.deepEqual(config.env, prepared.env);
-        assert.equal(config.defaultModel, JSON.stringify(['custom', 'only-custom-model']));
+        assert.equal(
+          config.defaultModel,
+          JSON.stringify(['custom', restart === 0 ? 'only-custom-model' : 'other-model']),
+        );
         const acpConfig = getRegisteredAcpConfig(saved.id, cwd);
         assert.ok(acpConfig);
         const service = await createAcpServiceForConfig({
@@ -248,6 +292,7 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
             ? ['Reply DSH_CONNECTION_OK without tools.', 'Repeat that exact marker without tools.']
             : ['Reply DSH_CONNECTION_OK again.']) {
             const events = [];
+            const previousSession = sessionId;
             for await (const event of service.invoke(prompt, sessionId ? { sessionId } : undefined)) events.push(event);
             assert.equal(
               events.some((event) => event.type === 'error'),
@@ -255,7 +300,10 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
               JSON.stringify(events),
             );
             assert.ok(JSON.stringify(events).includes('DSH_CONNECTION_OK'));
-            sessionId = events.find((event) => event.type === 'session_init')?.sessionId ?? sessionId;
+            const initializedSession = events.find((event) => event.type === 'session_init')?.sessionId;
+            if (restart === 1)
+              assert.equal(initializedSession, previousSession, 'the model edit resumes the same ACP session');
+            sessionId = initializedSession ?? sessionId;
           }
         } finally {
           await service.disposeHostService();
@@ -263,8 +311,8 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       }
       assert.equal(officialRequests, 0, 'no official /models or inference request');
       assert.equal(customRequests.length, 4);
-      customRequests.forEach((request) => {
-        assert.equal(request.model, 'only-custom-model');
+      customRequests.forEach((request, index) => {
+        assert.equal(request.model, index === 3 ? 'other-model' : 'only-custom-model');
         assert.equal(request.auth, 'Bearer fixture-custom-key');
       });
       Object.entries(files).forEach(([path, bytes]) => assert.equal(readFileSync(path, 'utf8'), bytes));

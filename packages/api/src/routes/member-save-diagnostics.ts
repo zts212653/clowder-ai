@@ -17,7 +17,6 @@ const phase = z.enum([
   'onboarding.entry',
   'member.write',
   'member.prepare',
-  'member.check',
   'strategy.write',
   'codex.write',
   'refresh',

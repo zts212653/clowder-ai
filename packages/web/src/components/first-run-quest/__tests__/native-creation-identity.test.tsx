@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { buildCatPayload } from '../../hub-cat-editor.payload';
-import { dshConnectionKey } from '../../settings/members/member-runtime-draft';
 import { recommendNativePartners } from '../native-onboarding';
 import { useNativeOnboarding } from '../useNativeOnboarding';
 
@@ -28,16 +27,12 @@ function Harness({ mode = 'members' }: { mode?: 'members' | 'goal' }) {
   setup = useNativeOnboarding(true, onCreated, mode);
   return <p>{setup.loading ? 'loading' : setup.error}</p>;
 }
-// These cases exercise request identity after the explicit verification step.
+// These cases exercise request identity without a synthetic verification request.
 async function verifyAndStart() {
   await act(async () =>
     setup.draft!.partners.forEach((partner) =>
       setup.patchPartner(partner.id, {
         selected: true,
-        runtime: {
-          ...partner.runtime,
-          connectionVerification: { key: dshConnectionKey(partner.form), checkedAt: Date.now() },
-        },
       }),
     ),
   );

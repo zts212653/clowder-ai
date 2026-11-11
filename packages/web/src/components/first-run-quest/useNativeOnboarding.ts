@@ -267,10 +267,12 @@ export function useNativeOnboarding(
         const id = partner.id;
         if (progress.created[id]) continue;
         const prepareBeforeSaving =
-          !!partner.runtime.dshDesktop && !partner.existingId && needsDshPreparation(partner.form);
+          !!partner.runtime.dshDesktop &&
+          !partner.existingId &&
+          needsDshPreparation(partner.form, undefined, partner.runtime);
         if (prepareBeforeSaving && !partner.creationForm) {
           setBusy(`正在准备 ${partner.form.displayName} 的 Desktop 配置…`);
-          const form = await prepareNativeMember(partner.form);
+          const form = await prepareNativeMember(partner.form, undefined, partner.runtime);
           partner = {
             ...partner,
             form,
