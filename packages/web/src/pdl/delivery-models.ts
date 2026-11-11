@@ -1,4 +1,4 @@
-import type { LifecycleActiveRun, TargetResponseStatus } from '@cat-cafe/shared';
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import { cloudDispatchReceipt, isNativeCloudTarget } from '@/components/cloud-dispatch-receipt';
 import {
   appendedInputReadDisplay,
@@ -6,23 +6,10 @@ import {
   projectAppendedInputReceipts,
   projectMessageDispatchAvatars,
 } from '@/components/message-dispatch-projection';
-import { projectTargetReply } from '@/components/target-response-projection';
 import { dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
 
 /** Read evidence and reply progress remain separate, as in the existing lifecycle projection. */
-/** A plugin target's reply status as the receipt states members use. */
-const PLUGIN_STATE: Record<TargetResponseStatus, string> = {
-  delivering: 'checking',
-  waiting: 'delivered',
-  processing: 'busy',
-  unconfirmed: 'unconfirmed',
-  completed: 'read',
-  failed: 'failed',
-  canceled: 'unknown',
-  interrupted: 'failed',
-};
-
 export function deliveryView(
   message: ChatMessage,
   timeline: ChatMessage[],
@@ -32,23 +19,6 @@ export function deliveryView(
   return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
     const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
     const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
-    const carrier = timeline.find((m) => m.id === projection.statusMessageId);
-    if (pluginDeliveryReceipt(carrier)) {
-      const reply = projectTargetReply(carrier!, timeline);
-      const result = reply?.resultMessageId && reply.resultMessageId !== carrier?.id ? reply.resultMessageId : '';
-      return {
-        cloud: false,
-        canRepeat: false,
-        who: projection.targetId,
-        state: PLUGIN_STATE[reply?.status ?? 'delivering'],
-        time: read.time,
-        detail: [],
-        mid: projection.statusMessageId ?? '',
-        open: result
-          ? { act: 'msgJump', args: { t: threadId, mid: result } }
-          : { act: 'cafeDelivery', args: { threadId, sourceMessageId: message.id } },
-      };
-    }
     if (isNativeCloudTarget(projection.targetId)) {
       const receipt = cloudDispatchReceipt(message, projection.targetId, timeline)?.receipt;
       return {

@@ -5004,21 +5004,6 @@ frags:
               tone: warn
               when: "@meta.quiet"
             - {text: "@meta.activity", when: "@meta.activity"}
-            - text:
-                of: "@meta.target"
-                map:
-                  delivering: t:chatMessage.targetReply.delivering
-                  waiting: t:chatMessage.targetReply.waiting
-                  processing: t:chatMessage.targetReply.processing
-                  unconfirmed: t:chatMessage.targetReply.unconfirmed
-                  completed: t:chatMessage.targetReply.completed
-                  failed: t:chatMessage.targetReply.failed
-                  canceled: t:chatMessage.targetReply.canceled
-                  interrupted: t:chatMessage.targetReply.interrupted
-              tone:
-                of: "@meta.target"
-                map: {unconfirmed: warn, failed: danger, interrupted: warn, _: ""}
-              when: "@meta.target"
             - parts:
                 - {text: t:chatMessage.runtimeSlot.hint, variant: meta}
                 - {lit: " "}

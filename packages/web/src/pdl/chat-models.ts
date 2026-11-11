@@ -369,6 +369,10 @@ function messageRecallCounts(data: ChatData, source: NonNullable<ChatProjectionI
   );
 }
 
+function isPluginReplying(message: ChatMessage, timeline: readonly ChatMessage[]) {
+  const reply = projectTargetReply(message, timeline);
+  return !!reply?.showFrame && !reply.terminal;
+}
 function messageSender(message: ChatMessage) {
   return (
     message.from ??
@@ -489,12 +493,12 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
   const recipientMembers = () =>
     recipients().map((id) => members().find((m) => m.id === id) ?? { name: id, handle: '' });
   const targetHandle = () => (recipientMembers().length === 1 ? recipientMembers()[0].handle : '');
-  // A plugin's reply carrier shows only while it is the reply's frame; a plugin result without content shows nothing.
+  // A plugin's reply carrier is the reply's typing row until the reply arrives; a result without content shows nothing.
   const sourceMessages = (timeline = messages()) =>
     timeline
       .filter((m) => !m.queuedEntryId && m.extra?.systemKind !== 'context_briefing')
       .filter((m) => !(m.from?.kind === 'plugin' && m.extra?.targetResponseResult && !hasAssistantBody(m)))
-      .filter((m) => !pluginDeliveryReceipt(m) || !!projectTargetReply(m, timeline)?.showFrame)
+      .filter((m) => !pluginDeliveryReceipt(m) || isPluginReplying(m, timeline))
       .filter((m) => !viewCat() || m.type === 'user' || m.catId === viewCat());
   /** Still replying: streaming, or the processing response the active run is writing (before its first output). */
   const replying = (message: ChatMessage) => {
@@ -561,7 +565,6 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     const item = (message: (typeof rows)[number], i: number) => {
       const from = messageSender(message),
         { output, body, stdout, md } = text(message);
-      // A plugin's reply frame: the plugin, and its reply status on the replying line
       const frame = pluginDeliveryReceipt(message) ? projectTargetReply(message, timeline) : undefined;
       const execution = executionVM(message, output, stdout, data.threadId);
       const toolCount = execution?.groups[2].items.filter((row) => row.kind === 'tool').length ?? 0;
@@ -617,9 +620,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                         : message.type === 'user'
                           ? 'user'
                           : frame
-                            ? frame.terminal
-                              ? 'cat'
-                              : 'typing'
+                            ? 'typing'
                             : message.type === 'system'
                               ? 'sys'
                               : replying(message) && !body
@@ -766,7 +767,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         ),
         tip: tipOnly ? slot!.tipText : null,
         meta: frame
-          ? { kind: frame.terminal ? 'cat' : 'typing', target: frame.status }
+          ? { kind: 'typing' }
           : !tipOnly && (execution || replying(message) || recallCounts?.[message.id])
             ? {
                 ...slot,

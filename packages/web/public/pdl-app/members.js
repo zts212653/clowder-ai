@@ -1291,20 +1291,6 @@ function bindMembers() {
     setup.failedPartner = null;
     render(true);
     let selected;
-    // Two picked partners with the same name would make two members with one identity: refuse before any write.
-    const names = setup.partners
-      .filter(function (row) {
-        return row.selected && row.selectable && !row.existingId && !row.identityConflict;
-      })
-      .map(function (row) {
-        return (row.form.nickname || row.form.displayName).trim().normalize('NFKC').toLowerCase();
-      });
-    if (new Set(names).size !== names.length) {
-      setup.busy = false;
-      setup.submitError = tc('nativeSetup.conflict');
-      render(true);
-      return;
-    }
     try {
       for (const partner of setup.partners.filter(function (row) {
         return row.selected && row.selectable && !row.existingId && !row.identityConflict;

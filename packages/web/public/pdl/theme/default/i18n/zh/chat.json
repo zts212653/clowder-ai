@@ -862,16 +862,6 @@
       "dismiss": "忽略",
       "dismissed": "已忽略",
       "undone": "已撤销"
-    },
-    "targetReply": {
-      "delivering": "正在投递…",
-      "waiting": "已接收，等待回复…",
-      "processing": "正在回复…",
-      "unconfirmed": "投递结果未确认，请检查连接。",
-      "completed": "已完成，没有返回可显示内容。",
-      "failed": "回复失败。",
-      "canceled": "已停止回复。",
-      "interrupted": "回复已中断。"
     }
   },
   "classify": {
