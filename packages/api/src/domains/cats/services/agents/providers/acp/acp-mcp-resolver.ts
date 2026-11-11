@@ -350,6 +350,13 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
+        const isEnabled = opts?.catId
+          ? isMcpEnabledForCat(storedCapability, opts.catId, { accessScope: opts.accessScope })
+          : (storedCapability.globalEnabled ?? storedCapability.enabled ?? true);
+        if (!isEnabled) {
+          log.info({ name }, 'Skipping globally disabled external server');
+          continue;
+        }
         const { capability: cap, available } = projectInvocationPluginMcp(storedCapability);
         if (!available) {
           unavailableLocal.add(name);
@@ -357,13 +364,6 @@ export async function resolveAcpMcpServers(
         }
         if (!cap.mcpServer) {
           missing.push(name);
-          continue;
-        }
-        const isEnabled = opts?.catId
-          ? isMcpEnabledForCat(cap, opts.catId, { accessScope: opts.accessScope })
-          : (cap.globalEnabled ?? cap.enabled ?? true);
-        if (!isEnabled) {
-          log.info({ name }, 'Skipping globally disabled external server');
           continue;
         }
         if (cap.mcpServer.resolver === SHARED_BROWSER_RESOLVER) {

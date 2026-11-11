@@ -188,6 +188,41 @@ test('refresh is free, current tool hashes invalidate old results, and attempt r
   assert.equal(spoofed.statusCode, 400);
 });
 
+test('a connected model retains explicit optional-plugin diagnostics without being marked disconnected', async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  app.decorateRequest('sessionUserId', 'fixture-owner');
+  const issue = {
+    pluginId: 'fixture',
+    capabilityId: 'plugin:fixture:broken',
+    reasonCode: 'tool_schema_invalid' as const,
+  };
+  let rejected = true;
+  let calls = 0;
+  registerDshMemberConnectionChecks(app, {
+    store: factStore(),
+    resolveTarget: async () => ({
+      configurationRevision: 'saved-v1',
+      effectiveFingerprint: 'member-v1',
+      toolManifestHash: rejected ? 'healthy-host-tools-with-rejected-capability' : 'healthy-host-tools',
+      ...(rejected ? { toolIssues: [issue] } : {}),
+      run: async () => {
+        calls++;
+        return { outcome: 'passed' as const };
+      },
+    }),
+  });
+  const url = '/api/cats/member/connection-check';
+  const result = (await app.inject({ method: 'POST', url, payload: { attemptId: randomUUID() } })).json();
+  assert.equal(result.state, 'passed');
+  assert.deepEqual(result.toolIssues, [issue]);
+  assert.deepEqual(result.fact.toolIssues, [issue]);
+  assert.equal((await app.inject({ method: 'GET', url })).json().state, 'passed');
+  rejected = false;
+  assert.equal((await app.inject({ method: 'GET', url })).json().state, 'stale');
+  assert.equal(calls, 1, 'repairing a plugin and refreshing does not silently request another model');
+});
+
 test('a restarted API projects a recorded started attempt as unknown and refuses a silent retry', async (t) => {
   const store = factStore();
   const app = Fastify();

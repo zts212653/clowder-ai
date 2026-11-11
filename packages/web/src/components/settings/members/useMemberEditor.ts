@@ -292,7 +292,7 @@ export function useMemberEditor(
         const result = await trace.phase('member.check', () => checkSavedDshMember(member));
         setConnectionCheck(result);
         setNotice(dshConnectionCheckMessage(result));
-        showDshConnectionCheckResult(member.displayName, result);
+        showDshConnectionCheckResult(member.displayName, result, baseline ? 'saved' : 'added');
       }
       await trace
         .phase('refresh', () => onSaved(member, trace))

@@ -23,6 +23,7 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
+import { invocationPluginMcpIssues } from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
@@ -293,15 +294,19 @@ export class AcpAgentService implements AgentService {
 
   /** Resolve the same existing MCP sources before admission can wait for a process. */
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
+    const frozenAcpMcpServers = await captureAcpMcpSources({
+      projectRoot: this.projectRoot,
+      catId: this.catId as string,
+      mcpSupport,
+      mcpWhitelist: input.mcpWhitelist ?? this.mcpWhitelist,
+      userProjectRoot: input.workingDirectory,
+      legacyServers: this.mcpServers,
+    });
+    const toolIssues = mcpSupport ? invocationPluginMcpIssues() : [];
     return {
-      frozenAcpMcpServers: await captureAcpMcpSources({
-        projectRoot: this.projectRoot,
-        catId: this.catId as string,
-        mcpSupport: input.mcpSupport ?? this.mcpSupportEnabled,
-        mcpWhitelist: input.mcpWhitelist ?? this.mcpWhitelist,
-        userProjectRoot: input.workingDirectory,
-        legacyServers: this.mcpServers,
-      }),
+      frozenAcpMcpServers,
+      ...(toolIssues.length ? { frozenAcpMcpIssues: toolIssues } : {}),
     };
   }
 
@@ -575,9 +580,16 @@ export class AcpAgentService implements AgentService {
     let invokeServers: AcpMcpServer[];
     let preparingMcp = true;
     try {
-      invokeServers =
-        options?.frozenAcpMcpServers ??
-        (await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory })).frozenAcpMcpServers;
+      const captured = options?.frozenAcpMcpServers
+        ? { frozenAcpMcpServers: options.frozenAcpMcpServers, frozenAcpMcpIssues: options.frozenAcpMcpIssues }
+        : await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory });
+      invokeServers = captured.frozenAcpMcpServers;
+      if (captured.frozenAcpMcpIssues?.length) {
+        const unavailable = captured.frozenAcpMcpIssues.map(({ capabilityId }) => capabilityId).join(', ');
+        const content = `可选插件工具定义无效，以下能力暂不可用：${unavailable}。其他工具不受本次限制；任务需要这些能力时请明确说明不可用，不得声称已执行。`;
+        yield { type: 'system_info', catId: this.catId, content, timestamp: Date.now() };
+        prompt = `${prompt}\n\n[Host 工具状态]\n${content}`;
+      }
       options?.signal?.throwIfAborted();
       preparingMcp = false;
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });

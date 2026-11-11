@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   type InvocationPluginMcpView,
+  invocationPluginMcpIssues,
   withInvocationPluginMcpView,
 } from '../config/capabilities/invocation-plugin-mcp-view.js';
 import { RedisDshMemberConnectionCheckStore } from '../domains/cats/services/stores/redis/RedisDshMemberConnectionCheckStore.js';
@@ -17,6 +18,7 @@ interface DshConnectionTarget {
   configurationRevision: string;
   effectiveFingerprint: string;
   toolManifestHash: string;
+  toolIssues?: DshConnectionCheckFact['toolIssues'];
   run: () => Promise<{ outcome: 'passed' | 'partial' | 'failed' | 'unknown'; reasonCode?: string }>;
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -71,6 +73,7 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
     mcpSupport: config.mcpSupport !== false,
     mcpWhitelist: acp.mcpWhitelist ?? [],
   });
+  const toolIssues = config.mcpSupport !== false ? invocationPluginMcpIssues() : [];
   // Binding removes inherited invocation credentials. A check never borrows the
   // current author's turn or gains a business tools/call forwarding path.
   const admitted = materializeSessionMcpServers(servers, { CAT_CAFE_USER_ID: owner, CAT_CAFE_CAT_ID: catId });
@@ -82,7 +85,8 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
   return {
     configurationRevision,
     effectiveFingerprint: digest([binding.launch, binding.patchText, model, effort, source.state.revision]),
-    toolManifestHash: manifest.hash,
+    toolManifestHash: toolIssues.length ? digest([manifest.hash, toolIssues]) : manifest.hash,
+    ...(toolIssues.length ? { toolIssues } : {}),
     run: async () => {
       const [{ AcpClient }, { applySessionConfiguration }, { prepareDshSecretPatch }, { dshSetupBootstrap }] =
         await Promise.all([
@@ -184,16 +188,23 @@ export function registerDshMemberConnectionChecks(
     fact: DshConnectionCheckFact | null,
     target: DshConnectionTarget,
   ): DshConnectionCheckView => {
-    if (!fact) return { state: 'unchecked' };
+    const tools = target.toolIssues?.length ? { toolIssues: target.toolIssues } : {};
+    if (!fact) return { state: 'unchecked', ...tools };
     if (fact.effectiveFingerprint !== target.effectiveFingerprint || fact.toolManifestHash !== target.toolManifestHash)
-      return { state: 'stale', fact, reasonCode: 'check_configuration_changed' };
+      return { state: 'stale', fact, reasonCode: 'check_configuration_changed', ...tools };
     if (fact.phase === 'started')
       return {
         state: active.get(activityKey(scope, fact))?.attemptId === fact.attemptId ? 'checking' : 'unknown',
         fact,
         reasonCode: 'check_result_unknown',
+        ...tools,
       };
-    return { state: fact.outcome ?? 'unknown', fact, ...(fact.reasonCode ? { reasonCode: fact.reasonCode } : {}) };
+    return {
+      state: fact.outcome ?? 'unknown',
+      fact,
+      ...(fact.reasonCode ? { reasonCode: fact.reasonCode } : {}),
+      ...tools,
+    };
   };
   app.route<{ Params: { id: string } }>({
     method: ['GET', 'POST'],
@@ -226,6 +237,7 @@ export function registerDshMemberConnectionChecks(
           attemptId: input.data.attemptId,
           effectiveFingerprint: target.effectiveFingerprint,
           toolManifestHash: target.toolManifestHash,
+          ...(target.toolIssues?.length ? { toolIssues: target.toolIssues } : {}),
           phase: 'started',
           startedAt: Date.now(),
         };

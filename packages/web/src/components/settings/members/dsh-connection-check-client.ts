@@ -43,6 +43,11 @@ export async function checkSavedDshMember(
 }
 
 export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
+  const toolIssues = view.toolIssues ?? view.fact?.toolIssues ?? [];
+  if (view.state === 'passed' && toolIssues.length) {
+    const plugins = [...new Set(toolIssues.map(({ pluginId }) => pluginId))].join('、');
+    return `模型已连接。插件工具暂不可用：${plugins}（工具定义无效）。基本聊天可用；需要这些工具的任务请先修复相应插件。`;
+  }
   if (view.state === 'passed') return '已收到所选模型的回复，工具定义已被接受。此检查不执行工具。';
   if (view.state === 'checking') return '成员已保存，正在检查连接。检查结束后可继续聊天。';
   if (view.state === 'stale') return '配置或工具定义已变化，先前检查仅供历史参考。可重新检查，也可直接聊天。';
@@ -63,12 +68,19 @@ export function dshConnectionCheckMessage(view: DshConnectionCheckView) {
 }
 
 /** Keep failure and recovery visible after either creation entry navigates away. */
-export function showDshConnectionCheckResult(name: string, view: DshConnectionCheckView) {
-  if (view.state === 'passed') return;
+export function showDshConnectionCheckResult(
+  name: string,
+  view: DshConnectionCheckView,
+  change: 'added' | 'saved' = 'added',
+) {
+  if (view.state === 'passed' && !(view.toolIssues ?? view.fact?.toolIssues)?.length) return;
   useToastStore.getState().addToast({
     type: view.state === 'failed' ? 'error' : 'info',
-    title: `${name}已添加`,
-    message: `${dshConnectionCheckMessage(view)} 打开设置 → 猫猫团队 → 该成员的模型与工具查看检查详情。`,
+    title: `${name}${change === 'added' ? '已添加' : '已保存'}`,
+    message:
+      view.state === 'passed'
+        ? '模型已连接，基本聊天可用。部分插件工具暂不可用，详见成员设置。'
+        : dshConnectionCheckMessage(view).replace(/^成员与配置已保留。/, ''),
     duration: 0,
   });
 }

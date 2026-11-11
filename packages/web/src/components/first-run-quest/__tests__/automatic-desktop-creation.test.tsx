@@ -107,7 +107,7 @@ it.each([
     expect(
       useToastStore
         .getState()
-        .toasts.some((toast) => toast.message.includes('工具配置被模型拒绝') && toast.message.includes('配置已保留')),
+        .toasts.some((toast) => toast.message.includes('工具配置被模型拒绝') && toast.title.endsWith('已添加')),
     ).toBe(true);
     await act(async () => root.render(null));
     await act(async () => root.render(<Harness />));
