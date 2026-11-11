@@ -19,9 +19,14 @@ end;
 
 <event('CurPageChanged')>
 procedure ShowExistingInstallDirectory(PageID: Integer);
+var
+  Explanation: String;
 begin
   if (PageID = wpReady) and (ExistingInstallDir <> '') then begin
-    WizardForm.ReadyMemo.Lines.Add('');
-    WizardForm.ReadyMemo.Lines.Add(FmtMessage(CustomMessage('SetupExistingInstallation'), [ExistingInstallDir]));
+    Explanation := FmtMessage(CustomMessage('SetupExistingInstallation'), [ExistingInstallDir]);
+    if Pos(Explanation, WizardForm.ReadyMemo.Text) = 0 then begin
+      WizardForm.ReadyMemo.Lines.Add('');
+      WizardForm.ReadyMemo.Lines.Add(Explanation);
+    end;
   end;
 end;

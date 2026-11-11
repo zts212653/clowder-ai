@@ -109,6 +109,7 @@ ${directoryPolicy}
 var
   VisitedDirectory: Boolean;
   ReturnedFromReady: Boolean;
+  PreparationFailed, ReturnedFromPreparing: Boolean;
   InitialDirectory, PreviousDirectory: String;
 
 procedure InitializeWizard();
@@ -117,8 +118,24 @@ begin
   PreviousDirectory := WizardForm.PrevAppDir;
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if (ExpandConstant('{param:RunId}') = 'upgrade') and not PreparationFailed then begin
+    PreparationFailed := True;
+    Result := 'Probe preparation failure: return to Ready and retry.';
+  end;
+end;
+
 procedure CurPageChanged(PageID: Integer);
 begin
+  if PageID = wpPreparing then begin
+    if PreparationFailed and WizardForm.BackButton.Visible and not ReturnedFromPreparing then begin
+      ReturnedFromPreparing := True;
+      PostMessage(WizardForm.BackButton.Handle, $00F5, 0, 0);
+    end;
+    exit;
+  end;
   if (PageID = wpSelectDir) and not WizardSilent then begin
     VisitedDirectory := True;
     WizardForm.DirEdit.Text := ExpandConstant('{param:SelectedDir}');
@@ -136,7 +153,7 @@ end;
 procedure CurStepChanged(Step: TSetupStep);
 begin
   if Step = ssPostInstall then
-    SaveStringsToUTF8File(ExpandConstant('{param:ReceiptPath}'), [ExpandConstant('{param:RunId}'), IntToStr(Ord(VisitedDirectory)), InitialDirectory, WizardDirValue, PreviousDirectory], False);
+    SaveStringsToUTF8File(ExpandConstant('{param:ReceiptPath}'), [ExpandConstant('{param:RunId}'), IntToStr(Ord(VisitedDirectory)), InitialDirectory, WizardDirValue, PreviousDirectory, IntToStr(Ord(ReturnedFromPreparing))], False);
 end;
 `,
     'utf8',
@@ -172,12 +189,13 @@ end;
       ...(mode === 'silent-override' ? [`/DIR=${selected}`] : []),
     ]);
     assert.equal(installed.status, 0, installed.stdout + installed.stderr);
-    const [runId, visited, defaultDirectory, actualDirectory, previousDirectory] = fs
+    const [runId, visited, defaultDirectory, actualDirectory, previousDirectory, returnedFromPreparing] = fs
       .readFileSync(receipt, 'utf8')
       .replace(/^\uFEFF/, '')
       .trim()
       .split(/\r?\n/);
     assert.equal(runId, mode, 'the receipt must come from this install, not its seed');
+    assert.equal(returnedFromPreparing === '1', mode === 'upgrade', 'upgrade must return from Preparing');
     assert.equal(defaultDirectory, initial, 'upgrades must default to the previous installation');
     if (hasPrevious) assert.equal(previousDirectory, initial, 'previous directory must be available at initialization');
     assert.equal(visited, expectedVisited, 'only fresh or missing-directory installs may select a directory');
