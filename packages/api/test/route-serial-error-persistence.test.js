@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 
 for (const wake of [
   { kind: 'legacy', reason: 'carrier_missing' },
@@ -661,8 +662,24 @@ describe('route-serial error persistence (F5 reload)', () => {
     assert.ok(errorAppend, 'terminal failure still surfaces as system error');
   });
 
+  function useNicknameOnlyOpus(t) {
+    const cats = catRegistry.getAllIds().map((id) => ({ id, ...catRegistry.getOrThrow(id) }));
+    t.after(() => {
+      catRegistry.reset();
+      for (const cat of cats) {
+        catRegistry.register(cat.id, cat.config, cat.configurationTemplatePath ? cat : undefined);
+      }
+    });
+    catRegistry.reset();
+    for (const cat of cats) {
+      const config = cat.id === 'opus' ? { ...cat.config, mentionPatterns: ['@宪宪'] } : cat.config;
+      catRegistry.register(cat.id, config, cat.configurationTemplatePath ? cat : undefined);
+    }
+  }
+
   for (const fails of [false, true]) {
-    it(`F212 lifecycle A2A admission follows the persisted provider outcome: failure=${fails}`, async () => {
+    it(`F212 lifecycle A2A admits stable IDs under a nickname-only catalog: failure=${fails}`, async (t) => {
+      useNicknameOnlyOpus(t);
       const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
       const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
       const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
