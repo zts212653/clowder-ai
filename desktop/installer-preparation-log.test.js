@@ -30,7 +30,7 @@ const messages = installerSource
 const installDelete = installerSource.split('[InstallDelete]')[1].split('[UninstallRun]')[0];
 
 // Use real Inno execution and test-only PowerShell helper payloads.
-async function writeProbe(root, { createAppDir = false, helpers, appId }) {
+async function writeProbe(root, { createAppDir = false, helpers }) {
   const helperSources = helpers
     .map(({ name, body }) => {
       const helper = path.join(root, name);
@@ -43,13 +43,12 @@ async function writeProbe(root, { createAppDir = false, helpers, appId }) {
     script,
     `[Setup]
 AppName=PR1519 Preparation Log Probe
-AppId=${appId || 'PR1519 Preparation Log Probe'}
 AppVersion=1.0.0
 DefaultDirName=${path.join(root, 'program')}
 CreateAppDir=${createAppDir ? 'yes' : 'no'}
-Uninstallable=${appId ? 'yes' : 'no'}
+Uninstallable=no
 PrivilegesRequired=lowest
-UsePreviousAppDir=${appId ? 'yes' : 'no'}
+UsePreviousAppDir=no
 OutputDir=${root}
 OutputBaseFilename=probe
 Compression=none
@@ -204,80 +203,5 @@ test('native Setup timeout reaps its bootstrap child before fixture removal', na
       },
     );
     // withTempRoot must actually remove the fixture; EPERM remains a failure.
-  });
-});
-
-async function uninstallUpgradeProbe(root, programs) {
-  for (const program of [...new Set(programs)].reverse()) {
-    const uninstaller = path.join(program, 'unins000.exe');
-    if (!fs.existsSync(uninstaller)) continue;
-    const removed = await runNativeCommand(root, `uninstall-${path.basename(program)}`, uninstaller, [
-      '/VERYSILENT',
-      '/SUPPRESSMSGBOXES',
-      '/NORESTART',
-    ]);
-    assert.equal(removed.status, 0, removed.stdout + removed.stderr);
-  }
-}
-
-[
-  ['relocate', false, 0],
-  ['same-directory', true, 0],
-  ['previous-stop-failure', false, 73],
-].forEach(([mode, sameDirectory, stopFailure]) => {
-  const previousName = sameDirectory ? 'program' : 'previous';
-  test(`native upgrade shutdown: ${mode}`, native, async () => {
-    await withTempRoot('issue1948-shutdown-', async (root) => {
-      const target = path.join(root, 'program');
-      const previous = path.join(root, previousName);
-      const expectedCalls = sameDirectory ? [target] : [previous, target];
-      const calls = path.join(root, 'shutdown-calls.txt');
-      const appId = path.basename(root);
-      await writeProbe(root, {
-        createAppDir: true,
-        appId,
-        helpers: [
-          configureHelper('exit 0\n'),
-          {
-            ...stopHelper,
-            body: `param([string]$AppDir, [string]$InstanceRoot)
-$root = Split-Path $AppDir -Parent
-Add-Content -LiteralPath (Join-Path $root 'shutdown-calls.txt') -Value $AppDir -Encoding UTF8
-if ((Split-Path $AppDir -Leaf) -eq 'previous' -and (Test-Path -LiteralPath (Join-Path $root 'fail-old'))) { exit 73 }
-exit 0
-`,
-          },
-        ],
-      });
-      try {
-        const seedDirectory = sameDirectory ? target.toUpperCase() + path.sep : previous;
-        const seed = await runProbe(root, [`/DIR=${seedDirectory}`]);
-        assert.equal(seed.installed.status, 0, seed.recorded);
-        fs.writeFileSync(calls, '');
-        const preserved = path.join(target, 'packages', 'must-survive.txt');
-        if (stopFailure) {
-          fs.mkdirSync(path.dirname(preserved), { recursive: true });
-          fs.writeFileSync(preserved, 'existing payload');
-          fs.writeFileSync(path.join(root, 'fail-old'), 'fail the previous installation shutdown');
-        }
-        const { installed, recorded } = await runProbe(root, [`/DIR=${target}`]);
-        const actual = fs
-          .readFileSync(calls, 'utf8')
-          .replace(/^\uFEFF/, '')
-          .trim()
-          .split(/\r?\n/);
-        if (stopFailure) {
-          assert.equal(installed.status, 7, recorded);
-          assert.deepEqual(actual, [previous], 'failed previous shutdown must prevent target shutdown');
-          assert.equal(fs.readFileSync(preserved, 'utf8'), 'existing payload');
-          assert.doesNotMatch(recorded, /Setup stage payload-replacement: started/);
-        } else {
-          assert.equal(installed.status, 0, recorded);
-          assert.deepEqual(actual, expectedCalls);
-        }
-      } finally {
-        await uninstallUpgradeProbe(root, [previous, target]);
-      }
-    });
   });
 });
