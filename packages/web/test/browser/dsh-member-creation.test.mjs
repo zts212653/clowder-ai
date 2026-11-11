@@ -8,6 +8,7 @@ for (const width of [1024, 390])
     const { context, page, state } = await scene(width);
     const order = [];
     const errors = [];
+    let discoveryReads = 0;
     page.on('pageerror', (error) => errors.push(error.message));
     let finishCheck;
     const release = new Promise((resolve) => {
@@ -30,17 +31,20 @@ for (const width of [1024, 390])
       await page.route('**/api/cats/native-runtimes*', (route) =>
         route.fulfill({
           json: {
-            runtimes: [
-              {
-                ...desktop,
-                id: 'acp:another-member',
-                label: 'DSH',
-                dshDesktop: false,
-                onboardingEligible: false,
-                env: { DSH_HOME: '/another/home' },
-              },
-              desktop,
-            ],
+            runtimes:
+              width === 1024 && discoveryReads++ === 0
+                ? []
+                : [
+                    {
+                      ...desktop,
+                      id: 'acp:another-member',
+                      label: 'DSH',
+                      dshDesktop: false,
+                      onboardingEligible: false,
+                      env: { DSH_HOME: '/another/home' },
+                    },
+                    desktop,
+                  ],
           },
         }),
       );
@@ -96,7 +100,7 @@ for (const width of [1024, 390])
       const editor = page.getByTestId('member-settings-page');
       await editor.getByRole('button', { name: '鲸鲸', exact: true }).click();
       const picker = editor.getByLabel('使用工具', { exact: true });
-      await picker.selectOption('dsh');
+      assert.equal(await picker.inputValue(), 'dsh', 'choosing the whale template selects the discovered Desktop');
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-picker-debug-${width}.png`) });
       assert.equal(
         await picker.locator('option[value="dsh"]').count(),
@@ -125,6 +129,7 @@ for (const width of [1024, 390])
       assert.equal(order.filter((step) => step === 'prepare').length, 1);
       assert.equal(order.filter((step) => step === 'saved').length, 1);
       assert.equal(order.filter((step) => step === 'checked').length, 1);
+      if (width === 1024) assert.ok(discoveryReads >= 2, 'saving refreshes an initially empty Desktop discovery');
       if (screenshots) await page.screenshot({ path: path.join(screenshots, `dsh-added-check-failed-${width}.png`) });
     } finally {
       finishCheck();
