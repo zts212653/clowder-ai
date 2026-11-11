@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { discoverDshRuntimes } from '../src/routes/native-dsh-discovery.js';
+import { discoverNativeRuntimes } from '../src/routes/native-runtimes.js';
 import { resolveDshDesktopHome } from '../src/utils/dsh-desktop-launch.js';
 
 test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP patch', async (t) => {
@@ -105,9 +106,9 @@ test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP
       nativeCwd: join(home, 'profiles/desktop'),
     });
   });
+  const other = join(root, 'Desktop-two');
+  cpSync(desktop, other, { recursive: true });
   await t.test('multiple installations match the running official Host or offer explicit locations', async (t) => {
-    const other = join(root, 'Desktop-two');
-    cpSync(desktop, other, { recursive: true });
     let running = true;
     t.mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
       const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
@@ -143,4 +144,29 @@ test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP
     assert.notEqual(choices[0]?.id, choices[1]?.id);
     assert.ok(choices.every((choice) => choice.label.includes(root)));
   });
+  for (const failure of [new Error('Desktop process query timed out'), 'not JSON', '{"processes":[]}']) {
+    await t.test(`optional Desktop disambiguation failure preserves discovery: ${String(failure)}`, async (t) => {
+      t.mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
+        const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+        if (script.includes('Get-ItemProperty')) return callback(null, JSON.stringify([desktop, other]), '');
+        if (failure instanceof Error) return callback(failure, '', '');
+        callback(null, failure, '');
+      });
+      syncBuiltinESMExports();
+      t.after(() => {
+        t.mock.restoreAll();
+        syncBuiltinESMExports();
+      });
+      const { runtimes } = await discoverNativeRuntimes(root, () => null);
+      assert.deepEqual(
+        runtimes.filter((runtime) => runtime.id === 'codex' || runtime.id === 'claude').map((runtime) => runtime.id),
+        ['codex', 'claude'],
+      );
+      assert.deepEqual(
+        runtimes.filter((runtime) => 'dshDesktop' in runtime).map((runtime) => runtime.command),
+        [command, join(other, 'resources/runtime/cli/bin/dsh.cmd')],
+      );
+      await assert.rejects(resolveDshDesktopHome(command), 'required HOME binding must still reject the query failure');
+    });
+  }
 });

@@ -66,7 +66,7 @@ export async function findDshDesktopCommands(installRoots?: string[]) {
     ),
   ];
   if (commands.length < 2 || installRoots) return commands;
-  const { processes } = await readDesktopState();
+  const { processes } = await readDesktopState().catch(() => ({ processes: [] }));
   const running = commands.filter(
     (command) => runningProfiles(resolveDshDesktopLaunch(command, [])!.command, processes).length,
   );
