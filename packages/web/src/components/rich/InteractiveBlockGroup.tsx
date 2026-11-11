@@ -51,9 +51,12 @@ export function InteractiveBlockGroup({
   messageId?: string;
   sendContext?: string;
 }) {
-  const allDisabled = blocks.every((b) => b.disabled);
-  const [locallySubmitted, setSubmitted] = useState(allDisabled);
-  const submitted = locallySubmitted || allDisabled;
+  // Codex groups send one combined answer: any saved sibling proves that send was accepted.
+  const savedSubmission = blocks[0]?.groupId?.startsWith('codex-async-question-')
+    ? blocks.some((block) => block.disabled)
+    : blocks.every((block) => block.disabled);
+  const [locallySubmitted, setSubmitted] = useState(savedSubmission);
+  const submitted = locallySubmitted || savedSubmission;
   const [selections, setSelections] = useState<Map<string, string[]>>(() => {
     const init = new Map<string, string[]>();
     for (const b of blocks) {

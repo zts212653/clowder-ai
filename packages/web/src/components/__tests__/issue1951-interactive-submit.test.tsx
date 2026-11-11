@@ -228,3 +228,42 @@ it('#1951 saves grouped blocks sequentially so full-message writes retain both a
   expect(sends).toBe(1);
   expect(apiFetch).toHaveBeenCalledTimes(2);
 });
+
+it('#1951 a partially saved Codex group stays submitted after reload and late hydration', async () => {
+  vi.useFakeTimers();
+  const blocks = ['a', 'b'].map((id) => ({
+    id,
+    kind: 'interactive' as const,
+    v: 1 as const,
+    interactiveType: 'select' as const,
+    groupId: 'codex-async-question-test',
+    options: [{ id: `${id}1`, label: `Choice ${id.toUpperCase()}` }],
+  }));
+  apiFetch.mockImplementation(async (_url: string, options: RequestInit) => {
+    const patch = JSON.parse(String(options.body)) as { blockId: string };
+    return patch.blockId === 'a' ? { ok: true } : { ok: false, status: 500 };
+  });
+  act(() => root.render(<InteractiveBlockGroup key="before-reload" messageId="response" blocks={blocks} />));
+  click('Choice A');
+  click('Choice B');
+  click('全部提交');
+  await act(async () => {
+    reportResult?.(true);
+    await vi.runAllTimersAsync();
+  });
+  expect(sends).toBe(1);
+  expect(apiFetch).toHaveBeenCalledTimes(4);
+  const partial = [{ ...blocks[0], disabled: true, selectedIds: ['a1'] }, blocks[1]];
+  act(() => root.render(<InteractiveBlockGroup key="after-reload" messageId="response" blocks={partial} />));
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('全部提交'))).toBe(
+    false,
+  );
+  click('Choice B');
+  expect(sends).toBe(1);
+  act(() => root.render(<InteractiveBlockGroup key="late-history" messageId="response" blocks={blocks} />));
+  act(() => root.render(<InteractiveBlockGroup key="late-history" messageId="response" blocks={partial} />));
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('全部提交'))).toBe(
+    false,
+  );
+  expect(sends).toBe(1);
+});
