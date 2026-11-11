@@ -19,6 +19,7 @@ tips_exempt: "沿用现有聊天＋菜单的发送策略和已读提示；本单
 - 工位：`G:\AIwork\clowder-ai\worktrees\fix-issue1947-dsh-turn-steer`；分支 `fix/issue1947-dsh-turn-steer`。
 - 基线为最新 `upstream/next@970ae0265397cb313ddc6084cff1215027e9d02c`。
 - 按用户要求，以 merge 提交 `b18f4cd5c57dc39f784bae7ec03b0f616e8dfe53` 继承 PR #1928 的 `f6e566e7867e49033c9037db1d2029a5f78a50b4`，没有修改主工位或在线 runtime。
+- 审查前同步 PR #1928 最新 `894b7a6f3ce36c60383da82ba7a5e9fa7aba2ca4`，其唯一新增提交只是合入 next `1fb70210bb6fba10f6f1cd5b02366fb827e29221`；本工位 merge 为 `243146e662a82a1124f836edaa52513fb55f8716`，无冲突。
 
 ## 根因及共同讨论
 
@@ -80,6 +81,8 @@ Why: 只扩展受控 provider 与现有 activeRunDispatch；桥和 DshTurnInput 
 - pnpm check:capability-tips：14/14 且内容检查通过，7 项既有引用警告保留。
 - git diff --check：通过。
 - fallback 扫描触发提示：协议/原生事件入口的 || 是单次边界校验；session/prompt/turn 是明确拒绝条件；status 的 deriveMessages 和 inbox 分别提供已读与受理事实；Host catch 保留不确定送达责任；patch catch 分别处理未知安装、拒绝篡改与首次创建 EEXIST。没有多级执行兜底或自动重试。
+- 同步最新 next/#1928 后，完整 API build、构建完成后的 54 项 turn/恢复合同检查、13 项 AcpServiceFactory 检查、Biome（14 文件，21 warnings / 3 infos，exit 0）和零模型真实 Desktop 启动探针通过。生产 turn 代码相对真实模型验收的 9ec13140 无变化；打包闭包由新基线增加为 99 项，已实际 initialize/hello/newSession/close 核对。
+- 沿用既有 tip `feature-author-message-disposition`（F047）：在 ＋ 菜单中选择“引导当前回复”，没有增加新的 UI 操作。
 
 ### 实际成员与 UI 验收
 
@@ -103,6 +106,8 @@ Why: 只扩展受控 provider 与现有 activeRunDispatch；桥和 DshTurnInput 
 - 两份受保护的原生源文件（credentials 与 Desktop patch）前后比对未改变。指纹与私有环境资料不发布。
 
 可公开核对的精简结果：[真实验收证据](../evidence/issue1947-dsh-turn-steer.json)。原始失败、截图、原生日志与冷重启记录保留在隔离 acceptance 目录，未将模型 reasoning、凭据或用户原生状态提交到仓库。
+
+更新基线后的 `243146e6` 另做了 API/Redis 重新启动及 Web 页面完整回读：11:06:53 UTC 验证输出、策略、源消息 accepted/read 和消息 ID 仍保留，原生日志未变化。该轮没有新增模型调用；不将它冒称新基线上的新付费 steer 实验。
 
 ## 交付与收尾
 

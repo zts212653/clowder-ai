@@ -43,5 +43,17 @@
     "nativeSourceFilesUnchanged": true
   },
   "originalAutomationFailure": "The initial runner incorrectly asserted a per-message messageDisposition field; the UI persists Thread preference via PUT. Original failure retained; independent read-only reconciliation passed without further model calls.",
-  "testFixture": "packages/api/test/fixtures/dsh-turn-gate.mjs; only gate wait tool; release text carries no NEW marker."
+  "testFixture": "packages/api/test/fixtures/dsh-turn-gate.mjs; only gate wait tool; release text carries no NEW marker.",
+  "updatedBaseVerification": {
+    "source": "243146e662a82a1124f836edaa52513fb55f8716",
+    "verifiedAt": "2026-11-11T11:06:53.054Z",
+    "turnProductionCodeDeltaFromRealSample": [],
+    "postBuildTargetedTestsPassed": 54,
+    "factoryTestsPassed": 13,
+    "apiBuildPassed": true,
+    "zeroModelStartupPassed": true,
+    "persistedHistoryAndUiPassed": true,
+    "newModelCalls": 0,
+    "nativeEventsUnchanged": true
+  }
 }
