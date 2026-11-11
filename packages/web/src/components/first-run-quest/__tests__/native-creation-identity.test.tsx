@@ -27,6 +27,17 @@ function Harness({ mode = 'members' }: { mode?: 'members' | 'goal' }) {
   setup = useNativeOnboarding(true, onCreated, mode);
   return <p>{setup.loading ? 'loading' : setup.error}</p>;
 }
+// These cases exercise request identity without a synthetic verification request.
+async function verifyAndStart() {
+  await act(async () =>
+    setup.draft!.partners.forEach((partner) =>
+      setup.patchPartner(partner.id, {
+        selected: true,
+      }),
+    ),
+  );
+  await act(async () => setup.start());
+}
 function installDiscovery(peer: typeof runtime, cats: CatData[], post: (init: RequestInit) => Response) {
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (path === '/api/session') return response({ userId: 'owner-a' });
@@ -77,7 +88,7 @@ it('replays an old short-v1 ACP pending receipt with its original key and unchan
   });
   await act(async () => root.render(<Harness />));
   expect(setup.draft!.partners[0].form.catId).toBe(original.form.catId);
-  await act(async () => setup.start());
+  await verifyAndStart();
   const request = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')![1]!;
   expect(new Headers(request.headers).get('Idempotency-Key')).toBe(expectedKey);
   expect(request.body).toBe(JSON.stringify(payload));
@@ -98,14 +109,14 @@ it('bounds ACP request keys independently of descriptor size and persists them b
     return response({ cat: { ...payload, id: 'dsh' } }, 201);
   });
   await act(async () => root.render(<Harness />));
-  await act(async () => setup.start());
+  await verifyAndStart();
   expect(setup.error).toContain('小鲸鱼');
   expect(setup.error).toContain('DSH');
   expect(setup.error).toContain('response lost');
   act(() => root.unmount());
   root = createRoot(container);
   await act(async () => root.render(<Harness />));
-  await act(async () => setup.start());
+  await verifyAndStart();
   const requests = vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST');
   expect(requests).toHaveLength(2);
   expect(requests[1][1]!.headers).toEqual(requests[0][1]!.headers);
@@ -155,7 +166,7 @@ it.each([
   );
   await act(async () => root.render(<Harness mode={mode} />));
   expect(setup.draft?.partners.map((p) => p.form.catId)).toEqual(['dsh', 'dsh']);
-  await act(async () => setup.start());
+  await verifyAndStart();
   expect(writes).toHaveLength(1);
   expect(JSON.parse(String(writes[0].body)).acp.startupArgs).toEqual(peers[1].acp.startupArgs);
   expect(Object.values(setup.draft!.created).map((member) => member.id)).toEqual(['dsh', 'dsh-2']);

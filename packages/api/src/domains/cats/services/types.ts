@@ -1082,6 +1082,7 @@ export interface AgentServiceOptions {
   claudeSdkRuntime?: import('./agents/providers/claude-sdk-runtime.js').ClaudeSdkRuntime;
   /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
   frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
+  frozenAcpMcpIssues?: import('@cat-cafe/shared').PluginMcpToolIssue[];
   frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
   frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
   frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
@@ -1308,6 +1309,7 @@ export interface AgentService {
     Pick<
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
+      | 'frozenAcpMcpIssues'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'

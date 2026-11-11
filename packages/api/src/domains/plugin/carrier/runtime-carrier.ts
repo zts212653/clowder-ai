@@ -21,6 +21,7 @@ import {
   removeDeclaredStaticResources,
   restoreDeclaredSkillPolicy,
 } from '../declared/declared-static-resources.js';
+import { inspectPluginMcpSchema } from '../declared/mcp-schema-admission.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
 import { NativePluginActions } from '../declared/native-plugin-actions.js';
 import type { SharedMcpFactory } from '../declared/shared-mcp-factory.js';
@@ -278,8 +279,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       if (contribution.type !== 'mcp' || !contribution.sharedFactory) continue;
       try {
         const factory = await carrier.resolveMcpFactory?.(admission.instance.pluginInstanceId, contribution.id);
-        if (factory) factories.set(contribution.id, factory);
-        else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
+        if (factory) {
+          const issue = await inspectPluginMcpSchema(factory);
+          if (issue) unavailable.set(contribution.id, issue);
+          else factories.set(contribution.id, factory);
+        } else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
       } catch {
         // Keep the original stdio path usable, without exposing package exceptions/secrets.
         unavailable.set(contribution.id, 'shared_factory_load_failed');
@@ -288,7 +292,9 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     for (const [contributionId, reason] of unavailable)
       createModuleLogger('plugin-native-mcp').warn(
         { instanceId: admission.instance.pluginInstanceId, contributionId, reason },
-        'Shared MCP unavailable; using original stdio',
+        reason === 'tool_schema_invalid'
+          ? 'Plugin MCP schema is invalid; this contribution is unavailable'
+          : 'Shared MCP unavailable; using original stdio',
       );
     return { factories, unavailable };
   }

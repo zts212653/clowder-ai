@@ -168,6 +168,7 @@ export * from './types/content-modification-carrier.js';
 export * from './types/content-modification-control.js';
 export * from './types/content-modification-view.js';
 export * from './types/deployment-wait.js';
+export type { DshConnectionCheckFact, DshConnectionCheckView } from './types/dsh-connection-check.js';
 export * from './types/evolution-media-source.js';
 // F167 direct carriers expose only action identities backed by terminal producers.
 export * from './types/executable-action-successor.js';

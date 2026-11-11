@@ -98,7 +98,8 @@ it.each([
     );
     const trigger = host.querySelector<HTMLButtonElement>('[role=combobox]');
     expect(patch).not.toHaveBeenCalled();
-    expect(host.textContent?.includes('DSH 自定义 LLM')).toBe(expectedDsh);
+    expect(host.textContent).not.toContain('复用 DSH Desktop');
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')?.value === 'dsh').toBe(expectedDsh);
     const summary = host.querySelector('[data-testid=shared-summary]')?.textContent;
     if (!expectedDsh) {
       expect(summary).not.toContain('DeepSeek Flash');
@@ -124,41 +125,41 @@ it.each([
 });
 
 it.each([
-  '/fixture/node_modules/@deepseek-ai/dsh/lib/bin.js',
-  '/fixture/installed/dsh/lib/bin.js',
-])('keeps a visited native panel and its receipt while collapsed for %s', async (entry) => {
-  const args = [entry, '--profile', 'acp'];
-  const generated = [...args, '--patch', '/fixture/host/custom.yml'];
+  '/fixture/desktop-a/dsh.cmd',
+  '/fixture/desktop-b/dsh.cmd',
+])('keeps a visited Desktop panel and its selection while collapsed for %s', async (command) => {
+  const args = ['--profile', 'acp'];
   const runtime = {
-    id: 'acp:native-panel',
+    id: 'dsh',
     label: 'DSH',
     clientId: 'acp' as const,
     installed: true,
-    discoveryStatus: 'configured' as const,
+    dshDesktop: true,
     models: [],
-    acp: { command: 'node', startupArgs: args, transport: 'stdio' as const },
+    acp: { command, startupArgs: args, transport: 'stdio' as const },
   };
-  vi.mocked(apiFetch).mockImplementation(
-    async (path) =>
-      new Response(
-        JSON.stringify(
-          path === '/api/cats/native-runtimes'
-            ? { runtimes: [runtime] }
-            : path.endsWith('/inspect')
-              ? {
-                  profiles: ['acp'],
-                  sourceProfile: 'acp',
-                  revision: 'a'.repeat(64),
-                  active: { providers: [] },
-                  source: { providers: [{ id: 'custom', models: [{ id: 'custom-model', label: 'Custom' }] }] },
-                }
-              : path.endsWith('/prepare')
-                ? { id: 'receipt', command: 'node', startupArgs: generated }
-                : path.endsWith('/test')
-                  ? { ok: true }
-                  : { status: 'live', models: [], effortOptions: [] },
-        ),
-      ),
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    Response.json(
+      path === '/api/cats/native-runtimes'
+        ? { runtimes: [runtime] }
+        : path.endsWith('/inspect')
+          ? {
+              revision: 'a'.repeat(64),
+              provider: 'custom',
+              model: 'custom-model',
+              providers: [
+                {
+                  id: 'custom',
+                  credential: 'configured',
+                  models: [
+                    { id: 'custom-model', label: 'Custom' },
+                    { id: 'other-model', label: 'Other' },
+                  ],
+                },
+              ],
+            }
+          : { status: 'live', models: [], effortOptions: [] },
+    ),
   );
   const valid = () => {};
   function Card() {
@@ -173,7 +174,7 @@ it.each([
         clientId: 'acp',
         carrier: 'acp',
         configurationSource: 'native_tool',
-        acpCommand: 'node',
+        acpCommand: command,
         acpStartupArgs: args.join(' '),
       },
     });
@@ -197,16 +198,25 @@ it.each([
     await act(async () => root.render(<Card />));
     expect(apiFetch).not.toHaveBeenCalled();
     await click('调整');
-    await click('读取 DSH 配置');
-    await click('使用此配置');
-    const reads = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes').length;
+    const chooser = host.querySelector<HTMLButtonElement>('[role="combobox"]');
+    expect(chooser).not.toBeNull();
+    expect(chooser?.closest('details')).toBeNull();
+    await act(async () => chooser?.click());
+    const other = [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((option) =>
+      option.textContent?.includes('Other'),
+    );
+    expect(other).toBeDefined();
+    await act(async () => {
+      other?.click();
+    });
+    const reads = vi.mocked(apiFetch).mock.calls.length;
     await click('收起');
     await click('调整');
-    expect(host.textContent).toContain('DSH 自定义 LLM');
-    expect(host.textContent).toContain('已加入草稿，请保存成员后使用');
-    await click('发送一次请求验证此配置');
-    expect(host.textContent).toContain('已收到模型文本回复');
-    expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/cats/native-runtimes')).toHaveLength(reads);
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain('Other · custom');
+    expect(vi.mocked(apiFetch).mock.calls).toHaveLength(reads);
+    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/prepare') || path.endsWith('/test'))).toBe(
+      false,
+    );
     expect(vi.mocked(apiFetch).mock.calls.some(([, request]) => request?.method === 'PATCH')).toBe(false);
   } finally {
     await act(async () => root.unmount());
