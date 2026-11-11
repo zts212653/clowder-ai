@@ -222,6 +222,7 @@ jobs:
           node --test
           desktop/installer-preparation-log.test.js
           desktop/installer-no-icons.test.js
+          desktop/installer-directory.test.js
       - name: Build the actual web application
         run: pnpm --filter @cat-cafe/web build
       - name: Widget sanitization behavior
