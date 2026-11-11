@@ -162,3 +162,89 @@ test('HTML and business requests share declared HTTP dispatch; UI only discovers
   assert.equal((await app.inject({ method: 'GET', url: '/api/plugins/dev.fixture/panel', headers })).statusCode, 409);
   assert.equal(calls.length, 2);
 });
+
+test('authenticated panel work outlives the ordinary webhook budget', async (t) => {
+  const ui = new DeclaredPluginUi();
+  ui.activate({
+    instance: { pluginInstanceId: 'fixture' },
+    packageRecord: {
+      pluginId: 'dev.fixture',
+      manifest: {
+        contributions: [
+          { type: 'ui', id: 'open', kind: 'command', action: { method: 'panel' } },
+          { type: 'ui', id: 'entry', kind: 'slot-item', command: 'open', group: 'activity-bar.bottom' },
+          { type: 'webhook', id: 'page', path: 'panel', methods: ['GET'], action: { method: 'panel' } },
+        ],
+      },
+    },
+  } as unknown as PluginRuntimeAdmission);
+  const [entry] = ui.list();
+  assert.ok(entry);
+  let release = () => {};
+  const work = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = 0;
+  let ready = () => {};
+  const running = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  const app = Fastify();
+  t.after(() => {
+    release();
+    t.mock.timers.reset();
+    return app.close();
+  });
+  app.addHook('onRequest', async (request) => {
+    request.sessionUserId = 'owner';
+  });
+  await app.register(pluginWebhookForwardingRoutes, {
+    ui,
+    webhooks: {
+      resolvePluginWebhook: (_pluginId, path) => ({
+        contributionId: path,
+        path,
+        methods: ['POST'],
+        anonymous: true,
+        requestBodyLimitBytes: 1024 * 1024,
+      }),
+      callPluginWebhook: async () => {
+        if (++entered === 2) ready();
+        await work;
+        return { status: 200, body: { completed: true } };
+      },
+    },
+  });
+  await app.ready();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const requests = [
+    { method: 'POST' as const, url: '/api/plugins/dev.fixture/anonymous', payload: {} },
+    {
+      method: 'POST' as const,
+      url: '/api/plugins/dev.fixture/feedback',
+      payload: {},
+      headers: {
+        origin: 'http://localhost:5173',
+        'x-clowder-plugin-ui-instance': 'fixture',
+        'x-clowder-plugin-ui-generation': entry.generation,
+      },
+    },
+  ];
+  const completed = requests.map(() => false);
+  const responses = requests.map((request, index) =>
+    Promise.resolve(app.inject(request)).then((response) => {
+      completed[index] = true;
+      return response;
+    }),
+  );
+  await running;
+  t.mock.timers.tick(30_001);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(completed[0], true, 'ordinary webhooks retain the 30 second budget');
+  assert.equal(completed[1], false, 'the authenticated panel keeps its interactive request alive');
+  release();
+  const [anonymous, panel] = await Promise.all(responses);
+  assert.equal(anonymous!.statusCode, 504);
+  assert.equal(panel!.statusCode, 200);
+  assert.deepEqual(panel!.json(), { completed: true });
+});
