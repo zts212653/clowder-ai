@@ -1624,13 +1624,11 @@ views:
                     item:
                       lead:
                         - {who: "@who", when: "@who"}
-                        - {glyph: "@icon", when: "@icon"}
                         - {glyph: users}
                       title:
                         of: "@kind"
                         map:
                           member: "@name"
-                          plugin: "@name"
                           thread: "@name"
                           all: "@name"
                           breed:
@@ -1651,10 +1649,7 @@ views:
                           breed:
                             t: chat.mentionSub.breed
                             args: ["@count", "@breed", "@model"]
-                          member:
-                            t: chat.mentionSub.member
-                            args: ["@count", "@breed", "@model"]
-                          plugin: t:chat.mentionSub.plugin
+                          member: {of: "@meta", sep: " · "}
                           _: "@kind"
                       sel: "@selected"
                       act: cafeTypedPick
@@ -1664,7 +1659,6 @@ views:
                           of: "@kind"
                           map:
                             member: "@ins"
-                            plugin: "@ins"
                             thread: "@ins"
                             all: "@ins"
                             breed:

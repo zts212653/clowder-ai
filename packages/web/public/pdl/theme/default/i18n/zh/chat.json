@@ -296,9 +296,7 @@
     "mentionSub": {
       "thread": "本对话全体参与猫猫",
       "all": "全体猫猫",
-      "breed": "{0} 只{1}",
-      "member": "{1} · {2}",
-      "plugin": "插件"
+      "breed": "{0} 只{1}"
     },
     "whisperWhy": {
       "true": "正在回复"

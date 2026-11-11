@@ -886,12 +886,15 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         ...member,
         who: member.id,
         kind: 'member',
+        meta: [member.breed, member.model],
         ins: member.handle,
         key: `${member.name}${member.handle}${member.breed}`.toLowerCase(),
       })),
+      // a plugin instance is a candidate like a member; its avatar resolves from the instance id
       ...(data.pluginTargets?.targets ?? []).map((target) => ({
-        icon: target.icon,
-        kind: 'plugin',
+        who: target.id,
+        kind: 'member',
+        meta: [],
         name: target.displayName,
         handle: `@${target.alias}`,
         ins: `@${target.alias}`,
