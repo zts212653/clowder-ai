@@ -7,7 +7,7 @@ tips_exempt: "沿用现有聊天＋菜单的发送策略和已读提示；本单
 
 # Issue #1947：DSH 同轮输入接入
 
-状态：实现、作者自检、实际成员 UI 与冷重启验收完成；待独立审查和 next PR。PR 创建不等于完成托付。
+状态：实现、作者自检、实际成员 UI 与冷重启验收完成；PR #1950 已 Ready。Kimi 已批准 b70ae9da；云端两项 P2 已修复，待新 HEAD 云端复审、CI 与 zts 批准后合入 next。PR 创建不等于完成托付。
 
 ## 托付、依据与范围
 
@@ -112,7 +112,7 @@ Why: 只扩展受控 provider 与现有 activeRunDispatch；桥和 DshTurnInput 
 ## 交付与收尾
 
 作者提交：鲸鲸 1b3cf3528846779ca45852f37c4019a3fad558f0；sol 9ec131408105212ccddc3d961a3b1aa6ad893f25。
-已创建目标 next 的 Draft PR #1950，并评论请求 zts 审查；尚需独立复审、必要 CI 与 zts approve 后合入。
+已创建目标 next 的 PR #1950，转为 Ready 并评论请求 zts 审查；尚需当前 HEAD 云端复审、必要 CI 与 zts approve 后合入。
 验收 worktree、失败样本和持久测试数据默认保留；临时服务在取证完成后停止并记录归属，不删除历史。
 
 ### 独立审查发现：fresh-session 恢复绑定（P2）
@@ -135,4 +135,15 @@ Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件�
 - 修复：原生 user/message 到达后仍立即标记 native read；异步观察者继续执行并捕获失败，清理不再等待它。独立的 completion custody 回调保持原合同。
 - GREEN：构建完成后，清理/Host/resume retry/Queue/History 共 48/48 通过；API tsc、格式检查通过。已有 source/ref/CAS 校验继续限制迟到已读写，不新建队列或重试层。
 - 同型扫描未发现其他 provider/session-contract 直接 await onInputRead 的位置。原生读取、完成判定和投递协议不变；此前 b70 的真实验收保持其原 SHA。
-- 另一个云端 P2 位于继承的 #1928 first-run 向导：明确拒绝后 creation intent 未释放。已把原 finding 投回原责任线程核实处理，不把它误记成本次 turn 代码问题。
+- 另一个云端 P2 位于继承的 #1928 first-run 向导：明确拒绝后 creation intent 未释放。原 owner 已在 ed9b7438 修复，连同 0c037212 的模型编辑持久 HOME 修复一起 merge 到本分支。
+
+### 云端反馈后的集成验证
+
+- 集成代码切点为 528713375665b26b7cdf62af1affc762f5405205，继承 #1928 的 ed9b743826465561d63569c1247e0b3d86cd69f7；DSH 已读 observer 修复提交为 344e601dced6eaba12aca159bfebeecf71dd8248。
+- #1928 的拒绝恢复只释放已确认的提交前校验拒绝（Invalid request / acp_profile_invalid）。通用 400 可能发生于创建后持久校验，408/409/503 也不能证明未提交，继续保留原请求 key；不扩大成所有 4xx 都重开。
+- 完整 API build exit 0 后，桥、Client、Host、overlay、清理、resume 与 Queue/History 共 65/65 通过；Web tsc 通过；first-run 76 文件 414/414 通过。Web 首次命令因 Windows spawn pnpm ENOENT 未执行，保留输出，改由既有环境 wrapper 直接调用 Node/Vitest 后通过。
+- 两个继承 Web 文件经仓库 Biome 格式化后与 ed9b7438 的规范格式逐字相等，没有语义改动。Biome 与 git diff --check 通过，既有复杂度警告不作额外重构。
+- 更新后的真实 Desktop initialize/hello/newSession/close 再次通过，未调用模型。付费功能验收仍明确绑定 b70ae9da，完整精简收据见 PR 评论 6794896576；该样本的实际成员同轮输入、原生已读、模型输出及 API/Redis 冷重启均通过，不声称包含后来 pending-observer 的真实故障注入。
+- Kimi 独立批准 b70ae9da、复跑 35/35 的回复锚点为 0001794396537414-000127-552823df，作者机械转录于 PR 评论 6794775727。typed MCP fact 未落库；当前云端 finding 修复由云端新 HEAD 复审承接，不借旧 peer 批准覆盖新增差异。
+- 旧 b70 的 CI 为 19 success / 1 planned skip；Windows owner-birth 首次失败日志保留，仅重跑失败 job 后通过。新提交必须等待自己的 CI，不沿用旧结果。
+- Web 3101、API 3102、Redis 6398 已停止，持久数据和失败样本保留；19 个临时工位文件已移至独立 acceptance 目录，逐一 SHA-256 比对一致。没有修改在线 runtime。
