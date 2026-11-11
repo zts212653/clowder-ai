@@ -84,3 +84,73 @@ test('the check reads every tools/list page, retains schema and namespace, and d
   assert.equal(denied.isError, true);
   assert.equal(businessCalls, 0, 'definition-only checks never forward actions to the source');
 });
+
+[
+  { name: 'each admitted server gets its own timeout budget', sources: 2, pages: 1, totalExpires: false, fails: false },
+  { name: 'one server cannot reset its timeout between pages', sources: 1, pages: 2, totalExpires: false, fails: true },
+  {
+    name: 'the complete manifest retains a bounded total deadline',
+    sources: 2,
+    pages: 1,
+    totalExpires: true,
+    fails: true,
+  },
+].forEach(({ name, sources, pages, totalExpires, fails }) =>
+  test(name, async (t) => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    t.mock.method(AbortSignal, 'timeout', (budget) =>
+      timeout(budget === 30_000 ? (totalExpires ? 1000 : 30_000) : totalExpires ? 10_000 : 1000),
+    );
+    let businessCalls = 0;
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST') {
+        response.writeHead(405).end();
+        return;
+      }
+      let text = '';
+      for await (const part of request) text += part;
+      const message = JSON.parse(text) as { id?: number; method: string; params?: { cursor?: string } };
+      if (message.method === 'tools/call') businessCalls += 1;
+      if (message.id === undefined) {
+        response.writeHead(202).end();
+        return;
+      }
+      if (message.method === 'tools/list') await new Promise((resolve) => setTimeout(resolve, 650));
+      const result =
+        message.method === 'initialize'
+          ? {
+              protocolVersion: '2024-11-05',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'fixture', version: '1' },
+            }
+          : {
+              tools: [{ name: 'read', inputSchema: { type: 'object' } }],
+              ...(pages === 2 && !message.params?.cursor ? { nextCursor: 'page2' } : {}),
+            };
+      response
+        .writeHead(200, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const names = ['first', 'second'].slice(0, sources);
+    const manifest = readDshToolManifest(
+      names.map((name) => ({
+        type: 'http' as const,
+        name,
+        url: `http://127.0.0.1:${address.port}/mcp`,
+        headers: [],
+      })),
+      process.cwd(),
+    );
+    if (fails) await assert.rejects(manifest, /timeout/i);
+    else
+      assert.deepEqual(
+        (await manifest).servers.map((source) => source.name),
+        names,
+      );
+    assert.equal(businessCalls, 0);
+  }),
+);

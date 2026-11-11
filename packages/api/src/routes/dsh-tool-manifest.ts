@@ -10,8 +10,10 @@ import { loadMcpClient, loadMcpHttp, loadMcpStdio } from '../utils/lazy-mcp-sdk.
 export async function readDshToolManifest(servers: AcpMcpServer[], cwd: string) {
   const { Client } = await loadMcpClient();
   const snapshots: { name: string; tools: Tool[] }[] = [];
-  const signal = AbortSignal.timeout(20_000);
+  // Leave room for the 60s model check and cleanup within the client's 100s request.
+  const manifestDeadline = AbortSignal.timeout(30_000);
   for (const server of servers) {
+    const signal = AbortSignal.any([manifestDeadline, AbortSignal.timeout(20_000)]);
     const headers =
       'headers' in server ? Object.fromEntries(server.headers.map(({ name, value }) => [name, value])) : {};
     const transport =
