@@ -34,6 +34,7 @@ it('automatically reads metadata, keeps explicit preferences and never prepares 
   expect(fetch).toHaveBeenCalledOnce();
   expect(fetch.mock.calls[0][0]).toContain('/inspect');
   expect(host.textContent).toContain('Chosen');
+  expect(host.querySelector('details')).toBeNull();
   expect(select).not.toHaveBeenCalled();
   expect(host.textContent).not.toContain('验证并使用');
   expect(host.textContent).not.toContain('客户端未上报');
@@ -62,4 +63,21 @@ it('ignores an old installation response after changing sources', async () => {
     ),
   );
   expect(host.textContent).not.toContain('Old result');
+});
+it('keeps a saved model visible while loading and after a failed free read', async () => {
+  const reading = Promise.withResolvers<Response>();
+  vi.stubGlobal('fetch', vi.fn(() => reading.promise));
+  await act(async () =>
+    root.render(
+      <DshProviderSetup runtimeId="dsh" selectedModel='["custom","chosen"]' onSelection={vi.fn()} t={(zh) => zh} />,
+    ),
+  );
+  const picker = host.querySelector('[role="combobox"]');
+  const selectedLabel = picker?.textContent;
+  expect(picker?.textContent).toContain('custom / chosen');
+  expect(picker?.closest('details')).toBeNull();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => reading.reject(new Error('dsh_setup_auth_refresh_required')));
+  expect(host.querySelector('[role="combobox"]')?.textContent).toBe(selectedLabel);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Desktop 登录需要更新');
 });

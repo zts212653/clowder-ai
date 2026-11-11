@@ -198,17 +198,21 @@ it.each([
     await act(async () => root.render(<Card />));
     expect(apiFetch).not.toHaveBeenCalled();
     await click('调整');
-    const chooser = host.querySelector<HTMLSelectElement>('select[aria-label="DSH 模型"]')!;
+    const chooser = host.querySelector<HTMLButtonElement>('[role="combobox"]');
+    expect(chooser).not.toBeNull();
+    expect(chooser?.closest('details')).toBeNull();
+    await act(async () => chooser?.click());
+    const other = [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((option) =>
+      option.textContent?.includes('Other'),
+    );
+    expect(other).toBeDefined();
     await act(async () => {
-      chooser.value = '["custom","other-model"]';
-      chooser.dispatchEvent(new Event('change', { bubbles: true }));
+      other?.click();
     });
     const reads = vi.mocked(apiFetch).mock.calls.length;
     await click('收起');
     await click('调整');
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="DSH 模型"]')?.value).toBe(
-      '["custom","other-model"]',
-    );
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain('Other · custom');
     expect(vi.mocked(apiFetch).mock.calls).toHaveLength(reads);
     expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/prepare') || path.endsWith('/test'))).toBe(
       false,

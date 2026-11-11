@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { SelectField } from '../../hub-cat-editor-fields';
+import { dshModelLabel } from '@/lib/dsh-model-label';
 import { type DshInspection, dshSetupError, dshSetupRequest } from './dsh-setup-client';
+import { MemberChoicePicker } from './MemberChoicePicker';
 
 /** Reading is free; preparing and checking belong to the explicit save action. */
 export function DshProviderSetup({
@@ -43,34 +44,30 @@ export function DshProviderSetup({
             label: `${model.label} · ${route.id}`,
           })),
     ) ?? [];
-  const value =
-    selectedModel ||
-    (inspection?.provider && inspection.model ? JSON.stringify([inspection.provider, inspection.model]) : '');
-  const label = choices.find((choice) => choice.value === value)?.label;
+  const defaultValue =
+    inspection?.provider && inspection.model ? JSON.stringify([inspection.provider, inspection.model]) : '';
+  const defaultLabel = choices.find((choice) => choice.value === defaultValue)?.label;
+  const automatic = t('自动选择（官方优先）', 'Automatic selection (official first)');
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-cafe-secondary">
-        {label ??
-          (value
-            ? t('保留已选模型', 'Selected model preserved')
-            : t(
-                '添加时自动读取 Desktop 模型与认证',
-                'Desktop models and authentication are prepared automatically when adding',
-              ))}
-      </p>
-      <details className="space-y-3">
-        <summary className="cursor-pointer text-cafe-accent">{t('调整模型', 'Choose another model')}</summary>
-        <SelectField
-          label={t('DSH 模型', 'DSH model')}
-          value={value}
-          options={
-            choices.some((choice) => choice.value === value)
-              ? choices
-              : [{ value, label: t('保留当前选择', 'Keep current selection') }, ...choices]
-          }
-          onChange={onSelection}
-        />
-      </details>
+      <MemberChoicePicker
+        label={t('模型', 'Model')}
+        value={selectedModel ?? ''}
+        formatValue={dshModelLabel}
+        options={choices}
+        onChange={onSelection}
+        inheritLabel={automatic}
+        inheritValueLabel={
+          defaultLabel
+            ? `${defaultLabel} · ${t('自动选择', 'Automatic selection')}`
+            : inspection || error
+              ? automatic
+              : t('正在读取 Desktop 模型…', 'Reading Desktop models…')
+        }
+        inheritedValue={defaultValue}
+        searchable
+        english={t('zh', 'en') === 'en'}
+      />
       {error && (
         <div role="alert">
           <p>{error}</p>

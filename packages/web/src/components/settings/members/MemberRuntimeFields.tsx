@@ -298,9 +298,10 @@ export function MemberRuntimeFields({
           {t('已检测登录 · 实际连接待验证', 'Sign-in detected · Connection not yet verified')}
         </p>
       )}
-      {automaticDsh && <MemberDshProviderSetup form={form} t={t} patch={patch} />}
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        {!automaticDsh && (
+        {automaticDsh ? (
+          <MemberDshProviderSetup form={form} t={t} patch={patch} />
+        ) : (
           <MemberChoicePicker
             label={t('模型', 'Model')}
             value={form.defaultModel}

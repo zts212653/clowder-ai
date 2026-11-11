@@ -3,9 +3,11 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { scene, screenshots } from './f322-members-fixture.mjs';
 
-for (const width of [1024, 390])
+for (const width of [1920, 1024, 390])
   test(`DSH has one entry and adds with automatic preparation and a retained failed check (${width}px)`, async () => {
-    const { context, page, state } = await scene(width);
+    const { context, page, state } = await scene(width, false, false, false, { deviceScaleFactor: 2 });
+    const alternateLabel = 'Other model with a long provider-specific name and a retained explicit route';
+    const expectedModel = width === 1920 ? 'other' : 'chosen';
     const order = [];
     const errors = [];
     let discoveryReads = 0;
@@ -63,6 +65,10 @@ for (const width of [1024, 390])
         const action = new URL(route.request().url()).pathname.split('/').at(-1);
         order.push(action);
         assert.notEqual(action, 'test', 'the old empty-MCP paid test must never be called');
+        if (action === 'prepare') {
+          assert.equal(route.request().postDataJSON().provider, 'custom');
+          assert.equal(route.request().postDataJSON().model, expectedModel);
+        }
         if (action === 'inspect' && width === 390) {
           inspectionRequests += 1;
           if (inspectionBusy) return route.fulfill({ status: 409, json: { error: 'dsh_setup_busy' } });
@@ -79,7 +85,14 @@ for (const width of [1024, 390])
                   provider: 'custom',
                   model: 'chosen',
                   providers: [
-                    { id: 'custom', credential: 'configured', models: [{ id: 'chosen', label: 'Chosen model' }] },
+                    {
+                      id: 'custom',
+                      credential: 'configured',
+                      models: [
+                        { id: 'chosen', label: 'Chosen model' },
+                        { id: 'other', label: alternateLabel },
+                      ],
+                    },
                   ],
                 }
               : {
@@ -87,7 +100,7 @@ for (const width of [1024, 390])
                   startupArgs: ['--profile', 'acp', '--patch', '/private/member.yml'],
                   env: { DSH_HOME: '/private/home' },
                   provider: 'custom',
-                  model: 'chosen',
+                  model: route.request().postDataJSON().model,
                 },
         });
       });
@@ -98,7 +111,7 @@ for (const width of [1024, 390])
         assert.deepEqual(payload.env, { DSH_HOME: '/private/home' });
         assert.ok(!payload.accountRef, 'native Desktop creation must not reuse another member account');
         assert.equal(payload.configurationSource, 'native_tool');
-        assert.equal(payload.defaultModel, '["custom","chosen"]');
+        assert.equal(payload.defaultModel, JSON.stringify(['custom', expectedModel]));
         assert.deepEqual(payload.acp.startupArgs, ['--profile', 'acp', '--patch', '/private/member.yml']);
         const cat = {
           ...state.cats[0],
@@ -114,6 +127,7 @@ for (const width of [1024, 390])
         if (route.request().method() === 'GET') return route.fulfill({ json: { state: 'unchecked' } });
         order.push('checked');
         assert.ok(order.indexOf('saved') < order.indexOf('checked'));
+        assert.equal(state.cats.at(-1).defaultModel, JSON.stringify(['custom', expectedModel]));
         began();
         await release;
         return route.fulfill({
@@ -137,6 +151,37 @@ for (const width of [1024, 390])
       assert.equal(await picker.locator('option').filter({ hasText: /DSH/ }).count(), 1);
       assert.equal(await editor.getByRole('button', { name: '验证并使用此模型', exact: true }).count(), 0);
       assert.equal(await editor.getByRole('button', { name: '读取 Desktop 配置', exact: true }).count(), 0);
+      const model = editor.getByRole('combobox', { name: '模型', exact: true });
+      const effort = editor.getByRole('combobox', { name: '思考强度', exact: true });
+      await model.waitFor({ state: 'visible' });
+      assert.equal(await model.evaluate((element) => Boolean(element.closest('details:not([open])'))), false);
+      await model.scrollIntoViewIfNeeded();
+      const modelBox = await model.boundingBox();
+      const effortBox = await effort.boundingBox();
+      assert.ok(modelBox.height >= 44, 'the model uses the shared 44px target');
+      if (width === 390) assert.ok(effortBox.y > modelBox.y, 'narrow screens stack model and effort');
+      else assert.ok(effortBox.x > modelBox.x && Math.abs(effortBox.y - modelBox.y) < 2, 'desktop fields share a row');
+      if (width === 1920) {
+        await model.getByText('Chosen model', { exact: false }).waitFor();
+        await model.click();
+        const search = editor.getByRole('textbox', { name: '搜索模型', exact: true });
+        await search.fill('Other model');
+        await search.press('ArrowDown');
+        await page.keyboard.press('Enter');
+        await model.getByText(alternateLabel, { exact: false }).waitFor();
+        await model.click();
+        await search.press('Escape');
+        assert.equal(await model.evaluate((element) => element === document.activeElement), true);
+        await page.setViewportSize({ width: 390, height: 900 });
+        await model.scrollIntoViewIfNeeded();
+        assert.ok(
+          await editor.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+          'long routes do not overflow',
+        );
+        if (screenshots) await page.screenshot({ path: path.join(screenshots, 'dsh-model-selected-narrow.png') });
+        await page.setViewportSize({ width, height: 900 });
+      }
+      await picker.scrollIntoViewIfNeeded();
       const fee = editor.getByTestId('member-save-bar').getByText('费用取决于模型和工具定义规模', { exact: false });
       await fee.waitFor();
       const feeRect = await fee.boundingBox();
@@ -164,7 +209,7 @@ for (const width of [1024, 390])
         /DSH.*已安装/,
         'the saved Desktop must use the discovery confirmed during preparation',
       );
-      await editor.locator('p', { hasText: /^Chosen model · custom$/ }).waitFor();
+      await model.getByText(width === 1920 ? alternateLabel : 'Chosen model', { exact: false }).waitFor();
       assert.equal(
         await editor.getByTestId('member-save-bar').getByText('准备好就可以添加伙伴', { exact: true }).count(),
         0,

@@ -23,7 +23,8 @@ it('shows the existing custom default when official authentication is missing wi
   const selection = vi.fn();
   await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onSelection={selection} t={(zh) => zh} />));
   expect(host.textContent).toContain('Custom');
-  expect(host.textContent).toContain('调整模型');
+  expect(host.querySelector('[role="combobox"]')?.textContent).toContain('Custom');
+  expect(host.querySelector('details')).toBeNull();
   expect(fetch).toHaveBeenCalledOnce();
   expect(selection).not.toHaveBeenCalled();
   await act(async () => root.unmount());
