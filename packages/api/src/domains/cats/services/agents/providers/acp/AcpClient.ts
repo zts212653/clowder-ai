@@ -25,6 +25,18 @@ import { PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from '../pi/pi-bridge-contra
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
+import {
+  DSH_TURN_METHODS,
+  type DshTurnBridgeCapability,
+  type DshTurnBridgeEvent,
+  type DshTurnInputState,
+  type DshTurnSteerRequest,
+  type DshTurnSteerResult,
+  parseDshTurnBridgeCapability,
+  parseDshTurnBridgeEvent,
+  parseDshTurnInputState,
+  parseDshTurnSteerResult,
+} from './dsh/dsh-turn-protocol.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
 import { respondToAcpPermission } from './permissions/acp-permission-response.js';
 import type {
@@ -213,6 +225,56 @@ export class AcpClient {
     return this.initResult?.agentCapabilities;
   }
 
+  /** Private DSH turn extension negotiated after initialize; null for ordinary ACP. */
+  get turnBridge(): DshTurnBridgeCapability | null {
+    return this.turnBridgeCapability;
+  }
+
+  onTurnBridgeEvent(listener: (event: DshTurnBridgeEvent) => void): () => void {
+    this.turnBridgeListeners.add(listener);
+    return () => this.turnBridgeListeners.delete(listener);
+  }
+
+  /**
+   * Probe the private extension once per process. Ordinary ACP agents reject
+   * the namespaced method and keep their existing behavior.
+   */
+  async probeTurnBridge(): Promise<DshTurnBridgeCapability | null> {
+    if (this.closed || this.exited) return null;
+    try {
+      const resp = await this.sendRequest(DSH_TURN_METHODS.hello, { protocol: 1 }, 2_000, undefined, true);
+      this.turnBridgeCapability = parseDshTurnBridgeCapability(resp.result);
+    } catch {
+      this.turnBridgeCapability = null;
+    }
+    return this.turnBridgeCapability;
+  }
+
+  async steerTurn(input: DshTurnSteerRequest): Promise<DshTurnSteerResult> {
+    const resp = await this.sendRequest(
+      DSH_TURN_METHODS.steer,
+      {
+        sessionId: input.sessionId,
+        deliveryId: input.deliveryId,
+        text: input.text,
+        ...(input.expectedTurn !== undefined ? { expectedTurn: input.expectedTurn } : {}),
+      },
+      5_000,
+      undefined,
+      true,
+    );
+    const result = parseDshTurnSteerResult(resp.result);
+    if (!result) throw new Error('DSH turn steer response is invalid');
+    return result;
+  }
+
+  async inspectTurnInput(sessionId: string, deliveryId: string): Promise<DshTurnInputState> {
+    const resp = await this.sendRequest(DSH_TURN_METHODS.status, { sessionId, deliveryId }, 2_000, undefined, true);
+    const result = parseDshTurnInputState(resp.result);
+    if (!result) throw new Error('DSH turn status response is invalid');
+    return result;
+  }
+
   setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void {
     if (handler) this.sessionPermissionHandlers.set(sessionId, handler);
     else this.sessionPermissionHandlers.delete(sessionId);
@@ -228,6 +290,8 @@ export class AcpClient {
   private rl: ReadlineInterface | null = null;
   private readonly pending = new Map<string, PendingAcpRequest>();
   private readonly notificationListeners: Array<(n: AcpNotification) => void> = [];
+  private readonly turnBridgeListeners = new Set<(event: DshTurnBridgeEvent) => void>();
+  private turnBridgeCapability: DshTurnBridgeCapability | null = null;
   private initResult: AcpInitializeResult | null = null;
   private negotiatedPromptCapabilities?: Readonly<AcpPromptCapabilities>;
   private closed = false;
@@ -1042,6 +1106,8 @@ export class AcpClient {
   private async closeOwnedProcess(): Promise<void> {
     this.liveSessions.clear();
     this.closed = true;
+    this.turnBridgeListeners.clear();
+    this.turnBridgeCapability = null;
 
     this.rl?.close();
     this.rejectAllPending(new Error('ACP client closed'));
@@ -1176,6 +1242,15 @@ export class AcpClient {
       const idStr = hasId ? String(id) : undefined;
       const method = msg.method as string | undefined;
 
+      // The private extension is transport metadata, never a prompt event.
+      // Route it before the prompt queue so it cannot clear pendingTool or
+      // reset the idle watchdog as if it were model activity.
+      if (method?.startsWith('_clowder/')) {
+        const event = parseDshTurnBridgeEvent(msg.params);
+        if (event) for (const listener of this.turnBridgeListeners) listener(event);
+        return;
+      }
+
       if (hasId && idStr && this.pending.has(idStr) && !method) {
         // Response to one of our requests
         const { resolve } = this.pending.get(idStr)!;
@@ -1221,6 +1296,8 @@ export class AcpClient {
     timeoutMs = 60_000,
     /** Pre-generated request ID — used by promptStream to enable cancel-time settlement. */
     preGeneratedId?: string,
+    /** Capability probes are expected to be rejected by ordinary ACP agents. */
+    quiet = false,
   ): Promise<AcpResponse> {
     const child = this.child;
     const stdin = child?.stdin;
@@ -1246,18 +1323,20 @@ export class AcpClient {
         timeoutStartedAt = Date.now();
         timer = setTimeout(() => {
           this.pending.delete(id);
-          log.error(
-            {
-              method,
-              id,
-              timeoutMs,
-              pid: child.pid,
-              elapsedMs: Date.now() - sentAt,
-              inactiveMs: Date.now() - timeoutStartedAt,
-              exited: this.exited,
-            },
-            'ACP sendRequest: TIMEOUT — no response from agent process',
-          );
+          if (!quiet) {
+            log.error(
+              {
+                method,
+                id,
+                timeoutMs,
+                pid: child.pid,
+                elapsedMs: Date.now() - sentAt,
+                inactiveMs: Date.now() - timeoutStartedAt,
+                exited: this.exited,
+              },
+              'ACP sendRequest: TIMEOUT — no response from agent process',
+            );
+          }
           // For prompt timeouts, send session/cancel to stop the agent's internal retry loop
           if (method === ACP_METHODS.sessionPrompt && params.sessionId) {
             this.cancelSession(params.sessionId as string);
@@ -1286,7 +1365,8 @@ export class AcpClient {
         },
         reject: (err) => {
           if (timer) clearTimeout(timer);
-          log.error({ method, id, durationMs: Date.now() - sentAt, error: err.message }, 'ACP sendRequest: rejected');
+          if (!quiet)
+            log.error({ method, id, durationMs: Date.now() - sentAt, error: err.message }, 'ACP sendRequest: rejected');
           reject(err);
         },
         refreshTimeout: armTimeout,
