@@ -2370,11 +2370,10 @@ describe('unmodified runtime and project chat bindings', () => {
       w.eval(
         'window.destinations=[]; go=function(to,opts){ window.destinations.push([to,opts]); }; window.opened=[]; ENGINE_PARTS.openTab=function(region,key){window.opened.push([region,key]);}; delete A.runOpen; A.runOpen=function(d){window.runArgs=d;};',
       );
-      w.eval("A.memberOpen({p:'codex'}); A.pluginOpen({to:'plugin.owner'}); A.searchOpen();");
+      w.eval("A.memberOpen({p:'codex'}); A.pluginOpen({to:'plugin.owner'});");
       expect(w.destinations).toEqual([
         ['member-codex', { ask: true }],
         ['plugin.owner', { ask: true }],
-        ['search', undefined],
       ]);
       await w.eval('A.cbAuthOpen()');
       expect(w.eval('S.ws.opsView')).toBe('obs');
@@ -2438,8 +2437,8 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('projects global search from pushed sources and presets organize without pulling host models', async () => {
-    const { dom, w, port, buildModels, errors } = await boot(
+  it('sidebar search filters the thread list in place and presets organize with the matches', async () => {
+    const { dom, w, errors } = await boot(
       undefined,
       (data) => {
         data.threads[0].title = 'Needle conversation';
@@ -2448,51 +2447,20 @@ describe('unmodified runtime and project chat bindings', () => {
       { sidebarOwner: { preferences: { groups: [] }, labels: [] } },
     );
     try {
-      port.data.project = {
-        search: {
-          query: 'Needle',
-          errors: {},
-          works: {
-            artifacts: [
-              {
-                navigationId: 'canonical-work',
-                type: 'image',
-                name: 'Needle image',
-                catId: 'codex',
-                createdAt: 1,
-                threadId: 'pdl-test',
-                threadTitle: 'Source',
-              },
-            ],
-            error: null,
-          },
-          messages: {
-            meta: { partial: false },
-            results: [
-              {
-                messageId: 'hit',
-                threadId: 'pdl-test',
-                threadTitle: 'Source',
-                speaker: 'codex',
-                timestamp: 1,
-                snippet: { text: 'A Needle snippet' },
-                highlights: [{ start: 2, end: 8 }],
-              },
-            ],
-          },
-          memory: { groups: [{ results: [{ title: 'Remembered Needle', updatedAt: 1 }] }] },
-        },
-      };
-      w.clowderChat.update(port);
-      w.eval("S.search='Needle'");
-      buildModels.mockClear();
-      for (let i = 0; i < 100; i++) expect(w.eval('VM.cafeSearch().threads.items[0].id')).toBe('pdl-test');
-      expect(buildModels).not.toHaveBeenCalled();
-      expect(w.eval('VM.cafeSearch().works.items[0].args')).toEqual({ id: 'canonical-work' });
-      expect(w.eval('VM.cafeSearch().msgs.items[0].hit')).toBe('Needle');
+      w.eval('A.searchOpen()');
+      expect(w.eval('VM.cafeNavShell().search')).toEqual({ q: '', matches: 0 });
+      w.eval("CS.navQ='needle'");
+      const ids = w.eval(
+        'VM.navThreads().sections.flatMap(function (s) { return s.rows.map(function (r) { return r.id; }); })',
+      );
+      expect(ids).toEqual(['pdl-test']);
+      expect(w.eval('VM.cafeNavShell().search.matches')).toBe(1);
       await w.eval('A.cafeSearchOrg()');
       expect(w.eval('CS.modal.sel')).toEqual({ 'pdl-test': true });
-      w.eval("CS.lastGid='missing'; A.cafeOrgView()");
+      w.eval("CS.navQ='nothing matches this'");
+      expect(w.eval('VM.navThreads().empty && VM.navThreads().searching')).toBe(true);
+      w.eval('A.searchOpen()');
+      expect(w.eval('CS.navQ')).toBe(null);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
@@ -7929,55 +7897,6 @@ it('keeps a cover write operation after an unknown result and retries that exact
     expect(w.eval('VM.workCover().operation')).toBeNull();
   } finally {
     await w.__settled();
-    dom.window.close();
-  }
-});
-
-it('re-verifies a structured search source before quoting and rejects a changed source', async () => {
-  const result = {
-    messageId: 'reply-1',
-    threadId: 'pdl-test',
-    speaker: 'codex',
-    timestamp: 1,
-    snippet: { text: 'Original quote' },
-    selection: { quote: 'Exact inner quote', headingPath: ['Heading'] },
-    contentRevision: 'original',
-  };
-  const binding = { messageId: 'answer-message', blockId: 'answer-block' };
-  let current = result;
-  const { dom, w, port, action } = await boot(
-    undefined,
-    undefined,
-    undefined,
-    {},
-    (port) => {
-      const get = port.get;
-      port.get = vi.fn(async (path, params) =>
-        path === '/api/evidence/answer'
-          ? { status: 'available', response: { results: [structuredClone(current)] } }
-          : get(path, params),
-      );
-    },
-    {},
-    {
-      search: {
-        query: 'Exact',
-        errors: {},
-        works: { artifacts: [], error: null },
-        messages: { results: [result], meta: { answerBinding: binding, partial: false } },
-      },
-    },
-  );
-  try {
-    expect(await w.eval("A.cafeSearchSource({t:'pdl-test',mid:'reply-1',op:'quote'})")).toBe(true);
-    expect(port.get).toHaveBeenCalledWith('/api/evidence/answer', binding);
-    expect(action).toHaveBeenCalledWith('searchQuote', { value: JSON.stringify(result) }, undefined);
-    action.mockClear();
-    current = { ...result, contentRevision: 'changed' };
-    expect(await w.eval("A.cafeSearchSource({t:'pdl-test',mid:'reply-1',op:'quote'})")).toBe(false);
-    expect(w.eval('CS.s.error')).toBe('selected_source_changed');
-    expect(action).not.toHaveBeenCalled();
-  } finally {
     dom.window.close();
   }
 });

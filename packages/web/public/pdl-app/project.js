@@ -205,7 +205,9 @@ function bindProject() {
       render(true);
     } else ENGINE_PARTS.openTab('panel', S.lastPanel);
   };
+  // path / v: set one state before opening (the find's query into the works search), as open does
   A.wsTool = function (d) {
+    if (d.path) pathSet(d.path, d.v, d);
     return ENGINE_PARTS.openTab('panel', d.k, {
       from: null,
       preview: false,
@@ -1450,7 +1452,7 @@ function bindProject() {
     render(true);
   };
   INPUTS.wkQ = function (e) {
-    S.ws.wk.q = e.target.value;
+    S.wkQ = e.target.value;
     render(true);
   };
   FORMS.wsSigQ = function () {
@@ -1826,6 +1828,11 @@ function bindProject() {
   };
   FORMS.cafeGraph = function () {
     return chatAction('memoryGraph', { q: val('mem-gq') });
+  };
+  // arriving with a query (the chat find's 记忆 handoff) runs the memory search
+  SET_AFTER['cs.m.searched'] = function (v) {
+    CS.m.q = v;
+    return chatAction('memorySearch', { q: v });
   };
   FORMS.cafeMemQ = function () {
     return chatAction('memorySearch', { q: CS.m.q });

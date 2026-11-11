@@ -1096,17 +1096,6 @@ function ChatBinding({
           state.setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
         else state.clearReplyTo();
         return;
-      case 'searchQuote': {
-        const source = JSON.parse(args.value) as import('@cat-cafe/shared').MessageSearchResult;
-        ui.current.reply = source.messageId;
-        state.setReplyTo({
-          id: source.messageId,
-          content: source.selection ? source.selection.quote : source.snippet.text,
-          senderCatId: source.speaker === 'user' ? null : source.speaker,
-          threadId: source.threadId,
-        });
-        return true;
-      }
       case 'cliSelection': {
         const source = current.current.messages.find((m) => m.id === args.mid)!;
         const leafSource = JSON.parse(args.source) as import('@cat-cafe/shared').CliOutputQuoteSource;

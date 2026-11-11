@@ -4,7 +4,6 @@ import type { useWorkspace } from '@/hooks/useWorkspace';
 import type { ChatData } from './chat-models';
 import type { ChatUiState } from './types';
 import { useBoardBindings } from './useBoardBindings';
-import { useCafeSearchBindings } from './useCafeSearchBindings';
 import { useCanonBindings } from './useCanonBindings';
 import { useChatOwnerBindings } from './useChatOwnerBindings';
 import { useDesktopUpdateBindings } from './useDesktopUpdateBindings';
@@ -96,12 +95,7 @@ export function ProjectDataBinding({
     ui,
     recentWorks.owners,
     need('project.reviews'),
-    need('project.reviews.global') || need('project.search.works'),
-  );
-  const search = useCafeSearchBindings(
-    reviews.data.global,
-    async (name, args) => Boolean(await reviews.action(name, args)),
-    need('project.search'),
+    need('project.reviews.global'),
   );
   const memory = useMemoryBindings((source) => need('project.memory.' + source));
   const trash = useTrashBindings(need('project.trash'));
@@ -123,7 +117,6 @@ export function ProjectDataBinding({
     recentWorks,
     desktop,
     sidebar,
-    search,
     sources,
     chatOwners,
     general,

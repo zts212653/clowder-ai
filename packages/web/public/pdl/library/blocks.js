@@ -533,13 +533,13 @@ Object.assign(PDL_BLOCKS, {
   /* 键值：都是组件库的 kvGrid（一列标签对齐、按最宽标签取档）。一行是 { k, v } 或 { label, value }。值：人 → 身份（可带一句补充）、act → 文字按钮、warn → 留意色、片段 → 片段 */
   kv: function (b, sc, root) {
     const xs = b.item ? pvList(b.from, sc, root) : pvItems(b.from, sc, root);
-    if (!xs.length) return '';
-    return kvGrid(xs.map(function (r) {
+    const rows = xs.map(function (r) {
       const v = r.v != null ? r.v : r.value, act = pv(r.act, r, root);
       const template = b.item && (b.item.v || b.item.value), rich = template && (Array.isArray(template) || template.parts), value = pvLit(rich ? template : v, r, root);
       const val = r.who ? who(r.who, 'line') + (v ? ' <span class="faint">' + value + '</span>' : '') : act ? btn(v, { link: true, sm: true, act: act, data: argAttrs(!b.item && Array.isArray(b.from) ? pvArgsObj(r.args, sc, root) : r.args), html: rich ? value : undefined }) : r.warn ? '<span class="vw-t-warn">' + value + '</span>' : value;
       return [r.k != null ? r.k : r.label, val];
-    }));
+    }).filter(function (x) { const v = String(x[1] == null ? '' : x[1]); return /<(img|svg|button|input)/.test(v) || v.replace(/<[^>]*>/g, '').trim(); });   /* 没有值的行不画（只剩一个键是噪音） */
+    return rows.length ? kvGrid(rows) : '';
   },
   stats: function (b, sc, root) {
     const v = b.variant || 'grid';

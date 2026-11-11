@@ -921,7 +921,7 @@ spaces:
     home: chat
     start: true
     threadView: chat
-    routes: [chat, home, works, work, memory, search, trash, export]
+    routes: [chat, home, works, work, memory, trash, export]
     prefix: plug-
     panel: true
     threadRoutes: [chat, home]

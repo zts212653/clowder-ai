@@ -80,32 +80,26 @@ function sidebarData() {
 function sidebarOwner() {
   return sidebarOwnerValue;
 }
-function sidebarSearchThreads(query) {
-  const q = query.trim().toLowerCase(),
-    feature = /^f\d+$/i.test(q);
-  const board = chatDataSnapshot.project && chatDataSnapshot.project.board,
-    linked = new Set(
-      feature && board
-        ? board.items
-            .filter(function (item) {
-              return item.tags.some(function (tag) {
-                return tag.toLowerCase() === q;
-              });
-            })
-            .map(function (item) {
-              return item.id;
-            })
-        : [],
-    );
-  return q
-    ? sidebarData().threads.filter(function (t) {
-        if (t.deletedAt) return false;
-        const title = t.title || '';
-        return feature
-          ? linked.has(t.backlogItemId) || new RegExp('\\b' + q + '\\b', 'i').test(title)
-          : (title + ' ' + t.id + ' ' + t.projectPath).toLowerCase().includes(q);
-      })
-    : [];
+// Sidebar search (CS.navQ; null = closed): filters the thread list in place by title, id and project path;
+// a feature number (f123) matches whole words and the board items tagged with it.
+function sidebarMatch(t, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return true;
+  const title = t.title || '';
+  if (!/^f\d+$/i.test(q)) return (title + ' ' + t.id + ' ' + t.projectPath).toLowerCase().includes(q);
+  const board = chatDataSnapshot.project && chatDataSnapshot.project.board;
+  return (
+    new RegExp('\\b' + q + '\\b', 'i').test(title) ||
+    (!!board &&
+      board.items.some(function (item) {
+        return (
+          item.id === t.backlogItemId &&
+          item.tags.some(function (tag) {
+            return tag.toLowerCase() === q;
+          })
+        );
+      }))
+  );
 }
 function sidebarSubmit(m) {
   return Promise.resolve(
@@ -167,7 +161,8 @@ function bindSidebar() {
       visible = data.threads.filter(function (t) {
         return (
           !t.deletedAt &&
-          (!CS.tag || (CS.tag === '__none' ? !t.labels || !t.labels.length : (t.labels || []).includes(CS.tag)))
+          (!CS.tag || (CS.tag === '__none' ? !t.labels || !t.labels.length : (t.labels || []).includes(CS.tag))) &&
+          sidebarMatch(t, CS.navQ)
         );
       }),
       tests = {
@@ -185,7 +180,8 @@ function bindSidebar() {
         },
       },
       listed = tests[CS.group] ? visible.filter(tests[CS.group]) : visible,
-      zone = data.timeZone;
+      zone = data.timeZone,
+      none = { empty: !listed.length, searching: !!(CS.navQ || '').trim() };
     const row = function (t) {
       return {
         id: t.id,
@@ -200,6 +196,7 @@ function bindSidebar() {
     };
     if (CS.group !== 'project')
       return {
+        ...none,
         sections: [
           {
             key: CS.group,
@@ -218,6 +215,7 @@ function bindSidebar() {
       if (open[t.projectPath] === undefined) open[t.projectPath] = true;
     });
     return {
+      ...none,
       sections: Array.from(projects)
         .sort(function (a, b) {
           return Number(pins.has(b[0])) - Number(pins.has(a[0]));
@@ -368,6 +366,17 @@ function bindSidebar() {
       return x.id === CS.tag;
     });
     return {
+      search:
+        CS.navQ == null
+          ? null
+          : {
+              q: CS.navQ,
+              matches: CS.navQ.trim()
+                ? sidebarData().threads.filter(function (t) {
+                    return !t.deletedAt && !t.systemKind && sidebarMatch(t, CS.navQ);
+                  }).length
+                : 0,
+            },
       tagName: tag ? tag.name : '',
       tag: CS.tag,
       route: S.route,
@@ -432,14 +441,32 @@ function bindSidebar() {
     }
   };
   A.cafeSearchOrg = function () {
-    CS.f['org-preset'] = sidebarSearchThreads(S.search)
-      .filter(function (t) {
-        return !t.systemKind;
+    CS.f['org-preset'] = sidebarData()
+      .threads.filter(function (t) {
+        return !t.deletedAt && !t.systemKind && sidebarMatch(t, CS.navQ);
       })
       .map(function (t) {
         return t.id;
       });
     return sidebarModalOpen({ v: 'org' });
+  };
+  // 🔍 and Esc in the field open / clear and close it; ⌘K only opens (stay)
+  A.searchOpen = function (d) {
+    if (CS.navQ != null && !(d && d.stay)) {
+      CS.navQ = null;
+      render(true);
+      return;
+    }
+    if (CS.navQ == null) CS.navQ = '';
+    CS.navHidden = false;
+    if (window.innerWidth <= 960) S.navOpen = true;
+    if (space() !== 'cafe') go('chat');
+    render(true);
+    focusField('nav-q');
+  };
+  INPUTS.navQ = function (e) {
+    CS.navQ = e.target.value;
+    render(true);
   };
   A.locate = function () {
     const t = sidebarData().threads.find(function (t) {
@@ -450,6 +477,7 @@ function bindSidebar() {
     if (g) (groupPrefs[g.id] || (groupPrefs[g.id] = {})).open = true;
     if (CS.group === 'project') CS.projOpen[t.projectPath] = true;
     if (CS.tag && (CS.tag === '__none' ? (t.labels || []).length : !(t.labels || []).includes(CS.tag))) CS.tag = null;
+    if (!sidebarMatch(t, CS.navQ)) CS.navQ = null;
     if (
       (CS.group === 'pinned' && !t.pinned) ||
       (CS.group === 'favorites' && !t.favorited) ||

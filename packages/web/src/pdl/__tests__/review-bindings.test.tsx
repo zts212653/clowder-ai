@@ -267,7 +267,7 @@ it('opens the exact owner after filtering and reordering current-thread works', 
   try {
     const hook = renderHook(() => useReviewProjection('thread-one', fixtureUi()));
     const model = hook.result.current.project();
-    model.worksState.q = 'filtered-target';
+    hook.result.current.console.context.S.wkQ = 'filtered-target';
     model.worksState.view = 'cards';
     const shown = hook.result.current.project().works;
     expect(shown.items).toHaveLength(1);

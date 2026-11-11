@@ -567,6 +567,12 @@
       "unavailable": "不可用：{0}。",
       "targets": "改发给：{0}。",
       "confirm": "确认改发"
+    },
+    "find": {
+      "works": "作品 ↗",
+      "worksTip": "到作品里按名称搜「{0}」",
+      "memory": "记忆 ↗",
+      "memoryTip": "到记忆页里搜「{0}」"
     }
   },
   "memoryOwners": {
@@ -1131,34 +1137,7 @@
     "scope": {
       "orgLabel": "整理全部 {0} 条"
     },
-    "help": "对话、消息、作品和记忆在这里一起搜；只在当前对话里找，用对话页的“查找消息”。",
-    "placeholder": "搜索对话、消息、作品、记忆或 ID",
-    "threadsHelp": "对话按标题、ID 和项目匹配；F 加数字按 Feature 号精确匹配。",
-    "noMessages": "没有匹配的消息。",
-    "noWorks": "没有匹配的作品。",
-    "noMemory": "没有匹配的记忆。",
-    "deepSearch": "在记忆里深入搜索",
-    "selection": {
-      "heading": {
-        "body": "章节",
-        "text": "章节",
-        "code": "章节",
-        "quote": "引文内章节",
-        "comment": "批注章节"
-      },
-      "original": "原句",
-      "quotation": "转引",
-      "origin": "原出处",
-      "unverifiedOrigin": "出处核验",
-      "unverified": "仅核实存在于本条转引，未核实原出处作者。",
-      "comment": "当条批注",
-      "reason": "选用理由",
-      "verify": "重新核验并去原处",
-      "quote": "引用到聊天",
-      "partial": "这次只读到部分搜索结果。",
-      "timeWindow": "时间排序仅覆盖本次已核对的 {0} 条候选（上限 {1}），不代表全部历史。",
-      "changed": "选定来源已改变或不可用，请重新读取。"
-    }
+    "placeholder": "搜索对话、项目或 ID…"
   },
   "chatCards": {
     "field": {

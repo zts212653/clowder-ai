@@ -155,10 +155,9 @@ export function useReviewBindings(
     historySequence = useRef(0),
     compareSequence = useRef(0);
   const artifacts = useThreadArtifacts(threadId, 'works', needed);
-  const [searchQuery, setSearchQuery] = useState('');
   const [widgets, setWidgets] = useState<Record<string, { work: ScopedWork; state: WidgetBlockState }>>({});
   const [, browseChanged] = useState(0);
-  const worksReading = useRef({ q: '', f: 'all', view: 'list', scope: 'thread', group: 'time', cat: '', page: false });
+  const worksReading = useRef({ f: 'all', view: 'list', scope: 'thread', group: 'time', cat: '', page: false });
   const textReading = useRef({ mode: 'render' });
   const [openedWork, setOpenedWork] = useState<{
     artifact: ScopedWork;
@@ -167,7 +166,6 @@ export function useReviewBindings(
   const work = openedWork?.artifact ?? null;
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const globalEnabled =
-    !!searchQuery ||
     ui.pop?.kind === 'ctx' ||
     worksReading.current.scope === 'global' ||
     worksReading.current.page ||
@@ -305,10 +303,6 @@ export function useReviewBindings(
     if (!result) throw new Error('评审未保存，请核对原版本或重试原操作');
   };
   const action = async (name: string, args: Record<string, string>): Promise<unknown> => {
-    if (name === 'cafeSearchRead') {
-      setSearchQuery(args.q);
-      return true;
-    }
     const s = state(),
       r = currentRound();
     switch (name) {

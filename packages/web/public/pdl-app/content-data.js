@@ -362,7 +362,7 @@ function reviewsModels() {
     const matches = values.filter(
       (w) =>
         (!globalScope || !reading.cat || w.catId === reading.cat) &&
-        w.name.toLocaleLowerCase().includes(reading.q.trim().toLocaleLowerCase()),
+        w.name.toLocaleLowerCase().includes((S.wkQ || '').trim().toLocaleLowerCase()),
     );
     const items = matches.filter((w) => workMatch(w, reading.f)).map(row);
     const grouped = globalScope && reading.group !== 'none';
@@ -404,7 +404,7 @@ function reviewsModels() {
       moreError: globalScope && !!source.error,
       items,
       scope: globalScope ? 'global' : 'thread',
-      q: reading.q,
+      q: S.wkQ || '',
       layout: reading.view,
       chips: ['all', 'image', 'file', 'codepr', 'audio', 'video', 'widget'].map((v) => ({
         v,

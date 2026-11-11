@@ -238,17 +238,6 @@ function receiveChatData(next) {
       const playback = chatDataSnapshot.playback;
       CS.speaking = playback.state === 'loading' || playback.state === 'playing' ? playback.messageId : null;
     }
-    const search = chatDataSnapshot.project && chatDataSnapshot.project.search;
-    if (search) {
-      Object.keys(search.errors).forEach(function (source) {
-        const error = search.errors[source],
-          name = 'cafeSearch.' + source;
-        if (error) dataError(name, error);
-        else dataOk(name);
-      });
-      if (search.query && search.works.error) dataError('cafeSearch.works', search.works.error);
-      else dataOk('cafeSearch.works');
-    }
   }
   return changed;
 }
@@ -537,203 +526,15 @@ window.clowderChat = {
       panel: null,
     });
     CS.runtime = { drafts: {} };
-    CS.s = { scope: 'all', sort: 'time' };
-    S.search = '';
-    A.searchOpen = function () {
-      go('search');
-      focusField('global-q');
-    };
     KEY_FNS.push(function (e) {
       if ((e.metaKey || e.ctrlKey) && (e.key || '').toLowerCase() === 'k') {
         e.preventDefault();
-        A.searchOpen();
+        A.searchOpen({ stay: 1 });
         return true;
       }
     });
-    PAGES.search = function () {
-      return pdlView('cafe.search');
-    };
-    INPUTS.globalQ = function (e) {
-      S.search = e.target.value;
-      render(true);
-      return chatAction('cafeSearchRead', { q: S.search.trim(), sort: CS.s.sort });
-    };
-    SET_AFTER['cs.s.sort'] = function () {
-      return chatAction('cafeSearchRead', { q: S.search.trim(), sort: CS.s.sort });
-    };
-    A.searchClear = function () {
-      S.search = '';
-      render(true);
-      return chatAction('cafeSearchRead', { q: '', sort: CS.s.sort });
-    };
     A.scheduleDecide = function (d) {
       return chatAction('cardDecide', { mid: d.mid, v: d.decision === 'approve' ? 'ok' : 'no' });
-    };
-    A.cafeSearchSource = async function (d) {
-      const response = chatDataSnapshot.project.search.messages,
-        result = response.results.find(function (row) {
-          return row.messageId === d.mid && row.threadId === d.t;
-        });
-      if (result.selection) {
-        const fresh = await api.get('/api/evidence/answer', response.meta.answerBinding);
-        const row =
-          fresh.status === 'available' &&
-          fresh.response.results.find(function (item) {
-            return item.messageId === d.mid && item.threadId === d.t;
-          });
-        if (!row || !chatDataEqual(row, result)) {
-          CS.s.error = 'selected_source_changed';
-          render(true);
-          return false;
-        }
-      }
-      CS.s.error = '';
-      if (d.op === 'quote') {
-        await chatAction('searchQuote', { value: JSON.stringify(result) });
-        go('chat');
-        render(true);
-        return true;
-      }
-      return A.msgJump({ mid: result.messageId, t: result.threadId });
-    };
-    api.on('sources:needed', function (diff) {
-      if (diff.added.indexOf('cafeSearch') >= 0)
-        settleHold(chatAction('cafeSearchRead', { q: S.search.trim(), sort: CS.s.sort }));
-    });
-    VM.cafeSearch = function () {
-      if (projectionNeeded) projectionNeeded.add('cafeSearch');
-      const q = S.search.trim(),
-        lower = q.toLowerCase(),
-        scope = CS.s.scope,
-        source = chatDataSnapshot.project && chatDataSnapshot.project.search,
-        current = source && source.query === q ? source : null;
-      const threads = sidebarSearchThreads(q),
-        messages = current && current.messages ? current.messages.results : [],
-        works =
-          q && source
-            ? source.works.artifacts.filter(function (w) {
-                return w.name.toLowerCase().includes(lower);
-              })
-            : [],
-        memory =
-          current && current.memory
-            ? current.memory.groups.flatMap(function (g) {
-                return g.results;
-              })
-            : [],
-        counts = { threads: threads.length, messages: messages.length, works: works.length, memory: memory.length },
-        names = {
-          all: 'common.all',
-          threads: 'common.threads',
-          messages: 'common.messages',
-          works: 'common.works',
-          memory: 'common.memory',
-        },
-        show = function (kind) {
-          return !!q && (scope === 'all' || scope === kind);
-        },
-        cap = function (rows) {
-          return scope === 'all' ? rows.slice(0, 4) : rows;
-        },
-        more = function (n) {
-          return scope === 'all' && n > 4 ? n : 0;
-        };
-      return {
-        navHidden: !!CS.navHidden,
-        q: q,
-        searchMeta: current && current.messages && current.messages.meta,
-        searchError: CS.s.error || '',
-        scopes: Object.keys(names).map(function (kind) {
-          return {
-            v: kind,
-            count: !q || kind === 'all' ? null : counts[kind],
-            active: scope === kind,
-          };
-        }),
-        threads: show('threads')
-          ? {
-              count: threads.length,
-              moreLabel: more(threads.length),
-              items: cap(threads).map(function (t) {
-                return {
-                  id: t.id,
-                  title: t.title,
-                  time: t.lastActiveAt,
-                  act: 'thread',
-                  args: { id: t.id },
-                  projectPath: t.projectPath,
-                };
-              }),
-            }
-          : null,
-        msgs: show('messages')
-          ? {
-              moreLabel: more(messages.length),
-              sort: CS.s.sort,
-              items: cap(messages).map(function (m) {
-                const text = m.snippet.text,
-                  hit = m.highlights[0],
-                  start = hit ? hit.start : text.length,
-                  end = hit ? hit.end : text.length;
-                return {
-                  mid: m.messageId,
-                  selection: m.selection,
-                  contentRevision: m.contentRevision,
-                  answerBinding: current.messages.meta.answerBinding,
-                  answerSelection: current.messages.meta.answerSelection,
-                  thread: m.threadId,
-                  pre: text.slice(0, start),
-                  hit: text.slice(start, end),
-                  post: text.slice(end),
-                  name: m.speakerLabel || m.speaker,
-                  threadTitle: m.threadTitle,
-                  time: m.timestamp,
-                  hitAt: start,
-                };
-              }),
-            }
-          : null,
-        works: show('works')
-          ? {
-              moreLabel: more(works.length),
-              items: cap(works).map(function (w) {
-                const id = w.navigationId;
-                return {
-                  id: id,
-                  name: w.name,
-                  cat: w.catId,
-                  catName: WHO_DATA.member(w.catId).name,
-                  catHandle: WHO_DATA.member(w.catId).handle,
-                  thread: w.threadId,
-                  threadTitle: w.threadTitle,
-                  scope: 'global',
-                  stale: !!(w.work && w.work.ownerRevision < w.work.currentOwnerRevision),
-                  revision: w.work ? { own: w.work.ownerRevision, cur: w.work.currentOwnerRevision } : null,
-                  type: w.type,
-                  source: api.file(w.url),
-                  at: w.createdAt,
-                  act: 'workOpen',
-                  args: { id: id },
-                };
-              }),
-            }
-          : null,
-        mem: show('memory')
-          ? {
-              moreLabel: more(memory.length),
-              items: cap(memory).map(function (m) {
-                return {
-                  title: m.title,
-                  rank: m.rank,
-                  relevance: m.relevance,
-                  updatedAt: m.updatedAt,
-                  act: 'open',
-                  args: { page: 'memory', path: 'cs.m.searched', v: q },
-                };
-              }),
-            }
-          : null,
-      };
     };
     ['chatHeader', 'chatPage', 'chatComposer', 'chatPop', 'chatWelcome'].forEach(function (name) {
       VM[name] = function () {
@@ -1480,11 +1281,11 @@ window.clowderChat = {
     INPUTS.cafeLive = function (e) {
       if (e.target.id === 'ctx-q') return chatAction('contextSearch', { q: e.target.value });
     };
+    // redraw on every keystroke: the works / memory handoff carries the current query
     INPUTS.cafeFindQ = function (e) {
-      const was = CS.find.active;
       CS.find.q = e.target.value;
       CS.find.active = false;
-      if (was || e.target.value.length <= 1) render(true);
+      render(true);
     };
     FORMS.cafeFind = function () {
       CS.find.active = true;

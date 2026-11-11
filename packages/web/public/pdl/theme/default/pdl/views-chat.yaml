@@ -1133,6 +1133,28 @@ views:
                 placeholder: t:composerPop.searchMessages
                 value: $.find.q
                 input: cafeFindQ
+              - type: button
+                label: t:chat.find.works
+                tip:
+                  t: chat.find.worksTip
+                  args: [$.find.q]
+                act: wsTool
+                args:
+                  k: works-t
+                  view:
+                    of: $.find.scope
+                    map: {all: global, _: thread}
+                  path: s.wkQ
+                  v: $.find.q
+                when: $.find.q
+              - type: button
+                label: t:chat.find.memory
+                tip:
+                  t: chat.find.memoryTip
+                  args: [$.find.q]
+                act: open
+                args: {page: memory, path: cs.m.searched, v: $.find.q}
+                when: $.find.q
           - type: toolbar
             when: $.find
             items:
@@ -1944,13 +1966,16 @@ views:
     loading: t:common.loading
     blocks:
       - type: empty
-        text: t:chat.sidebar.tag.empty
+        text:
+          of: $.searching
+          map: {"true": t:classify.noMatch, _: t:chat.sidebar.tag.empty}
         when: $.empty
         action:
           type: button
           label: t:nav.clearTagFilter
           act: fold
           args: {path: cs.tag, cast: "null", v: $.tag}
+          when: $.tag
       - type: threads
         from: $.sections
         item:
@@ -4829,11 +4854,32 @@ views:
           hidden: $.hidden
           scrollId: cafe-nav-scroll
           slot: nav.cafe
+          top:
+            - type: toolbar
+              when: $.search
+              items:
+                - type: search
+                  id: nav-q
+                  placeholder: t:search.placeholder
+                  label: t:common.search
+                  value: $.search.q
+                  input: navQ
+                  wide: true
+                  on: {esc: searchOpen}
+            - type: toolbar
+              when: $.search.matches
+              items:
+                - type: button
+                  label:
+                    t: search.scope.orgLabel
+                    args: [$.search.matches]
+                  act: cafeSearchOrg
           actions:
             - type: button
               iconOnly: true
               icon: search
               label: t:common.search
+              pressed: $.search
               act: searchOpen
             - type: more
               variant: row
