@@ -41,6 +41,7 @@ import { type RuntimeChoice, runtimeDefaults } from '@/components/settings/membe
 import { memberRuntimeTools } from '@/components/settings/members/member-runtime-tools';
 import { saveMemberExtras } from '@/components/settings/members/member-save-extras';
 import { saveMemberRecord } from '@/components/settings/members/member-save-record';
+import { prepareNativeMember } from '@/components/settings/members/prepare-native-member';
 import type { MemberCatalog } from '@/components/settings/members/useRuntimeCatalog';
 import { agentClientConfigurationError } from '@/components/settings/plugin-manager/PluginAgentClientsField';
 import { configurationRequest } from '@/components/settings/plugin-manager/plugin-manager-live-api';
@@ -243,6 +244,12 @@ export async function readNativeMembers(journeyId: string, refresh: boolean) {
   }));
 }
 
+/** A DSH Desktop partner is prepared (private Desktop configuration) before it is created; the prepared form is kept by
+ * the caller so a retry sends the same body under the same idempotency key. */
+export function prepareNativePartner(partner: NativePartner) {
+  return prepareNativeMember(partner.form, undefined, partner.runtime);
+}
+
 export async function createNativeMember(partner: NativePartner, journeyId: string) {
   const receipt = await request<{ cat: CatData }>('/api/cats', {
     method: 'POST',
@@ -251,7 +258,7 @@ export async function createNativeMember(partner: NativePartner, journeyId: stri
       'X-Cat-Cafe-Onboarding-Journey': journeyId,
       'Idempotency-Key': `onboarding:${journeyId}:cat:${partner.creationRequestKey}`,
     },
-    body: JSON.stringify(buildNativeCreationPayload(partner.form)),
+    body: JSON.stringify(buildNativeCreationPayload(partner.creationForm ?? partner.form)),
   });
   await refreshCatsNow();
   return receipt.cat;

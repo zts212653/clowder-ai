@@ -106,6 +106,7 @@ import { submitInteractiveGroup } from './interactive-actions';
 import {
   createNativeMember,
   pickMemberTemplate,
+  prepareNativePartner,
   readMemberCanon,
   readMemberClientSettings,
   readMemberRuntimeModels,
@@ -852,6 +853,8 @@ function ChatBinding({
         return saveMemberCanon(args.id, threadId, args.value, (element as unknown as File | null) ?? undefined);
       case 'nativeDetect':
         return readNativeMembers(args.journeyId, args.refresh === 'true');
+      case 'nativePrepare':
+        return prepareNativePartner(JSON.parse(args.value));
       case 'nativeCreate':
         return createNativeMember(JSON.parse(args.value), args.journeyId);
       case 'memberStrategySave':

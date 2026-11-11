@@ -1245,7 +1245,15 @@ function bindMembers() {
           get preferences() {
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
-          state: p.existingId ? 'created' : p.identityConflict ? 'conflict' : p.selectable ? 'ready' : 'unavailable',
+          state: p.existingId
+            ? 'created'
+            : p.identityConflict
+              ? 'conflict'
+              : p.selectable
+                ? p.runtime.dshDesktop
+                  ? 'dshAuto'
+                  : 'ready'
+                : 'unavailable',
         };
       }),
       createDisabled:
@@ -1303,6 +1311,8 @@ function bindMembers() {
         );
         if ((partner.runtime.agyCarrier === 'native' && !partner.form.defaultModel.trim()) || preference.invalidEffort)
           throw new Error('runtime_preference_required');
+        if (partner.runtime.dshDesktop && !partner.creationForm)
+          partner.creationForm = await act('nativePrepare', { value: JSON.stringify(partner) });
         const cat = await act('nativeCreate', { journeyId: setup.journeyId, value: JSON.stringify(partner) });
         partner.existingId = cat.id;
       }

@@ -65,6 +65,7 @@ modules:
                           map:
                             created: t:nativeSetup.created
                             ready: t:nativeSetup.ready
+                            dshAuto: t:nativeSetup.dshAuto
                             unavailable: t:common.status.notInstalled
                             conflict: t:nativeSetup.conflict
                             _: "@state"
