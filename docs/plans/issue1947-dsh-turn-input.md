@@ -7,7 +7,7 @@ tips_exempt: "沿用现有聊天＋菜单的发送策略和已读提示；本单
 
 # Issue #1947：DSH 同轮输入接入
 
-状态：实现、作者自检、实际成员 UI 与冷重启验收完成；PR #1950 已 Ready。Kimi 已批准 b70ae9da；云端三项 P2 已修复，待新 HEAD 云端复审、CI 与 zts 批准后合入 next。PR 创建不等于完成托付。
+状态：实现、作者自检、实际成员 UI 与冷重启验收完成，PR #1950 已 Ready；审批和合入状态以 GitHub 当前记录为准。下文按提交记录各轮验证，旧批准不覆盖新增差异，原 Task 负责跟至实际合入 next。
 
 ## 托付、依据与范围
 
@@ -112,7 +112,7 @@ Why: 只扩展受控 provider 与现有 activeRunDispatch；桥和 DshTurnInput 
 ## 交付与收尾
 
 作者提交：鲸鲸 1b3cf3528846779ca45852f37c4019a3fad558f0；sol 9ec131408105212ccddc3d961a3b1aa6ad893f25。
-已创建目标 next 的 PR #1950，转为 Ready 并评论请求 zts 审查；尚需当前 HEAD 云端复审、必要 CI 与 zts approve 后合入。
+已创建目标 next 的 PR #1950，转为 Ready 并评论请求 zts 审查；合入须满足当前 HEAD 云端复审、必要 CI 与 zts approve，状态以 PR 实时记录为准。
 验收 worktree、失败样本和持久测试数据默认保留；临时服务在取证完成后停止并记录归属，不删除历史。
 
 ### 独立审查发现：fresh-session 恢复绑定（P2）
@@ -156,3 +156,13 @@ Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件�
 - 两文件 Biome、git diff --check 通过；规范格式与 a68 内容逐字一致。fallback 检查仅新增一处可选边界 catch，累计提示包含已有校验分支，没有多级执行兜底或新重试。查询的其他调用为必需 HOME 绑定，不能一并吞错。
 - 相对已验证 28f8f0d5，只有上述两个 API 文件变化，Web 目录无差异；此前 414/414 和 Web 类型证据保持原来源，不重复执行，不冒称新跑。28f8f0d5 的 CI 最终为 19 success / 1 planned skip；新 HEAD 仍须自己的 CI 和云端复审。
 - 依据用户后续明确要求，在 PR 评论汇总全部有效反馈、对应最小方案及验证，请 zts 批准当前提交。本轮三项云端意见均有复现依据，采用上述最小修复，不扩大到其他异常的吞错或自动重试。实际批准前不合入，原 Task 保持 doing。
+
+### 探测期间取消与第二 Desktop 恢复（P2）
+
+- 云端 4538380083：桥能力探测期间取消时，prompt 仍未开始，原 abort handler 不发 cancel；探测完成后却继续发 prompt。direct/RegisteredSession × 有/无能力的 4 个准确 RED 均观察到一次不应发生的 prompt。首轮夹具缺 Host session ID 的两个超时保留，修正后为 4 fail / 0 cancelled。
+- a390a56324c996f58f554f950bfc13cde12f5ebf 仅补 4 行：探测返回后检查 signal，已取消则 done/return，在绑定输入与标记 prompt 活动之前结束。API tsc emit 后 69/69 turn/恢复、18/18 既有 ACP cancel/busy 回归通过；同时核对无 prompt、无输入绑定、无多余 cancel/seal，lease 释放一次。唯一的 Host probe 调用已覆盖，不扩成通用重试改造。
+- #1928 已由 zts 批准 a68 并于 13:31 UTC 合入 next@7f3e76d16142b8bd367e016431f8c90b01a4505f，其 tree 与 a68 完全相同。本分支同步为 d5808de7，并证明完整 tree 与已测 a390 相同，未借依赖批准替代本 PR 审批。
+- 云端 4538380094：第二安装自动准备后遇到 POST 响应丢失，重开向导又优选首安装，导致原 body/key 被替换。原责任线程复现 members/goal × 已写入/未写入 4 RED，发布独立续办分支的 8c3f2dc8cacdb48e84d1b7b7fb043762937dfab1；该提交晚于 #1928 合入，故由本 PR 承载。
+- 补修只在保存的 Desktop 仍被发现且 runtime/form command 一致时优先恢复该推荐；保留原选择、私有 HOME/patch、冻结表单与 creation key。测试还验证安装消失、同 ID 换路径时不套用到另一个安装。没有第二份 intent store 或新幂等协议。
+- 本分支 merge 8c 为 fef8632a7759824f8b37d042cf2c1e6667957a7e，独立运行 Web 77 文件 420/420、Web tsc、Biome 与 diff-check 通过。API 目录与已测 a390 逐字相同，复用上述 69/18 结果；付费功能样本仍明确绑定 b70，未重放收费故障实验。
+- 原线程补修回传曾停留投递队列，后由当前线程回读原文和已发布分支取回；未把 queued 当 delivered。全部 6 项已知反馈（Kimi 1、云端 5）均有行为证据，按上述最小方案处理，完整新 HEAD 仍须自己的云端复审、CI 和 zts 正式批准。

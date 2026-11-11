@@ -131,5 +131,27 @@
     "cloudReviewPending": true,
     "ztsApprovalPending": true,
     "verifiedAt": "2026-11-11T13:04:23.039205+00:00"
+  },
+  "latestFeedbackIntegration": {
+    "source": "fef8632a7759824f8b37d042cf2c1e6667957a7e",
+    "canonicalNext": "7f3e76d16142b8bd367e016431f8c90b01a4505f",
+    "cancelProbeFix": "a390a56324c996f58f554f950bfc13cde12f5ebf",
+    "pendingDesktopFix": "8c3f2dc8cacdb48e84d1b7b7fb043762937dfab1",
+    "cancelProbeRedFailures": 4,
+    "cancelProbeRedCancelledTests": 0,
+    "initialFixtureFailureRetained": true,
+    "apiTypecheckAndEmitPassed": true,
+    "postBuildTurnRecoveryTestsPassed": 69,
+    "existingAcpCancelBusyTestsPassed": 18,
+    "apiCodeEqualsTestedCancelFix": true,
+    "ownerReportedPendingDesktopRedFailures": 4,
+    "independentWebTestFiles": 77,
+    "independentWebTestsPassed": 420,
+    "webTypecheckPassed": true,
+    "canonicalFormattingProved": true,
+    "paidFunctionalSampleSource": "b70ae9da767e8ff8b0c1200df4a623eff2353b63",
+    "newPaidModelCalls": 0,
+    "reviewStatusAtEvidenceFreeze": "new-head cloud review, CI and zts approval pending",
+    "verifiedAt": "2026-11-11T15:19:42.969212+00:00"
   }
 }
