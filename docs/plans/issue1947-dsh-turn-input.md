@@ -166,3 +166,25 @@ Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件�
 - 补修只在保存的 Desktop 仍被发现且 runtime/form command 一致时优先恢复该推荐；保留原选择、私有 HOME/patch、冻结表单与 creation key。测试还验证安装消失、同 ID 换路径时不套用到另一个安装。没有第二份 intent store 或新幂等协议。
 - 本分支 merge 8c 为 fef8632a7759824f8b37d042cf2c1e6667957a7e，独立运行 Web 77 文件 420/420、Web tsc、Biome 与 diff-check 通过。API 目录与已测 a390 逐字相同，复用上述 69/18 结果；付费功能样本仍明确绑定 b70，未重放收费故障实验。
 - 原线程补修回传曾停留投递队列，后由当前线程回读原文和已发布分支取回；未把 queued 当 delivered。全部 6 项已知反馈（Kimi 1、云端 5）均有行为证据，按上述最小方案处理，完整新 HEAD 仍须自己的云端复审、CI 和 zts 正式批准。
+
+### 待确认投递与完成回执的收尾责任（P2）
+
+云端对 b37d88a8 的两项反馈 4539881277、4539881288 均在原代码上复现。共同机制是把尚未确认的阶段当成终态：pending steer 先收到 completion=false 会覆盖后续明确拒绝；完成回执尚未保存却先标记 completed，会丢掉成功原生结束的证据。
+
+本轮先核对 DshTurnInput 的全部接收、读取、结束与 dispose 路径，明确状态契约，再修复：
+
+| 阶段与事实 | 收尾责任 |
+| --- | --- |
+| steer 仍 pending | 等待既有 RPC 的分类结果；Client 现有超时为 5 秒，不引入新超时或重试 |
+| 明确未接受 | 移除瞬态 delivery，不发执行完成回执；Queue 保留 not_accepted 的重试合同 |
+| accepted 或 unknown | 保留 delivery；原生成功结束且已读才传 true，其余传 false |
+| 完成回执保存成功 | 才标记 completed，后续 dispose 不重复保存 |
+| 完成回执保存失败 | 保留原生结束结果和未完成责任，利用既有 dispose 再结算；持续失败在 lease 释放后报错 |
+
+- 修复提交 4e4a980fdecace2c7c7bffba248b494df0132c14。没有引入业务队列、后台重试、退避或新的恢复平台；读取 observer 继续不阻塞清理。
+- 新增 6 个检查在 b37 编译产物上为 4 fail / 2 pass；其中明确拒绝检查使用真实 Queue 恢复夹具，确证旧结果为 incomplete，修复后为 not_accepted。accepted/unknown 两个反例保留原收尾责任。
+- API tsc emit exit 0 后，新增 6 项连同既有 turn/恢复共 75/75，通过；既有 ACP cancel/busy 18/18，通过。持续回执失败仍释放 lease 一次；短暂失败重写时保留 true，保存后不再重复。
+- Biome 与 diff-check 通过，6 个现有复杂度警告保留。按已提交的 b37...4e4 差异扫描，fallback 净增 1 处：异步 native-end 通知中的失败捕获；它只记录并保留责任，dispose 最终仍报告错误。累计 9 个模式包含既有条件分支，没有新增执行兜底链。
+- Web 目录相对 b37 无变化，沿用该版本独立 77 文件 420 项与 Web 类型证据；本轮不冒称重跑 Web 或新增真实模型故障注入。
+- b37 的远端 CI 失败记录保留：Build、Web 与首个 distributable 分片原始日志明确显示 Ubuntu 依赖下载 DNS 解析失败；6 个 distributable 均停在安装 Redis 测试依赖。未改变工作流或测试断言，也未把失败写成通过；新修复提交须运行自己的 CI。
+- 以上累计 8 项已知反馈完成作者修复，新的 HEAD 仍须独立审查、必要 CI 与 zts 正式批准。当前共有 4 轮云端审查；若达到仓库 merge-gate 的 5 轮封板阈值，处理该轮意见后改由本地有状态 reviewer 审最终差异，不继续触发无界云端循环；zts 批准要求仍保留。
