@@ -73,7 +73,7 @@ async function resolveDshConnectionTarget(catId: string, root: string, owner: st
     mcpSupport: config.mcpSupport !== false,
     mcpWhitelist: acp.mcpWhitelist ?? [],
   });
-  const toolIssues = config.mcpSupport !== false ? invocationPluginMcpIssues() : [];
+  const toolIssues = config.mcpSupport !== false ? invocationPluginMcpIssues(acp.mcpWhitelist) : [];
   // Binding removes inherited invocation credentials. A check never borrows the
   // current author's turn or gains a business tools/call forwarding path.
   const admitted = materializeSessionMcpServers(servers, { CAT_CAFE_USER_ID: owner, CAT_CAFE_CAT_ID: catId });

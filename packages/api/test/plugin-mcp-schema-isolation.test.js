@@ -10,7 +10,10 @@ import {
   withInvocationPluginMcpView,
 } from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
 import { AcpAgentService } from '../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
-import { resolveAcpMcpServers } from '../dist/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
+import {
+  resolveAcpMcpServers,
+  resolveDisabledServerIds,
+} from '../dist/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js';
 import { inspectPluginMcpSchema } from '../dist/domains/plugin/declared/mcp-schema-admission.js';
 import { NativeMcpLaunches } from '../dist/domains/plugin/declared/native-mcp-launches.js';
 import { NativePluginActions } from '../dist/domains/plugin/declared/native-plugin-actions.js';
@@ -86,13 +89,21 @@ test('a malformed optional MCP contribution cannot enter either member transport
   };
   const view = await launches.memberView(root);
   const sources = await withInvocationPluginMcpView(
-    () =>
-      resolveAcpMcpServers(root, [], undefined, {
+    async () => {
+      const servers = await resolveAcpMcpServers(root, [], undefined, {
         mcpSupport: true,
+        disabledServerIds: resolveDisabledServerIds(root, 'member', config),
         catId: 'member',
         capabilitiesConfig: config,
         configSourceRoot: root,
-      }),
+      });
+      assert.deepEqual(
+        invocationPluginMcpIssues(),
+        [{ pluginId: 'fixture', capabilityId: 'plugin:fixture:broken', reasonCode: 'tool_schema_invalid' }],
+        'the real disabled-policy → server-resolution sequence must retain the rejection diagnosis',
+      );
+      return servers;
+    },
     view,
     { kind: 'member', projectRoot: root, memberCatId: 'member' },
   );
@@ -180,11 +191,12 @@ test('a malformed optional MCP contribution cannot enter either member transport
     async () => {
       await resolveAcpMcpServers(root, ['cat-cafe-memory'], undefined, {
         mcpSupport: true,
+        disabledServerIds: resolveDisabledServerIds(root, 'member', config),
         catId: 'member',
         capabilitiesConfig: config,
         configSourceRoot: root,
       });
-      return invocationPluginMcpIssues();
+      return invocationPluginMcpIssues(['cat-cafe-memory']);
     },
     view,
     { kind: 'member', projectRoot: root, memberCatId: 'member' },
@@ -192,16 +204,18 @@ test('a malformed optional MCP contribution cannot enter either member transport
   assert.deepEqual(unrelated, [], 'a tool not selected by the member must not produce an unrelated warning');
   const blocked = await withInvocationPluginMcpView(
     async () => {
+      const blockedConfig = {
+        ...config,
+        capabilities: config.capabilities.map((capability) =>
+          capability.id === 'plugin:fixture:broken' ? { ...capability, blockedCats: ['member'] } : capability,
+        ),
+      };
       await resolveAcpMcpServers(root, [], undefined, {
         mcpSupport: true,
+        disabledServerIds: resolveDisabledServerIds(root, 'member', blockedConfig),
         catId: 'member',
         configSourceRoot: root,
-        capabilitiesConfig: {
-          ...config,
-          capabilities: config.capabilities.map((capability) =>
-            capability.id === 'plugin:fixture:broken' ? { ...capability, blockedCats: ['member'] } : capability,
-          ),
-        },
+        capabilitiesConfig: blockedConfig,
       });
       return invocationPluginMcpIssues();
     },

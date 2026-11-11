@@ -467,7 +467,7 @@ export function resolveDisabledServerIds(
   const disabled = new Set(
     invocationPluginMcpConfig(capConfig, catId)
       .capabilities.filter((cap) => cap.type === 'mcp')
-      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId, options))
+      .filter((cap) => !isMcpEnabledForCat(cap, catId, options) || !projectInvocationPluginMcp(cap).available)
       .map((cap) => cap.id),
   );
   if (disabled.has('cat-cafe')) {

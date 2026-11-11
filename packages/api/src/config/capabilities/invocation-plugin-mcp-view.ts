@@ -35,8 +35,9 @@ const invocationView = new AsyncLocalStorage<{
 }>();
 
 /** Explain an optional capability rejection without treating it as a member connection failure. */
-export function invocationPluginMcpIssues() {
-  return [...(invocationView.getStore()?.toolIssues ?? [])];
+export function invocationPluginMcpIssues(whitelist?: readonly string[] | null) {
+  const issues = invocationView.getStore()?.toolIssues ?? [];
+  return whitelist?.length ? issues.filter((issue) => whitelist.includes(issue.capabilityId)) : [...issues];
 }
 
 export function invocationPluginMcpHttpPaths(servers: Record<string, Record<string, unknown>>): Record<string, string> {
@@ -67,7 +68,6 @@ export function withInvocationPluginMcpView<T>(
 
 export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {
   const context = invocationView.getStore();
-  if (context) context.toolIssues.length = 0;
   return projectLocalPluginMcpCapabilities(config, context?.view, context?.scope, memberCatId).config;
 }
 

@@ -303,7 +303,7 @@ export class AcpAgentService implements AgentService {
       userProjectRoot: input.workingDirectory,
       legacyServers: this.mcpServers,
     });
-    const toolIssues = mcpSupport ? invocationPluginMcpIssues() : [];
+    const toolIssues = mcpSupport ? invocationPluginMcpIssues(input.mcpWhitelist ?? this.mcpWhitelist) : [];
     return {
       frozenAcpMcpServers,
       ...(toolIssues.length ? { frozenAcpMcpIssues: toolIssues } : {}),
