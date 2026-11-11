@@ -16,6 +16,7 @@ import {
   inventoryIdentity,
   objectIcon,
   pluginIconAsset,
+  readVerifiedConsole,
   readVerifiedIcon,
   readVerifiedReadme,
   verifiedPackageIcon,
@@ -140,6 +141,24 @@ export class PluginManagerPackageAssetService
     });
     try {
       return await readVerifiedIcon(located, inventoryIdentity(installed));
+    } finally {
+      await located.release();
+    }
+  }
+
+  /** The installed package's console files (app.js, i18n), read beside its manifest's pdl section. */
+  async readConsole(pluginId: string): Promise<{ app?: string; i18n?: Record<string, Record<string, unknown>> }> {
+    const snapshot = await this.options.inventory.snapshot({ pluginId });
+    const instance = snapshot.instances.find(
+      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
+    );
+    const installed = instance
+      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
+      : undefined;
+    if (!installed) return {};
+    const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest);
+    try {
+      return await readVerifiedConsole(located, inventoryIdentity(installed));
     } finally {
       await located.release();
     }

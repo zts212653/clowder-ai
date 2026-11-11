@@ -24,7 +24,6 @@ import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInventorySnapshot } from '../host-inventory/types.js';
 import type { PluginAddressedTargets } from './addressing/plugin-addressed-targets.js';
 import { connectorPermissionsProjection } from './connector-settings.js';
-import { readPluginConsole } from './plugin-console-package.js';
 import {
   type PluginManagerCatalogCandidate,
   type PluginManagerProjectionOverrides,
@@ -96,6 +95,8 @@ export interface PluginManagerConfigurationPort {
 
 export interface PluginManagerServiceOptions {
   readonly addressedTargets?: PluginAddressedTargets;
+  /** An installed package's console files (app.js, i18n) beside its manifest's pdl section. */
+  readonly consoleFiles?: (pluginId: string) => Promise<Pick<PluginPdlFragment, 'app' | 'i18n'>>;
   readonly delivery?: { deliver(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> };
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
@@ -324,8 +325,9 @@ export class PluginManagerService {
       const pkg = inventory.packages.find((item) => item.packageDigest === instance.packageDigest);
       if (!pkg || pkg.packageState !== 'installed' || !pkg.manifest) continue;
       const manifest = pkg.manifest as typeof pkg.manifest & { pdl?: PluginPdlFragment };
-      const fragment = manifest.pdl ? structuredClone(manifest.pdl) : await readPluginConsole(instance.pluginId);
-      if (fragment) out.set(instance.pluginId, fragment);
+      if (!manifest.pdl) continue;
+      const files = (await this.options.consoleFiles?.(instance.pluginId)) ?? {};
+      out.set(instance.pluginId, { ...structuredClone(manifest.pdl), ...files });
     }
     return out;
   }

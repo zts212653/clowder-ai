@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { open, realpath } from 'node:fs/promises';
+import { open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PluginIconSpec } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
@@ -213,6 +213,38 @@ export async function readVerifiedReadme(
   } catch {
     throw new PluginManagerPackageAssetError('INVALID_ASSET', 'plugin README is not valid UTF-8');
   }
+}
+
+const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
+/** A package's console files beside its manifest's pdl section: console/app.js and console/i18n/<language>.json. */
+export async function readVerifiedConsole(
+  located: VerifiedPluginPackage,
+  expected: PackageIdentity,
+): Promise<{ app?: string; i18n?: Record<string, Record<string, unknown>> }> {
+  if (!packageIdentityMatches(located.manifest, expected)) {
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
+  }
+  await located.verifyIntegrity();
+  const dir = resolve(located.rootDir, 'console');
+  const text = async (file: string) => {
+    const full = resolve(dir, file);
+    if (!pathInside(located.rootDir, full))
+      throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console path escapes');
+    return new TextDecoder('utf-8', { fatal: true }).decode(
+      await readBoundedStableFile(full, MAX_PLUGIN_CONSOLE_BYTES),
+    );
+  };
+  const names = await readdir(dir).catch(() => [] as string[]);
+  const out: { app?: string; i18n?: Record<string, Record<string, unknown>> } = {};
+  if (names.includes('app.js')) out.app = await text('app.js');
+  if (names.includes('i18n')) {
+    const files = (await readdir(resolve(dir, 'i18n'))).filter((name) => name.endsWith('.json'));
+    out.i18n = Object.fromEntries(
+      await Promise.all(files.map(async (name) => [name.slice(0, -5), JSON.parse(await text('i18n/' + name))])),
+    );
+  }
+  await located.verifyIntegrity();
+  return out;
 }
 
 export function inventoryIdentity(record: PluginPackageRecord): PackageIdentity {

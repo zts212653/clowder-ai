@@ -134,11 +134,15 @@ it('exposes only current admitted installed fragments through the authenticated 
   }
 });
 
-it('serves an installed plugin console package: PDL data, texts by language and its app script', async () => {
+it('serves an installed plugin console: the manifest pdl section with the package console files beside it', async () => {
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory);
-  const github = { ...manifest, pluginId: 'official.github-operations', name: 'GitHub Operations' };
-  delete (github as { pdl?: unknown }).pdl;
+  const github = {
+    ...manifest,
+    pluginId: 'official.github-operations',
+    name: 'GitHub Operations',
+    pdl: { ns: 'github', views: { 'github.community': { blocks: [{ type: 'text', text: 't:github.title' }] } } },
+  };
   const digest = `sha512-${createHash('sha512').update('github-console').digest('base64')}`;
   await control.installPackage({
     manifest: github,
@@ -150,12 +154,12 @@ it('serves an installed plugin console package: PDL data, texts by language and 
   const manager = new PluginManagerService({
     inventory: { snapshot: async () => snapshot },
     catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 1 }) },
+    consoleFiles: async (pluginId) =>
+      pluginId === github.pluginId ? { app: 'VM.githubCommunity = () => ({});', i18n: { zh: { title: '社区' } } } : {},
   });
   const fragment = (await manager.pdl()).fragments[github.pluginId]!;
   assert.equal(fragment.ns, 'github');
-  assert.ok(fragment.views!['github.community']);
-  assert.ok(fragment.rows!['community.issue']);
-  assert.equal(typeof (fragment.i18n!.zh as { wsCommunity: unknown }).wsCommunity, 'object');
+  assert.equal((fragment.i18n!.zh as { title: unknown }).title, '社区');
   assert.equal(fragment.app, undefined);
   const subtree = await manager.pdlSubtree(github.pluginId);
   assert.ok(subtree.views!['github.community']!.blocks);

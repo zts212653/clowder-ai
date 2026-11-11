@@ -1084,6 +1084,7 @@ export function createPluginManagerRuntimeComposition(
   });
   const manager = new PluginManagerService({
     addressedTargets,
+    consoleFiles: (pluginId) => assets.readConsole(pluginId),
     delivery: options.runtime.supervisor,
     ...(options.pluginOperationChanged ? { operationChanged: options.pluginOperationChanged } : {}),
     catalog,
