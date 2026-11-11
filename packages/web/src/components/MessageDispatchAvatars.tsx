@@ -66,6 +66,7 @@ export function MessageDispatchAvatars({
           projection={projection}
           message={message}
           timelineMessages={timelineMessages}
+          activeRuns={activeRuns}
           getCatLabel={getCatLabel}
           agentSource={agentSource}
           whisper={whisper}
