@@ -1655,7 +1655,11 @@ export function resolveServersForCat(
   const nameOrigin = new Map<string, string>();
 
   for (const storedCapability of invocationPluginMcpConfig(config, catId).capabilities) {
-    const { capability: cap, available: localActivationAvailable } = projectInvocationPluginMcp(storedCapability);
+    const enabledFromConfig = isMcpEnabledForCat(storedCapability, catId, options);
+    const { capability: cap, available: localActivationAvailable } = projectInvocationPluginMcp(
+      storedCapability,
+      enabledFromConfig,
+    );
     if (cap.type !== 'mcp') continue;
     if (isRetiredGithubMcpCapability(cap)) continue;
 
@@ -1664,7 +1668,6 @@ export function resolveServersForCat(
     if (!mcpServer) continue;
 
     // Per-cat access: single source of truth via isMcpEnabledForCat
-    const enabledFromConfig = isMcpEnabledForCat(cap, catId, options);
 
     const transportSupported =
       mcpServer.transport === 'streamableHttp'

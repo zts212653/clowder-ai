@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { CapabilityEntry } from '@cat-cafe/shared';
+import type { CapabilityEntry, PluginMcpToolIssue } from '@cat-cafe/shared';
 import { type PluginMcpExposureScope, projectLocalPluginMcpCapabilities } from './plugin-mcp-exposure.js';
 
 export interface InvocationPluginMcpEntry {
@@ -31,7 +31,14 @@ export interface InvocationPluginMcpView {
 const invocationView = new AsyncLocalStorage<{
   readonly view: InvocationPluginMcpView | undefined;
   readonly scope: PluginMcpExposureScope | undefined;
+  readonly toolIssues: PluginMcpToolIssue[];
 }>();
+
+/** Explain an optional capability rejection without treating it as a member connection failure. */
+export function invocationPluginMcpIssues(whitelist?: readonly string[] | null) {
+  const issues = invocationView.getStore()?.toolIssues ?? [];
+  return whitelist?.length ? issues.filter((issue) => whitelist.includes(issue.capabilityId)) : [...issues];
+}
 
 export function invocationPluginMcpHttpPaths(servers: Record<string, Record<string, unknown>>): Record<string, string> {
   const result: Record<string, string> = {};
@@ -56,7 +63,7 @@ export function withInvocationPluginMcpView<T>(
   view: InvocationPluginMcpView | undefined,
   scope?: PluginMcpExposureScope,
 ): T {
-  return invocationView.run({ view, scope: scope ? Object.freeze({ ...scope }) : undefined }, run);
+  return invocationView.run({ view, scope: scope ? Object.freeze({ ...scope }) : undefined, toolIssues: [] }, run);
 }
 
 export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {
@@ -64,7 +71,10 @@ export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').Cap
   return projectLocalPluginMcpCapabilities(config, context?.view, context?.scope, memberCatId).config;
 }
 
-export function projectInvocationPluginMcp(capability: CapabilityEntry): {
+export function projectInvocationPluginMcp(
+  capability: CapabilityEntry,
+  enabled = true,
+): {
   capability: CapabilityEntry;
   available: boolean;
 } {
@@ -77,6 +87,12 @@ export function projectInvocationPluginMcp(capability: CapabilityEntry): {
   const local = matches.length === 1 ? matches[0] : undefined;
   // An isolated Host must not fall back to a different deployment's activation.
   if (!local || !local.isCurrent()) return { capability, available: false };
+  if (local.sharedHttpUnavailableReason === 'tool_schema_invalid') {
+    const issues = invocationView.getStore()?.toolIssues;
+    if (enabled && issues && !issues.some((issue) => issue.capabilityId === capability.id))
+      issues.push({ pluginId: local.pluginId, capabilityId: capability.id, reasonCode: 'tool_schema_invalid' });
+    return { capability, available: false };
+  }
   return {
     available: true,
     capability: {
@@ -97,7 +113,7 @@ export function bindInvocationPluginMcpView<T>(
   view: InvocationPluginMcpView | undefined,
   scope?: PluginMcpExposureScope,
 ): AsyncIterator<T> {
-  const context = { view, scope: scope ? Object.freeze({ ...scope }) : undefined };
+  const context = { view, scope: scope ? Object.freeze({ ...scope }) : undefined, toolIssues: [] };
   const iterator = invocationView.run(context, create);
   return {
     next: () => invocationView.run(context, () => iterator.next()),

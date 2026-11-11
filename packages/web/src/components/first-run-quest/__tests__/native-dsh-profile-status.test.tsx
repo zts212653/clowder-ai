@@ -45,9 +45,9 @@ it.each([
   );
   const checkbox = host.querySelector<HTMLInputElement>('input[type=checkbox]');
   if (!checkbox) throw new Error('Partner checkbox missing');
-  expect(checkbox.disabled).toBe(invalid);
-  expect(partner.selected).toBe(!invalid);
-  expect(nativeRuntimeSelectable(peer, partner.form)).toBe(!invalid);
+  expect(checkbox.disabled).toBe(true);
+  expect(partner.selected).toBe(false);
+  expect(nativeRuntimeSelectable(peer, partner.form)).toBe(false);
   expect(host.textContent).toContain(invalid ? '已安装 · ACP 配置异常' : '已安装 · 首次连接初始化 ACP');
   expect(host.textContent).not.toContain('未检测到');
   expect(host.textContent).not.toContain('需要已安装的 DSH');
@@ -58,7 +58,7 @@ it.each([
     expect(host.textContent).toContain('浏览和创建伙伴不会初始化');
     expect(host.textContent).toContain('实际连接时由 DSH 准备');
     await act(async () => checkbox.click());
-    expect(patch).toHaveBeenCalledWith({ selected: false });
+    expect(patch).not.toHaveBeenCalled();
   }
   expect(apiFetch).not.toHaveBeenCalled();
 });
@@ -105,12 +105,14 @@ it.each([
     ),
   );
   if (nativeSetup) expect(host.querySelector('option[value=dsh]')).toBeNull();
-  else
-    expect(host.querySelector('option[value=dsh]')?.textContent).toContain(
-      invalid ? '已安装 · ACP 配置异常' : '已安装 · 首次连接初始化 ACP',
-    );
-  expect(host.textContent).toContain(invalid ? '修复现有 ACP 配置' : '实际连接时由 DSH 准备');
-  expect(host.textContent).toContain(invalid ? '不会自动覆盖' : '浏览和创建伙伴不会初始化');
+  else if (invalid) expect(host.querySelector('option[value=dsh]')?.textContent).toContain('已安装 · ACP 配置异常');
+  if (invalid) {
+    expect(host.textContent).toContain('修复现有 ACP 配置');
+    expect(host.textContent).toContain('不会自动覆盖');
+  } else {
+    expect(host.textContent).toContain('浏览和创建伙伴不会初始化');
+    expect(host.textContent).toContain('实际连接时由 DSH 准备');
+  }
   expect(host.textContent).not.toContain('已检测登录');
   expect(patch).not.toHaveBeenCalled();
   expect(validity).toHaveBeenLastCalledWith(!invalid);

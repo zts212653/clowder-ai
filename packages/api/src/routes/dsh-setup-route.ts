@@ -2,16 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { resolveDshDesktopHome } from '../utils/dsh-desktop-launch.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
+import { type DshDesktopSource, prepareDshDesktopSetup, readDshDesktopSetup } from './dsh-desktop-setup.js';
 import { type DshSetupLaunch, resolveDshSetupLaunch } from './dsh-setup-launch.js';
-import {
-  dshSourceProfiles,
-  type PreparedDshSetup,
-  prepareDshSetup,
-  readDshSetup,
-  testDshSetup,
-} from './dsh-setup-service.js';
+import { type PreparedDshSetup, prepareDshSetup, readDshSetup, testDshSetup } from './dsh-setup-service.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
 
 const selection = z
@@ -20,7 +16,8 @@ const selection = z
     sourceProfile: z
       .string()
       .regex(/^[\w-]+$/)
-      .max(80),
+      .max(80)
+      .optional(),
   })
   .strict();
 const prepare = selection
@@ -30,22 +27,35 @@ const prepare = selection
     model: z.string().min(1).max(512),
   })
   .strict();
-const test = z.object({ id: z.string().uuid() }).strict();
+const preferences = z.object({
+  model: z.string().min(1).max(512).optional(),
+  effort: z.string().min(1).max(160).optional(),
+});
+const test = preferences.extend({ id: z.string().uuid() }).strict();
+async function desktopSourceFor(id: string): Promise<DshDesktopSource> {
+  const cwd = resolveActiveProjectRoot();
+  const runtime = (await discoverNativeRuntimes(cwd)).runtimes.find((item) => item.id === id);
+  if (!runtime?.installed || !('dshDesktop' in runtime) || !runtime.dshDesktop || !runtime.command)
+    throw Error('dsh_setup_custom_startup');
+  return { command: runtime.command, cwd, ...(await resolveDshDesktopHome(runtime.command)) };
+}
 
-function launchFor(id: string) {
+async function launchFor(id: string) {
   const root = resolveActiveProjectRoot();
-  const runtime = discoverNativeRuntimes(root).runtimes.find((item) => item.id === id);
+  const runtime = (await discoverNativeRuntimes(root)).runtimes.find((item) => item.id === id);
   if (!runtime?.installed || !('acp' in runtime) || !runtime.acp || runtime.acp.transport === 'httpstream')
     throw Error('dsh_setup_custom_startup');
   return resolveDshSetupLaunch(runtime.acp.command, runtime.acp.startupArgs, root);
 }
 
 interface DshSetupRouteOptions {
-  resolveLaunch?: (id: string) => DshSetupLaunch;
+  resolveLaunch?: (id: string) => DshSetupLaunch | Promise<DshSetupLaunch>;
+  resolveDesktopLaunch?: (id: string) => DshDesktopSource | Promise<DshDesktopSource>;
   audit?: (target: string, owner: string) => Promise<unknown>;
 }
 export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRouteOptions = {}) {
   const resolveLaunch = options.resolveLaunch ?? launchFor;
+  const resolveDesktop = options.resolveDesktopLaunch ?? desktopSourceFor;
   const audit =
     options.audit ??
     ((target: string, owner: string) =>
@@ -71,23 +81,34 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
         const code =
           error instanceof Error && /^dsh_[a-z_]+$/.test(error.message) ? error.message : 'dsh_setup_unavailable';
         // Raw DSH errors, dumps, URLs and credential names never leave this boundary.
-        return reply
-          .code(code === 'dsh_setup_changed' ? 409 : 422)
-          .send({ error: code, profiles: dshSourceProfiles() });
+        return reply.code(code === 'dsh_setup_changed' ? 409 : 422).send({ error: code });
       } finally {
         busy = false;
       }
     });
   }
-  route(
-    'inspect',
-    selection,
-    async (data) => (await readDshSetup(resolveLaunch(data.runtimeId), data.sourceProfile)).view,
+  route('inspect', selection, async (data) =>
+    data.sourceProfile === undefined
+      ? (await readDshDesktopSetup(await resolveDesktop(data.runtimeId))).view
+      : (await readDshSetup(await resolveLaunch(data.runtimeId), data.sourceProfile)).view,
   );
   route('prepare', prepare, async (input, owner) => {
-    const launch = resolveLaunch(input.runtimeId);
     await audit('dsh-acp-preparation', owner);
-    const value = await prepareDshSetup(launch, input.sourceProfile, input.revision, input.provider, input.model);
+    const value =
+      input.sourceProfile === undefined
+        ? await prepareDshDesktopSetup(
+            await resolveDesktop(input.runtimeId),
+            input.revision,
+            input.provider,
+            input.model,
+          )
+        : await prepareDshSetup(
+            await resolveLaunch(input.runtimeId),
+            input.sourceProfile,
+            input.revision,
+            input.provider,
+            input.model,
+          );
     const oldest = receipts.keys().next().value;
     if (receipts.size >= 64 && oldest) receipts.delete(oldest);
     receipts.set(value.id, { owner, at: Date.now(), value });
@@ -95,6 +116,7 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
       id: value.id,
       command: value.launch.command,
       startupArgs: value.launch.args,
+      ...('env' in value.launch ? { env: value.launch.env } : {}),
       provider: value.provider,
       model: value.model,
     };
@@ -103,7 +125,7 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
     const receipt = receipts.get(data.id);
     if (!receipt || receipt.owner !== owner) throw Error('dsh_setup_expired');
     await audit('dsh-acp-connection-test', owner);
-    await testDshSetup(receipt.value);
+    await testDshSetup(receipt.value, { model: data.model, effort: data.effort });
     return { ok: true };
   });
 }

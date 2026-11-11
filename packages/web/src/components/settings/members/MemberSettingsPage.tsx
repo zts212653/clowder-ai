@@ -5,19 +5,21 @@ import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useIsDshMember } from '@/lib/member-model-display';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
 import { usesAgyAcp, usesAgyNative } from '../../hub-cat-editor.agy';
-import { splitCommandArgs } from '../../hub-cat-editor.model';
+import { initialState, splitCommandArgs } from '../../hub-cat-editor.model';
 import { MemberCurrentStatus } from '../../members/MemberCurrentStatus';
 import { MemberIdentity } from '../../members/MemberIdentity';
 import { memberSaveCopy } from '../../members/member-save.shell-copy';
 import { useShellCopy } from '../../shell/shell-copy';
 import { useShellLanguage } from '../../shell/shell-language';
 import { settingsDetailCopy } from '../settings-detail.shell-copy';
+import { DshConnectionStatus } from './DshConnectionStatus';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
 import { MemberCodexOptions } from './MemberCodexOptions';
 import { MemberDeleteButton } from './MemberDeleteButton';
 import { MemberRuntimeFields } from './MemberRuntimeFields';
+import { pickRuntime } from './member-runtime-draft';
 import { useMemberEditor } from './useMemberEditor';
 
 const sections = [
@@ -55,6 +57,8 @@ export function MemberSettingsPage({
   const dshMember = useIsDshMember();
   const { draft, accounts, ready, saving, dirtyCount } = editor;
   const { form, baseline, section } = draft;
+  const runtimeUnchanged =
+    baseline && JSON.stringify(pickRuntime(form)) === JSON.stringify(pickRuntime(initialState(baseline)));
   const runtimeScope = draft.baseline?.id ?? 'new';
   const [runtimeVisitedFor, setRuntimeVisitedFor] = useState<string>();
   useEffect(() => {
@@ -237,6 +241,9 @@ export function MemberSettingsPage({
                     editing={Boolean(cat)}
                     onValidityChange={setRuntimeValid}
                   />
+                  {baseline && dshMember(baseline) && (
+                    <DshConnectionStatus key={baseline.configurationRevision} member={baseline} />
+                  )}
                 </div>
               )}
               {section === 'runtime' ? (
@@ -338,15 +345,7 @@ export function MemberSettingsPage({
               )}
               <button
                 type="button"
-                disabled={
-                  saving ||
-                  uploading ||
-                  !form.name.trim() ||
-                  (!runtimeValid &&
-                    (!baseline ||
-                      form.defaultModel !== baseline.defaultModel ||
-                      form.cliEffort !== (baseline.cli?.effort ?? '')))
-                }
+                disabled={saving || uploading || !form.name.trim() || (!runtimeValid && !runtimeUnchanged)}
                 onClick={() => {
                   if (cat && dirtyCount === 0 && !draft.pendingWrite) {
                     setUnchangedSave(true);

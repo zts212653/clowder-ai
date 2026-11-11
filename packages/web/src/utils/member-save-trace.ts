@@ -3,6 +3,8 @@ export type SavePhase =
   | 'save'
   | 'onboarding.entry'
   | 'member.write'
+  | 'member.prepare'
+  | 'member.check'
   | 'strategy.write'
   | 'codex.write'
   | 'refresh'

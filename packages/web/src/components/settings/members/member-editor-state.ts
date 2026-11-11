@@ -100,11 +100,14 @@ export function templateForm(
   for (let suffix = 2; used.has(alias.toLowerCase()); suffix++)
     alias = `@${template.nickname || template.name}${suffix}`;
   // Templates recommend tools, never model/effort overrides or authentication.
-  const recommended = /maine|缅因/i.test(template.id + template.name)
-    ? 'openai'
-    : /ragdoll|布偶/i.test(template.id + template.name)
-      ? 'anthropic'
-      : current.clientId;
+  const recommended =
+    template.id === 'dsh'
+      ? 'acp'
+      : /maine|缅因/i.test(template.id + template.name)
+        ? 'openai'
+        : /ragdoll|布偶/i.test(template.id + template.name)
+          ? 'anthropic'
+          : current.clientId;
   return {
     ...initialState(),
     catId: id,
@@ -120,6 +123,7 @@ export function templateForm(
     mentionPatterns: alias,
     clientId: recommended,
     carrier: recommended === 'openai' ? 'app_server' : recommended === 'acp' ? 'acp' : 'cli',
+    ...(template.id === 'dsh' ? { acpCommand: 'dsh', acpStartupArgs: '--profile acp' } : {}),
     defaultModel: '',
     cliEffort: '',
     accountRef: '',

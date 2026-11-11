@@ -1,3 +1,4 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 import { nativeAcpProfileLabel, nativeAcpProfileMessage } from '../settings/members/native-acp-profile-status';
@@ -26,6 +27,7 @@ export function NativePartnerCard({
   const [opened, setOpened] = useState(false);
   const { runtime, form } = partner;
   const available = runtime.installed && (runtime.clientId !== 'acp' || Boolean(runtime.acp));
+  const dsh = runtime.acp && isDshLauncher(runtime.acp.command, runtime.acp.startupArgs);
   const selectable = nativeRuntimeSelectable(runtime, form);
   const detectedConfiguration = usesDetectedRuntimeConfiguration(form, runtime);
   const defaultIdentity = usesDefaultNativeIdentity(form) && detectedConfiguration;
@@ -34,17 +36,17 @@ export function NativePartnerCard({
     form.defaultModel || (detectedConfiguration ? runtime.configuredModel : undefined),
   );
   const effort = form.cliEffort || (detectedConfiguration ? runtime.configuredEffort : undefined);
-  const profileLabel = nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
-  const profileMessage = nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
+  const profileLabel = runtime.dshDesktop ? undefined : nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
+  const profileMessage = runtime.dshDesktop ? undefined : nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
   return (
     <article
-      className={`rounded-xl border p-4 ${partner.selected ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
+      className={`rounded-xl border p-4 ${partner.selected && selectable ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
     >
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
         <input
           type="checkbox"
           aria-label={`加入 ${runtime.label} 伙伴`}
-          checked={partner.selected}
+          checked={partner.selected && selectable}
           disabled={!selectable || disabled}
           onChange={(e) => patch({ selected: e.target.checked })}
           className="h-5 w-5 shrink-0 accent-[var(--color-cafe-accent)]"
@@ -73,7 +75,9 @@ export function NativePartnerCard({
                 : available && defaultIdentity && runtime.readiness?.status === 'login_required'
                   ? '已安装 · 登录校验未通过'
                   : available
-                    ? '已安装'
+                    ? dsh
+                      ? '已安装 · 添加时自动配置'
+                      : '已安装'
                     : runtime.discoveryStatus === 'adapter_missing'
                       ? '已安装 · 待接入适配器'
                       : '未检测到'}
@@ -110,6 +114,11 @@ export function NativePartnerCard({
                 ? '安装 DSH 后重新检测；首次连接时由 DSH 准备 ACP。'
                 : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
       </p>
+      {runtime.dshDesktop && !partner.existingId && !created && (
+        <p className="mt-2 text-sm text-cafe-secondary">
+          添加后自动检查连接，费用取决于模型和工具定义规模。检查失败保留成员，不自动重试。
+        </p>
+      )}
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.identityConflict && !created && (
         <p role="status" className="mt-3 text-sm text-cafe-secondary">
@@ -153,7 +162,7 @@ export function NativePartnerCard({
       {available && defaultIdentity && runtime.readiness?.status === 'configured' && (
         <p className="mt-3 text-sm text-cafe-secondary">已检测登录 · 实际连接待验证</p>
       )}
-      {available && !defaultIdentity && (
+      {available && !defaultIdentity && !dsh && (
         <p className="mt-3 text-sm text-cafe-secondary">此连接的登录状态尚未检查 · 实际连接待验证</p>
       )}
       {available && runtime.clientId === 'opencode' && (
@@ -185,6 +194,8 @@ export function NativePartnerCard({
           </div>
           <MemberRuntimeFields
             nativeSetup
+            preparedRuntime={runtime}
+            onPreparedRuntime={(next) => patch({ runtime: next })}
             form={form}
             accounts={[]}
             patch={(change) => patch({ form: { ...form, ...change } })}
