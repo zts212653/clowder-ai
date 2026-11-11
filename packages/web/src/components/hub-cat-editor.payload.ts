@@ -218,6 +218,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const voiceConfigPatch: Record<string, unknown> =
     voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};
   const common = {
+    ...(form.env && JSON.stringify(form.env) !== JSON.stringify(cat?.env) ? { env: form.env } : {}),
     ...((form.executionApproval ?? 'auto') !== (cat?.executionApproval ?? 'auto')
       ? { executionApproval: form.executionApproval ?? 'auto' }
       : {}),

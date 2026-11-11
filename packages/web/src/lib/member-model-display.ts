@@ -18,7 +18,7 @@ export const useMemberModelCatalogs = create<{
 }>(() => ({ catalogs: {}, runtimes: [], runtimeRevision: 0, runtimeConfirmedRevision: 0, preparedRuntime: undefined }));
 
 export function memberModelCatalogKey(
-  cat: Pick<CatData, 'id' | 'clientId' | 'acp' | 'agentProvider' | 'accountRef' | 'cliConfigArgs'>,
+  cat: Pick<CatData, 'id' | 'clientId' | 'acp' | 'agentProvider' | 'accountRef' | 'cliConfigArgs' | 'env'>,
 ) {
   return JSON.stringify([
     cat.id,
@@ -29,6 +29,7 @@ export function memberModelCatalogKey(
     (cat.agentProvider !== undefined ? cat.agentProvider : cat.acp?.agentProvider) || '',
     cat.accountRef || '',
     cat.cliConfigArgs ?? [],
+    Object.entries(cat.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
   ]);
 }
 
