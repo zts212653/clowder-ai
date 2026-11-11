@@ -396,7 +396,12 @@ LOCAL_NORM.push(function (root) {
    操作 op.mode：seq（按钮 → 进行中 → 轮询〔二维码、剩余秒数〕→ 结果 / 已连接 + 断开）、live（限时授权：状态 + 一个按钮）、rows（列表按钮 + 行，每行自己的动作）。
    都是组件库的控件（field、sel、sw、kvEditor、btn、status、notice、lrow）；点了什么由 data-act（pcf*）+ 实例 / 字段 / 动作给出 */
 /* 动作的结果：标签是一行状态；文本结果（网址、要粘贴的消息）是可复制的值 */
-function pcfFb(fb) { return fb ? (fb.label ? status('ok', fb.label) : '') + (fb.copy ? copyValue({ value: fb.copy, label: tc('common.copy'), mono: !/\s/.test(fb.copy) }) : '') : ''; }
+function pcfFb(fb) {   /* 文本结果是表单里的一个只读框（和输入框同一个样子，按内容长高）+ 框尾的复制 */
+  if (!fb) return '';
+  const copy = fb.copy ? '<span class="combo"><textarea class="input' + (/\s/.test(fb.copy) ? '' : ' mono') + '" readonly data-grow rows="1" aria-label="' + h(fb.label || tc('common.copy')) + '">' + h(fb.copy) + '</textarea>' +
+    btn(tc('common.copy'), { iconOnly: true, sm: true, icon: 'copy', act: 'copy', data: argAttrs({ v: fb.copy, msg: tc('control.copied', fb.label || tc('common.copy')) }) }) + '</span>' : '';
+  return (fb.label ? status('ok', fb.label) : '') + copy;
+}
 function pcfData(p, k) { return argAttrs({ p: p, k: k }); }
 function pcfOpHtml(o) {
   const A = function (a, extra) { return actAttrs('pcfOp', Object.assign({ p: o.p, f: o.f, a: a }, extra || {})); };

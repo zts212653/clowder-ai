@@ -615,8 +615,9 @@ function pcfOpVM(inst, f) {
     armId: sh.arm && sh.arm.id,
     revokeId: sh.revoke && sh.revoke.id,
     currentId: o.cur,
-    // a restart only once the steps have started (or have a result)
-    restartable: sh.mode === 'seq' && !!o.phase && o.phase !== 'idle',
+    // a restart only when the host holds a half-way state (a sign-in in progress); a direct action is redone by clicking it
+    restartable:
+      sh.mode === 'seq' && !!f.operationState && !!sh.first && f.operationState.currentAction !== sh.first.id,
     phase: o.phase,
     last: o.last,
     seconds: Math.max(0, Math.ceil((o.until - Date.now()) / 1000)),
