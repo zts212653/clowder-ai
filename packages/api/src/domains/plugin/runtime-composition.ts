@@ -985,6 +985,8 @@ export interface PluginManagerRuntimeComposition {
   readonly quarantines: FilePluginPackageQuarantineStore;
 }
 
+const lifecycleLog = createModuleLogger('plugin/lifecycle');
+
 function lifecycleFailure(error: unknown): never {
   if (error instanceof PluginManagerServiceError) throw error;
   if (error instanceof Error && 'code' in error) {
@@ -999,6 +1001,15 @@ function lifecycleFailure(error: unknown): never {
       throw new PluginManagerServiceError('RUNTIME_START_FAILED', error.message);
     }
   }
+  lifecycleLog.warn(
+    {
+      cause: {
+        code: (error as { code?: unknown })?.code,
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+      },
+    },
+    'Plugin lifecycle operation failed',
+  );
   throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin lifecycle operation failed');
 }
 
