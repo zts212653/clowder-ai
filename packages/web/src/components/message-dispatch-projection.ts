@@ -189,17 +189,21 @@ export function resolveUnloadedDispatchReply(input: {
         )
       : [];
   const exactActiveRun = matchingRuns.length === 1 ? matchingRuns[0] : undefined;
+  const unloadedActiveAppended =
+    exactActiveRun !== undefined &&
+    exactActiveRun.inputMessageIds.indexOf(message.id) > 0 &&
+    message.timestamp > exactActiveRun.startedAt;
   const unloadedSettledAppended =
     !linkedMessage &&
     !disqualified &&
     ref?.phase === 'settled' &&
     Boolean(statusId) &&
-    (Boolean(ref.appendDelivery || ref.appendAcceptance) || selfIndex >= 0);
+    Boolean(ref.appendDelivery || ref.appendAcceptance);
   return {
     selfIndex,
     exactActiveRun,
     unloadedSettledAppended,
-    unloadedLinkedReply: exactActiveRun !== undefined || unloadedSettledAppended,
+    unloadedLinkedReply: unloadedActiveAppended || unloadedSettledAppended,
   };
 }
 

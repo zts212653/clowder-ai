@@ -144,6 +144,22 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     resetCoCreatorConfigCacheForTest();
   });
 
+  const renderAvatars = (
+    message: ChatMessage,
+    timelineMessages: readonly ChatMessage[],
+    activeRuns: readonly LifecycleActiveRun[] = [],
+  ) => (
+    <MessageDispatchAvatars
+      message={message}
+      timelineMessages={timelineMessages}
+      activeRuns={activeRuns}
+      getCatLabel={() => 'Astra'}
+    />
+  );
+
+  const findButton = (label: string) =>
+    [...container.querySelectorAll('button')].find((btn) => btn.textContent?.includes(label));
+
   it('renders ↓ when the reply is below the initial input and ↑ when appended into an earlier-started reply', () => {
     const initial = makeInitialInput();
     const appended = makeAppendedInput('settled');
@@ -153,22 +169,8 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     act(() => {
       root.render(
         <>
-          <div data-testid="initial-receipt">
-            <MessageDispatchAvatars
-              message={initial}
-              timelineMessages={timeline}
-              activeRuns={[]}
-              getCatLabel={() => 'Astra'}
-            />
-          </div>
-          <div data-testid="appended-receipt">
-            <MessageDispatchAvatars
-              message={appended}
-              timelineMessages={timeline}
-              activeRuns={[]}
-              getCatLabel={() => 'Astra'}
-            />
-          </div>
+          <div data-testid="initial-receipt">{renderAvatars(initial, timeline)}</div>
+          <div data-testid="appended-receipt">{renderAvatars(appended, timeline)}</div>
         </>,
       );
     });
@@ -186,12 +188,7 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     act(() => {
       root.render(
         <MessageNavigationProvider value={navigate}>
-          <MessageDispatchAvatars
-            message={activeAppended}
-            timelineMessages={[activeAppended]}
-            activeRuns={[appendedActiveRun]}
-            getCatLabel={() => 'Astra'}
-          />
+          {renderAvatars(activeAppended, [activeAppended], [appendedActiveRun])}
         </MessageNavigationProvider>,
       );
     });
@@ -207,12 +204,7 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     act(() => {
       root.render(
         <MessageNavigationProvider value={navigate}>
-          <MessageDispatchAvatars
-            message={settledAppended}
-            timelineMessages={[settledAppended]}
-            activeRuns={[]}
-            getCatLabel={() => 'Astra'}
-          />
+          {renderAvatars(settledAppended, [settledAppended])}
         </MessageNavigationProvider>,
       );
     });
@@ -223,6 +215,29 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     expect(settledBtn?.textContent).toContain('看回复 ↑');
     act(() => settledBtn?.click());
     expect(navigate).toHaveBeenCalledWith('response-1', { loadIfNeeded: true });
+  });
+
+  it('does not misclassify non-appended unloaded inputs as appended or show a premature 看回复 ↑ button', () => {
+    const unloadedInitialSettled = makeInitialInput();
+    act(() => root.render(renderAvatars(unloadedInitialSettled, [unloadedInitialSettled])));
+    expect(container.textContent).toContain('收到，回复状态待核对');
+    expect(container.textContent).not.toContain('并进了已结束的这一轮');
+    expect(container.querySelector('button')).toBeNull();
+
+    const activeInitial: ChatMessage = {
+      ...unloadedInitialSettled,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '100:input-0',
+        dispatchRefs: [
+          { targetId: 'codex-astra', phase: 'dispatched', statusMessageId: 'response-1', dispatchedAt: 101 },
+        ],
+      },
+    };
+    act(() => root.render(renderAvatars(activeInitial, [activeInitial], [appendedActiveRun])));
+    expect(container.textContent).toContain('收到，正在回…');
+    expect(container.textContent).not.toContain('并进了正在回的这一轮');
+    expect(container.querySelector('button')).toBeNull();
   });
 
   it.each([
@@ -264,9 +279,7 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     expect(reader.captureReadingRef).toHaveBeenCalledOnce();
     expect(reader.navigateToMessage).toHaveBeenCalledWith('response-1', expect.any(AbortSignal), undefined);
 
-    const findReturnBtn = () =>
-      [...container.querySelectorAll('button')].find((btn) => btn.textContent?.trim() === '回到刚才');
-    expect(findReturnBtn()).toBeTruthy();
+    expect(findButton('回到刚才')).toBeTruthy();
     expect(container.textContent).not.toContain('仅计本次返回的结果');
     expect(container.querySelector('button[aria-label="上一处结果"]')).toBeNull();
 
@@ -274,14 +287,10 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
     expect(container.querySelector('button')).toBeNull();
 
     renderShell('thread-1');
-    act(() => {
-      host.registerReadingPort(reader);
-    });
-    expect(findReturnBtn()).toBeTruthy();
+    act(() => host.registerReadingPort(reader));
+    expect(findButton('回到刚才')).toBeTruthy();
 
-    await act(async () => {
-      findReturnBtn()?.click();
-    });
+    await act(async () => findButton('回到刚才')?.click());
     expect(reader.restoreReadingRef).toHaveBeenCalledWith(
       'chat-reading:thread-1:origin-ref',
       expect.any(AbortSignal),
@@ -308,12 +317,7 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
       return (
         <MessageNavigationProvider value={navigate}>
           <MessageSearchOverlay threadId="thread-1" host={host} available />
-          <MessageDispatchAvatars
-            message={appended}
-            timelineMessages={messages}
-            activeRuns={[]}
-            getCatLabel={() => 'Astra'}
-          />
+          {renderAvatars(appended, messages)}
           {messages.some((m) => m.id === reply.id) ? (
             <AppendedInputReceipts response={reply} timelineMessages={messages} getCatById={() => undefined} />
           ) : null}
@@ -326,20 +330,16 @@ describe('supplement-to-reply jump and return (DESIGN.md §聊天里的顺序)',
       host.registerReadingPort(reader);
     });
     await act(async () => {
-      (
-        [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('看回复 ↑')) as HTMLButtonElement
-      ).click();
+      (findButton('看回复 ↑') as HTMLButtonElement).click();
     });
     expect(reader.navigateToMessage).toHaveBeenCalledWith('response-1', expect.any(AbortSignal), { refresh: true });
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === '回到刚才')).toBe(true);
+    expect(findButton('回到刚才')).toBeTruthy();
 
     act(() => root.render(<SurfaceGate messages={[initial, reply, appended]} />));
     await act(async () => {
-      (
-        [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '跳到原文') as HTMLButtonElement
-      ).click();
+      (findButton('跳到原文') as HTMLButtonElement).click();
     });
     expect(reader.navigateToMessage).toHaveBeenLastCalledWith('input-appended', expect.any(AbortSignal), undefined);
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === '回到刚才')).toBe(true);
+    expect(findButton('回到刚才')).toBeTruthy();
   });
 });

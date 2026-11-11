@@ -71,6 +71,7 @@ describe('reply navigation owner', () => {
             phase: 'settled',
             statusMessageId: responseId,
             dispatchedAt: now - 900,
+            appendAcceptance: 'accepted',
             inputRead: { status: 'read', at: now - 800 },
           },
         ],
