@@ -244,7 +244,8 @@ test('authenticated panel work outlives the ordinary webhook budget', async (t) 
   assert.equal(completed[1], false, 'the authenticated panel keeps its interactive request alive');
   release();
   const [anonymous, panel] = await Promise.all(responses);
-  assert.equal(anonymous!.statusCode, 504);
-  assert.equal(panel!.statusCode, 200);
-  assert.deepEqual(panel!.json(), { completed: true });
+  assert.ok(anonymous && panel);
+  assert.equal(anonymous.statusCode, 504);
+  assert.equal(panel.statusCode, 200);
+  assert.deepEqual(panel.json(), { completed: true });
 });
