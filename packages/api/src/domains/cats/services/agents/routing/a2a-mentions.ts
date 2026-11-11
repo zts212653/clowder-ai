@@ -78,6 +78,7 @@ export function analyzeA2AMentions(
     const handle = /^@[\p{L}\p{N}_][\p{L}\p{N}_.-]{0,63}(?=$|[^\p{L}\p{N}_.-])/u.exec(segment)?.[0];
     if (
       handle &&
+      !HANDLE_CONTINUATION_RE.test(segment.charAt(handle.length)) &&
       !excluded.some((pattern) => startsWithMentionHandle(segment, pattern)) &&
       !isReservedGroupMentionHandle(handle)
     ) {

@@ -48,6 +48,10 @@ describe('findLineStartMentions', () => {
     expect(findLineStartMentions('@opusx look', handles)).toEqual([]);
   });
 
+  it('treats a registered handle followed by a path separator as a package or path', () => {
+    expect(findLineStartMentions('@opus/docs\n- @codex\\notes\n@codex 请复核', handles)).toEqual(['codex']);
+  });
+
   it('stops a line at the first handle it does not know', () => {
     expect(findLineStartMentions('@co-creator @codex', handles)).toEqual([]);
   });

@@ -160,19 +160,39 @@ test('task teardown signals both its home and the exact approved successor threa
   f.turns.createRunning({ ...actor, parentInvocationId: 'parent', executionKind: 'ordinary', startedAt: 1 });
   await service.start(initial.id, actor, 'parent');
   const pending = await f.append(await service.prepare({ ...f.input, targetThreadId: child.id }));
-  const queued = await queue.enqueueDurable({
-    kind: 'message_wake',
-    userId: actor.userId,
-    threadId: child.id,
-    content: '',
-    from: pending.from,
-    targetCats: ['sonnet'],
-    intent: 'execute',
-    messageId: pending.id,
-    a2aTriggerMessageId: pending.id,
-    ownerAuthProvenance: 'strict',
-  });
-  assert.equal(queued.outcome, 'enqueued');
+  async function enqueueWake(source, userId = source.userId) {
+    const queued = await queue.enqueueDurable({
+      kind: 'message_wake',
+      userId,
+      threadId: source.threadId,
+      content: '',
+      from: source.from,
+      targetCats: ['sonnet'],
+      intent: 'execute',
+      messageId: source.id,
+      a2aTriggerMessageId: source.id,
+      ownerAuthProvenance: 'strict',
+    });
+    assert.equal(queued.outcome, 'enqueued');
+  }
+  await enqueueWake(pending);
+  const handoff = pending.extra.taskHandoff;
+  await enqueueWake(await f.append({ ...handoff, taskId: 'other-task', targetThreadId: 'other-task-thread' }));
+  await enqueueWake(
+    await f.append({
+      ...handoff,
+      issuer: { ...handoff.issuer, userId: 'other-user' },
+      targetThreadId: 'foreign-queue-thread',
+    }),
+  );
+  await enqueueWake(
+    await f.append({
+      ...handoff,
+      issuer: { ...handoff.issuer, userId: 'other-user' },
+      targetThreadId: 'foreign-source-thread',
+    }),
+    actor.userId,
+  );
   assert.equal((await service.apply(pending.id)).kind, 'waiting');
   assert.deepEqual(drained, []);
   f.turns.transitionTerminal(actor.invocationId, { status: 'succeeded', endedAt: 2, providerTeardownAt: 2 });
@@ -180,6 +200,22 @@ test('task teardown signals both its home and the exact approved successor threa
   await service.finish(f.task.id, actor.invocationId);
   assert.deepEqual(drained, [f.home.id, child.id]);
   assert.equal((await service.apply(pending.id)).kind, 'applied');
+});
+
+test('task release without a tenant signals home without scanning the queue', async () => {
+  const processor = new QueueProcessor({
+    queue: {
+      async listOwnerDurableEntries() {
+        assert.fail('owner queue requires a tenant');
+      },
+    },
+  });
+  const drained = [];
+  processor.requestDrain = async (threadId) => {
+    drained.push(threadId);
+  };
+  await processor.requestTaskHandoffDrain({ taskId: 'legacy-task', threadId: 'home' });
+  assert.deepEqual(drained, ['home']);
 });
 
 test('restart before provider entry recovers; a started provider without teardown remains unknown', async () => {

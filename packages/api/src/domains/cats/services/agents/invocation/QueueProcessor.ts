@@ -3484,13 +3484,14 @@ export class QueueProcessor {
   }
 
   /** A Task can have a queued successor in an approved thread other than its home. */
-  async requestTaskHandoffDrain(input: { taskId: string; threadId: string; userId: string }): Promise<void> {
+  async requestTaskHandoffDrain(input: { taskId: string; threadId: string; userId?: string }): Promise<void> {
     const signal = (threadId: string) => {
       void this.requestDrain(threadId).catch((err) =>
         this.deps.log.warn({ err, threadId, taskId: input.taskId }, 'Task handoff drain failed'),
       );
     };
     signal(input.threadId);
+    if (!input.userId) return;
     try {
       const threads = new Set<string>();
       for (const row of await this.deps.queue.listOwnerDurableEntries(input.userId)) {

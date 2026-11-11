@@ -19,7 +19,7 @@
  */
 
 import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, deploymentDefaults, escapeRegExp } from '@cat-cafe/shared';
+import { catRegistry, deploymentDefaults, escapeRegExp, HANDLE_CONTINUATION_RE } from '@cat-cafe/shared';
 import type {
   RoutingPreviewReason,
   RoutingPreviewReasonKind,
@@ -83,7 +83,6 @@ const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 const MENTION_TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
-const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
 const QUOTE_BEFORE_MENTION_RE = /["'“”‘’]/;
 const DOMAIN_SUFFIX_START_RE = /[\p{L}\p{N}]/u;
 const BARE_URL_PREFIX_BEFORE_MENTION_RE = /(?:^|[^a-z0-9_-])(?:[a-z0-9-]+\.)+[a-z0-9-]+(?:\/[^\s@]*)*\/$/i;
@@ -418,7 +417,9 @@ function recordResolvedMention(catId: CatId, position: number, seenCats: Set<str
 function buildMentionData(configs: Record<string, import('@cat-cafe/shared').CatConfig>) {
   const mentionAliases = Array.from(
     new Set(
-      Object.values(configs).flatMap((config) => config.mentionPatterns.map((pattern) => pattern.replace(/^@/, ''))),
+      Object.values(configs).flatMap((config) =>
+        (config.mentionPatterns ?? []).map((pattern) => pattern.replace(/^@/, '')),
+      ),
     ),
   ).sort((a, b) => b.length - a.length);
 

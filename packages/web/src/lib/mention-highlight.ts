@@ -5,14 +5,21 @@
  * to populate regex with all cats from the runtime catalog.
  */
 
-import { buildCatMentionHandles, escapeRegExp } from '@cat-cafe/shared';
+import {
+  buildCatMentionHandles,
+  type CoCreatorConfig,
+  escapeRegExp,
+  reservedCoCreatorMentionHandles,
+} from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { CO_CREATOR_MENTION_COLOR as CO_CREATOR_MENTION } from '@/lib/color-defaults';
 
 // ── Internal builders ───────────────────────────────────
 
-function buildMentionToCat(cats: Array<{ id: string; mentionPatterns: string[] }>): Record<string, string> {
+function buildMentionToCat(
+  cats: readonly { id: string; mentionPatterns: readonly string[] }[],
+): Record<string, string> {
   return Object.fromEntries(
     cats.flatMap((cat) => cat.mentionPatterns.map((p) => [p.replace(/^@/, '').toLowerCase(), cat.id])),
   );
@@ -40,14 +47,15 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
 // ── Co-Creator (co-creator) ───────────────────────────────────
 const CO_CREATOR_ID = '__co-creator__';
 const CO_CREATOR_COLOR = CO_CREATOR_MENTION; // warm gold — centralized in color-defaults.ts
-const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator'];
+type OwnerMentionConfig = Pick<CoCreatorConfig, 'mentionPatterns' | 'nickname' | 'nicknameSource'>;
+const DEFAULT_CO_CREATOR_MENTION_CONFIG: OwnerMentionConfig = { mentionPatterns: ['@co-creator'] };
 
 // ── Module-level cache (populated by refreshMentionData after /api/cats fetch) ─
 
 // Include co-creator as pseudo-cat so @co-creator highlights gold
 let _cats: CatData[] = [];
 let _disabledCats: CatData[] = [];
-let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
+let _coCreatorMentionConfig = DEFAULT_CO_CREATOR_MENTION_CONFIG;
 let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
 let _mentionColor = buildMentionColor([]);
@@ -62,7 +70,7 @@ function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): 
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0)
     .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
-  const unique = new Set(DEFAULT_CO_CREATOR_MENTION_PATTERNS);
+  const unique = new Set(DEFAULT_CO_CREATOR_MENTION_CONFIG.mentionPatterns);
   for (const pattern of normalized) unique.add(pattern);
   return [...unique];
 }
@@ -70,15 +78,13 @@ function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): 
 function rebuildMentionCache(): void {
   const ownerEntry = {
     id: CO_CREATOR_ID,
-    mentionPatterns: _coCreatorMentionPatterns,
+    mentionPatterns: _coCreatorMentionConfig.mentionPatterns,
     color: { primary: CO_CREATOR_COLOR },
   };
   const all = [..._cats, ownerEntry];
   const unavailableIds = new Set(_disabledCats.map(({ id }) => id));
-  const handles = buildCatMentionHandles(
-    [..._cats, ..._disabledCats],
-    [..._coCreatorMentionPatterns, '@owner', '@大当家'],
-  );
+  const ownerHandles = reservedCoCreatorMentionHandles(_coCreatorMentionConfig);
+  const handles = buildCatMentionHandles([..._cats, ..._disabledCats], ownerHandles);
   _mentionToCat = Object.fromEntries(
     handles.filter(({ catId }) => !unavailableIds.has(catId)).map(({ catId, pattern }) => [pattern.slice(1), catId]),
   );
@@ -89,7 +95,10 @@ function rebuildMentionCache(): void {
   _mentionRe = buildMentionRe(_mentionToCat);
   _mentionColor = buildMentionColor(all);
   _mentionLabel = Object.fromEntries(_cats.map((cat) => [cat.id, formatCatDisplayName(cat)]));
-  const canonicalMentionToCat = Object.fromEntries(_cats.map((cat) => [cat.id.toLowerCase(), cat.id]));
+  const reserved = new Set(ownerHandles);
+  const canonicalMentionToCat = Object.fromEntries(
+    _cats.map(({ id }) => [id.toLowerCase(), id] as const).filter(([alias]) => !reserved.has(`@${alias}`)),
+  );
   // Display can still humanize IDs the routing resolver reserved for another purpose.
   _displayMentionToCat = { ...canonicalMentionToCat, ..._mentionToCat };
   _displayMentionRe = buildMentionRe(_displayMentionToCat);
@@ -111,8 +120,8 @@ export function refreshMentionData(cats: CatData[]): void {
   rebuildMentionCache();
 }
 
-export function refreshCoCreatorMentionData(mentionPatterns: readonly string[]): void {
-  _coCreatorMentionPatterns = normalizeCoCreatorMentionPatterns(mentionPatterns);
+export function refreshCoCreatorMentionData(config: OwnerMentionConfig): void {
+  _coCreatorMentionConfig = { ...config, mentionPatterns: normalizeCoCreatorMentionPatterns(config.mentionPatterns) };
   rebuildMentionCache();
 }
 
@@ -161,7 +170,7 @@ export function isCanonicalOnlyMentionAlias(alias: string): boolean {
 
 export function resetMentionDataForTest(): void {
   _cats = [];
-  _unavailableMentionToCat = {};
-  _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
+  _disabledCats = [];
+  _coCreatorMentionConfig = DEFAULT_CO_CREATOR_MENTION_CONFIG;
   rebuildMentionCache();
 }

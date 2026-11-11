@@ -23,6 +23,16 @@ export function coCreatorNickname(config: Pick<CoCreatorConfig, 'nickname' | 'ni
   return config.nickname === '大当家' && config.nicknameSource !== 'user' ? undefined : config.nickname;
 }
 
+/** Reserve familiar owner addresses during member routing without changing the owner mailbox. */
+export function reservedCoCreatorMentionHandles(
+  config: Pick<CoCreatorConfig, 'mentionPatterns' | 'nickname' | 'nicknameSource'>,
+): string[] {
+  const nickname = coCreatorNickname(config)?.trim().replace(/^@/, '');
+  const handles = ['@co-creator', '@owner', '@大当家', ...config.mentionPatterns];
+  if (nickname) handles.push(`@${nickname}`);
+  return [...new Set(handles.map((handle) => handle.toLowerCase()))];
+}
+
 /** Familiar/role defaults preserve existing installations that predate nickname. */
 export function coCreatorDisplay(
   config: Pick<CoCreatorConfig, 'name' | 'nickname' | 'nicknameSource' | 'mentionPatterns'>,

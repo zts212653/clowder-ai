@@ -18,6 +18,17 @@ function makeCat(overrides: Partial<CatData> & { id: string; mentionPatterns: st
 }
 
 describe('mention highlight cache', () => {
+  it('reserves the custom owner nickname when config and the member roster are loaded', async () => {
+    const { primeCoCreatorConfigCache } = await import('@/hooks/useCoCreatorConfig');
+    const { refreshMentionData, getMentionToCat, getDisplayMentionToCat } = await import('@/lib/mention-highlight');
+    refreshMentionData([makeCat({ id: 'boss', mentionPatterns: ['@reviewer'] })]);
+    primeCoCreatorConfigCache({ name: 'Operator', nickname: 'Boss', aliases: [], mentionPatterns: ['@co-creator'] });
+
+    expect(getMentionToCat().boss).toBeUndefined();
+    expect(getDisplayMentionToCat().boss).toBeUndefined();
+    expect(getMentionToCat().reviewer).toBe('boss');
+  });
+
   it('excludes disabled cats (roster.available === false) from highlight (#193)', async () => {
     const { refreshMentionData, getMentionToCat, getMentionRe } = await import('@/lib/mention-highlight');
     const cats: CatData[] = [

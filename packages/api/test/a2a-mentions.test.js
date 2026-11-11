@@ -30,7 +30,7 @@ describe('parseA2AMentions', () => {
   it('reports an unknown handoff handle without warning for owner, group, inline or fenced mentions', async () => {
     const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = analyzeA2AMentions(
-      '邮件 name@example.com\n@owner\n@大当家\n@co-creator\n@all\n```\n@code\n```\n- @opuss\n请接棒。',
+      '邮件 name@example.com\n@owner\n@大当家\n@co-creator\n@all\n```\n@code\n```\n- @cat-cafe/shared: 7 tests pass\n@types/node 已验证\n@opus/docs 已更新\n- @opuss\n请接棒。',
       'codex',
     );
     assert.deepEqual(result.mentions, []);
@@ -38,6 +38,23 @@ describe('parseA2AMentions', () => {
       result.routing_warnings.map(({ kind, mention }) => ({ kind, mention })),
       [{ kind: 'unknown_mention_handle', mention: '@opuss' }],
     );
+  });
+
+  it('reserves the configured owner nickname without suggesting a cat', async (t) => {
+    const { _resetCachedConfig, getCoCreatorConfig, loadResolvedCatConfig } = await import(
+      '../dist/config/cat-config-loader.js'
+    );
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const config = loadResolvedCatConfig(process.env.CAT_TEMPLATE_PATH ?? REPO_TEMPLATE_PATH);
+    t.after(_resetCachedConfig);
+    getCoCreatorConfig({
+      ...config,
+      coCreator: { name: 'operator', nickname: '老板', aliases: [], mentionPatterns: ['@co-creator'] },
+    });
+    assert.deepEqual(analyzeA2AMentions('@老板 请拍板\n@老板请看一下', 'codex'), {
+      mentions: [],
+      routing_warnings: [],
+    });
   });
 
   it('detects line-start @mention (Chinese name)', async () => {

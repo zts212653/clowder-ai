@@ -16,10 +16,10 @@ import { escapeRegExp } from './text-utils.js';
 export const MAX_A2A_MENTION_TARGETS = 2;
 
 export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
-export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
+export const HANDLE_CONTINUATION_RE = /[a-z0-9_./-]|\\/;
 const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 const LINE_START_MARKDOWN_PREFIX_PATTERN = String.raw`\s*(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))*`;
-const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_.-])`;
+const HANDLE_BOUNDARY_PATTERN = String.raw`(?=$|[\s,.:;!?()\[\]{}<>，。！？、：；（）【】《》「」『』〈〉]|[^a-z0-9_./\\-])`;
 
 export interface MentionHandle {
   readonly catId: string;

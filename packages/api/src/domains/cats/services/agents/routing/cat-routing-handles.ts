@@ -1,10 +1,10 @@
-import { buildCatMentionHandles, type CatId, catRegistry } from '@cat-cafe/shared';
-import { getCoCreatorMentionPatterns } from '../../../../../config/cat-config-loader.js';
+import { buildCatMentionHandles, type CatId, catRegistry, reservedCoCreatorMentionHandles } from '@cat-cafe/shared';
+import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 
 export type PluginMention = { readonly id: string; readonly alias: string };
 
 export function reservedOwnerMentionHandles(): string[] {
-  return [...getCoCreatorMentionPatterns(), '@owner', '@大当家'];
+  return reservedCoCreatorMentionHandles(getCoCreatorConfig());
 }
 
 export function getCatRoutingHandles(
@@ -13,7 +13,10 @@ export function getCatRoutingHandles(
 ): { catId: CatId; pattern: string }[] {
   const pluginHandles = plugins.map(({ id, alias }) => ({ catId: id, pattern: `@${alias.toLowerCase()}` }));
   const memberHandles = buildCatMentionHandles(
-    Object.values(catRegistry.getAllConfigs()),
+    Object.entries(catRegistry.getAllConfigs()).map(([id, config]) => ({
+      id,
+      mentionPatterns: config.mentionPatterns ?? [],
+    })),
     [...reservedOwnerMentionHandles(), ...pluginHandles.map(({ pattern }) => pattern)],
     onCollision,
   );

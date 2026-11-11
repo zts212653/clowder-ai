@@ -22,7 +22,7 @@ const listeners = new Set<(cc: CoCreatorConfig) => void>();
 
 function publishCoCreator(next: CoCreatorConfig): void {
   cachedCoCreator = next;
-  refreshCoCreatorMentionData(next.mentionPatterns);
+  refreshCoCreatorMentionData(next);
   for (const listener of listeners) listener(next);
 }
 function subscribe(listener: () => void) {
@@ -66,7 +66,7 @@ export function useCoCreatorConfig(): CoCreatorConfig {
     let cancelled = false;
     fetchCoCreatorPromise.catch(() => {
       if (!cancelled && ticket === generation) {
-        refreshCoCreatorMentionData(DEFAULT_CO_CREATOR.mentionPatterns);
+        refreshCoCreatorMentionData(DEFAULT_CO_CREATOR);
       }
     });
     return () => {

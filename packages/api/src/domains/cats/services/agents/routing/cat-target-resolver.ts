@@ -23,8 +23,8 @@ function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternat
     .map(([id, e]) => ({
       catId: id as CatId,
       mention:
-        configs[id]?.mentionPatterns.find((pattern) => pattern === `@${id}`) ??
-        configs[id]?.mentionPatterns[0] ??
+        configs[id]?.mentionPatterns?.find((pattern) => pattern === `@${id}`) ??
+        configs[id]?.mentionPatterns?.[0] ??
         `@${id}`,
       displayName: configs[id]?.displayName ?? id,
       family: e.family,
@@ -43,7 +43,7 @@ export function resolveCatTarget(mentionOrId: string): { ok: CatId } | { error: 
   let catId: string | undefined = catRegistry.has(input) ? input : undefined;
   if (!catId) {
     outer: for (const [id, cfg] of Object.entries(configs)) {
-      for (const p of cfg.mentionPatterns) {
+      for (const p of cfg.mentionPatterns ?? []) {
         if ((p.startsWith('@') ? p.slice(1) : p).toLowerCase() === input) {
           catId = id;
           break outer;

@@ -45,7 +45,7 @@ describe('v2 cross-thread letter through ChatMessage', () => {
     api.mockReset();
     api.mockResolvedValue(new Response('{}', { status: 503 }));
     primeCoCreatorConfigCache({ name: 'You', aliases: [], mentionPatterns: ['@co-creator'] });
-    refreshCoCreatorMentionData(['@co-creator']);
+    refreshCoCreatorMentionData({ mentionPatterns: ['@co-creator'] });
     refreshMentionData([
       {
         id: 'codex-astra',
