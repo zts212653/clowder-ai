@@ -2,17 +2,17 @@ import type { MessageSearchResponse, MessageSearchResult } from '@cat-cafe/share
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatReadingPort, RegisterChatReadingPort } from '../thread-chat/useThreadChatReadingPort';
 import { consumeMessageFindReturn } from './message-find-events';
+import type { MessageFindContext, MessageFindDestination, MessageFindState } from './message-find-state';
 import {
-  type MessageFindContext,
-  type MessageFindDestination,
-  type MessageFindState,
-  parseMessageFindContext,
-} from './message-find-state';
-import {
+  admitReadingEffect,
+  createPendingOperation,
+  type PendingReadingOperation,
+  prepareNavigateResult,
+  prepareOpenDestination,
   readThroughOwner,
-  startFindPageFromForeground,
-  startFromForeground,
+  startJumpTargetFromForeground,
   targetThread,
+  toInitialFindState,
 } from './message-reading-owner';
 import {
   type MessageReadingSession,
@@ -27,7 +27,6 @@ import {
   settleMessageReadingTrip,
 } from './message-reading-trip';
 import { useMessageFindEntry } from './useMessageFindEntry';
-import { verifyMessageNavigationSource } from './verify-message-navigation-source';
 
 export interface MessageSearchHost {
   open: boolean;
@@ -45,16 +44,9 @@ export interface MessageSearchHost {
   closeSearch: () => void;
   registerReadingPort: RegisterChatReadingPort;
   navigateResult: (result: MessageSearchResult, response: MessageSearchResponse) => void;
+  jumpInThread: (messageId: string, options?: { refresh?: boolean }) => boolean;
   moveTo: (index: number) => void;
   returnToOrigin: () => void;
-}
-
-interface PendingReadingOperation {
-  sessionId: string;
-  effect: MessageReadingEffect;
-  running: boolean;
-  admitted: boolean;
-  controller: AbortController;
 }
 
 /** A navigation consumer: route and reading owners retain all authorization, paging and geometry. */
@@ -62,12 +54,14 @@ export function useMessageSearchHost({
   threadId,
   pushThreadRoute,
   available = true,
+  searchAvailable = available,
   onOpenDestination,
   beforeFindReturn,
 }: {
   threadId: string;
   pushThreadRoute: (threadId: string) => void;
   available?: boolean;
+  searchAvailable?: boolean;
   onOpenDestination?: (session: MessageReadingSession) => void;
   beforeFindReturn?: (session: MessageReadingSession) => void;
 }): MessageSearchHost {
@@ -88,6 +82,8 @@ export function useMessageSearchHost({
   const activeDurable = useRef(true);
   const availableNow = useRef(available);
   availableNow.current = available;
+  const searchAvailableNow = useRef(searchAvailable);
+  searchAvailableNow.current = searchAvailable;
 
   const publish = useCallback((next: MessageReadingSession) => {
     current.current = next;
@@ -107,7 +103,9 @@ export function useMessageSearchHost({
       operation.running = true;
       let status: 'settled' | 'unavailable' | 'interrupted';
       try {
-        status = await readThroughOwner(port, operation.effect, operation.controller.signal);
+        status = await readThroughOwner(port, operation.effect, operation.controller.signal, {
+          refresh: operation.refresh,
+        });
       } catch {
         status = 'unavailable';
       }
@@ -149,24 +147,17 @@ export function useMessageSearchHost({
   const admitAndDrive = useCallback(
     async (operation: PendingReadingOperation) => {
       const { effect } = operation;
-      const admission = await verifyMessageNavigationSource(
-        effect.kind === 'target' ? effect.target : { threadId: effect.origin.threadId },
-        operation.controller.signal,
-      );
+      const admission = await admitReadingEffect(effect, operation.controller.signal);
       if (pending.current !== operation || current.current?.id !== operation.sessionId) return;
-      if (admission.status !== 'available') {
+      if (!admission.admitted) {
         pending.current = null;
         publish({ ...current.current, trip: settleMessageReadingTrip(current.current.trip, effect, 'unavailable') });
         if (current.current.find && effect.kind === 'return') consumeMessageFindReturn(current.current.id);
-        setNotice(
-          admission.status === 'forbidden'
-            ? '这条来源目前不可访问，已保留返回位置。'
-            : '这条来源暂不可定位，已保留返回位置。',
-        );
+        setNotice(admission.notice);
         return;
       }
       operation.admitted = true;
-      if (admission.updated) setNotice('来源已更新，将定位到这条消息的当前版本。');
+      if (admission.notice) setNotice(admission.notice);
       const port = reader.current;
       if (port?.threadId === targetThread(effect)) void drive(operation, port);
       else pushThreadRoute(targetThread(effect));
@@ -175,21 +166,20 @@ export function useMessageSearchHost({
   );
 
   const request = useCallback(
-    (next: MessageReadingSession, effect: MessageReadingEffect) => {
+    (next: MessageReadingSession, effect: MessageReadingEffect, options?: { direct?: boolean; refresh?: boolean }) => {
       pending.current?.controller.abort();
       publish(next);
       setNotice(null);
-      const operation: PendingReadingOperation = {
-        sessionId: next.id,
-        effect,
-        running: false,
-        admitted: false,
-        controller: new AbortController(),
-      };
+      const operation = createPendingOperation(next.id, effect, options);
       pending.current = operation;
-      void admitAndDrive(operation);
+      if (operation.direct) {
+        const port = reader.current;
+        if (port?.threadId === targetThread(effect)) void drive(operation, port);
+      } else {
+        void admitAndDrive(operation);
+      }
     },
-    [admitAndDrive, publish],
+    [admitAndDrive, drive, publish],
   );
 
   const moveTo = useCallback(
@@ -209,61 +199,85 @@ export function useMessageSearchHost({
     if (!availableNow.current && !active.find) return;
     if (active.find) destinationCallbacks.current.beforeFindReturn?.(active);
     const requested = requestMessageReadingReturn(active.trip);
-    if (requested) request({ ...active, trip: requested.trip }, requested.effect);
+    if (requested)
+      request(
+        { ...active, trip: requested.trip },
+        requested.effect,
+        active.source === 'jump' ? { direct: true, refresh: false } : undefined,
+      );
   }, [available, request]);
+
+  const jumpInThread = useCallback<MessageSearchHost['jumpInThread']>(
+    (messageId, options) => {
+      if (!availableNow.current) return false;
+      const started = startJumpTargetFromForeground(messageId, reader.current, foregroundThread.current);
+      if (!started) return false;
+      activeDurable.current = started.persisted;
+      setPersisted(started.persisted && started.session.originPersisted);
+      setOpen(false);
+      request(started.session, started.effect, { direct: true, refresh: Boolean(options?.refresh) });
+      return true;
+    },
+    [request],
+  );
 
   const openDestination = useCallback<MessageSearchHost['openDestination']>(
     (destination, state, workspaceOrigin) => {
-      if (!availableNow.current || !destinationCallbacks.current.onOpenDestination) return;
-      const find = parseMessageFindContext({ destination, state, ...(workspaceOrigin ? { workspaceOrigin } : {}) });
-      if (!find) return;
-      const started = startFindPageFromForeground(find, reader.current, foregroundThread.current);
-      if (!started) {
-        setNotice('当前阅读位置或查找状态暂无法保存，请留在对话中再试。');
+      if (!searchAvailableNow.current || !destinationCallbacks.current.onOpenDestination) return;
+      const prepared = prepareOpenDestination(
+        destination,
+        state,
+        workspaceOrigin,
+        reader.current,
+        foregroundThread.current,
+      );
+      if (!prepared) return;
+      if (!prepared.ok) {
+        setNotice(prepared.notice);
         return;
       }
       pending.current?.controller.abort();
       pending.current = null;
-      activeDurable.current = started.persisted;
-      publish(started.session);
+      activeDurable.current = prepared.persisted;
+      publish(prepared.session);
       setNotice(null);
       setOpen(false);
-      destinationCallbacks.current.onOpenDestination(started.session);
+      destinationCallbacks.current.onOpenDestination(prepared.session);
     },
     [publish],
   );
 
   const navigateResult = useCallback(
     (result: MessageSearchResult, response: MessageSearchResponse) => {
-      if (!availableNow.current) return;
-      const index = response.results.findIndex(
-        (candidate) => candidate.threadId === result.threadId && candidate.messageId === result.messageId,
+      if (!searchAvailableNow.current) return;
+      const prepared = prepareNavigateResult(
+        result,
+        response,
+        current.current,
+        reader.current,
+        foregroundThread.current,
       );
-      if (index < 0) {
-        setNotice('这条来源不属于当前检索结果，暂不可跳转。');
+      if (!prepared.ok) {
+        if (prepared.notice) setNotice(prepared.notice);
         return;
       }
-      let active = current.current;
-      if (!active || active.trip.searchId !== response.searchId || active.trip.status === 'completed') {
-        const started = startFromForeground(response, reader.current, foregroundThread.current);
-        if (!started) {
-          setNotice('当前阅读位置暂不可保存，请在对话中重新尝试。');
-          return;
-        }
-        active = started.session;
-        activeDurable.current = started.persisted;
-        setPersisted(started.persisted && started.session.originPersisted);
+      if (prepared.startedPersisted !== undefined) {
+        activeDurable.current = prepared.startedPersisted;
+        setPersisted(prepared.startedPersisted && prepared.session.originPersisted);
       }
-      const indexInCollection = active.trip.targets.findIndex(
-        (target) => target.threadId === result.threadId && target.messageId === result.messageId,
-      );
-      const requested = requestMessageReadingTarget(active.trip, indexInCollection);
-      if (!requested) return;
       setOpen(false);
-      request({ ...active, trip: requested.trip }, requested.effect);
+      request(prepared.session, prepared.effect);
     },
-    [available, request],
+    [request],
   );
+
+  const cancelPending = useCallback(() => {
+    const active = current.current;
+    if (!pending.current || !active) return;
+    pending.current.controller.abort();
+    pending.current = null;
+    publish({ ...active, trip: interruptMessageReadingTrip(active.trip) });
+  }, [publish]);
 
   useEffect(() => {
     const recovered = readActiveMessageReadingSession();
@@ -279,7 +293,7 @@ export function useMessageSearchHost({
   }, []);
   useMessageFindEntry({
     threadId,
-    available,
+    available: searchAvailable,
     readSession: () => current.current,
     hasPending: () => pending.current !== null,
     navigateResult,
@@ -290,43 +304,26 @@ export function useMessageSearchHost({
     },
     show: (response) => {
       entryFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setFindState({
-        query: response.query,
-        scope: response.meta.scope,
-        sort: response.meta.sort === 'selected' ? 'time' : response.meta.sort,
-        scrollTop: 0,
-        status: 'ready',
-        response,
-      });
+      setFindState(toInitialFindState(response));
       setFindSeed((seed) => seed + 1);
       setNotice(null);
       setOpen(true);
     },
   });
   useEffect(() => {
-    const operation = pending.current;
-    const active = current.current;
-    if (!operation || !active || targetThread(operation.effect) === threadId) return;
-    operation.controller.abort();
-    pending.current = null;
-    publish({ ...active, trip: interruptMessageReadingTrip(active.trip) });
-  }, [publish, threadId]);
+    if (pending.current && targetThread(pending.current.effect) !== threadId) cancelPending();
+  }, [cancelPending, threadId]);
   useEffect(() => {
-    if (available) return;
-    setOpen(false);
-    const active = current.current;
-    if (!pending.current || !active) return;
-    pending.current.controller.abort();
-    pending.current = null;
-    publish({ ...active, trip: interruptMessageReadingTrip(active.trip) });
-  }, [available, publish]);
+    if (!searchAvailable) setOpen(false);
+    if (!available) cancelPending();
+  }, [available, cancelPending, searchAvailable]);
 
   const openSearch = useCallback(() => {
-    if (!availableNow.current) return;
+    if (!searchAvailableNow.current) return;
     entryFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFindState(undefined);
     setOpen(true);
-  }, [available]);
+  }, []);
   const closeSearch = useCallback(() => {
     setOpen(false);
     entryFocus.current?.focus({ preventScroll: true });
@@ -343,6 +340,7 @@ export function useMessageSearchHost({
     closeSearch,
     registerReadingPort,
     navigateResult,
+    jumpInThread,
     moveTo,
     returnToOrigin,
   };

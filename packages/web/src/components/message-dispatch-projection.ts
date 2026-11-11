@@ -168,3 +168,57 @@ export function isLinkedDeliveryFailureCarrier(
       ).length === 1,
   );
 }
+
+export function resolveUnloadedDispatchReply(input: {
+  message: ChatMessage;
+  targetId: string;
+  ref: LifecycleDispatchRef | undefined;
+  linkedMessage: ChatMessage | undefined;
+  timelineMessages: readonly ChatMessage[];
+  activeRuns: readonly LifecycleActiveRun[];
+  disqualified: boolean;
+}) {
+  const { message, targetId, ref, linkedMessage, timelineMessages, activeRuns, disqualified } = input;
+  const selfIndex = timelineMessages.findIndex((candidate) => candidate.id === message.id);
+  const statusId = ref?.statusMessageId;
+  const matchingRuns =
+    !linkedMessage && !disqualified && ref?.phase === 'dispatched' && statusId
+      ? activeRuns.filter(
+          (run) =>
+            run.targetId === targetId && run.responseMessageId === statusId && run.inputMessageIds.includes(message.id),
+        )
+      : [];
+  const exactActiveRun = matchingRuns.length === 1 ? matchingRuns[0] : undefined;
+  const unloadedSettledAppended =
+    !linkedMessage &&
+    !disqualified &&
+    ref?.phase === 'settled' &&
+    Boolean(statusId) &&
+    (Boolean(ref.appendDelivery || ref.appendAcceptance) || selfIndex >= 0);
+  return {
+    selfIndex,
+    exactActiveRun,
+    unloadedSettledAppended,
+    unloadedLinkedReply: exactActiveRun !== undefined || unloadedSettledAppended,
+  };
+}
+
+export function resolveDispatchReplyArrow(input: {
+  message: ChatMessage;
+  replyMessageId: string | undefined;
+  linkedMessage: ChatMessage | undefined;
+  timelineMessages: readonly ChatMessage[];
+  selfIndex: number;
+  appended: boolean;
+  unloadedLinkedReply: boolean;
+}): '↑' | '↓' {
+  const { message, replyMessageId, linkedMessage, timelineMessages, selfIndex, appended, unloadedLinkedReply } = input;
+  const replyIndex = replyMessageId ? timelineMessages.findIndex((candidate) => candidate.id === replyMessageId) : -1;
+  return (
+    selfIndex >= 0 && replyIndex >= 0
+      ? replyIndex < selfIndex
+      : unloadedLinkedReply || appended || (linkedMessage !== undefined && linkedMessage.timestamp < message.timestamp)
+  )
+    ? '↑'
+    : '↓';
+}
