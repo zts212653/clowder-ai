@@ -29,6 +29,7 @@ export function createFixtureLoginDriver() {
       const item = pending[index];
       if (!item) throw new Error('No official login attempt has started');
       return {
+        terminal: item.input.terminal === true,
         keepPendingAfterAbort() {
           item.keepPendingAfterAbort = true;
         },

@@ -102,7 +102,7 @@ export const accountsRoutes: FastifyPluginAsync<{
       const nativeDefaults = inspectNativeAccountDefaults(projectRoot);
       for (const [id, account] of nativeDefaults.defaults) {
         if (!snapshot.entries[id] && !snapshot.unavailableAccounts.some((row) => row.accountRef === id))
-          providers.push(accountToView(id, account, false, projectRoot));
+          providers.push(accountToView(id, account, false, projectRoot, true));
       }
       return {
         projectPath: projectRoot,
