@@ -195,3 +195,36 @@ it('#1951 a grouped answer waits for admission, retries a rejected send, and sav
   expect(updateRichBlock).toHaveBeenCalledWith('response', 'a', { disabled: true, selectedIds: ['a1'] });
   expect(updateRichBlock).toHaveBeenCalledWith('response', 'b', { disabled: true, selectedIds: ['b1'] });
 });
+
+it('#1951 saves grouped blocks sequentially so full-message writes retain both answers', async () => {
+  const firstWrite = Promise.withResolvers<void>();
+  let saved = new Set<string>();
+  apiFetch.mockImplementation(async (_url: string, options: RequestInit) => {
+    // The block-state route reads and writes an entire message snapshot, as Redis does.
+    const next = new Set(saved);
+    const patch = JSON.parse(String(options.body)) as { blockId: string };
+    next.add(patch.blockId);
+    if (patch.blockId === 'a') await firstWrite.promise;
+    saved = next;
+    return { ok: true };
+  });
+  act(() =>
+    root.render(
+      <InteractiveBlockGroup
+        messageId="response"
+        blocks={[
+          { id: 'a', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'a1', label: 'Choice A' }] },
+          { id: 'b', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'b1', label: 'Choice B' }] },
+        ]}
+      />,
+    ),
+  );
+  click('Choice A');
+  click('Choice B');
+  click('全部提交');
+  await act(async () => reportResult?.(true));
+  await act(async () => firstWrite.resolve());
+  expect([...saved].sort()).toEqual(['a', 'b']);
+  expect(sends).toBe(1);
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+});

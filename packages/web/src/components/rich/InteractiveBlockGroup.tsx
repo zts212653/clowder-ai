@@ -108,13 +108,12 @@ export function InteractiveBlockGroup({
 
     // Persist each block
     if (messageId) {
-      await Promise.all(
-        blocks.map(async (block) => {
-          const optionIds = selections.get(block.id) ?? [];
-          useChatStore.getState().updateRichBlock(messageId, block.id, { disabled: true, selectedIds: optionIds });
-          await patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds });
-        }),
-      );
+      // Each PATCH writes the whole message extra; serialize siblings to retain earlier answers.
+      for (const block of blocks) {
+        const optionIds = selections.get(block.id) ?? [];
+        useChatStore.getState().updateRichBlock(messageId, block.id, { disabled: true, selectedIds: optionIds });
+        await patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds });
+      }
     }
   }, [allSelected, submitted, blocks, selections, customTexts, messageId, sendContext]);
 
