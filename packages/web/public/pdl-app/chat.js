@@ -1033,13 +1033,8 @@ window.clowderChat = {
       CS.lb = { mid: '', block: '', i: +d.i, target: { kind: 'draftAttachment', i: +d.i } };
       render(true);
     };
-    // A jump to another message of the same thread (to the reply, to the original) keeps a way back: the find bar
-    // without a query is only that.
     A.msgJump = function (d) {
       S.inboxOpen = false;
-      const here = chatDataSnapshot.chat.threadId;
-      if (d.mid && (!d.t || d.t === here))
-        CS.findNav = { q: '', list: [{ mid: d.mid, thread: here }], i: 0, back: streamTop(), backThread: here };
       return chatAction('jump', d.t ? Object.assign({}, d, { thread: d.t }) : d);
     };
     A.findOpen = function (d) {

@@ -2218,12 +2218,10 @@ views:
               - type: text
                 parts:
                   - {icon: search, size: xs}
-                when: $.find.q
               - type: text
                 text:
                   t: chatPage.actions.label
                   args: [$.find.q, $.find.index, $.find.count]
-                when: $.find.q
               - {type: grow}
               - type: button
                 iconOnly: true
@@ -2231,14 +2229,12 @@ views:
                 label: t:chatPage.prevHit
                 act: findStep
                 args: {v: "-1"}
-                when: $.find.q
               - type: button
                 iconOnly: true
                 icon: next
                 label: t:chatPage.nextHit
                 act: findStep
                 args: {v: "1"}
-                when: $.find.q
               - {type: button, label: t:chatPage.backToPrev, act: findBack}
               - type: button
                 iconOnly: true
