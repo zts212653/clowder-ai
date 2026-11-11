@@ -78,7 +78,6 @@ export function projectInvocationPluginMcp(
   capability: CapabilityEntry;
   available: boolean;
 } {
-  if (!enabled) return { capability, available: false };
   const view = invocationView.getStore()?.view;
   if (!view || capability.type !== 'mcp' || !capability.pluginId || capability.mcpServerOverride)
     return { capability, available: true };
@@ -90,7 +89,7 @@ export function projectInvocationPluginMcp(
   if (!local || !local.isCurrent()) return { capability, available: false };
   if (local.sharedHttpUnavailableReason === 'tool_schema_invalid') {
     const issues = invocationView.getStore()?.toolIssues;
-    if (issues && !issues.some((issue) => issue.capabilityId === capability.id))
+    if (enabled && issues && !issues.some((issue) => issue.capabilityId === capability.id))
       issues.push({ pluginId: local.pluginId, capabilityId: capability.id, reasonCode: 'tool_schema_invalid' });
     return { capability, available: false };
   }
