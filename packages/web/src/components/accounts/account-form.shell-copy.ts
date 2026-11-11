@@ -16,7 +16,8 @@ export const accountFormCopy = defineShellCopy(
       provider: '厂商',
       keyOwner: 'API Key 归属',
       chooseProvider: '请选择账户归属',
-      loginHint: '创建后会打开终端运行官方 codex login。请在浏览器亲自完成授权；失败可在同一账号条目重试。',
+      loginHint:
+        '创建后会运行官方 codex login 并打开浏览器。请亲自完成授权；若浏览器未打开，可在账号条目打开登录终端。',
       bindingsHint: '添加账号不会自动改变猫的绑定。',
       processing: '处理中…',
       createLogin: '创建并开始登录',
@@ -58,7 +59,7 @@ export const accountFormCopy = defineShellCopy(
       keyOwner: 'API key provider',
       chooseProvider: 'Choose an account provider',
       loginHint:
-        'Creating the account opens a terminal for the official codex login. Complete authorization yourself in the browser; retry from this account row if it fails.',
+        'Creating the account runs the official codex login and opens the browser. Complete authorization yourself; if the browser did not open, use Open login terminal on the account row.',
       bindingsHint: 'Adding an account does not change member bindings.',
       processing: 'Processing…',
       createLogin: 'Create and start login',

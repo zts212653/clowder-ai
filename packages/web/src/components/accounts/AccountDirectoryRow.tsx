@@ -243,6 +243,9 @@ export function AccountDirectoryRow({
               setOpen(true);
             }}
             onRelogin={() => void login('start')}
+            onOpenTerminal={
+              account.codex && (waiting || failed) ? () => void login('start', { terminal: true }) : undefined
+            }
             onEdit={() => onEdit(account)}
             onDelete={() => void remove()}
             onExpand={() => setOpen(!open)}

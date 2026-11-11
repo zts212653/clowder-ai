@@ -166,9 +166,14 @@ it('row retry uses immediate mutation state while GET never settles', async () =
   request.mockResolvedValue({ profiles: [waiting] });
   await act(async () => root.render(<Row profile={profile} />));
   await click('重试');
-  expect(host.textContent).toContain('终端已打开');
+  expect(host.textContent).toContain('等待浏览器授权');
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === '取消' && !b.disabled)).toBe(true);
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(false);
+  await click('打开登录终端');
+  expect(request).toHaveBeenLastCalledWith('/api/accounts/backup/codex/login/start', {
+    attemptId: 'a',
+    terminal: true,
+  });
 });
 it('relogin failure keeps ready identity and offers retry without destroying the used login', async () => {
   const profile = managed(true);
