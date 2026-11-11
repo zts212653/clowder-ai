@@ -1491,7 +1491,7 @@ export class AcpAgentService implements AgentService {
       if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
-      await dshTurn?.dispose();
+      const [dshSettlement] = await Promise.allSettled([dshTurn?.dispose()]);
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
@@ -1592,6 +1592,7 @@ export class AcpAgentService implements AgentService {
           };
         }
       }
+      if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
     }
   }
 }

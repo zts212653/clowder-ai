@@ -11,6 +11,7 @@ type Delivery = {
   read: boolean;
   completed: boolean;
   accepted?: boolean;
+  handoff?: Promise<void>;
 };
 const log = createModuleLogger('dsh-turn-input');
 
@@ -21,6 +22,7 @@ export class DshTurnInput {
   private release?: () => void;
   private readonly unsubscribe: () => void;
   private closed = false;
+  private successful = false;
   private settlement = Promise.resolve();
   private resolveInitialRead!: (at: number) => void;
   private readonly initialInputRead = new Promise<number>((resolve) => {
@@ -74,18 +76,26 @@ export class DshTurnInput {
             }
             const delivery: Delivery = { input, signature, read: false, completed: false };
             this.deliveries.set(deliveryId, delivery);
-            try {
-              const result = await this.client.steerTurn({
+            const handoff = Promise.resolve().then(() =>
+              this.client.steerTurn({
                 sessionId: this.sessionId,
                 deliveryId,
                 text: input.text,
                 expectedTurn: nativeTurnId,
-              });
+              }),
+            );
+            delivery.handoff = handoff.then(
+              (result) => {
+                delivery.accepted = result.accepted;
+              },
+              () => {},
+            );
+            try {
+              const result = await handoff;
               if (!result.accepted) {
                 this.deliveries.delete(deliveryId);
                 return { accepted: false, reason: 'provider_rejected', acceptance: 'not_accepted' };
               }
-              delivery.accepted = true;
               return { accepted: true, handle };
             } catch {
               // Bytes may have reached the native inbox; retain completion custody and never retry here.
@@ -121,7 +131,11 @@ export class DshTurnInput {
     }
     if (event.type === 'turn_ended') {
       this.stop();
-      this.settlement = this.settle(event.reason === 'completed');
+      this.successful = event.reason === 'completed';
+      this.settlement = this.settle(this.successful).catch((error: unknown) => {
+        // Unfinished custody stays in deliveries for disposal to settle or report.
+        log.warn({ error, sessionId: this.sessionId }, 'DSH input completion receipt failed');
+      });
     }
   }
 
@@ -137,20 +151,19 @@ export class DshTurnInput {
       [...this.deliveries.values()]
         .filter((delivery) => !delivery.completed)
         .map(async (delivery) => {
-          delivery.completed = true;
+          await delivery.handoff;
+          if (delivery.accepted === false) return;
           await delivery.input.onInputCompleted?.(successful && delivery.read);
+          delivery.completed = true;
         }),
     );
-    results
-      .filter((result) => result.status === 'rejected')
-      .forEach((result) => {
-        log.warn({ error: result.reason, sessionId: this.sessionId }, 'DSH input completion receipt failed');
-      });
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure) throw failure.reason;
   }
 
   async dispose(): Promise<void> {
     this.stop();
     await this.settlement;
-    await this.settle(false);
+    await this.settle(this.successful);
   }
 }
