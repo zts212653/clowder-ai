@@ -10,6 +10,7 @@ import { appendRecoveryFixture, recoveryProcessor } from '../helpers/append-reco
 function fixture({
   registered = false,
   supported = true,
+  bridgeAvailable = true,
   ending = 'completed',
   unknownWrite = false,
   emptyResume = false,
@@ -35,6 +36,7 @@ function fixture({
     },
     async probeTurnBridge() {
       calls.hello++;
+      if (!bridgeAvailable) return null;
       return { protocol: 1, bridge: 'cat-cafe-dsh-turn', steer: true, nativeTurns: true };
     },
     onTurnBridgeEvent(listener) {
@@ -162,6 +164,8 @@ for (const registered of [false, true]) {
 for (const registered of [false, true]) {
   test(`${registered ? 'registered' : 'direct'} ACP registers one exact native turn and separates accept/read/completion`, async () => {
     const f = fixture({ registered });
+    assert.equal(f.service.freshnessCarrierCapability().activeInvocationGuidance, 'supported');
+    assert.equal(f.service.freshnessCarrierCapability().deliverySemantics, 'exact_active_turn');
     let reads = 0;
     const completions = [];
     for await (const message of f.service.invoke('original fixture prompt', f.options)) {
@@ -271,6 +275,17 @@ test('ordinary ACP neither probes private DSH methods nor registers live input',
   assert.equal(f.calls.hello, 0);
   assert.equal(f.calls.registered, 0);
   assert.equal(f.service.freshnessCarrierCapability().activeInvocationGuidance, 'unsupported');
+});
+
+test('an admitted DSH bridge declares stable capability while a failed handshake exposes no dispatcher', async () => {
+  const f = fixture({ bridgeAvailable: false });
+  const declared = f.service.freshnessCarrierCapability();
+  assert.equal(declared.deliverySemantics, 'exact_active_turn');
+  for await (const message of f.service.invoke('fixture', f.options))
+    assert.notEqual(message.type, 'error', message.error);
+  assert.equal(f.calls.hello, 1);
+  assert.equal(f.calls.registered, 0);
+  assert.deepEqual(f.service.freshnessCarrierCapability(), declared);
 });
 
 for (const mode of ['read-completed', 'read-failed', 'unread-completed']) {

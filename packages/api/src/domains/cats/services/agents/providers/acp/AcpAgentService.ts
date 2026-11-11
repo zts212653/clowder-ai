@@ -226,7 +226,6 @@ export class AcpAgentService implements AgentService {
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
   private readonly dshTurnInput: boolean;
-  private bridgeSteerAvailable = false;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -361,11 +360,12 @@ export class AcpAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
+    // Factory admission verifies the bridge; each invocation still requires a successful wire handshake.
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: this.bridgeSteerAvailable ? 'exact_active_turn' : 'unsupported',
-      activeInvocationGuidance: this.bridgeSteerAvailable ? 'supported' : 'unsupported',
+      deliverySemantics: this.dshTurnInput ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.dshTurnInput ? 'supported' : 'unsupported',
     };
   }
 
@@ -1117,8 +1117,8 @@ export class AcpAgentService implements AgentService {
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return;
         }
-        this.bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
-        if (this.bridgeSteerAvailable && options?.activeRunDispatch)
+        const bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (bridgeSteerAvailable && options?.activeRunDispatch)
           dshTurn = new DshTurnInput(dshClient, sessionId, options);
       }
       promptPhase = 'active_unacknowledged';
