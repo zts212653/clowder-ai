@@ -342,6 +342,7 @@ export class AcpClient {
       );
       command = spawnPlan.command;
       args = spawnPlan.args;
+      Object.assign(childEnv, spawnPlan.env);
       if (spawnPlan.shell !== undefined) {
         spawnOpts.shell = spawnPlan.shell;
       }

@@ -435,7 +435,7 @@ export async function createAcpServiceForConfig(
   // Audit and execution consume one fresh plan, rather than separate cache generations.
   invalidateCliCommand(bootstrap.command);
   const selectedCommand = resolveCliCommandOrBare(bootstrap.command);
-  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell'> =
+  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell' | 'env'> =
     process.platform === 'win32'
       ? resolveWindowsSpawnPlan(selectedCommand, bootstrap.args, { refresh: true })
       : { command: selectedCommand, args: [...bootstrap.args] };
@@ -485,6 +485,7 @@ export async function createAcpServiceForConfig(
               memberEnvironment: config.env,
             }),
             ...spawn.fixedEnv,
+            ...selected.env,
           },
     onChanged(changed) {
       input.log.warn(

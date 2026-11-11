@@ -246,6 +246,7 @@ export type {
   McpSyncState,
   McpToolInfo,
   McpTransport,
+  PluginMcpToolIssue,
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';

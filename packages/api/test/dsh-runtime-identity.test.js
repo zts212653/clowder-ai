@@ -8,7 +8,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import { resolveDshSetupLaunch } from '../dist/routes/dsh-setup-launch.js';
 import { discoverNativeRuntimes } from '../dist/routes/native-runtimes.js';
 
-test('runtime discovery identifies the DSH launcher rather than a DeepSeek provider argument', () => {
+test('runtime discovery identifies the DSH launcher rather than a DeepSeek provider argument', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-identity-'));
   const templatePath = join(root, 'cat-template.json');
   const members = [
@@ -44,7 +44,7 @@ test('runtime discovery identifies the DSH launcher rather than a DeepSeek provi
     process.env[key] = root;
   });
   try {
-    const { runtimes } = discoverNativeRuntimes(root, () => process.execPath);
+    const { runtimes } = await discoverNativeRuntimes(root, () => process.execPath);
     assert.equal(runtimes.find((runtime) => runtime.id === 'acp:dsh-identity-real')?.label, 'DSH');
     assert.equal(runtimes.find((runtime) => runtime.id === 'acp:dsh-identity-custom')?.label, 'Custom ACP');
   } finally {
@@ -55,7 +55,7 @@ test('runtime discovery identifies the DSH launcher rather than a DeepSeek provi
   }
 });
 
-test('registered DSH profile status verifies package identity outside node_modules without trusting its label', () => {
+test('registered DSH profile status verifies package identity outside node_modules without trusting its label', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-verified-entry-'));
   const savedHome = process.env.DSH_HOME;
   try {
@@ -77,7 +77,10 @@ test('registered DSH profile status verifies package identity outside node_modul
       writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: member.packageName }));
       const entry = join(pkg, 'lib', 'bin.js');
       writeFileSync(entry, '');
-      return { ...member, acp: { command: 'node', startupArgs: [entry, '--profile', 'acp', ...member.extra] } };
+      return {
+        ...member,
+        acp: { command: process.execPath, startupArgs: [entry, '--profile', 'acp', ...member.extra] },
+      };
     });
     const templatePath = join(root, 'cat-template.json');
     writeFileSync(
@@ -102,7 +105,7 @@ test('registered DSH profile status verifies package identity outside node_modul
         },
         { configurationTemplatePath: templatePath },
       );
-    const { runtimes } = discoverNativeRuntimes(root, () => process.execPath);
+    const { runtimes } = await discoverNativeRuntimes(root, () => process.execPath);
     const official = runtimes.find((runtime) => runtime.id === `acp:${members[0].id}`);
     const lookalike = runtimes.find((runtime) => runtime.id === `acp:${members[1].id}`);
     assert.equal(official?.discoveryStatus, 'configured');
@@ -110,7 +113,7 @@ test('registered DSH profile status verifies package identity outside node_modul
     assert.equal(official?.dshSetupSupported, true);
     assert.deepEqual(official?.acp?.startupArgs, members[0].acp.startupArgs);
     assert.equal(
-      resolveDshSetupLaunch('node', members[0].acp.startupArgs, root).args[0],
+      resolveDshSetupLaunch(process.execPath, members[0].acp.startupArgs, root).args[0],
       members[0].acp.startupArgs[0],
     );
     assert.equal(lookalike?.label, 'DSH');
@@ -121,7 +124,10 @@ test('registered DSH profile status verifies package identity outside node_modul
     assert.equal(patched?.dshSetupSupported, true);
     assert.equal(patched?.label, 'DSH');
     assert.deepEqual(patched?.acp?.startupArgs, members[2].acp.startupArgs);
-    assert.deepEqual(resolveDshSetupLaunch('node', members[2].acp.startupArgs, root).args, members[2].acp.startupArgs);
+    assert.deepEqual(
+      resolveDshSetupLaunch(process.execPath, members[2].acp.startupArgs, root).args,
+      members[2].acp.startupArgs,
+    );
     assert.equal(runtimes.find((runtime) => runtime.id === `acp:${members[3].id}`)?.dshSetupSupported, undefined);
   } finally {
     if (savedHome === undefined) delete process.env.DSH_HOME;

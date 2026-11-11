@@ -17,12 +17,12 @@ it.each([
   'rejected',
   'different',
   'earlier-refresh',
-] as const)('publishes only a confirmed exact prepared descriptor: %s', async (result) => {
+] as const)('keeps saved Desktop bindings separate from discovery metadata: %s', async (result) => {
   sessionStorage.clear();
   useMemberModelCatalogs.setState(useMemberModelCatalogs.getInitialState());
   const acp = {
-    command: 'node',
-    startupArgs: ['/install/dsh/lib/bin.js', '--profile', 'acp'],
+    command: '/desktop/dsh.cmd',
+    startupArgs: ['--profile', 'acp'],
     transport: 'stdio' as const,
   };
   const generated = [...acp.startupArgs, '--patch', '/fixture/provider.yml'];
@@ -35,9 +35,12 @@ it.each([
     configurationSource: 'native_tool',
     defaultModel: '',
     mentionPatterns: ['@saved-dsh'],
-    acp,
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+    acp: { command: '/old/agent.cmd', startupArgs: [], transport: 'stdio' },
     color: { primary: '#123456', secondary: '#abcdef' },
-  } as CatData;
+  } satisfies CatData;
   let saved: CatData | undefined;
   let failDiscovery = false;
   let removed = false;
@@ -45,12 +48,13 @@ it.each([
   let pendingDiscovery: Promise<Response> | undefined;
   let finishDiscovery: ((response: Response) => void) | undefined;
   const runtime = {
-    id: 'acp:source',
+    id: 'dsh',
     label: 'DSH',
     clientId: 'acp',
     installed: true,
     discoveryStatus: 'configured',
     dshSetupSupported: true,
+    dshDesktop: true,
     models: [],
     acp,
   };
@@ -59,27 +63,38 @@ it.each([
       writes++;
       if (result === 'rejected') return Response.json({ error: 'save rejected' }, { status: 400 });
       const member: CatData = { ...cat, ...(JSON.parse(String(request.body)) as Partial<CatData>) };
-      if (result === 'different') member.acp = { ...acp, ...member.acp, startupArgs: [...generated, '--manual'] };
+      if (result === 'different') member.acp = { command: 'other-acp', startupArgs: ['--opaque'] };
       return Response.json({ cat: member });
     }
-    if (url.startsWith('/api/cats/native-runtimes'))
-      return (
-        pendingDiscovery ??
-        (failDiscovery
-          ? Response.json({}, { status: 503 })
-          : Response.json({
-              runtimes: removed ? [] : [runtime],
-            }))
-      );
+    if (url.startsWith('/api/cats/native-runtimes')) {
+      if (pendingDiscovery) {
+        const pending = pendingDiscovery;
+        pendingDiscovery = undefined;
+        return pending;
+      }
+      return failDiscovery
+        ? Response.json({}, { status: 503 })
+        : Response.json({
+            runtimes: removed ? [] : [runtime],
+          });
+    }
     if (url.endsWith('/inspect'))
       return Response.json({
-        profiles: ['acp'],
-        sourceProfile: 'acp',
         revision: 'a'.repeat(64),
-        active: { providers: [] },
-        source: { providers: [{ id: 'fixture', models: [{ id: 'flash', label: 'Flash' }] }] },
+        provider: 'fixture',
+        model: 'flash',
+        providers: [{ id: 'fixture', credential: 'configured', models: [{ id: 'flash', label: 'Flash' }] }],
       });
-    if (url.endsWith('/prepare')) return Response.json({ id: 'receipt', command: 'node', startupArgs: generated });
+    if (url.endsWith('/prepare'))
+      return Response.json({
+        id: 'receipt',
+        command: acp.command,
+        startupArgs: generated,
+        env: { DSH_HOME: '/host/private' },
+        provider: 'fixture',
+        model: 'flash',
+      });
+    if (url.endsWith('/connection-check')) return Response.json({ state: 'passed' });
     switch (url) {
       case '/api/accounts':
         return Response.json({ providers: [], projectPath: '/fixture' });
@@ -119,8 +134,12 @@ it.each([
   try {
     await act(async () => root.render(editor(cat)));
     expect(writes).toBe(0);
-    await click('读取 DSH 配置');
-    await click('使用此配置');
+    const tool = host.querySelector<HTMLSelectElement>('select[aria-label="使用工具"]')!;
+    await act(async () => {
+      tool.value = 'dsh';
+      tool.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.textContent).not.toContain('验证并使用此模型');
     expect(writes).toBe(0);
     if (result === 'earlier-refresh') {
       pendingDiscovery = new Promise((resolve) => {
@@ -135,25 +154,25 @@ it.each([
       pendingDiscovery = undefined;
       expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
     }
-    const preparedCat = { ...cat, acp: { ...acp, startupArgs: generated } };
-    await act(async () => root.render(<MemberRuntimeSummary cat={saved ?? preparedCat} />));
+    await act(async () => root.render(<MemberRuntimeSummary cat={saved ?? cat} />));
     if (result === 'rejected' || result === 'different') {
       expect(host.textContent).toContain('ACP Client');
       expect(host.textContent).not.toContain('DeepSeek Flash');
       return;
     }
     expect(saved?.acp?.startupArgs).toEqual(generated);
-    expect(saved?.defaultModel).toBe('');
-    expect(host.textContent).toContain('DSH · DeepSeek Flash');
+    expect(saved?.defaultModel).toBe('["fixture","flash"]');
+    expect(saved?.env).toEqual({ DSH_HOME: '/host/private' });
+    expect(host.textContent).toContain('DSH · fixture / flash');
     // Saving another descriptor must preserve the original discovered tool too.
-    expect(useMemberModelCatalogs.getState().runtimes.some((item) => item.id === 'acp:source')).toBe(true);
+    expect(useMemberModelCatalogs.getState().runtimes.some((item) => item.id === 'dsh')).toBe(true);
     for (const changed of [
       { ...saved, agentProvider: 'plugin:fixture/tool' },
       { ...saved, acp: { ...saved?.acp, transport: 'httpstream' } },
-      { ...saved, acp: { ...saved?.acp, startupArgs: [...generated, '--manual'] } },
+      { ...saved, acp: { command: 'other-acp', startupArgs: ['--opaque'] } },
     ]) {
       await act(async () => root.render(<MemberRuntimeSummary cat={changed as CatData} />));
-      expect(host.textContent).not.toContain('DSH · DeepSeek Flash');
+      expect(host.textContent).not.toContain('DSH · fixture / flash');
     }
     failDiscovery = true;
     await act(async () => root.render(editor(saved as CatData)));
@@ -162,10 +181,11 @@ it.each([
     failDiscovery = false;
     removed = true;
     await click('刷新');
-    expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('ACP');
+    expect(host.querySelector('[data-testid=member-identity-summary]')?.textContent).toBe('DSH');
     await act(async () => root.render(<MemberRuntimeSummary cat={saved as CatData} />));
-    expect(host.textContent).toContain('ACP Client');
+    expect(host.textContent).toContain('DSH · fixture / flash');
     expect(writes).toBe(1);
+    expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path.endsWith('/test'))).toBe(false);
   } finally {
     await act(async () => root.unmount());
     sessionStorage.clear();
