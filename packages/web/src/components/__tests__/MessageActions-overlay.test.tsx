@@ -51,12 +51,12 @@ describe('reading-column action overlay', () => {
     vi.unstubAllGlobals();
   });
 
-  function render(selectionOnly = false) {
+  function render() {
     act(() =>
       h.root.render(
         <div data-chat-container>
           <div data-thread-chat-reading-column>
-            <MessageActions message={streamReply()} threadId="thread-1" selectionOnly={selectionOnly}>
+            <MessageActions message={streamReply()} threadId="thread-1">
               <div data-message-author-row>
                 <span>Author · Time</span>
                 <MessageActionSlot />
@@ -67,14 +67,6 @@ describe('reading-column action overlay', () => {
       ),
     );
   }
-
-  it('keeps range quotation ownership without offering whole-message actions', () => {
-    render(true);
-    expect(h.container.querySelector('[data-context-quote-source="message"]')).not.toBeNull();
-    expect(document.querySelector('[data-message-actions-owner="reply-1"]')).toBeNull();
-    expect(document.querySelector('[data-testid="message-actions-toolbar"]')).toBeNull();
-    expect(document.querySelector('[data-testid="message-actions-compact-trigger"]')).toBeNull();
-  });
 
   it('keeps all action paint outside message scroll geometry and clamps the narrow trigger', () => {
     render();
