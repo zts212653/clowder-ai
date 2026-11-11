@@ -1,6 +1,6 @@
 'use client';
 
-import { getLifecycleAppendOutcome, isAppendRepeatSource } from '@cat-cafe/shared';
+import { getLifecycleAppendOutcome, isAppendRepeatSource, type LifecycleActiveRun } from '@cat-cafe/shared';
 
 import { useMessageNavigation } from '@/components/thread-chat/MessageNavigationContext';
 import { usePluginTargets } from '@/hooks/usePluginMentionTargets';
@@ -10,7 +10,12 @@ import { hasAssistantBody } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { cloudDispatchAudit, cloudDispatchReceipt, pendingCloudDeliveryLabel } from './cloud-dispatch-receipt';
 import { HistoryAppendActions } from './HistoryAppendActions';
-import { type MessageDispatchAvatarProjection, pluginDeliveryReceipt } from './message-dispatch-projection';
+import {
+  type MessageDispatchAvatarProjection,
+  pluginDeliveryReceipt,
+  resolveDispatchReplyArrow,
+  resolveUnloadedDispatchReply,
+} from './message-dispatch-projection';
 import { PluginTargetIcon } from './PluginTargetIcon';
 import { useShellPresentation } from './shell/shell-presentation';
 import { projectTargetReply } from './target-response-projection';
@@ -20,6 +25,7 @@ interface RecipientProps {
   projection: MessageDispatchAvatarProjection;
   message: ChatMessage;
   timelineMessages: readonly ChatMessage[];
+  activeRuns?: readonly LifecycleActiveRun[];
   getCatLabel: (catId: string) => string;
   agentSource: boolean;
   whisper: boolean;
@@ -43,6 +49,7 @@ export function MessageDispatchRecipient({
   projection,
   message,
   timelineMessages,
+  activeRuns = [],
   getCatLabel,
   agentSource,
   whisper,
@@ -59,7 +66,7 @@ export function MessageDispatchRecipient({
     (candidate) => candidate.id === (projection.statusMessageId ?? ref?.statusMessageId),
   );
   const pluginReceipt = pluginDeliveryReceipt(linkedMessage);
-  const targetReply = linkedMessage ? projectTargetReply(linkedMessage, timelineMessages) : undefined;
+  const targetReply = pluginReceipt && linkedMessage ? projectTargetReply(linkedMessage, timelineMessages) : undefined;
   const resultMessageId = targetReply?.resultMessageId;
   const pluginReply =
     pluginReceipt && targetReply?.hasBody && resultMessageId
@@ -74,14 +81,35 @@ export function MessageDispatchRecipient({
   const appendOutcome = getLifecycleAppendOutcome(ref, message.lifecycle);
   const uncertain = appendOutcome === 'unknown';
   const checking = uncertain && (!failure || (failure.acceptance === 'unknown' && failure.checkedAt === undefined));
-  const processing = projection.phase === 'processing' && !uncertain && failure?.acceptance !== 'incomplete';
   const notAccepted = appendOutcome === 'not_accepted';
   const incomplete = appendOutcome === 'incomplete';
+  const { selfIndex, exactActiveRun, unloadedSettledAppended, unloadedLinkedReply } = resolveUnloadedDispatchReply({
+    message,
+    targetId: projection.targetId,
+    ref,
+    linkedMessage,
+    timelineMessages,
+    activeRuns,
+    disqualified:
+      Boolean(cloud) ||
+      pluginRecipient ||
+      notAccepted ||
+      incomplete ||
+      uncertain ||
+      appendOutcome === 'awaiting_completion',
+  });
+  const processing =
+    (projection.phase === 'processing' || exactActiveRun !== undefined) &&
+    !uncertain &&
+    failure?.acceptance !== 'incomplete';
   const linked = linkedMessage?.lifecycle;
   const response = linked?.kind === 'response' ? linked : undefined;
-  const appended =
-    response && response.inputMessageIds.indexOf(message.id) > 0 && message.timestamp > response.startedAt;
-  const running = response ? response.status === 'processing' : ref?.phase !== 'settled';
+  const appended = response
+    ? response.inputMessageIds.indexOf(message.id) > 0 && message.timestamp > response.startedAt
+    : exactActiveRun
+      ? exactActiveRun.inputMessageIds.indexOf(message.id) > 0 && message.timestamp > exactActiveRun.startedAt
+      : unloadedSettledAppended;
+  const running = response ? response.status === 'processing' : exactActiveRun ? true : ref?.phase !== 'settled';
   const receipt = dispatchReceiptDisplay(ref, running, message.lifecycle);
   const audit = cloud ? cloudDispatchAudit(cloud, logical.state === 'source_replied') : undefined;
   const title = pluginReply
@@ -102,7 +130,16 @@ export function MessageDispatchRecipient({
       ? logical.replyMessageId
       : awaitingCloudReply
         ? undefined
-        : projection.statusMessageId);
+        : (projection.statusMessageId ?? (unloadedLinkedReply ? ref?.statusMessageId : undefined)));
+  const replyArrow = resolveDispatchReplyArrow({
+    message,
+    replyMessageId,
+    linkedMessage,
+    timelineMessages,
+    selfIndex,
+    appended: Boolean(appended),
+    unloadedLinkedReply,
+  });
   const failedDelivery = linked?.kind === 'delivery_failure';
   const notSent =
     cloud?.receipt?.status === 'failed' &&
@@ -195,19 +232,23 @@ export function MessageDispatchRecipient({
           repeatKind={notAccepted ? 'not_accepted' : incomplete ? 'incomplete' : 'unknown'}
         />
       ) : null}
-      {!checking && replyMessageId && (resultMessageId || pluginReply || response || logical.state !== 'unverified') ? (
+      {!checking &&
+      replyMessageId &&
+      (resultMessageId || pluginReply || response || unloadedLinkedReply || logical.state !== 'unverified') ? (
         <button
           type="button"
           aria-label={`看${label}的回复`}
           className="rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
           onClick={() => {
             if (!replyMessageId) return;
-            if (logical.state !== 'unverified') navigateToMessage(replyMessageId, { loadIfNeeded: true });
-            else if (pluginReceipt) navigateToMessage(replyMessageId, { loadIfNeeded: true });
-            else navigateToMessage(replyMessageId);
+            if (logical.state !== 'unverified' || pluginReceipt || unloadedLinkedReply) {
+              navigateToMessage(replyMessageId, { loadIfNeeded: true });
+            } else {
+              navigateToMessage(replyMessageId);
+            }
           }}
         >
-          · 看回复 ↓
+          · 看回复 {replyArrow}
         </button>
       ) : null}
     </li>

@@ -113,6 +113,7 @@ export interface ThreadChatSurfaceProps {
   onActivity?: (activity: ThreadChatActivity) => void;
   onRealMessageSent?: () => void;
   onReadingPort?: RegisterChatReadingPort;
+  onNavigateMessage?: (messageId: string, options?: { refresh?: boolean }) => boolean;
   conversationViewController?: ConversationViewPreferenceController;
   conversationViewQueue?: readonly QueueEntry[];
 }
@@ -135,6 +136,7 @@ export function ThreadChatSurface({
   onActivity,
   onRealMessageSent,
   onReadingPort,
+  onNavigateMessage,
   conversationViewController,
   conversationViewQueue = [],
 }: ThreadChatSurfaceProps) {
@@ -165,13 +167,23 @@ export function ThreadChatSurface({
   } = history;
   const navigateMessage = useCallback(
     (messageId: string, options?: MessageNavigationOptions): boolean => {
+      const loaded = useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.some((message) => message.id === messageId);
+      if (!loaded && !options?.loadIfNeeded) {
+        return false;
+      }
+      if (onNavigateMessage?.(messageId, { refresh: Boolean(options?.loadIfNeeded && !loaded) })) {
+        return true;
+      }
       if (options?.loadIfNeeded) {
         void navigateToMessage(messageId, undefined, { refresh: true });
         return true;
       }
       return jumpToMessage(messageId);
     },
-    [jumpToMessage, navigateToMessage],
+    [jumpToMessage, navigateToMessage, onNavigateMessage, threadId],
   );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
