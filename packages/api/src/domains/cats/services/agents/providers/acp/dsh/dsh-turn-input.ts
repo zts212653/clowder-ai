@@ -11,7 +11,6 @@ type Delivery = {
   read: boolean;
   completed: boolean;
   accepted?: boolean;
-  readReceipt?: Promise<void>;
 };
 const log = createModuleLogger('dsh-turn-input');
 
@@ -110,7 +109,8 @@ export class DshTurnInput {
       }
       if (delivery.read) return;
       delivery.read = true;
-      delivery.readReceipt = Promise.resolve()
+      // Native consumption is already known; persistence is a nonblocking observer.
+      void Promise.resolve()
         .then(() => delivery.input.onInputRead?.())
         .catch((error: unknown) => {
           log.warn(
@@ -138,7 +138,6 @@ export class DshTurnInput {
         .filter((delivery) => !delivery.completed)
         .map(async (delivery) => {
           delivery.completed = true;
-          await delivery.readReceipt;
           await delivery.input.onInputCompleted?.(successful && delivery.read);
         }),
     );

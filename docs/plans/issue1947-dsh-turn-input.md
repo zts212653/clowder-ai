@@ -126,3 +126,13 @@ Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件�
 - 同根因扫描覆盖本函数全部 sessionId 赋值：其他赋值均发生在首次创建 turn 绑定之前，只有这条 retry 是绑定后的 session 切换。
 - 该恢复分支使用 fake 协议边界验证，没有故意让真实供应商产生空回复或重放收费请求；前述真实样本保留其原 SHA，不声称覆盖这条新修复的真实故障注入。
 - 首轮 finding 已通过普通回复送达；reviewer 的 typed MCP 回执因参数序列化失败未落库，保留缺口，不伪造为 approved。
+
+### 云端审查：已读 observer 与 Stop（P2）
+
+云端在 b70ae9da 指出，settle/dispose 等待 onInputRead 的持久化 promise，会让已完成或取消的 provider 清理被已读观察者阻塞。AgentClientDispatchInput 的现行合同明确规定 delivery 和 Stop 不等待该 callback；既有 AGY 输入路径也将其作为 best-effort observer。
+
+- RED：保持已读 observer pending，分别完成/取消原生轮次，2/2 因 dispose 无法结束而失败。
+- 修复：原生 user/message 到达后仍立即标记 native read；异步观察者继续执行并捕获失败，清理不再等待它。独立的 completion custody 回调保持原合同。
+- GREEN：构建完成后，清理/Host/resume retry/Queue/History 共 48/48 通过；API tsc、格式检查通过。已有 source/ref/CAS 校验继续限制迟到已读写，不新建队列或重试层。
+- 同型扫描未发现其他 provider/session-contract 直接 await onInputRead 的位置。原生读取、完成判定和投递协议不变；此前 b70 的真实验收保持其原 SHA。
+- 另一个云端 P2 位于继承的 #1928 first-run 向导：明确拒绝后 creation intent 未释放。已把原 finding 投回原责任线程核实处理，不把它误记成本次 turn 代码问题。

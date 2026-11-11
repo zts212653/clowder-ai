@@ -73,5 +73,20 @@
       "single process capability probe"
     ],
     "liveProviderFaultInjected": false
+  },
+  "nonblockingReadObserverReview": {
+    "reviewedHead": "b70ae9da767e8ff8b0c1200df4a623eff2353b63",
+    "finding": "https://github.com/zts212653/clowder-ai/pull/1950#discussion_r4537466297",
+    "severity": "P2",
+    "redFailedTests": 2,
+    "postBuildGreenPassedTests": 48,
+    "apiTypecheckPassed": true,
+    "fix": "Native read is recorded immediately; the read persistence observer remains fire-and-forget and is not awaited by settle/dispose. Completion custody remains independent.",
+    "coverage": [
+      "completed turn cleanup with pending read observer",
+      "cancelled turn cleanup with pending read observer",
+      "native read/completion and Queue/History recovery regressions"
+    ],
+    "liveFaultInjected": false
   }
 }
