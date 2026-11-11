@@ -1113,6 +1113,10 @@ export class AcpAgentService implements AgentService {
       if (this.dshTurnInput) {
         const dshClient = lease.client as unknown as AcpClient;
         const capability = await dshClient.probeTurnBridge();
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
         this.bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
         if (this.bridgeSteerAvailable && options?.activeRunDispatch)
           dshTurn = new DshTurnInput(dshClient, sessionId, options);
