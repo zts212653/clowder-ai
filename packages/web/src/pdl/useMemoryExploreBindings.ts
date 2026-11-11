@@ -314,7 +314,8 @@ export function useMemoryExploreBindings(
         if (!abort.signal.aborted)
           setSearch({
             key,
-            load: data.readStatus === 'unavailable' ? 'error' : data.readStatus === 'partial' ? 'stale' : '',
+            // a partial read still shows what was checked (not the "latest read failed" notice)
+            load: data.readStatus === 'unavailable' ? 'error' : '',
             data,
           });
       },
