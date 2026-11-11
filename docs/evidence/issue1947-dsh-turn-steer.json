@@ -113,5 +113,23 @@
     "currentHeadCloudReviewPending": true,
     "ztsApprovalPending": true,
     "logsRetainedOutsideCheckout": true
+  },
+  "optionalDiscoveryRepairVerification": {
+    "source": "f79719afde9f8dd078dca4ac6c83c26d32ed0d11",
+    "dependency1928Head": "a68eb85e21ede95769eedcb07e39356313f3a342",
+    "finding": "https://github.com/zts212653/clowder-ai/pull/1950#discussion_r4537863356",
+    "redFailedTests": 2,
+    "greenProbeTestsPassed": 2,
+    "apiFullBuildPassed": true,
+    "postBuildTurnRecoveryTestsPassed": 65,
+    "postBuildDiscoveryLaunchCatalogTestsPassed": 18,
+    "requiredHomeBindingStillRejects": true,
+    "webDeltaFromPriorVerifiedHead": false,
+    "earlierWebTestsPassed": 414,
+    "webTestsRerun": false,
+    "newModelCalls": 0,
+    "cloudReviewPending": true,
+    "ztsApprovalPending": true,
+    "verifiedAt": "2026-11-11T13:04:23.039205+00:00"
   }
 }

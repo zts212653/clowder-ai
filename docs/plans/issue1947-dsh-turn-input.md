@@ -7,7 +7,7 @@ tips_exempt: "沿用现有聊天＋菜单的发送策略和已读提示；本单
 
 # Issue #1947：DSH 同轮输入接入
 
-状态：实现、作者自检、实际成员 UI 与冷重启验收完成；PR #1950 已 Ready。Kimi 已批准 b70ae9da；云端两项 P2 已修复，待新 HEAD 云端复审、CI 与 zts 批准后合入 next。PR 创建不等于完成托付。
+状态：实现、作者自检、实际成员 UI 与冷重启验收完成；PR #1950 已 Ready。Kimi 已批准 b70ae9da；云端三项 P2 已修复，待新 HEAD 云端复审、CI 与 zts 批准后合入 next。PR 创建不等于完成托付。
 
 ## 托付、依据与范围
 
@@ -147,3 +147,12 @@ Kimi 对 6ae4047e 的独立动态探针确认：旧 session 恢复后零事件�
 - Kimi 独立批准 b70ae9da、复跑 35/35 的回复锚点为 0001794396537414-000127-552823df，作者机械转录于 PR 评论 6794775727。typed MCP fact 未落库；当前云端 finding 修复由云端新 HEAD 复审承接，不借旧 peer 批准覆盖新增差异。
 - 旧 b70 的 CI 为 19 success / 1 planned skip；Windows owner-birth 首次失败日志保留，仅重跑失败 job 后通过。新提交必须等待自己的 CI，不沿用旧结果。
 - Web 3101、API 3102、Redis 6398 已停止，持久数据和失败样本保留；19 个临时工位文件已移至独立 acceptance 目录，逐一 SHA-256 比对一致。没有修改在线 runtime。
+
+### 双 Desktop 的可选消歧查询（P2）
+
+- 云端 finding 4537863356 指出两个安装均已验证时，readDesktopState 超时或解析异常会传播到整个 runtime/catalog 发现，连带影响 Codex/Claude。当前 28f8f0d5 独立探针的 timeout、无效 JSON 两项均复现失败，未启动 Harness 或调用模型。
+- 原 #1928 owner 已在 a68eb85e21ede95769eedcb07e39356313f3a342 最小修复，本分支 merge 为 f79719afde9f8dd078dca4ac6c83c26d32ed0d11。生产代码仅一行：可选消歧失败按无可用进程优选处理，保留所有已验证 commands 供显式选择；必需的 resolveDshDesktopHome 查询失败仍拒绝绑定。
+- 原探针 2/2 GREEN。完整 API build exit 0 后，65/65 turn/恢复回归、18/18 discovery/launch/catalog 检查通过，包含超时、无效 JSON、结构不符、Codex/Claude 保留和 HOME 拒绝语义。
+- 两文件 Biome、git diff --check 通过；规范格式与 a68 内容逐字一致。fallback 检查仅新增一处可选边界 catch，累计提示包含已有校验分支，没有多级执行兜底或新重试。查询的其他调用为必需 HOME 绑定，不能一并吞错。
+- 相对已验证 28f8f0d5，只有上述两个 API 文件变化，Web 目录无差异；此前 414/414 和 Web 类型证据保持原来源，不重复执行，不冒称新跑。28f8f0d5 的 CI 最终为 19 success / 1 planned skip；新 HEAD 仍须自己的 CI 和云端复审。
+- 依据用户后续明确要求，在 PR 评论汇总全部有效反馈、对应最小方案及验证，请 zts 批准当前提交。本轮三项云端意见均有复现依据，采用上述最小修复，不扩大到其他异常的吞错或自动重试。实际批准前不合入，原 Task 保持 doing。
