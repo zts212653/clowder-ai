@@ -4,6 +4,7 @@ import type { PluginManagerDesignFixture } from '@/components/settings/plugin-ma
 import { ThemeApplier } from '@/components/ThemeApplier';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { useThemeStore } from '@/stores/themeStore';
+import { ActualProbe, themeApplied } from './f322-theme-applied';
 import '@/app/globals.css';
 import '@/app/theme-tokens.css';
 import '@/app/console-tokens.css';
@@ -16,14 +17,18 @@ import '@/app/shell-v2.css';
 declare global {
   interface Window {
     __superagentSettingsPlugin: PluginManagerDesignFixture;
-    __superagentTheme: (base: 'light' | 'dark') => void;
+    __superagentTheme: (base: 'light' | 'dark') => Promise<void>;
   }
 }
 
-window.__superagentTheme = (base) => useThemeStore.getState().setActive(base);
+window.__superagentTheme = (base) => {
+  useThemeStore.getState().setActive(base);
+  return themeApplied();
+};
 createRoot(document.getElementById('root')!).render(
   <ThemeProvider>
     <ThemeApplier />
+    <ActualProbe />
     <main className="cafe-presentation min-h-screen bg-cafe-surface p-6 text-cafe">
       <div className="mx-auto max-w-3xl">
         <PluginManagerConfigurationSection
