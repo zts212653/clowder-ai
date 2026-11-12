@@ -1,5 +1,33 @@
 [
   {
+    "id": "feature-f235-conversation-issue",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/rich/CommunityPublishFlow.tsx",
+      "anchor": "CommunityPublishFlow"
+    },
+    "bodySource": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "发现项目问题时，可让猫把已有分析整理成会话 Issue 草稿。先核对报告与仓库，再预览和确认提交；插件未配置时也能复制报告。出现真实 Issue 链接才算提交完成。",
+    "action": {
+      "type": "open_source",
+      "label": "查看会话提单用法",
+      "sourceRef": {
+        "path": "docs/features/F235-feedback-to-community-publisher.md",
+        "anchor": "会话里把问题整理成 Issue"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f332-matter-recall",
     "kind": "feature",
     "sourceRef": {

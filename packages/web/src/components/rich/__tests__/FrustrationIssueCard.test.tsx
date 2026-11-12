@@ -131,6 +131,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/confirm') && init?.method === 'POST') {
         return Promise.resolve(okJson({ issue: { status: 'confirmed' } }));
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 
@@ -173,6 +176,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/confirm') && init?.method === 'POST') {
         return Promise.resolve(errorJson(409, { error: 'Issue already confirmed' }));
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 
@@ -213,6 +219,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/false-positive') && init?.method === 'POST') {
         return Promise.resolve(okJson({ issue: { status: 'false_positive' } }));
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 
@@ -263,6 +272,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/confirm') && init?.method === 'POST') {
         return Promise.resolve(okJson({ issue: { status: 'confirmed' } }));
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 
@@ -279,12 +291,12 @@ describe('FrustrationIssueCard', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // After confirm, card stays expanded (F235: "创建 GitHub 草稿" button must be visible)
+    // After confirm, card stays expanded (F235: "预览并提交" button must be visible)
     await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
     // Body remains visible — card is NOT collapsed after confirm (unlike skip/false_positive)
     expect(container.textContent).toContain('模型工具调用解析失败');
     // F235: Community publish flow should render
-    expect(container.textContent).toContain('创建 GitHub 草稿');
+    expect(container.textContent).toContain('预览并提交');
   });
 
   it('expands collapsed card on click', async () => {
@@ -296,6 +308,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/skip') && init?.method === 'POST') {
         return Promise.resolve(okJson({ issue: { status: 'skipped' } }));
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 
@@ -366,6 +381,9 @@ describe('FrustrationIssueCard', () => {
       if (path.endsWith('/confirm') && init?.method === 'POST') {
         return confirmPromise;
       }
+      if (path.endsWith('/config')) return Promise.resolve(okJson({ defaultRepo: 'org/repo', repos: ['org/repo'] }));
+      if (path.endsWith('/report-preview'))
+        return Promise.resolve(okJson({ title: issueBlock.title, bodyMarkdown: issueBlock.bodyMarkdown }));
       throw new Error(`Unexpected apiFetch call: ${path}`);
     });
 

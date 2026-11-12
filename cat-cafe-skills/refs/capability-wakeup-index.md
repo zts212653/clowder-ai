@@ -59,6 +59,8 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **完整 schema**：`cat_cafe_get_rich_block_rules`
 **Fallback**：rich block 工具失败时退到 markdown table；连 markdown 不够再用纯文字
 
+**会话问题 → 跟踪**：分析已具备症状、影响、证据但尚未跟踪时，最多一次建议或使用 `rich-messaging` 的 `community_issue_draft` 卡预填；用户已授权则沿 canonical gh 查重执行。根因未知可明确建单调查；已有单/用户拒绝/只分析/紧急止损时不重复提示。插件不可用仍保留报告，不要求用户安装CLI，不自动外发。
+
 ### 2. `browser-preview` — Hub 内嵌 localhost 预览
 
 **坏直觉**：改完前端发"开浏览器看 http://localhost:5102/foo"

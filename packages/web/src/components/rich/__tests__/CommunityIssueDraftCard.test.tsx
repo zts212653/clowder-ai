@@ -1,105 +1,63 @@
-/**
- * F235 Phase B: CommunityIssueDraftCard — routing + render tests.
- *
- * Uses SSR (renderToStaticMarkup) to test initial render state without
- * browser environment. API calls (useEffect-driven) don't fire in SSR,
- * so we test the static "editing" state only. Integration tests for the
- * full create → publish flow happen at the API layer (Task 2 + Task 5).
- */
-
-import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, test, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
 import { CommunityIssueDraftCard, isCommunityIssueDraftBlock } from '../CommunityIssueDraftCard';
-import { RichBlocks } from '../RichBlocks';
 
-Object.assign(globalThis as Record<string, unknown>, { React });
-
-const draftBlock = {
-  id: 'b_draft_1',
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
+const block = {
+  id: 'proposal-1',
   kind: 'card' as const,
   v: 1 as const,
-  title: 'Publish to Community',
-  bodyMarkdown: 'Cat suggests publishing this issue.',
-  tone: 'info' as const,
-  meta: {
-    kind: 'community_issue_draft',
-    proposedTitle: 'Bug: tool calls fail silently',
-    proposedBody: '## Problem\n\nTool calls return empty response.',
-    proposedRepo: 'clowder-ai/cat-cafe',
-    proposedLabels: ['bug', 'ux'],
-  },
+  title: 'Issue',
+  meta: { kind: 'community_issue_draft', draftId: 'retained-id' },
 };
-
-describe('isCommunityIssueDraftBlock', () => {
-  it('returns true for community_issue_draft meta.kind', () => {
-    expect(isCommunityIssueDraftBlock(draftBlock)).toBe(true);
-  });
-
-  it('returns false for other meta.kind', () => {
+test('only Agent messages route a draft card; connectors cannot impersonate publish UI', () => {
+  expect(isCommunityIssueDraftBlock(block)).toBe(true);
+  expect(isCommunityIssueDraftBlock(block, { connector: 'external' })).toBe(false);
+  expect(isCommunityIssueDraftBlock({ ...block, meta: {} })).toBe(false);
+});
+test.each([
+  'published',
+  'cancelled',
+])('retained draft ID hydrates %s without create or publish, including after remount', async (status) => {
+  vi.mocked(apiFetch).mockReset();
+  const url = 'https://github.com/org/repo/issues/4';
+  vi.mocked(apiFetch).mockImplementation(
+    async (path) =>
+      new Response(
+        JSON.stringify(
+          String(path).includes('/by-id/')
+            ? {
+                draft: {
+                  draftId: 'retained-id',
+                  title: 'Issue',
+                  bodyMarkdown: 'Details',
+                  targetRepo: 'org/repo',
+                  labels: [],
+                  status,
+                  githubIssueUrl: url,
+                  githubIssueNumber: 4,
+                },
+              }
+            : String(path).endsWith('/config')
+              ? { defaultRepo: '', repos: [] }
+              : { title: 'Issue', bodyMarkdown: 'Details' },
+        ),
+      ),
+  );
+  for (let mount = 0; mount < 2; mount++) {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => root.render(<CommunityIssueDraftCard block={block} messageId="original-message" />));
+    expect(container.textContent).toContain(status === 'published' ? 'Published to Community' : 'Publish cancelled');
+    if (status === 'published') expect(container.querySelector('a')?.href).toBe(url);
     expect(
-      isCommunityIssueDraftBlock({
-        ...draftBlock,
-        meta: { kind: 'callback_auth_failure' },
-      }),
+      vi
+        .mocked(apiFetch)
+        .mock.calls.some(([path, init]) => !String(path).endsWith('/report-preview') && init?.method === 'POST'),
     ).toBe(false);
-  });
-
-  it('returns false when meta is undefined', () => {
-    expect(isCommunityIssueDraftBlock({ ...draftBlock, meta: undefined })).toBe(false);
-  });
-});
-
-describe('CommunityIssueDraftCard', () => {
-  it('renders editable title from meta', () => {
-    const html = renderToStaticMarkup(<CommunityIssueDraftCard block={draftBlock} />);
-    expect(html).toContain('Bug: tool calls fail silently'); // proposedTitle in input value
-    expect(html).toContain('Publish to Community'); // header
-    expect(html).toContain('draft'); // badge
-  });
-
-  it('renders editable body from meta', () => {
-    const html = renderToStaticMarkup(<CommunityIssueDraftCard block={draftBlock} />);
-    expect(html).toContain('Tool calls return empty response');
-  });
-
-  it('renders proposed labels', () => {
-    const html = renderToStaticMarkup(<CommunityIssueDraftCard block={draftBlock} />);
-    expect(html).toContain('bug, ux');
-  });
-
-  it('renders submit and cancel buttons', () => {
-    const html = renderToStaticMarkup(<CommunityIssueDraftCard block={draftBlock} />);
-    expect(html).toContain('Submit to GitHub');
-    expect(html).toContain('Cancel');
-  });
-
-  it('renders repo input (fallback when config not yet loaded)', () => {
-    const html = renderToStaticMarkup(<CommunityIssueDraftCard block={draftBlock} />);
-    // On SSR, repos array is empty → renders text input with proposedRepo value
-    expect(html).toContain('clowder-ai/cat-cafe');
-    expect(html).toContain('Target Repository');
-  });
-});
-
-describe('RichBlocks routing to CommunityIssueDraftCard', () => {
-  it('routes community_issue_draft card to CommunityIssueDraftCard', () => {
-    const html = renderToStaticMarkup(<RichBlocks blocks={[draftBlock]} />);
-    // CommunityIssueDraftCard renders "Submit to GitHub" button — default CardBlock doesn't
-    expect(html).toContain('Submit to GitHub');
-    expect(html).toContain('draft'); // badge
-  });
-
-  it('does NOT route regular card blocks to CommunityIssueDraftCard', () => {
-    const regularCard = {
-      id: 'b_regular',
-      kind: 'card' as const,
-      v: 1 as const,
-      title: 'Just a card',
-      bodyMarkdown: 'Nothing special',
-    };
-    const html = renderToStaticMarkup(<RichBlocks blocks={[regularCard]} />);
-    expect(html).not.toContain('Submit to GitHub');
-    expect(html).toContain('Just a card');
-  });
+    await act(async () => root.unmount());
+  }
 });

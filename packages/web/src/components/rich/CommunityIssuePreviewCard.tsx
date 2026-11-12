@@ -11,31 +11,23 @@
  * Matches wireframe: docs/designs/F235-publish-to-community.html
  */
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { communityDraftSchema } from './community-issue-draft-schema';
 
 interface CommunityIssuePreviewCardProps {
   block?: RichCardBlock;
   messageId?: string;
   /** Direct draftId for inline rendering (e.g. from FrustrationIssueCard). */
   inlineDraftId?: string;
+  expectedRepo?: string;
+  unavailableFallback?: ReactNode;
   /** Called when the user cancels the draft — parent resets to pre-draft state. */
   onDraftCancelled?: () => void;
 }
 
 type PreviewState = 'loading' | 'editing' | 'publishing' | 'published' | 'cancelling' | 'cancelled' | 'error';
-
-interface DraftData {
-  draftId: string;
-  status: string;
-  title: string;
-  bodyMarkdown: string;
-  targetRepo: string;
-  labels: string[];
-  githubIssueNumber?: number;
-  githubIssueUrl?: string;
-}
 
 /**
  * Detect if a card block is a community issue preview card.
@@ -51,19 +43,34 @@ function extractDraftId(block: RichCardBlock): string | null {
   return (block.meta as { draftId?: string } | undefined)?.draftId ?? null;
 }
 
-export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancelled }: CommunityIssuePreviewCardProps) {
+export function CommunityIssuePreviewCard({
+  block,
+  inlineDraftId,
+  onDraftCancelled,
+  expectedRepo,
+  unavailableFallback,
+}: CommunityIssuePreviewCardProps) {
+  const formId = useId();
   const draftId = inlineDraftId ?? (block ? extractDraftId(block) : null);
   const [state, setState] = useState<PreviewState>('loading');
-  const [draft, setDraft] = useState<DraftData | null>(null);
+  const [draft, setDraft] = useState<import('zod').z.infer<typeof communityDraftSchema> | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [targetAccepted, setTargetAccepted] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Hydrate draft data on mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry explicitly reloads the same retained draft.
   useEffect(() => {
-    if (!draftId) return;
+    if (!draftId) {
+      setState('error');
+      setError('未找到草稿。');
+      return;
+    }
     let cancelled = false;
 
+    setState('loading');
     const hydrate = async () => {
       try {
         const res = await apiFetch(
@@ -72,7 +79,7 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
-        const d = data.draft as DraftData;
+        const d = communityDraftSchema.parse(data.draft);
         setDraft(d);
         setEditTitle(d.title);
         setEditBody(d.bodyMarkdown);
@@ -81,7 +88,10 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         else if (d.status === 'cancelled') setState('cancelled');
         else setState('editing');
       } catch {
-        if (!cancelled) setState('error');
+        if (!cancelled) {
+          setError('草稿暂不可用，请检查 GitHub 插件设置后重试。');
+          setState('error');
+        }
       }
     };
 
@@ -89,7 +99,7 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
     return () => {
       cancelled = true;
     };
-  }, [draftId]);
+  }, [draftId, retry]);
 
   const handlePublish = async () => {
     if (!draftId) return;
@@ -112,7 +122,9 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setDraft(data.draft);
+      const result = communityDraftSchema.parse(data.draft);
+      if (result.status !== 'published') throw new Error('尚未确认远端提交结果，请使用同一草稿重试核验。');
+      setDraft(result);
       setState('published');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Publish failed');
@@ -136,7 +148,7 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setDraft(data.draft);
+      setDraft(communityDraftSchema.parse(data.draft));
       setState('cancelled');
       onDraftCancelled?.();
     } catch (err) {
@@ -156,6 +168,19 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
       </div>
     );
   }
+
+  if (state === 'error')
+    return (
+      <div className="space-y-2">
+        <p role="alert" className="text-xs text-red-500">
+          {error}
+        </p>
+        {unavailableFallback}
+        <button type="button" onClick={() => setRetry((value) => value + 1)} className="text-xs text-sky-600">
+          重新加载草稿
+        </button>
+      </div>
+    );
 
   // ── Published (collapsed success) ───────────────────────────
   if (state === 'published' && draft) {
@@ -195,6 +220,10 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
 
   // ── Editing / Publishing / Error ────────────────────────────
   const isActionInProgress = state === 'publishing' || state === 'cancelling';
+  const differentTarget = Boolean(
+    draft && expectedRepo && draft.targetRepo.toLowerCase() !== expectedRepo.toLowerCase(),
+  );
+  const reconciling = draft?.status === 'publishing' || draft?.status === 'uncertain';
 
   return (
     <div className="rounded-lg border border-sky-300/40 bg-sky-50/10 p-3 text-sm">
@@ -206,23 +235,29 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
 
       {/* Editable title */}
       <div className="mb-2">
-        <label className="mb-1 block text-xs text-cafe-muted">Title</label>
+        <label htmlFor={`${formId}-title`} className="mb-1 block text-xs text-cafe-muted">
+          Title
+        </label>
         <input
+          id={`${formId}-title`}
           type="text"
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
-          disabled={isActionInProgress}
+          disabled={isActionInProgress || !draft || reconciling}
           className="w-full rounded border border-cafe/30 bg-cafe-surface px-2 py-1.5 text-xs text-cafe-text focus:border-sky-400 focus:outline-none disabled:opacity-50"
         />
       </div>
 
       {/* Editable body */}
       <div className="mb-2">
-        <label className="mb-1 block text-xs text-cafe-muted">Description (Markdown)</label>
+        <label htmlFor={`${formId}-body`} className="mb-1 block text-xs text-cafe-muted">
+          Description (Markdown)
+        </label>
         <textarea
+          id={`${formId}-body`}
           value={editBody}
           onChange={(e) => setEditBody(e.target.value)}
-          disabled={isActionInProgress}
+          disabled={isActionInProgress || !draft || reconciling}
           rows={6}
           className="w-full rounded border border-cafe/30 bg-cafe-surface px-2 py-1.5 text-xs text-cafe-text focus:border-sky-400 focus:outline-none disabled:opacity-50"
         />
@@ -240,12 +275,20 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         </span>
       </div>
 
+      {differentTarget && !targetAccepted && (
+        <p className="mb-2 text-xs text-cafe-muted">
+          已有草稿属于 {draft?.targetRepo}，与本次建议目标 {expectedRepo} 不同。
+          <button type="button" onClick={() => setTargetAccepted(true)} className="ml-2 underline">
+            确认使用草稿原仓库
+          </button>
+        </p>
+      )}
       {/* Actions */}
       <div className="flex gap-2">
         <button
           type="button"
           onClick={handlePublish}
-          disabled={isActionInProgress || !editTitle.trim()}
+          disabled={isActionInProgress || !draft || !editTitle.trim() || (differentTarget && !targetAccepted)}
           className="rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
         >
           {state === 'publishing' ? (
@@ -253,6 +296,8 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
               <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
               Publishing...
             </span>
+          ) : reconciling ? (
+            '重新核验提交结果'
           ) : (
             'Submit to GitHub'
           )}
@@ -260,7 +305,7 @@ export function CommunityIssuePreviewCard({ block, inlineDraftId, onDraftCancell
         <button
           type="button"
           onClick={handleCancel}
-          disabled={isActionInProgress}
+          disabled={isActionInProgress || !draft || reconciling}
           className="rounded border border-cafe/30 px-3 py-1.5 text-xs text-cafe-muted transition hover:bg-cafe-surface disabled:opacity-50"
         >
           {state === 'cancelling' ? 'Cancelling...' : 'Cancel'}
