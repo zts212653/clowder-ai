@@ -180,7 +180,7 @@ const PDL_SCHEMA = {
   search: { form: 1, id: 1, input: 1, on: 1, label: 1, note: 1, placeholder: 1, value: 1, when: 1, wide: 1 },
   section: { actions: 1, blocks: 1, from: 1, help: 1, id: 1, keep: 1, key: 1, label: 1, note: 1, open: 1, row: 1, rows: 1, title: 1, when: 1 },
   seg: { act: 1, args: 1, from: 1, options: 1, value: 1, variant: R('seg'), when: 1 },
-  select: { span: 1, act: 1, args: 1, change: 1, from: 1, id: 1, invalid: 1, label: 1, multi: 1, none: 1, options: 1, prefix: 1, value: 1, variant: R('select'), when: 1 },
+  select: { span: 1, act: 1, args: 1, change: 1, disabled: 1, from: 1, id: 1, invalid: 1, label: 1, multi: 1, none: 1, options: 1, prefix: 1, tip: 1, value: 1, variant: R('select'), when: 1 },
   send: { args: 1, disabled: 1, stop: 1, stopping: 1, tip: 1 },
   settings: { from: 1, plain: 1, row: 1, rows: 1, when: 1 },
   slot: { ctx: 1, slot: 1 },

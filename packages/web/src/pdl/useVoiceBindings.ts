@@ -20,6 +20,7 @@ import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
 import { API_URL } from '@/utils/api-client';
 import { request, write } from './owner-api';
+import { useServiceLogs } from './useServiceLogs';
 
 interface ShareIntent {
   callId: string;
@@ -643,6 +644,10 @@ export function useVoiceBindings(
         return false;
     }
   };
+  const serviceLogs = useServiceLogs(
+    services.items.filter((s) => s.installed).map((s) => s.id),
+    needed('serviceLogs'),
+  );
   const rawData = useMemo(
     () => ({
       threadId,
@@ -655,6 +660,7 @@ export function useVoiceBindings(
       vadState: vad.vadState,
       worktrees: workspace.worktrees.map(({ id, root }) => ({ id, root })),
       services,
+      serviceLogs,
       installPreviews,
       capture,
       saved,
@@ -670,6 +676,7 @@ export function useVoiceBindings(
       vad.vadState,
       workspace.worktrees,
       services,
+      serviceLogs,
       installPreviews,
       capture,
       saved,

@@ -58,7 +58,7 @@ body, [data-grid] > *, .chat > .stream { --g-w: min(100cqi - var(--g-pad) - max(
 .page-actions { display: flex; gap: var(--sp-s); align-items: center; }
 .back { gap: var(--sp-xs); flex: none; align-self: flex-start; margin-left: calc(-1 * var(--sp-xs)); }   /* 返回（引擎的，唯一一个）就是一个图标按钮（.btn-icon，样子在按钮里）：这里只管它在头里的位置；主题声明了名字时图标后面跟着去处 */
 .btn.back.btn-icon { width: max-content; min-width: var(--ctl-s); padding: 0 var(--sp-xs); }
-.back-l { white-space: nowrap; min-width: 0; max-width: 16em; overflow: clip; text-overflow: ellipsis; }
+.back-l { white-space: nowrap; min-width: 0; max-width: 16em; overflow: clip; text-overflow: ellipsis; font-weight: 600; color: var(--fg-strong); }   /* 去处的名字：加粗、强调色，一眼看出能回到哪 */
 .layer-exit { position: absolute; z-index: var(--z-raised); top: var(--page-gap); right: var(--gutter-panel); }
 .layer-exit ~ * .page-head { padding-right: calc(var(--ctl-m) + var(--sp-l)); }   /* 带 ✕ 的层：页头右边留出 ✕ 的位置，页头自己的操作不和它叠在一起 */
 .back-head { display: flex; align-items: center; }   /* 没有标题行的容器：引擎在顶上画一行只放返回的头 */
@@ -1007,7 +1007,8 @@ button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身
 .page:is(:has(> .frame.tall), :has(> .vw-widget[src].tall)) { display: flex; flex-direction: column; min-block-size: 100%; padding-block-end: var(--sp-l); }   /* 整页的插件 / 内置空间：框占满这一层剩下的高度 */
 .page > :is(.frame.tall, .vw-widget[src].tall) { flex: 1; }
 .cover-in:has(> .vw-page-full) { display: flex; flex-direction: column; position: relative; }   /* 铺满的页（page: full，比如猫猫星球）：整块都是它，不留边距、不留圆角、不超出窗口 */
-.cover-in:has(> .vw-page-full) > .back-head { position: absolute; z-index: var(--z-raised); top: var(--page-gap); left: var(--page-gap); }   /* 它没有标题行：返回（图标 + 名字）浮在左上角，不另占一行 */
+.cover-in:has(> .vw-page-full) > .back-head { position: absolute; z-index: var(--z-raised); top: var(--page-gap); left: var(--page-gap); }
+.cover-in:has(> .vw-page-full) > .back-head > .back { margin-left: 0; background: var(--surf-float); box-shadow: var(--shadow-float); }   /* 盖在别人画的页面上（框里的页面什么底色都有）：返回自己带浮层的面，不是一条横带 */   /* 它没有标题行：返回（图标 + 名字）浮在左上角，不另占一行 */
 .cover-in > .vw-page-full.page:has(> .vw-widget[src]) { flex: 1; min-block-size: 0; padding: 0; }
 .vw-page-full > .vw-widget[src] { border-radius: 0; }
 .page > .vw-split > .vw-split-r > * { max-inline-size: var(--g-w); }   /* 阅读宽度只限详情栏里的内容（靠左），不限分栏本身 */

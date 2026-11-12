@@ -2351,7 +2351,7 @@
   }
   globalThis.projectEvaluation = projectEvaluation;
   function projectVoice(raw = chatDataSnapshot.project.voice) {
-    const { session, settings, services, capture, saved, call, transcript, share, error } = raw;
+    const { session, settings, services, serviceLogs, capture, saved, call, transcript, share, error } = raw;
     const vad = { vadState: raw.vadState };
     const state = { current: CS.voice };
     const threadId = chatDataSnapshot.chat.threadId;
@@ -2430,8 +2430,7 @@
           error: !!s.error,
           errorText: s.error,
           detailKey: 'svc-' + s.id,
-          model: s.selectedModel,
-          endpoint: s.endpoint,
+          logs: (serviceLogs.data?.[s.id] ?? []).join('\n'),
         })),
         terms: settings.customTerms.map((t, i) => ({
           i,

@@ -53,6 +53,7 @@ export function ownerData() {
       'ledger',
       'axes',
       'services',
+      'serviceLogs',
     ]),
     recall: { page: null, events: [], loading: false, error: false, moreLoading: false, moreError: false },
     brakes: { events: [], loading: false, error: false, hasMore: false },
@@ -93,6 +94,7 @@ export function ownerData() {
       session: null,
       settings: { customTerms: [], language: 'auto', customPrompt: '' },
       services: { load: 'loading', items: [] },
+      serviceLogs: { data: null, loading: false, error: null },
       vadState: 'idle',
       capture: {
         status: { running: false },

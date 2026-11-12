@@ -1524,14 +1524,13 @@ views:
                         change: wsFlag
                         args: {g: "@g"}
                         value: "@value"
+                        disabled: "@locked"
+                        tip:
+                          of: "@locked"
+                          map: {"true": t:workbench.flagLocked.true, _: ""}
                         options:
                           - from: "@options"
-                            item:
-                              v: "@value"
-                              label: "@value"
-                              why:
-                                of: "@locked"
-                                map: {"true": t:workbench.flagLocked.true, "false": "", _: "@locked"}
+                            item: {v: "@value", label: "@value"}
                 row: record.row
           - type: section
             when: $.status

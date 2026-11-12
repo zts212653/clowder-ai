@@ -235,7 +235,7 @@ function pvControl(c, sc, root) {
     case 'select': {
       const id = P(c.id), o = c.options ? pvItems(c.options, sc, root) : pvList(c.from, sc, root), v = P(c.value);
       if (c.variant === 'member') return memberPick({ id: id, pool: o, value: v, none: c.none ? pvText(c.none, sc, root) : null, multi: !!c.multi, act: c.act, args: c.args ? pvArgsObj(c.args, sc, root) : null, change: c.change, data: data, label: c.label ? pvText(c.label, sc, root) : '' });   /* 选成员：组件库唯一的成员选择器 */
-      return sel(id, o, v, { span: P(c.span), change: c.change, data: data, invalid: !!P(c.invalid), label: c.label ? pvText(c.label, sc, root) : '', prefix: c.prefix ? pvText(c.prefix, sc, root) : '' });   /* 下拉只有一个样子（不按所在的设置行 / 表单 / 筛选换样子） */
+      return sel(id, o, v, { span: P(c.span), change: c.change, data: data, invalid: !!P(c.invalid), disabled: !!P(c.disabled), tip: c.tip ? pvText(c.tip, sc, root) : '', label: c.label ? pvText(c.label, sc, root) : '', prefix: c.prefix ? pvText(c.prefix, sc, root) : '' });   /* 下拉只有一个样子（不按所在的设置行 / 表单 / 筛选换样子） */
     }
     case 'search': {
       if (!c.form && !c.wide && !c.note && !c.label && !c.on) return search(c.id, c.placeholder, P(c.value), c.input);

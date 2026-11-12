@@ -1246,17 +1246,11 @@ views:
                         sep: ""
                     - type: disclosure
                       key: "@detailKey"
-                      title: t:voice.techDetails
+                      title: t:memory.runLog
+                      when: "@installed"
                       blocks:
-                        - type: text
-                          variant: para
-                          parts:
-                            - t:voice.options.endpoint
-                            - {text: "@model", mono: true, when: "@model"}
-                            - {text: t:voice.options.text, mono: true, when: "!@model"}
-                            - {br: true}
-                            - t:voice.options.endpointPrefix
-                            - {text: "@endpoint", mono: true}
+                        - {type: pre, rows: 12, text: "@logs", when: "@logs"}
+                        - {type: empty, text: t:memory.noLogs, when: "!@logs"}
       - type: section
         title: t:voice.glossary
         note: "2"
@@ -1311,14 +1305,14 @@ views:
                     title: t:voice.builtinDict
                     count: $.dictCount
                     blocks:
-                      - type: text
-                        parts:
-                          - parts: $.dict
-                            sep: ""
-                            each:
-                              parts:
-                                - parts: ["@a", " → ", "@b"]
-                                  sep: ""
+                      - type: list
+                        id: voiceDict
+                        from: $.dict
+                        item:
+                          title:
+                            t: settingsUi.voice.pair
+                            args: ["@a", "@b"]
+                        row: {layout: line, title: "@title"}
       - type: section
         title: t:voice.recognition
         blocks:
