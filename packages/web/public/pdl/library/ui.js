@@ -6,7 +6,7 @@
 function fmtParts(ts) { const tz = WHO_DATA.me().timeZone, o = {}; new Intl.DateTimeFormat('en-US', { timeZone: tz || undefined, year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(ts).forEach(function (p) { o[p.type] = p.value; }); return o; }
 function fmtDayNo(o) { return Date.UTC(+o.year, +o.month - 1, +o.day) / 864e5; }
 const FORMATS = {
-  ago: function (ts) { const s = Math.max(0, (ioNow() - ts) / 1000); return s < 60 ? tc('common.justNow') : s < 3600 ? tc('format.minutes', Math.round(s / 60)) : s < 86400 ? tc('format.hours', Math.round(s / 3600)) : tc('format.days', Math.round(s / 86400)); },
+  ago: function (ts) { if (typeof ts === 'string') ts = /^\d+$/.test(ts) ? Number(ts) : Date.parse(ts); if (!isFinite(ts)) return ''; const s = Math.max(0, (ioNow() - ts) / 1000);   /* 时间可能是毫秒数、数字串或 ISO 串；读不出来就不写 */ return s < 60 ? tc('common.justNow') : s < 3600 ? tc('format.minutes', Math.round(s / 60)) : s < 86400 ? tc('format.hours', Math.round(s / 3600)) : tc('format.days', Math.round(s / 86400)); },
   hm: function (ts) { const o = fmtParts(ts); return o.hour + ':' + o.minute; },
   stamp: function (ts) { const o = fmtParts(ts); return ('0' + o.month).slice(-2) + '/' + ('0' + o.day).slice(-2) + ' ' + o.hour + ':' + o.minute; },
   day: function (ts) { const o = fmtParts(ts); return fmtDayNo(o) === fmtDayNo(fmtParts(ioNow())) ? tc('format.today') : tc('format.date', +o.month, +o.day); },

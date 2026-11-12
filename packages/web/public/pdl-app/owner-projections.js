@@ -2718,8 +2718,20 @@
   }
   globalThis.projectMemory = projectMemory;
   function projectMemoryExplore(raw = chatDataSnapshot.project.memory.explore) {
-    const { catalog, feed, index, maintenance, healthReport, toolUsage, curation, flags, ledger, axes, services } =
-        raw.reads,
+    const {
+        catalog,
+        feed,
+        index,
+        maintenance,
+        healthReport,
+        toolUsage,
+        curation,
+        flags,
+        ledger,
+        axes,
+        services,
+        serviceLogs,
+      } = raw.reads,
       {
         recall,
         brakes,
@@ -3041,7 +3053,10 @@
               canConfigure: !busy && installed && !s.enabled,
             };
           }),
-        tech: index.data ? JSON.stringify({ index: index.data, rebuild }, null, 2) : '',
+        logs: Object.entries(serviceLogs.data ?? {})
+          .filter(([, lines]) => lines.length)
+          .map(([id, lines]) => '── ' + id + ' ──\n' + lines.join('\n'))
+          .join('\n\n'),
         warm: stats?.passageVectorsSupported && stats.passagesCount > stats.passageVectorsCount,
         passages: stats?.passageVectorsCount,
         vectors: stats?.vectorsCount,
@@ -3065,11 +3080,13 @@
                 name: 'F200_CONSUMPTION_RERANK',
                 states: ['off', 'shadow', 'on'],
                 value: flags.data.f200.consumptionRerank,
+                g: 0,
+                selId: 'flag-0',
+                locked: true,
                 options: ['off', 'shadow', 'on'].map((value) => ({ value, locked: true })),
               },
             ]
           : [],
-        cfg: JSON.stringify({ curation: curation.data, recall: flags.data }, null, 2),
       };
     }
     return result;

@@ -1449,10 +1449,11 @@ views:
                         label: t:memory.serviceActions
                       when: "@canConfigure"
               - type: disclosure
-                key: mem-tech
-                title: t:voice.techDetails
+                key: mem-logs
+                title: t:memory.runLog
                 blocks:
-                  - {type: pre, text: $.status.tech}
+                  - {type: pre, text: $.status.logs, when: $.status.logs}
+                  - {type: empty, text: t:memory.noLogs, when: "!$.status.logs"}
               - type: notice
                 tone: warn
                 when: $.status.warm
@@ -1481,12 +1482,12 @@ views:
                 v: {of: $.status.evidence.vectors_count, fmt: num}
               - l: t:memoryOwners.metric.relations
                 v: {of: $.status.evidence.edges_count, fmt: num}
-              - {l: t:memoryOwners.metric.model, v: $.status.evidence.embedding_model}
               - l: t:memoryOwners.metric.rebuilt
                 v:
                   t: memoryOwners.metricValue.rebuilt
                   args:
                     - {of: $.status.evidence.last_rebuild_at, fmt: ago}
+                when: $.status.evidence.last_rebuild_at
           - type: section
             when: $.status
             title: t:wsOps.featureFlags
@@ -1505,7 +1506,6 @@ views:
                           "false": "@name"
                           _: "@curator"
                       tip: "@id"
-                  sub: {parts: "@states", sep: " → "}
                   trail:
                     - text:
                         of: "@pending"
@@ -1519,24 +1519,20 @@ views:
                         map: {"true": warn, "false": "", _: ""}
                       when: "@restartRequired"
                     - control:
-                        type: seg
-                        act: wsFlag
+                        type: select
+                        id: "@selId"
+                        change: wsFlag
+                        args: {g: "@g"}
                         value: "@value"
                         options:
                           - from: "@options"
                             item:
                               v: "@value"
                               label: "@value"
-                              g: "@group"
                               why:
                                 of: "@locked"
                                 map: {"true": t:workbench.flagLocked.true, "false": "", _: "@locked"}
                 row: record.row
-          - type: section
-            when: $.status
-            title: t:memory.configRef
-            blocks:
-              - {type: pre, text: $.status.cfg}
           - type: section
             when: $.status
             title: t:memory.health

@@ -221,6 +221,34 @@ export function useMemoryExploreBindings(
     needed('reads.axes'),
   );
   const services = useMemoryRead<{ services: HomeServiceState[] }>('/api/services', undefined, servicesNeeded);
+  // the memory services' log tails (运行日志), read when the status page projects them
+  const logsNeeded = needed('reads.serviceLogs');
+  const [serviceLogs, setServiceLogs] = useState<{
+    data: Record<string, string[]> | null;
+    loading: boolean;
+    error: unknown;
+  }>({ data: null, loading: false, error: null });
+  useEffect(() => {
+    if (!logsNeeded || !services.data) return;
+    const abort = new AbortController();
+    const ids = services.data.services.filter((s) => s.features.includes('memory-semantic-search')).map((s) => s.id);
+    setServiceLogs((current) => ({ ...current, loading: true }));
+    Promise.all(
+      ids.map((id) =>
+        request<{ lines: string[] }>(`/api/services/${encodeURIComponent(id)}/logs`, { signal: abort.signal }).then(
+          (r) => [id, r.lines] as const,
+        ),
+      ),
+    ).then(
+      (rows) => {
+        if (!abort.signal.aborted) setServiceLogs({ data: Object.fromEntries(rows), loading: false, error: null });
+      },
+      (error) => {
+        if (!abort.signal.aborted) setServiceLogs({ data: null, loading: false, error });
+      },
+    );
+    return () => abort.abort();
+  }, [logsNeeded, services.data]);
   const brakes = useBrakes(ui.brakeRange === 'all' ? 0 : Number(ui.brakeRange), needed('brakes'));
   const brakeRows = groupHumanBrakes(brakes.events);
   const filteredBrakes = brakeRows.filter((row) => ui.brakeWord === 'all' || row.words.includes(ui.brakeWord));
@@ -653,6 +681,7 @@ export function useMemoryExploreBindings(
           ledger,
           axes,
           services,
+          serviceLogs,
         }).map(([name, { data, loading, error }]) => [name, { data, loading, error }]),
       ),
       recall: {

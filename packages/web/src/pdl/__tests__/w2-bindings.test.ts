@@ -736,9 +736,6 @@ it('retains the real curation preference on a failed write and only changes it a
   expect(projectOwner('memoryExplore', result.current, state, undefined, undefined).status?.flags).toMatchObject([
     { id: 'F200_CONSUMPTION_RERANK', value: 'shadow' },
   ]);
-  expect(projectOwner('memoryExplore', result.current, state, undefined, undefined).status?.cfg).toContain(
-    '"consumptionRerank": "shadow"',
-  );
   await act(async () => {
     await expect(result.current.action('memoryCuration', { v: false as unknown as string })).rejects.toThrow(
       'preference_unavailable',

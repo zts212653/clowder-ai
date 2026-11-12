@@ -1861,7 +1861,6 @@
     "warmupPending": "待建索引",
     "continueWarmup": "继续补全",
     "flagsHelp": "三档：先在影子模式里观察，再开启。",
-    "configRef": "配置参考",
     "health": "健康度",
     "evaluate": "评估",
     "closeSearch": "关闭搜索",
@@ -1872,7 +1871,9 @@
     "configReminders": "{0} 项配置提醒",
     "meetingsMissing": "会议记忆还没接进来。",
     "allCats": "全部猫",
-    "rebuilding": "重建中…"
+    "rebuilding": "重建中…",
+    "runLog": "运行日志",
+    "noLogs": "还没有日志"
   },
   "wsExec": {
     "title": "执行",
