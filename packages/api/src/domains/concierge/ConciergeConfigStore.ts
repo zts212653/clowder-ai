@@ -29,6 +29,15 @@ import {
 import { ConciergeKeys } from './concierge-keys.js';
 import { assertWatcherConfigRevision, updateRedisWatcherConfig } from './watcher/watcher-config-store.js';
 
+/** The owner record holds runtime state only; fields an older record still carries are not read. */
+const RUNTIME_KEYS = ['watcher', 'ballPosition', 'appAssistEnabled', 'householdReadsAllowed'] as const;
+function runtimeConfig(saved: Partial<ConciergeConfig> = {}): ConciergeConfig {
+  return {
+    ...CONCIERGE_CONFIG_DEFAULTS,
+    ...Object.fromEntries(RUNTIME_KEYS.filter((key) => saved[key] !== undefined).map((key) => [key, saved[key]])),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Port interface
 // ---------------------------------------------------------------------------
@@ -106,7 +115,7 @@ export class RedisConciergeConfigStore implements IConciergeConfigStore {
 
   async get(userId: string): Promise<ConciergeConfig> {
     const raw = await this.redis.get(ConciergeKeys.config(userId));
-    return raw ? { appAssistEnabled: false, ...JSON.parse(raw) } : { ...CONCIERGE_CONFIG_DEFAULTS };
+    return runtimeConfig(raw ? JSON.parse(raw) : undefined);
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {
@@ -171,8 +180,7 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
   }
 
   async get(userId: string): Promise<ConciergeConfig> {
-    const entry = this.store.get(userId);
-    return entry ? { appAssistEnabled: false, ...entry } : { ...CONCIERGE_CONFIG_DEFAULTS };
+    return runtimeConfig(this.store.get(userId));
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {

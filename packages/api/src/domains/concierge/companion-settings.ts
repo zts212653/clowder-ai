@@ -17,7 +17,7 @@ export interface CompanionSettings {
 
 export type ReadCompanionSettings = () => Promise<CompanionSettings>;
 
-/** A member field declares no default; until one is chosen the companion is answered by the roster default. */
+/** A member field declares no default; until a current member is chosen the roster default answers. */
 function defaultMember(): string {
   const ids = catRegistry.getAllIds();
   if (ids.includes('gemini35' as never)) return 'gemini35';
@@ -34,7 +34,7 @@ export async function readCompanionSettings(
 ): Promise<CompanionSettings> {
   const values = (await configuration.readActionInput(COMPANION_PLUGIN_ID)) as Record<string, string>;
   return {
-    dutyCatProfileId: values.dutyCatProfileId ?? defaultMember(),
+    dutyCatProfileId: catRegistry.has(values.dutyCatProfileId) ? values.dutyCatProfileId : defaultMember(),
     displayName: line(values.displayName, 50),
     personaTone: line(values.personaTone, 200),
     proactivePolicy: values.proactivePolicy as CompanionSettings['proactivePolicy'],

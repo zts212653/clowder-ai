@@ -79,10 +79,14 @@ test('modern settings read takes the manifest defaults without rewriting the sav
   const read = await f.modern.request({ kind: 'settings.read' });
   assert.equal(read.kind, 'settings');
   if (read.kind !== 'settings' || read.status !== 'available') assert.fail('modern settings must be available');
-  assert.equal(read.values.dutyCatProfileId, 'retired-selected-profile');
+  assert.equal(
+    read.values.dutyCatProfileId,
+    (await f.companion.read()).dutyCatProfileId,
+    'a retired member reads as the roster default',
+  );
+  assert.notEqual(read.values.dutyCatProfileId, 'retired-selected-profile');
   assert.equal(read.values.behaviorEnabled, true);
   assert.equal(read.values.ballSize, 72);
-  assert.equal(read.selectedCompanionStatus, 'unavailable');
   assert.deepEqual(f.saved(), { dutyCatProfileId: 'retired-selected-profile' });
   assert.equal(f.mediaPreparations(), 0);
   assert.deepEqual(await f.legacy.request({ kind: 'settings.read' }), { kind: 'error', code: 'invalid_request' });

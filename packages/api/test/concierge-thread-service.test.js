@@ -206,7 +206,6 @@ describe('ConciergeThreadService', () => {
     const settings = await companionConfigurationFixture().read();
     assert.equal(settings.dutyCatProfileId, 'gemini35', 'an unchosen member falls back to gemini35');
     assert.equal(settings.skin, 'xianxian-codex', 'default skin should be 宪宪');
-    assert.equal(settings.enabled, true);
     assert.equal(settings.ballSize, 72);
   });
 

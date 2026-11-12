@@ -81,15 +81,17 @@ async function fixture(t: TestContext) {
   };
 }
 
-test('prepare rejects a saved retired choice before native allocation, with or without the expected choice', async (t) => {
+test('a retired saved choice is never prepared: it reads as the roster default, and the old expected choice is refused', async (t) => {
   const f = await fixture(t);
   f.companion.set({ dutyCatProfileId: 'retired-choice' });
   const modern = await f.request('retired-choice');
   assert.equal(modern.statusCode, 409);
   assert.equal(modern.json().code, 'live_duty_unavailable');
-  assert.equal((await f.request()).statusCode, 409, 'the saved choice is the only selection; no substitute member');
   assert.deepEqual(f.allocations, []);
-  assert.equal((await f.companion.read()).dutyCatProfileId, 'retired-choice');
+  const fallback = (await f.companion.read()).dutyCatProfileId;
+  assert.notEqual(fallback, 'retired-choice');
+  assert.equal((await f.request()).statusCode, 503, 'the roster default reaches the existing prepare seam');
+  assert.deepEqual(f.allocations, [fallback]);
 });
 
 test('modern prepare admits only the saved choice it read, and a changed choice never silently selects another cat', async (t) => {

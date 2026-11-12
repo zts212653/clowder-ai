@@ -11,25 +11,26 @@ const redisFixture = ownedRedisFixture('f317-preserved-selection');
 test('companion settings are official.companion plugin configuration with manifest defaults', async () => {
   const companion = companionConfigurationFixture();
   const defaults = await companion.read();
-  assert.equal(defaults.enabled, true);
   assert.equal(defaults.displayName, '猫猫球');
   assert.equal(defaults.proactivePolicy, 'quiet-badge');
   assert.equal(defaults.behaviorEnabled, true);
   assert.equal(defaults.skin, 'xianxian-codex');
   assert.equal(defaults.ballSize, 72);
   assert.ok(catRegistry.has(defaults.dutyCatProfileId), 'an unchosen member falls back to a roster member');
-  companion.set({ dutyCatProfileId: 'opus', behaviorEnabled: false, ballSize: 96, enabled: false });
+  companion.set({ dutyCatProfileId: 'opus', behaviorEnabled: false, ballSize: 96 });
   const saved = await companion.read();
   assert.equal(saved.dutyCatProfileId, 'opus');
   assert.equal(saved.behaviorEnabled, false);
   assert.equal(saved.ballSize, 96);
-  assert.equal(saved.enabled, false);
 });
 
-test('a retired saved selection is read as saved; reading never rewrites the configuration', async () => {
+test('a saved member that is no longer a member reads as the roster default; reading never rewrites the configuration', async () => {
   const companion = companionConfigurationFixture({ dutyCatProfileId: 'removed-companion-profile' });
   assert.equal(catRegistry.has('removed-companion-profile'), false);
-  assert.equal((await companion.read()).dutyCatProfileId, 'removed-companion-profile');
+  assert.equal(
+    (await companion.read()).dutyCatProfileId,
+    (await companionConfigurationFixture().read()).dutyCatProfileId,
+  );
   assert.deepEqual(readPluginConfig(companion.projectRoot, 'official.companion'), {
     dutyCatProfileId: 'removed-companion-profile',
   });

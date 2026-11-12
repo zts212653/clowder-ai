@@ -101,12 +101,3 @@ test('only a real occupied owner slot reports the retryable active-call conflict
   assert.equal(sessions.get(call.id, 'default-user'), call);
   assert.equal(call.status().state, 'preparing', 'a rejected second call does not disturb the existing call');
 });
-
-test('a missing selected identity is rejected before allocating a companion thread', async (t) => {
-  const { app, request, threadReads } = await fixture('missing-selected-cat');
-  t.after(() => app.close());
-  const response = await request();
-  assert.equal(response.statusCode, 409);
-  assert.equal(response.json().code, 'live_duty_unavailable');
-  assert.equal(threadReads(), 0);
-});

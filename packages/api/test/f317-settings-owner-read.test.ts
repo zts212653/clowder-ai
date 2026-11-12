@@ -39,7 +39,7 @@ test('settings view reads the saved plugin selection and refuses header-only or 
   const sessions = new LiveCompanionSessions();
   t.after(() => sessions.close());
   let revocations = 0;
-  await config.put('settings-owner', { ...CONCIERGE_CONFIG_DEFAULTS });
+  await config.put('settings-owner', { ...CONCIERGE_CONFIG_DEFAULTS, enabled: false, muted: false } as never);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
     companionSettings,
@@ -61,9 +61,10 @@ test('settings view reads the saved plugin selection and refuses header-only or 
   const url = '/api/concierge/config?view=settings';
   const read = await app.inject({ url, headers });
   assert.equal(read.statusCode, 200);
-  assert.equal(read.json().config.dutyCatProfileId, 'retired-selected-profile');
+  assert.equal(read.json().config.dutyCatProfileId, (await companion.read()).dutyCatProfileId);
+  assert.notEqual(read.json().config.dutyCatProfileId, 'retired-selected-profile', 'a retired member is not offered');
   assert.equal(read.json().config.ballSize, 72, 'manifest default');
-  assert.equal(read.json().selectedCompanionStatus, 'unavailable');
+  assert.equal(read.json().config.enabled, undefined, 'an older owner record leaks no settings fields');
   assert.equal(read.headers['cache-control'], 'no-store');
   for (const view of ['settings', 'native']) {
     const endpoint = `/api/concierge/config?view=${view}`;
