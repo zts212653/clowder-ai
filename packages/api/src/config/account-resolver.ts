@@ -40,6 +40,7 @@ export interface RuntimeProviderProfile {
   displayName?: string;
   codex?: CodexManagedAccount;
   claude?: AccountConfig['claude'];
+  agy?: AccountConfig['agy'];
   authType: 'oauth' | 'api_key';
   kind?: ProviderProfileKind;
   /** Fresh-install CLI-owned identity; its active provider is selected by the CLI config. */
@@ -390,6 +391,7 @@ export function accountToRuntimeProfile(
         }
       : {}),
     ...(account.claude ? { claude: account.claude, envVars: claudeTokenEnvironment(credential) } : {}),
+    ...(account.agy ? { agy: account.agy } : {}),
     ...(builtinClient ? { client: builtinClient } : {}),
     ...(builtinClient === 'openai' && accountOwnerRoot ? { accountOwnerRoot: resolve(accountOwnerRoot) } : {}),
     ...(account.clientId !== undefined ? { persistedClientId: account.clientId } : {}),

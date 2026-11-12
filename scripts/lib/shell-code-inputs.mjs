@@ -226,17 +226,26 @@ export function codeParameters(inline, inputs) {
 }
 
 /** xargs owns stdin-to-argv transport; its child's actual template slots own the evidence. */
-export function launcherInputs(name, consumed, inputs, stage) {
+export function launcherInputs(name, consumed, inputs, stage, options = []) {
   if (name !== 'xargs') return { ...inputs, redirections: [] };
   const marker = `${SUBSTITUTION}:stdin\0`;
   const replacement = consumed.replacement;
-  const literal = inputs.stdin?.source?.replace(/\n$/, '');
+  const literal = inputs.stdin?.source;
+  const line = literal?.replace(/\n$/, '');
+  // Default xargs splits unquoted blanks/newlines, not one whole shell word.
+  // Replacement/null modes have different boundaries. Unknown quoting retains
+  // the producer as generated argv evidence instead of inventing a filename.
+  let words;
+  if (literal !== undefined) {
+    if (options.includes('-0') || options.includes('--null')) {
+      words = literal.split('\0');
+      if (words.at(-1) === '') words.pop();
+    } else if (!/["'\\\0]/.test(literal)) words = literal.split(/[ \t\n]+/).filter(Boolean);
+  }
   const args =
     replacement === undefined
-      ? [...consumed.rest, literal ?? marker]
-      : consumed.rest.map((word) =>
-          replacement ? word.replaceAll(replacement, literal ?? marker) : (literal ?? marker),
-        );
+      ? [...consumed.rest, ...(words ?? [marker])]
+      : consumed.rest.map((word) => (replacement ? word.replaceAll(replacement, line ?? marker) : (line ?? marker)));
   const sources = inputs.stdin?.evidence ?? [stage];
   return {
     ...inputs,

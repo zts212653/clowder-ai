@@ -206,6 +206,7 @@ for (const [width, language] of [
       fixtureForApi,
       viewport: { width, height: 900 },
       language,
+      olderResponse: width === 1440,
     }),
   );
 }

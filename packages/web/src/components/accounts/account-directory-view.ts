@@ -6,6 +6,7 @@ import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
 
 export function accountProvider(account: ProfileItem, t = accountsCopy.zh): string {
+  if (account.agy) return 'Google · AGY';
   if (account.authType === 'oauth') return googleCloudLabel(account) ?? builtinClientLabel(account.clientId);
   if (!account.baseUrl)
     return account.clientId ? builtinClientLabel(account.clientId, account.authType) : t.customProvider;
@@ -28,7 +29,7 @@ export function accountProvider(account: ProfileItem, t = accountsCopy.zh): stri
   }
 }
 export function accountMembers(account: ProfileItem, cats: CatData[], selection?: AccountSelection): AccountMember[] {
-  if (['openai', 'anthropic'].includes(account.clientId ?? '') && selection)
+  if (['openai', 'anthropic', 'google'].includes(account.clientId ?? '') && selection)
     return selection.members.filter((m) => m.accountRef === account.id);
   return cats
     .filter(
@@ -48,7 +49,8 @@ export function accountMembers(account: ProfileItem, cats: CatData[], selection?
     }));
 }
 export function accountIsSelected(account: ProfileItem, cats: CatData[], selection?: AccountSelection): boolean {
-  if (['openai', 'anthropic'].includes(account.clientId ?? '')) return selection?.accountRef === account.id;
+  if (['openai', 'anthropic', 'google'].includes(account.clientId ?? '') && selection)
+    return selection.accountRef === account.id;
   const local = cats.filter(
     (cat) => cat.id !== 'gpt-pro' && cat.cli && cat.clientId === account.clientId && cat.roster?.available !== false,
   );
@@ -58,10 +60,26 @@ export function accountIsSelected(account: ProfileItem, cats: CatData[], selecti
   );
 }
 export function accountLoginReady(account: ProfileItem) {
+  if (account.agy) return account.agyLoginStatus === 'ready' || account.agyLoginStatus === 'refreshable';
   if (account.claude) return account.claudeTokenStatus === 'saved';
   return account.codex ? account.codex.status === 'ready' : account.codexLoginStatus === 'ready';
 }
 export function accountStatus(account: ProfileItem, t = accountsCopy.zh, language: 'zh' | 'en' = 'zh') {
+  if (account.agy)
+    return {
+      label: accountLoginReady(account)
+        ? language === 'zh'
+          ? '登录文件已就绪'
+          : 'Login file ready'
+        : account.agyLoginStatus === 'unreadable'
+          ? t.unreadable
+          : t.notLoggedIn,
+      detail:
+        language === 'zh'
+          ? '由 AGY 在调用时验证身份并自动续期'
+          : 'AGY verifies identity and refreshes credentials at launch',
+      ready: accountLoginReady(account),
+    };
   if (account.claude)
     return {
       label:

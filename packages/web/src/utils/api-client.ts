@@ -62,6 +62,8 @@ export function reportApiConnectionFailure(error: unknown): boolean {
 export interface ApiFetchOptions {
   /** Longer bounded wait for mutations that prepare plugin packages. GET deadlines stay unchanged. */
   mutationTimeoutMs?: number;
+  /** Suppress the global connection-failure notice for a non-critical mutation. */
+  notifyFailure?: boolean;
   /**
    * A mutation happened while this exact GET may already be active. Attach the
    * caller to one bounded trailing generation instead of the possibly stale one.
@@ -443,7 +445,7 @@ export async function apiFetch(path: string, init?: RequestInit, options?: ApiFe
   if (requestMethod(init) === 'GET') {
     return coordinatedGet(path, init, options?.afterCurrentGet === true, options?.ifNoneMatch);
   }
-  return performApiFetch(path, init, options?.mutationTimeoutMs);
+  return performApiFetch(path, init, options?.mutationTimeoutMs, options?.notifyFailure);
 }
 
 /** Best-effort timing delivery recovers stale sessions without showing diagnostic-only failures to the user. */

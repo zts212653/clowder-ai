@@ -5,6 +5,7 @@ export async function requestPluginHttp(
   entry: { pluginId: string; instanceId: string; generation: string },
   input: unknown,
   signal?: AbortSignal,
+  options?: { notifyFailure?: boolean },
 ) {
   if (
     !input ||
@@ -34,7 +35,7 @@ export async function requestPluginHttp(
       ...(mutation && 'body' in input ? { body: JSON.stringify(input.body) } : {}),
       signal,
     },
-    mutation ? { mutationTimeoutMs: 185_000 } : undefined,
+    mutation ? { mutationTimeoutMs: 185_000, ...options } : options,
   );
   const text = await response.text();
   if (text.length > 24_000_000) throw new Error('插件 HTTP 响应超过大小限制');

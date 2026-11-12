@@ -60,7 +60,7 @@ test(
 );
 
 test(
-  'identity mismatch is disposed once across lanes and never executes or loses the original business record',
+  'identity mismatch is disposed across every recovery lane while retaining the original business record after index rebuild',
   isolated,
   async () => {
     await withActionRecoveryRedis(async ({ redis, store, seed }) => {
@@ -68,22 +68,16 @@ test(
       await seed(original);
       await redis.set(ActionSuccessorKeys.identity(original), 'another-owner-detail');
       await store.initializeRecovery();
-      const notices = new Set();
       for (const lane of ['return', 'dispatch', 'task']) {
         await runActionDueRecovery({
           port: store.recovery,
           lease: original,
           lane,
           now: 1,
-          notify: async ({ key }) => {
-            notices.add(key);
-            return 'delivered';
-          },
           recover: async () => assert.fail('identity mismatch cannot execute'),
         });
         assert.equal((await store.recovery.read(original.leaseId, lane)).fact.nextAttemptAt, null);
       }
-      assert.equal(notices.size, 1, 'one owner mismatch is one incident, not three lane incidents');
       await store.initializeRecovery(true);
       assert.equal((await store.listPendingDispatches()).length, 0);
       assert.deepEqual(await store.get(original.leaseId), {

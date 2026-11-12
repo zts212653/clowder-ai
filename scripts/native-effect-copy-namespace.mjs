@@ -1,4 +1,5 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
+import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
 import { isExactNonRecursiveCopy } from './native-effect-media-classifier.mjs';
 import { segmentCommandText } from './native-effect-segment-locations.mjs';
 import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
@@ -21,47 +22,57 @@ const TOPOLOGY_PRESERVING_WRITES = new Set([
 const FIXED_SHELL_OPERATIONS = new Set([':', 'false', 'true']);
 
 /** Whether the physical copy-target observations remain valid before each unit. */
-export function copyNamespaceStability(units, initial = true) {
+export function copyNamespaceStability(units, initial = true, programContexts = []) {
   let stable = initial;
-  return units.map(({ segment }) => {
+  return units.map(({ segment }, index) => {
     const before = stable;
-    stable &&= segmentPreservesCopyNamespace(segment);
+    stable &&= segmentPreservesCopyNamespace(segment, programContexts[index] ?? false);
     return before;
   });
 }
 
 /** Filesystem topology and command environment are separate observations. */
 export function programNamespaceStability(units, initial = true) {
-  let stable = initial;
+  let stable = nativeBuiltinContext(initial);
   return units.map(({ segment }) => {
     const before = stable;
-    stable &&= isShellBinding(segment)
-      ? isLocalProgramBinding(segment)
-      : !segment.trim() || (classifyShellSegment(segment) === 'read' && segmentPreservesCopyNamespace(segment));
+    stable &&=
+      !leadingShellControl(segment) &&
+      (isLocalProgramBinding(segment) ||
+        (!isShellBinding(segment) &&
+          (!segment.trim() ||
+            (classifyShellSegment(segment, { builtinContext: stable }) === 'read' &&
+              segmentPreservesCopyNamespace(segment, stable)))));
     return before;
   });
 }
 
 /** Fold every executed segment, including a substitution body, into one stability fact. */
-export function shellTextPreservesCopyNamespace(raw) {
+export function shellTextPreservesCopyNamespace(raw, builtinContext = false) {
   const parts = splitShellExecutionSegmentsWithSeparators(raw);
   if (parts.length === 0) return raw.trim() === '';
-  return parts.every(({ text }) => segmentPreservesCopyNamespace(segmentCommandText(text)));
+  const contexts = programNamespaceStability(
+    parts.map(({ text }) => ({ segment: text })),
+    builtinContext,
+  );
+  return parts.every(({ text }, index) => segmentPreservesCopyNamespace(segmentCommandText(text), contexts[index]));
 }
 
-export function segmentPreservesCopyNamespace(segment) {
+export function segmentPreservesCopyNamespace(segment, builtinContext = false) {
   if (!segment.trim()) return true;
+  if (builtinContext && isLocalProgramBinding(segment)) return true;
   if (isShellBinding(segment)) {
     const parsed = shellInvocation(segment);
     return parsed.complete && !parsed.redirections.length && parsed.words.every((word) => word.literal);
   }
-  const reader = executedInvocations(segment);
+  const reader = executedInvocations(segment, { builtinContext });
   if (!reader.complete || reader.unresolvedEvidence?.length) return false;
   const calls = reader.pipelines.flat();
   return calls.length > 0 && calls.every(invocationPreservesCopyNamespace);
 }
 
 function invocationPreservesCopyNamespace(call) {
+  if (call.lookupOnly) return true;
   if (
     !call.name ||
     call.generatedCode ||

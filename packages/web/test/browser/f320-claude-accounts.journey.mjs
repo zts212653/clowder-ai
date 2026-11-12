@@ -99,7 +99,11 @@ export async function runClaudeAccountJourney({ preview, browser }) {
     await select(native);
     assert.equal((await preview.reply('back to default', 'opus')).accountRef, 'claude');
     const nativeReplies = await (await page.request.get(`${preview.apiUrl}/api/messages`)).json();
-    assert.equal(nativeReplies.messages.at(-1).metadata.usage.executionAccount.accountRef, 'claude');
+    const defaultReply = nativeReplies.messages.find(
+      (message) => message.catId === 'opus' && message.content === 'back to default',
+    );
+    assert.ok(defaultReply, 'the exact default-account Claude reply must be retained');
+    assert.equal(defaultReply.metadata.executionAccount.accountRef, 'claude');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(() => {

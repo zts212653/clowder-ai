@@ -5,6 +5,8 @@ import type { AccountSelection, AccountsResponse, ProfileItem } from '../hub-acc
 
 export function useAccountDirectory() {
   const [data, setData] = useState<AccountsResponse>();
+  const [agySelection, setAgySelection] = useState<AccountSelection>();
+  const agySequence = useRef(0);
   const [claudeSelection, setClaudeSelection] = useState<AccountSelection>();
   const [claudeMemberError, setClaudeMemberError] = useState('');
   const claudeSequence = useRef(0);
@@ -33,6 +35,16 @@ export function useAccountDirectory() {
       }
     };
     void fetchMembers();
+    const agyRead = ++agySequence.current;
+    void apiFetch('/api/accounts/agy/members', undefined, { afterCurrentGet: true })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('selection_unavailable');
+        const body = (await response.json()) as { selection?: AccountSelection };
+        if (agyRead === agySequence.current) setAgySelection(body.selection);
+      })
+      .catch(() => {
+        if (agyRead === agySequence.current) setAgySelection(undefined);
+      });
     const claudeRead = ++claudeSequence.current;
     void apiFetch('/api/accounts/claude/members', undefined, { afterCurrentGet: true })
       .then(async (response) => {
@@ -77,6 +89,11 @@ export function useAccountDirectory() {
     setLoading(false);
   }, []);
   const applyBinding = useCallback((next: AccountSelection, client = 'openai') => {
+    if (client === 'google') {
+      agySequence.current++;
+      setAgySelection(next);
+      return;
+    }
     if (client === 'anthropic') {
       claudeSequence.current++;
       setClaudeSelection(next);
@@ -132,6 +149,7 @@ export function useAccountDirectory() {
   }, [refresh]);
   return {
     data,
+    agySelection,
     claudeSelection,
     claudeMemberError,
     selection,

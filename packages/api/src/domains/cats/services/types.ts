@@ -1153,6 +1153,8 @@ export interface AgentServiceOptions {
   accountEnv?: Record<string, string>;
   /** Selected token must win after alternate auth and user env merging. */
   claudeTokenAccount?: boolean;
+  /** F320: frozen AGY personal OAuth selection; credentials remain CLI-owned. */
+  agyAccount?: { readonly credentialHome: string; readonly storage: 'cli_file' };
   /** F320: immutable selected account launch snapshot; independent of displayName/token refresh. */
   codexAccountLaunch?: CodexAccountLaunchDescriptor;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */

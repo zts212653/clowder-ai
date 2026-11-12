@@ -1,4 +1,5 @@
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { AttentionListRow } from './attention-clusters';
 
 interface MeasuredRow {
@@ -56,7 +57,9 @@ export function useWholeSidebarSignalText(
       setFits(required > 0 && slot.getBoundingClientRect().width >= required);
     };
     measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    // ResizeObserver runs before paint. Commit the new visibility in that same
+    // delivery, so words measured at the old width cannot be painted clipped.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => flushSync(measure));
     observer?.observe(slot);
     observer?.observe(content);
     return () => observer?.disconnect();

@@ -131,7 +131,20 @@ export function useNativeOnboarding(
         const journeyId = saved?.journeyId ?? newJourneyId();
         const currentCats = roster.cats;
         rosterCats.current = currentCats;
-        const partners = recommendNativePartners(discovered.runtimes, templates.templates, currentCats, journeyId).map(
+        // A valid saved Desktop binding takes precedence over the first discovery recommendation.
+        const savedDesktop = saved?.partners.find(
+          (partner) =>
+            partner.form &&
+            partner.runtime?.dshDesktop &&
+            partner.runtime.acp?.command === partner.form.acpCommand &&
+            discovered.runtimes.some(
+              (runtime) => runtime.dshDesktop && runtime.installed && runtime.acp?.command === partner.form.acpCommand,
+            ),
+        );
+        const runtimes = savedDesktop
+          ? [{ ...savedDesktop.runtime, installed: true }, ...discovered.runtimes]
+          : discovered.runtimes;
+        const partners = recommendNativePartners(runtimes, templates.templates, currentCats, journeyId).map(
           (partner) => {
             const previous = saved?.partners.find(
               (p) =>

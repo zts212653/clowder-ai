@@ -5,6 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { codeToolsCopy } from './code-tools.shell-copy';
@@ -118,7 +119,11 @@ export function ChangesPanelV2({
         </div>
         {error && !pullRequestTarget && (
           <div className="px-3 py-1.5 text-micro text-conn-red-text">
-            {error === 'fetch_failed' ? copy.fetchFailed : copy.networkError}
+            {isGitWorktreeRequired(error)
+              ? copy.gitWorktreeRequired
+              : error === 'fetch_failed'
+                ? copy.fetchFailed
+                : copy.networkError}
           </div>
         )}
         {data?.changedFiles.map((f) => {
