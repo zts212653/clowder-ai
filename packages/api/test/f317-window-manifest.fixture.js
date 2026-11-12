@@ -18,7 +18,6 @@ export function desktopWindowManifest(body = windowHtml, bridgeVersion = '1.0.0'
         id: 'body',
         name: 'Body',
         resources: [],
-        capabilities: ['windows.create'],
         contributions: [{ type: 'desktop-window', id: 'body' }],
       },
     ],

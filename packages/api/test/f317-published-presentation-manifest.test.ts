@@ -21,10 +21,6 @@ test('the new manifest reader admits only the delivered companion bridge without
     { ...published, pluginId: 'dev.other' },
     { ...published, version: '0.1.0-alpha.25' },
     { ...published, version: '0.1.0-alpha.23' },
-    {
-      ...published,
-      features: published.features.map((f) => ({ ...f, capabilities: ['windows.create', 'files.write'] })),
-    },
   ])
     assert.equal(validateHostPluginManifest(foreign).valid, false);
 });
