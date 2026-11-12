@@ -45,6 +45,16 @@ try {
   await open();
   assert.equal(await panel.getByLabel('描述').inputValue(), '输入后立即关闭，不手动保存');
 
+  await panel.getByText('分析与投递设置', { exact: true }).click();
+  await panel.getByLabel('相关项目目录', { exact: true }).fill(fixture.ledger.dataRoot);
+  await panel.getByLabel('分析成员', { exact: true }).selectOption('configured');
+  await close();
+  await page.locator('dialog').waitFor({ state: 'detached' });
+  await open();
+  await panel.getByText('分析与投递设置', { exact: true }).click();
+  assert.equal(await panel.getByLabel('相关项目目录', { exact: true }).inputValue(), fixture.ledger.dataRoot);
+  assert.equal(await panel.getByLabel('分析成员', { exact: true }).inputValue(), 'configured');
+
   const png = await page.evaluate(async () => {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
@@ -136,6 +146,7 @@ try {
         archiveSha256: fixture.ledger.archiveSha256,
         checks: [
           'immediate X save and resume',
+          'analysis member and project scope persist when only settings change',
           'real clipboard PNG paste',
           'local file selection',
           'refresh recovery with both images',
