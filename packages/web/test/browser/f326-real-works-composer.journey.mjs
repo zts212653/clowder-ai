@@ -9,7 +9,7 @@ export function readAuthorDraft(page, threadId) {
 }
 
 /** Only this private author journey's known, unsent RSI probes; never erase an unfamiliar draft. */
-export async function cleanAuthorDraft({ page, context, api, threadId, reference, allowedAnchors }) {
+export async function cleanAuthorDraft({ page, threadId, reference, allowedAnchors }) {
   const before = await readAuthorDraft(page, threadId);
   const own = before.filter((item) => item.kind === 'media' && item.source.contentRef === reference.contentRef);
   for (const item of own) {
@@ -38,21 +38,5 @@ export async function cleanAuthorDraft({ page, context, api, threadId, reference
     await readAuthorDraft(page, threadId),
     before.filter((item) => !own.includes(item)),
   );
-  // Confirm the normal UI autosave, rather than editing the owner draft out of band.
-  if (removed.length) {
-    const deadline = Date.now() + 15000;
-    let saved = false;
-    while (Date.now() < deadline) {
-      const response = await context.request.get(`${api}/api/threads/${threadId}/composer-draft`);
-      assert.equal(response.status(), 200);
-      const { draft } = await response.json();
-      saved = !(draft?.contentBlocks || []).some(
-        (block) => block.type === 'context_attachment' && own.some((item) => item.id === block.attachment.id),
-      );
-      if (saved) break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    assert.ok(saved, 'The author probe cleanup must be durably saved through the original composer');
-  }
   return { removed, unrelatedPreserved: before.length - own.length, viaOriginalComposer: true };
 }

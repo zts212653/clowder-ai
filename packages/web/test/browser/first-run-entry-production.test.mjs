@@ -218,11 +218,6 @@ async function fixture(shell, scenario) {
       }
       case '/api/routing/preview':
         return reply({ targetCats: [cats[0].id], reason: { kind: 'recent_replier' } });
-      case '/api/threads/default/composer-draft': {
-        // Autosave can race a reload; preserve the real HTTP 409 revision fence.
-        const response = await entryApi.request(url.pathname, { method, body: req.postData() });
-        return reply(response.json(), response.statusCode);
-      }
     }
     if (url.pathname.startsWith('/api/concierge/home/clients/')) {
       assert.equal(method, 'DELETE');

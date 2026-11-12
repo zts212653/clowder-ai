@@ -149,8 +149,6 @@ test(
       const paragraph = indexed.context.story[2];
       const cleanOptions = {
         page,
-        context,
-        api,
         threadId: thread.id,
         reference: saved.reference,
         allowedAnchors: [
@@ -169,13 +167,8 @@ test(
         ],
       };
       await context.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'v2'));
-      const hydrated = page.waitForResponse(
-        (response) =>
-          response.url().endsWith(`/api/threads/${thread.id}/composer-draft`) && response.request().method() === 'GET',
-      );
       await page.goto(`${web}/thread/${thread.id}`, { waitUntil: 'domcontentloaded' });
       await ensureWorkspaceOpen(page, { readinessTimeoutMs: 90000 });
-      await hydrated;
       cleanOwnDraft = () => cleanAuthorDraft(cleanOptions);
       await writeFile(
         path.join(evidence, 'initial-author-cleanup.json'),

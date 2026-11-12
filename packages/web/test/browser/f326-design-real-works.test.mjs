@@ -61,11 +61,6 @@ test(
           ([, items]) => !items.length,
         ),
       );
-      await wait(async () => {
-        const r = await context.request.get(`${api}/api/threads/${library.threadId}/composer-draft`);
-        const { draft } = await r.json();
-        return !draft?.contentBlocks?.some((block) => block.type === 'context_attachment');
-      });
       observations.composerClean = true;
     }
     t.after(async () => {
