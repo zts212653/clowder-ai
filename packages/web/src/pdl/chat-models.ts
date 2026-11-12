@@ -75,7 +75,6 @@ export interface ChatData {
   pluginTargets?: import('@/hooks/usePluginMentionTargets').PluginTargets;
   live?: Record<string, Record<string, string>>;
   preparingImages: boolean;
-  unrestoredImages: number;
   search?: MessageSearchResponse;
   historyEntries: string[];
   questions: Record<string, QuestionBinding>;
@@ -832,7 +831,6 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     !!data.readonly ||
     data.preparingImages ||
     data.uploadStatus === 'uploading' ||
-    data.unrestoredImages > 0 ||
     (data.threadId === 'default' && !!input?.admission && (!input.admission.ready || !!input.admission.optionsLocked));
   const reply = () =>
     data.reply
@@ -1226,7 +1224,6 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
             ctx: ctx(),
             att: attachments(),
             chips: ctx(),
-            lost: data.unrestoredImages > 0,
             whisper: ui.whisper
               ? {
                   none: !ui.whisperTo.length,
@@ -1277,13 +1274,11 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               !data.executions.some((e) => e.threadId === data.threadId)),
           reason: data.readonly
             ? 'readonly'
-            : data.unrestoredImages
-              ? 'lost'
-              : data.preparingImages || data.uploadStatus === 'uploading'
-                ? 'uploading'
-                : ui.whisper && !ui.whisperTo.length
-                  ? 'whisper'
-                  : 'send',
+            : data.preparingImages || data.uploadStatus === 'uploading'
+              ? 'uploading'
+              : ui.whisper && !ui.whisperTo.length
+                ? 'whisper'
+                : 'send',
           home: data.threadId === 'default',
         },
       };

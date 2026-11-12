@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 export function readAuthorDraft(page, threadId) {
   return page.evaluate((id) => {
-    const drafts = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
+    const drafts = JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
     return drafts.find(([key]) => key === id)?.[1] || [];
   }, threadId);
 }

@@ -1,7 +1,8 @@
 import type { ArtifactReviewCommand, ArtifactReviewView, GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { appliedResult, initial, REVIEW_ID } from '@/components/content-review/__tests__/review-command.fixture';
-import type { ComposerDraftInsert, OwnerComposerDraft } from '@/stores/chat-types';
+import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
+import type { ComposerDraftInsert } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { ReviewOwnerBinding, useReviewBindings } from '../useReviewBindings';
 import { fixtureUi } from './chat-fixture';
@@ -489,89 +490,29 @@ it.each([
     hook = renderHook(() => useReviewProjection('viewing-thread', ui));
   await act(() => hook.result.current.action('worksScope', { v: 'global' }));
   await act(() => hook.result.current.action('workOpen', { id: hook.result.current.project().works.items[0].id }));
-  let draft: OwnerComposerDraft = {
-    version: 1,
-    ownerUserId: 'owner',
-    threadId: 'source-thread',
-    revision: 7,
-    text: 'Keep this unsent draft',
-    replyTo: 'quoted',
-    updatedAt: 1,
-    contentBlocks: [
-      { type: 'image', url: '/uploads/keep.png' },
-      {
-        type: 'context_attachment',
-        attachment: {
-          id: 'context',
-          v: 1,
-          kind: 'quote',
-          text: 'Keep quote',
-          source: { kind: 'message', threadId: 'source-thread', messageId: 'quoted' },
-        },
-      },
-    ],
-  };
   const original = vi.mocked(apiFetch).getMockImplementation()!;
-  const calls: { path: string; method: string; body?: Record<string, unknown> }[] = [];
+  const paths: string[] = [];
   vi.mocked(apiFetch).mockImplementation(async (path, init, options) => {
-    const method = init?.method || 'GET';
-    calls.push({ path: String(path), method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
-    if (String(path) !== '/api/threads/source-thread/composer-draft') return original(path, init, options);
-    if (method === 'PUT') {
-      const body = JSON.parse(String(init!.body));
-      expect(body.expectedRevision).toBe(7);
-      draft = { ...draft, revision: 8, text: body.text, replyTo: body.replyTo, contentBlocks: body.contentBlocks };
-      return response({ draft });
-    }
-    return response({ draft, revision: draft.revision });
+    paths.push(String(path));
+    return original(path, init, options);
   });
   const receipt = (await act(() => hook.result.current.action('cafeWorkSrc', {}))) as {
     threadId: string;
     mid: string;
     catId: string;
-    insert: ComposerDraftInsert;
+    insert?: ComposerDraftInsert;
   };
   expect(receipt).toMatchObject({ threadId: 'source-thread', mid: mid || '', catId: 'codex-astra' });
-  expect(receipt.insert).toMatchObject({
+  expect(receipt.insert).toEqual({
     threadId: 'source-thread',
-    authoritative: true,
-    serverRevision: 8,
-    text: 'Keep this unsent draft',
-    imageUrls: ['/uploads/keep.png'],
-    replyToId: 'quoted',
+    text: '',
+    contextAttachments: [
+      { id: expect.any(String), v: 1, kind: 'work', workId: 'content-one', version: 3, title: 'image.png' },
+    ],
   });
-  expect(receipt.insert.contextAttachments).toEqual([
-    {
-      id: 'context',
-      v: 1,
-      kind: 'quote',
-      text: 'Keep quote',
-      source: { kind: 'message', threadId: 'source-thread', messageId: 'quoted' },
-    },
-    { id: expect.any(String), v: 1, kind: 'work', workId: 'content-one', version: 3, title: 'image.png' },
-  ]);
+  syncContextAttachmentDraftToStorage('source-thread', receipt.insert!.contextAttachments!);
   const second = (await act(() => hook.result.current.action('cafeWorkSrc', {}))) as typeof receipt;
-  expect(second.insert.contextAttachments).toEqual(receipt.insert.contextAttachments);
-  expect(calls.map(({ path, method }) => [path, method])).toEqual([
-    ['/api/threads/source-thread/composer-draft', 'GET'],
-    ['/api/threads/source-thread/composer-draft', 'PUT'],
-    ['/api/threads/source-thread/composer-draft', 'GET'],
-  ]);
-});
-
-it('keeps an unacknowledged work draft write rejected at the existing owner revision boundary', async () => {
-  const ui = fixtureUi(),
-    hook = renderHook(() => useReviewProjection('thread-one', ui));
-  await act(() => hook.result.current.action('workOpen', { id: hook.result.current.project().works.items[0].id }));
-  const original = vi.mocked(apiFetch).getMockImplementation()!;
-  vi.mocked(apiFetch).mockImplementation(async (path, init, options) => {
-    if (String(path) === '/api/threads/thread-one/composer-draft')
-      return init?.method === 'PUT'
-        ? response({ code: 'DRAFT_REVISION_MISMATCH', actualRevision: 1 }, 409)
-        : response({ draft: null, revision: 0 });
-    return original(path, init, options);
-  });
-  await act(async () => {
-    await expect(hook.result.current.action('cafeWorkSrc', {})).rejects.toThrow('请求失败 (409)');
-  });
+  expect(second.insert).toBeUndefined();
+  expect(paths.filter((path) => path.includes('composer-draft'))).toEqual([]);
+  syncContextAttachmentDraftToStorage('source-thread', []);
 });

@@ -6,7 +6,6 @@ import { type RoutingConfirmation, useSendMessage } from '@/hooks/useSendMessage
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
-import type { ChatInputDraftSnapshot } from '../ChatInput';
 import {
   getThreadDraft,
   hasPendingThreadDraft,
@@ -16,6 +15,7 @@ import {
   threadImageDrafts,
 } from '../thread-drafts';
 import {
+  type ChatInputDraftSnapshot,
   createFirstMessageAdmissionController,
   type FirstMessageAdmissionPhase,
   type FirstMessagePayload,
@@ -33,11 +33,7 @@ import {
   subscribeNewConversationIntentSaveState,
 } from './new-conversation-intent-store';
 import type { SessionImportIntent } from './session-import-admission';
-import {
-  clearAcceptedAdmission,
-  clearAcceptedComposerDraft,
-  useNewConversationAdmissionSend,
-} from './use-new-conversation-admission-send';
+import { useNewConversationAdmissionSend } from './use-new-conversation-admission-send';
 import { useNewConversationImport } from './useNewConversationImport';
 
 const DRAFT_THREAD_ID = 'default';
@@ -149,11 +145,9 @@ export function useNewConversationAdmission(
         return;
       }
       if (hydrated.intent.messageAccepted && hydrated.intent.createdThreadId) {
-        const cleared = await clearAcceptedAdmission(hydrated.ownerUserId, hydrated.intent);
-        if (cleared) {
-          clearDefaultDraft();
-          setThreadHasDraft(DRAFT_THREAD_ID, false);
-        }
+        await clearNewConversationIntent(hydrated.ownerUserId);
+        clearDefaultDraft();
+        setThreadHasDraft(DRAFT_THREAD_ID, false);
         void invalidateSidebarProjection();
         onNavigate(hydrated.intent.createdThreadId);
         return;
@@ -212,10 +206,6 @@ export function useNewConversationAdmission(
   const complete = useCallback(async () => {
     const ownerUserId = ownerRef.current;
     if (!ownerUserId) throw new Error('owner unavailable');
-    const current = intentRef.current;
-    if (!current || !(await clearAcceptedComposerDraft(current))) {
-      throw new Error('accepted composer draft cleanup failed');
-    }
     await clearNewConversationIntent(ownerUserId);
     clearDefaultDraft();
     draftRef.current = EMPTY_DRAFT;
@@ -273,13 +263,10 @@ export function useNewConversationAdmission(
     intentRef,
     draftRef,
     saveSnapshot: save,
-    persistIntent,
     submit: controller.send,
     setPhasePreparing: () => setPhase('creating'),
     setPrepareFailed: () => setPhase('create_failed'),
     setPreparationCancelled: () => setPhase('idle'),
-    setDraftRecovered: () => setPhase('draft_recovered'),
-    setDraftRecoveryBlocked: () => setPhase('draft_recovery_blocked'),
     setLocalSaveFailed,
   });
 

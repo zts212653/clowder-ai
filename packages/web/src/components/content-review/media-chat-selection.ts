@@ -8,7 +8,7 @@ import {
   MediaContextAttachmentSchema,
   reviewedMediaTypeSchema,
 } from '@cat-cafe/shared';
-import { COMPOSER_RECALL_PENDING_COPY, COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
+import { COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
 import { projectScreeningComposerConflict } from '../project-screening-composer-group';
 
 /**
@@ -56,9 +56,7 @@ export type MediaSelectionRefusal =
    */
   | 'too_large'
   /** The shared message schema would reject the result, so it is refused here instead of failing at send. */
-  | 'invalid'
-  /** The input has not yet taken the answer to a recall waiting for it; a place added now would be taken as saved. */
-  | 'recall_pending';
+  | 'invalid';
 
 export type AddMediaSelection =
   | { readonly kind: 'added'; readonly attachment: MediaContextAttachment; readonly selectionId: string }
@@ -75,7 +73,6 @@ export const MEDIA_SELECTION_REFUSAL_COPY = {
   too_long: '这处说明太长了，请精简后再放进对话。',
   too_large: COMPOSER_TOO_LARGE_COPY,
   invalid: '这处选区暂时无法放进对话。',
-  recall_pending: COMPOSER_RECALL_PENDING_COPY,
   no_thread: '请先打开一个对话，再把选区放进去。',
 } as const satisfies Record<MediaSelectionRefusal | 'no_thread', string>;
 

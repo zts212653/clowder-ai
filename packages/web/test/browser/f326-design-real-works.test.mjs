@@ -57,7 +57,7 @@ test(
           .click();
       }
       await page.waitForFunction(() =>
-        JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]').every(
+        JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]').every(
           ([, items]) => !items.length,
         ),
       );

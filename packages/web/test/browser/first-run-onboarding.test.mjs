@@ -229,7 +229,7 @@ test('recommends all three installed tools, skips the demo and creates ordinary 
     }
     assert.deepEqual(members[2].acp, { command: 'node', startupArgs: ['dsh.js', '--profile', 'acp'] });
     assert.equal(writes.find((write) => write.path === '/api/threads').body.bootcampState, undefined);
-    const drafts = await page.evaluate(() => JSON.parse(sessionStorage.getItem('cat-cafe:thread-drafts')));
+    const drafts = await page.evaluate(() => JSON.parse(localStorage.getItem('cat-cafe:thread-drafts')));
     assert.equal(drafts.length, 1);
     assert.equal(drafts[0][0], 'thread-1');
     const lines = drafts[0][1].split('\n');

@@ -420,7 +420,6 @@ async function boot(
     richRender: vi.fn(richRenderer ?? (async () => '<math><mi>x</mi></math>')),
     terminal: w.testTerminal,
     navResize: { width: () => 240, min: 160, max: () => 400 },
-    mounted: vi.fn(),
     attach: vi.fn(),
     live: () => '',
   };

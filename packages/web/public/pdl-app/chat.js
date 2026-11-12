@@ -1320,7 +1320,6 @@ window.clowderChat = {
       },
     });
     onRender(function () {
-      chatPort.mounted(document.getElementById('chat-input'));
       if (CS.pendingMid) {
         const mid = CS.pendingMid;
         delete CS.pendingMid;

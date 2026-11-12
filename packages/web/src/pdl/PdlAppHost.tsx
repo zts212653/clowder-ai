@@ -28,14 +28,13 @@ import {
   createQuoteContextAttachment,
   createThreadContextAttachment,
 } from '@/components/chat-context-reference';
-import { flushComposerDraft } from '@/components/composer-draft-flush-registry';
+import { applyContextAttachmentDelta } from '@/components/composer-queue';
 import {
   addMediaSelection,
   addMediaWork,
   MEDIA_SELECTION_REFUSAL_COPY,
   type MediaChatTarget,
 } from '@/components/content-review/media-chat-selection';
-import { downloadDraftImages } from '@/components/durable-composer-draft-helpers';
 import { uploadAvatarAsset, uploadRefAudioAsset } from '@/components/hub-cat-editor.client';
 import { initialState } from '@/components/hub-cat-editor.model';
 import {
@@ -66,14 +65,19 @@ import { projectDisplayName } from '@/components/ThreadSidebar/thread-utils';
 import { useHubSocket } from '@/components/thread-chat/hub-socket-context';
 import { ThreadChatRuntimeProvider, useThreadChatRuntime } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import {
+  getContextAttachmentDraft,
+  getThreadDraft,
   hasPendingThreadDraft,
   subscribeContextAttachmentDrafts,
   subscribeThreadDrafts,
+  syncContextAttachmentDraftToStorage,
+  syncDraftToStorage,
+  syncReplyDraftToStorage,
   threadImageDrafts,
+  threadReplyDrafts,
 } from '@/components/thread-drafts';
 import { useCloudBindingRecovery } from '@/components/useCloudBindingRecovery';
 import { useCloudReply } from '@/components/useCloudReply';
-import { useDurableComposerDraft } from '@/components/useDurableComposerDraft';
 import { reconcileThreadWithServer } from '@/hooks/queue-reconciliation';
 import { cancelProjectedExecution, useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { type CatData, refreshCatsNow, useCatData } from '@/hooks/useCatData';
@@ -190,6 +194,19 @@ function subscribeLocation(changed: () => void) {
 const browserLocation = () => window.location.pathname + window.location.search + window.location.hash;
 type PendingThreadJump = { threadId: string; mid: string; catId?: string };
 
+/** Message images as files again, for a retry or a recalled message going back into the input. */
+async function downloadImages(urls: readonly string[]): Promise<File[]> {
+  return Promise.all(
+    urls.slice(0, 5).map(async (url, index) => {
+      const response = await apiFetch(url);
+      if (!response.ok) throw new Error('原图片未完整读取，请重试');
+      const blob = await response.blob();
+      const ext = url.split('.').pop() ?? 'png';
+      return new File([blob], `recalled-${Date.now()}-${index}.${ext}`, { type: blob.type || `image/${ext}` });
+    }),
+  );
+}
+
 function subscribeDraftOwner(onChange: () => void): () => void {
   const stopText = subscribeThreadDrafts(onChange),
     stopContext = subscribeContextAttachmentDrafts(onChange);
@@ -287,7 +304,7 @@ function ChatBinding({
     subscribeDraftOwner,
     () =>
       store.threads
-        .filter((t) => hasPendingThreadDraft(t.id))
+        .filter((t) => t.id !== threadId && hasPendingThreadDraft(t.id))
         .map((t) => t.id)
         .join('\u0000'),
     () => '',
@@ -355,13 +372,16 @@ function ChatBinding({
   );
   useActiveExecutionProjection(threadId, socketConnected, need('chat.executions'));
   const pluginTargets = usePluginTargets(need('chat.pluginTargets'));
-  const [input, writeInput] = useState('');
+  // One draft per conversation, kept in browser storage (thread-drafts): read when it opens, written as it changes.
+  const drafting = exportMids === undefined;
+  const [input, writeInput] = useState(() => (drafting ? getThreadDraft(threadId) : ''));
   const [images, setImages] = useState<File[]>(() => threadImageDrafts.get(threadId) ?? []);
-  const [contexts, setContexts] = useState<ContextAttachment[]>([]);
+  const [contexts, setContexts] = useState<ContextAttachment[]>(() =>
+    drafting ? [...getContextAttachmentDraft(threadId)] : [],
+  );
   const [preparingImages, setPreparingImages] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const ui = useRef<ChatUiState>({
-    draft: { 'chat-input': '' },
+    draft: { 'chat-input': input },
     target: '',
     navHidden: false,
     viewCat: null,
@@ -387,17 +407,16 @@ function ChatBinding({
     writeInput(text);
     if (window.clowderChat) window.clowderChat.emit('composer:changed', undefined);
   }, []);
-  const durable = useRef<ReturnType<typeof useDurableComposerDraft>>();
-  const [unrestoredImages, setUnrestoredImages] = useState(0);
   const [conversation, setConversation] = useState(threadId);
   if (conversation !== threadId) {
+    const text = drafting ? getThreadDraft(threadId) : '';
     setConversation(threadId);
-    writeInput('');
+    writeInput(text);
     setImages(threadImageDrafts.get(threadId) ?? []);
-    setContexts([]);
+    setContexts(drafting ? [...getContextAttachmentDraft(threadId)] : []);
     setContextQuery('');
     Object.assign(ui.current, {
-      draft: { 'chat-input': '' },
+      draft: { 'chat-input': text },
       target: '',
       viewCat: null,
       reply: null,
@@ -417,6 +436,52 @@ function ChatBinding({
       for (const oldest of [...threadImageDrafts.keys()].slice(0, -5)) threadImageDrafts.delete(oldest);
     } else threadImageDrafts.delete(threadId);
   }, [threadId, images]);
+  const reply = store.replyToMessage;
+  useEffect(() => {
+    if (!drafting) return;
+    syncDraftToStorage(threadId, input);
+    syncContextAttachmentDraftToStorage(threadId, contexts);
+    syncReplyDraftToStorage(threadId, reply);
+  }, [drafting, threadId, input, contexts, reply]);
+  // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
+  const pendingInsert = useChatStore((s) => s.pendingChatInsert);
+  useEffect(() => {
+    if (pendingInsert?.threadId !== threadId) return;
+    const state = useChatStore.getState();
+    state.setPendingChatInsert(null);
+    if (pendingInsert.text)
+      setInput((previous) =>
+        previous ? `${previous}${previous.endsWith('\n') ? '' : '\n'}${pendingInsert.text}` : pendingInsert.text,
+      );
+    if (pendingInsert.contextAttachments || pendingInsert.removeContextAttachmentIds)
+      setContexts((all) =>
+        applyContextAttachmentDelta(
+          all,
+          pendingInsert.contextAttachments ?? [],
+          new Set(pendingInsert.removeContextAttachmentIds),
+        ),
+      );
+    if (pendingInsert.replyToId) {
+      const parent = state.messages.find((m) => m.id === pendingInsert.replyToId);
+      state.setReplyTo({
+        id: pendingInsert.replyToId,
+        content: parent?.content ?? '(原消息未加载)',
+        senderCatId: parent?.catId ?? null,
+        threadId,
+      });
+    }
+    if (pendingInsert.imageUrls?.length) {
+      setPreparingImages(true);
+      downloadImages(pendingInsert.imageUrls)
+        .then((files) => setImages((all) => [...all, ...files].slice(0, 5)))
+        .catch((error: Error) =>
+          useToastStore
+            .getState()
+            .addToast({ type: 'error', title: '图片未放回输入框', message: error.message, duration: 6000 }),
+        )
+        .finally(() => setPreparingImages(false));
+    }
+  }, [pendingInsert, threadId, setInput]);
   // The thread list marks a conversation with a draft when you leave it — typing never touches the list.
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
   const leaving = useRef(false);
@@ -613,7 +678,6 @@ function ChatBinding({
       activeRuns,
       pluginTargets,
       preparingImages,
-      unrestoredImages: unrestoredImages,
       historyEntries: inputHistory.entries,
       readonly: exportMids !== undefined || connection.isReadonly,
       updateRequired: connection.updateRequired,
@@ -655,7 +719,6 @@ function ChatBinding({
       activeRuns,
       pluginTargets,
       preparingImages,
-      unrestoredImages,
       inputHistory.entries,
       exportMids,
       connection.isReadonly,
@@ -710,8 +773,12 @@ function ChatBinding({
   const admissionRef = useRef<NewConversationAdmission | null>(null);
 
   useLayoutEffect(() => {
-    useChatStore.getState().setCurrentThread(threadId);
-  }, [threadId]);
+    const state = useChatStore.getState(),
+      kept = threadReplyDrafts.get(threadId);
+    state.setCurrentThread(threadId);
+    // Opening a conversation clears the quoted reply; its draft's reply comes back.
+    if (drafting && kept) state.setReplyTo(kept);
+  }, [drafting, threadId]);
   useEffect(() => {
     initSidebarWidth();
   }, []);
@@ -811,7 +878,6 @@ function ChatBinding({
       await replyOutput.preference.load();
       return;
     }
-    const workDraft = name === 'cafeWorkSrc' ? await flushComposerDraft(threadId) : null;
     const handled = await project.current?.action(name, args, element);
     if (handled && !['workReviewDiscuss', 'cafeWorkSrc'].includes(name)) return handled;
     const state = useChatStore.getState();
@@ -1023,13 +1089,7 @@ function ChatBinding({
         if (threadId === 'default' && !admission?.ready) throw new Error('对话尚未就绪');
         if (!input.trim() && !images.length && !contexts.length) return;
         if (input.trim()) inputHistory.addEntry(input);
-        const snapshot = {
-          text: input,
-          images: [...images],
-          contextAttachments: [...contexts],
-          replyTo: state.replyToMessage,
-        };
-        const settle = durable.current!.beginAdmission(snapshot);
+        const snapshot = { text: input, images, contexts, reply: state.replyToMessage };
         const pending =
           threadId === 'default' && admission
             ? admission.send({
@@ -1047,17 +1107,22 @@ function ChatBinding({
                 state.replyToMessage?.id,
                 contexts.length ? contexts : undefined,
                 ui.current.target ? [ui.current.target] : undefined,
-                { consumeComposerDraft: true },
               );
-        durable.current!.markOptimisticallyCleared();
+        // Sending clears the draft; a send that fails puts it back into an input left empty meanwhile.
         setInput('');
         setImages([]);
         setContexts([]);
         state.clearReplyTo();
+        const restore = () => {
+          setInput((text) => text || snapshot.text);
+          setImages((all) => (all.length ? all : snapshot.images));
+          setContexts((all) => (all.length ? all : snapshot.contexts));
+          if (snapshot.reply && !useChatStore.getState().replyToMessage) state.setReplyTo(snapshot.reply);
+        };
         try {
-          settle((await pending) === false ? false : undefined);
+          if ((await pending) === false) restore();
         } catch (error) {
-          settle(false);
+          restore();
           throw error;
         }
         return;
@@ -1234,13 +1299,7 @@ function ChatBinding({
         setContexts((all) => all.filter((_, i) => i !== Number(args.id)));
         return;
       case 'removeImage':
-        durable.current!.removeImage(Number(args.id));
-        return;
-      case 'cafeAttRetry':
-        await durable.current!.retryUnrestoredImages();
-        return;
-      case 'removeLost':
-        durable.current!.discardUnrestoredImages();
+        setImages((all) => all.filter((_, i) => i !== Number(args.id)));
         return;
       case 'cafeQueueSend': {
         const entry = current.current.queue.find((q) => q.id === args.id)!;
@@ -1262,11 +1321,10 @@ function ChatBinding({
             method: 'DELETE',
           });
         else if (args.v === 'recall' && entry?.messageId) {
-          const recalled = await requestTrueRecall({
-            threadId,
-            messageId: entry.messageId,
-            confirmAppend: () => window.clowderChat.confirm('queueRecallAppend', {}),
-          });
+          const { input: text, images: kept, contexts: places, reply } = current.current;
+          const drafted = text.trim() || kept.length || places.length || reply;
+          if (drafted && !(await window.clowderChat.confirm('queueRecallAppend', {}))) return;
+          const recalled = await requestTrueRecall({ threadId, messageId: entry.messageId });
           if (recalled) {
             state.setQueue(threadId, recalled.queue);
             const insert = composerInsertFromRecall(recalled);
@@ -1289,8 +1347,7 @@ function ChatBinding({
         if (!source || !response?.catId) throw new Error('请先加载原问题');
         if (source.extra?.recall) throw new Error('原问题已撤回');
         const imageUrls = (source.contentBlocks ?? []).flatMap((b) => (b.type === 'image' ? [b.url] : []));
-        const sourceImages = await downloadDraftImages(imageUrls);
-        if (sourceImages.length !== imageUrls.length) throw new Error('原图片未完整读取，请重试');
+        const sourceImages = await downloadImages(imageUrls);
         const sourceContexts = (source.contentBlocks ?? []).flatMap((b) =>
           b.type === 'context_attachment' ? [b.attachment] : [],
         );
@@ -1467,11 +1524,7 @@ function ChatBinding({
           catId?: string;
           insert?: import('@/stores/chat-types').ComposerDraftInsert;
         };
-        if (source.insert)
-          state.setPendingChatInsert({
-            ...source.insert,
-            ...(source.threadId === threadId && workDraft ? { clientSnapshot: workDraft } : {}),
-          });
+        if (source.insert) state.setPendingChatInsert(source.insert);
         if (source.threadId !== threadId) {
           pendingJump.current = { threadId: source.threadId, mid: source.mid, catId: source.catId };
           pushThreadRouteWithHistory(source.threadId, window);
@@ -1782,9 +1835,6 @@ function ChatBinding({
       },
       file: (path) => resolveAssetUrl(path, API_URL) ?? '',
       attach: (files) => setImages((all) => [...all, ...files]),
-      mounted: (input) => {
-        textareaRef.current = input;
-      },
       navResize: {
         min: 160,
         max: () => 400,
@@ -1902,23 +1952,6 @@ function ChatBinding({
   );
   return (
     <>
-      {need('chat.input') ? (
-        <ComposerOwnerBinding
-          key={threadId}
-          threadId={exportMids === undefined ? threadId : undefined}
-          input={input}
-          setInput={setInput}
-          images={images}
-          setImages={setImages}
-          contexts={contexts}
-          setContexts={setContexts}
-          reply={store.replyToMessage}
-          textareaRef={textareaRef}
-          setPreparing={setPreparingImages}
-          owner={durable}
-          changed={setUnrestoredImages}
-        />
-      ) : null}
       {exportMids === undefined ? (
         <ProjectDataBinding
           data={data}
@@ -1993,52 +2026,6 @@ function ChatBinding({
       ) : null}
     </>
   );
-}
-
-export function ComposerOwnerBinding({
-  threadId,
-  input,
-  setInput,
-  images,
-  setImages,
-  contexts,
-  setContexts,
-  reply,
-  textareaRef,
-  setPreparing,
-  owner,
-  changed,
-}: {
-  threadId?: string;
-  input: string;
-  setInput: React.Dispatch<React.SetStateAction<string>>;
-  images: File[];
-  setImages: React.Dispatch<React.SetStateAction<File[]>>;
-  contexts: ContextAttachment[];
-  setContexts: React.Dispatch<React.SetStateAction<ContextAttachment[]>>;
-  reply: ChatData['reply'];
-  textareaRef: MutableRefObject<HTMLTextAreaElement | null>;
-  setPreparing: React.Dispatch<React.SetStateAction<boolean>>;
-  owner: MutableRefObject<ReturnType<typeof useDurableComposerDraft> | undefined>;
-  changed: (count: number) => void;
-}) {
-  const draft = useDurableComposerDraft({
-    threadId,
-    input,
-    setInput,
-    images,
-    setImages,
-    contextAttachments: contexts,
-    setContextAttachments: setContexts,
-    replyToMessage: reply && { ...reply, threadId: threadId! },
-    textareaRef,
-    setIsPreparingImages: setPreparing,
-  });
-  useLayoutEffect(() => {
-    owner.current = draft;
-    changed(draft.unrestoredImageCount);
-  });
-  return null;
 }
 
 function CloudRecoveryOwnerBinding({

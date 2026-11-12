@@ -44,7 +44,7 @@ test(
         path.join(evidence, 'composer-draft.json'),
         JSON.stringify(
           await page.evaluate(() => ({
-            drafts: JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
+            drafts: JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
             notices: [...document.querySelectorAll('[role="alert"], [data-testid="workspace-content-review-surface"]')]
               .filter((node) => node.getClientRects().length)
               .map((node) => node.textContent),

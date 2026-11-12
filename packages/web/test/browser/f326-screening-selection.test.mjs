@@ -41,7 +41,7 @@ test(
       const readDraft = () =>
         page.evaluate(
           (threadId) =>
-            new Map(JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]')).get(
+            new Map(JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]')).get(
               threadId,
             ) ?? [],
           manifest.threadId,

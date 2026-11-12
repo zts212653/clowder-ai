@@ -136,7 +136,6 @@ async function boot(
     file: (s: string) => s,
     richRender: async () => '',
     navResize: { width: () => 240, min: 160, max: () => 400 },
-    mounted() {},
     attach() {},
     live: () => '',
   };

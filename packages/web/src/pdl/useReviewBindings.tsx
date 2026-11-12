@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { artifactContentSource, prRefToUrl } from '@/components/artifacts/artifact-view';
 import { readWorkContent, Unavailable as WorkUnavailable } from '@/components/artifacts/work-content-client';
+import { composerAttachments } from '@/components/composer-queue';
 import {
   artifactRoundChatTarget,
   artifactRoundRequestSource,
@@ -23,13 +24,11 @@ import { contentFileInfo, fileSourceUrl } from '@/components/content-review/file
 import { contentFileUrl } from '@/components/content-review/file-source';
 import { useArtifactReview } from '@/components/content-review/useArtifactReview';
 import { useReviewMediaSource } from '@/components/content-review/useReviewMediaSource';
-import { contextAttachmentsFromDraft, imageUrlsFromDraft } from '@/components/durable-composer-draft-helpers';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { readArtifactWidgetBlock, type WidgetBlockState } from '@/hooks/useArtifactWidgetBlock';
 import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
 import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import type { FileData } from '@/hooks/useWorkspace';
-import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { request, write } from './owner-api';
 import type { ChatUiState } from './types';
@@ -335,52 +334,28 @@ export function useReviewBindings(
         const source = args.id ? widgets[args.id].work : work;
         if (!source) throw new Error('作品已变化');
         const sourceThread = source.threadId || threadId;
-        let insert;
         const reference = source.work;
-        if (reference) {
-          const path = `/api/threads/${encodeURIComponent(sourceThread)}/composer-draft`;
-          const ownerDraft = await request<{ draft: OwnerComposerDraft | null; revision: number }>(path);
-          let draft = ownerDraft.draft;
-          if (
-            !contextAttachmentsFromDraft(draft).some(
-              (attachment) => attachment.kind === 'work' && attachment.workId === reference.contentRef,
-            )
-          ) {
-            const result = await write<{ draft: OwnerComposerDraft }>(
-              path,
-              {
-                expectedRevision: ownerDraft.revision,
-                text: draft?.text ?? '',
-                contentBlocks: [
-                  ...(draft?.contentBlocks ?? []),
+        // The work goes into that conversation's input once; the input adds it to its draft.
+        const insert =
+          reference &&
+          !composerAttachments(sourceThread).some(
+            (attachment) => attachment.kind === 'work' && attachment.workId === reference.contentRef,
+          )
+            ? {
+                threadId: sourceThread,
+                text: '',
+                contextAttachments: [
                   {
-                    type: 'context_attachment',
-                    attachment: {
-                      id: crypto.randomUUID(),
-                      v: 1,
-                      kind: 'work',
-                      workId: reference.contentRef,
-                      version: reference.ownerRevision,
-                      title: source.name,
-                    },
+                    id: crypto.randomUUID(),
+                    v: 1 as const,
+                    kind: 'work' as const,
+                    workId: reference.contentRef,
+                    version: reference.ownerRevision,
+                    title: source.name,
                   },
                 ],
-                ...(draft?.replyTo ? { replyTo: draft.replyTo } : {}),
-              },
-              'PUT',
-            );
-            draft = result.draft;
-          }
-          insert = {
-            threadId: sourceThread,
-            text: draft!.text,
-            authoritative: true,
-            serverRevision: draft!.revision,
-            contextAttachments: contextAttachmentsFromDraft(draft),
-            imageUrls: imageUrlsFromDraft(draft),
-            replyToId: draft!.replyTo,
-          };
-        }
+              }
+            : undefined;
         return { threadId: sourceThread, mid: source.sourceMessageId || '', catId: source.catId, insert };
       }
       case 'workReviewDiscuss': {

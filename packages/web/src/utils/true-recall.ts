@@ -1,32 +1,16 @@
-import { flushComposerDraft } from '@/components/composer-draft-flush-registry';
-import type { OwnerComposerDraft, TrueRecallResponse } from '@/stores/chat-types';
+import type { ComposerDraftInsert, TrueRecallResponse } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 
 export class TrueRecallRequestError extends Error {
   readonly status: number;
   readonly code?: string;
-  readonly actualRevision?: number;
 
   constructor(status: number, body: Record<string, unknown>) {
     super(typeof body.error === 'string' ? body.error : '撤回并重新编辑失败，请重试');
     this.name = 'TrueRecallRequestError';
     this.status = status;
     this.code = typeof body.code === 'string' ? body.code : undefined;
-    this.actualRevision = typeof body.actualRevision === 'number' ? body.actualRevision : undefined;
   }
-}
-
-export async function loadOwnerComposerDraft(
-  threadId: string,
-): Promise<{ draft: OwnerComposerDraft | null; revision: number }> {
-  const response = await apiFetch(`/api/threads/${threadId}/composer-draft`);
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) throw new TrueRecallRequestError(response.status, body);
-  return body as unknown as { draft: OwnerComposerDraft | null; revision: number };
-}
-
-export function hasComposerDraftContent(draft: OwnerComposerDraft | null): boolean {
-  return Boolean(draft && (draft.text.trim() || draft.contentBlocks?.length || draft.replyTo));
 }
 
 interface InFlightRecall {
@@ -36,37 +20,30 @@ interface InFlightRecall {
 
 const inFlightRecall = new Map<string, InFlightRecall>();
 
-async function executeTrueRecall(input: {
-  threadId: string;
-  messageId: string;
-  confirmAppend: (draft: OwnerComposerDraft) => boolean | Promise<boolean>;
-}): Promise<TrueRecallResponse | null> {
-  const clientSnapshot = await flushComposerDraft(input.threadId);
-  const current = await loadOwnerComposerDraft(input.threadId);
-  const append = hasComposerDraftContent(current.draft);
-  if (append && current.draft && !(await input.confirmAppend(current.draft))) return null;
-
+/**
+ * The recall endpoint hands the message back through the person's server draft slot, which needs that slot's current
+ * revision. The input keeps its own draft in the browser; the recalled message is added to it (composerInsertFromRecall).
+ */
+async function executeTrueRecall(input: { threadId: string; messageId: string }): Promise<TrueRecallResponse> {
+  const slot = await apiFetch(`/api/threads/${input.threadId}/composer-draft`);
+  const current = (await slot.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!slot.ok) throw new TrueRecallRequestError(slot.status, current);
   const response = await apiFetch(`/api/messages/${input.messageId}/recall`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      threadId: input.threadId,
-      expectedDraftRevision: current.revision,
-      merge: append ? 'append' : 'replace',
-    }),
+    body: JSON.stringify({ threadId: input.threadId, expectedDraftRevision: current.revision, merge: 'replace' }),
   });
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) throw new TrueRecallRequestError(response.status, body);
-  return { ...(body as unknown as TrueRecallResponse), ...(clientSnapshot ? { clientSnapshot } : {}) };
+  return body as unknown as TrueRecallResponse;
 }
 
 export async function requestTrueRecall(input: {
   threadId: string;
   messageId: string;
-  confirmAppend: (draft: OwnerComposerDraft) => boolean | Promise<boolean>;
 }): Promise<TrueRecallResponse | null> {
-  // Every recall mutates the same owner+thread draft revision. Serialize the
-  // whole thread, not only duplicate controls for one source message.
+  // Every recall moves the same draft slot's revision. Serialize the whole
+  // thread, not only duplicate controls for one source message.
   const key = input.threadId;
   const existing = inFlightRecall.get(key);
   if (existing) {
@@ -84,7 +61,7 @@ export async function requestTrueRecall(input: {
   }
 }
 
-export function composerInsertFromRecall(result: TrueRecallResponse) {
+export function composerInsertFromRecall(result: TrueRecallResponse): ComposerDraftInsert | null {
   const draft = result.draft;
   if (!draft) return null;
   const imageUrls = (draft.contentBlocks ?? []).flatMap((block) =>
@@ -96,10 +73,6 @@ export function composerInsertFromRecall(result: TrueRecallResponse) {
   return {
     threadId: draft.threadId,
     text: draft.text,
-    authoritative: true as const,
-    serverRevision: draft.revision,
-    ...(result.clientSnapshot ? { clientSnapshot: result.clientSnapshot } : {}),
-    ...(result.insertedRange ? { selectionRange: result.insertedRange } : {}),
     ...(imageUrls.length > 0 ? { imageUrls } : {}),
     ...(contextAttachments.length > 0 ? { contextAttachments } : {}),
     ...(draft.replyTo ? { replyToId: draft.replyTo } : {}),

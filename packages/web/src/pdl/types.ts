@@ -109,7 +109,6 @@ export interface ChatPort {
   post: (path: string, params: Record<string, string>, body: unknown) => Promise<unknown>;
   file: (path: string) => string;
   attach: (files: File[]) => void;
-  mounted: (input: HTMLTextAreaElement | null) => void;
   navResize: {
     min: number;
     max: () => number;

@@ -14,10 +14,13 @@ export interface PendingNewConversationIntent {
   creationStarted: boolean;
   createdThreadId?: string;
   messageAccepted?: boolean;
-  composerDraftAdmission?: {
-    threadId: 'default';
-    expectedRevision: number;
-  };
+}
+
+/** What the new conversation's input holds, kept with its intent until the first message is accepted. */
+export interface ChatInputDraftSnapshot {
+  text: string;
+  files: File[];
+  contextAttachments: ContextAttachment[];
 }
 
 export interface FirstMessagePayload {
@@ -34,8 +37,6 @@ export type FirstMessageAdmissionPhase =
   | 'idle'
   | 'creating'
   | 'sending'
-  | 'draft_recovered'
-  | 'draft_recovery_blocked'
   | 'create_failed'
   | 'create_rejected'
   | 'send_failed'

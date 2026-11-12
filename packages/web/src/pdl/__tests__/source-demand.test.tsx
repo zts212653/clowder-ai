@@ -1,12 +1,10 @@
-import type { ActiveExecutionProjection, BacklogItem, ContextAttachment } from '@cat-cafe/shared';
+import type { ActiveExecutionProjection, BacklogItem } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { useDurableComposerDraft } from '@/components/useDurableComposerDraft';
 import type { useWorkspace } from '@/hooks/useWorkspace';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { ComposerOwnerBinding } from '../PdlAppHost';
 import { type ProjectBindings, ProjectDataBinding } from '../ProjectDataBinding';
 import { useMemoryBindings } from '../useMemoryBindings';
 import { useSidebarBindings } from '../useSidebarBindings';
@@ -249,93 +247,6 @@ it('reads the requested memory family only, and leaves an unavailable taste read
   source = 'reads.taste';
   await act(hook.rerender);
   await waitFor(() => expect(calls.filter((path) => path.startsWith('/api/memory/taste'))).toHaveLength(2));
-});
-
-it('isolates composer revisions across A → B → A while the departing save is still pending', async () => {
-  const receipts = new Map([
-    ['draft-a', { draft: { text: 'A saved' }, revision: 4 }],
-    ['draft-b', { draft: { text: 'B saved' }, revision: 17 }],
-  ]);
-  const reads: string[] = [],
-    writes: { id: string; body: { expectedRevision: number; text: string; replyTo?: string } }[] = [];
-  let release!: () => void;
-  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
-    const id = String(path).split('/')[3],
-      current = receipts.get(id)!;
-    if (init?.method) {
-      const body = JSON.parse(String(init.body));
-      writes.push({ id, body });
-      expect(body.expectedRevision).toBe(current.revision);
-      if (id === 'draft-a')
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-      const next = { draft: { text: body.text }, revision: current.revision + 1 };
-      receipts.set(id, next);
-      return Response.json(next);
-    }
-    reads.push(id);
-    return Response.json(current);
-  });
-  let threadId = 'draft-a',
-    writeInput!: (text: string) => void;
-  const owner = { current: undefined } as React.MutableRefObject<
-    ReturnType<typeof useDurableComposerDraft> | undefined
-  >;
-  const textarea = { current: null };
-  const changed = vi.fn();
-  const hook = renderHook(
-    () => {
-      const [text, setText] = useState(''),
-        [scope, setScope] = useState(threadId),
-        [images, setImages] = useState<File[]>([]),
-        [contexts, setContexts] = useState<ContextAttachment[]>([]),
-        [, setPreparing] = useState(false);
-      if (scope !== threadId) {
-        setScope(threadId);
-        setText('');
-        setImages([]);
-        setContexts([]);
-      }
-      writeInput = setText;
-      return { text, setText, images, setImages, contexts, setContexts, setPreparing };
-    },
-    (state) => (
-      <ComposerOwnerBinding
-        key={threadId}
-        threadId={threadId}
-        input={state.text}
-        setInput={state.setText}
-        images={state.images}
-        setImages={state.setImages}
-        contexts={state.contexts}
-        setContexts={state.setContexts}
-        reply={null}
-        textareaRef={textarea}
-        setPreparing={state.setPreparing}
-        owner={owner}
-        changed={changed}
-      />
-    ),
-  );
-  await waitFor(() => expect(hook.result.current.text).toBe('A saved'));
-  await act(() => writeInput('A changed'));
-  threadId = 'draft-b';
-  await act(hook.rerender);
-  await waitFor(() => expect(hook.result.current.text).toBe('B saved'));
-  expect(writes.map((row) => [row.id, row.body.expectedRevision])).toEqual([['draft-a', 4]]);
-  await act(() => writeInput('B changed'));
-  threadId = 'draft-a';
-  await act(hook.rerender);
-  expect(reads.filter((id) => id === 'draft-a')).toHaveLength(1);
-  await act(release);
-  await waitFor(() => expect(hook.result.current.text).toBe('A changed'));
-  expect(reads.filter((id) => id === 'draft-a')).toHaveLength(2);
-  expect(writes.map((row) => [row.id, row.body.expectedRevision, row.body.text])).toEqual([
-    ['draft-a', 4, 'A changed'],
-    ['draft-b', 17, 'B changed'],
-  ]);
-  expect(writes.every((row) => row.body.replyTo === undefined)).toBe(true);
 });
 
 it('retains unchanged execution records from a full HTTP receipt, changing only the matching id', () => {

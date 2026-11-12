@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { type ContextAttachment, ContextAttachmentsSchema, type QuoteContextAttachment } from '@cat-cafe/shared';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { composerAttachments } from '@/components/composer-queue';
@@ -76,16 +77,6 @@ it('refuses an edit that would push the whole input past one message, tells the 
   expect(useToastStore.getState().toasts[0]?.message).toContain('请先发送或移除几个');
   expect(composerAttachments(THREAD)).toEqual([first, second]);
   expect(getContextAttachmentDraft(THREAD)).toEqual([first, second]);
-});
-
-it.each(['authoritative', 'serverRevision'] as const)('does not overwrite a pending %s recall answer', (field) => {
-  const original = quote('original');
-  syncContextAttachmentDraftToStorage(THREAD, [original]);
-  const recalled = { threadId: THREAD, text: 'recalled', [field]: field === 'authoritative' ? true : 2 };
-  useChatStore.getState().setPendingChatInsert(recalled);
-  expect(editWorkspaceFileQuoteInChat(THREAD, original, 'changed')).toBe(false);
-  expect(editWorkspaceFileQuoteInChat(THREAD, original, null)).toBe(false);
-  expect(useChatStore.getState().pendingChatInsert).toBe(recalled);
 });
 
 it.each(['thread', 'source', 'removed'] as const)('refuses an editor that outlived its %s', (change) => {

@@ -156,7 +156,6 @@ export function fixtureData(): ChatData {
     executions: [],
     activeRuns: [],
     preparingImages: false,
-    unrestoredImages: 0,
     questions: {},
     historyEntries: [],
   };

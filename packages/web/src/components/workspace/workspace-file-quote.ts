@@ -7,8 +7,8 @@ import {
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { createQuoteContextAttachment } from '../chat-context-reference';
-import { composerAttachments, queuedServerAckBlocks } from '../composer-queue';
-import { COMPOSER_RECALL_PENDING_COPY, COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
+import { composerAttachments } from '../composer-queue';
+import { COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
 import {
   PROJECT_SCREENING_GROUP_CONFLICT,
   projectScreeningComposerConflict,
@@ -68,11 +68,10 @@ export function workspaceFileQuoteAttachment(quote: WorkspaceFileQuote): Context
 
 export type AddWorkspaceFileQuote =
   | { readonly kind: 'added' }
-  | { readonly kind: 'refused'; readonly reason: 'too_large' | 'recall_pending' | 'other_source' };
+  | { readonly kind: 'refused'; readonly reason: 'too_large' | 'other_source' };
 
 const REFUSAL_COPY = {
   too_large: COMPOSER_TOO_LARGE_COPY,
-  recall_pending: COMPOSER_RECALL_PENDING_COPY,
   other_source: PROJECT_SCREENING_GROUP_CONFLICT,
 } as const;
 
@@ -82,9 +81,8 @@ const REFUSAL_COPY = {
  *
  * What is already queued for this conversation stays: the input takes a queued place only when it is there to take
  * it (a chat folded away while the file is read does not), so a second place must not replace the first. A place that
- * would make the whole input more than one message can carry, or that would meet a recall's answer the input has not
- * taken yet, is refused before anything is queued: the person is told why, and the caller learns it too, so it can
- * keep the selection and the words where they are.
+ * would make the whole input more than one message can carry is refused before anything is queued: the person is told
+ * why, and the caller learns it too, so it can keep the selection and the words where they are.
  */
 export function addWorkspaceFileQuoteToChat(threadId: string, quote: WorkspaceFileQuote): AddWorkspaceFileQuote {
   return admitQuoteToChat(threadId, () => workspaceFileQuoteAttachment(quote));
@@ -96,13 +94,12 @@ export function addQuoteToChat(threadId: string, attachment: ContextAttachment):
 }
 
 function admitQuoteToChat(threadId: string, makeAttachment: () => ContextAttachment): AddWorkspaceFileQuote {
-  const refuse = (reason: 'too_large' | 'recall_pending' | 'other_source'): AddWorkspaceFileQuote => {
+  const refuse = (reason: 'too_large' | 'other_source'): AddWorkspaceFileQuote => {
     useToastStore
       .getState()
       .addToast({ type: 'error', title: '没能放进输入框', message: REFUSAL_COPY[reason], duration: 6000 });
     return { kind: 'refused', reason };
   };
-  if (queuedServerAckBlocks()) return refuse('recall_pending');
   const attachment = makeAttachment();
   // The canonical rule for what one message carries, over the whole input: its stored draft with what is queued
   // applied, and this place.
@@ -130,7 +127,6 @@ export function editWorkspaceFileQuoteInChat(
       .addToast({ type: 'error', title: '没能更新批注', message: REFUSAL_COPY[reason], duration: 6000 });
     return false;
   };
-  if (queuedServerAckBlocks()) return refuse('recall_pending');
   const attachments = composerAttachments(threadId);
   const current = attachments.find((attachment) => attachment.id === original.id);
   if (
