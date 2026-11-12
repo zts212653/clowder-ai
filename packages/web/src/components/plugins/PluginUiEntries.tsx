@@ -23,10 +23,13 @@ export function PluginUiEntries() {
   const [active, setActive] = useState<Entry>();
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
+  const [closing, setClosing] = useState(false);
+  const [closeFailed, setCloseFailed] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const nonce = useRef('');
   const lifetime = useRef<AbortController>();
+  const closeGuard = useRef(false);
   const refresh = useCallback(async () => {
     try {
       const response = await apiFetch('/api/plugin-ui');
@@ -56,7 +59,19 @@ export function PluginUiEntries() {
     setActive(undefined);
     setHtml('');
     setError('');
+    setClosing(false);
+    setCloseFailed(false);
+    closeGuard.current = false;
   }, []);
+  const requestClose = () => {
+    if (closing) return;
+    if (!closeGuard.current) return close();
+    setClosing(true);
+    frame.current?.contentWindow?.postMessage(
+      { channel: pluginPanelChannel, nonce: nonce.current, type: 'before-close' },
+      '*',
+    );
+  };
   useEffect(() => {
     if (
       active &&
@@ -82,17 +97,26 @@ export function PluginUiEntries() {
       )
         return;
       const requestId = message.requestId as number;
-      if (pending.has(requestId) || pending.size >= 16 || JSON.stringify(data).length > 24_000_000) return;
-      pending.add(requestId);
+      if (pending.has(requestId)) return;
       const target = frame.current?.contentWindow;
       const token = nonce.current;
       try {
+        if (pending.size >= 16) throw new Error('请求过多，请稍后重试');
+        if (JSON.stringify(data).length > 24_000_000) throw new Error('请求过大，请减少内容或附件');
+        pending.add(requestId);
         let result: unknown;
         if (message.type === 'close') {
           close();
           return;
         }
-        if (message.type === 'clipboard.text') {
+        if (message.type === 'close.guard') {
+          closeGuard.current = message.value === true;
+          result = true;
+        } else if (message.type === 'close.cancel') {
+          setClosing(false);
+          setCloseFailed(true);
+          result = true;
+        } else if (message.type === 'clipboard.text') {
           if (typeof message.value !== 'string' || message.value.length > 120_000) throw new Error('复制内容无效');
           await navigator.clipboard.writeText(message.value);
           result = true;
@@ -127,6 +151,9 @@ export function PluginUiEntries() {
     const controller = new AbortController();
     lifetime.current = controller;
     nonce.current = crypto.randomUUID();
+    closeGuard.current = false;
+    setClosing(false);
+    setCloseFailed(false);
     setError('');
     setHtml('');
     setActive(entry);
@@ -164,14 +191,24 @@ export function PluginUiEntries() {
           <dialog
             ref={dialog}
             aria-label={active.label}
-            onCancel={close}
+            onCancel={(event) => {
+              event.preventDefault();
+              requestClose();
+            }}
             className="m-auto h-[min(900px,94dvh)] w-[min(820px,96vw)] max-w-none overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-bg)] p-0 shadow-2xl backdrop:bg-black/40"
           >
-            <div className="absolute right-3 top-2 z-10">
+            <div className="absolute right-3 top-2 z-10 flex items-center gap-2 rounded bg-[var(--console-bg)] px-1">
+              {closing && <span role="status" className="text-sm">正在保存…</span>}
+              {(closing || closeFailed) && (
+                <button type="button" className="rounded px-2 py-1 text-sm hover:bg-black/10" onClick={() => {
+                  if (window.confirm('仍然关闭可能丢失本窗口最后未保存的内容。确定关闭？')) close();
+                }}>仍然关闭</button>
+              )}
               <button
                 type="button"
                 aria-label="关闭插件面板"
-                onClick={close}
+                onClick={requestClose}
+                disabled={closing}
                 className="rounded px-2 py-1 hover:bg-black/10"
               >
                 ×

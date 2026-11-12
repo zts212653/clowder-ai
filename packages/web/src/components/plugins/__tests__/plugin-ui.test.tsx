@@ -129,6 +129,74 @@ describe('plugin sidebar panel isolation', () => {
     expect(apiFetch.mock.calls.length).toBe(count);
     expect(post.mock.calls.at(-1)?.[0]).toHaveProperty('error');
   });
+  it.each(['button', 'escape'])('waits for a registered panel to save before closing via %s', async (method) => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const source = frame.contentWindow!;
+    const post = vi.spyOn(source, 'postMessage');
+    let requestId = 0;
+    const send = (type: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: { channel: 'clowder-plugin-ui/v1', nonce: frame.name, requestId: ++requestId, type, value: true },
+        }),
+      );
+    await act(async () => {
+      send('close.guard');
+    });
+    let cancellation: Event | undefined;
+    await act(async () => {
+      if (method === 'button') document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.click();
+      else {
+        cancellation = new Event('cancel', { cancelable: true });
+        document.querySelector('dialog')?.dispatchEvent(cancellation);
+      }
+    });
+    expect(document.querySelector('iframe')).toBe(frame);
+    if (cancellation) expect(cancellation.defaultPrevented).toBe(true);
+    expect(post.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'before-close', nonce: frame.name });
+    await act(async () => {
+      send('close.cancel');
+    });
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.disabled).toBe(false);
+    await act(async () => {
+      send('close');
+    });
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+  it.each([false, true])('allows confirmed close when a panel is hung or failed (cancelled=%s)', async (cancelled) => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const source = frame.contentWindow!;
+    const send = (type:string,requestId:number) => window.dispatchEvent(new MessageEvent('message', {
+      source,data:{channel:'clowder-plugin-ui/v1',nonce:frame.name,type,requestId,value:true},
+    }));
+    await act(async () => {send('close.guard',1);});
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.click());
+    if(cancelled)await act(async () => {send('close.cancel',2);});
+    const force = Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='仍然关闭');
+    expect(force).toBeDefined();
+    const confirm=vi.spyOn(window,'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await act(async () => force?.click());
+    expect(document.querySelector('iframe')).toBe(frame);
+    await act(async () => force?.click());
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+  it('returns an explicit error for oversized sandbox messages', async () => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const source = frame.contentWindow!;
+    const post=vi.spyOn(source,'postMessage');
+    await act(async () => {window.dispatchEvent(new MessageEvent('message', {
+      source,data:{channel:'clowder-plugin-ui/v1',nonce:frame.name,requestId:1,type:'clipboard.text',value:'x'.repeat(24_000_000)},
+    }));});
+    expect(post.mock.calls.at(-1)?.[0]).toHaveProperty('error');
+  });
   it('production-page HTTP fixture represents an empty installed UI registry without admitting mutations', () => {
     const fixture = createChatProofApi(Date.now(), false, true);
     const url = new URL('http://localhost/api/plugin-ui');
