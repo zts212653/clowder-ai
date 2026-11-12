@@ -65,6 +65,7 @@ async function click(text: string) {
 test('confirmed local feedback prepares a sanitized preview and publishes only after separate confirmation', async () => {
   await renderFlow();
   expect(apiFetch).not.toHaveBeenCalledWith(endpoint, expect.objectContaining({ method: 'POST' }));
+  expect(container.querySelector('textarea')?.readOnly).toBe(true);
   await click('预览并提交');
   expect(apiFetch).toHaveBeenCalledWith(
     endpoint,
@@ -79,6 +80,8 @@ test('confirmed local feedback prepares a sanitized preview and publishes only a
   );
   expect(apiFetch).toHaveBeenCalledWith(`${endpoint}/by-id/draft-1`);
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
+  expect(container.querySelector('textarea')?.readOnly).toBe(false);
+  expect(container.querySelector('textarea')?.disabled).toBe(false);
   await click('Submit to GitHub');
   expect(container.querySelector('a')?.href).toBe('https://github.com/org/repo/issues/12');
 });

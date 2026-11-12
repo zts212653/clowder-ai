@@ -128,7 +128,8 @@ export function CommunityPublishFlow({
     <div className="mt-2 rounded-lg border border-cafe/20 bg-cafe-surface p-3 text-sm">
       <p className="font-medium text-cafe-text">Issue 草稿 · 尚未提交</p>
       <p className="mt-1 text-xs text-cafe-muted">
-        已过滤常见凭据和个人路径，仍请核对隐私；发布服务会再处理正文。预览不会创建远端 Issue。
+        已过滤常见凭据和个人路径，仍请核对隐私；发布服务会再处理正文。预览不会创建远端
+        Issue；继续预览后可编辑标题和正文。
       </p>
       <label className="mt-2 block text-xs text-cafe-muted">
         标题
@@ -136,6 +137,7 @@ export function CommunityPublishFlow({
           aria-label="报告标题"
           className="mt-1 w-full rounded border border-cafe/30 bg-cafe-surface p-2 text-cafe-text"
           value={report?.title ?? ''}
+          readOnly={!providerError}
           disabled={!report || creating}
           onChange={(e) => setReport(report && { ...report, title: e.target.value })}
         />
@@ -147,6 +149,7 @@ export function CommunityPublishFlow({
           rows={6}
           className="mt-1 w-full rounded border border-cafe/30 bg-cafe-surface p-2 text-cafe-text"
           value={report?.bodyMarkdown ?? ''}
+          readOnly={!providerError}
           disabled={!report || creating}
           onChange={(e) => setReport(report && { ...report, bodyMarkdown: e.target.value })}
         />
