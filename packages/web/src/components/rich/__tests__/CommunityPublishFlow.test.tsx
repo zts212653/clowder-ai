@@ -120,3 +120,50 @@ test('a different target returned for an existing draft is shown as a conflict, 
   expect(container.textContent).toContain('已有草稿属于 previous/repo');
   expect(vi.mocked(apiFetch).mock.calls.some(([url]) => String(url).includes('/by-id/'))).toBe(false);
 });
+
+test('changing the proposed repository A to allowed B previews and publishes B without a false target conflict', async () => {
+  const selectedDraft = { ...draft, targetRepo: 'org/B' };
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (String(url).endsWith('/config')) return response({ defaultRepo: 'org/A', repos: ['org/A', 'org/B'] });
+    if (String(url).endsWith('/report-preview'))
+      return response({ title: draft.title, bodyMarkdown: draft.bodyMarkdown });
+    if (String(url).endsWith('/publish'))
+      return response({
+        draft: {
+          ...selectedDraft,
+          status: 'published',
+          githubIssueNumber: 9,
+          githubIssueUrl: 'https://github.com/org/B/issues/9',
+        },
+      });
+    if (init?.method === 'POST') return response({ draft: selectedDraft });
+    return response({ draft: selectedDraft });
+  });
+  await act(async () =>
+    root.render(
+      <CommunityPublishFlow
+        issueId="fi_choice"
+        title={draft.title}
+        bodyMarkdown={draft.bodyMarkdown}
+        proposedRepo="org/A"
+        status="confirmed"
+        onStatusChange={vi.fn()}
+      />,
+    ),
+  );
+  const select = container.querySelector('select');
+  expect(select).not.toBeNull();
+  await act(async () => {
+    if (select) {
+      select.value = 'org/B';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await click('预览并提交');
+  expect(container.textContent).not.toContain('确认使用草稿原仓库');
+  expect(
+    [...container.querySelectorAll('button')].find((button) => button.textContent === 'Submit to GitHub')?.disabled,
+  ).toBe(false);
+  await click('Submit to GitHub');
+  expect(container.querySelector('a')?.href).toBe('https://github.com/org/B/issues/9');
+});

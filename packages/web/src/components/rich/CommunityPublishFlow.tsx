@@ -226,7 +226,7 @@ export function CommunityPublishFlow({
     </div>
   );
   return draftId ? (
-    <CommunityIssuePreviewCard inlineDraftId={draftId} expectedRepo={proposedRepo} unavailableFallback={reportForm} />
+    <CommunityIssuePreviewCard inlineDraftId={draftId} expectedRepo={selectedRepo} unavailableFallback={reportForm} />
   ) : (
     reportForm
   );
