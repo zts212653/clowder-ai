@@ -68,6 +68,12 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     if (this.active?.id === id) await this.close(this.active, reason);
   }
 
+  /** A configuration save advances the lifecycle revision the window's lease is bound to, so the window reopens under it. */
+  async configRefresh(id: string): Promise<void> {
+    await this.stop(id, 'configuration_update');
+    await this.start(id);
+  }
+
   async presence(): Promise<DesktopWindowPresence | null> {
     const run = this.active;
     const observation = run?.observer?.observation;
