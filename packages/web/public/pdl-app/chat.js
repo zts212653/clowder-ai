@@ -1357,13 +1357,18 @@ window.clowderChat = {
       S.exportMids = chatPort.exportMids;
       applyThemeVals();
       applyAssets();
-      go(
-        chatPort.exportMids === undefined
-          ? chatPort.threadId === 'default'
-            ? 'home'
-            : 'chat'
-          : 'export-' + chatPort.threadId,
-      );
+      // the address after # reopens the page it names (settings, member, plugin…); the thread itself is in the path
+      const address = (location.hash || '').replace('#', '');
+      if (chatPort.exportMids === undefined && address && !/^(chat|home|export)(-|$)/.test(address))
+        go(address, { address: true });
+      else
+        go(
+          chatPort.exportMids === undefined
+            ? chatPort.threadId === 'default'
+              ? 'home'
+              : 'chat'
+            : 'export-' + chatPort.threadId,
+        );
       bootDone();
     });
     // React loads these classic scripts after the native event; the engine runs its own startup phases.

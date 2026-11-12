@@ -22,18 +22,18 @@ function navItem(to, ic, label, trail, block) {
   return navRow({ label: label, icon: ic, attrs: (block ? ' data-block="' + block + '"' : '') + ' data-act="open" data-page="' + to + '"', current: cur, trail: trail ? '<span class="trail num">' + trail + '</span>' : '' });
 }
 
-/* o.title 标题（文字）+ o.acts 标题行右边的操作；o.top 标题行下面、不随列表滚动的一块（侧栏搜索）；o.foot 底部的入口（套 nav-foot） */
+/* o.title 标题（文字）+ o.acts 标题行右边的操作；o.foot 底部的入口（套 nav-foot） */
 function navShell(o) {
   const cls = o.hidden ? 'cafe-hidden' : o.cls;
   const head = o.head != null ? o.head : '<span class="nav-title">' + h(o.title || '') + '</span>' + (o.acts || '');
-  return '<aside class="nav' + (cls ? ' ' + cls : '') + '"' + regionAttrs('nav') + ' aria-label="' + o.label + '">' + '<div class="nav-head">' + head + '</div>' + (o.top ? '<div class="nav-top">' + o.top + '</div>' : '') + '<div class="nav-scroll scroll"' + (o.scrollId ? ' id="' + o.scrollId + '"' : '') + '>' + o.body + '</div>' + (o.foot ? '<div class="nav-foot">' + o.foot + '</div>' : '') +
+  return '<aside class="nav' + (cls ? ' ' + cls : '') + '"' + regionAttrs('nav') + ' aria-label="' + o.label + '">' + '<div class="nav-head">' + head + '</div><div class="nav-scroll scroll"' + (o.scrollId ? ' id="' + o.scrollId + '"' : '') + '>' + o.body + '</div>' + (o.foot ? '<div class="nav-foot">' + o.foot + '</div>' : '') +
     resizeHandle({ which: 'nav', side: 'end', label: tc('frame.navResize'), tip: tc('frame.navResizeTip'), now: Math.round(RESIZERS.nav.width()), min: Math.round(RESIZERS.nav.min), max: Math.round(RESIZERS.nav.max()) }) + '</aside>';
 }
 /* 现有侧栏外壳的 PDL 入口：标题操作、页面插槽、格子工具条、列表与底部入口。
    结构仍由 navShell / listBar / listWrap / navItem 四个原件画，主题只声明内容和绑定。 */
 PDL_COMPONENTS.navShell = function (p, sc, root) {
   const P = function (x) { return pv(x, sc, root); }, bar = p.bar;
-  return navShell({ label: P(p.label), hidden: P(p.hidden), title: P(p.title), acts: pvControls(p.actions, sc, root), top: p.top ? pvBlocks(p.top, sc, root) : '', scrollId: P(p.scrollId),
+  return navShell({ label: P(p.label), hidden: P(p.hidden), title: P(p.title), acts: pvControls(p.actions, sc, root), scrollId: P(p.scrollId),
     body: (p.slot ? pdlSlot(P(p.slot)) : '') + (bar ? listBar({ key: bar.key, note: P(bar.note), items: bar.items.filter(function (x) { return pvOk(x.when, sc, root); }).map(function (x) { return { key: x.key, html: pvControl(x.control, sc, root), span: x.span || 's', anchor: x.anchor || 'start' }; }) }) : '') + (p.body ? listWrap(pvBlocks(p.body, sc, root)) : ''),
     foot: p.foot ? navItem(P(p.foot.to), P(p.foot.icon), P(p.foot.label), P(p.foot.trail), p.foot.key) : '' });
 };

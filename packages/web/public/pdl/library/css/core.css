@@ -29,7 +29,6 @@ button { font: inherit; color: inherit; }
 .nav { background: var(--bg-nav); display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; z-index: var(--z-raised); --empty-pad-y: var(--sp-l); --empty-pad-x: var(--sp-s); --empty-fs: var(--fs-m); }   /* 区域 token：侧栏里的空状态小一号（空状态组件只有一个） */
 .nav-head { height: var(--row-h); display: flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-s) 0 var(--gutter-panel); flex-shrink: 0; }   /* 标题行的起始内边距：区域标题行共用 --gutter-panel */
 .nav-title { flex: 1; }
-.nav-top { padding: 0 var(--sp-s) var(--sp-xs); flex-shrink: 0; }   /* 标题行下、不随列表滚动的一块（侧栏搜索）：左右和列表同一档内边距 */
 .nav-scroll { padding: 0 var(--sp-s) var(--sp-xl); flex: 1; min-height: 0; }
 .nav-item { display: flex; align-items: center; gap: var(--sp-s); width: 100%; height: var(--ctl-m); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-s); text-align: left; cursor: pointer; }
 .nav-item > span { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }   /* 导航名字一行：放不下就省略（全文在提示里），从不在词中间折行 */

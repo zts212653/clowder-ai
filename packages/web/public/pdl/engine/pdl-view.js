@@ -174,7 +174,7 @@ const PDL_SCHEMA = {
   opts: { empty: 1, from: 1, when: 1 },
   chatpage: { bar: 1, body: 1, dock: 1, head: 1, side: 1, top: 1 },   /* 子容器 stream / composer 的顺序由用户层的 order['main.chat'] 决定 */
   ticks: { from: 1, older: 1, when: 1 },
-  threads: { from: 1, groups: 1, heads: 1, note: 1, other: 1, rename: 1, when: 1 },
+  threads: { from: 1, groups: 1, heads: 1, move: 1, note: 1, other: 1, rename: 1, when: 1 },
   range: { args: 1, change: 1, id: 1, input: 1, label: 1, max: 1, min: 1, step: 1, unit: 1, value: 1, when: 1 },
   reply: { ref: 1 },
   search: { form: 1, id: 1, input: 1, on: 1, label: 1, note: 1, placeholder: 1, value: 1, when: 1, wide: 1 },

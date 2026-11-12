@@ -1961,14 +1961,48 @@ views:
                   mid: $.sel.mid
                   i: "0"
                 when: $.sel.anno
+  nav.find:
+    vm: navFind
+    bare: true
+    blocks:
+      - type: pop
+        label: t:common.search
+        pos: {span: 6}
+        blocks:
+          - type: search
+            id: nav-q
+            placeholder: t:search.placeholder
+            label: t:common.search
+            value: $.q
+            input: navQ
+            wide: true
+          - type: toolbar
+            when: $.matches
+            items:
+              - type: button
+                label:
+                  t: search.scope.orgLabel
+                  args: [$.matches]
+                act: cafeSearchOrg
+          - type: list
+            id: navFindT
+            when: $.q
+            from: $.items
+            item:
+              search: true
+              threadRef:
+                t: chat.threadRef
+                args: ["@id"]
+              act: thread
+              args: {id: "@id"}
+            row: thread.row
+            empty: t:classify.noMatch
   nav.threads:
     vm: navThreads
     loading: t:common.loading
     blocks:
       - type: empty
-        text:
-          of: $.searching
-          map: {"true": t:classify.noMatch, _: t:chat.sidebar.tag.empty}
+        text: t:chat.sidebar.tag.empty
         when: $.empty
         action:
           type: button
@@ -1978,6 +2012,9 @@ views:
           when: $.tag
       - type: threads
         from: $.sections
+        move:
+          of: $.group
+          map: {recent: cafeThreadMove, _: ""}
         item:
           key: "@key"
           rows: "@rows"
@@ -4854,32 +4891,12 @@ views:
           hidden: $.hidden
           scrollId: cafe-nav-scroll
           slot: nav.cafe
-          top:
-            - type: toolbar
-              when: $.search
-              items:
-                - type: search
-                  id: nav-q
-                  placeholder: t:search.placeholder
-                  label: t:common.search
-                  value: $.search.q
-                  input: navQ
-                  wide: true
-                  on: {esc: searchOpen}
-            - type: toolbar
-              when: $.search.matches
-              items:
-                - type: button
-                  label:
-                    t: search.scope.orgLabel
-                    args: [$.search.matches]
-                  act: cafeSearchOrg
           actions:
             - type: button
               iconOnly: true
               icon: search
               label: t:common.search
-              pressed: $.search
+              pressed: $.findOpen
               act: searchOpen
             - type: more
               variant: row

@@ -80,7 +80,7 @@ function sidebarData() {
 function sidebarOwner() {
   return sidebarOwnerValue;
 }
-// Sidebar search (CS.navQ; null = closed): filters the thread list in place by title, id and project path;
+// Sidebar search (the navFind popup, query CS.navQ): finds threads by title, id and project path;
 // a feature number (f123) matches whole words and the board items tagged with it.
 function sidebarMatch(t, query) {
   const q = (query || '').trim().toLowerCase();
@@ -161,8 +161,7 @@ function bindSidebar() {
       visible = data.threads.filter(function (t) {
         return (
           !t.deletedAt &&
-          (!CS.tag || (CS.tag === '__none' ? !t.labels || !t.labels.length : (t.labels || []).includes(CS.tag))) &&
-          sidebarMatch(t, CS.navQ)
+          (!CS.tag || (CS.tag === '__none' ? !t.labels || !t.labels.length : (t.labels || []).includes(CS.tag)))
         );
       }),
       tests = {
@@ -181,7 +180,7 @@ function bindSidebar() {
       },
       listed = tests[CS.group] ? visible.filter(tests[CS.group]) : visible,
       zone = data.timeZone,
-      none = { empty: !listed.length, searching: !!(CS.navQ || '').trim() };
+      none = { empty: !listed.length };
     const row = function (t) {
       return {
         id: t.id,
@@ -366,17 +365,7 @@ function bindSidebar() {
       return x.id === CS.tag;
     });
     return {
-      search:
-        CS.navQ == null
-          ? null
-          : {
-              q: CS.navQ,
-              matches: CS.navQ.trim()
-                ? sidebarData().threads.filter(function (t) {
-                    return !t.deletedAt && !t.systemKind && sidebarMatch(t, CS.navQ);
-                  }).length
-                : 0,
-            },
+      findOpen: !!CS.navFind,
       tagName: tag ? tag.name : '',
       tag: CS.tag,
       route: S.route,
@@ -450,19 +439,56 @@ function bindSidebar() {
       });
     return sidebarModalOpen({ v: 'org' });
   };
-  // 🔍 and Esc in the field open / clear and close it; ⌘K only opens (stay)
+  // a thread dragged into a group (to = group id) or out of its group (to = ''); groups keep time order
+  A.cafeThreadMove = function (d) {
+    const from = grouped(d.id),
+      o = owner();
+    if (d.to) {
+      if (from && from.id === d.to) return;
+      return command({
+        action: 'organize',
+        threadIds: [d.id],
+        groupId: d.to,
+        expectedGroups: o.preferences.groups.map(function (g) {
+          return { id: g.id, threadIds: g.threadIds.slice() };
+        }),
+      });
+    }
+    if (from) return command({ action: 'remove', groupId: from.id, threadId: d.id });
+  };
+  // 🔍 opens / closes the search popup; ⌘K only opens it (stay; no trigger, so it anchors on 🔍); each opening starts empty
   A.searchOpen = function (d) {
-    if (CS.navQ != null && !(d && d.stay)) {
-      CS.navQ = null;
+    if (CS.navFind && !(d && d.stay)) {
+      CS.navFind = false;
       render(true);
       return;
     }
-    if (CS.navQ == null) CS.navQ = '';
+    if (!CS.navFind) CS.navQ = '';
     CS.navHidden = false;
     if (window.innerWidth <= 960) S.navOpen = true;
     if (space() !== 'cafe') go('chat');
+    CS.navFind = true;
+    if (d && d.stay) {
+      render(true);
+      popAnchorAt('navFind', '.nav-head [data-act="searchOpen"]');
+    }
     render(true);
     focusField('nav-q');
+  };
+  VM.navFind = function () {
+    const q = (CS.navQ || '').trim(),
+      hits = q
+        ? sidebarData().threads.filter(function (t) {
+            return !t.deletedAt && !t.systemKind && sidebarMatch(t, q);
+          })
+        : [];
+    return {
+      q: CS.navQ || '',
+      matches: hits.length,
+      items: hits.map(function (t) {
+        return { id: t.id, title: t.title, time: t.lastActiveAt, projectPath: t.projectPath };
+      }),
+    };
   };
   INPUTS.navQ = function (e) {
     CS.navQ = e.target.value;
@@ -477,7 +503,6 @@ function bindSidebar() {
     if (g) (groupPrefs[g.id] || (groupPrefs[g.id] = {})).open = true;
     if (CS.group === 'project') CS.projOpen[t.projectPath] = true;
     if (CS.tag && (CS.tag === '__none' ? (t.labels || []).length : !(t.labels || []).includes(CS.tag))) CS.tag = null;
-    if (!sidebarMatch(t, CS.navQ)) CS.navQ = null;
     if (
       (CS.group === 'pinned' && !t.pinned) ||
       (CS.group === 'favorites' && !t.favorited) ||

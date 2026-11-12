@@ -131,6 +131,16 @@ popups:
     demo:
       - act: set
         args: {path: s.editLayout, v: "true", cast: bool}
+  navFind:
+    view: nav.find
+    when: cs.navFind
+    at: trigger
+    exit: [outside, esc, pick]
+    drag: false
+    close: close
+    closeArgs: {path: cs.navFind}
+    demo:
+      - act: searchOpen
   memberCard:
     view: member.card.popup
     when: cs.memberCard

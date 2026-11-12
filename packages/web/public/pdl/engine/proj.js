@@ -75,6 +75,7 @@ function navWith(c, l, fn) { const prev = NAV_CTX; NAV_CTX = { c: c, l: l }; try
 function navArg(k, c) { const l = c ? navTop(c) : NAV_CTX ? NAV_CTX.l : navTop(navFocusC()); return l && l.a ? l.a[k] : undefined; }
 
 /* ───────── 触发元素的容器链（从 DOM 读：层 data-lc、容器 data-c、视图里的分栏 data-ct），再接上容器树的祖先 ───────── */
+function popTrig(t) { const host = t && t.closest && t.closest('.pop-host[data-pop]'), o = host && anchorEl(POP_TRIG[host.dataset.pop]); return o && o !== t ? popTrig(o) : t; }
 function trigChain(t) {
   const inner = []; let c0 = null, lc = null;
   for (let e = t && t.closest ? t : null; e && e !== document.body; e = e.parentElement) {
@@ -134,7 +135,7 @@ function navOpen(o, from) {
   let want = o.into === '.' ? tc0.lc || ctPages() : o.into || navCoverDefault(chain) || (o.exit && navCoverDefault(ctAnc(ctPages()))) || ctPages();
   const T = navEffective(want);
   const host = T, push = !!o.push || !!(o.exit && o.exit.length) || chain.indexOf(T) >= 0 || o.into === '.';
-  const title = o.title != null ? o.title : navTitleAt(t), bl = navBackLabel(o, t);
+  const pt = popTrig(t), title = o.title != null ? o.title : navTitleAt(pt), bl = navBackLabel(o, pt);   /* 弹窗里的触发：标题和返回旁的文字按打开这个弹窗的元素算（和 trigChain 一样） */
   const tn = ctNode(T);
   if (tn && tn.tabs) { navLeave(navCoveringIds(T), function () { navUncover(T); rtOpenContent(T, o, t); navAfter(); }); return T; }   /* 开进标签式容器：变成它的一项（绑定方说是哪一项） */
   if (push) {

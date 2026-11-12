@@ -670,6 +670,7 @@ EDGE_DRAG.push({
   find: function (t) {
     if (!t || !t.closest) return null;
     const el = t.closest('[data-edit]'); if (!el || el.dataset.locked) return null;
+    if (el.dataset.edit === 'move') return el.closest('[data-move-act]') ? { el: el, whole: true } : null;   /* 移到别的容器（对话拖进 / 拖出分组）：所在的容器声明了 data-move */
     if (!S.editLayout) { const box = el.dataset.edit === 'order' && el.parentElement && el.parentElement.closest('[data-ocontainer]'); if (!box || !box.dataset.orderAct) return null; }   /* 平时只有会话状态的容器能拖（它声明了顺序存哪：data-order-act）；主题的布局只在编辑布局时动 */
     return { el: el, whole: true };   /* 编辑布局时整块都是抓手（平时的窗口只有边缘） */
   },
@@ -697,6 +698,14 @@ EDGE_DRAG.push({
           if (t.before) t.before.classList.add('drop-before'); else t.el.classList.add('drop-end');
         },
         end: function (e, moved) { const u = under(e, el); done(); if (moved) entryDrop(u); endDrag(); render(true); }
+      };
+    }
+    if (kind === 'move') {   /* 移到同一类的另一个容器（data-move 相同）：放下时交给目标容器声明的动作（data-move-act），参数 = 目标容器的 data + 被拖的 id；不排先后 */
+      const from = el.closest('[data-move-act]'), family = from.dataset.move;
+      let to = null;
+      return {
+        move: function (e) { follow(e); clearMarks(); const u = under(e, el), b = u.target.closest && u.target.closest('[data-move-act]'); to = b && b !== from && b.dataset.move === family ? b : null; if (to) to.classList.add('pdl-over'); },
+        end: function (e, moved) { done(); clearMarks(); if (moved && to && actFn(to.dataset.moveAct)) actFn(to.dataset.moveAct)(Object.assign(actionArgs(to), { id: el.dataset.okey })); render(true); }
       };
     }
     if (kind === 'cell') {   /* 格子容器里的项：放到任意一格；移动范围（move）允许的话也能放进别的格子容器 */

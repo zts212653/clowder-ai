@@ -2437,7 +2437,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('sidebar search filters the thread list in place and presets organize with the matches', async () => {
+  it('sidebar search finds threads in its popup and presets organize with the matches', async () => {
     const { dom, w, errors } = await boot(
       undefined,
       (data) => {
@@ -2447,20 +2447,19 @@ describe('unmodified runtime and project chat bindings', () => {
       { sidebarOwner: { preferences: { groups: [] }, labels: [] } },
     );
     try {
+      const listed = () =>
+        w.eval('VM.navThreads().sections.flatMap(function (s) { return s.rows.map(function (r) { return r.id; }); })');
+      const before = listed();
       w.eval('A.searchOpen()');
-      expect(w.eval('VM.cafeNavShell().search')).toEqual({ q: '', matches: 0 });
+      expect(w.eval('CS.navFind && VM.cafeNavShell().findOpen')).toBe(true);
       w.eval("CS.navQ='needle'");
-      const ids = w.eval(
-        'VM.navThreads().sections.flatMap(function (s) { return s.rows.map(function (r) { return r.id; }); })',
-      );
-      expect(ids).toEqual(['pdl-test']);
-      expect(w.eval('VM.cafeNavShell().search.matches')).toBe(1);
+      expect(w.eval('VM.navFind().items.map(function (t) { return t.id; })')).toEqual(['pdl-test']);
+      expect(w.eval('VM.navFind().matches')).toBe(1);
+      expect(listed()).toEqual(before);
       await w.eval('A.cafeSearchOrg()');
       expect(w.eval('CS.modal.sel')).toEqual({ 'pdl-test': true });
-      w.eval("CS.navQ='nothing matches this'");
-      expect(w.eval('VM.navThreads().empty && VM.navThreads().searching')).toBe(true);
       w.eval('A.searchOpen()');
-      expect(w.eval('CS.navQ')).toBe(null);
+      expect(w.eval('CS.navFind')).toBe(false);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();

@@ -422,7 +422,7 @@ function secCollapsed(key, dflt) { const st = secSt(key); return st && st.c != n
 function rowMore(menu, k, label, cls) { return btn(label || tc('common.moreActions'), { sm: true, iconOnly: true, icon: 'more', cls: cls, act: 'menu', data: ' data-menu="' + menu + '"' + MENU_DECL + (k != null ? ' data-k="' + h(k) + '"' : '') }); }
 const TROW_TONE = { run: { cls: 'run', dot: true }, err: { cls: 'cafe-err' } };   /* 行的状态：执行中（圆点按状态表挑节拍预设）、出错 */
 /* rn：原地改名的绑定（threads 块声明 rename = { form, path, blur }：回车提交给哪个表单、Esc 关掉哪个状态、失焦执行什么），组件不认识 */
-function threadRow(v, rn, root) {
+function threadRow(v, rn, root, movable) {
   if (v.renaming && rn) return ('<form class="cafe-trow renaming" data-form="' + rn.form + '"><label class="sr" for="row-rename">' + h(tc('threadRow.name')) + '</label><input class="input" id="row-rename" value="') + h(v.title) + ('" maxlength="200" data-path="' + h(rn.path) + '" data-on-esc="close" data-on-blur="' + rn.blur + '"></form>');
   /* 一项状态：可以带身份（who，颜色是这一项自己的能力，取不到就是组件的中性默认）和执行状态（status，和头像的圈读同一张表）；
      runs：一条对话里有几只猫同时在执行时，按节拍轮流显示（通用轮换 data-rot，悬停不换） */
@@ -446,7 +446,7 @@ function threadRow(v, rn, root) {
   /* 时间和草稿是同一格的状态（有草稿时显示“草稿”，主题色）：悬停时一起让位给操作 */
   const stamp = v.draft && !bdg ? '<span class="trow-draft">' + h(tc('common.status.draft')) + '</span>' : h(rn && rn.time ? pv(rn.time, v, root) : v.time || '');
   /* 一行对话就是一行 lrow：标题 · 第二行状态；行尾按行对齐（时间 / 计数），悬停的“更多”出现在时间的位置上（同一位置互斥）；置顶是左上角的标记 */
-  return lrow({ layout: 'item', hook: 'cafe-trow' + (v.pinned ? ' pinned' : ''), rootAttrs: ' data-tid="' + h(v.id) + '"', act: 'thread', data: ' data-id="' + h(v.id) + '"', headAttrs: ' data-tip="' + h(v.title) + '"',
+  return lrow({ layout: 'item', hook: 'cafe-trow' + (v.pinned ? ' pinned' : ''), rootAttrs: ' data-tid="' + h(v.id) + '"' + (movable ? ' data-edit="move" data-okey="' + h(v.id) + '"' : ''), act: 'thread', data: ' data-id="' + h(v.id) + '"', headAttrs: ' data-tip="' + h(v.title) + '"',
     cur: v.cur ? 'page' : false, title: h(v.title), sub: meta.length ? meta.join(' · ') : '', aside: [stamp, bdg], swap: true,
     actsHtml: rn && rn.more ? (rn.acts || []).map(function (c) { return pvControl(c, v, root); }).join('') + rowMore(menuLive(rowMenuItems(rn.more.items, v, root)), v.id, pv(rn.more.label, v, root)) : '',   /* 悬停时换上来的：声明的操作按钮（acts）+ 更多 */
     acts: rn && rn.more ? [] : [{ icon: 'more', label: tc('threadRow.more', v.title), act: 'menu', data: ' data-menu="' + (rn && rn.menu || '') + '" data-k="' + h(v.id) + '"' }],
@@ -478,8 +478,10 @@ function threadSections(list, dc, root) {
   return (list || []).map(function (s) {
     const dflt = (groups || {})[String(s.key || '').split(':')[0]] || {};
     if (s.other) { const d = dc.other || {}; return secHead({ act: d.act, data: pvArgs(d.args, s.other, root), open: s.other.open, name: tc('threadRow.otherProjects'), n: s.other.n }) + (s.other.open ? threadSections(s.other.sections, dc, root) : ''); }
-    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root); }), empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
-      attrs: s.gid ? ' data-gid="' + h(s.gid) + '"' : '', head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
+    /* move（主题声明的动作）：对话能拖进别的分组、拖出到不分组的段；段是放下的容器（data-move-act + 它是哪一段） */
+    const mvAct = dc.move ? pv(dc.move, root, root) : '', mv = !!mvAct;
+    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
+      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' : ''), head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
   }).join('');
 }
 function gsection(o) {

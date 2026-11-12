@@ -532,9 +532,9 @@ function pagesOpen(route, a, t, o) {
   if (split) { if (split.dataset.into === 'split') navOpen({ f: route, a: a, into: '.' }, t); else { navReplace(tc0.lc, route, a); navAfter(); } after(); return; }
   if (tc0.lc && !navIsPage(route)) { navOpen({ f: route, a: a }, t); after(); return; }
   if (!t && !navIsPage(route)) { navReplace(navFocusC(), route, a); navAfter(); after(); return; }
-  /* 从内容里（主区、工作台里的链接和按钮）打开另一个空间的页面（比如对话里点“语音合成未安装”去设置的语音页）：和打开内容一样开到触发处的默认覆盖层级
-     （触发处的祖先，返回规则），盖在原来的内容上，带 ✕ / Esc 回去；同一空间里的页面跳转、从内容外面的入口（窄栏、设置菜单）切换照旧 */
-  if (tc0.lc && navIsPage(route) && rs !== space() && tc0.chain.indexOf(ctParent(ctPages())) >= 0) { navOpen({ f: route, a: a, exit: ['x', 'esc'] }, t); after(); return; }
+  /* 从内容里（主区、工作台里的链接和按钮）打开页面（对话里点“记忆”、点插件去它的设置页）：和打开内容一样开到触发处的默认覆盖层级（触发处的祖先，返回规则），
+     压在原来的内容上，返回回去；从内容外面的入口（窄栏、设置菜单）切换照旧 */
+  if (tc0.lc && navIsPage(route) && tc0.chain.indexOf(ctParent(ctPages())) >= 0) { navOpen({ f: route, a: a, push: true }, t); after(); return; }   /* 返回规则：从内容里开的页面压在原处，返回回到原来的内容（对话里开的带「‹ 对话标题」） */
   const sp = o.address && navIsPage(route) && rs !== space() ? rs : null;   /* 按地址进来：地址里的页面属于哪个空间就是哪个空间（离开的空间隐藏着留下）；入口打开页面只换主区，不换第二栏 */
   navSwitchC(ctPages(), route, a, after, !t && !o.ask, sp ? function () { S.space = sp; } : null);   /* 程序里的跳转不问；动作（导航）总要过离开检查 */
 }
