@@ -55,6 +55,7 @@ function resolveDefaultDutyCatProfileId(): string {
 
 const COMPANION_PLUGIN_ID = 'official.companion';
 const PLUGIN_KEYS = [
+  'enabled',
   'dutyCatProfileId',
   'displayName',
   'personaTone',
@@ -73,6 +74,7 @@ function readPluginSettings(projectRoot: string): Pick<ConciergeConfig, PluginKe
     displayName: stored.displayName ?? d.displayName,
     personaTone: stored.personaTone ?? d.personaTone,
     proactivePolicy: (stored.proactivePolicy as ConciergeConfig['proactivePolicy']) ?? d.proactivePolicy,
+    enabled: stored.enabled === undefined ? d.enabled : stored.enabled === 'true',
     behaviorEnabled: stored.behaviorEnabled === undefined ? d.behaviorEnabled : stored.behaviorEnabled === 'true',
     skin: (stored.skin as ConciergeConfig['skin']) ?? d.skin,
     ballSize: stored.ballSize === undefined ? d.ballSize : Number(stored.ballSize),
