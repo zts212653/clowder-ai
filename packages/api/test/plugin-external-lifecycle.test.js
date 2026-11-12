@@ -179,6 +179,19 @@ test('disable and uninstall stop process authority before their durable terminal
   assert.equal((await store.snapshot()).instances[0].lifecycleState, 'retired');
 });
 
+test('uninstall always removes the plugin, also when its own stop cannot run', async () => {
+  const { store, lifecycle } = await harness({
+    stop: async () => {
+      throw new TypeError('plugin manifest is invalid');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  const retired = await lifecycle.uninstall('pi_official', 2);
+  assert.equal(retired.lifecycleState, 'retired');
+  assert.equal(retired.activationState, 'disabled');
+  assert.equal((await store.snapshot()).instances[0].lifecycleState, 'retired');
+});
+
 test('repair restores the enabled owner intent after restart recovery projects an error', async () => {
   const { store, lifecycle, calls } = await harness();
   await lifecycle.prepare('pi_official', 1);

@@ -136,7 +136,12 @@ export class ExternalPluginLifecycleService {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
+      // The owner's removal goes through even when the plugin's own stop cannot run (e.g. its module no longer loads).
+      try {
+        await this.options.supervisor.stop(instanceId, PLUGIN_OWNER_UNINSTALLED_REASON);
+      } catch (error) {
+        logPluginStopFailure(instanceId, PLUGIN_OWNER_UNINSTALLED_REASON, error);
+      }
       return this.advance(instanceId, disabling.lifecycleRevision, {
         lifecycleState: 'retired',
         activationState: 'disabled',
