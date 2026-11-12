@@ -26,6 +26,21 @@ describe('callback propose-profile-update route', () => {
     writeFileSync(path, content, 'utf8');
   };
 
+  const seedOrigin = (clientRequestId) => {
+    const origin = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        threadId: 'thread_1',
+        content: 'Please update the profile',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
+    originByRequest.set(`alice:opus:thread_1:${clientRequestId}`, origin);
+    return origin.id;
+  };
+
   const propose = async ({ userId = 'alice', catId = 'opus', threadId = 'thread_1', body }) => {
     const key = body.clientRequestId ? `${userId}:${catId}:${threadId}:${body.clientRequestId}` : undefined;
     let origin = key ? originByRequest.get(key) : undefined;
@@ -179,8 +194,198 @@ describe('callback propose-profile-update route', () => {
     assert.equal(JSON.parse(r2.body).deduped, true);
   });
 
+  it('rejects a draft based on an older profile revision before reserving or publishing', async () => {
+    seedPrimer('new facts added by the owner');
+    const res = await propose({
+      body: {
+        afterContent: 'draft based on old facts',
+        rationale: 'update',
+        signalKind: 'cat-declared',
+        clientRequestId: 'stale-draft',
+        expectedRevision: `sha256:${writeMod.hashContent('old facts')}`,
+      },
+    });
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().error, 'profile_revision_changed');
+    assert.equal(store.getDedupProposalId('alice', 'stale-draft'), null);
+    assert.equal(store.listPending('alice').length, 0);
+    assert.equal((await messageStore.getByThread('thread_1', 50)).length, 1, 'only the source exists');
+  });
+
+  it('checks the revision of the selected layer, including an absent layer', async () => {
+    seedPrimer('primer must not supply the corpus revision');
+    for (const targetLayer of ['corpus', 'capsule']) {
+      const body = {
+        targetLayer,
+        afterContent: 'first owner facts',
+        rationale: 'update',
+        signalKind: 'cat-declared',
+        expectedRevision: `sha256:${writeMod.hashContent('')}`,
+        clientRequestId: `first-${targetLayer}`,
+      };
+      const res = await propose({ body });
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(store.get(res.json().proposalId).baseContentHash, writeMod.hashContent(''));
+      const mismatch = await propose({
+        body: { ...body, clientRequestId: `bad-${targetLayer}`, expectedRevision: `sha256:${'0'.repeat(64)}` },
+      });
+      assert.equal(mismatch.statusCode, 409, targetLayer);
+    }
+  });
+
+  it('recovers the same request before checking a newer current revision', async () => {
+    seedPrimer('original');
+    const body = {
+      afterContent: 'draft',
+      rationale: 'update',
+      signalKind: 'cat-declared',
+      clientRequestId: 'same-draft',
+      expectedRevision: `sha256:${writeMod.hashContent('original')}`,
+    };
+    const first = await propose({ body });
+    seedPrimer('owner changed the profile after this proposal');
+    const retry = await propose({ body });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().proposalId, first.json().proposalId);
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('recovers a committed proposal after the create response was lost', async () => {
+    const body = {
+      afterContent: 'draft',
+      rationale: 'r',
+      signalKind: 'cat-declared',
+      clientRequestId: 'lost-create-response',
+    };
+    const originalCreate = store.create.bind(store);
+    store.create = (input) => {
+      originalCreate(input);
+      throw new Error('connection lost after commit');
+    };
+    const unknown = await propose({ body });
+    assert.equal(unknown.statusCode, 500);
+    store.create = originalCreate;
+    const [committed] = store.listPending('alice');
+    const retry = await propose({ body });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().proposalId, committed.proposalId);
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('releases an aborted staged recovery so the same request can succeed after card storage recovers', async () => {
+    const body = {
+      afterContent: 'draft',
+      rationale: 'r',
+      signalKind: 'cat-declared',
+      clientRequestId: 'recovery-abort',
+    };
+    const originalCreate = store.create.bind(store);
+    store.create = (input) => {
+      originalCreate(input);
+      throw new Error('create response lost');
+    };
+    assert.equal((await propose({ body })).statusCode, 500);
+    store.create = originalCreate;
+    const [aborted] = store.listPending('alice');
+    const originalAppend = messageStore.append.bind(messageStore);
+    messageStore.append = () => {
+      throw new Error('card storage unavailable');
+    };
+    assert.equal((await propose({ body })).statusCode, 500);
+    assert.equal(store.get(aborted.proposalId), null, 'ingress aborted the staged proposal without a visible card');
+    assert.equal(
+      store.getDedupProposalId('alice', body.clientRequestId),
+      null,
+      'confirmed abort releases its durable binding',
+    );
+    messageStore.append = originalAppend;
+    const recovered = await propose({ body });
+    assert.equal(recovered.statusCode, 200, recovered.body);
+    assert.notEqual(recovered.json().proposalId, aborted.proposalId);
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('rejects reuse of a request key with changed content, target, or expected revision', async () => {
+    seedPrimer('original');
+    const body = {
+      afterContent: 'draft',
+      rationale: 'update',
+      signalKind: 'cat-declared',
+      clientRequestId: 'bound-draft',
+      expectedRevision: `sha256:${writeMod.hashContent('original')}`,
+    };
+    assert.equal((await propose({ body })).statusCode, 200);
+    for (const delta of [
+      { afterContent: 'different draft' },
+      { rationale: 'different reason' },
+      { signalKind: 'cvo-instructed' },
+      { targetLayer: 'corpus' },
+      { expectedRevision: `sha256:${'0'.repeat(64)}` },
+    ]) {
+      const retry = await propose({ body: { ...body, ...delta } });
+      assert.equal(retry.statusCode, 409, JSON.stringify(delta));
+      assert.equal(retry.json().error, 'client_request_conflict');
+    }
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('revalidates the origin before returning a cached proposal', async () => {
+    seedPrimer('original');
+    const body = {
+      afterContent: 'draft',
+      rationale: 'r',
+      signalKind: 'cat-declared',
+      clientRequestId: 'deleted-source',
+    };
+    const first = await propose({ body });
+    const source = store.get(first.json().proposalId).signalProvenance.sourceMessageId;
+    await messageStore.softDelete(source, 'alice');
+    const retry = await propose({ body });
+    assert.equal(retry.statusCode, 409);
+    assert.equal(retry.json().error, 'origin_not_eligible');
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('rejects an altered concurrent loser instead of returning the winning payload as its success', async () => {
+    const body = { afterContent: 'winner', rationale: 'r', signalKind: 'cat-declared', clientRequestId: 'race' };
+    const first = await propose({ body });
+    const originalLookup = store.getDedupProposalId.bind(store);
+    store.getDedupProposalId = () => null; // first lookup raced with the winner's create
+    const loser = await propose({ body: { ...body, afterContent: 'loser' } });
+    store.getDedupProposalId = originalLookup;
+    assert.equal(loser.statusCode, 409);
+    assert.equal(loser.json().error, 'client_request_conflict');
+    assert.equal(store.get(first.json().proposalId).afterContent, 'winner');
+    assert.equal(store.listPending('alice').length, 1);
+  });
+
+  it('does not publish a legacy staged proposal lacking its original source binding', async () => {
+    store.reserveDedup('alice', 'legacy', 'legacy-proposal');
+    store.create({
+      proposalId: 'legacy-proposal',
+      sourceThreadId: 'thread_1',
+      sourceInvocationId: 'old',
+      sourceCatId: 'opus',
+      targetLayer: 'primer',
+      targetPath: 'relationship/ragdoll-primer.md',
+      beforeContent: '',
+      baseContentHash: writeMod.hashContent(''),
+      afterContent: 'draft',
+      rationale: 'r',
+      createdBy: 'alice',
+      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
+    });
+    const res = await propose({
+      body: { afterContent: 'draft', rationale: 'r', signalKind: 'cat-declared', clientRequestId: 'legacy' },
+    });
+    assert.equal(res.statusCode, 409);
+    assert.equal(store.get('legacy-proposal').publication.state, 'staged');
+    assert.equal((await messageStore.getByThread('thread_1', 50)).length, 1);
+  });
+
   it('dedup retry recovers a staged proposal by publishing and anchoring its card', async () => {
     seedPrimer('OLD');
+    const sourceMessageId = seedOrigin('req-invisible');
     const existingProposalId = 'profile_update_pending_no_card';
     store.reserveDedup('alice', 'req-invisible', existingProposalId);
     store.create({
@@ -194,7 +399,7 @@ describe('callback propose-profile-update route', () => {
       baseContentHash: writeMod.hashContent('OLD'),
       afterContent: 'X',
       rationale: 'r',
-      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
+      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1', sourceMessageId },
       createdBy: 'alice',
     });
 
@@ -212,6 +417,7 @@ describe('callback propose-profile-update route', () => {
 
   it('dedup self-heals a visible card even after more than 500 newer messages', async () => {
     seedPrimer('OLD');
+    const sourceMessageId = seedOrigin('req-old-visible');
     const existingProposalId = 'profile_update_old_visible_card';
     store.reserveDedup('alice', 'req-old-visible', existingProposalId);
     store.create({
@@ -225,7 +431,7 @@ describe('callback propose-profile-update route', () => {
       baseContentHash: writeMod.hashContent('OLD'),
       afterContent: 'X',
       rationale: 'r',
-      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
+      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1', sourceMessageId },
       createdBy: 'alice',
     });
     const cardMessage = await messageStore.append(

@@ -16,6 +16,15 @@ import { createMemoryServices } from '../../dist/domains/memory/factory.js';
 import { openVectorGeneration } from '../../dist/domains/memory/open-vector-generation.js';
 import { libraryRoutes } from '../../dist/routes/library.js';
 
+const legacy = (id, embed = async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0]))) => ({
+  load: async () => {},
+  reprobeIfNeeded: async () => {},
+  dispose() {},
+  isReady: () => true,
+  getModelInfo: () => ({ modelId: id, modelRev: '1', dim: 4, generationId: 'g0' }),
+  embed,
+});
+
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'generation-admission-'));
   const docs = join(root, 'docs');
@@ -209,14 +218,6 @@ test('project bootstrap also admits secrets and canonical sources before creatin
 
 test('an explicit library rebuild can repair an old G0 collection after the active same-dimensional provider changes', async (t) => {
   const f = await fixture(t);
-  const legacy = (id) => ({
-    load: async () => {},
-    reprobeIfNeeded: async () => {},
-    dispose() {},
-    isReady: () => true,
-    getModelInfo: () => ({ modelId: id, modelRev: '1', dim: 4, generationId: 'g0' }),
-    embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
-  });
   f.selectEncoder(legacy('collection-old'));
   await f.rebuild();
   assert.equal(f.store.searchEmbedding().getModelInfo().modelId, 'collection-old');
@@ -232,3 +233,61 @@ test('an explicit library rebuild can repair an old G0 collection after the acti
     'collection-current',
   );
 });
+
+for (const route of ['library', 'bootstrap']) {
+  for (const failAt of [1, 2]) {
+    test(`registered G0 collection stays closed through ${route} replacement failure at batch ${failAt} and retries skipped sources`, async (t) => {
+      const f = await fixture(t);
+      const projectRoot = join(f.path, '..');
+      for (let i = 0; i < 8; i++)
+        writeFileSync(join(projectRoot, `stable-${i}.md`), `# Stable ${i}\n\nOrdinary source.`);
+      let encoder = legacy('old-g0');
+      const id = route === 'library' ? 'domain:neutral' : deriveProjectCollectionId(projectRoot);
+      const rebuild = async () => {
+        if (route === 'bootstrap')
+          return ensureProjectCollection(
+            projectRoot,
+            f.service.catalog,
+            f.service.collectionStores,
+            f.service.dataDir,
+            'fixture-owner',
+            () => encoder,
+          );
+        f.selectEncoder(encoder);
+        const response = await f.rebuild();
+        assert.equal(response.statusCode, 200, response.body);
+        return response.json();
+      };
+      await rebuild();
+      const store = f.service.collectionStores.get(id);
+      const db = store.getDb();
+      const count = () => db.prepare('SELECT count(*) AS n FROM evidence_vectors').get().n;
+      assert.equal(count(), 9);
+      assert.equal(store.searchEmbedding().getModelInfo().modelId, 'old-g0');
+      store.setEmbedDeps(undefined);
+      let calls = 0;
+      let failing = true;
+      encoder = legacy('replacement-g0', async (texts) => {
+        if (++calls === failAt && failing) throw new Error('controlled optional encode failure');
+        return texts.map(() => new Float32Array([1, 0, 0, 0]));
+      });
+      const failed = await rebuild();
+      if (route === 'library') assert.deepEqual([failed.indexed, failed.skipped], [0, 9]);
+      assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_docs').get().n, 9, 'canonical sources survive');
+      assert.equal(count(), failAt === 1 ? 0 : 8, 'partial committed work is retained');
+      assert.equal(f.service.catalog.get(id).status, 'stale');
+      assert.equal(store.searchEmbedding(), undefined, 'neither empty nor partial replacement is published');
+      assert.equal(db.prepare("SELECT state FROM vector_generations WHERE id='g0'").get().state, 'building');
+
+      failing = false;
+      const beforeRetry = calls;
+      const complete = await rebuild();
+      if (route === 'library') assert.deepEqual([complete.indexed, complete.skipped], [0, 9]);
+      assert.equal(calls - beforeRetry, failAt === 1 ? 2 : 1, 'retry fills only missing current sources');
+      assert.equal(count(), 9);
+      assert.equal(f.service.catalog.get(id).status, 'active');
+      assert.equal(store.searchEmbedding().getModelInfo().modelId, 'replacement-g0');
+      assert.equal(db.prepare("SELECT state FROM vector_generations WHERE id='g0'").get().state, 'ready');
+    });
+  }
+}

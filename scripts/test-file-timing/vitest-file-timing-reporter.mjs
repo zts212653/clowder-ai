@@ -1,5 +1,15 @@
 import { timingEnvironment, writeTimingReport } from './report-format.mjs';
 
+/**
+ * Only the public timing fields are shared across workspace Vitest peer instances.
+ * @typedef {object} TimingModule
+ * @property {string} moduleId
+ * @property {() => string | undefined} [state]
+ * @property {() => boolean} [ok]
+ * @property {() => {duration?: number, environmentSetupDuration?: number, collectDuration?: number}} [diagnostic]
+ */
+
+/** @param {TimingModule} testModule */
 function moduleStatus(testModule) {
   try {
     const state = testModule.state?.();
@@ -14,6 +24,7 @@ function moduleStatus(testModule) {
   }
 }
 
+/** @param {TimingModule} testModule */
 function moduleTiming(testModule) {
   try {
     const diagnostic = testModule.diagnostic?.() || {};
@@ -36,12 +47,18 @@ function moduleTiming(testModule) {
 export function createVitestFileTimingReporter(environment = process.env) {
   if (!timingEnvironment(environment)) return null;
   const files = new Map();
-  /** @type {import('vitest/reporters').Reporter} */
+  /** @satisfies {import('vitest/reporters').Reporter} */
   const reporter = {
+    /** @param {TimingModule} testModule */
     onTestModuleEnd(testModule) {
       const timing = moduleTiming(testModule);
       if (timing) files.set(testModule.moduleId, timing);
     },
+    /**
+     * @param {ReadonlyArray<TimingModule>} testModules
+     * @param {ReadonlyArray<unknown>} _unhandledErrors
+     * @param {unknown} _reason
+     */
     onTestRunEnd(testModules, _unhandledErrors, _reason) {
       for (const testModule of testModules) {
         const timing = moduleTiming(testModule);
@@ -57,7 +74,7 @@ export function createVitestFileTimingReporter(environment = process.env) {
   return reporter;
 }
 
-/** @returns {Array<'default' | import('vitest/reporters').Reporter>} */
+/** @returns {Array<'default' | NonNullable<ReturnType<typeof createVitestFileTimingReporter>>>} */
 export function vitestReporters(environment = process.env) {
   const reporter = createVitestFileTimingReporter(environment);
   return reporter ? ['default', reporter] : ['default'];

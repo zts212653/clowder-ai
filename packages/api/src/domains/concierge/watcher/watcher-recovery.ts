@@ -1,5 +1,6 @@
 import { parseWatcherSessionState, type SessionRecord, type TurnExecutionRecord } from '@cat-cafe/shared';
 import { watcherSessionChainKey } from '../../cats/services/session/session-scope.js';
+import { watcherRetirementPending } from './retirement/watcher-retirement-state.js';
 import { type FinalizationOwners, finalizeWatcherWake, finishIdleWatcherWake } from './watcher-finalization.js';
 import { settleWatcherStartupFailure } from './watcher-startup-failure.js';
 
@@ -22,7 +23,7 @@ export async function reconcileWatcherRecovery(
   const pending = new Map<string, SessionRecord>();
   for (const session of sessions) {
     const state = parseWatcherSessionState(session.watcherState);
-    const id = state.attempt?.invocationId ?? state.wakeInvocationId;
+    const id = state.attempt?.invocationId ?? state.wakeInvocationId ?? session.watcherRetirement?.wakeInvocationId;
     if (!id) continue;
     pending.set(id, session);
     const record = await owners.executions.get(id);
@@ -52,7 +53,11 @@ export async function reconcileWatcherRecovery(
       )
         throw new Error('watcher_recovery_session_mismatch');
       const state = parseWatcherSessionState(session.watcherState);
-      if (state.attempt?.phase === 'finalize_pending' && state.attempt.invocationId === execution.invocationId) {
+      if (
+        !watcherRetirementPending(session) &&
+        state.attempt?.phase === 'finalize_pending' &&
+        state.attempt.invocationId === execution.invocationId
+      ) {
         await finalizeWatcherWake(owners, session, state);
         continue;
       }
@@ -67,6 +72,10 @@ export async function reconcileWatcherRecovery(
         !source.settledSequence
       )
         throw new Error('watcher_recovery_source_missing');
+      if (watcherRetirementPending(session)) {
+        await owners.recoverNative(session, source);
+        continue;
+      }
       if (state.attempt && state.attempt.invocationId !== execution.invocationId) {
         if (execution.providerStartedAt !== undefined) throw new Error('watcher_recovery_attempt_changed');
         await finishIdleWatcherWake(owners, session, source);

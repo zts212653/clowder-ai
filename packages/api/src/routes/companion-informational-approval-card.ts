@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { buildApprovalCardBlock } from '../domains/approval-hub/buildApprovalCardBlock.js';
 import { buildDispatchProposalCardBlock } from './dispatch-proposal-card-block.js';
 import { buildEntityProposalCardBlock } from './entity-proposal-card-block.js';
+import { reconstructLegacyTasteProposalCard } from './legacy-taste-proposal-card.js';
 import { buildTasteProposalCardBlock } from './taste-proposal-card-block.js';
 
 const dispatchDetail = z.object({
@@ -27,6 +28,7 @@ const dispatchDetail = z.object({
 const tasteDetail = z.object({
   scene: z.string(),
   quote: z.string(),
+  quotes: z.array(z.string()).optional(),
   takeaway: z.string().optional(),
   tags: z.array(z.string()),
   dimension: z.enum([
@@ -53,13 +55,17 @@ const entityDetail = z.object({
 /** Compare the entire immutable publication with the same read's canonical domain detail. No stored UI grants authority. */
 export function isExactInformationalApprovalCard(block: RichCardBlock, item: ApprovalHubItem): boolean {
   if (block.actions !== undefined) return false;
-  const expected = expectedDomainCard(item);
-  return (
-    expected !== null &&
-    isDeepStrictEqual(
-      block,
-      buildApprovalCardBlock({ producerId: item.sourceFeatureId, canonicalProposalId: item.proposalId }, expected),
-    )
+  const candidates = [expectedDomainCard(item)];
+  // Old immutable cards establish provenance, not consent to their truncated preview.
+  // Chat/Inbox render fresh canonical detail and submit its digest before the original writer runs.
+  if (item.sourceFeatureId === 'F221') candidates.push(expectedTasteCard(item, reconstructLegacyTasteProposalCard));
+  return candidates.some(
+    (expected) =>
+      expected !== null &&
+      isDeepStrictEqual(
+        block,
+        buildApprovalCardBlock({ producerId: item.sourceFeatureId, canonicalProposalId: item.proposalId }, expected),
+      ),
   );
 }
 
@@ -101,15 +107,16 @@ function expectedDispatchCard(item: ApprovalHubItem): RichCardBlock | null {
   });
 }
 
-function expectedTasteCard(item: ApprovalHubItem): RichCardBlock | null {
+function expectedTasteCard(item: ApprovalHubItem, buildCard = buildTasteProposalCardBlock): RichCardBlock | null {
   const parsed = tasteDetail.safeParse(item.detail);
   if (!parsed.success) return null;
   // Validation must not reorder/trim the patch that the immutable builder serialized.
   const rawDetail = item.detail as z.infer<typeof tasteDetail>;
-  return buildTasteProposalCardBlock({
+  return buildCard({
     ...parsed.data,
     id: item.proposalId,
     catId: item.requesterCatId,
+    resolvedQuotes: parsed.data.quotes,
     correctionTarget: rawDetail.correction,
   });
 }

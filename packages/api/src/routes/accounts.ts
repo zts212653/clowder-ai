@@ -149,16 +149,22 @@ export const accountsRoutes: FastifyPluginAsync<{
       };
       const managedClaude = body.claudeToken !== undefined;
       if (managedClaude) account = { ...account, claude: { kind: 'long_lived_token' } };
+      const googleCloud = body.googleCloudProjectId !== undefined;
+      if (body.googleCloudProjectId)
+        account = { ...account, googleCloud: { credential: 'local_adc', projectId: body.googleCloudProjectId } };
       const managed = account.authType === 'oauth' && account.clientId === 'openai';
+      // Generated IDs never collide with the well-known IDs that native CLI logins resolve by.
       const profileId = managedClaude
         ? `claude-${randomUUID()}`
-        : managed
-          ? `codex-${randomUUID()}`
-          : deriveAccountId(
-              body.displayName ?? body.name ?? body.provider ?? 'custom',
-              new Set(readAccountStoreSnapshot(projectRoot).refs),
-              account.authType === 'api_key',
-            );
+        : googleCloud
+          ? `google-cloud-${randomUUID()}`
+          : managed
+            ? `codex-${randomUUID()}`
+            : deriveAccountId(
+                body.displayName ?? body.name ?? body.provider ?? 'custom',
+                new Set(readAccountStoreSnapshot(projectRoot).refs),
+                account.authType === 'api_key',
+              );
       if (managed)
         account = {
           ...account,
@@ -232,11 +238,21 @@ export const accountsRoutes: FastifyPluginAsync<{
           'envVars' in parsed.data)
       )
         throw new Error('claude_token_account_fields_owned');
+      if (
+        existing.googleCloud &&
+        ((parsed.data.authType && parsed.data.authType !== 'oauth') ||
+          (parsed.data.clientId && parsed.data.clientId !== 'google') ||
+          'apiKey' in parsed.data ||
+          'baseUrl' in parsed.data ||
+          'envVars' in parsed.data)
+      )
+        throw new Error('google_cloud_account_fields_owned');
       if (parsed.data.claudeToken && !existing.claude) throw new Error('claude_token_account_required');
       // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
       const account: AccountConfig = {
         ...(existing.claude ? { claude: existing.claude } : {}),
         ...(existing.codex ? { codex: existing.codex } : {}),
+        ...(existing.googleCloud ? { googleCloud: existing.googleCloud } : {}),
         ...(existing.quota ? { quota: existing.quota } : {}),
         authType: (parsed.data.authType as 'oauth' | 'api_key') ?? existing.authType,
         ...(parsed.data.clientId

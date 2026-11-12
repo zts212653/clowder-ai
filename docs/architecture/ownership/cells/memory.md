@@ -12,6 +12,10 @@ title: Memory / Evidence
 summary: Evidence indexing、retrieval、scanner selection、bootstrap、library memory，以及带 append-only content-free owner outcome refs 的 execution-time cue orchestration。
 canonical_features: [F102, F152, F209, F221, F227, F231, F255, F260, F263, F271, F276, F282, F287, F321, F332]
 code_anchors:
+  - packages/api/src/domains/memory/read-usage/MemoryDirectReadEvidence.ts
+  - packages/api/src/domains/memory/read-usage/MemoryReadUsageReader.ts
+  - packages/api/src/routes/event-memory-read-usage.ts
+  - packages/api/src/routes/memory-direct-read-response.ts
   - packages/api/src/domains/memory/matters/MatterMemoryService.ts
   - packages/api/src/domains/memory/matters/MatterMemoryStore.ts
   - packages/api/src/routes/memory-matter-routes.ts
@@ -223,6 +227,14 @@ the empty extraction is not absence proof or automatic contract coverage. Browse
 and uncertain-result recovery only; Event and Taste still use separate original endpoints and receipt validators.
 
 ## Canonical Owner
+
+F321 AC-A2 direct Person/Event read observations remain in the existing Evidence SQLite owner.
+The original authenticated read entry records content-free caller/source/version identities with a stable
+request ID; an owner browser GET is not a cat read. The original Person/Event store still owns lifecycle
+and current-version eligibility. Usage is a read-only, revision-checked projection over direct observations
+and existing successful cue drills. Historical unrecorded reads stay unknown; these rows do not establish
+adoption or grant mutation authority. The schema and behavioral boundaries are covered by
+`f321-person-event-read-usage.test.js` and `f321-read-usage-evidence.test.js`.
 
 F102 owns the memory system contract: `IIndexBuilder`, `IEvidenceStore`, indexing, retrieval modes, local SQLite evidence, and resolver boundaries.
 

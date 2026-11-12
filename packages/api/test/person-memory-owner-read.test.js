@@ -141,6 +141,7 @@ describe('F276 owner person-memory reads', () => {
   let messages;
   let store;
   let threads;
+  let messageStore;
 
   beforeEach(async () => {
     messages = new Map([[sourceMessage.id, { ...sourceMessage }]]);
@@ -148,6 +149,7 @@ describe('F276 owner person-memory reads', () => {
       [sourceRef.threadId, { id: sourceRef.threadId, createdBy: ownerUserId, title: '人物来源对话' }],
     ]);
     store = fakeStore();
+    messageStore = { getById: async (messageId) => messages.get(messageId) ?? null };
     app = Fastify();
     app.addHook('preHandler', async (request) => {
       request.sessionUserId = request.headers['x-test-session'];
@@ -155,7 +157,7 @@ describe('F276 owner person-memory reads', () => {
     await app.register(personMemoryOwnerReadRoutes, {
       ownerUserId,
       store,
-      messageStore: { getById: async (messageId) => messages.get(messageId) ?? null },
+      messageStore,
       threadStore: {
         get: async (threadId) => threads.get(threadId) ?? null,
         list: async () => [...threads.values()],
@@ -316,6 +318,15 @@ describe('F276 owner person-memory reads', () => {
     messages.set(sourceMessage.id, sourceMessage);
     threads.set(sourceRef.threadId, { ...threads.get(sourceRef.threadId), createdBy: 'other-owner' });
     assert.deepEqual((await get(url)).json(), { status: 'unavailable', sources: [] });
+  });
+
+  it('keeps a transient source-store failure distinct from a known unavailable source', async () => {
+    messageStore.getById = async () => {
+      throw new Error('temporary source read failure');
+    };
+    const response = await get(`/api/memory/people/${person.personId}/source?kind=claim&itemId=${claim.claimId}`);
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), { status: 'unavailable', sources: [] });
   });
 
   it('does not reveal whether a foreign or unknown person exists', async () => {

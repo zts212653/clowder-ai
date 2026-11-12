@@ -679,6 +679,7 @@ import {
   isPromptTokenLimitExceededError,
   isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
+  isTransientAgyNativePreInitFailure,
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
@@ -5646,6 +5647,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     let allowSessionRetry = !isScopedMember && Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
     let allowTransientRetry = !isScopedMember && !isAgyAcp;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let retryFreshReason: 'resume_rejected' | 'resume_failed' | undefined;
     let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await scopedMemberLaunch?.assertCurrent();
@@ -5873,6 +5875,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               evidence,
               coordinate: contextContinuityHandshake.coordinate,
               invocationId,
+              ...(retryFreshReason ? { freshReason: retryFreshReason } : {}),
             }),
           };
           await applyProviderCompactions(compactions);
@@ -6145,7 +6148,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          (isAgyNative
+            ? isTransientAgyNativePreInitFailure(msg)
+            : isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
         ) {
           suppressedTransientCliError = msg;
           continue;
@@ -6477,6 +6482,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (shouldRetryWithoutSession && !requiresImportedHistory && attempt + 1 < maxAttempts) {
         await presentationDelivery?.release('provider_generation_replaced');
         const nativeBindingChanged = suppressedMissingSessionError?.errorCode === 'AGY_NATIVE_RESUME_MISMATCH';
+        const currentRetryFreshReason: 'resume_rejected' | 'resume_failed' = nativeBindingChanged
+          ? 'resume_rejected'
+          : 'resume_failed';
+        retryFreshReason = currentRetryFreshReason;
         const retryReason = nativeBindingChanged
           ? 'native_binding_changed'
           : suppressedPromptLimitError
@@ -6607,7 +6616,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ? resolveContextContinuity({
                 capability: contextCapability,
                 invocationId,
-                freshReason: 'resume_failed',
+                freshReason: currentRetryFreshReason,
                 invocationOrigin: params.invocationOrigin ?? 'unknown',
                 routeTopology: params.routeTopology ?? 'independent',
                 // F296 B4 (kimi review): without this the retry silently
