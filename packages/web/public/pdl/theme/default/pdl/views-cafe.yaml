@@ -1503,8 +1503,7 @@ views:
                           "true":
                             t: workbench.flagName.true
                             args: ["@name"]
-                          "false": "@name"
-                          _: "@curator"
+                          _: "@name"
                       tip: "@id"
                   trail:
                     - text:
