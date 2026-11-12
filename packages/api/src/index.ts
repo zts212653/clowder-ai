@@ -5565,7 +5565,6 @@ async function main(): Promise<void> {
           ? {
               appAssist: new CompanionAppAssistOwner({
                 store: redis ? conciergeConfigStoreShared : undefined,
-                companionSettings,
                 ownerUserId: privateUserId,
                 timeZone: () => getCoCreatorConfig().timeZone,
                 assertCurrent: assertWorkCurrent,

@@ -20,7 +20,6 @@ test('actual executor/private pipes and Host instances enforce the same owner da
   for (let i = 0; i < 2; i++) {
     const owner = new CompanionAppAssistOwner({
       store: new RedisConciergeConfigStore(redis.client('executor:')),
-      companionSettings: async () => ({ enabled: true }),
       ownerUserId: 'fixture-owner',
       timeZone: () => 'Pacific/Honolulu',
       now: () => Date.parse('2030-01-02T12:00:00Z'),

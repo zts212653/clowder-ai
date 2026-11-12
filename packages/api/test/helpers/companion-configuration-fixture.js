@@ -8,7 +8,6 @@ import { writePluginConfig } from '../../dist/domains/plugin/plugin-config-store
 
 /** official.companion's declared configuration (plugin.yaml), as the installed package carries it. */
 export const COMPANION_CONFIGURATION = [
-  { key: 'enabled', label: '显示猫猫球', kind: 'boolean', required: false, default: true },
   { key: 'dutyCatProfileId', label: '回复的成员', kind: 'member', required: false },
   { key: 'displayName', label: '名称', kind: 'string', required: false, default: '猫猫球' },
   { key: 'personaTone', label: '人设基调', kind: 'string', required: false, default: '温暖、简短、不啰嗦' },

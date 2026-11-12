@@ -6,7 +6,6 @@ export const COMPANION_PLUGIN_ID = 'official.companion';
 
 /** 猫猫球's owner settings: official.companion's plugin configuration, defaults from its manifest. */
 export interface CompanionSettings {
-  enabled: boolean;
   dutyCatProfileId: string;
   displayName: string;
   personaTone: string;
@@ -35,7 +34,6 @@ export async function readCompanionSettings(
 ): Promise<CompanionSettings> {
   const values = (await configuration.readActionInput(COMPANION_PLUGIN_ID)) as Record<string, string>;
   return {
-    enabled: values.enabled === 'true',
     dutyCatProfileId: values.dutyCatProfileId ?? defaultMember(),
     displayName: line(values.displayName, 50),
     personaTone: line(values.personaTone, 200),
