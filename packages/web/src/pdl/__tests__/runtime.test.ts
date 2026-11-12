@@ -3969,7 +3969,13 @@ describe('unmodified runtime and project chat bindings', () => {
       const saves = (port.post as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([path]) => path === '/api/config/console-themes',
       );
-      const themes = (saves.at(-1)?.[2] as { themes: { customs: { full: Record<string, any> }[] } }).themes;
+      const themes = (
+        saves.at(-1)?.[2] as {
+          themes: {
+            customs: { full: { style: { readSize: string }; tokens: { cream: { light: { accent: string } } } } }[];
+          };
+        }
+      ).themes;
       expect(w.localStorage.getItem('clowder-proto3:pdl-themes-v1')).toBeNull();
       expect(themes.customs[0].full.style.readSize).toBe('17');
       expect(themes.customs[0].full.tokens.cream.light.accent).toBe('#527b99');
