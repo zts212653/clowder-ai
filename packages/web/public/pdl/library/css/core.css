@@ -1111,7 +1111,9 @@ button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身
    渐隐是遮罩，遮罩会把同一个元素的阴影裁掉，所以两者永远不在同一个元素上 */
 .menu, .pop, .ws-pop, .inbox { display: flex; flex-direction: column; }
 .float-body { --sf-size: inherit; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: inherit; }
-.float-body > * { flex: none; }   /* 里面的行不被压扁：面限高，超出的由这一层滚动（和 .scroll.stick-end 的子元素同理） */
+.float-body > * { flex: none; }
+.float-body > .vw-widget.tall { flex: 1 1 auto; height: calc(var(--row-h-1) * 14); min-height: calc(var(--row-h-1) * 6); }   /* 浮窗里的整页框（插件自己的页面，自己滚动）：给它一个固定的高度，窗口放不下时先让它变矮 */
+:is(.pop, .ws-pop, .inbox) { max-block-size: 100%; }   /* 浮层不超出它能放下的空间（定位区域的高度）：超出的由里面那层滚动 */   /* 里面的行不被压扁：面限高，超出的由这一层滚动（和 .scroll.stick-end 的子元素同理） */
 .scroll-x { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, transparent 0, black var(--sf-l), black calc(100% - var(--sf-r)), transparent 100%); mask-image: linear-gradient(to right, transparent 0, black var(--sf-l), black calc(100% - var(--sf-r)), transparent 100%); animation: scroll-fade-x linear both; animation-timeline: scroll(self x); }
 @property --sf-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
 @property --sf-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
