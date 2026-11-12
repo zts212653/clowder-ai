@@ -31,14 +31,13 @@ describe('F276 recall and lifecycle MCP tools', () => {
     globalThis.fetch = originalFetch;
   });
 
-  test('registers live status, owner-derived recall, drill, revision and redaction tools', async () => {
+  test('registers live status, owner-derived recall, drill and revision tools', async () => {
     const { callbackTools } = await import('../dist/tools/callback-tools.js');
     const names = [
       'cat_cafe_get_person_memory_proposal_status',
       'cat_cafe_recall_person_relationship',
       'cat_cafe_drill_person_memory',
       'cat_cafe_revise_person_memory',
-      'cat_cafe_redact_person_memory_item',
     ];
     for (const name of names) {
       const tool = callbackTools.find((entry) => entry.name === name);

@@ -445,6 +445,19 @@ of addressability and must not be changed into a global subscription for the Dot
 
 ## Dot migration intake (2026-11-10)
 
+Home absorption [#6929](https://github.com/zts212653/clowder-ai/pull/6929) merged into main as
+`8b77ba944c6f4533f90d40790829457ec61ea3e9` at 2026-11-10T16:28:49Z; Intent
+[#6924](https://github.com/zts212653/clowder-ai/issues/6924) is completed. Argon's
+[exact-HEAD independent review](https://github.com/zts212653/clowder-ai/pull/6929#pullrequestreview-5845113268)
+rebuilt API and repeated the 39-test high-risk chain. The temporary merge with then-current main
+also passed API build, 66 migration/thread tests and 70 related Web tests; actual landed functional
+code matches that tested tree. Canonical strict record and immediate advance passed; ledger commit
+`5cef6fceac365ddb8fa18693a63db6034dff2425` was pushed and read back, with the public `next`
+watermark at `0d04ce8f24a5455c5e4c1d16b3cdefe14ed64ccc`. All three owned review/baseline/intake
+checkouts were actually removed; registered home checkout finish/check receipts passed.
+Remote home CI could not start due account billing/spending-limit blocking; matching local workflow
+checks passed. This is completed code intake, with no claim of a new live Dot installation or activation.
+
 The paired public changes merged as Host `0d04ce8f24a5` and plugin `717a417690bd`; the
 bundled Dot is `0.2.0-alpha.52`. The public SDK and contract publication completed, with
 consumer download, npm registry signatures and provenance attestations verified. Dot itself is a
@@ -453,7 +466,7 @@ in [public issue #1932](https://github.com/zts212653/clowder-ai/issues/1932#issu
 operator waived this pair's seven-day calendar wait after that confirmation; the actual pre-merge
 soak remains `MISSED`, not a seven-day PASS.
 
-This home candidate moves addressed delivery, queue handoff, Settings actions and new replies
+This home intake moves addressed delivery, queue handoff, Settings actions and new replies
 through the ordinary plugin mechanisms. Its migration is owner-checked, idempotent and
 non-destructive. Compatibility is confined to the original installation and package lineage:
 revoked credentials cannot be adopted, replacement installations cannot rebind the old source,

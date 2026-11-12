@@ -1,6 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
+import { z } from 'zod';
 import type { SharedMcpFactory } from './shared-mcp-factory.js';
 
 /** Read definitions at the existing activation boundary, without a business-action client. */
@@ -19,10 +21,18 @@ export async function inspectPluginMcpSchema(factory: SharedMcpFactory) {
     const validator = new AjvJsonSchemaValidator();
     let cursor: string | undefined;
     do {
-      const page = await client.listTools(cursor ? { cursor } : undefined, { signal, timeout: 20_000 });
+      const rawPage = await client.request(
+        { method: 'tools/list', ...(cursor ? { params: { cursor } } : {}) },
+        z.unknown(),
+        { signal, timeout: 20_000 },
+      );
+      const parsed = ListToolsResultSchema.safeParse(rawPage);
+      if (!parsed.success) return 'tool_schema_invalid' as const;
+      const page = parsed.data;
       const invalid = page.tools.some((tool) => {
         try {
           validator.getValidator(tool.inputSchema);
+          if (tool.outputSchema) validator.getValidator(tool.outputSchema);
           return false;
         } catch {
           return true;

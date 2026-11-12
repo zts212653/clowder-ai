@@ -41,19 +41,39 @@ export async function createTestApprovalRegistry(adapters) {
 
 export function anchorApproval(
   store,
-  { proposalId, sourceFeatureId, ownerUserId, requesterCatId, threadId, createdAt = Date.now() },
+  { proposalId, sourceFeatureId, ownerUserId, requesterCatId, threadId, createdAt = Date.now(), originRef },
 ) {
   const envelope = {
     canonicalProposalId: proposalId,
     sourceFeatureId,
     ownerUserId,
     requesterCatId,
-    originRef: { kind: 'message', threadId, messageId: `origin-${proposalId}` },
+    originRef: originRef ?? { kind: 'message', threadId, messageId: `origin-${proposalId}` },
     approvalCardRef: { threadId, messageId: `card-${proposalId}` },
     createdAt,
   };
   const committed = store.commitEnvelope(proposalId, envelope);
   return committed && typeof committed.then === 'function' ? committed.then(() => envelope) : envelope;
+}
+
+/** Publication-only suites isolate source eligibility; real ApprovalIngress and retry tests cover that policy. */
+export function createTestApprovalIngress() {
+  return {
+    async validateOrigin() {},
+    async publish(draft, store) {
+      const envelope = {
+        canonicalProposalId: draft.canonicalProposalId,
+        sourceFeatureId: draft.producerId,
+        ownerUserId: draft.ownerUserId,
+        requesterCatId: draft.requesterCatId,
+        originRef: draft.originRef,
+        approvalCardRef: { threadId: draft.cardThreadId, messageId: `card-${draft.canonicalProposalId}` },
+        createdAt: draft.createdAt,
+      };
+      await store.commitEnvelope(draft.canonicalProposalId, envelope);
+      return envelope;
+    },
+  };
 }
 
 export function proposedTaskAction(overrides = {}) {

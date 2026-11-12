@@ -223,6 +223,7 @@ import { coverPublishedMessageReads } from './callback-published-wake-coverage.j
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackReadProfileRoutes } from './callback-read-profile-routes.js';
 import { registerCallbackRecordProactiveMemoryAbstentionRoutes } from './callback-record-proactive-memory-abstention-routes.js';
+import { registerCallbackRememberRoutes } from './callback-remember-routes.js';
 import {
   type CallbackRequestReviewOwnerDeps,
   registerCallbackRequestReviewOwnerRoutes,
@@ -247,6 +248,7 @@ import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdra
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { registerCompanionWorkReadRoutes } from './companion-work-read.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
+import { verifyOutboundTerminalCoordinationBinding } from './cross-thread-coordination-outbound.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { buildThreadIdsByFeatId, normalizeFeatId } from './feature-thread-resolver.js';
 import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
@@ -2677,6 +2679,41 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           subjectRef: action.subjectRef,
         }
       : explicitCoordination;
+    const preflightReplayCandidate =
+      effectiveCoordination?.phase === 'terminal' &&
+      effectiveCoordination.id &&
+      effectiveCoordination.id !== incomingCrossThreadHint?.coordination?.id &&
+      clientMessageId &&
+      !localReviewVerdict
+        ? ((await messageStore.getByIdempotencyKey(
+            actor.userId,
+            effectiveThreadId,
+            buildCallbackPostMessageIdempotencyKey(actor.catId, clientMessageId),
+          )) ??
+          (await messageStore.getByIdempotencyKey(
+            actor.userId,
+            effectiveThreadId,
+            buildNotificationMessageIdempotencyKey({
+              catId: actor.catId,
+              clientMessageId,
+              principalRef: `invocation:${invocationId}`,
+            }),
+          )))
+        : null;
+    const outboundTerminalBinding = await verifyOutboundTerminalCoordinationBinding({
+      messageStore,
+      actor: {
+        userId: actor.userId,
+        catId: actor.catId,
+        threadId: actor.threadId,
+      },
+      invocationId,
+      effectiveThreadId,
+      explicit: effectiveCoordination,
+      incomingCoordinationId: incomingCrossThreadHint?.coordination?.id,
+      replyTo,
+      existingIdempotentMessage: preflightReplayCandidate,
+    });
     // Resolve the ordinary carrier's canonical targets before any policy that
     // can claim, buffer, queue, or emit it. The proposal store's index is
     // deny-only; canonical fields are revalidated inside the store lookup.
@@ -2691,6 +2728,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                     coordination: incomingCrossThreadHint.coordination,
                   },
                 }
+              : {}),
+            ...(outboundTerminalBinding.kind === 'verified'
+              ? { verifiedOutboundActive: outboundTerminalBinding.outboundActive }
+              : {}),
+            ...(outboundTerminalBinding.kind === 'conflict'
+              ? { outboundConflict: outboundTerminalBinding.conflict }
               : {}),
             targetThreadId: effectiveThreadId,
             hasExplicitRoutingIntent:
@@ -3475,6 +3518,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             clientMessageId,
           };
         }
+        const persistedCoordination = readStoredCoordination(duplicateMsg);
         return {
           status: 'duplicate',
           threadId: effectiveThreadId,
@@ -3482,6 +3526,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ...notificationDeliveryReceipt(duplicateMsg.extra?.notificationDelivery?.withoutWakeCatIds),
           ...(duplicateMsg.replyTo ? { replyTo: duplicateMsg.replyTo } : {}),
           ...(clientMessageId ? { clientMessageId } : {}),
+          ...(persistedCoordination ? { coordination: persistedCoordination } : {}),
         };
       };
       if (duplicateMsg) {
@@ -5968,6 +6013,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackWithdrawThreadProposalRoutes(app, { registry, proposalStore: opts.proposalStore, socketManager });
   }
 
+  // F332: bounded facade over the original memory submission routes.
+  registerCallbackRememberRoutes(app, { registry, messageStore: opts.messageStore, socketManager });
+
   // F231 Phase C: Cat-side profile-update proposal callback
   if (opts.profileUpdateProposalStore && opts.profileRepository) {
     registerCallbackProposeProfileUpdateRoutes(app, {
@@ -6001,6 +6049,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     });
     registerCallbackPersonMemoryRoutes(app, {
       store: opts.personMemoryStore,
+      readEvidenceDb: opts.profileReadEvidenceDb,
       workspacePersonResolver: opts.workspacePersonResolver,
       ...(opts.writeOpportunityDeliveryStore
         ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }

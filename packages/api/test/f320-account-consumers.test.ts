@@ -79,6 +79,7 @@ for (const explicit of [false, true])
                 buildChildEnv(launch.env, { inheritParentEnv: launch.inheritParentEnv }),
                 account.apiKey,
                 selectedRouting,
+                { official: !custom },
               );
               assertSelectedApiProvider(launch, baseUrl);
               const home = launch.env?.CODEX_HOME;
@@ -132,6 +133,7 @@ for (const explicit of [false, true])
               buildChildEnv(options.env, { inheritParentEnv: options.inheritParentEnv }),
               account.apiKey,
               selectedRouting,
+              { official: !custom },
             );
             assertSelectedApiProvider(options, baseUrl);
             homes.push(options.env!.CODEX_HOME!);
