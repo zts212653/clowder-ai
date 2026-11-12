@@ -1,4 +1,4 @@
-import { isPluginConfigurationFieldRequired, type PluginManagerConfigureRequest } from '@cat-cafe/shared';
+import { catRegistry, isPluginConfigurationFieldRequired, type PluginManagerConfigureRequest } from '@cat-cafe/shared';
 import {
   declaresConfigurationVariants,
   effectiveConfiguration,
@@ -62,6 +62,9 @@ const VALUE_VALIDATORS: Partial<Record<ContractConfigurationField['kind'], Value
     if (value.trim().length === 0 || !Number.isFinite(Number(value))) {
       throw configError(`Configuration field ${field.key} must be a finite number`);
     }
+  },
+  member: (field, value) => {
+    if (!catRegistry.has(value)) throw configError(`Configuration field ${field.key} is not a member`);
   },
   url: (field, value) => {
     let parsed: URL;

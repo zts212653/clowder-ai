@@ -51,8 +51,8 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@clowder-ai/plugin-contract':
-        specifier: file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz
-        version: file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz
+        specifier: file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz
+        version: file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz
       '@clowder-ai/plugin-contract-033c0':
         specifier: npm:@clowder-ai/plugin-contract@0.3.3-candidate.0
         version: '@clowder-ai/plugin-contract@0.3.3-candidate.0'
@@ -1298,8 +1298,8 @@ packages:
     version: 0.3.3-candidate.1
     engines: {node: '>=20.0.0'}
 
-  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz':
-    resolution: {integrity: sha512-myNTGwxFPHIb43CGVPxdC8D7P6vUgWjLoCxhajMEWOVxD4gd0PjlVwaq40L7eo0YoCOF1qha3CjfHDFRJfbejQ==, tarball: file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz}
+  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz':
+    resolution: {integrity: sha512-Nh32gzD9p5vjWT6BleielMHnNp+VYlySp8adar7oH9rNa26eFoh20Zzhxj1OEQ0D77zwtOpWH3Rj+Ed1gXNwoQ==, tarball: file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz}
     version: 0.4.0-candidate.0
     engines: {node: '>=20.0.0'}
 
@@ -7811,7 +7811,7 @@ snapshots:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
 
-  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-85e7a273aebd.tgz':
+  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz':
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)

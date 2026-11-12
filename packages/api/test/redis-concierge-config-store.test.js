@@ -5,6 +5,9 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
@@ -58,7 +61,7 @@ describe('RedisConciergeConfigStore', { skip: redisIsolationSkipReason(REDIS_URL
       await redis.quit().catch(() => {});
       return;
     }
-    store = new RedisConciergeConfigStore(redis);
+    store = new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-')));
   });
 
   after(async () => {

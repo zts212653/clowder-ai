@@ -26,8 +26,6 @@ export interface ConciergeConfig {
    * - 'quiet-badge': Tier 0-1 低优先级 badge，hover 才出文字（Phase A 默认）
    */
   proactivePolicy: 'ambient' | 'quiet-badge';
-  /** 隐藏整个猫猫球；字段名为历史兼容保留，不表示关闭声音 (AC-A6) */
-  muted: boolean;
   /** 球位置 (PR-A3b INV-P3: per-user 持久化) — null = default bottom-right */
   ballPosition: { x: number; y: number } | null;
   /** 球大小 (E3: per-user 持久化, 43-192px) — undefined/null = BALL_SIZE_DEFAULT */
@@ -71,7 +69,6 @@ export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'
   displayName: '猫猫球',
   personaTone: '温暖、简短、不啰嗦',
   proactivePolicy: 'quiet-badge',
-  muted: false,
   ballPosition: null,
   ballSize: BALL_SIZE_DEFAULT,
   behaviorEnabled: true,

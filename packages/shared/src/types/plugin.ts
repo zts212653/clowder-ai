@@ -252,7 +252,8 @@ export type PluginManagerConfigFieldKind =
   | 'number'
   | 'url'
   | 'list'
-  | 'operation';
+  | 'operation'
+  | 'member';
 
 export interface PluginManagerConfigOption {
   value: string;

@@ -1,6 +1,6 @@
 /* 插件配置引擎：安装后，宿主读插件清单（plugin.yaml）的 configuration，投影成 PluginManagerConfigField[]，用同一个引擎画成配置表单。
    规则和真实项目同一套（PluginManagerConfigurationSection、ConfigFieldRenderer、ActionRenderer、OperationRowsRenderer、actionConfirmation）：
-   - 种类 → 控件：select 下拉、boolean 开关、string / number / url 输入、secret 遮住的输入（只露“已设置”）、list 一列值的编辑器、operation 动作流程；hidden 不画；
+   - 种类 → 控件：select 下拉、member 成员下拉（选项是主机的成员列表）、boolean 开关、string / number / url 输入、secret 遮住的输入（只露“已设置”）、list 一列值的编辑器、operation 动作流程；hidden 不画；
      records 一组记录：清单声明每行有哪些子字段（recordFields，用上面这些种类）和可选的模板（presets，新加一行时的初值），值是这些行的 JSON 数组
    - 分支（configurationVariants，oneOf）：判别字段的当前值（含未保存的草稿）选出唯一匹配的分支；没被任何分支认领的字段一直在，分支字段只在选中时在。切换立刻重算，不保存、不往返
    - requiredWhen：写了它就由它决定（引用的值在列表里才必填）；引用的是已保存的密钥（值被遮住）时用宿主算好的 requiredNow
@@ -711,6 +711,14 @@ function pcfModel(inst, src) {
         return Object.assign(row, { value: value, options: f.options || [] });
       }
       if (f.kind === 'boolean') return Object.assign(row, { value: pcfEffective(f, d) === 'true' });
+      if (f.kind === 'member')
+        return Object.assign(row, {
+          kind: 'select',
+          value: pcfEffective(f, d),
+          options: WHO_DATA.members().map(function (m) {
+            return { value: m.id, label: m.name };
+          }),
+        }); /* 成员：选项是主机的成员列表 */
       if (f.kind === 'list')
         return Object.assign(row, {
           items: pcfList(d[f.key] !== undefined ? d[f.key] : f.currentValue || pcfDefault(f) || '[]') || [],

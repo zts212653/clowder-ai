@@ -10,7 +10,7 @@ export interface AppAssistDay {
 }
 
 export function appAssistAllowed(config: ConciergeConfig): boolean {
-  return config.appAssistEnabled === true && config.enabled !== false && config.muted !== true;
+  return config.appAssistEnabled === true && config.enabled !== false;
 }
 
 export function validateAppAssistClaim(appKey: string, day: string): void {
@@ -28,7 +28,7 @@ const CLAIM_DAY = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'disabled' end
 local config = cjson.decode(raw)
-if config.appAssistEnabled ~= true or config.enabled == false or config.muted == true then return 'disabled' end
+if config.appAssistEnabled ~= true or config.enabled == false then return 'disabled' end
 local rawDay = redis.call('GET', KEYS[2])
 local current = rawDay and cjson.decode(rawDay) or {day=ARGV[1], keys={}}
 if ARGV[1] < current.day then return 'clock_rollback' end
@@ -51,7 +51,7 @@ if ARGV[3] == 'patch' then
   config = merged
 end
 redis.call('SET', KEYS[1], cjson.encode(config))
-local allowed = config.appAssistEnabled == true and config.enabled ~= false and config.muted ~= true
+local allowed = config.appAssistEnabled == true and config.enabled ~= false
 redis.call('PUBLISH', ARGV[2], allowed and 'enabled' or 'disabled')
 return 1
 `;

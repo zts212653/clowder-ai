@@ -91,7 +91,12 @@ test('settings view reads the saved owner selection and refuses header-only or p
   const opened = await app.inject({ method: 'POST', url: '/api/concierge/thread', headers });
   assert.equal(opened.statusCode, 200);
   const before = (await threadStore.get(opened.json().threadId))?.preferredCats;
-  const ordinary = await app.inject({ method: 'PUT', url: '/api/concierge/config', headers, payload: { muted: true } });
+  const ordinary = await app.inject({
+    method: 'PUT',
+    url: '/api/concierge/config',
+    headers,
+    payload: { householdReadsAllowed: true },
+  });
   const effective = (await app.inject({ url: '/api/concierge/config', headers })).json().config;
   assert.equal(ordinary.json().config.dutyCatProfileId, effective.dutyCatProfileId);
   assert.deepEqual((await threadStore.get(opened.json().threadId))?.preferredCats, before);

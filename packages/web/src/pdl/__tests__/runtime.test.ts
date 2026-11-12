@@ -2830,6 +2830,23 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
+  it('renders a member configuration field as a choice among the Host members', async () => {
+    const { dom, w, errors } = await boot();
+    try {
+      const row = w.eval(
+        "WHO_DATA.members=function(){return [{id:'opus',name:'Opus'},{id:'codex',name:'Codex'}]};pcfModel('member-pick',{plugin:'official.companion',installed:true,fields:[{key:'dutyCatProfileId',kind:'member',label:'Member',required:false,currentValue:'codex'}]}).rows[0]",
+      );
+      expect(row.kind).toBe('select');
+      expect(row.value).toBe('codex');
+      expect(row.options).toEqual([
+        { value: 'opus', label: 'Opus' },
+        { value: 'codex', label: 'Codex' },
+      ]);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
   it('renders real plugin schema branches and retains a rejected config draft until its owner accepts', async () => {
     const variants = {
       discriminator: 'mode',

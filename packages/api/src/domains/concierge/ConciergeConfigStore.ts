@@ -10,6 +10,9 @@
  * - registry 为空时 fallback 'sonnet'
  */
 
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   applyWatcherConfigPatch,
   CONCIERGE_CONFIG_DEFAULTS,
@@ -20,6 +23,7 @@ import {
   type WatcherConfigPatch,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { readPluginConfig, writePluginConfig } from '../plugin/plugin-config-store.js';
 import {
   type AppAssistClaim,
   type AppAssistDay,
@@ -43,6 +47,61 @@ function resolveDefaultDutyCatProfileId(): string {
   if (ids.includes('gemini35' as never)) return 'gemini35';
   if (ids.length > 0) return ids[0];
   return 'sonnet';
+}
+
+// ---------------------------------------------------------------------------
+// Owner-managed settings are the companion plugin's configuration
+// ---------------------------------------------------------------------------
+
+const COMPANION_PLUGIN_ID = 'official.companion';
+const PLUGIN_KEYS = [
+  'dutyCatProfileId',
+  'displayName',
+  'personaTone',
+  'proactivePolicy',
+  'behaviorEnabled',
+  'skin',
+  'ballSize',
+] as const;
+type PluginKey = (typeof PLUGIN_KEYS)[number];
+
+function readPluginSettings(projectRoot: string): Pick<ConciergeConfig, PluginKey> {
+  const stored = readPluginConfig(projectRoot, COMPANION_PLUGIN_ID);
+  const d = CONCIERGE_CONFIG_DEFAULTS;
+  return {
+    dutyCatProfileId: stored.dutyCatProfileId ?? resolveDefaultDutyCatProfileId(),
+    displayName: stored.displayName ?? d.displayName,
+    personaTone: stored.personaTone ?? d.personaTone,
+    proactivePolicy: (stored.proactivePolicy as ConciergeConfig['proactivePolicy']) ?? d.proactivePolicy,
+    behaviorEnabled: stored.behaviorEnabled === undefined ? d.behaviorEnabled : stored.behaviorEnabled === 'true',
+    skin: (stored.skin as ConciergeConfig['skin']) ?? d.skin,
+    ballSize: stored.ballSize === undefined ? d.ballSize : Number(stored.ballSize),
+  };
+}
+
+/** Writes the plugin-owned keys to the plugin configuration and returns the rest. */
+function writePluginSettings(projectRoot: string, patch: Partial<ConciergeConfig>): Partial<ConciergeConfig> {
+  const rest: Record<string, unknown> = {};
+  const updates: { name: string; value: string | null }[] = [];
+  for (const [key, value] of Object.entries(patch)) {
+    if ((PLUGIN_KEYS as readonly string[]).includes(key))
+      updates.push({ name: key, value: value == null ? null : String(value) });
+    else rest[key] = value;
+  }
+  if (updates.length) writePluginConfig(projectRoot, COMPANION_PLUGIN_ID, updates);
+  return rest as Partial<ConciergeConfig>;
+}
+
+/** One-time move of settings saved before they became the companion plugin's configuration. */
+export async function moveConciergeSettingsToPlugin(redis: RedisClient, projectRoot: string, userId: string) {
+  const raw = await redis.get(ConciergeKeys.config(userId));
+  const stored = readPluginConfig(projectRoot, COMPANION_PLUGIN_ID);
+  if (!raw || PLUGIN_KEYS.some((key) => key in stored)) return;
+  const saved = JSON.parse(raw) as Partial<ConciergeConfig>;
+  writePluginSettings(
+    projectRoot,
+    Object.fromEntries(PLUGIN_KEYS.filter((key) => saved[key] != null).map((key) => [key, saved[key]])),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +159,10 @@ export class RedisConciergeConfigStore implements IConciergeConfigStore {
   }
   private readonly redis: RedisClient;
 
-  constructor(redis: RedisClient) {
+  constructor(
+    redis: RedisClient,
+    private readonly projectRoot: string,
+  ) {
     this.redis = redis;
   }
 
@@ -138,22 +200,17 @@ export class RedisConciergeConfigStore implements IConciergeConfigStore {
 
   async getSaved(userId: string): Promise<ConciergeConfig> {
     const raw = await this.redis.get(ConciergeKeys.config(userId));
-    if (!raw) {
-      return {
-        ...CONCIERGE_CONFIG_DEFAULTS,
-        dutyCatProfileId: resolveDefaultDutyCatProfileId(),
-      };
-    }
-    return { appAssistEnabled: false, ...JSON.parse(raw) } as ConciergeConfig;
+    const saved = raw ? { appAssistEnabled: false, ...JSON.parse(raw) } : CONCIERGE_CONFIG_DEFAULTS;
+    return { ...saved, ...readPluginSettings(this.projectRoot) } as ConciergeConfig;
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {
     // TTL=0 意味着"不设置 EXPIRE" = 持久化（铁律 5 LL-048）
-    await writeConciergeConfig(this.redis, userId, config);
+    await writeConciergeConfig(this.redis, userId, writePluginSettings(this.projectRoot, config));
   }
 
   async patch(userId: string, patch: Partial<ConciergeConfig>): Promise<void> {
-    await writeConciergeConfig(this.redis, userId, patch, {
+    await writeConciergeConfig(this.redis, userId, writePluginSettings(this.projectRoot, patch), {
       ...CONCIERGE_CONFIG_DEFAULTS,
       dutyCatProfileId: resolveDefaultDutyCatProfileId(),
     });
@@ -187,6 +244,8 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
     return sequence;
   }
   private readonly store = new Map<string, ConciergeConfig>();
+  /** Memory is ephemeral; the Host passes its project root when it runs without Redis. */
+  constructor(private readonly projectRoot = mkdtempSync(join(tmpdir(), 'concierge-config-'))) {}
   private readonly days = new Map<string, AppAssistDay>();
   private readonly listeners = new Map<string, Set<AppAssistPolicyListener>>();
 
@@ -227,26 +286,22 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
 
   async getSaved(userId: string): Promise<ConciergeConfig> {
     const entry = this.store.get(userId);
-    if (!entry) {
-      return {
-        ...CONCIERGE_CONFIG_DEFAULTS,
-        dutyCatProfileId: resolveDefaultDutyCatProfileId(),
-      };
-    }
-    return { appAssistEnabled: false, ...entry };
+    const saved = entry ? { appAssistEnabled: false, ...entry } : CONCIERGE_CONFIG_DEFAULTS;
+    return { ...saved, ...readPluginSettings(this.projectRoot) } as ConciergeConfig;
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {
-    this.store.set(userId, { ...config });
-    await Promise.all([...(this.listeners.get(userId) ?? [])].map((listener) => listener(appAssistAllowed(config))));
+    await this.keep(userId, writePluginSettings(this.projectRoot, config) as ConciergeConfig);
   }
 
   async patch(userId: string, patch: Partial<ConciergeConfig>): Promise<void> {
-    const existing = this.store.get(userId) ?? {
-      ...CONCIERGE_CONFIG_DEFAULTS,
-      dutyCatProfileId: resolveDefaultDutyCatProfileId(),
-    };
-    await this.put(userId, { ...existing, ...patch });
+    const rest = writePluginSettings(this.projectRoot, patch);
+    await this.keep(userId, { ...(this.store.get(userId) ?? CONCIERGE_CONFIG_DEFAULTS), ...rest } as ConciergeConfig);
+  }
+
+  private async keep(userId: string, config: ConciergeConfig): Promise<void> {
+    this.store.set(userId, config);
+    await Promise.all([...(this.listeners.get(userId) ?? [])].map((listener) => listener(appAssistAllowed(config))));
   }
 
   async claimAppAssistDay(userId: string, appKey: string, day: string): Promise<AppAssistClaim> {

@@ -55,7 +55,7 @@ describe('F202 terminal Plugin Manager contract', () => {
   it('projects typed configuration contributions without leaking secret values', () => {
     expectTypeOf<PluginManagerDetail['configFields'][number]['key']>().toEqualTypeOf<string>();
     expectTypeOf<PluginManagerDetail['configFields'][number]['kind']>().toEqualTypeOf<
-      'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list' | 'operation'
+      'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list' | 'operation' | 'member'
     >();
     expectTypeOf<PluginManagerDetail['configFields'][number]['currentValue']>().toEqualTypeOf<string | null>();
   });

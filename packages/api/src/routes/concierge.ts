@@ -73,7 +73,6 @@ const patchConciergeConfigSchema = z
       message: 'Duty cat is currently unavailable',
     }),
     proactivePolicy: z.enum(['ambient', 'quiet-badge']),
-    muted: z.boolean(),
     /** PR-A3b: ball position persistence (INV-P3) */
     ballPosition: z.object({ x: z.number().finite(), y: z.number().finite() }).nullable(),
     /** E3: ball size persistence, shared with public and native companion geometry. */

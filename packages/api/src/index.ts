@@ -2594,10 +2594,16 @@ async function main(): Promise<void> {
 
   // F229: Concierge config store — created before AgentRouter so it can be passed into
   // invocationDeps for routing-layer 岗位 prompt injection (ConciergeRoutingInterceptor).
-  const { RedisConciergeConfigStore: _RCCSEarly, MemoryConciergeConfigStore: _MCCSEarly } = await import(
-    './domains/concierge/ConciergeConfigStore.js'
-  );
-  const conciergeConfigStoreShared = redis ? new _RCCSEarly(redis) : new _MCCSEarly();
+  const {
+    RedisConciergeConfigStore: _RCCSEarly,
+    MemoryConciergeConfigStore: _MCCSEarly,
+    moveConciergeSettingsToPlugin,
+  } = await import('./domains/concierge/ConciergeConfigStore.js');
+  const conciergeProjectRoot = resolveActiveProjectRoot();
+  if (redis) await moveConciergeSettingsToPlugin(redis, conciergeProjectRoot, privateUserId);
+  const conciergeConfigStoreShared = redis
+    ? new _RCCSEarly(redis, conciergeProjectRoot)
+    : new _MCCSEarly(conciergeProjectRoot);
 
   // F229 Phase B: TriagePlan store (needed by AgentRouter for reply validator)
   const { RedisConciergeTriagePlanStore: _RTPSEarly, MemoryConciergeTriagePlanStore: _MTPSEarly } = await import(
