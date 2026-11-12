@@ -253,7 +253,8 @@ export type PluginManagerConfigFieldKind =
   | 'url'
   | 'list'
   | 'operation'
-  | 'member';
+  | 'member'
+  | 'thread';
 
 export interface PluginManagerConfigOption {
   value: string;
@@ -286,6 +287,8 @@ export interface PluginManagerConfigField {
   label: string;
   description?: string;
   kind: PluginManagerConfigFieldKind;
+  /** member / thread only: the value is a JSON array of ids. */
+  multiple?: boolean;
   required: boolean;
   hidden?: boolean;
   requiredWhen?: {

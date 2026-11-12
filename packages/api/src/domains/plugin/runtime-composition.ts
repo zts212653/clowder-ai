@@ -960,6 +960,8 @@ export interface PluginManagerRuntimeCompositionOptions {
   /** Catalog authority used by the pre-Manager official routes during Train B compatibility. */
   readonly officialRouteCatalogProvider?: OfficialPluginCatalogProvider;
   readonly catalogManifests: readonly unknown[];
+  /** Thread ids saved in a plugin's thread configuration fields must exist here. */
+  readonly threads: Pick<IThreadStore, 'get'>;
   readonly fetchOfficialArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
   readonly prepareDesktopComponent?: () => Promise<void>;
   readonly now?: () => number;
@@ -1085,6 +1087,7 @@ export function createPluginManagerRuntimeComposition(
     lifecycle: options.runtime.lifecycle,
     projectRoot: options.runtime.projectRoot,
     inventory: options.runtime.inventoryStore,
+    threads: options.threads,
     now,
   });
   const addressedTargets = new PluginAddressedTargets({

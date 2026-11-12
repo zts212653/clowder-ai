@@ -1,5 +1,6 @@
 import { type PluginManagerConfigField, type PluginManagerConfigureRequest } from '@cat-cafe/shared';
 import type { inspectAcpBootstrapDirectory } from '../../cats/services/agents/providers/acp/bootstrap/acp-bootstrap-inspect.js';
+import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import { type ExternalPluginLifecycleService, PluginLifecycleError } from '../external-plugin-lifecycle.js';
 import type { VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
@@ -24,6 +25,7 @@ import { effectivePluginConfigurationValue } from './plugin-configuration-values
 import {
   assertConfigurationFence,
   configError,
+  configurationIds,
   configureTransaction,
   manifestConfiguration,
   manifestConfigurationReady,
@@ -47,6 +49,7 @@ export interface HostPluginConfigurationServiceOptions {
   readonly packages?: VerifiedPluginPackageLocator;
   readonly inspectBootstrapRoot?: typeof inspectAcpBootstrapDirectory;
   readonly bootstrapDirectoryIdentity?: typeof acpBootstrapDirectoryIdentity;
+  readonly threads: Pick<IThreadStore, 'get'>;
 }
 
 export class HostPluginConfigurationService implements PluginManagerConfigurationPort {
@@ -204,6 +207,18 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     return this.configureInternal(pluginId, pluginInstanceId, request, false, true);
   }
 
+  private async assertThreadsExist(pluginId: string, updates: PluginManagerConfigureRequest['updates']) {
+    const record = (await this.options.inventory.readCurrentAuthority(pluginId))?.packageRecord;
+    const fields = new Map((record ? manifestConfiguration(record) : []).map((field) => [field.key, field]));
+    for (const update of updates) {
+      const field = fields.get(update.key);
+      if (field?.kind !== 'thread' || !update.value) continue;
+      for (const id of configurationIds(field, update.value))
+        if (!(await this.options.threads.get(id)))
+          throw configError(`Configuration field ${field.key} is not a conversation`);
+    }
+  }
+
   private async configureInternal(
     pluginId: string,
     pluginInstanceId: string,
@@ -211,6 +226,7 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
     allowEmpty: boolean,
     bootstrapRootRecovery = false,
   ): Promise<void> {
+    await this.assertThreadsExist(pluginId, request.updates);
     let recovery: AcpBootstrapConfigRecovery | undefined;
     let persisted = false;
     let compensated = false;

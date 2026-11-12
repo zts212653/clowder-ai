@@ -66,6 +66,7 @@ export function configFieldProjection(
     key: field.key,
     label: field.label,
     kind: field.kind,
+    ...(field.multiple === undefined ? {} : { multiple: field.multiple }),
     required: field.required,
     ...(field.hidden === undefined ? {} : { hidden: field.hidden }),
     ...(configurationVariants === undefined ? {} : { configurationVariants }),

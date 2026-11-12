@@ -18,14 +18,14 @@ test('source policy matches the exact locked contract and rejects the next candi
   };
   assert.equal(
     packageJson.dependencies['@clowder-ai/plugin-contract'],
-    'file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz',
+    'file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-071318a237b9.tgz',
   );
   const archive = await readFile(
-    new URL('../vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-fc05bcbbcf45.tgz', import.meta.url),
+    new URL('../vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-console-071318a237b9.tgz', import.meta.url),
   );
   assert.equal(
     createHash('sha256').update(archive).digest('hex'),
-    '0f20fb26a46ad75ea962af10a23217b6c9f699f11f7c1c07bd2113b053478b04',
+    'f92aef6c4e40e454b9611303d167ccd3b365422293aa22a832faaf8275358e3a',
   );
   assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, currentContract);
   assert.equal(isManifestContractSupported(currentContract, PLUGIN_MANIFEST_CONTRACT_RANGE), true);

@@ -43,3 +43,29 @@ test('installed Manager configuration exposes complete editable values and masks
   assert.equal(JSON.stringify(fields).includes('must-not-be-exposed'), false);
   assert.deepEqual(await service.readActionInput(pluginId), { labels: 'acceptance-bot,second-bot' });
 });
+
+test('saving a thread configuration field requires every chosen id to be an existing conversation', async () => {
+  const pluginId = 'example.threads';
+  const service = new HostPluginConfigurationService({
+    projectRoot: mkdtempSync(join(tmpdir(), 'plugin-thread-values-')),
+    threads: { get: async (id) => (id === 'thread-a' ? { id } : null) },
+    inventory: {
+      readCurrentAuthority: async () => ({
+        instance: { pluginId, pluginInstanceId: 'instance', lifecycleState: 'installed', packageDigest: 'digest' },
+        packageRecord: {
+          packageDigest: 'digest',
+          manifest: {
+            configuration: [{ key: 'threadIds', label: 'Threads', kind: 'thread', multiple: true, required: false }],
+          },
+        },
+      }),
+    },
+  });
+  await assert.rejects(
+    service.configure(pluginId, 'instance', {
+      expectedRevision: 0,
+      updates: [{ key: 'threadIds', value: '["thread-a","thread-gone"]' }],
+    }),
+    /threadIds is not a conversation/,
+  );
+});

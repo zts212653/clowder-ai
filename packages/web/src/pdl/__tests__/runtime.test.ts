@@ -2835,12 +2835,34 @@ describe('unmodified runtime and project chat bindings', () => {
       const row = w.eval(
         "WHO_DATA.members=function(){return [{id:'opus',name:'Opus'},{id:'codex',name:'Codex'}]};pcfModel('member-pick',{plugin:'official.companion',installed:true,fields:[{key:'dutyCatProfileId',kind:'member',label:'Member',required:false,currentValue:'codex'}]}).rows[0]",
       );
-      expect(row.kind).toBe('select');
+      expect(row.kind).toBe('member');
+      expect(row.multiple).toBe(false);
       expect(row.value).toBe('codex');
+      expect(row.options).toEqual(['opus', 'codex']);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+  it('renders a multiple thread configuration field as a choice among the Host conversations and picks ids', async () => {
+    const { dom, w, errors } = await boot();
+    try {
+      const model =
+        "pcfModel('thread-pick',{plugin:'official.superagent',installed:true,fields:[{key:'threadIds',kind:'thread',multiple:true,label:'Threads',required:false,currentValue:'[\"t1\"]'}]}).rows[0]";
+      const row = w.eval(
+        "sidebarData=function(){return {threads:[{id:'t1',title:'One'},{id:'t2',title:'Two'}]}};" + model,
+      );
+      expect(row.kind).toBe('thread');
+      expect(row.multiple).toBe(true);
+      expect(row.value).toEqual(['t1']);
       expect(row.options).toEqual([
-        { value: 'opus', label: 'Opus' },
-        { value: 'codex', label: 'Codex' },
+        { value: 't1', label: 'One' },
+        { value: 't2', label: 'Two' },
       ]);
+      w.eval("A.pcfOp({op:'pick',p:'thread-pick',k:'threadIds',id:'t2'})");
+      expect(w.eval(model).value).toEqual(['t1', 't2']);
+      w.eval("A.pcfOp({op:'pick',p:'thread-pick',k:'threadIds',id:'t1'})");
+      expect(w.eval(model).value).toEqual(['t2']);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
