@@ -269,7 +269,8 @@ export function applyResponseStreamReplay(
   live: () => ChatState = useChatStore.getState,
   runningAtConfirmation?: ReadonlySet<string>,
 ): void {
-  for (const _ of iterateResponseStreamReplay(replay, live, runningAtConfirmation)) {
+  const steps = iterateResponseStreamReplay(replay, live, runningAtConfirmation);
+  while (!steps.next().done) {
     // Non-interactive callers explicitly drain the same projection without browser scheduling.
   }
 }

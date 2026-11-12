@@ -17,6 +17,7 @@ function* visibleToolEvents(events: readonly ToolEvent[]) {
 }
 
 export function hasCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: string | undefined): boolean {
+  // Finalizing tool inputs changes detail only, never the label/type/order used for visibility.
   return Boolean(streamContent?.trim()) || !visibleToolEvents(toolEvents ?? []).next().done;
 }
 
