@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CLAUDE_TOKEN_PATTERN } from '../config/claude-token-account.js';
+import { GOOGLE_CLOUD_PROJECT_ID } from '../config/google-cloud-account.js';
 
 const claudeTokenSchema = z.string().trim().regex(CLAUDE_TOKEN_PATTERN, 'claude_token_invalid').optional();
 
@@ -61,6 +62,8 @@ export const createBodySchema = z
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
     claudeToken: claudeTokenSchema,
+    /** F317: a Google Cloud (Vertex AI) account that uses this machine's Google Cloud login for one project. */
+    googleCloudProjectId: z.string().trim().regex(GOOGLE_CLOUD_PROJECT_ID, 'google_cloud_project_invalid').optional(),
     modelOverride: z.string().optional(),
     models: z
       .array(
@@ -92,6 +95,16 @@ export const createBodySchema = z
         value.envVars !== undefined)
     )
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'claude_token_account_fields_owned' });
+    if (
+      value.googleCloudProjectId !== undefined &&
+      (value.authType !== 'oauth' ||
+        value.clientId !== 'google' ||
+        value.apiKey !== undefined ||
+        value.baseUrl !== undefined ||
+        value.claudeToken !== undefined ||
+        value.envVars !== undefined)
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'google_cloud_account_fields_owned' });
     if ((value.authType ?? 'api_key') === 'api_key' && !value.clientId) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'API key accounts require clientId' });
     }

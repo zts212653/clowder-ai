@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { buildProgressiveFtsQueries } from './fts-query-builder.js';
+import { messageCjkPassageSource } from './message-cjk-index-candidates.js';
 import { observeCjkRead } from './message-cjk-read-diagnostics.js';
 import { messageLiteralRelevance } from './message-literal-relevance.js';
 import type { MessagePassageSearchOptions } from './message-passage-search-types.js';
@@ -94,15 +95,28 @@ export function lexicalMessagePassages(
     const rankedParams = ranked?.params ?? [];
     let parameter = rankedParams.length;
     const admitted = filter.sql.replace(/\?/g, () => `?${++parameter}`);
+    // One extra bind, like MATCH in the preceding FTS query. Separate needle
+    // binds would reject formerly legal grant sets near SQLite's variable cap.
+    const needleParam = rankedParams.length + filter.params.length + 1;
+    const needleValues = literal.chinesePrefilter.length ? [JSON.stringify(literal.chinesePrefilter)] : [];
     const bindings = Object.fromEntries(
-      filter.params.map((value, index) => [String(rankedParams.length + index + 1), value]),
+      [...filter.params, ...needleValues].map((value, index) => [String(rankedParams.length + index + 1), value]),
     );
+    const necessary = literal.chinesePrefilter
+      .map((_value, index) => `instr(p.content, json_extract(?${needleParam}, '$[${index}]')) > 0`)
+      .join(' OR ');
+    const match = 'message_cjk_match(LOWER(p.content))';
+    // CASE is lazy even when SQLite reorders other WHERE terms. Run the full
+    // matcher/observer only after this lossless native rejection; ordering and
+    // LIMIT still see every full match, including those late in the corpus.
+    const predicate = necessary ? `CASE WHEN ${necessary} THEN ${match} ELSE 0 END` : match;
+    const from = messageCjkPassageSource(db, needleParam, literal.chinesePrefilter.length, filter);
     const readExtra = () =>
       db
         .prepare(`SELECT ${columns}, ${literalColumns} 0 AS rank
-      FROM evidence_passages p JOIN evidence_docs d ON d.anchor = p.doc_anchor
+      FROM ${from}
       WHERE ${admitted} AND CASE WHEN ${admitted}
-        THEN message_cjk_match(LOWER(p.content)) ELSE 0 END ORDER BY ${order} LIMIT ?`)
+        THEN ${predicate} ELSE 0 END ORDER BY ${order} LIMIT ?`)
         .all(bindings, ...rankedParams, pool + 1) as PassageRow[];
     const extra = cjk ? cjk.read(readExtra) : readExtra();
     // FTS wins duplicate identities, retaining BM25 as the final score tie-breaker.

@@ -74,7 +74,7 @@ export function publishTasteProposal(
       requesterCatId: createCatId(proposal.catId),
       originRef,
       cardThreadId: proposal.threadId,
-      cardContent: `${proposal.correctionTarget ? '提议更正品味记忆' : '提议捕捉品味信号'}：${proposal.scene.slice(0, 60)}${proposal.scene.length > 60 ? '…' : ''}`,
+      cardContent: proposal.correctionTarget ? '提议更正品味记忆' : '提议捕捉品味信号',
       cardBlock: buildTasteProposalCardBlock(proposal),
       createdAt: proposal.createdAt,
     },

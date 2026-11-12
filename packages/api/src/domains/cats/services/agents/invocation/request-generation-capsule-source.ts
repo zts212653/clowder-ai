@@ -16,16 +16,23 @@ export function nativeOpeningCapsuleRevision(
   const capsule = repository?.readCapsule(userId);
   if (!capsule) return undefined;
   const rendered = renderUserCapsuleSection(capsule.content);
-  return rendered &&
-    prepared.nativeInstructions.some(
-      (instruction) =>
-        (instruction.injectionDecision === 'native_l0_compiled' ||
-          instruction.injectionDecision === 'native_l0_compiled_with_signature_boundary' ||
-          instruction.injectionDecision === 'native_agent_file_compiled') &&
-        instruction.body.includes(rendered),
-    )
-    ? capsule.revision
-    : undefined;
+  if (!rendered) return undefined;
+  const inNativeInstruction = prepared.nativeInstructions.some(
+    (instruction) =>
+      (instruction.injectionDecision === 'native_l0_compiled' ||
+        instruction.injectionDecision === 'native_l0_compiled_with_signature_boundary' ||
+        instruction.injectionDecision === 'native_agent_file_compiled') &&
+      instruction.body.includes(rendered),
+  );
+  if (inNativeInstruction) return capsule.revision;
+  const inAgyDynamicTurnL0 =
+    prepared.runtime.carrier === 'antigravity_cli' &&
+    prepared.nativeInstructions.some((instruction) => instruction.injectionDecision === 'native_agent_file_compiled') &&
+    'body' in prepared.message &&
+    (prepared.message.injectionDecision === 'agy_native_dynamic_l0' ||
+      prepared.message.injectionDecision === 'agy_native_dynamic_l0_with_attachment_references') &&
+    prepared.message.body.includes(rendered);
+  return inAgyDynamicTurnL0 ? capsule.revision : undefined;
 }
 
 /** Bind bytes emitted by the current capsule renderer; logical Profile pointers copy no body. */

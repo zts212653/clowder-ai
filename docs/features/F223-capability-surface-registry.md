@@ -4,7 +4,7 @@ related_features: [F038, F041, F131, F150, F192, F203, F211, F212, F286]
 topics: [capability-surface, skills, mcp, hub-action-surface, harness-eval, workspace-navigator]
 doc_kind: spec
 created: 2026-06-03
-tips_exempt: post-close contract-truth update for the existing workspace-navigator capability (one page connection — the legacy copy skips ack-room members, and the hook mounts on the page connection provider); nothing new for users to learn, guidance remains covered by capability-workspace-navigator
+tips_exempt: "2026-11-11 每日文档守护同步 #6574 expert-panel 退役与 collaborative-thinking 触发词合并；既有 capability-expert-panel tip 已锚定更新后的唤醒索引，无新增用户侧功能入口。"
 ---
 
 # F223: Capability Surface Registry — 把隐藏能力产品化成可发现、可执行、可验证的能力面
@@ -95,6 +95,7 @@ ack 时返回 unconfirmed。这个修复属于 `hub-action-surface` 的确定契
 - 只有 API route 的：按 Decision Ladder 判断 helper / MCP wrapper / ActionService。
 - 只有文档或 skill 的：确认是否真无副作用，还是隐藏了可产品化执行面。
 - F192 Phase F 的 normalizer/classifier 超过 5 个 capability 后，避免继续在 normalizer 里 hardcode business rule；按 clean reboot note 做 classifier 解耦。
+- **2026-11-04 follow-up（PR #6574 `3fe7936230`）**：退役独立 `expert-panel` skill，将「专家辩论」「多猫分析」「三猫讨论」等触发词并入 `collaborative-thinking` Mode B，同步更新 [capability-surface-inventory](assets/F223/capability-surface-inventory.md) 第 7 项与 `f223-phase-c-capability-normalization.test.js`（评测项 ID `expert-panel` 保留用于历史连续性）。
 
 ### Phase D: Guardrail + Eval Feedback Loop
 

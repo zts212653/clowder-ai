@@ -399,6 +399,23 @@
         "matchedFileCount": 1,
         "matchedFilesHash": "15e33bedfb5cb7afaa190c7b296ed2b99496bf0af2263805f91452dcf2abe071"
       }
+    },
+    {
+      "id": "owner-memory-redis-resource-contracts",
+      "match": "^test/(?:person-memory-owner-(?:deferred-invalidation|maintenance)|remember-(?:group-retry|original-entrypoints))\\.test\\.js$",
+      "category": "resource_contract",
+      "reason": "These exact four owner-maintenance and remember persistence consumers require the native isolated Redis runner. Public shard children deliberately deny Redis on port 0 and no Redis service is provisioned. Keep their actual isolated-Redis execution as separate evidence; portable owner-read, remember delegation and revision contracts remain selected.",
+      "owner": "@codex61-sol",
+      "introducedBy": "Task743 native Node and Redis resource audit of public candidate 652fd2f9",
+      "expiresOn": "2026-12-31",
+      "audit": {
+        "reviewedOn": "2026-11-12",
+        "sourceHead": "c5e46e3db77468f693a104cb697f7431242ec52b",
+        "publicHead": "652fd2f9547f4d739ee504d27d6c1fb6cb2b3328",
+        "status": "resource_contract",
+        "matchedFileCount": 4,
+        "matchedFilesHash": "da1ba0352fdb1c07470f3f1d55f977d9f8455d42e8a1ee531873a0f39ac0882b"
+      }
     }
   ]
 }

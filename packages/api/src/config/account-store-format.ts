@@ -2,6 +2,7 @@
 import type { AccountConfig, CredentialEntry } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { codexManagedAccountSchema } from './codex-account-schema.js';
+import { googleCloudAccountSchema } from './google-cloud-account.js';
 
 export class AccountStoreVerdictError extends Error {}
 
@@ -52,6 +53,7 @@ const accountSchema = z
       .object({ kind: z.literal('long_lived_token') })
       .strict()
       .optional(),
+    googleCloud: googleCloudAccountSchema.optional(),
     quota: accountQuotaObservationSchema.optional(),
   })
   .passthrough();

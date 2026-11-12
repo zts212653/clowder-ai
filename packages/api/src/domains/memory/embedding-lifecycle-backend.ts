@@ -5,11 +5,12 @@ import { openVectorGeneration, type VectorBackend } from './open-vector-generati
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { vectorIdentityMatches } from './vector-generation-identity.js';
 import {
-  prepareGenerationInvalidationConnection,
-  reconcileGenerationInvalidations,
-} from './vector-generation-invalidation.js';
-import { inspectVectorGeneration } from './vector-generation-readiness.js';
-import { vectorGenerationTables } from './vector-generation-tables.js';
+  type GenerationReadOptions,
+  inspectStoreVectorGeneration,
+  reconcileStoreVectorGeneration,
+  type VectorCoverageProof,
+} from './vector-generation-inspection.js';
+import { prepareGenerationInvalidationConnection } from './vector-generation-invalidation.js';
 
 export class VectorBackendUnavailableError extends Error {
   constructor(readonly reason: EmbeddingActivationFailure) {
@@ -17,23 +18,48 @@ export class VectorBackendUnavailableError extends Error {
   }
 }
 
+export type VectorBackendInitializer = (
+  store: SqliteEvidenceStore,
+  dim: number,
+  model: EmbedModelInfo,
+  lifetime: GenerationReadOptions,
+) => Promise<VectorBackend>;
+
+function assertBackendLifetime(lifetime: GenerationReadOptions): void {
+  lifetime.signal?.throwIfAborted();
+  if (lifetime.deadlineAt !== undefined && Date.now() >= lifetime.deadlineAt)
+    throw new VectorBackendUnavailableError('generation_not_ready');
+}
+
 export async function initializeVectorBackend(
   store: SqliteEvidenceStore,
   dim: number,
   model?: EmbedModelInfo,
+  lifetime: GenerationReadOptions = {},
 ): Promise<VectorBackend> {
   try {
+    assertBackendLifetime(lifetime);
     const backend = openVectorGeneration(store.getDb(), model ?? { modelId: 'unknown', modelRev: 'unknown', dim }, {
       create: !model?.generationId || model.generationId === 'g0',
+      reconcile: !store.usesIsolatedProcesses(),
     });
     // Preserve existing sparse-layout maintenance, scoped to the proposed fixed table.
     try {
-      await store.repackPassageVectors({ generationId: model?.generationId ?? 'g0' });
+      await store.repackPassageVectors({
+        generationId: model?.generationId ?? 'g0',
+        signal: lifetime.signal,
+        deadlineAt: lifetime.deadlineAt,
+      });
     } catch {
-      /* Optional layout maintenance. */
+      // Optional layout failure may retain the complete old projection;
+      // cancellation/deadline may never turn into a successful activation.
+      assertBackendLifetime(lifetime);
     }
+    assertBackendLifetime(lifetime);
     return backend;
-  } catch {
+  } catch (error) {
+    assertBackendLifetime(lifetime);
+    if (error instanceof VectorBackendUnavailableError) throw error;
     throw new VectorBackendUnavailableError('vector_table_unavailable');
   }
 }
@@ -42,26 +68,34 @@ export async function initializeVectorBackend(
 export async function prepareLifecycleBindings(
   stores: SqliteEvidenceStore[],
   model: EmbedModelInfo,
-  initialize: (store: SqliteEvidenceStore, dim: number, model?: EmbedModelInfo) => Promise<VectorBackend>,
+  initialize: VectorBackendInitializer,
   isCurrent: () => boolean,
   enabledStores: () => SqliteEvidenceStore[],
   coverageRequired = true,
+  lifetime: GenerationReadOptions = {},
 ): Promise<Map<SqliteEvidenceStore, VectorBackend> | undefined> {
   const bindings = new Map<SqliteEvidenceStore, VectorBackend>();
+  const proofs = new Map<SqliteEvidenceStore, VectorCoverageProof>();
   for (const store of stores) {
     if (typeof store.getDb === 'function')
-      await store.runExclusive(() => {
+      await store.runExclusive(async () => {
         prepareGenerationInvalidationConnection(store.getDb());
-        const tables = vectorGenerationTables(model.generationId ?? 'g0');
-        if (store.getDb().prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(tables.documents))
-          reconcileGenerationInvalidations(store.getDb(), tables);
+        await reconcileStoreVectorGeneration(store, model, lifetime);
       });
     if (!isCurrent()) return;
-    if (coverageRequired && !inspectVectorGeneration(store.getDb(), model).ready)
-      throw new VectorBackendUnavailableError('generation_not_ready');
-    const backend = await initialize(store, model.dim, model);
+    if (coverageRequired) {
+      const proof = await store.runExclusive(() => inspectStoreVectorGeneration(store, model, lifetime));
+      if (!proof.coverage.ready || !proof.isCurrent()) throw new VectorBackendUnavailableError('generation_not_ready');
+      proofs.set(store, proof);
+    }
+    const backend = await initialize(store, model.dim, model, {
+      ...lifetime,
+      deadlineAt: lifetime.deadlineAt ?? Date.now() + 15_000,
+    });
     if (!coverageRequired && !vectorIdentityMatches(store.getDb(), model)) backend.vectorStore.initMeta(model);
     bindings.set(store, backend);
+    if (coverageRequired && !proofs.get(store)?.isCurrent())
+      proofs.set(store, await store.runExclusive(() => inspectStoreVectorGeneration(store, model, lifetime)));
     if (!isCurrent()) return;
   }
   const current = enabledStores();
@@ -70,7 +104,7 @@ export async function prepareLifecycleBindings(
   if (
     stores.some((store) =>
       coverageRequired
-        ? !inspectVectorGeneration(store.getDb(), model).ready
+        ? !proofs.get(store)?.coverage.ready || !proofs.get(store)?.isCurrent()
         : !vectorIdentityMatches(store.getDb(), model),
     )
   )

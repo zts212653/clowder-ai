@@ -64,6 +64,7 @@ export function accountToView(
         }
       : {}),
     kind: isBuiltin ? 'builtin' : account.authType,
+    ...(account.googleCloud ? { googleCloud: account.googleCloud } : {}),
     ...(account.claude
       ? {
           claude: account.claude,

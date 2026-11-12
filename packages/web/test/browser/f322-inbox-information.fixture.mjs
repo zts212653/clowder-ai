@@ -19,7 +19,7 @@ import { registerTasteProposalDecisionRoutes } from '../../../api/dist/routes/ta
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
 
 /** Real staged stores/Ingress/owner writers. Only this mkdtemp vignette/SQLite and these in-memory Messages are written. */
-export async function createInboxInformationFixture(language) {
+export async function createInboxInformationFixture(language, { legacyTaste = false } = {}) {
   return createInboxProposalFixture({
     configureApprovals: async ({ app, owner, messages, threads, socketManager }) => {
       const root = await mkdtemp(path.join(tmpdir(), 'f322-information-'));
@@ -91,7 +91,11 @@ export async function createInboxInformationFixture(language) {
                   dimension: 'cognitive-honesty',
                   tags: ['evidence'],
                   privacy: 'public',
-                  scene: language === 'en' ? 'Discussing how to describe verified work' : '讨论怎样说明已验证的工作',
+                  scene: legacyTaste
+                    ? `${'The full source scene must be reviewed. '.repeat(12)}AFTER_LEGACY_PREVIEW`
+                    : language === 'en'
+                      ? 'Discussing how to describe verified work'
+                      : '讨论怎样说明已验证的工作',
                   takeaway: language === 'en' ? 'Explain the actual result first' : '先说明实际结果',
                   quote: 'Keep the original evidence.\n'.repeat(40),
                 });
@@ -113,7 +117,7 @@ export async function createInboxInformationFixture(language) {
           });
           for (const [kind, proposal, store, builder] of [
             ['F193', work, dispatch, buildDispatchProposalCardBlock],
-            ['F221', preference, taste, buildTasteProposalCardBlock],
+            ['F221', preference, taste, legacyTaste ? preM3TasteCard : buildTasteProposalCardBlock],
             ['F260', concept, entity, buildEntityProposalCardBlock],
           ]) {
             if (verb === 'unknown' && kind === 'F221') continue;
@@ -169,6 +173,7 @@ export async function createInboxInformationFixture(language) {
         });
         registerTasteProposalDecisionRoutes(app, {
           tasteProposalStore: taste,
+          messageStore: messages,
           socketManager,
           writeVignette: async (proposal) => {
             const file = path.join(root, `${proposal.id}.md`);
@@ -269,4 +274,28 @@ export async function createInboxInformationFixture(language) {
       }
     },
   });
+}
+
+/** Historical fixture: pre-M3 (96527977ac^) publication, independent of the current card/verifier. */
+function preM3TasteCard(proposal) {
+  return {
+    id: `taste-proposal-${proposal.id}`,
+    kind: 'card',
+    v: 1,
+    title: '提议捕捉品味信号',
+    bodyMarkdown: [
+      `**猫的判断（假设）：** ${proposal.takeaway}`,
+      '',
+      `**场景：** ${proposal.scene.slice(0, 197)}…`,
+      '',
+      `> ${proposal.quote}`,
+    ].join('\n'),
+    tone: 'info',
+    fields: [
+      { label: '维度', value: '认知诚实' },
+      { label: '标签', value: 'evidence' },
+      { label: '隐私', value: '公开' },
+      { label: '捕捉猫', value: 'codex61-sol' },
+    ],
+  };
 }

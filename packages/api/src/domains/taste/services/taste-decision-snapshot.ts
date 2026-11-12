@@ -11,6 +11,7 @@ export const TASTE_DECISION_FIELDS = [
   'sourceMessageId',
   'scene',
   'quote',
+  'resolvedQuotes',
   'takeaway',
   'tags',
   'dimension',
@@ -38,6 +39,7 @@ function fieldsOf(proposal: TasteProposal, publication: string): TasteDecisionFi
     sourceMessageId: proposal.sourceMessageId ?? '',
     scene: proposal.scene,
     quote: proposal.quote,
+    resolvedQuotes: proposal.resolvedQuotes ? JSON.stringify(proposal.resolvedQuotes) : '',
     takeaway: proposal.takeaway ?? '',
     tags: JSON.stringify(proposal.tags),
     dimension: proposal.dimension,
@@ -56,7 +58,12 @@ function digest(fields: TasteDecisionFields): string {
 }
 
 export function tasteDecisionSnapshot(proposal: TasteProposal): TasteDecisionSnapshot | null {
-  if (proposal.status !== 'pending' || proposal.publication?.state !== 'anchored') return null;
+  return proposal.status === 'pending' ? tasteContentSnapshot(proposal) : null;
+}
+
+/** The same immutable fields remain inspectable when the original owner resumes an approving write. */
+export function tasteContentSnapshot(proposal: TasteProposal): TasteDecisionSnapshot | null {
+  if (proposal.publication?.state !== 'anchored') return null;
   assertApprovalEnvelopeIdentity(proposal.publication.envelope, {
     canonicalProposalId: proposal.id,
     sourceFeatureId: 'F221',
@@ -69,12 +76,16 @@ export function tasteDecisionSnapshot(proposal: TasteProposal): TasteDecisionSna
 }
 
 export function matchesTasteDecisionSnapshot(proposal: TasteProposal, expected: TasteDecisionSnapshot): boolean {
+  return proposal.status === 'pending' && matchesTasteContentSnapshot(proposal, expected);
+}
+
+export function matchesTasteContentSnapshot(proposal: TasteProposal, expected: TasteDecisionSnapshot): boolean {
   if (
     expected.proposalId !== proposal.id ||
     expected.ownerUserId !== proposal.userId ||
     expected.digest !== digest(expected.fields)
   )
     return false;
-  const current = tasteDecisionSnapshot(proposal);
+  const current = tasteContentSnapshot(proposal);
   return current !== null && current.digest === expected.digest;
 }

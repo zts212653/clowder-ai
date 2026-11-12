@@ -97,6 +97,7 @@ export interface RuntimeCatInput {
   personality?: string;
   teamStrengths?: string;
   caution?: string | null;
+  restrictions?: string[];
   strengths?: string[];
   sessionChain?: boolean;
   clientId: ClientId;
@@ -139,6 +140,7 @@ export interface RuntimeCatUpdate {
   personality?: string;
   teamStrengths?: string;
   caution?: string | null;
+  restrictions?: string[] | null;
   strengths?: string[];
   sessionChain?: boolean;
   clientId?: ClientId;
@@ -187,6 +189,10 @@ function normalizeMentionPatterns(_catId: string, mentionPatterns: readonly stri
     .filter((pattern) => pattern.length > 0)
     .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
   return Array.from(new Set(values));
+}
+
+function normalizeRestrictions(restrictions: readonly string[]): string[] {
+  return Array.from(new Set(restrictions.map((item) => item.trim()).filter((item) => item.length > 0)));
 }
 
 function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): string[] {
@@ -360,6 +366,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         ...(input.caution !== undefined
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
+        ...(input.restrictions !== undefined ? { restrictions: normalizeRestrictions(input.restrictions) } : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
         ...(input.acp ? { acp: input.acp } : {}),
         ...(input.agyProfile ? { agyProfile: input.agyProfile } : {}),
@@ -638,6 +645,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   }
   if (patch.caution !== undefined) {
     variant.caution = patch.caution && patch.caution.trim().length > 0 ? patch.caution.trim() : null;
+  }
+  if (patch.restrictions !== undefined) {
+    if (patch.restrictions === null) {
+      delete variant.restrictions;
+    } else {
+      variant.restrictions = normalizeRestrictions(patch.restrictions);
+    }
   }
   if (patch.strengths !== undefined) {
     if (patch.strengths.length > 0) {
