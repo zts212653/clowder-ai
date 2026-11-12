@@ -31,6 +31,7 @@ FORCE=false
 RUN_INSTALL=true
 SYNC_BEFORE_START=true
 QUICK_START=true
+FOREGROUND_START=false
 ALPHA_EMPTY_REDIS_ALLOWED=false
 START_ARGS=()
 SOURCE_ONLY=false
@@ -46,7 +47,7 @@ Clowder AI Alpha Worktree Manager
 Usage:
   ./scripts/alpha-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
   ./scripts/alpha-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
-  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--allow-empty-redis] [--] [start-dev args...]
+  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--foreground] [--allow-empty-redis] [--] [start-dev args...]
   ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
   ./scripts/alpha-worktree.sh stop   [--dir PATH]
   ./scripts/alpha-worktree.sh init|start --instance NAME --ports WEB,API,PREVIEW,REDIS [--allow-empty-redis]
@@ -441,26 +442,69 @@ status_alpha_worktree() {
 }
 
 stop_alpha_daemon() {
-  local root daemon_state_path
+  local root daemon_state_path caller_deployment_id="${CAT_CAFE_DEPLOYMENT_ID-}"
+  local daemon_rc=0 preview_rc=0 port
+  local unowned_ports=()
   root="$(abs_path "$ALPHA_DIR")"
   [ -d "$root" ] || die "alpha root not found: $root"
   export CAT_CAFE_DEPLOYMENT_ID=alpha
+
   daemon_state_path="$(node "$SCRIPT_DIR/daemon-state.mjs" path \
     --home "$HOME" \
     --project-root "$root" \
     --deployment-id alpha)"
   if [ -f "$daemon_state_path" ]; then
-    node "$SCRIPT_DIR/daemon-state.mjs" stop \
+    if node "$SCRIPT_DIR/daemon-state.mjs" stop \
       --home "$HOME" \
       --project-root "$root" \
-      --deployment-id alpha
+      --deployment-id alpha; then
+      info "live daemon stop: stopped ($daemon_state_path)"
+    else
+      daemon_rc=$?
+      echo "[alpha-worktree] ERROR: live daemon stop failed (exit $daemon_rc): $daemon_state_path" >&2
+    fi
+  else
+    info "live daemon stop: no active daemon record ($daemon_state_path)"
   fi
-  # Managed Hub previews are the canonical cross-invocation Alpha launcher. Its
-  # ownership record proves the exact process group before anything is stopped.
-  node "$SCRIPT_DIR/preview-process.mjs" stop \
-    --port "$ALPHA_FRONTEND_PORT" --cwd "$PROJECT_DIR" --json
+
+  # Managed Hub previews are the cross-invocation Alpha launcher. Settle or stop
+  # preview registration independently using the caller's original host identity.
+  if [ -n "$caller_deployment_id" ]; then
+    export CAT_CAFE_DEPLOYMENT_ID="$caller_deployment_id"
+  else
+    unset CAT_CAFE_DEPLOYMENT_ID
+  fi
+  if node "$SCRIPT_DIR/preview-process.mjs" stop \
+    --port "$ALPHA_FRONTEND_PORT" --cwd "$PROJECT_DIR" --json; then
+    preview_rc=0
+    info "preview registration: stopped cleanly (exit 0)"
+  else
+    preview_rc=$?
+    if [ "$preview_rc" -eq 3 ]; then
+      info "preview registration: dead prior registration retired (exit 3; prior cleanup status unknown, original completion preserved)"
+    else
+      echo "[alpha-worktree] ERROR: preview registration stop/settlement failed (exit $preview_rc)" >&2
+    fi
+  fi
+
   if is_api_running; then
-    die "Alpha API remains on $ALPHA_API_PORT without a proven managed owner"
+    unowned_ports+=("$ALPHA_API_PORT")
+  fi
+  for port in "$ALPHA_FRONTEND_PORT" "$ALPHA_API_PORT" "$ALPHA_PREVIEW_GATEWAY_PORT" "${ALPHA_COLLECTIVE_SERVICE_PORT:-5211}"; do
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      case " ${unowned_ports[*]-} " in
+        *" $port "*) ;;
+        *) unowned_ports+=("$port") ;;
+      esac
+    fi
+  done
+
+  if [ "${#unowned_ports[@]}" -gt 0 ]; then
+    echo "[alpha-worktree] ERROR: Alpha listener(s) remain without a proven managed owner on port(s): ${unowned_ports[*]}" >&2
+  fi
+
+  if [ "$daemon_rc" -ne 0 ] || { [ "$preview_rc" -ne 0 ] && [ "$preview_rc" -ne 3 ]; } || [ "${#unowned_ports[@]}" -gt 0 ]; then
+    die "Alpha stop incomplete (daemon_rc=$daemon_rc preview_rc=$preview_rc unowned_ports=${unowned_ports[*]-none})"
   fi
 }
 
@@ -552,6 +596,18 @@ start_alpha_worktree() {
   if [ "$QUICK_START" = "true" ]; then
     cmd+=("--quick")
   fi
+  local has_daemon_arg=false arg
+  for arg in ${START_ARGS[@]+"${START_ARGS[@]}"}; do
+    case "$arg" in
+      --daemon|-d)
+        has_daemon_arg=true
+        ;;
+    esac
+  done
+  if [ "$has_daemon_arg" != "true" ] && [ -z "${CAT_CAFE_PREVIEW_EXPIRES_AT:-}" ] && [ "$FOREGROUND_START" != "true" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+    info "non-interactive standard Alpha start: enabling --daemon ownership record"
+    cmd+=("--daemon")
+  fi
 
   exec "${cmd[@]}" ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
@@ -624,6 +680,11 @@ while [ "$SOURCE_ONLY" != "true" ] && [ $# -gt 0 ]; do
     --no-quick)
       NAMED_ALPHA_DISALLOWED_OPTIONS=true
       QUICK_START=false
+      shift
+      ;;
+    --foreground)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      FOREGROUND_START=true
       shift
       ;;
     --allow-empty-redis)

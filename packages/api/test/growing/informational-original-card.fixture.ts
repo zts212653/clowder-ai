@@ -1,4 +1,10 @@
-import { APPROVAL_PRODUCER_IDS, type CatId, type IgnoredItemEntry, type RichCardBlock } from '@cat-cafe/shared';
+import {
+  APPROVAL_PRODUCER_IDS,
+  type CatId,
+  type IgnoredItemEntry,
+  type RichCardBlock,
+  type TasteProposal,
+} from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { ApprovalIngress } from '../../src/domains/approval-hub/ApprovalIngress.js';
 import {
@@ -25,7 +31,14 @@ const catId = 'codex-sol' as CatId;
 const threadId = 'info-thread';
 
 /** Real staged store -> feature builder -> Ingress -> adapter/registry -> owner projection. */
-export async function informationalOriginalFixture(feature: InformationProducer, correction = false) {
+export async function informationalOriginalFixture(
+  feature: InformationProducer,
+  correction = false,
+  options: {
+    tasteInput?: Partial<Pick<TasteProposal, 'scene' | 'quote' | 'resolvedQuotes'>>;
+    tasteCard?: (proposal: TasteProposal) => RichCardBlock;
+  } = {},
+) {
   const messages = new MessageStore();
   const origin = await messages.append({
     userId: infoOwner,
@@ -79,10 +92,14 @@ export async function informationalOriginalFixture(feature: InformationProducer,
             sourceAnchor: 'taste-vignette:docs/taste/vignettes/original.md',
             expectedRevision: `sha256:${'a'.repeat(64)}`,
             reason: 'outdated' as const,
-            suggestedPatch: { scene: 'A corrected scene', quotes: ['A corrected quotation'] },
+            suggestedPatch: {
+              scene: 'A corrected scene',
+              quotes: options.tasteInput?.resolvedQuotes ?? ['A corrected quotation'],
+            },
           },
         }
       : {}),
+    ...options.tasteInput,
   });
   const entityProposal = entity.create({
     proposalId: 'entity-one',
@@ -111,7 +128,7 @@ export async function informationalOriginalFixture(feature: InformationProducer,
         ? {
             proposalId: tasteProposal.id,
             createdAt: tasteProposal.createdAt,
-            block: buildTasteProposalCardBlock(tasteProposal),
+            block: (options.tasteCard ?? buildTasteProposalCardBlock)(tasteProposal),
             store: taste,
           }
         : {
@@ -184,7 +201,28 @@ export async function informationalOriginalFixture(feature: InformationProducer,
             return message && mutate ? mutate(structuredClone(message)) : message;
           },
         },
+        emptyCollectiveSource,
       ),
     close: () => app.close(),
+  };
+}
+
+/** This disposable fixture has no installed Collective requests; absence is explicit, not a failed read. */
+export async function emptyCollectiveSource() {
+  return {
+    status: 200,
+    body: {
+      data: {
+        items: [],
+        reasons: [],
+        state: {
+          coverage: 'pending_f290_collective_accountability_requests',
+          startedAt: Date.now(),
+          observedAt: Date.now(),
+          status: 'available',
+          exhaustiveness: 'complete',
+        },
+      },
+    },
   };
 }

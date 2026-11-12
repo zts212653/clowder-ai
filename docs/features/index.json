@@ -1683,7 +1683,7 @@
     {
       "id": "F286",
       "name": "MCP Surface Lifecycle Governance",
-      "status": "in-progress（Phase A–C complete；Phase D incremental Design Gate accepted and implementation assigned to Sol；live=dormant） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "frozen（Phase A–C complete；Phase D 停在 Signals 试点之前：底座 #4148 已合入并保留，试点与任何 `discoverable` 迁移暂停；You 2026-11-10 定暂停，见 Phase D「2026-11-10 暂停」；非全部完成） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F286-mcp-surface-lifecycle-governance.md"
     },
     {

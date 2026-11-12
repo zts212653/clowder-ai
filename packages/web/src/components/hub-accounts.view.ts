@@ -40,6 +40,11 @@ export function builtinClientLabel(client?: BuiltinAccountClient, authType?: Pro
   }
 }
 
+/** A Google Cloud login account is not the Gemini CLI login, although both are Google OAuth. */
+export function googleCloudLabel(profile: Pick<ProfileItem, 'googleCloud'>): string | null {
+  return profile.googleCloud ? `Google Cloud（Vertex AI · ${profile.googleCloud.projectId}）` : null;
+}
+
 export function accountTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {
   if (profile.authType === 'oauth') return 'orange';
   if (profile.baseUrl?.toLowerCase().includes('google')) return 'green';

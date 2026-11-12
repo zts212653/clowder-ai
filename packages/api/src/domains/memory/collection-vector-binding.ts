@@ -1,8 +1,9 @@
 import type { CollectionEmbedDeps } from './CollectionIndexBuilder.js';
-import { resetLegacyCohort } from './embedding-cohort-recovery.js';
+import { requiresCohortCoverage, resetLegacyCohort } from './embedding-cohort-recovery.js';
 import type { IEmbeddingService } from './interfaces.js';
 import { openVectorGeneration } from './open-vector-generation.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { generationIdentity } from './vector-generation-identity.js';
 import { inspectVectorGeneration } from './vector-generation-readiness.js';
 
 /** A newly indexed collection borrows the current recipe; it cannot choose another active generation. */
@@ -38,17 +39,23 @@ export async function prepareCollectionVectorBinding(
   return {
     deps: { getEmbeddingService: currentService, vectorStore: backend.vectorStore },
     publish: () => {
-      const mode = resolveMode();
-      if (
-        !currentService() ||
-        !mode ||
-        (model.generationId === 'g1' && !inspectVectorGeneration(store.getDb(), model).ready)
-      ) {
-        store.setEmbedDeps(undefined);
-        return false;
-      }
-      store.setEmbedDeps({ embedding: service, ...backend, mode });
-      return true;
+      const db = store.getDb();
+      return db.transaction(() => {
+        const mode = resolveMode();
+        const coverageRequired = requiresCohortCoverage([store], model);
+        if (!currentService() || !mode || (coverageRequired && !inspectVectorGeneration(db, model).ready)) {
+          store.setEmbedDeps(undefined);
+          return false;
+        }
+        // An optional encode failure keeps lexical sources usable, but cannot
+        // publish a registered replacement until every current source is covered.
+        if ((model.generationId ?? 'g0') === 'g0' && coverageRequired)
+          db.prepare("UPDATE vector_generations SET state='ready' WHERE id='g0' AND fingerprint=?").run(
+            generationIdentity(model),
+          );
+        store.setEmbedDeps({ embedding: service, ...backend, mode });
+        return true;
+      })();
     },
   };
 }

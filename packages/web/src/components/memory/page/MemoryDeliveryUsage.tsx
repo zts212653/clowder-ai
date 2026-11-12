@@ -1,4 +1,5 @@
 import type { RecallResolverFamily } from '@cat-cafe/shared';
+import { MemoryReadUsage } from './MemoryReadUsage';
 import { memoryObject } from './owner-memory-read';
 import { useMemoryRead } from './use-memory-read';
 
@@ -15,7 +16,15 @@ function isSummary(value: unknown): value is Summary {
     })
   );
 }
-export function MemoryDeliveryUsage({ family, anchor }: { family: RecallResolverFamily; anchor: string }) {
+export function MemoryDeliveryUsage({
+  family,
+  anchor,
+  usageEndpoint,
+}: {
+  family: RecallResolverFamily;
+  anchor: string;
+  usageEndpoint?: string;
+}) {
   const read = useMemoryRead(
     `/api/memory/cues/source-summary?${new URLSearchParams({ resolverFamily: family, sourceAnchor: anchor })}`,
     isSummary,
@@ -42,9 +51,14 @@ export function MemoryDeliveryUsage({ family, anchor }: { family: RecallResolver
             `${counts.presented} 次 · 点开 ${counts.drilled} · 采用 ${counts.applied} · 明确不用 ${counts.dismissed}`
           )}
         </dd>
-        <dt className="text-cafe-muted">被猫翻到</dt>
-        <dd>还没接进来</dd>
+        {!usageEndpoint && (
+          <>
+            <dt className="text-cafe-muted">被猫翻到</dt>
+            <dd>还没接进来</dd>
+          </>
+        )}
       </dl>
+      {usageEndpoint && <MemoryReadUsage endpoint={usageEndpoint} anchor={anchor} />}
     </section>
   );
 }

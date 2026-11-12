@@ -1,0 +1,54 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "person-memory"
+  },
+  "retiredNames": ["cat_cafe_redact_person_memory_item"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "465e8196ae63271deb40ef5f5bc80933bd7505b0",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "docs/guides/person-memory-maintenance.md"
+      ]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "No active consumer names these retired wrappers. The verified owner people page uses the original canonical lifecycle and owner session/CSRF; callbacks remain compatible.",
+      "absenceEvidence": ["cat_cafe_redact_person_memory_item"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "No active consumer names these retired wrappers. The verified owner people page uses the original canonical lifecycle and owner session/CSRF; callbacks remain compatible.",
+      "absenceEvidence": ["cat_cafe_redact_person_memory_item"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/person-memory-lifecycle-tools.test.js",
+        "packages/mcp-server/test/memory-entry-contracts.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No active consumer names these retired wrappers. The verified owner people page uses the original canonical lifecycle and owner session/CSRF; callbacks remain compatible.",
+      "absenceEvidence": ["cat_cafe_redact_person_memory_item"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No active consumer names these retired wrappers. The verified owner people page uses the original canonical lifecycle and owner session/CSRF; callbacks remain compatible.",
+      "absenceEvidence": ["cat_cafe_redact_person_memory_item"]
+    }
+  }
+}

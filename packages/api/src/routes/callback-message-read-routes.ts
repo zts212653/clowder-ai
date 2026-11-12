@@ -14,6 +14,7 @@ import type {
   ITurnExecutionStore,
   TurnExecutionRecord,
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import { isReadableSchedulerWork } from '../domains/cats/services/stores/readable-scheduler-work.js';
 import {
   canViewMessage,
   getTimelineOrderTime,
@@ -76,13 +77,22 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       }
 
       // A published, owner-bound approval fact is readable, while remaining non-quotable.
-      const approvalThread =
-        readApprovalDecisionReceipt(message) && message.userId === principal.userId && threadStore
+      const admissionThread =
+        (readApprovalDecisionReceipt(message) ||
+          (message.from?.kind === 'system' && message.from.service === 'scheduler')) &&
+        message.userId === principal.userId &&
+        threadStore
           ? await threadStore.get(message.threadId)
           : undefined;
-      const isReadableApproval = isReadableApprovalDecisionReceipt(message, principal.userId, approvalThread);
+      const isReadableApproval = isReadableApprovalDecisionReceipt(message, principal.userId, admissionThread);
+      const isReadableScheduler = isReadableSchedulerWork(message, principal.userId, admissionThread);
       const isReadableManagedHold = isAgentReadableManagedHoldMessage(message) && message.userId === principal.userId;
-      if (isInternalNonQuotableParent(message) && !isReadableManagedHold && !isReadableApproval) {
+      if (
+        isInternalNonQuotableParent(message) &&
+        !isReadableManagedHold &&
+        !isReadableApproval &&
+        !isReadableScheduler
+      ) {
         reply.status(404);
         return { error: 'Message not found' };
       }
@@ -116,7 +126,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       }
       // Align with thread-context: debug = cats see all (user viewer), play = cats see own (cat viewer)
       const thread =
-        approvalThread ?? (message.threadId && threadStore ? await threadStore.get(message.threadId) : null);
+        admissionThread ?? (message.threadId && threadStore ? await threadStore.get(message.threadId) : null);
       const needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
       const viewer: Viewer = needsPlayFilter ? { type: 'cat', catId: principal.catId } : { type: 'user' };
       if (!isReadableManagedHold && !canViewMessage(message, viewer)) {
@@ -252,7 +262,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
             if (
               isInternalNonQuotableParent(m) &&
               !isReadableManagedHoldNeighbor &&
-              !isReadableApprovalDecisionReceipt(m, principalUserId, thread)
+              !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
+              !isReadableSchedulerWork(m, principalUserId, thread)
             )
               return false;
             if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;

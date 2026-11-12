@@ -14,6 +14,22 @@ export function codexUsesSharedState(
   return launch.managed === true || (launch.accountRef === 'codex' && launch.authMode !== 'api_key');
 }
 
+/**
+ * F320 KD-3: the default Codex home's conversation roots, which every login shares. An API key links
+ * here rather than to anything its own account environment names, so relocating that account's
+ * HOME/CODEX_HOME can neither fork the conversations nor block them. The roots do not depend on how
+ * the default account authenticates: an API-only household shares the same home.
+ */
+export function resolveCodexSharedStateRoots(projectRoot: string): { stateRoot: string; sqliteHome: string } {
+  const accounts = readAccountCatalogSnapshot(projectRoot);
+  assertCodexSharedStateRoots(projectRoot, { accounts });
+  const profile = accounts.codex
+    ? accountToRuntimeProfile('codex', accounts.codex)
+    : { id: 'codex', authType: 'oauth' as const, client: 'openai' as const };
+  const { stateRoot, sqliteHome } = resolveCodexAccountLaunch(profile, { cwd: projectRoot });
+  return { stateRoot, sqliteHome };
+}
+
 /** Durable layout claims reserve one owner, including an interrupted, unprepared creation.
  * Check prospective mutations and actual admission before writes/spawn; never migrate roots.
  */

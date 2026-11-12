@@ -80,6 +80,8 @@ export interface ProfileUpdateSignalProvenance {
  */
 export interface ProfileUpdateProposal {
   proposalId: string;
+  /** Original retry binding, retained so staged abort can release it atomically. Absent on legacy records. */
+  clientRequestId?: string;
   status: ProfileUpdateProposalStatus;
 
   // Source / lineage

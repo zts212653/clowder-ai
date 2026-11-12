@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryReceiptIdSchema,
@@ -6,15 +7,19 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { DeferredPersonMemoryReceiptStore } from '../domains/memory/DeferredPersonMemoryReceiptStore.js';
+import { deferredPersonMemoryOwnerRevision } from '../domains/memory/deferred-person-memory-owner-read.js';
 import { AsrPersonMemoryContractTrial } from '../domains/memory/people/AsrPersonMemoryContractTrial.js';
 import { resolveWriteOpportunityDispositionBinding } from '../domains/memory/people/WriteOpportunityDispositionBinding.js';
 import { WriteOpportunityTerminalConflictError } from '../domains/memory/people/WriteOpportunityTerminalLedger.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { invalidateDeferredWriteOpportunity } from './person-memory-defer-write-opportunity.js';
 import { type DeferredCaptureDeps, handleDeferredPersonMemoryCapture } from './person-memory-deferred-capture.js';
+import { executeOwnerDeferredAction } from './person-memory-owner-deferred-action.js';
 import { recordWriteOpportunityRouteError } from './write-opportunity-route-telemetry.js';
 
-export interface CallbackDeferPersonMemoryDeps extends DeferredCaptureDeps {}
+export interface CallbackDeferPersonMemoryDeps extends DeferredCaptureDeps {
+  receiptStore: DeferredCaptureDeps['receiptStore'] & Pick<DeferredPersonMemoryReceiptStore, 'prepareOwnerForget'>;
+}
 
 const receiptActionSchema = z.object({ receiptId: deferredPersonMemoryReceiptIdSchema }).strict();
 
@@ -132,70 +137,55 @@ async function disposeDeferredReceiptClaim(
   return { receiptId: result.receipt.receiptId, status: result.outcome };
 }
 
-async function withdrawDeferredReceipt(
+async function mutateDeferredReceipt(
   request: FastifyRequest,
   reply: FastifyReply,
   deps: CallbackDeferPersonMemoryDeps,
+  action: 'withdraw' | 'forget',
 ) {
   const auth = requireCallbackAuth(request, reply);
   if (!auth) return;
   const parsed = receiptActionSchema.safeParse(request.body);
-  if (!parsed.success) {
-    reply.status(400);
-    return { error: 'invalid_request', details: parsed.error.issues };
-  }
-  const current = await deps.receiptStore.get(auth.userId, parsed.data.receiptId);
-  if (current?.writeOpportunityLineage) {
-    try {
-      await invalidateDeferredWriteOpportunity(deps, request, auth.userId, current, 'superseded');
-    } catch {
-      return reply.code(503).send({ error: 'write_opportunity_invalidation_unavailable' });
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', details: parsed.error.issues });
+  const { receiptId } = parsed.data;
+  try {
+    const current = await deps.receiptStore.get(auth.userId, receiptId);
+    const requestId = `deferred_callback_${createHash('sha256').update(`${auth.userId}\0${auth.invocationId}\0${action}\0${receiptId}`).digest('hex')}`;
+    // Legacy callbacks have no client revision. Bind their internal command to the current
+    // canonical snapshot; a retry of the same invocation resumes its original stored plan.
+    const expectedRevision =
+      current?.ownerForget?.requestId === requestId
+        ? current.ownerForget.expectedRevision
+        : current
+          ? deferredPersonMemoryOwnerRevision(current)
+          : `sha256:${'0'.repeat(64)}`;
+    const result = await executeOwnerDeferredAction(
+      {
+        ownerUserId: auth.userId,
+        deferredReceiptStore: deps.receiptStore,
+        ...(deps.writeOpportunityDeliveryStore
+          ? { writeOpportunityDeliveryStore: deps.writeOpportunityDeliveryStore }
+          : {}),
+        ...(deps.writeOpportunityTerminalLedger
+          ? { writeOpportunityTerminalLedger: deps.writeOpportunityTerminalLedger }
+          : {}),
+      },
+      request,
+      receiptId,
+      { action, requestId, expectedRevision, confirmed: true },
+    );
+    if (result.status !== 200) {
+      if (action === 'withdraw' && result.body.error === 'proposal_bound') {
+        return reply.code(409).send({ error: 'receipt_not_withdrawable' });
+      }
+      return reply.code(result.status).send(result.body);
     }
+    if (action === 'withdraw') return { receiptId, status: 'withdrawn', replayed: result.body.outcome === 'replayed' };
+    return { receiptId, status: result.body.outcome === 'replayed' ? 'already_absent' : 'purged' };
+  } catch (error) {
+    request.log.warn({ err: error }, '[F276] Callback deferred terminal result unknown');
+    return reply.code(503).send({ error: 'write_opportunity_invalidation_unavailable' });
   }
-  const result = await deps.receiptStore.withdraw(auth.userId, parsed.data.receiptId, Date.now());
-  switch (result.outcome) {
-    case 'conflict':
-      return reply.status(409).send({ error: 'receipt_not_withdrawable' });
-    case 'not_available':
-      return reply.status(404).send({ error: 'not_available' });
-    case 'withdrawn':
-    case 'replayed':
-      return {
-        receiptId: result.receipt.receiptId,
-        status: 'withdrawn',
-        replayed: result.outcome === 'replayed',
-      };
-  }
-}
-
-async function forgetDeferredReceipt(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  deps: CallbackDeferPersonMemoryDeps,
-) {
-  const auth = requireCallbackAuth(request, reply);
-  if (!auth) return;
-  const parsed = receiptActionSchema.safeParse(request.body);
-  if (!parsed.success) {
-    reply.status(400);
-    return { error: 'invalid_request', details: parsed.error.issues };
-  }
-  // Always inspect the receipt before deleting it: a lineage-bearing receipt must fail closed
-  // when either durable invalidation authority is unavailable.
-  const beforeForget = await deps.receiptStore.get(auth.userId, parsed.data.receiptId);
-  if (beforeForget?.writeOpportunityLineage) {
-    try {
-      await invalidateDeferredWriteOpportunity(deps, request, auth.userId, beforeForget, 'source_forgotten');
-    } catch {
-      return reply.code(503).send({ error: 'write_opportunity_invalidation_unavailable' });
-    }
-  }
-  const result = await deps.receiptStore.hardForget(auth.userId, parsed.data.receiptId);
-  if (result.outcome === 'proposal_bound') {
-    reply.status(409);
-    return { error: 'proposal_bound', proposalId: result.proposalId };
-  }
-  return { receiptId: parsed.data.receiptId, status: result.outcome };
 }
 
 export function registerCallbackDeferPersonMemoryRoutes(
@@ -206,10 +196,10 @@ export function registerCallbackDeferPersonMemoryRoutes(
     handleDeferredPersonMemoryCapture(request, reply, deps),
   );
   app.post('/api/callbacks/person-memory/deferred/withdraw', (request, reply) =>
-    withdrawDeferredReceipt(request, reply, deps),
+    mutateDeferredReceipt(request, reply, deps, 'withdraw'),
   );
   app.post('/api/callbacks/person-memory/deferred/forget', (request, reply) =>
-    forgetDeferredReceipt(request, reply, deps),
+    mutateDeferredReceipt(request, reply, deps, 'forget'),
   );
   app.post('/api/callbacks/person-memory/deferred/dispose', (request, reply) =>
     disposeDeferredReceiptClaim(request, reply, deps),
