@@ -705,7 +705,7 @@ EDGE_DRAG.push({
       let to = null;
       return {
         move: function (e) { follow(e); clearMarks(); const u = under(e, el), b = u.target.closest && u.target.closest('[data-move-act]'); to = b && b !== from && b.dataset.move === family ? b : null; if (to) to.classList.add('pdl-over'); },
-        end: function (e, moved) { done(); clearMarks(); if (moved && to && actFn(to.dataset.moveAct)) actFn(to.dataset.moveAct)(Object.assign(actionArgs(to), { id: el.dataset.okey })); render(true); }
+        end: function (e, moved) { done(); clearMarks(); if (moved && to && actFn(to.dataset.moveAct)) actFn(to.dataset.moveAct)(Object.assign(actionArgs(to), { id: el.dataset.moveKey })); render(true); }
       };
     }
     if (kind === 'cell') {   /* 格子容器里的项：放到任意一格；移动范围（move）允许的话也能放进别的格子容器 */
