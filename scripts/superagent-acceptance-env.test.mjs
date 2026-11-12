@@ -21,6 +21,11 @@ test('live Host ignores inherited production SQLite, Redis, configuration and na
       'CODEX_HOME',
       'CODEX_SQLITE_HOME',
       'CLAUDE_CONFIG_DIR',
+      'LOG_DIR',
+      'AUDIT_LOG_DIR',
+      'TMPDIR',
+      'TMP',
+      'TEMP',
     ].map((key) => [key, '/protected/runtime/state']),
   );
   const env = acceptanceEnvironment(ambient, process.cwd(), root);
