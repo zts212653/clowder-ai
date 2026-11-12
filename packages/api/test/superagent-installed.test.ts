@@ -172,7 +172,6 @@ test(
     const first = await threads.create(owner, '选定的开发会话', root);
     const second = await threads.create(owner, '选定的评审会话', root);
     const outside = await threads.create(owner, '未选会话', root);
-    await Promise.all(Array.from({ length: 50 }, (_, index) => threads.create(owner, `目录会话 ${index}`, root)));
     const entries = () =>
       listPluginConversations({ inventory: runtime.inventoryStore, runtime: runtime.supervisor, threads }, owner);
     assert.equal((await entries()).length, 1, 'the tgz supplies an installed top entry before activation');
@@ -232,26 +231,28 @@ test(
     );
     const workers = directoryRows.parse((await operation('workers', 'list')).json()).data.rows;
     assert.ok(workers.length > 0 && workers.every((row) => row.key.startsWith('worker:')));
-    const directory = directoryRows.parse((await operation('scope', 'list')).json()).data.rows;
-    assert.ok(directory.every((row) => !row.key.startsWith('coordinator:') && !row.key.startsWith('worker:')));
-    const more = directory.find((row) => row.key === 'more');
-    assert.ok(more, 'a real 50-conversation directory exposes its older-page action');
-    const older = directoryRows.parse((await operation('scope', 'page', more.actions[0].input)).json()).data.rows;
-    assert.ok(
-      older.some((row) => row.key === first.id),
-      'the older source conversation is selectable',
-    );
+    const threadPicker = z.object({
+      render: z.literal('thread-picker'),
+      data: z.object({
+        selected: z.array(z.string()),
+        excluded: z.array(z.string()),
+      }),
+    });
+    const initialScope = threadPicker.parse((await operation('scope', 'list')).json()).data;
+    assert.deepEqual(initialScope.selected, []);
+    assert.ok(Array.isArray(initialScope.excluded));
     await operation('assistant', 'choose', { selection: 'coordinator', id: 'codex' });
     await operation('workers', 'choose', { selection: 'worker', id: 'opus' });
-    await operation('scope', 'choose', { selection: 'thread', id: first.id });
-    await operation('scope', 'choose', { selection: 'thread', id: second.id });
-    const recent = older.find((row) => row.key === 'recent');
-    assert.ok(recent);
-    const returned = directoryRows.parse((await operation('scope', 'page', recent.actions[0].input)).json()).data.rows;
-    assert.ok(
-      returned.some((row) => row.key === first.id),
-      'selected older conversations survive returning to recent',
-    );
+    const selectedScope = threadPicker.parse(
+      (
+        await operation('scope', 'choose', {
+          selection: 'threads',
+          ids: [first.id, second.id],
+        })
+      ).json(),
+    ).data;
+    assert.deepEqual(new Set(selectedScope.selected), new Set([first.id, second.id]));
+    assert.ok(selectedScope.excluded.every((id) => !selectedScope.selected.includes(id)));
     await operation('activity', 'enable', {}, true);
     const main = view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {}));
     assert.equal(main.status, 'listening');

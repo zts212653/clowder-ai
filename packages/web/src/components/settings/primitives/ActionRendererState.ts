@@ -58,7 +58,7 @@ export function rowActionRequest(
   target: ActionRendererTarget,
   operationName: string,
   actionId: string,
-  input: Readonly<Record<string, string | number | boolean>>,
+  input: Readonly<Record<string, string | number | boolean | readonly string[]>>,
 ): { readonly url: string; readonly init: RequestInit } {
   return {
     url: actionUrl(target, operationName, actionId),
