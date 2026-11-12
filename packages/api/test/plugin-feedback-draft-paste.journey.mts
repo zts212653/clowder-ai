@@ -118,6 +118,7 @@ try {
   await open();
   assert.equal(await panel.getByLabel('描述').inputValue(), '');
   await panel.locator('header').getByRole('button', { name: '反馈记录', exact: true }).click();
+  await panel.locator('.history-item').waitFor();
   assert.equal(await panel.locator('.history-item').count(), 1);
   await panel.getByRole('button', { name: '继续投递', exact: true }).click();
   const sentImage = await panel.locator('.picture img').last().getAttribute('src');
@@ -161,7 +162,12 @@ try {
       {
         error: String(error),
         frames: await Promise.all(
-          page.frames().map(async (frame: { content(): Promise<string> }) => await frame.content()),
+          page
+            .frames()
+            .map(
+              async (frame: { evaluate(action: () => string): Promise<string> }) =>
+                await frame.evaluate(() => document.body.innerText),
+            ),
         ),
       },
       null,
