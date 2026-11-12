@@ -220,12 +220,20 @@ test(
         rows: z.array(
           z.object({
             key: z.string(),
-            actions: z.array(z.object({ action: z.string(), input: z.record(z.unknown()) })),
+            actions: z.array(z.object({ action: z.string(), input: z.record(z.unknown()) })).default([]),
           }),
         ),
       }),
     });
+    const assistants = directoryRows.parse((await operation('assistant', 'list')).json()).data.rows;
+    assert.ok(
+      assistants.length > 0 &&
+        assistants.every((row) => row.key === 'assistant-status' || row.key.startsWith('coordinator:')),
+    );
+    const workers = directoryRows.parse((await operation('workers', 'list')).json()).data.rows;
+    assert.ok(workers.length > 0 && workers.every((row) => row.key.startsWith('worker:')));
     const directory = directoryRows.parse((await operation('scope', 'list')).json()).data.rows;
+    assert.ok(directory.every((row) => !row.key.startsWith('coordinator:') && !row.key.startsWith('worker:')));
     const more = directory.find((row) => row.key === 'more');
     assert.ok(more, 'a real 50-conversation directory exposes its older-page action');
     const older = directoryRows.parse((await operation('scope', 'page', more.actions[0].input)).json()).data.rows;
@@ -233,8 +241,8 @@ test(
       older.some((row) => row.key === first.id),
       'the older source conversation is selectable',
     );
-    await operation('scope', 'choose', { selection: 'coordinator', id: 'codex' });
-    await operation('scope', 'choose', { selection: 'worker', id: 'opus' });
+    await operation('assistant', 'choose', { selection: 'coordinator', id: 'codex' });
+    await operation('workers', 'choose', { selection: 'worker', id: 'opus' });
     await operation('scope', 'choose', { selection: 'thread', id: first.id });
     await operation('scope', 'choose', { selection: 'thread', id: second.id });
     const recent = older.find((row) => row.key === 'recent');
