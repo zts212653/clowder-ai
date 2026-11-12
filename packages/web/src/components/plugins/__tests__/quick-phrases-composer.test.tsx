@@ -14,6 +14,11 @@ vi.mock('@/hooks/useCatData', () => ({
 }));
 
 const phrasePath = '/api/plugins/official.quick-phrases/phrases';
+const receiptPath = '/api/plugins/official.quick-phrases/inserted-ack';
+const onInserted = {
+  request: { method: 'POST', path: 'inserted-ack', body: { receipt: 'from-plugin' } },
+  notifyFailure: false,
+};
 const discovery = '/api/plugin-ui?group=composer.quick-phrases';
 const onSend = vi.fn();
 let container: HTMLDivElement;
@@ -47,8 +52,8 @@ function phrasePosts() {
   return apiFetch.mock.calls.filter(([url, init]) => url === phrasePath && init?.method === 'POST');
 }
 
-function usageWrites() {
-  return phrasePosts().filter((call) => 'id' in bodyOf(call));
+function receiptWrites() {
+  return apiFetch.mock.calls.filter(([url]) => url === receiptPath);
 }
 
 function saveWrites() {
@@ -68,7 +73,10 @@ it('does not show an entry while the plugin is inactive', async () => {
   expect(getButton('快捷用语')).toBeUndefined();
 });
 
-it('selects a saved phrase and sends the draft to storage only after confirmation', async () => {
+it.each([
+  false,
+  true,
+])('honors the plugin insertion notification policy (%s) and saves only after confirmation', async (notifyFailure) => {
   const saved = '复核 #1898 的修改';
   apiFetch.mockImplementation(async (url, init) => {
     if (url === discovery) {
@@ -80,7 +88,11 @@ it('selects a saved phrase and sends the draft to storage only after confirmatio
     }
     if (String(url).startsWith(phrasePath)) {
       if (init?.method === 'POST') return Response.json({ ok: true });
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({
+        items: [{ id: 'saved', text: saved, onInserted: { ...onInserted, notifyFailure } }],
+        page: 1,
+        totalPages: 1,
+      });
     }
     return Response.json({});
   });
@@ -95,9 +107,9 @@ it('selects a saved phrase and sends the draft to storage only after confirmatio
   await vi.waitFor(() => expect(getButton(saved)).toBeDefined());
   expect(phrasePosts()).toHaveLength(0);
   await click(saved);
-  await vi.waitFor(() => expect(usageWrites()).toHaveLength(1));
-  expect(bodyOf(usageWrites()[0])).toEqual({ id: 'saved' });
-  expect(usageWrites()[0]?.[2]).toEqual({ mutationTimeoutMs: 185_000, notifyFailure: false });
+  await vi.waitFor(() => expect(receiptWrites()).toHaveLength(1));
+  expect(bodyOf(receiptWrites()[0])).toEqual({ receipt: 'from-plugin' });
+  expect(receiptWrites()[0]?.[2]).toEqual({ mutationTimeoutMs: 185_000, notifyFailure });
   const textarea = container.querySelector('textarea');
   expect(textarea?.value).toBe(saved);
   expect(onSend).not.toHaveBeenCalled();
@@ -129,7 +141,7 @@ it('does not insert or count a phrase when a newer draft makes the selection sta
     }
     if (String(url).startsWith(phrasePath)) {
       if (init?.method === 'POST') return Response.json({ ok: true });
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({ items: [{ id: 'saved', text: saved, onInserted }], page: 1, totalPages: 1 });
     }
     return Response.json({});
   });
@@ -147,14 +159,14 @@ it('does not insert or count a phrase when a newer draft makes the selection sta
   expect(textarea?.value).toBe('更新的草稿');
   await click(saved);
   expect(textarea?.value).toBe('更新的草稿');
-  expect(usageWrites()).toHaveLength(0);
+  expect(receiptWrites()).toHaveLength(0);
   expect(saveWrites()).toHaveLength(0);
 });
 
-it('retries the usage notification once after a CAS conflict', async () => {
+it('forwards an insertion receipt once without interpreting a plugin conflict', async () => {
   const saved = '复核 #1898 的修改';
-  let usagePosts = 0;
-  apiFetch.mockImplementation(async (url, init) => {
+  let receiptPosts = 0;
+  apiFetch.mockImplementation(async (url) => {
     if (url === discovery) {
       return Response.json({
         entries: [
@@ -162,12 +174,12 @@ it('retries the usage notification once after a CAS conflict', async () => {
         ],
       });
     }
+    if (url === receiptPath) {
+      receiptPosts += 1;
+      return Response.json({ error: 'conflict' }, { status: 409 });
+    }
     if (String(url).startsWith(phrasePath)) {
-      if (init?.method === 'POST') {
-        usagePosts += 1;
-        return usagePosts === 1 ? Response.json({ error: 'conflict' }, { status: 409 }) : Response.json({ ok: true });
-      }
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({ items: [{ id: 'saved', text: saved, onInserted }], page: 1, totalPages: 1 });
     }
     return Response.json({});
   });
@@ -181,15 +193,15 @@ it('retries the usage notification once after a CAS conflict', async () => {
   await click('快捷用语');
   await vi.waitFor(() => expect(getButton(saved)).toBeDefined());
   await click(saved);
-  await vi.waitFor(() => expect(usageWrites()).toHaveLength(2));
-  expect(usagePosts).toBe(2);
+  await vi.waitFor(() => expect(receiptWrites()).toHaveLength(1));
+  expect(receiptPosts).toBe(1);
   expect(container.querySelector('textarea')?.value).toBe(saved);
   expect(onSend).not.toHaveBeenCalled();
 });
 
 it('does not retry when the plugin rejects usage with 400', async () => {
   const saved = '复核 #1898 的修改';
-  apiFetch.mockImplementation(async (url, init) => {
+  apiFetch.mockImplementation(async (url) => {
     if (url === discovery) {
       return Response.json({
         entries: [
@@ -197,9 +209,9 @@ it('does not retry when the plugin rejects usage with 400', async () => {
         ],
       });
     }
+    if (url === receiptPath) return Response.json({ error: 'Invalid request' }, { status: 400 });
     if (String(url).startsWith(phrasePath)) {
-      if (init?.method === 'POST') return Response.json({ error: 'Invalid request' }, { status: 400 });
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({ items: [{ id: 'saved', text: saved, onInserted }], page: 1, totalPages: 1 });
     }
     return Response.json({});
   });
@@ -213,14 +225,14 @@ it('does not retry when the plugin rejects usage with 400', async () => {
   await click('快捷用语');
   await vi.waitFor(() => expect(getButton(saved)).toBeDefined());
   await click(saved);
-  await vi.waitFor(() => expect(usageWrites()).toHaveLength(1));
+  await vi.waitFor(() => expect(receiptWrites()).toHaveLength(1));
   expect(container.querySelector('textarea')?.value).toBe(saved);
   expect(document.body.querySelector('[role="alert"]')).toBeNull();
 });
 
 it('keeps the selected phrase when the usage notification fails', async () => {
   const saved = '复核 #1898 的修改';
-  apiFetch.mockImplementation(async (url, init) => {
+  apiFetch.mockImplementation(async (url) => {
     if (url === discovery) {
       return Response.json({
         entries: [
@@ -228,9 +240,9 @@ it('keeps the selected phrase when the usage notification fails', async () => {
         ],
       });
     }
+    if (url === receiptPath) throw new TypeError('offline');
     if (String(url).startsWith(phrasePath)) {
-      if (init?.method === 'POST') throw new Error('offline');
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({ items: [{ id: 'saved', text: saved, onInserted }], page: 1, totalPages: 1 });
     }
     return Response.json({});
   });
@@ -244,7 +256,7 @@ it('keeps the selected phrase when the usage notification fails', async () => {
   await click('快捷用语');
   await vi.waitFor(() => expect(getButton(saved)).toBeDefined());
   await click(saved);
-  await vi.waitFor(() => expect(usageWrites()).toHaveLength(1));
+  await vi.waitFor(() => expect(receiptWrites()).toHaveLength(1));
   expect(container.querySelector('textarea')?.value).toBe(saved);
   expect(document.body.querySelector('[role="alert"]')).toBeNull();
   expect(onSend).not.toHaveBeenCalled();
@@ -262,7 +274,7 @@ it('does not report usage when deleting a phrase', async () => {
     }
     if (String(url).startsWith(phrasePath)) {
       if (init?.method === 'DELETE') return Response.json({ ok: true });
-      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+      return Response.json({ items: [{ id: 'saved', text: saved, onInserted }], page: 1, totalPages: 1 });
     }
     return Response.json({});
   });
@@ -279,4 +291,27 @@ it('does not report usage when deleting a phrase', async () => {
   await click('是');
   expect(apiFetch.mock.calls.some(([url, init]) => url === phrasePath && init?.method === 'DELETE')).toBe(true);
   expect(phrasePosts()).toHaveLength(0);
+});
+
+it('inserts a legacy item without inventing a plugin receipt', async () => {
+  const saved = '旧版插件用语';
+  apiFetch.mockImplementation(async (url) => {
+    if (url === discovery)
+      return Response.json({
+        entries: [
+          { pluginId: 'official.quick-phrases', instanceId: 'phrases', resourcePath: 'phrases', generation: 'active' },
+        ],
+      });
+    if (String(url).startsWith(phrasePath))
+      return Response.json({ items: [{ id: 'saved', text: saved }], page: 1, totalPages: 1 });
+    return Response.json({});
+  });
+  await act(async () => root.render(<ChatInput presentation="v2" onSend={onSend} />));
+  await act(async () => getButton('快捷用语')?.click());
+  await vi.waitFor(() => expect(getButton(saved)).toBeDefined());
+  await act(async () => getButton(saved)?.click());
+  expect(container.querySelector('textarea')?.value).toBe(saved);
+  expect(phrasePosts()).toHaveLength(0);
+  expect(receiptWrites()).toHaveLength(0);
+  expect(onSend).not.toHaveBeenCalled();
 });

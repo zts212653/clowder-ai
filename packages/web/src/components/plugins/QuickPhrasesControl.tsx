@@ -4,10 +4,11 @@ import { useRef, useState } from 'react';
 import { AppTooltip } from '../AppTooltip';
 import { ComposerPopover } from '../ComposerPopover';
 import { useShellCopy } from '../shell/shell-copy';
+import { requestPluginHttp } from './plugin-panel-http';
 import { QuickPhraseConfirmation } from './QuickPhraseConfirmation';
 import { QuickPhrasesList } from './QuickPhrasesList';
 import { quickPhrasesCopy } from './quick-phrases.shell-copy';
-import { type QuickPhrasesEntry, recordQuickPhraseUse, useQuickPhrasesEntry } from './quick-phrases-api';
+import { type QuickPhrasesEntry, useQuickPhrasesEntry } from './quick-phrases-api';
 
 type Props = {
   draft: string;
@@ -81,7 +82,12 @@ function QuickPhrasesButton({ draft, disabled, presentation, onSelect, entry }: 
                 setSnapshot(undefined);
                 if (draft.trim()) return;
                 onSelect(phrase.text);
-                void recordQuickPhraseUse(entry, phrase.id);
+                if (phrase.onInserted) {
+                  const { request, notifyFailure } = phrase.onInserted;
+                  void requestPluginHttp(entry, request, undefined, { notifyFailure }).catch(() => {
+                    // A receipt failure cannot undo the already inserted text.
+                  });
+                }
               }}
             />
           )}

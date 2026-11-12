@@ -14,7 +14,11 @@ const entriesSchema = z.object({
   ),
 });
 export type QuickPhrasesEntry = z.infer<typeof entriesSchema>['entries'][number];
-const phraseSchema = z.object({ id: z.string(), text: z.string() });
+const phraseSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  onInserted: z.object({ request: z.unknown(), notifyFailure: z.boolean().optional() }).optional(),
+});
 export type QuickPhrase = z.infer<typeof phraseSchema>;
 const pageSchema = z.object({
   items: z.array(phraseSchema).max(5),
@@ -52,23 +56,6 @@ export async function readQuickPhrases(entry: QuickPhrasesEntry, query: string, 
   const response = await requestPluginHttp(entry, { method: 'GET', path: `${entry.resourcePath}?${params}` }, signal);
   if (response.status !== 200) throw new Error('Could not read quick phrases');
   return pageSchema.parse(response.body);
-}
-
-/** Best-effort usage signal; selection already succeeded locally and must not depend on it. */
-export async function recordQuickPhraseUse(entry: QuickPhrasesEntry, id: string) {
-  const send = () =>
-    requestPluginHttp(entry, { method: 'POST', path: entry.resourcePath, body: { id } }, undefined, {
-      notifyFailure: false,
-    });
-  try {
-    const response = await send();
-    // A 409 means the CAS did not apply, so retrying cannot double-count this selection.
-    if (response.status === 409) {
-      await send();
-    }
-  } catch {
-    // Counting is best-effort: a stale plugin generation or network failure must not surface.
-  }
 }
 
 export type QuickPhrasesPage = Awaited<ReturnType<typeof readQuickPhrases>>;
