@@ -584,8 +584,9 @@ const EDGE_DRAG = [];
     const x = hit(e.target, e); if (!x) return;
     const s = x.pr.start(x.el, e); if (!s) return;
     sess = { s: s, moved: false }; e.preventDefault();
+    document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = 'none'; });   /* 拖过框（插件页面）时指针不被框吃掉 */
   }, true);
-  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; if (s.moved) eat = true; s.s.end(e, s.moved); setTimeout(function () { eat = false; }, 0); });
+  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) eat = true; s.s.end(e, s.moved); setTimeout(function () { eat = false; }, 0); });
   document.addEventListener('click', function (e) { if (eat) { e.stopImmediatePropagation(); e.preventDefault(); eat = false; } }, true);
 })();
 /* 弹窗拖动：弹窗框架（[data-pop] 的第一个子元素）能不能拖只看 PDL_POPUPS 的 drag 声明，不逐个开启。拖动是相对初始位置（at）的偏移，只在这次打开期间有效：关掉再打开回到初始位置 */

@@ -446,7 +446,7 @@ function floatHtml(o) {
     (o.bare ? o.body : '<div class="scroll float-body"' + (o.scroll || '') + '>' + o.body + '</div>') + (o.foot ? '<div class="float-foot">' + o.foot + '</div>' : '') + '</div>';
 }
 /* 既有浮层的 PDL 绑定：壳的角色和内容由声明给出，仍使用同一 floatHtml。 */
-PDL_COMPONENTS.floatHtml = function (o, sc, root) { return floatHtml({ cls: pv(o.className, sc, root), label: pv(o.label, sc, root), body: pvBlocks(o.blocks, sc, root) }); };
+PDL_COMPONENTS.floatHtml = function (o, sc, root) { const label = pv(o.label, sc, root), pop = pv(o.close, sc, root); return floatHtml({ cls: pv(o.className, sc, root), label: label, head: pop ? '<span class="u-strong grow">' + h(label) + '</span>' + popX(pop) : '', body: pvBlocks(o.blocks, sc, root) }); };   /* close：弹窗名，头上是名字和 ×（弹窗声明了 exit x 时） */
 PDL_COMPONENTS.floatHtml.catalog = { g: 'popups', props: { className: 'pop', label: '$.title', blocks: [{ type: 'text', text: '$.sub' }] } };
 /* 菜单（⋯ 打开的那种）：m = { k, items: [{ label, lead（前导内容：头像、图标，可选）, act, data, danger, cur } | { hr } | { group }] }；位置由锚定决定（触发元素是 --menu，见上面的锚定） */
 function menuHtml(m) {

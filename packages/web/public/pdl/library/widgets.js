@@ -437,6 +437,8 @@ function pcfCtl(r, p) {
     const options = r.options.map(function (x) { return { v: x.value, label: pv(x.label, x, x) }; });
     return sel(r.id, !r.record && r.value === '' ? [{ v: '', label: tc('pcf.choose') }].concat(options) : options, r.value, { change: r.record ? 'pcfRecSel' : 'pcfSel', data: d, invalid: !!r.err, label: label });
   }
+  if (r.kind === 'member') return memberPick({ id: r.id, pool: r.options, value: r.value, multi: r.multiple, none: tc('pcf.choose'), change: 'pcfSel', data: d, label: label, act: 'pcfOp', args: { op: 'pick', p: p, k: r.key } });
+  if (r.kind === 'thread') return sel(r.id, (r.multiple ? [] : [{ v: '', label: tc('pcf.choose') }]).concat(r.options.map(function (x) { return { v: x.value, label: x.label }; })), r.value, { change: 'pcfSel', data: d, label: label, multi: r.multiple, act: 'pcfOp', args: { op: 'pick', p: p, k: r.key }, key: 'id', none: tc('pcf.choose') });
   if (r.kind === 'boolean') return sw(r.value, 'pcfOp', d + ' data-op="' + (r.record ? 'recBool' : 'bool') + '"', label);
   if (r.kind === 'list') return kvEditor({ key: p + '|' + r.key, rows: r.items.map(function (v) { return { v: v }; }), single: true, input: 'pcfListIn', del: 'pcfOp', add: tc('pcf.addItem') });
   if (r.kind === 'records') return pcfRecordsHtml(r, p);
