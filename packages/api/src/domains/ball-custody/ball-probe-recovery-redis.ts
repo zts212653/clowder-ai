@@ -53,10 +53,17 @@ export class RedisBallProbeRecovery {
   constructor(private readonly redis: RedisClient) {
     this.redis = recoveryRedis(redis);
     this.census = new BallProbeRecoveryCensus(this.redis, Object.values(INDEX), async (subject) => {
-      await this.mutate(subject, ({ facts, projection }) => ({
-        result: undefined,
-        facts: reconcileBallProbeFacts(subject, projection, facts),
-      }));
+      await this.mutate(subject, ({ facts, projection }) => {
+        const archive = Object.fromEntries(
+          Object.entries(facts.notices).map(([key, notice]) => [`notice:${key}`, JSON.stringify(notice)]),
+        );
+        facts.notices = {};
+        return {
+          result: undefined,
+          facts: reconcileBallProbeFacts(subject, projection, facts),
+          archive,
+        };
+      });
     });
   }
   async readArchive(subject: string, key: string): Promise<string | null> {
@@ -167,7 +174,7 @@ export class RedisBallProbeRecovery {
     });
   }
   async initialize(rebuild = false): Promise<void> {
-    if (rebuild) await this.census.reset();
+    if (rebuild || Number(await this.redis.zcard(BALL_NOTICE_DUE)) > 0) await this.census.reset();
     // Explicit initialization/rebuild retains its existing complete-on-return contract.
     while (!(await this.census.advance())) {
       /* Each page is independently durable. */

@@ -3,7 +3,6 @@ import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskS
 import { readManagedJobRecovery } from '../managed-job/managed-job-recovery-ledger.js';
 import type { ManagedCommandWaitProcessResult } from './ManagedCommandWakeRecoveryEngine.js';
 import { resolveManagedCommandJob } from './managed-command-job-reference.js';
-import { deliverManagedCommandWaitNotification } from './managed-command-wait-notification.js';
 import {
   type ManagedCommandWaitRecoveryFact,
   type ManagedCommandWaitRecoveryOutcome,
@@ -12,8 +11,6 @@ import {
 import {
   type ManagedCommandWakeRecoveryDeps,
   type ManagedCommandWakeRecoveryResult,
-  parseManagedCommandWakeTask,
-  parseRetiredManagedCommandWakeTask,
   readManagedCommandWakeProjection,
 } from './managed-command-wake-lifecycle.js';
 
@@ -40,20 +37,11 @@ function consumptionMatches(task: DynamicTaskDef, fact: ManagedCommandWaitRecove
   );
 }
 
-function attachNotificationTarget(
-  fact: ManagedCommandWaitRecoveryFact,
-  task: DynamicTaskDef,
-): ManagedCommandWaitRecoveryFact {
-  if (!fact.notification || fact.notification.target) return fact;
-  const parsed = parseManagedCommandWakeTask(task) ?? parseRetiredManagedCommandWakeTask(task);
-  if (!parsed) return { ...fact, nextAttemptAt: null };
-  return {
-    ...fact,
-    notification: {
-      ...fact.notification,
-      target: { userId: parsed.userId, threadId: parsed.threadId, catId: parsed.catId },
-    },
-  };
+function recheckMatchesOriginalWait(task: DynamicTaskDef, fact: ManagedCommandWaitRecoveryFact): boolean {
+  const command = readManagedCommandWakeProjection(task);
+  if (!command || fact.waitGeneration !== generation(task)) return false;
+  if (command.messageId) return consumptionMatches(task, fact);
+  return command.state === 'condition_met' && typeof command.wakeContent === 'string' && command.wakeContent.length > 0;
 }
 
 /** Recovery facts and consumption fencing remain owned by this exact wait row, independent of the job producer. */
@@ -70,12 +58,18 @@ export async function processManagedCommandWait(
   const task = store.getById(taskId);
   if (!task) return 'missing';
   const command = readManagedCommandWakeProjection(task);
-  if (snapshot.fact.disposition && (!force || !command?.messageId)) {
-    await deliverManagedCommandWaitNotification(deps, task, now);
+  const mayRecheckDisposition =
+    snapshot.fact.disposition &&
+    force &&
+    recheckMatchesOriginalWait(task, snapshot.fact) &&
+    (!command?.messageId || Boolean(await deps.messageStore.getById?.(command.messageId)));
+  if (snapshot.fact.disposition && !mayRecheckDisposition) {
+    const { notification: _legacyNotification, ...fact } = snapshot.fact as ManagedCommandWaitRecoveryFact & {
+      notification?: unknown;
+    };
+    store.updateManagedCommandRecoveryState(taskId, snapshot.revision, { ...fact, nextAttemptAt: null });
     return 'pending';
   }
-  if (snapshot.fact.disposition && command?.messageId && !(await deps.messageStore.getById?.(command.messageId)))
-    return 'pending';
   if (snapshot.fact.claim && snapshot.fact.claim.expiresAt > now) return 'pending';
   let outcome: ManagedCommandWaitRecoveryOutcome | undefined;
   if (snapshot.fact.claim) outcome = { kind: 'retryable_error', reason: 'wait_observation_interrupted' };
@@ -124,8 +118,7 @@ export async function processManagedCommandWait(
       log.warn({ err, taskId }, 'Managed wait observation failed');
     }
   }
-  const next = attachNotificationTarget(planManagedCommandWaitRecovery(current, outcome, taskId, now), task);
-  if (store.updateManagedCommandRecoveryState(taskId, revision, next) && next.notification)
-    await deliverManagedCommandWaitNotification(deps, task, now);
+  const next = planManagedCommandWaitRecovery(current, outcome, taskId, now);
+  store.updateManagedCommandRecoveryState(taskId, revision, next);
   return outcome.kind === 'settled' ? 'recovered' : result;
 }

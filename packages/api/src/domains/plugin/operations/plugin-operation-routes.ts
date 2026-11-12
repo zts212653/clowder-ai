@@ -28,7 +28,21 @@ import { type OperationState, transitionOperationState } from './operation-state
 import { expiredOperation, type PluginOperationCommitFence } from './plugin-operation-fence.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-class PluginSettingsUnavailableError extends Error {}
+class PluginSettingsUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly disabled = false,
+  ) {
+    super(message);
+  }
+
+  toResult(): InstalledPluginOperationResult {
+    return {
+      ...response(409, { error: this.message }),
+      ...(this.disabled ? { disabled: true } : {}),
+    };
+  }
+}
 type OperationField = Extract<ConfigurationField, { readonly kind: 'operation' }>;
 
 export interface PluginOperationConfigurationPort {
@@ -63,6 +77,7 @@ export interface InstalledPluginOperationsOptions {
 
 export interface InstalledPluginOperationResult {
   readonly matched: boolean;
+  readonly disabled?: boolean;
   readonly status: number;
   readonly body: Readonly<Record<string, unknown>>;
 }
@@ -78,6 +93,21 @@ function response(
   matched = true,
 ): InstalledPluginOperationResult {
   return { matched, status, body };
+}
+
+function isOwnerDisabledInstance(instance: PluginInstanceRecord): boolean {
+  return instance.lifecycleState === 'installed' && instance.activationState === 'disabled';
+}
+
+function instanceFailureResponse(
+  instance: PluginInstanceRecord,
+  status: number,
+  body: Readonly<Record<string, unknown>>,
+): InstalledPluginOperationResult {
+  return {
+    ...response(status, body),
+    ...(isOwnerDisabledInstance(instance) ? { disabled: true } : {}),
+  };
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -224,15 +254,18 @@ export class InstalledPluginOperations {
     const instance = authority?.instance;
     if (!instance) return response(404, { error: `Plugin '${pluginId}' is not installed` }, false);
     const packageRecord = authority?.packageRecord;
-    if (!packageRecord) return response(404, { error: `Plugin '${pluginId}' package is unavailable` });
+    if (!packageRecord)
+      return instanceFailureResponse(instance, 404, { error: `Plugin '${pluginId}' package is unavailable` });
     if (!packageRecord.manifest)
-      return response(409, { error: 'Plugin version is incompatible; update or reinstall it' });
+      return instanceFailureResponse(instance, 409, {
+        error: 'Plugin version is incompatible; update or reinstall it',
+      });
     assertExecutablePackage(packageRecord);
     if (
       !this.options.settingsInvocation &&
       (instance.activationState !== 'enabled' || instance.runtimeState !== 'healthy')
     ) {
-      return response(409, { error: `Plugin '${pluginId}' is not enabled` });
+      return instanceFailureResponse(instance, 409, { error: `Plugin '${pluginId}' is not enabled` });
     }
     return {
       instance,
@@ -271,7 +304,7 @@ export class InstalledPluginOperations {
         () => lifetime.abort(),
       );
     } catch (error) {
-      if (error instanceof PluginSettingsUnavailableError) return response(409, { error: error.message });
+      if (error instanceof PluginSettingsUnavailableError) return error.toResult();
       if (error instanceof PluginInvocationTimeoutError) return response(504, { error: 'Plugin operation timed out' });
       if (error instanceof PluginOwnerOperationExpiredError) return response(409, { error: error.message });
       return response(502, { error: `Action failed: ${safeActionErrorMessage(error)}` });
@@ -295,11 +328,13 @@ export class InstalledPluginOperations {
       (active.packageRecord.manifest.runtime?.transport !== 'builtin' ||
         typeof active.packageRecord.manifest.runtime.entrypoint !== 'string')
     )
-      return response(409, { error: 'Owner operation requires the module carrier' });
+      return instanceFailureResponse(active.instance, 409, { error: 'Owner operation requires the module carrier' });
     const declaredOperation = operation(active.packageRecord.manifest, operationKey);
-    if (!declaredOperation) return response(404, { error: `Operation '${operationKey}' is not declared` });
+    if (!declaredOperation)
+      return instanceFailureResponse(active.instance, 404, { error: `Operation '${operationKey}' is not declared` });
     const action = declaredOperation.actions.find((candidate) => candidate.id === actionId);
-    if (!action) return response(404, { error: `Action '${actionId}' is not declared` });
+    if (!action)
+      return instanceFailureResponse(active.instance, 404, { error: `Action '${actionId}' is not declared` });
     if (action.confirm !== undefined && request?.confirmed !== true)
       return response(400, { error: 'Confirm this operation first' });
     const declaration = JSON.stringify(declaredOperation);
@@ -334,7 +369,9 @@ export class InstalledPluginOperations {
     const currentValues = await this.options.configuration.readActionInput(pluginId);
     const input = { ...currentValues, ...((body ?? {}) as Readonly<Record<string, unknown>>) };
     if (!operationAvailableForConfiguration(active.packageRecord.manifest, operationKey, input))
-      return response(409, { error: 'Operation is unavailable for the selected configuration' });
+      return instanceFailureResponse(active.instance, 409, {
+        error: 'Operation is unavailable for the selected configuration',
+      });
     await assertCurrent();
     const currentState = await this.options.configuration.readOperationState(pluginId, operationKey);
     const params = {
@@ -359,7 +396,10 @@ export class InstalledPluginOperations {
       });
       if (result?.handled) return result.result;
       if (active.instance.activationState !== 'enabled' || active.instance.runtimeState !== 'healthy')
-        throw new PluginSettingsUnavailableError('Plugin has no loaded settings handler');
+        throw new PluginSettingsUnavailableError(
+          'Plugin has no loaded settings handler',
+          isOwnerDisabledInstance(active.instance),
+        );
       return this.options.invocation.invoke(active.instance.pluginInstanceId, action.action.method, params);
     };
     let rawResult: unknown;
@@ -464,7 +504,10 @@ export class InstalledPluginOperations {
         });
         if (result?.handled) return result.result;
         if (active.instance.activationState !== 'enabled' || active.instance.runtimeState !== 'healthy')
-          throw new PluginSettingsUnavailableError('Plugin has no loaded test handler');
+          throw new PluginSettingsUnavailableError(
+            'Plugin has no loaded test handler',
+            isOwnerDisabledInstance(active.instance),
+          );
         return this.options.invocation.invoke(
           active.instance.pluginInstanceId,
           declared.action.method,
@@ -474,7 +517,7 @@ export class InstalledPluginOperations {
       rawResult = await withTimeout(invoke(), this.timeoutMs, () => controller.abort());
       await assertCurrent();
     } catch (error) {
-      if (error instanceof PluginSettingsUnavailableError) return response(409, { error: error.message });
+      if (error instanceof PluginSettingsUnavailableError) return error.toResult();
       if (error instanceof PluginOwnerOperationExpiredError) return response(409, { error: error.message });
       if (error instanceof PluginInvocationTimeoutError) return response(504, { error: 'Plugin test timed out' });
       return response(502, { error: 'Plugin test invocation failed' });

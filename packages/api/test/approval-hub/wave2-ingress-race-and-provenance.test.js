@@ -1,26 +1,9 @@
+import { tasteSourceStore } from '../helpers/taste-source-fixture.js';
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { proposedTaskAction } from './helpers.js';
-
-function createSucceedingIngress() {
-  return {
-    async publish(draft, store) {
-      const envelope = {
-        canonicalProposalId: draft.canonicalProposalId,
-        sourceFeatureId: draft.producerId,
-        ownerUserId: draft.ownerUserId,
-        requesterCatId: draft.requesterCatId,
-        originRef: draft.originRef,
-        approvalCardRef: { threadId: draft.cardThreadId, messageId: 'msg-card-ok' },
-        createdAt: draft.createdAt,
-      };
-      await store.commitEnvelope(draft.canonicalProposalId, envelope);
-      return envelope;
-    },
-  };
-}
+import { createTestApprovalIngress, proposedTaskAction } from './helpers.js';
 
 describe('F193 concurrent dispatch publication', () => {
   it('keeps the post-create dedup loser retryable until the winner is anchored', async () => {
@@ -71,10 +54,11 @@ describe('F193 concurrent dispatch publication', () => {
       releasePublish = resolve;
     });
     const ingress = {
+      ...createTestApprovalIngress(),
       async publish(draft, publicationStore) {
         publishStarted();
         await canPublish;
-        return createSucceedingIngress().publish(draft, publicationStore);
+        return createTestApprovalIngress().publish(draft, publicationStore);
       },
     };
 
@@ -162,12 +146,13 @@ describe('staged recovery provenance', () => {
 
   function buildCapturingIngress(drafts) {
     return {
+      ...createTestApprovalIngress(),
       async publish(draft, store) {
         drafts.push(draft);
         if (drafts.length === 1) {
           throw new ApprovalCardCommittedError(new Error('commit unavailable'), 'msg-card-original');
         }
-        return createSucceedingIngress().publish(draft, store);
+        return createTestApprovalIngress().publish(draft, store);
       },
     };
   }
@@ -235,6 +220,7 @@ describe('staged recovery provenance', () => {
     app.addHook('preHandler', (request, _reply, done) => {
       request.callbackAuth = {
         invocationId: 'inv-taste-recovery',
+        originTriggerMessageId: `${currentThreadId}-source`,
         callbackToken: 'tok',
         catId: 'opus',
         threadId: currentThreadId,
@@ -248,6 +234,11 @@ describe('staged recovery provenance', () => {
     await app.register(callbackProposeTasteRoutes, {
       registry: { isLatest: async () => true },
       tasteProposalStore: store,
+      messageStore: {
+        getById: async (id) =>
+          (await tasteSourceStore({ ids: ['thread-original-source'], threadId: 'thread-original' }).getById(id)) ??
+          tasteSourceStore({ ids: ['thread-retry-source'], threadId: 'thread-retry' }).getById(id),
+      },
       socketManager: { emitToUser() {} },
       approvalIngress: buildCapturingIngress(drafts),
     });
@@ -259,7 +250,6 @@ describe('staged recovery provenance', () => {
       tags: ['authentic-expression'],
       dimension: 'authentic-expression',
       privacy: 'public',
-      sourceMessageId: 'msg-original',
       clientRequestId: 'taste-original-thread',
     };
 

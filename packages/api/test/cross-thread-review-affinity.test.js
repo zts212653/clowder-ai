@@ -314,30 +314,34 @@ describe('cross-thread review action affinity', () => {
     }
   });
 
-  it('allows an explicit or minted standalone terminal only when no incoming id exists', () => {
-    const explicitTerminal = resolveCrossThreadCoordination({
+  it('closes verified outbound active chains while rejecting unverified standalone explicit terminal ids', () => {
+    const verified = resolveCrossThreadCoordination({
+      explicit: { phase: 'terminal', id: 'coord-outbound-b', subjectRef: 'file:roof620' },
+      incoming: boundIncoming,
+      verifiedOutboundActive: { id: 'coord-outbound-b', phase: 'active', hop: 0, subjectRef: 'file:roof620' },
+      targetThreadId: 'thread-roof',
+      mintId: () => 'must-not-mint',
+    });
+    assert.deepEqual(verified, {
+      coordination: { id: 'coord-outbound-b', phase: 'terminal', hop: 1, subjectRef: 'file:roof620' },
+      suppressRouting: false,
+    });
+
+    const unverified = resolveCrossThreadCoordination({
       explicit: { phase: 'terminal', id: 'coord-explicit', subjectRef: 'subject:task:done' },
       targetThreadId: 'thread-target',
       mintId: () => 'must-not-mint',
     });
-    assert.deepEqual(explicitTerminal.coordination, {
-      id: 'coord-explicit',
-      phase: 'terminal',
-      hop: 0,
-      subjectRef: 'subject:task:done',
-    });
-    assert.equal(explicitTerminal.contentDedupCoordinationKey, undefined);
+    assert.equal(unverified.suppressRouting, true);
+    assert.equal(unverified.conflict?.kind, 'coordination_id_conflict');
+    assert.equal(unverified.conflict?.explicitCoordinationId, 'coord-explicit');
 
-    const mintedTerminal = resolveCrossThreadCoordination({
+    const minted = resolveCrossThreadCoordination({
       explicit: { phase: 'terminal' },
       targetThreadId: 'thread-target',
       mintId: () => 'coord-minted-terminal',
     });
-    assert.deepEqual(mintedTerminal.coordination, {
-      id: 'coord-minted-terminal',
-      phase: 'terminal',
-      hop: 0,
-    });
-    assert.equal(mintedTerminal.contentDedupCoordinationKey, 'minted-terminal-root');
+    assert.deepEqual(minted.coordination, { id: 'coord-minted-terminal', phase: 'terminal', hop: 0 });
+    assert.equal(minted.contentDedupCoordinationKey, 'minted-terminal-root');
   });
 });

@@ -1,7 +1,9 @@
 import type { MaterializableClaimPayload } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { MemoryPersonClaimTechnicalDetails, MemoryPersonClaimText } from './MemoryPersonClaimText';
+import { MemoryPersonMaintenanceConfirm } from './MemoryPersonMaintenance';
 import { MemoryPersonSource } from './MemoryPersonSource';
-import { type PersonClaim, type PersonOwnerCommand, personClaimText } from './people-types';
+import type { PersonClaim, PersonOwnerCommand } from './people-types';
 import { formatMemoryDate } from './use-memory-read';
 
 function editableText(payload: PersonClaim['payload']) {
@@ -29,15 +31,18 @@ export function MemoryPersonClaim({
   claim,
   busy,
   submit,
+  onRedacted,
 }: {
   personId: string;
   claim: PersonClaim;
   busy: boolean;
   submit: (input: PersonOwnerCommand) => void;
+  onRedacted?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [sourceState, setSourceState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [retiring, setRetiring] = useState(false);
+  const [redacting, setRedacting] = useState(false);
   const payload = claim.payload;
   const [draft, setDraft] = useState(editableText(payload));
   const [predicate, setPredicate] = useState(payload.kind === 'reported_fact' ? payload.predicate : '');
@@ -54,7 +59,7 @@ export function MemoryPersonClaim({
   }
   return (
     <article className="space-y-3 rounded-lg bg-cafe-surface-sunken p-4">
-      <p className="whitespace-pre-wrap break-words text-sm">{personClaimText(payload)}</p>
+      <MemoryPersonClaimText claim={claim} />
       <p className="text-xs text-cafe-muted">
         {payload.kind === 'reported_fact'
           ? '你说的事实'
@@ -63,19 +68,58 @@ export function MemoryPersonClaim({
             : '已忘掉'}{' '}
         · {claim.status === 'current' ? '当前判断' : '历史判断'} · {formatMemoryDate(claim.recordedAt)}
       </p>
-      <MemoryPersonSource personId={personId} kind="claim" itemId={claim.claimId} onReadState={setSourceState} />
+      {payload.kind !== 'redacted' && (
+        <MemoryPersonSource personId={personId} kind="claim" itemId={claim.claimId} onReadState={setSourceState} />
+      )}
+      <MemoryPersonClaimTechnicalDetails claim={claim} />
       {claim.status === 'current' && payload.kind !== 'redacted' && (
-        <div className="flex gap-3 text-compact text-cafe-accent">
-          <button type="button" disabled={busy || sourceState !== 'ready'} onClick={() => setEditing(!editing)}>
+        <div className="flex flex-wrap gap-3 text-compact text-cafe-accent">
+          <button
+            type="button"
+            disabled={busy || sourceState !== 'ready'}
+            onClick={() => {
+              setEditing(!editing);
+              setRetiring(false);
+              setRedacting(false);
+            }}
+          >
             编辑
           </button>
-          <button type="button" disabled={busy} onClick={() => setRetiring(!retiring)}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setRetiring(!retiring);
+              setEditing(false);
+              setRedacting(false);
+            }}
+          >
             不再成立
           </button>
         </div>
       )}
-      {sourceState === 'unavailable' && (
-        <p className="text-xs text-cafe-muted">来源读不到，暂时不能编辑。可以重读来源，或者不再使用、忘掉这条。</p>
+      {payload.kind !== 'redacted' && claim.status !== 'redacted' && (
+        <MemoryPersonMaintenanceConfirm
+          label="忘掉这条内容"
+          disabled={busy}
+          opened={redacting}
+          onApplied={onRedacted}
+          onToggle={() => {
+            setRedacting(!redacting);
+            setEditing(false);
+            setRetiring(false);
+          }}
+          draft={{
+            action: 'redact_item',
+            personId,
+            item: { kind: 'claim', id: claim.claimId },
+            expectedRevision: claim.revision,
+          }}
+          description="擦除这条记忆的内容与来源关联，只留一条已忘掉记录，不能恢复。不会删除原始对话，也不会忘掉整个人。"
+        />
+      )}
+      {sourceState === 'unavailable' && payload.kind !== 'redacted' && (
+        <p className="text-xs text-cafe-muted">来源读不到，暂时不能编辑。仍可不再使用或忘掉这条。</p>
       )}
       {editing && (
         <form

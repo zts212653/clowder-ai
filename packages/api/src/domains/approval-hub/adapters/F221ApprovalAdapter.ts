@@ -12,6 +12,7 @@ import { projectSettledPage } from '../project-settled-page.js';
  */
 
 import type { ApprovalItem, SettledApprovalItem, TasteProposal } from '@cat-cafe/shared';
+import { tasteContentSnapshot } from '../../taste/services/taste-decision-snapshot.js';
 import type { ITasteProposalStore } from '../../taste/stores/ports/TasteProposalStore.js';
 import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
@@ -57,6 +58,7 @@ function toItem(p: TasteProposal): ApprovalItem | null {
     legacyMessageId: p.sourceMessageId,
   });
   if (!navigation) return null;
+  const decision = tasteContentSnapshot(p);
   return {
     proposalId: p.id,
     sourceFeatureId: 'F221' as const,
@@ -67,6 +69,8 @@ function toItem(p: TasteProposal): ApprovalItem | null {
     detail: {
       scene: p.scene,
       quote: p.quote,
+      ...(p.resolvedQuotes ? { quotes: [...p.resolvedQuotes] } : {}),
+      ...(decision ? { decisionDigest: decision.digest } : {}),
       ...(p.takeaway ? { takeaway: p.takeaway } : {}),
       dimension: p.dimension,
       tags: p.tags,
@@ -113,6 +117,7 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
         : {}),
       scene: p.scene,
       quote: p.quote,
+      ...(p.resolvedQuotes ? { quotes: [...p.resolvedQuotes] } : {}),
       ...(p.takeaway ? { takeaway: p.takeaway } : {}),
       dimension: p.dimension,
       tags: p.tags,
