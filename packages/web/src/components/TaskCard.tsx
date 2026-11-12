@@ -94,10 +94,35 @@ export function TaskCard({
         </button>
       </div>
 
+      {task.recovery?.incidents.length ? (
+        <div data-testid="task-recovery" className="mt-2 rounded border border-cafe-accent/40 bg-cafe-accent/5 p-2">
+          <p className="text-xs font-medium text-cafe-secondary">自动恢复已暂停</p>
+          {task.recovery.incidents.map((incident) => (
+            <p
+              key={`${incident.source}:${incident.lane}:${incident.executionRef}`}
+              className="mt-1 text-micro text-cafe-muted"
+            >
+              {incident.disposition === 'needs_attention'
+                ? '需要检查'
+                : incident.disposition === 'parked'
+                  ? '已停放'
+                  : '已中断'}
+              {' · '}
+              {incident.reasonCode}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
       {/* Expanded details */}
       {expanded && (
         <div className="mt-2 pt-2 border-t border-cafe">
           {task.why && <p className="text-xs text-cafe-muted leading-relaxed">{task.why}</p>}
+          {task.recovery?.incidents.map((incident) => (
+            <p key={incident.executionRef} className="mt-1 break-all text-micro text-cafe-muted">
+              原执行：{incident.executionRef}
+            </p>
+          ))}
           <p className="text-micro text-cafe-muted mt-1">
             {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? owner.nickname : task.createdBy}
           </p>
