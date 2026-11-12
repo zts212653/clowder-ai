@@ -198,11 +198,21 @@ export function PluginUiEntries() {
             className="m-auto h-[min(900px,94dvh)] w-[min(820px,96vw)] max-w-none overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-bg)] p-0 shadow-2xl backdrop:bg-black/40"
           >
             <div className="absolute right-3 top-2 z-10 flex items-center gap-2 rounded bg-[var(--console-bg)] px-1">
-              {closing && <span role="status" className="text-sm">正在保存…</span>}
+              {closing && (
+                <span role="status" className="text-sm">
+                  正在保存…
+                </span>
+              )}
               {(closing || closeFailed) && (
-                <button type="button" className="rounded px-2 py-1 text-sm hover:bg-black/10" onClick={() => {
-                  if (window.confirm('仍然关闭可能丢失本窗口最后未保存的内容。确定关闭？')) close();
-                }}>仍然关闭</button>
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-sm hover:bg-black/10"
+                  onClick={() => {
+                    if (window.confirm('仍然关闭可能丢失本窗口最后未保存的内容。确定关闭？')) close();
+                  }}
+                >
+                  仍然关闭
+                </button>
               )}
               <button
                 type="button"

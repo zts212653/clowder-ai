@@ -116,7 +116,7 @@ try {
   await panel.getByRole('button', { name: '直接反馈', exact: true }).click();
   await panel.getByRole('button', { name: '编辑正文', exact: true }).click();
   await panel.getByLabel('报告正文', { exact: true }).fill('检查报告时的修改也要保存');
-  await panel.locator('[data-save-status]').filter({hasText:'草稿已保存到反馈记录'}).waitFor();
+  await panel.locator('[data-save-status]').filter({ hasText: '草稿已保存到反馈记录' }).waitFor();
   await close();
   await page.locator('dialog').waitFor({ state: 'detached' });
   await open();

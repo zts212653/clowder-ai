@@ -171,15 +171,24 @@ describe('plugin sidebar panel isolation', () => {
     await act(async () => container.querySelector('button')?.click());
     const frame = document.querySelector('iframe')!;
     const source = frame.contentWindow!;
-    const send = (type:string,requestId:number) => window.dispatchEvent(new MessageEvent('message', {
-      source,data:{channel:'clowder-plugin-ui/v1',nonce:frame.name,type,requestId,value:true},
-    }));
-    await act(async () => {send('close.guard',1);});
+    const send = (type: string, requestId: number) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: { channel: 'clowder-plugin-ui/v1', nonce: frame.name, type, requestId, value: true },
+        }),
+      );
+    await act(async () => {
+      send('close.guard', 1);
+    });
     await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.click());
-    if(cancelled)await act(async () => {send('close.cancel',2);});
-    const force = Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='仍然关闭');
+    if (cancelled)
+      await act(async () => {
+        send('close.cancel', 2);
+      });
+    const force = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '仍然关闭');
     expect(force).toBeDefined();
-    const confirm=vi.spyOn(window,'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     await act(async () => force?.click());
     expect(document.querySelector('iframe')).toBe(frame);
     await act(async () => force?.click());
@@ -191,10 +200,21 @@ describe('plugin sidebar panel isolation', () => {
     await act(async () => container.querySelector('button')?.click());
     const frame = document.querySelector('iframe')!;
     const source = frame.contentWindow!;
-    const post=vi.spyOn(source,'postMessage');
-    await act(async () => {window.dispatchEvent(new MessageEvent('message', {
-      source,data:{channel:'clowder-plugin-ui/v1',nonce:frame.name,requestId:1,type:'clipboard.text',value:'x'.repeat(24_000_000)},
-    }));});
+    const post = vi.spyOn(source, 'postMessage');
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: {
+            channel: 'clowder-plugin-ui/v1',
+            nonce: frame.name,
+            requestId: 1,
+            type: 'clipboard.text',
+            value: 'x'.repeat(24_000_000),
+          },
+        }),
+      );
+    });
     expect(post.mock.calls.at(-1)?.[0]).toHaveProperty('error');
   });
   it('production-page HTTP fixture represents an empty installed UI registry without admitting mutations', () => {
