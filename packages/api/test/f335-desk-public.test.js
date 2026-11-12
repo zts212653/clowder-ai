@@ -107,7 +107,7 @@ test('F335 desk admission: alpha.37 is admitted only by its exact SRI, and only 
   assert.equal(companionContractHas('0.1.0-beta.30', 'modern'), false, 'an unknown line has no capability');
 });
 
-test('F335 desk admission: bridge 1.7.0 is admitted only for the shipped alpha.37 manifest', () => {
+test('F335 desk admission: bridge 1.7.0 is admitted for the shipped alpha.37 manifest and local builds', () => {
   // The generic Host manifest ABI stops at bridge 1.6.0; 1.7.0 enters only through the archive row.
   const admitted = validateHostPluginManifest(ALPHA37_MANIFEST);
   assert.equal(admitted.valid, true);
@@ -117,7 +117,8 @@ test('F335 desk admission: bridge 1.7.0 is admitted only for the shipped alpha.3
     contributions: ALPHA37_MANIFEST.contributions.map((c) => ({ ...c, bridgeVersion })),
   });
   assert.equal(validateHostPluginManifest(withBridge('1.8.0')).valid, false);
-  assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, version: '0.1.0-alpha.36' }).valid, false);
+  // A version without a pinned release is a local build: the current contract reads it
+  assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, version: '0.1.0-alpha.36' }).valid, true);
   assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, pluginId: 'dev.other' }).valid, false);
 });
 
