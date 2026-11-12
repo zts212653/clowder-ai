@@ -29,6 +29,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { API_URL, refreshApiSession } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
+import { MEMORY_CHANGED } from './memory-changed';
 import { writeStoredSnapshot } from './named-message-writer';
 import {
   deliverPreviewAutoOpenEvent,
@@ -118,6 +119,8 @@ interface ConnectorMessageEvent {
     type: 'connector';
     from?: MessageFrom;
     content: string;
+    replyTo?: string;
+    contentBlocks?: import('../stores/chat-types').ChatMessage['contentBlocks'];
     source?: import('../stores/chat-types').ConnectorSourceData;
     extra?: import('../stores/chat-types').ChatMessage['extra'];
     timestamp: number;
@@ -639,7 +642,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       }
     });
     socket.on('memory_matter_changed', () => {
-      window.dispatchEvent(new Event('cat-cafe:memory-matter-changed'));
+      window.dispatchEvent(new Event(MEMORY_CHANGED));
     });
     socket.on('runtime_interaction_updated', (interaction: { interactionId: string; status: string }) => {
       if (typeof window !== 'undefined') {
@@ -995,87 +998,98 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
-    socket.on(
-      'message_lifecycle_updated',
-      (data: {
-        threadId: string;
-        message: {
-          id: string;
-          from?: MessageFrom;
-          catId: string | null;
-          content: string;
-          lifecycle: unknown;
-          timestamp: number;
-          timelineOrderAt?: number;
-          contentBlocks?: readonly unknown[];
-          toolEvents?: import('../stores/chat-types').ToolEvent[];
-          thinking?: string;
-          metadata?: import('../stores/chat-types').ChatMessageMetadata & {
-            cliDiagnostics?: import('@cat-cafe/shared').CliDiagnostics;
-            timeoutDiagnostics?: import('../stores/chat-types').TimeoutDiagnostics;
-          };
-          mentionsUser?: boolean;
-          extra?: Record<string, unknown>;
-          origin?: 'stream' | 'callback' | 'briefing';
-          replyTo?: string;
-          source?: import('../stores/chat-types').ConnectorSourceData;
+    const onStoredMessageSnapshot = (data: {
+      threadId: string;
+      commit?: unknown;
+      message: {
+        id: string;
+        from?: MessageFrom;
+        catId: string | null;
+        content: string;
+        lifecycle?: unknown;
+        timestamp: number;
+        timelineOrderAt?: number;
+        contentBlocks?: readonly unknown[];
+        toolEvents?: import('../stores/chat-types').ToolEvent[];
+        thinking?: string;
+        metadata?: import('../stores/chat-types').ChatMessageMetadata & {
+          cliDiagnostics?: import('@cat-cafe/shared').CliDiagnostics;
+          timeoutDiagnostics?: import('../stores/chat-types').TimeoutDiagnostics;
         };
-        /** PR-3a: set only by the store-seam publication; see lifecycle-terminal.ts. */
-        commit?: unknown;
-      }) => {
-        if (!isLifecycleStoredMessageMetadata(data.message.lifecycle)) return;
-        const lifecycle = data.message.lifecycle;
-        const isDeliveryFailure = lifecycle.kind === 'delivery_failure';
-        const snapshot: import('../stores/chat-types').ChatMessage = {
-          id: data.message.id,
-          type: isDeliveryFailure
-            ? 'system'
-            : (timelineMessageKind(data.message.from, Boolean(data.message.source)) ??
-              (data.message.catId ? 'assistant' : 'user')),
-          ...(data.message.from ? { from: data.message.from } : {}),
-          ...(data.message.source ? { source: data.message.source } : {}),
-          ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
-          ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),
-          content: data.message.content,
-          lifecycle,
-          timestamp: data.message.timestamp,
-          ...(data.message.timelineOrderAt !== undefined ? { timelineOrderAt: data.message.timelineOrderAt } : {}),
-          ...(data.message.contentBlocks
-            ? {
-                contentBlocks: data.message
-                  .contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'],
-              }
-            : {}),
-          ...(data.message.toolEvents ? { toolEvents: data.message.toolEvents } : {}),
-          ...(data.message.thinking ? { thinking: data.message.thinking } : {}),
-          ...(data.message.metadata ? { metadata: data.message.metadata } : {}),
-          ...(data.message.mentionsUser ? { mentionsUser: true } : {}),
-          ...(data.message.extra || data.message.metadata?.cliDiagnostics || data.message.metadata?.timeoutDiagnostics
-            ? {
-                extra: {
-                  ...(data.message.extra as import('../stores/chat-types').ChatMessage['extra']),
-                  // F212 / F118: same folding as history hydration, so a failed response keeps its panel.
-                  ...(data.message.metadata?.cliDiagnostics
-                    ? { cliDiagnostics: data.message.metadata.cliDiagnostics }
-                    : {}),
-                  ...(data.message.metadata?.timeoutDiagnostics
-                    ? { timeoutDiagnostics: data.message.metadata.timeoutDiagnostics }
-                    : {}),
-                },
-              }
-            : {}),
-          ...(data.message.origin ? { origin: data.message.origin } : {}),
-          ...(data.message.replyTo ? { replyTo: data.message.replyTo } : {}),
-        };
-        writeStoredSnapshot(data.threadId, snapshot);
+        mentionsUser?: boolean;
+        extra?: Record<string, unknown>;
+        origin?: 'stream' | 'callback' | 'briefing';
+        replyTo?: string;
+        source?: import('../stores/chat-types').ConnectorSourceData;
+      };
+    }) => {
+      const lifecycle = isLifecycleStoredMessageMetadata(data.message.lifecycle) ? data.message.lifecycle : undefined;
+      if (data.message.lifecycle !== undefined && !lifecycle) return;
+      const isDeliveryFailure = lifecycle?.kind === 'delivery_failure';
+      const snapshot: import('../stores/chat-types').ChatMessage = {
+        id: data.message.id,
+        type: isDeliveryFailure
+          ? 'system'
+          : (timelineMessageKind(data.message.from, Boolean(data.message.source)) ??
+            (data.message.catId ? 'assistant' : 'user')),
+        ...(data.message.from ? { from: data.message.from } : {}),
+        ...(data.message.source ? { source: data.message.source } : {}),
+        ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
+        ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),
+        content: data.message.content,
+        ...(lifecycle ? { lifecycle } : {}),
+        timestamp: data.message.timestamp,
+        ...(data.message.timelineOrderAt !== undefined ? { timelineOrderAt: data.message.timelineOrderAt } : {}),
+        ...(data.message.contentBlocks
+          ? {
+              contentBlocks: data.message.contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'],
+            }
+          : {}),
+        ...(data.message.toolEvents ? { toolEvents: data.message.toolEvents } : {}),
+        ...(data.message.thinking ? { thinking: data.message.thinking } : {}),
+        ...(data.message.metadata ? { metadata: data.message.metadata } : {}),
+        ...(data.message.mentionsUser ? { mentionsUser: true } : {}),
+        ...(data.message.extra || data.message.metadata?.cliDiagnostics || data.message.metadata?.timeoutDiagnostics
+          ? {
+              extra: {
+                ...(data.message.extra as import('../stores/chat-types').ChatMessage['extra']),
+                // F212 / F118: same folding as history hydration, so a failed response keeps its panel.
+                ...(data.message.metadata?.cliDiagnostics
+                  ? { cliDiagnostics: data.message.metadata.cliDiagnostics }
+                  : {}),
+                ...(data.message.metadata?.timeoutDiagnostics
+                  ? { timeoutDiagnostics: data.message.metadata.timeoutDiagnostics }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(data.message.origin ? { origin: data.message.origin } : {}),
+        ...(data.message.replyTo ? { replyTo: data.message.replyTo } : {}),
+      };
+      writeStoredSnapshot(data.threadId, snapshot);
+      if (lifecycle)
         observeLifecycleSnapshot({
           threadId: data.threadId,
           message: snapshot,
           commit: lifecycleCommitOf(data.commit),
         });
-        if (lifecycle.kind === 'response') refreshActiveExecutionForThread(data.threadId);
-      },
-    );
+      if (lifecycle?.kind === 'response') refreshActiveExecutionForThread(data.threadId);
+    };
+    socket.on('message_lifecycle_updated', (data: Parameters<typeof onStoredMessageSnapshot>[0]) => {
+      if (!isLifecycleStoredMessageMetadata(data.message.lifecycle)) return;
+      onStoredMessageSnapshot(data);
+    });
+    socket.on('message_snapshot_updated', (data: Parameters<typeof onStoredMessageSnapshot>[0]) => {
+      if (
+        !data?.threadId ||
+        !data.message?.id ||
+        !isMessageFrom(data.message.from) ||
+        typeof data.message.content !== 'string' ||
+        !Number.isFinite(data.message.timestamp)
+      )
+        return;
+      onStoredMessageSnapshot(data);
+    });
 
     socket.on('queue_full_warning', (data: { threadId: string; source: 'user' | 'connector'; queue: unknown[] }) => {
       const store = useChatStore.getState();
@@ -1113,6 +1127,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         ...(data.message.from ? { from: data.message.from } : {}),
         ...(data.message.from?.kind === 'agent' ? { catId: data.message.from.catId } : {}),
         content: semantic?.action === 'replace' ? semantic.projection.content : (data.message.content ?? ''),
+        ...(data.message.replyTo === undefined ? {} : { replyTo: data.message.replyTo }),
+        ...(data.message.contentBlocks === undefined ? {} : { contentBlocks: data.message.contentBlocks }),
         ...(data.message.source ? { source: data.message.source } : {}),
         ...(data.message.extra ? { extra: data.message.extra } : {}),
         timestamp: data.message.timestamp ?? Date.now(),

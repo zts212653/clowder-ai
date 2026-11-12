@@ -8,6 +8,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   ClaimDeferredPersonMemoryReceiptResult,
   DeferredPersonMemoryReceiptStore,
+  PrepareOwnerDeferredForgetInput,
   RearmDeferredPersonMemoryReceiptResult,
   StageDeferredPersonMemoryReceiptInput,
   StageDeferredPersonMemoryReceiptResult,
@@ -17,6 +18,7 @@ import {
   type DisposeDeferredPersonMemoryClaimInput,
   type ExpireDeferredPersonMemoryClaimInput,
 } from './DeferredPersonMemoryReceiptTerminalStore.js';
+import { listOwnerDeferredPersonMemoryPage } from './deferred-person-memory-owner-read.js';
 import {
   DEFERRED_RECEIPT_BIND_PROCESSING_MESSAGE_LUA,
   DEFERRED_RECEIPT_BIND_PROCESSOR_INVOCATION_LUA,
@@ -153,6 +155,14 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
     return parseReceipt(await this.redis.get(this.keys.receipt(ownerUserId, receiptId)));
   }
 
+  prepareOwnerForget(input: PrepareOwnerDeferredForgetInput) {
+    return this.terminalStore.prepareOwnerForget(input);
+  }
+
+  listOwnerPage(ownerUserId: string, options: { cursor?: string; limit?: number }) {
+    return listOwnerDeferredPersonMemoryPage(this.redis, ownerUserId, options);
+  }
+
   async listReady(ownerUserId: string, limit: number, now = Date.now()): Promise<DeferredPersonMemoryReceipt[]> {
     const bounded = Math.max(0, Math.min(50, limit));
     if (bounded === 0) return [];
@@ -184,6 +194,7 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
     if (!input.processorCatId || !input.processingThreadId) return { outcome: 'not_available' };
     const current = await this.get(input.ownerUserId, input.receiptId);
     if (!current) return { outcome: 'not_available' };
+    if (current.state !== 'deferred' && current.state !== 'claimed') return { outcome: 'not_available' };
     const {
       processingMessageId: _processingMessageId,
       processorInvocationId: _processorInvocationId,
@@ -223,6 +234,7 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
   }) {
     const current = await this.get(input.ownerUserId, input.receiptId);
     if (!current) return { outcome: 'not_available' as const };
+    if (current.state !== 'claimed') return { outcome: 'conflict' as const };
     const bound = deferredPersonMemoryReceiptSchema.parse({
       ...current,
       processingMessageId: input.processingMessageId,
@@ -375,11 +387,11 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
     return this.terminalStore.expireClaim(input);
   }
 
-  async withdraw(ownerUserId: string, receiptId: string, decidedAt: number) {
-    return this.terminalStore.withdraw(ownerUserId, receiptId, decidedAt);
+  async withdraw(ownerUserId: string, receiptId: string, decidedAt: number, expectedRevision?: string) {
+    return this.terminalStore.withdraw(ownerUserId, receiptId, decidedAt, expectedRevision);
   }
 
-  async hardForget(ownerUserId: string, receiptId: string) {
-    return this.terminalStore.hardForget(ownerUserId, receiptId);
+  async hardForget(ownerUserId: string, receiptId: string, expectedRevision?: string, ownerForgetRequestId?: string) {
+    return this.terminalStore.hardForget(ownerUserId, receiptId, expectedRevision, ownerForgetRequestId);
   }
 }

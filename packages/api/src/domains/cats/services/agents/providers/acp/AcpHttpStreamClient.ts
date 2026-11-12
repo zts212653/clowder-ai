@@ -153,6 +153,7 @@ export class AcpHttpStreamClient {
       const spawnPlan = resolveWindowsSpawnPlan(command, args);
       command = spawnPlan.command;
       args = spawnPlan.args;
+      Object.assign(childEnv, spawnPlan.env);
       if (spawnPlan.shell !== undefined) spawnOpts.shell = spawnPlan.shell;
     }
 

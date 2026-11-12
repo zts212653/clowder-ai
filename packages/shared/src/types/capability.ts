@@ -8,6 +8,13 @@
 import type { MarketplaceEcosystem } from './marketplace.js';
 import type { MountRuleEntry, SkillsSyncState } from './mount-rules.js';
 
+/** A selected optional tool capability rejected by the Host's definition admission. */
+export interface PluginMcpToolIssue {
+  pluginId: string;
+  capabilityId: string;
+  reasonCode: 'tool_schema_invalid';
+}
+
 // ─── F249: MCP Sync Types ────────────────────────────────────────
 
 /**

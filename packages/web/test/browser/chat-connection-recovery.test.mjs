@@ -185,6 +185,8 @@ test('dormant automatic retry recovers the saved reply while execution polling c
     await page.clock.runFor(6000);
     await page.locator('[data-message-id="missed-reply"]').waitFor({ timeout: 3000 });
     assert.equal(await page.locator('[data-executions]').innerText(), 'codex-sol');
+    // History polling can finish before the new socket's connected state commits.
+    await page.locator('main[data-connected="true"]').waitFor({ timeout: 3000 });
     assert.equal(await page.locator('main').getAttribute('data-connected'), 'true');
     // Teleport, workspace navigation and file watching are mounted too; they share the page connection.
     assert.equal(sockets.length, 2, 'one connection per page, plus its one reconnect');

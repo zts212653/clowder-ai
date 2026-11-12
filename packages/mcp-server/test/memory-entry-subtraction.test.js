@@ -64,3 +64,61 @@ test('library archive is no longer advertised as a cat tool', () => {
   assert.equal('handleLibraryArchive' in tools, false);
   assert.equal('libraryArchiveInputSchema' in tools, false);
 });
+
+test('person and terminal proposal forgetting are owner-page actions rather than cat tools', () => {
+  assert.equal(
+    CANONICAL_TOOL_REGISTRY.some((definition) => definition.name === 'cat_cafe_forget_person'), // mcp-cutover-negative-reference: absence
+    false,
+  );
+  assert.equal('handleForgetPerson' in tools, false);
+  assert.equal(
+    CANONICAL_TOOL_REGISTRY.some((definition) => definition.name === 'cat_cafe_forget_person_memory_proposal'), // mcp-cutover-negative-reference: absence
+    false,
+  );
+  assert.equal('handleForgetPersonMemoryProposal' in tools, false);
+  assert.equal('forgetPersonMemoryProposalInputSchema' in tools, false);
+});
+
+// 第二刀第二批：新建资料库挪到主人页面（You 2026-11-10 认可分工，thread_mw9jh0edn2fvrbny#0001794299592816-000985-c6382083）。
+// 页面的新建流程调同样的 POST /api/library/bind-dry-run 与 /api/library/register，并补上了原工具的 exclude；服务端路由不变。
+test('library creation and its dry run are no longer advertised as cat tools', () => {
+  for (const retiredName of [
+    'cat_cafe_library_create', // mcp-cutover-negative-reference: absence
+    'cat_cafe_library_dry_run', // mcp-cutover-negative-reference: absence
+  ]) {
+    assert.equal(
+      CANONICAL_TOOL_REGISTRY.some((definition) => definition.name === retiredName),
+      false,
+      `${retiredName} should be gone`,
+    );
+  }
+  for (const exportName of [
+    'handleLibraryCreate',
+    'handleLibraryDryRun',
+    'libraryCreateInputSchema',
+    'libraryDryRunInputSchema',
+  ]) {
+    assert.equal(exportName in tools, false, `${exportName} should be gone`);
+  }
+});
+
+test('single-item redaction and deferred owner cleanup have complete page replacements', () => {
+  for (const name of [
+    'cat_cafe_redact_person_memory_item', // mcp-cutover-negative-reference: absence
+    'cat_cafe_withdraw_deferred_person_memory', // mcp-cutover-negative-reference: absence
+    'cat_cafe_forget_deferred_person_memory', // mcp-cutover-negative-reference: absence
+  ])
+    assert.equal(
+      CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === name),
+      false,
+      `${name} should be retired`,
+    );
+  for (const name of [
+    'handleRedactPersonMemoryItem',
+    'redactPersonMemoryItemInputSchema',
+    'handleWithdrawDeferredPersonMemory',
+    'handleForgetDeferredPersonMemory',
+  ])
+    assert.equal(name in tools, false, `${name} should not remain as a callable barrel export`);
+  assert.ok(CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === 'cat_cafe_dispose_deferred_person_memory'));
+});

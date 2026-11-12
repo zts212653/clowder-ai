@@ -174,14 +174,7 @@ if record.threadId ~= ARGV[1] then return -1 end
 if record.userId ~= ARGV[2] then return -1 end
 if record.sourceMessageId ~= ARGV[3] then return -1 end
 if record.targetCatId ~= ARGV[4] then return -1 end
-if record.targetCatId == 'gpt-dot' and record.status == 'pending' and record.dispatchInvocationId ~= ARGV[5] then
-  if redis.call('EXISTS', KEYS[2]) == 1 then return -2 end
-  record.dispatchInvocationId = ARGV[5]
-  record.issuedAt = tonumber(ARGV[6])
-  redis.call('SET', KEYS[1], cjson.encode(record), 'PX', tonumber(ARGV[7]))
-  return 2
-end
-redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[7]))
+redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[5]))
 return 1
 `;
 
@@ -223,12 +216,8 @@ export class RedisCloudReturnGrantStore implements CloudReturnGrantStore {
       claims.userId,
       claims.sourceMessageId,
       claims.targetCatId,
-      claims.dispatchInvocationId,
-      record.issuedAt,
       GRANT_RETENTION_MS,
     );
-    if (refreshed === -2) return { ok: false, reason: 'in_flight' };
-    if (refreshed === 2) return { ok: true, status: 'issued' };
     if (refreshed !== 1) return { ok: false, reason: 'scope_collision' };
     return { ok: true, status: 'existing' };
   }
@@ -306,17 +295,6 @@ export class MemoryCloudReturnGrantStore implements CloudReturnGrantStore {
     const existing = this.grants.get(key);
     if (existing) {
       if (!sameScope(existing, claims)) return { ok: false, reason: 'scope_collision' };
-      if (
-        claims.targetCatId === 'gpt-dot' &&
-        existing.status === 'pending' &&
-        existing.dispatchInvocationId !== claims.dispatchInvocationId
-      ) {
-        if ((this.leases.get(key)?.expiresAt ?? 0) > this.now()) return { ok: false, reason: 'in_flight' };
-        this.leases.delete(key);
-        this.grants.set(key, { v: 1, ...claims, status: 'pending', issuedAt: this.now() });
-        this.grantExpiresAt.set(key, this.now() + GRANT_RETENTION_MS);
-        return { ok: true, status: 'issued' };
-      }
       this.grantExpiresAt.set(key, this.now() + GRANT_RETENTION_MS);
       return { ok: true, status: 'existing' };
     }

@@ -100,6 +100,31 @@ describe('approvalHubStore — batch operations', () => {
     expect(useApprovalHubStore.getState().selectedIds.has('inline-1')).toBe(true);
   });
 
+  it('keeps each selected Taste digest when the live store changes during a batch', async () => {
+    const first = makeItem({
+      proposalId: 'taste-first',
+      sourceFeatureId: 'F221',
+      detail: { decisionDigest: 'a'.repeat(64) },
+    });
+    const second = makeItem({
+      proposalId: 'taste-second',
+      sourceFeatureId: 'F221',
+      detail: { decisionDigest: 'b'.repeat(64) },
+    });
+    useApprovalHubStore.setState({
+      items: [first, second],
+      selectedIds: new Set([first.proposalId, second.proposalId]),
+      count: 2,
+    });
+    vi.mocked(apiFetch).mockImplementationOnce(async () => {
+      useApprovalHubStore.setState({ items: [first, { ...second, detail: { decisionDigest: 'c'.repeat(64) } }] });
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    });
+    await useApprovalHubStore.getState().batchApprove();
+    expect(vi.mocked(apiFetch).mock.calls[0][1]?.body).toBe(JSON.stringify({ decisionDigest: 'a'.repeat(64) }));
+    expect(vi.mocked(apiFetch).mock.calls[1][1]?.body).toBe(JSON.stringify({ decisionDigest: 'b'.repeat(64) }));
+  });
+
   it('toggleSelection: deselects on second call', () => {
     useApprovalHubStore.getState().toggleSelection('inline-1');
     useApprovalHubStore.getState().toggleSelection('inline-1');

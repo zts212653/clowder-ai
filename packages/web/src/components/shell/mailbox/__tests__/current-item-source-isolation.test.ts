@@ -160,4 +160,39 @@ describe('Native card current item follows its own source', () => {
     h.store[0].summary = 'Changed since displayed';
     expect(h.sessions.authorize(session.key)).toBe(false);
   });
+  it('keeps native approvals readable under partial Collective connections and project attention outages', () => {
+    const h = harness(approvalRow(storeItem({ sourceFeatureId: 'F193' })));
+    h.read().sources.collectiveAccountabilityRequests = {
+      status: 'available',
+      coverage: 'pending_f290_collective_accountability_requests',
+      exhaustiveness: 'partial',
+      startedAt: 1,
+      observedAt: 2,
+    };
+    h.read().sources.collectiveProjectAttention = {
+      status: 'unavailable',
+      coverage: 'pending_f290_project_materials_and_dates',
+      exhaustiveness: 'unknown',
+      startedAt: 1,
+      observedAt: 2,
+    };
+    h.read().sources.needsMe.exhaustiveness = 'partial';
+    h.read().consistency.reasons = [
+      'collective_accountability_connection_read_failed',
+      'collective_accountability_connection_authority_unavailable',
+      'collective_project_attention_source_unavailable',
+    ];
+    expect(parseUnifiedAttentionRead(h.read())).not.toBeNull();
+    expect(h.current()).toBe(h.read().items[0]);
+  });
+  it.each([
+    'collective_accountability_identity_conflict',
+    'collective_accountability_item_invalid',
+    'collective_project_attention_identity_conflict',
+    'collective_project_attention_invalid',
+  ])('blocks Collective conflict or payload corruption reason %s', (reason) => {
+    const h = harness(approvalRow(storeItem({ sourceFeatureId: 'F193' })));
+    h.read().consistency.reasons = [reason];
+    expect(h.current()).toBeNull();
+  });
 });

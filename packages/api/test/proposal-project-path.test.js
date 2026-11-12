@@ -15,7 +15,9 @@
 
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
@@ -24,6 +26,39 @@ import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 const TMP = tmpdir();
 const TMP_CANON = realpathSync(TMP);
 const BAD_PATH = '/no/such/dir/f128-does-not-exist';
+
+test('an explicit runtime selection is rejected on both propose and approve', async (t) => {
+  const runtime = await mkdtemp(join(TMP, 'proposal-runtime-'));
+  const workspace = await mkdtemp(join(TMP, 'proposal-workspace-'));
+  const previous = { runtime: process.env.CAT_CAFE_RUNTIME_ROOT, workspace: process.env.CAT_CAFE_WORKSPACE_ROOT };
+  process.env.CAT_CAFE_RUNTIME_ROOT = runtime;
+  process.env.CAT_CAFE_WORKSPACE_ROOT = workspace;
+  t.after(async () => {
+    if (previous.runtime === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    else process.env.CAT_CAFE_RUNTIME_ROOT = previous.runtime;
+    if (previous.workspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    else process.env.CAT_CAFE_WORKSPACE_ROOT = previous.workspace;
+    await rm(runtime, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const ctx = await createProposalTestContext();
+  const source = await ctx.threadStore.create('alice', 'Source');
+  const rejected = await ctx.propose({ userId: 'alice', threadId: source.id, body: { projectPath: runtime } });
+  assert.equal(rejected.statusCode, 400, rejected.body);
+  assert.match(rejected.json().error, /runtime.*read.only/i);
+  assert.deepEqual(await ctx.proposalStore.listPending('alice'), []);
+
+  const accepted = await ctx.propose({ userId: 'alice', threadId: source.id });
+  const { proposalId } = accepted.json();
+  const approval = await ctx.approve('alice', proposalId, { projectPath: runtime });
+  assert.equal(approval.statusCode, 400, approval.body);
+  assert.match(approval.json().error, /runtime.*read.only/i);
+  assert.equal((await ctx.proposalStore.get(proposalId))?.status, 'pending');
+  assert.equal(ctx.threadStore.size, 1);
+  assert.deepEqual(await readdir(runtime), []);
+  assert.deepEqual(await readdir(workspace), []);
+});
 
 describe('F128 projectPath — propose side (callback route)', () => {
   test('valid explicit projectPath is stored as the canonical real path', async () => {

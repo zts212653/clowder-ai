@@ -21,6 +21,7 @@ import {
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
 import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
+import { persistentOwnerFixture } from './helpers/persistent-capability-owner-fixture.js';
 
 const providerDirectory = (provider) => (provider === 'kimi' ? '.kimi-code' : `.${provider}`);
 
@@ -1040,7 +1041,7 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('uses project mount rules for capability skill health', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1556,12 +1557,13 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('ignores broken project skill symlinks for deleted skills', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
-    // Use a dir under cwd (not /tmp/) so PROJECT_ALLOWED_ROOTS validation passes in public gate
-    const projectDir = join(process.cwd(), `.test-tmp-broken-skill-${Date.now()}`);
+    // Use an external temporary project: runtime descendants are remapped to
+    // the persistent workspace, which is a different boundary from stale links.
+    const projectDir = await makeTmpDir('broken-skill');
     const staleSkill = `ghost-skill-${Date.now()}`;
     const skillsDir = join(projectDir, '.claude', 'skills');
     const brokenLink = join(skillsDir, staleSkill);
@@ -1592,7 +1594,7 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('accepts ?projectPath query param for multi-project support', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1620,7 +1622,8 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
-  it('keeps global capability writes persistent and rejects governance under Clowder AI descendants', async () => {
+  it('keeps global capability writes persistent and rejects governance under Clowder AI descendants', async (t) => {
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -1764,7 +1767,7 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('discovers antigravity MCP from homedir instead of a stale project-local file', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
@@ -1819,7 +1822,7 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('realigns stale managed cat-cafe MCP paths to the stable main repo root on GET', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
     const { resolveMainRepoPath } = await import('../dist/utils/skill-mount.js');
@@ -1873,7 +1876,7 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('does not use project-local manifests to prune installed plugin skills', async (t) => {
-    useCapabilityWriterFixture(t);
+    await persistentOwnerFixture(t);
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 

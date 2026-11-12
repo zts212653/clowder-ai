@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { persistentOwnerFixture } from '../helpers/persistent-capability-owner-fixture.js';
 
 /**
  * F300 Task 2.1 — the F041 capability board has one pure read path.
@@ -187,7 +188,8 @@ describe('F300 2.1 capability read service', () => {
     assert.equal(fs.existsSync(join(projectRoot, '.cat-cafe')), false);
   });
 
-  it('snapshot never bootstraps; Console bootstrap requires the publication-owning Host', async () => {
+  it('snapshot never bootstraps; Console bootstrap requires the publication-owning Host', async (t) => {
+    await persistentOwnerFixture(t);
     const projectRoot = await makeProject('route-absent');
     cleanup.push(projectRoot);
     const app = await appWithBothEntries();

@@ -120,8 +120,10 @@ describe('F202 C1 — Host-driven subscription delivery', () => {
       'envelope',
       'kind',
       'presentation',
+      'reason',
       'threadId',
     ]);
+    assert.equal(calls[0].input.reason, 'subscription');
     assert.equal(isPluginDeliveryInput(calls[0].input), true);
   });
 
@@ -285,4 +287,73 @@ describe('F202 C1 — Host-driven subscription delivery', () => {
       [SUBSCRIBER_B],
     );
   });
+});
+
+test('re-registration alone does not retry a failed delivery', async () => {
+  const { SubscriptionDrainScheduler } = await import('../dist/domains/messaging/subscription-drain-scheduler.js');
+  let ready = false;
+  const rejected = Promise.withResolvers();
+  const accepted = Promise.withResolvers();
+  const scheduler = new SubscriptionDrainScheduler(() => rejected.resolve());
+  const driver = createSubscriptionDelivery({
+    messaging,
+    presentation: async (_thread, actor) => ({ actor: { displayName: actor.id }, thread: { shortId: THREAD_ID } }),
+    onReady: scheduler.schedule,
+    delivery: {
+      async deliver(_subscriber, input) {
+        if (!ready) throw new Error('receipt_pending');
+        accepted.resolve(input);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+  });
+  scheduler.attach(driver);
+  const handleId = await subscribeHandle(SUBSCRIBER_A);
+  const declaration = { subscriberId: SUBSCRIBER_A, threadId: THREAD_ID, handleId };
+  await driver.register(declaration);
+  await produce('fast reply', 'fast-reply');
+  scheduler.schedule(THREAD_ID);
+  await rejected.promise;
+  ready = true;
+  await driver.register(declaration);
+  await driver.enqueueThread(THREAD_ID, async () => {});
+  let delivered = false;
+  accepted.promise.then(() => {
+    delivered = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(delivered, false, 're-registration must not implicitly retry a failure');
+  await driver.drain(THREAD_ID);
+  assert.equal((await accepted.promise).threadId, THREAD_ID);
+});
+
+test('startup registration neither executes nor revives a canceled activation', async () => {
+  const scheduled = [],
+    calls = [];
+  const driver = createSubscriptionDelivery({
+    messaging,
+    presentation: async () => ({}),
+    onReady: (threadId) => scheduled.push(threadId),
+    delivery: {
+      deliver: async (_id, input) => {
+        calls.push(input);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+  });
+  driver.beginInstance(SUBSCRIBER_A);
+  await driver.register({
+    subscriberId: SUBSCRIBER_A,
+    threadId: THREAD_ID,
+    handleId: await subscribeHandle(SUBSCRIBER_A),
+  });
+  await produce('pending initialization', 'startup-pending');
+  await driver.drain(THREAD_ID);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(scheduled, []);
+  await driver.cancelInstance(SUBSCRIBER_A);
+  driver.activateInstance(SUBSCRIBER_A);
+  await driver.drain(THREAD_ID);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(scheduled, []);
 });

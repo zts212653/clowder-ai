@@ -422,6 +422,218 @@ test_stop_alpha_preserves_daemon_mode() (
   echo "PASS: alpha stop preserves daemon mode"
 )
 
+test_stop_alpha_accepts_retired_dead_preview_registration() (
+  local tmp_root output
+  tmp_root="$(mktemp -d)"
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  node() {
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/missing-daemon.json"
+      return 0
+    fi
+    if [[ "$*" == *"preview-process.mjs stop"* ]]; then
+      printf '{"status":"registration_retired","settlement":{"status":"registration_retired","cleanupExitCode":null,"cleanupStatus":"unknown","persistenceStatus":"not_reverified"}}\n'
+      return 3
+    fi
+    return 7
+  }
+  is_api_running() { return 1; }
+  lsof() { return 1; }
+
+  output="$(stop_alpha_daemon 2>&1)"
+  assert_contains "$output" "registration_retired" "alpha:stop should preserve retired preview payload"
+  assert_contains "$output" "retired" "alpha:stop should distinguish retired registration from live stop"
+  echo "PASS: alpha stop accepts retired dead preview registration (exit 3) when no live process remains"
+)
+
+test_stop_alpha_decouples_daemon_failure_from_preview_settlement_and_fails_on_preview_error() (
+  local tmp_root calls rc
+  tmp_root="$(mktemp -d)"
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  touch "$tmp_root/daemon.json"
+  : > "$tmp_root/calls.log"
+  node() {
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/daemon.json"
+      return 0
+    fi
+    printf '|%s' "$*" >> "$tmp_root/calls.log"
+    if [[ "$*" == *"daemon-state.mjs stop"* ]]; then
+      return 1
+    fi
+    if [[ "$*" == *"preview-process.mjs stop"* ]]; then
+      printf '{"status":"stopped"}\n'
+      return 0
+    fi
+    return 0
+  }
+  is_api_running() { return 1; }
+  lsof() { return 1; }
+
+  rc=0
+  ( stop_alpha_daemon ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || {
+    echo "FAIL: alpha:stop must fail when daemon-state stop fails"
+    exit 1
+  }
+  calls="$(cat "$tmp_root/calls.log")"
+  assert_contains "$calls" "preview-process.mjs stop" \
+    "alpha:stop must still settle preview registration even when daemon-state stop failed"
+
+  rm -f "$tmp_root/daemon.json"
+  node() {
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/daemon.json"
+      return 0
+    fi
+    if [[ "$*" == *"preview-process.mjs stop"* ]]; then
+      echo "[preview-process] preview cleanup incomplete or failed" >&2
+      return 1
+    fi
+    return 0
+  }
+  rc=0
+  ( stop_alpha_daemon ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || {
+    echo "FAIL: alpha:stop must not swallow genuine preview-process stop exit 1"
+    exit 1
+  }
+  echo "PASS: alpha stop decouples steps without swallowing daemon or preview failures"
+)
+
+test_stop_alpha_restores_caller_deployment_id_for_preview_stop() (
+  local tmp_root calls
+  tmp_root="$(mktemp -d)"
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  touch "$tmp_root/daemon.json"
+  : > "$tmp_root/env-calls.log"
+  node() {
+    local dep="${CAT_CAFE_DEPLOYMENT_ID-<unset>}"
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf 'path:%s\n' "$dep" >> "$tmp_root/env-calls.log"
+      printf '%s\n' "$tmp_root/daemon.json"
+      return 0
+    fi
+    if [[ "$*" == *"daemon-state.mjs stop"* ]]; then
+      printf 'daemon-stop:%s\n' "$dep" >> "$tmp_root/env-calls.log"
+      return 0
+    fi
+    if [[ "$*" == *"preview-process.mjs stop"* ]]; then
+      printf 'preview-stop:%s\n' "$dep" >> "$tmp_root/env-calls.log"
+      printf '{"status":"stopped"}\n'
+      return 0
+    fi
+    return 7
+  }
+  is_api_running() { return 1; }
+  lsof() { return 1; }
+
+  export CAT_CAFE_DEPLOYMENT_ID=runtime
+  stop_alpha_daemon >/dev/null
+  calls="$(cat "$tmp_root/env-calls.log")"
+  assert_contains "$calls" "daemon-stop:alpha" \
+    "daemon-state.mjs stop must run with CAT_CAFE_DEPLOYMENT_ID=alpha when caller is runtime"
+  assert_contains "$calls" "preview-stop:runtime" \
+    "preview-process.mjs stop must observe restored caller CAT_CAFE_DEPLOYMENT_ID=runtime"
+
+  : > "$tmp_root/env-calls.log"
+  unset CAT_CAFE_DEPLOYMENT_ID
+  stop_alpha_daemon >/dev/null
+  calls="$(cat "$tmp_root/env-calls.log")"
+  assert_contains "$calls" "daemon-stop:alpha" \
+    "daemon-state.mjs stop must run with CAT_CAFE_DEPLOYMENT_ID=alpha when caller env is unset"
+  assert_contains "$calls" "preview-stop:<unset>" \
+    "preview-process.mjs stop must observe unset CAT_CAFE_DEPLOYMENT_ID when caller env was unset"
+  echo "PASS: alpha stop restores caller CAT_CAFE_DEPLOYMENT_ID before preview-process stop"
+)
+
+test_noninteractive_alpha_start_enables_daemon_and_preserves_foreground_contracts() (
+  local tmp_root origin_dir src_dir alpha_dir out
+  tmp_root="$(cd "$(mktemp -d)" && pwd -P)"
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
+
+  origin_dir="$tmp_root/origin.git"
+  src_dir="$tmp_root/cat-cafe"
+  alpha_dir="$tmp_root/cat-cafe-alpha"
+
+  git init --bare "$origin_dir" >/dev/null 2>&1
+  git clone "$origin_dir" "$src_dir" >/dev/null 2>&1
+  git -C "$src_dir" config user.name "Alpha Test"
+  git -C "$src_dir" config user.email "alpha-test@example.com"
+  mkdir -p "$src_dir/scripts/lib" "$src_dir/packages/shared/dist" "$src_dir/packages/api/dist" "$src_dir/packages/mcp-server/dist"
+  cp "$SCRIPT_DIR/alpha-worktree.sh" "$src_dir/scripts/alpha-worktree.sh"
+  cp "$SCRIPT_DIR/lib/node-runtime-guard.sh" "$src_dir/scripts/lib/node-runtime-guard.sh"
+  cp "$SCRIPT_DIR/lib/quickstart-freshness.sh" "$src_dir/scripts/lib/quickstart-freshness.sh"
+  cp "$SCRIPT_DIR/lib/alpha-redis-identity.sh" "$src_dir/scripts/lib/alpha-redis-identity.sh"
+  cp "$SCRIPT_DIR/lib/alpha-launch-contract.mjs" "$src_dir/scripts/lib/alpha-launch-contract.mjs"
+  cp "$SCRIPT_DIR/lib/alpha-coordinates.mjs" "$src_dir/scripts/lib/alpha-coordinates.mjs"
+  cp "$SCRIPT_DIR/lib/alpha-identity-diagnostics.mjs" "$src_dir/scripts/lib/alpha-identity-diagnostics.mjs"
+  cp "$SCRIPT_DIR/lib/alpha-git-trace.mjs" "$src_dir/scripts/lib/alpha-git-trace.mjs"
+  cat > "$src_dir/scripts/start-dev.sh" <<'EOF'
+#!/bin/sh
+printf 'START_DEV_ARGS:%s\n' "$*"
+EOF
+  chmod +x "$src_dir/scripts/alpha-worktree.sh" "$src_dir/scripts/start-dev.sh"
+  git -C "$src_dir" add .
+  git -C "$src_dir" commit -m "init" >/dev/null
+  git -C "$src_dir" branch -M main
+  git -C "$src_dir" push -u origin main >/dev/null 2>&1
+  git -C "$src_dir" worktree add "$alpha_dir" -b alpha/main-sync origin/main >/dev/null 2>&1
+
+  local head
+  head="$(git -C "$alpha_dir" rev-parse HEAD)"
+  mkdir -p "$alpha_dir/node_modules/.pnpm" "$alpha_dir/packages/web/node_modules/next" \
+    "$alpha_dir/packages/api/node_modules/tsx" "$alpha_dir/packages/mcp-server/node_modules/typescript" \
+    "$alpha_dir/.cat-cafe/redis"
+  : > "$alpha_dir/packages/web/node_modules/next/package.json"
+  : > "$alpha_dir/packages/api/node_modules/tsx/package.json"
+  : > "$alpha_dir/packages/mcp-server/node_modules/typescript/package.json"
+  printf 'REDIS0012' > "$alpha_dir/.cat-cafe/redis/dump.rdb"
+  for pkg in shared api mcp-server; do
+    mkdir -p "$alpha_dir/packages/$pkg/dist"
+    echo "built" > "$alpha_dir/packages/$pkg/dist/index.js"
+    echo "$head" > "$alpha_dir/packages/$pkg/dist/.build-commit"
+  done
+
+  mkdir -p "$tmp_root/bin"
+  printf '#!/bin/sh\nexit 1\n' > "$tmp_root/bin/redis-cli"
+  printf '#!/bin/sh\nexit 1\n' > "$tmp_root/bin/lsof"
+  printf '#!/bin/sh\nexit 0\n' > "$tmp_root/bin/pnpm"
+  chmod +x "$tmp_root/bin/redis-cli" "$tmp_root/bin/lsof" "$tmp_root/bin/pnpm"
+
+  out="$(PATH="$tmp_root/bin:$PATH" HOME="$tmp_root" CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
+    bash "$src_dir/scripts/alpha-worktree.sh" start --dir "$alpha_dir" --no-sync --no-install </dev/null)"
+  assert_contains "$out" "START_DEV_ARGS:--quick --daemon" \
+    "non-interactive standard Alpha start must pass --daemon so daemon-state records ownership"
+
+  out="$(PATH="$tmp_root/bin:$PATH" HOME="$tmp_root" CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
+    bash "$src_dir/scripts/alpha-worktree.sh" start --dir "$alpha_dir" --no-sync --no-install --foreground </dev/null)"
+  assert_contains "$out" "START_DEV_ARGS:--quick" \
+    "--foreground must preserve foreground start-dev invocation"
+  if [[ "$out" == *"--daemon"* ]]; then
+    echo "FAIL: --foreground must not append --daemon"
+    exit 1
+  fi
+
+  out="$(PATH="$tmp_root/bin:$PATH" HOME="$tmp_root" CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
+    CAT_CAFE_PREVIEW_EXPIRES_AT="2099-01-01T00:00:00.000Z" \
+    bash "$src_dir/scripts/alpha-worktree.sh" start --no-quick </dev/null)"
+  if [[ "$out" == *"--daemon"* ]]; then
+    echo "FAIL: managed preview:process Alpha start must remain attached to lease runner without --daemon"
+    exit 1
+  fi
+  echo "PASS: non-interactive Alpha start establishes daemon ownership while preserving foreground/preview contracts"
+)
+
 test_build_alpha_stale_packages_rebuilds_missing_dist() {
   local tmp_root origin_dir src_dir alpha_dir
   tmp_root="$(mktemp -d)"
@@ -612,7 +824,12 @@ test_migrate_legacy_main_test_worktree_to_alpha_location
 test_resolve_env_source_file_falls_back_to_sibling_cat_cafe
 test_is_api_running_checks_alpha_api_port
 test_stop_alpha_uses_owned_preview_lifecycle
+test_stop_alpha_reports_an_orphaned_service
 test_stop_alpha_preserves_daemon_mode
+test_stop_alpha_accepts_retired_dead_preview_registration
+test_stop_alpha_decouples_daemon_failure_from_preview_settlement_and_fails_on_preview_error
+test_stop_alpha_restores_caller_deployment_id_for_preview_stop
+test_noninteractive_alpha_start_enables_daemon_and_preserves_foreground_contracts
 test_build_alpha_stale_packages_rebuilds_missing_dist
 test_build_alpha_stale_packages_skips_fresh_packages
 test_build_alpha_stale_packages_rebuilds_when_head_moved

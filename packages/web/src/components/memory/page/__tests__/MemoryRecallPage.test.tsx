@@ -1,6 +1,7 @@
 import { type AnchorHTMLAttributes, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MATTER_MEMORY_CHANGED } from '@/hooks/matter-memory-events';
 import { MemoryPagePreview } from '../MemoryPagePreview';
 import { MemoryRecall } from '../MemoryRecall';
 import { deferred, ledger, page, type Reply, response, taste, tasteEntry } from './recall-page-fixture';
@@ -72,6 +73,47 @@ describe('global Recall page', () => {
     expect(container.textContent).toContain('没有命中');
     expect(container.textContent).not.toMatch(/还没接进来|thread-coordinate|event-coordinate|inv-event|忽略/);
     expect(mocks.fetch.mock.calls.some(([path]) => String(path).startsWith('/api/recall/events'))).toBe(false);
+  });
+  it('refreshes after an owner save and rejects the older pending response', async () => {
+    const old = deferred<Reply>();
+    feed = () => old.promise;
+    await render();
+    feed = () => response(page({ records: [] }));
+    await act(async () => window.dispatchEvent(new Event(MATTER_MEMORY_CHANGED)));
+    expect(flow().textContent).toContain('还没有召回记录');
+    await act(async () => old.resolve(response(page())));
+    expect(flow().textContent).not.toContain('真实检索词');
+    expect(flow().textContent).toContain('还没有召回记录');
+  });
+  it('preserves loaded pages and expanded rows across focus, but rereads on memory changes', async () => {
+    const initial = page().records[0];
+    const next = { ...initial, event: { ...initial.event, id: 'next-page', query: '第二页记录' } };
+    feed = (path) => response(page(path.includes('cursor=') ? { records: [next] } : { nextCursor: 'page-2' }));
+    await render();
+    await click('读取更早的记录');
+    expect(flow().textContent).toContain('第二页记录');
+    const row = flow().querySelector('[data-recall-event-id="event-coordinate"]') as HTMLElement;
+    await act(async () => row.querySelector('button')?.click());
+    expect(row.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+    const reads = mocks.fetch.mock.calls.filter(([path]) => String(path).startsWith('/api/memory/recall?')).length;
+    const frames: string[] = [];
+    const observer = new MutationObserver(() => frames.push(flow()?.textContent ?? ''));
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    observer.disconnect();
+    expect(mocks.fetch.mock.calls.filter(([path]) => String(path).startsWith('/api/memory/recall?'))).toHaveLength(
+      reads,
+    );
+    expect(flow().textContent).toContain('第二页记录');
+    expect(row.isConnected).toBe(true);
+    expect(row.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+    expect(frames.join('')).not.toContain('正在读取召回记录');
+    feed = () => response(page({ records: [] }));
+    await act(async () => window.dispatchEvent(new Event(MATTER_MEMORY_CHANGED)));
+    expect(mocks.fetch.mock.calls.filter(([path]) => String(path).startsWith('/api/memory/recall?'))).toHaveLength(
+      reads + 1,
+    );
+    expect(flow().textContent).toContain('还没有召回记录');
   });
   it('keeps loading, failure, retry and confirmed empty distinct', async () => {
     const pending = deferred<Reply>();
@@ -150,7 +192,7 @@ describe('global Recall page', () => {
     expect(container.textContent).toContain('未回报次数暂时读不到');
     expect(container.textContent).not.toContain('其余 0 次未回报');
   });
-  it('leaves global delivery summaries static while keeping search result expansion', async () => {
+  it('expands global deliveries using the same row as search results', async () => {
     const pull = page().records[0];
     const delivery = {
       ...pull,
@@ -165,7 +207,7 @@ describe('global Recall page', () => {
     };
     feed = () => response(page({ records: [delivery, pull] }));
     await render();
-    expect(flow().querySelector('[data-recall-event-id="delivery-coordinate"] button')).toBeNull();
+    expect(flow().querySelector('[data-recall-event-id="delivery-coordinate"] button')).not.toBeNull();
     expect(flow().querySelector('[data-recall-event-id="event-coordinate"] button')).not.toBeNull();
   });
 });

@@ -214,7 +214,15 @@ export class WorkPreparationService {
       try {
         this.deps.logger?.warn(
           {
-            ...preparationFailureFields(input.auth, received?.opportunityId, stage, started, stageStarted, error),
+            ...preparationFailureFields(
+              input.auth,
+              received?.opportunityId,
+              stage,
+              started,
+              stageStarted,
+              error,
+              input.signal,
+            ),
             sourcePhases: observations.snapshot(),
           },
           '[F332] work preparation stopped',

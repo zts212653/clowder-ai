@@ -430,17 +430,18 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     narrowWorkComposerActive,
     closeStatusPanel,
   ]);
-  const messageSearchAvailable =
-    isV2 &&
+  const readingReturnAvailable =
     viewMode === 'single' &&
     !artworkLightbox?.work &&
     !workComposerOnlyActive &&
     !mainAreaOverlayActive &&
     (isDesktop || !statusPanelOpen);
+  const messageSearchAvailable = isV2 && readingReturnAvailable;
   const messageSearch = useMessageSearchHost({
     threadId,
     pushThreadRoute: navigateToThread,
-    available: messageSearchAvailable,
+    available: readingReturnAvailable,
+    searchAvailable: messageSearchAvailable,
     onOpenDestination: openMessageFindDestination,
     beforeFindReturn: restoreFindWorkspaceOrigin,
   });
@@ -565,11 +566,11 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const registerSettingsReadingPort = useSettingsReadingPort(originTitle);
   const registerShellReadingPort = useCallback<RegisterChatReadingPort>(
     (port) => {
-      conversationViewReading.setReadingPort(port);
-      const releaseSearch = messageSearchAvailable ? messageSearch.registerReadingPort(port) : () => {};
+      if (isV2) conversationViewReading.setReadingPort(port);
+      const releaseSearch = readingReturnAvailable ? messageSearch.registerReadingPort(port) : () => {};
       const releaseSettings = isV2 && viewMode === 'single' ? registerSettingsReadingPort(port) : () => {};
       return () => {
-        conversationViewReading.setReadingPort(null);
+        if (isV2) conversationViewReading.setReadingPort(null);
         releaseSettings();
         releaseSearch();
       };
@@ -579,7 +580,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       isV2,
       viewMode,
       registerSettingsReadingPort,
-      messageSearchAvailable,
+      readingReturnAvailable,
       messageSearch.registerReadingPort,
     ],
   );
@@ -1084,7 +1085,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
           <MessageSearchOverlay
             threadId={threadId}
             host={messageSearch}
-            available={messageSearchAvailable}
+            available={readingReturnAvailable}
             resolveSpeaker={(speaker) => {
               if (speaker === 'user') return coCreator.name;
               const cat = cats.find((candidate) => candidate.id === speaker);
@@ -1117,7 +1118,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                 threadId={threadId}
                 density="full"
                 presentation={workComposerOnlyActive ? 'composer-only' : 'conversation'}
-                onReadingPort={isV2 ? registerShellReadingPort : undefined}
+                onReadingPort={registerShellReadingPort}
+                onNavigateMessage={readingReturnAvailable ? messageSearch.jumpInThread : undefined}
                 messageConfirmations={messageConfirmations}
                 conversationViewController={conversationViewController}
                 conversationViewQueue={conversationViewQueue}

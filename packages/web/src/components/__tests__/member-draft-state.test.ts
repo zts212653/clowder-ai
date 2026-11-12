@@ -9,6 +9,7 @@ import {
   persistMemberDraft,
   readMemberDraft,
   rebaseMemberDraft,
+  templateForm,
 } from '../settings/members/member-editor-state';
 import { type RuntimeChoice, switchMemberRuntime } from '../settings/members/member-runtime-draft';
 
@@ -27,6 +28,45 @@ const original = {
   configurationRevision: 'before',
   cli: { effort: 'high' },
 } as CatData;
+
+it.each([
+  'anthropic',
+  'openai',
+  'acp',
+] as const)('the whale template recommends DSH without inheriting the previous %s connection', (clientId) => {
+  const form = templateForm(
+    {
+      id: 'dsh',
+      name: '小鲸鱼',
+      nickname: '鲸鲸',
+      avatar: '/avatars/family/dsh.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      roleDescription: '共创伙伴',
+      personality: '',
+    },
+    [],
+    {
+      ...initialState(),
+      clientId,
+      accountRef: 'other',
+      acpCommand: 'other-agent',
+      env: { DSH_HOME: '/another/member' },
+      defaultModel: 'other-model',
+      cliEffort: 'high',
+    },
+  );
+  expect(form).toMatchObject({
+    clientId: 'acp',
+    carrier: 'acp',
+    configurationSource: 'native_tool',
+    acpCommand: 'dsh',
+    acpStartupArgs: '--profile acp',
+    accountRef: '',
+    defaultModel: '',
+    cliEffort: '',
+  });
+  expect(form.env).toBeUndefined();
+});
 
 describe('member drafts survive navigation and concurrent edits', () => {
   it('isolates AGY profile permissions per tool and restores the exact persisted profile draft', () => {

@@ -9,6 +9,8 @@ export const ApprovalResultHistory = createContext<{
   kind: string;
   time: string;
   details: ReactNode;
+  /** Optional actions on the same row as the original, read-only technical disclosure. */
+  actions?: ReactNode;
   retry?: () => void;
 } | null>(null);
 
@@ -17,10 +19,18 @@ export function HistoryTechnicalDetails({ children }: { children: ReactNode }) {
   const history = useContext(ApprovalResultHistory);
   const t = useShellCopy(decisionResultCopy);
   if (!history) return <>{children}</>;
-  return (
-    <details data-testid="handled-technical-details" className="text-xs text-[var(--shell-muted)]">
+  const details = (
+    <details data-testid="handled-technical-details" className="order-1 text-xs text-[var(--shell-muted)]">
       <summary className="shell-focusable cursor-pointer">{t.technical}</summary>
       <div className="mt-2 space-y-2">{children}</div>
     </details>
+  );
+  return history.actions ? (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-compact" data-testid="handled-actions">
+      {history.actions}
+      {details}
+    </div>
+  ) : (
+    details
   );
 }

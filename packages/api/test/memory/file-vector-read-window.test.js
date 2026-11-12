@@ -40,6 +40,7 @@ const search = (db, reader) => new PassageVectorStore(db, 32, reader).search(que
 before(() => {
   const db = open(source, false);
   db.pragma('journal_mode=WAL');
+  db.exec('CREATE TABLE embedding_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   db.exec('CREATE VIRTUAL TABLE passage_vectors USING vec0(passage_key TEXT PRIMARY KEY, embedding float[32])');
   const vectors = new PassageVectorStore(db, 32);
   db.transaction(() => {

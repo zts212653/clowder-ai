@@ -1,4 +1,4 @@
-import { resolvePersistentProjectPath } from '../../../utils/persistent-project-path.js';
+import { validateNewProjectPath } from '../../../utils/persistent-project-path.js';
 import type { IThreadStore, Thread } from '../../cats/services/stores/ports/ThreadStore.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import {
@@ -241,12 +241,15 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
       const participants =
         value.participants === undefined ? [] : validatePreferredCats(value.participants, input.cats);
       const parent = value.parentThreadId === undefined ? undefined : await requireThread(value.parentThreadId);
-      const project =
-        value.projectRef === undefined
-          ? undefined
-          : await resolvePersistentProjectPath(boundedString(value.projectRef, 'projectRef', 4096));
-      if (project === null)
-        throw new TypeError('projectRef must be an existing directory allowed by Host project policy');
+      let project: string | undefined;
+      if (value.projectRef !== undefined) {
+        const selected = await validateNewProjectPath(
+          boundedString(value.projectRef, 'projectRef', 4096),
+          'projectRef must be an existing directory allowed by Host project policy',
+        );
+        if (!selected.ok) throw new TypeError(selected.error);
+        project = selected.path;
+      }
       input.assertCurrent?.();
       const thread = await input.threadStore.create(
         input.ownerUserId,

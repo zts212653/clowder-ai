@@ -16,7 +16,7 @@ async function close(server: Server) {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }
 
-test('one installed MCP URL discovers dot events and tools while preserving Pro default tools and bound auth', async () => {
+test('the Pro MCP surface stays generic when no shared plugin binding is approved', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'shared-mcp-'));
   const original = { ...process.env };
   const key = 'b'.repeat(64);
@@ -38,6 +38,11 @@ test('one installed MCP URL discovers dot events and tools while preserving Pro 
       invocation: req.headers['x-invocation-id'],
       method: rpc.method,
     });
+    if (req.url === '/api/plugin-runtime/shared/handle') {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'shared_extension_not_bound' }));
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -101,7 +106,7 @@ test('one installed MCP URL discovers dot events and tools while preserving Pro 
       clientInfo: { name: 'dot', version: '1' },
     });
     assert.equal(modern.body.result.protocolVersion, '2026-07-28');
-    assert.ok(modern.body.result.capabilities.events);
+    assert.equal(modern.body.result.capabilities.events, undefined);
     assert.equal((await rpc('initialize', { protocolVersion: '2026-07-28' })).body.error.code, -32602);
     const legacy = await rpc('initialize', {
       protocolVersion: '2025-11-25',
@@ -123,40 +128,30 @@ test('one installed MCP URL discovers dot events and tools while preserving Pro 
         .status,
       400,
     );
+    for (const name of ['cat_cafe_post_message', 'cat_cafe_get_thread_context', 'cat_cafe_search_evidence'])
+      assert.ok(names.includes(name), name);
     for (const name of [
-      'cat_cafe_post_message',
-      'cat_cafe_get_thread_context',
-      'cat_cafe_search_evidence',
       'cat_cafe_dot_read_source',
       'cat_cafe_dot_reply',
       'cat_cafe_dot_publish_image',
       'cat_cafe_dot_ask',
     ])
-      assert.ok(names.includes(name), name);
-    assert.equal((await rpc('events/list')).body.result.events[0].name, 'dot.summoned');
-    assert.equal(
-      (
-        await rpc('tools/call', {
-          name: 'cat_cafe_dot_read_source',
-          arguments: { event_id: `dot_evt_${'a'.repeat(64)}` },
-        })
-      ).body.result.isError,
-      false,
-    );
+      assert.equal(names.includes(name), false, name);
+    assert.ok(seen.length > 0, 'the generic Host binding probe runs before exposing an extension');
     assert.ok(
-      seen.every((item) => item.path === '/api/plugins/chatgpt-dot/shared-mcp' && item.key === key && !item.invocation),
+      seen.every(
+        (item) =>
+          item.path === '/api/plugin-runtime/shared/handle' &&
+          item.key === key &&
+          item.invocation === undefined &&
+          ['tools/list', 'events/list'].includes(item.method),
+      ),
+      'binding probes use only the server-bound identity and never relay client selectors',
     );
-    const beforeSelector = seen.length;
-    const forged = await rpc('tools/call', {
-      name: 'cat_cafe_dot_read_source',
-      arguments: { event_id: `dot_evt_${'a'.repeat(64)}`, catId: 'gpt-pro' },
-    });
-    assert.ok(forged.body.result?.isError || forged.body.error);
-    assert.equal(seen.length, beforeSelector, 'caller-selected actors are refused before Host dispatch');
-    const before = seen.length;
+    const beforeUnauthorized = seen.length;
     assert.equal((await rpc('events/list', {}, '')).status, 401);
-    assert.equal(seen.length, before);
-    // R12's single-entry map remains the identity boundary, even for shared discovery.
+    assert.equal(seen.length, beforeUnauthorized, 'outer authentication rejects before the binding probe');
+    // R12's single-entry map remains the identity boundary for the Pro process itself.
     const { validateB1aEnv } = await import('../src/remote-spike.js');
     process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ 'gpt-pro': keyFile, 'gpt-dot': keyFile });
     assert.throws(() => validateB1aEnv(), /extra cats/);

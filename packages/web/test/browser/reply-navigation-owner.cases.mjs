@@ -14,6 +14,7 @@ describe('reply navigation owner', () => {
   let browser, context, harness;
   const samples = [];
   let longReply = false;
+  let pagedHistory = false;
   const catId = 'codex-astra';
   const now = Date.now();
   const responseId = 'lineage-response';
@@ -70,6 +71,7 @@ describe('reply navigation owner', () => {
             phase: 'settled',
             statusMessageId: responseId,
             dispatchedAt: now - 900,
+            appendAcceptance: 'accepted',
             inputRead: { status: 'read', at: now - 800 },
           },
         ],
@@ -84,27 +86,48 @@ describe('reply navigation owner', () => {
     context = await browser.newContext();
     harness = createChatProofHarness(context, built, evidence, samples, (api) => {
       const respond = api.respond;
-      api.respond = (request, url) =>
-        url.pathname === '/api/messages'
-          ? {
+      api.respond = (request, url) => {
+        if (url.pathname === '/api/messages') {
+          const allMessages = messages.map((message) =>
+            longReply && message.id === responseId
+              ? {
+                  ...message,
+                  content: Array.from(
+                    { length: 8 },
+                    (_, i) =>
+                      `第 ${i + 1} 段：${'定位到回复开头后继续阅读，前面的消息完成排版也不应卷走标题。'.repeat(4)}`,
+                  ).join('\n\n'),
+                }
+              : message,
+          );
+          if (pagedHistory && !url.searchParams.get('before')) {
+            return {
               contentType: 'application/json',
               body: JSON.stringify({
-                messages: messages.map((message) =>
-                  longReply && message.id === responseId
-                    ? {
-                        ...message,
-                        content: Array.from(
-                          { length: 8 },
-                          (_, i) =>
-                            `第 ${i + 1} 段：${'定位到回复开头后继续阅读，前面的消息完成排版也不应卷走标题。'.repeat(4)}`,
-                        ).join('\n\n'),
-                      }
-                    : message,
-                ),
+                messages: allMessages.slice(2),
+                hasMore: true,
+              }),
+            };
+          }
+          if (pagedHistory && url.searchParams.get('before')) {
+            return {
+              contentType: 'application/json',
+              body: JSON.stringify({
+                messages: allMessages.slice(0, 2),
                 hasMore: false,
               }),
-            }
-          : respond(request, url);
+            };
+          }
+          return {
+            contentType: 'application/json',
+            body: JSON.stringify({
+              messages: allMessages,
+              hasMore: false,
+            }),
+          };
+        }
+        return respond(request, url);
+      };
     });
   });
   after(async () => {
@@ -141,6 +164,7 @@ describe('reply navigation owner', () => {
       { timeout: 60000 },
       async () => {
         longReply = tall;
+        pagedHistory = false;
         const proof = await harness.openProof({ surface: true, sidebar: false, width });
         const { page } = proof;
         try {
@@ -165,10 +189,12 @@ describe('reply navigation owner', () => {
           const button = page
             .locator(`[data-message-viewport-id="${appendedId}"]`)
             .getByRole('button', { name: /看.*的回复/ });
+          assert.match(await button.innerText(), /看回复 ↑/, 'appended message below an earlier reply points ↑');
           await button.click();
           await page.waitForFunction(() =>
             document.querySelector('[data-message-id="lineage-response"]')?.hasAttribute('data-message-jump-focus'),
           );
+          await page.getByRole('button', { name: '回到刚才', exact: true }).waitFor();
           await page.waitForTimeout(1200); // Includes native smooth completion and passive ResizeObserver correction.
           const arrived = await page.evaluate(measure);
           samples.push({ shell, width, tall, earlierReflow, phase: 'arrived', ...arrived });
@@ -237,6 +263,68 @@ describe('reply navigation owner', () => {
             await harness.captureFailure(page, `${shell}-${width}${tall ? '-tall' : ''}-reply-navigation`, error);
           throw error;
         } finally {
+          await harness.closeProof(proof);
+        }
+      },
+    );
+  }
+
+  for (const shell of ['v2', 'classic']) {
+    test(
+      `${shell}: cross-page unloaded reply loads on 看回复 ↑, lands at top with ring, and 回到刚才 restores origin`,
+      { timeout: 60000 },
+      async () => {
+        longReply = true;
+        pagedHistory = true;
+        const proof = await harness.openProof({ surface: true, sidebar: false, width: 1280 });
+        const { page } = proof;
+        try {
+          if (shell === 'classic') await page.evaluate(() => window.__f322Chat.presentation('classic'));
+          assert.equal(await page.locator(`[data-message-id="${responseId}"]`).count(), 0);
+          const departure = await page.evaluate(() => {
+            const chat = document.querySelector('[data-chat-container]');
+            const appended = chat.querySelector('[data-message-viewport-id="lineage-appended"]');
+            return {
+              scrollTop: chat.scrollTop,
+              appendedBottomOffset: appended.getBoundingClientRect().bottom - chat.getBoundingClientRect().bottom,
+            };
+          });
+          const button = page
+            .locator(`[data-message-viewport-id="${appendedId}"]`)
+            .getByRole('button', { name: /看.*的回复/ });
+          assert.match(await button.innerText(), /看回复 ↑/);
+          await button.click();
+          await page.waitForFunction(() =>
+            document.querySelector('[data-message-id="lineage-response"]')?.hasAttribute('data-message-jump-focus'),
+          );
+          const returnBtn = page.getByRole('button', { name: '回到刚才', exact: true });
+          await returnBtn.waitFor();
+          await page.waitForTimeout(800);
+          const arrived = await page.evaluate(measure);
+          assert.equal(arrived.visible, true);
+          assert.ok(Math.abs(arrived.offset) <= 2, `tall paged reply lands at its opening (${arrived.offset}px)`);
+          await returnBtn.click();
+          await page.waitForFunction(
+            () => !Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === '回到刚才'),
+          );
+          await page.waitForTimeout(400);
+          const restored = await page.evaluate(() => {
+            const chat = document.querySelector('[data-chat-container]');
+            const appended = chat.querySelector('[data-message-viewport-id="lineage-appended"]');
+            return {
+              visible:
+                appended.getBoundingClientRect().bottom > chat.getBoundingClientRect().top &&
+                appended.getBoundingClientRect().top < chat.getBoundingClientRect().bottom,
+              appendedBottomOffset: appended.getBoundingClientRect().bottom - chat.getBoundingClientRect().bottom,
+            };
+          });
+          assert.equal(restored.visible, true, '回到刚才 brings the user back to the departure message');
+          assert.ok(
+            Math.abs(restored.appendedBottomOffset - departure.appendedBottomOffset) <= 8,
+            '回到刚才 restores the departure viewport alignment after older pages prepend above',
+          );
+        } finally {
+          pagedHistory = false;
           await harness.closeProof(proof);
         }
       },

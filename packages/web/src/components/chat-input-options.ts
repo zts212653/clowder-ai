@@ -16,6 +16,27 @@ export interface CatOption {
   isCloud?: boolean;
   /** F247 AC-C-4: Human-readable provider label for cloud tag (e.g. "via ChatGPT Pro") */
   providerLabel?: string;
+  isPlugin?: boolean;
+  pluginIcon?: PluginIconSpec;
+  /**
+   * Other names the member answers to: its nickname and every mention alias. The label shows
+   * the breed and model and the insert uses only the first alias, so without these "@小太阳"
+   * found nobody even though every Sol variant is called 小太阳·砚砚.
+   */
+  searchTerms?: readonly string[];
+}
+
+/** Menu entries whose label, insert, id or other names contain the typed fragment. */
+export function filterMentionOptions(options: readonly CatOption[], filter: string): CatOption[] {
+  if (!filter) return [...options];
+  const lower = filter.toLowerCase();
+  return options.filter(
+    (opt) =>
+      opt.label.toLowerCase().includes(lower) ||
+      opt.insert.toLowerCase().includes(lower) ||
+      (opt.isPlugin ? opt.desc.toLowerCase().includes(lower) : opt.id.toLowerCase().includes(lower)) ||
+      (opt.searchTerms ?? []).some((term) => term.toLowerCase().includes(lower)),
+  );
 }
 
 /** Static group mention shortcuts — shown at top of autocomplete.
@@ -100,7 +121,7 @@ function detectCloudProvider(cat: CatData): string | undefined {
   return undefined;
 }
 
-export function buildCatOptions(cats: CatData[]): CatOption[] {
+export function buildCatOptions(cats: CatData[], plugins: readonly PluginMentionTarget[] = []): CatOption[] {
   const breedGroups = buildBreedGroupOptions(cats);
   const individuals = cats
     .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
@@ -113,13 +134,24 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
         insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
         color: catColorVar(cat.id, 'primary'),
         avatar: cat.avatar,
+        searchTerms: [...(cat.nickname ? [cat.nickname] : []), ...cat.mentionPatterns],
         ...(providerLabel ? { isCloud: true as const, providerLabel } : {}),
       };
     });
   // Group mentions (@thread, @all, @全体xx猫) are low-frequency — put them
   // at the bottom so individual cats occupy the prime visible slots.
   // Users can still reach groups via arrow-up or by typing the filter text.
-  return [...individuals, ...STATIC_GROUP_MENTIONS, ...breedGroups];
+  const pluginOptions = plugins.map((plugin) => ({
+    id: plugin.id,
+    label: `@${plugin.alias}`,
+    desc: `插件 · ${plugin.displayName}`,
+    insert: `@${plugin.alias} `,
+    color: 'var(--cafe-text-secondary)',
+    avatar: '',
+    isPlugin: true,
+    pluginIcon: plugin.icon ?? 'blocks',
+  }));
+  return [...individuals, ...pluginOptions, ...STATIC_GROUP_MENTIONS, ...breedGroups];
 }
 
 /** Build whisper target options from dynamic cat data.
@@ -151,3 +183,5 @@ export function detectMenuTrigger(
   }
   return null;
 }
+
+import type { PluginIconSpec, PluginMentionTarget } from '@cat-cafe/shared';

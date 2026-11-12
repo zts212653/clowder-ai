@@ -115,6 +115,9 @@ function configureSandbox(env) {
   env.NODE_ENV = 'test';
 
   for (const key of CLEARED_ENV_KEYS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CAT_CAFE_MANAGED_') || key.startsWith('BASH_FUNC_')) delete env[key];
+  }
 
   try {
     if (env.CAT_CAFE_REDIS_TEST_ISOLATED === '1') {

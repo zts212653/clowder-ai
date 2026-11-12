@@ -19,8 +19,9 @@ export function MessageSearchOverlay({
 }) {
   const trip = host.session?.trip;
   const journey6 = useShellPresentation() === 'v2';
+  const hiddenJump = host.session?.source === 'jump' && trip?.origin.threadId !== threadId;
   if (!available || typeof document === 'undefined') return null;
-  if (!host.open && (!trip || trip.status === 'completed') && !host.notice) return null;
+  if (!host.open && (!trip || trip.status === 'completed' || hiddenJump) && !host.notice) return null;
   return (
     <aside
       className={

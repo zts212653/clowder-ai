@@ -88,13 +88,14 @@ jobs:
           test/issue-1666-carrier-environment.test.js
           test/issue-1666-network-environment.test.js
           test/issue-1666-provider-environment.test.js
-      - name: Codex semantic completion after asynchronous launch preparation
+      - name: Codex semantic completion across stdout and process exit
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
           node --import ./test/helpers/setup-cat-registry.js --test --test-timeout=60000
-          --test-name-pattern="Issue #116: turn.completed unblocks done even when process exit is delayed"
+          --test-name-pattern="Issue #116: turn.completed unblocks done even when process exit is delayed|Issue #1260"
           test/codex-agent-service.test.js
+          test/codex-semantic-completion.test.js
       - name: DSH packaged secret guard admission
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
@@ -225,6 +226,7 @@ jobs:
           node --test
           desktop/installer-preparation-log.test.js
           desktop/installer-no-icons.test.js
+          desktop/installer-directory.test.js
       - name: Build the actual web application
         run: pnpm --filter @cat-cafe/web build
       - name: Widget sanitization behavior
@@ -240,6 +242,7 @@ jobs:
           packages/api/test/plugin-package-staging-diagnostics.test.js
           packages/api/test/plugin-external-runtime-package.test.js
           packages/api/test/plugin-official-package-installer.test.js
+          packages/api/test/f202-dot-delivery-archive.test.js
           packages/api/test/plugin-companion-registry.smoke.mjs
         env:
           NODE_ENV: test

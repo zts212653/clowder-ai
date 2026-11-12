@@ -229,6 +229,8 @@ test('source returns verified exact message only, not raw proposal/path or body'
     canOpen: true,
     threadId: 'thread-owner',
     messageId: 'message-owner',
+    occurredAt: 100,
+    speaker: '你',
   });
   assert.equal(response.body.includes(publicPath), false);
   assert.equal(response.body.includes('先把真实'), false);
@@ -264,4 +266,49 @@ test('missing source coordinate and a failed source read are different states', 
   proposals.get('proposal-owner').sourceMessageId = 'message-owner';
   messages.delete('message-owner');
   assert.equal((await get(url)).json().status, 'unavailable');
+});
+
+test('exposes an approval link only to its canonical visible card, preserving legacy approvals without links', async () => {
+  const proposal = proposals.get('proposal-owner');
+  const item = await first();
+  assert.equal(item.approval.href, undefined);
+  messages.set('card-owner', {
+    ...messages.get('message-owner'),
+    id: 'card-owner',
+    catId: 'sonnet',
+    from: { kind: 'agent', catId: 'sonnet' },
+  });
+  proposal.publication = {
+    state: 'anchored',
+    envelope: {
+      canonicalProposalId: proposal.id,
+      ownerUserId: 'owner',
+      sourceFeatureId: 'F221',
+      approvalCardRef: { threadId: 'thread-owner', messageId: 'card-owner' },
+    },
+  };
+  assert.equal((await first()).approval.href, '/thread/thread-owner?message=card-owner');
+  messages.get('card-owner').userId = 'foreign';
+  assert.equal((await first()).approval.href, undefined);
+  messages.get('card-owner').userId = 'owner';
+  threads.get('thread-owner').createdBy = 'foreign';
+  assert.equal((await first()).approval.href, undefined);
+});
+
+test('current taste detail is owner-readable without a delivered revision; explicit stale and malformed versions stay fenced', async () => {
+  const item = await first();
+  const url = `/api/memory/taste/${item.id}`;
+  assert.equal((await get(url)).statusCode, 200);
+  writeFileSync(join(root, publicPath), vignette('public', '更正后的原话'));
+  const current = await get(url);
+  assert.equal(current.statusCode, 200);
+  assert.notEqual(current.json().revision, item.revision);
+  assert.deepEqual(current.json().quotes, ['更正后的原话']);
+  assert.equal((await get(`${url}?revision=${encodeURIComponent(item.revision)}`)).statusCode, 409);
+  for (const value of ['', 'bad']) assert.equal((await get(`${url}?revision=${value}`)).statusCode, 400);
+  assert.equal((await get(`${url}/source`)).statusCode, 400);
+  assert.equal((await app.inject({ url })).statusCode, 401);
+  assert.equal((await get(url, { headers: { 'x-test-session': 'other' } })).statusCode, 403);
+  const hidden = (await get('/api/memory/taste')).json().entries.find((entry) => entry.visibility === 'private');
+  assert.equal((await get(`/api/memory/taste/${hidden.id}`, { remoteAddress: '10.0.0.2' })).statusCode, 404);
 });

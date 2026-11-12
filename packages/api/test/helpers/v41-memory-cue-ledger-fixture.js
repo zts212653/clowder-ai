@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { installLegacyEntityRevisionFixture } from './legacy-entity-revision-fixture.js';
+import { installV39MemorySchemaFixture } from './v39-memory-schema-fixture.js';
 
 export function installV41CueLedgerFixture(db) {
   installLegacyEntityRevisionFixture(db);
+  installV39MemorySchemaFixture(db);
   // These tables already existed at V35 and kept the same definition through V77.
   db.exec(readFileSync(new URL('../scheduler/fixtures/schema-v77-schedule.sql', import.meta.url), 'utf8'));
   db.exec(`

@@ -12,11 +12,13 @@ import { z } from 'zod';
 import type { PersonMemoryTelemetryOutcome } from '../domains/memory/people/person-memory-telemetry.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
-export const recallSchema = z.object({ alias: z.string().trim().min(1).max(160) }).strict();
+const readRequestId = z.string().trim().min(1).max(200).optional();
+export const recallSchema = z.object({ alias: z.string().trim().min(1).max(160), readRequestId }).strict();
 export const proposalStatusParamsSchema = z.object({ proposalId: captureCandidateIdSchema }).strict();
 export const drillSchema = z
   .object({
     personId: personIdSchema,
+    readRequestId,
     item: z
       .object({
         kind: z.enum(['claim', 'relationship', 'event']),

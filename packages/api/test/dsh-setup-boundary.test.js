@@ -74,3 +74,25 @@ test('configuration and model-test endpoints require a direct authenticated owne
   }
   await app.close();
 });
+
+test('Desktop inspection accepts runtime IDs, never client-supplied executables or environment', async (t) => {
+  const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+  process.env.DEFAULT_OWNER_USER_ID = 'fixture-owner';
+  t.after(() => {
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+  });
+  const app = Fastify();
+  app.decorateRequest('sessionUserId', 'fixture-owner');
+  registerDshSetupRoutes(app, { audit: async () => {} });
+  for (const extra of [{ command: 'arbitrary' }, { args: ['--eval', 'code'] }, { env: { DSH_HOME: 'untrusted' } }]) {
+    const result = await app.inject({
+      method: 'POST',
+      url: '/api/cats/dsh-setup/inspect',
+      payload: { runtimeId: 'dsh', ...extra },
+    });
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.json().error, 'dsh_setup_invalid_request');
+  }
+  await app.close();
+});

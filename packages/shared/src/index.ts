@@ -109,6 +109,7 @@ export { richBlockSchema } from './schemas/rich-block.schema.js';
 export * from './shared-markdown-selection.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
+export * from './target-response.js';
 export * from './text-utils.js';
 export * from './thread-works.js';
 export * from './types/approval-decision-receipt.js';
@@ -167,6 +168,7 @@ export * from './types/content-modification-carrier.js';
 export * from './types/content-modification-control.js';
 export * from './types/content-modification-view.js';
 export * from './types/deployment-wait.js';
+export type { DshConnectionCheckFact, DshConnectionCheckView } from './types/dsh-connection-check.js';
 export * from './types/evolution-media-source.js';
 // F167 direct carriers expose only action identities backed by terminal producers.
 export * from './types/executable-action-successor.js';

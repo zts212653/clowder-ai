@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 
 import { PluginManagerServiceError } from '../dist/domains/plugin/index.js';
 import { PluginManagerBindings } from '../dist/domains/plugin/manager/plugin-manager-bindings.js';
+import { PluginSharedExtensionError } from '../dist/domains/plugin/shared-extension/plugin-shared-extension.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { pluginManagerUploadRoutes, registerPluginManagerRoutes } from '../dist/routes/plugin-manager-routes.js';
 
@@ -52,6 +53,8 @@ async function harness({
   documentation,
   contributions,
   bindings,
+  addressedTargets,
+  installedMigration,
 } = {}) {
   const calls = [];
   const audits = [];
@@ -116,6 +119,8 @@ async function harness({
     ...(documentation ? { documentation } : {}),
     ...(contributions ? { contributions } : {}),
     ...(bindings ? { bindings } : {}),
+    ...(addressedTargets ? { addressedTargets } : {}),
+    ...(installedMigration ? { installedMigration } : {}),
     ...(callbackRegistry ? { callbackRegistry } : {}),
     auditLog: {
       append: async (event) => {
@@ -129,6 +134,246 @@ async function harness({
   await app.ready();
   return { app, audits, calls };
 }
+
+test('owner catalog install/update and enable run the dormant migration before the replacement can start', async () => {
+  const events = [];
+  const digest = `sha512-${Buffer.alloc(64, 7).toString('base64')}`;
+  const detail = {
+    ...listed.plugins[0],
+    pluginId: 'official.chatgpt-dot',
+    pluginInstanceId: 'pi_dot',
+    packageDigest: digest,
+    artifact: 'installed',
+    lifecycleRevision: 4,
+  };
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: detail, catalog: listed.catalog }),
+      install: async () => {
+        events.push('install');
+        return { pluginId: detail.pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+      update: async () => {
+        events.push('update');
+        return { pluginId: detail.pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+      setEnabled: async () => {
+        events.push('enable');
+        return { pluginId: detail.pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+    },
+    installedMigration: {
+      applies: (pluginId) => pluginId === detail.pluginId,
+      needsMigration: async (pluginId) => pluginId === detail.pluginId,
+      ensure: async (input) => {
+        events.push(`migrate:${input.pluginInstanceId}`);
+        assert.equal(input.ownerUserId, ownerUserId);
+        input.assertCurrent();
+      },
+    },
+  });
+  try {
+    const install = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: {
+        source: { kind: 'catalog', catalogId: 'chatgpt-dot' },
+        expectedVersion: '0.2.0-alpha.0',
+        expectedDigest: digest,
+      },
+    });
+    assert.equal(install.statusCode, 201, install.payload);
+
+    const update = await app.inject({
+      method: 'POST',
+      url: `/api/plugin-manager/plugins/${detail.pluginId}/update`,
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedVersion: '0.2.0-alpha.0', expectedRevision: 4 },
+    });
+    assert.equal(update.statusCode, 200, update.payload);
+
+    const enabled = await app.inject({
+      method: 'POST',
+      url: `/api/plugin-manager/plugins/${detail.pluginId}/set-enabled`,
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { enabled: true, expectedRevision: 4 },
+    });
+    assert.equal(enabled.statusCode, 200, enabled.payload);
+    assert.deepEqual(events, ['install', 'migrate:pi_dot', 'update', 'migrate:pi_dot', 'migrate:pi_dot', 'enable']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('migration failures fail closed before enable, while a terminal migration decision leaves enable usable', async () => {
+  const digest = `sha512-${Buffer.alloc(64, 6).toString('base64')}`;
+  const detail = {
+    ...listed.plugins[0],
+    pluginId: 'official.chatgpt-dot',
+    pluginInstanceId: 'pi_dot',
+    packageDigest: digest,
+    artifact: 'installed',
+    lifecycleRevision: 4,
+  };
+  const errors = ['dot_migration_conflict', 'dot_legacy_image_dispatch_mismatch', 'dot_migration_request_expired'];
+  let migrationError = errors.shift();
+  let enableCalls = 0;
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: detail, catalog: listed.catalog }),
+      setEnabled: async () => {
+        enableCalls += 1;
+        return { pluginId: detail.pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+    },
+    installedMigration: {
+      applies: (pluginId) => pluginId === detail.pluginId,
+      needsMigration: async () => true,
+      ensure: async () => {
+        if (migrationError) throw new Error(migrationError);
+      },
+    },
+  });
+  try {
+    const enable = () =>
+      app.inject({
+        method: 'POST',
+        url: `/api/plugin-manager/plugins/${detail.pluginId}/set-enabled`,
+        headers: writeHeaders,
+        remoteAddress: '127.0.0.1',
+        payload: { enabled: true, expectedRevision: 4 },
+      });
+    for (const expected of [
+      'dot_migration_conflict',
+      'dot_legacy_image_dispatch_mismatch',
+      'dot_migration_request_expired',
+    ]) {
+      const rejected = await enable();
+      assert.equal(rejected.statusCode, 409, rejected.payload);
+      assert.equal(rejected.json().code, expected);
+      assert.equal(enableCalls, 0);
+      migrationError = errors.shift();
+    }
+    const recovered = await enable();
+    assert.equal(recovered.statusCode, 200, recovered.payload);
+    assert.equal(enableCalls, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('post-enable shared-connection reconciliation preserves its bounded error contract', async () => {
+  const digest = `sha512-${Buffer.alloc(64, 5).toString('base64')}`;
+  const detail = {
+    ...listed.plugins[0],
+    pluginId: 'official.chatgpt-dot',
+    pluginInstanceId: 'pi_dot',
+    packageDigest: digest,
+    artifact: 'installed',
+    lifecycleRevision: 4,
+  };
+  let enableCalls = 0;
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: detail, catalog: listed.catalog }),
+      setEnabled: async () => {
+        enableCalls += 1;
+        return { pluginId: detail.pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+    },
+    installedMigration: {
+      applies: (pluginId) => pluginId === detail.pluginId,
+      needsMigration: async () => true,
+      ensure: async () => {},
+      afterEnable: async () => {
+        throw new PluginSharedExtensionError(409, 'shared_surface_changed');
+      },
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/plugin-manager/plugins/${detail.pluginId}/set-enabled`,
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { enabled: true, expectedRevision: 4 },
+    });
+    assert.equal(response.statusCode, 409, response.payload);
+    assert.deepEqual(response.json(), {
+      error:
+        'shared_surface_changed: The legacy shared connection cannot authorize changed tools. ' +
+        'Restore the previously approved plugin version and enable it again, or generate a Server URL ' +
+        'in Dot settings, add that connection in ChatGPT and send its subscription message.',
+      code: 'shared_surface_changed',
+    });
+    assert.equal(enableCalls, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('legacy Dot update disables an enabled instance before replacement and migrates the dormant successor', async () => {
+  const events = [];
+  const digest = `sha512-${Buffer.alloc(64, 8).toString('base64')}`;
+  let detail = {
+    ...listed.plugins[0],
+    pluginId: 'official.chatgpt-dot',
+    pluginInstanceId: 'pi_dot',
+    packageDigest: digest,
+    artifact: 'installed',
+    intent: 'enabled',
+    live: 'running',
+    lifecycleRevision: 3,
+  };
+  const { app } = await harness({
+    overrides: {
+      get: async () => ({ plugin: detail, catalog: listed.catalog }),
+      setEnabled: async (pluginId, request) => {
+        events.push(['disable', pluginId, request]);
+        assert.deepEqual(request, { enabled: false, expectedRevision: 3 });
+        detail = { ...detail, intent: 'disabled', live: 'stopped', lifecycleRevision: 4 };
+        return { pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+      update: async (pluginId, request) => {
+        events.push(['update', pluginId, request]);
+        assert.deepEqual(request, { expectedVersion: '0.2.0-alpha.0', expectedRevision: 4 });
+        detail = { ...detail, packageDigest: `${digest}-replacement`, lifecycleRevision: 5 };
+        return { pluginId, pluginInstanceId: detail.pluginInstanceId };
+      },
+    },
+    installedMigration: {
+      applies: (pluginId) => pluginId === detail.pluginId,
+      needsMigration: async (pluginId) => pluginId === detail.pluginId,
+      ensure: async (input) => {
+        events.push(['migrate', input.pluginId, input.packageDigest]);
+        assert.equal(input.pluginInstanceId, detail.pluginInstanceId);
+        assert.equal(input.ownerUserId, ownerUserId);
+        input.assertCurrent();
+      },
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/plugin-manager/plugins/${detail.pluginId}/update`,
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedVersion: '0.2.0-alpha.0', expectedRevision: 3 },
+    });
+    assert.equal(response.statusCode, 200, response.payload);
+    assert.deepEqual(events, [
+      ['disable', detail.pluginId, { enabled: false, expectedRevision: 3 }],
+      ['update', detail.pluginId, { expectedVersion: '0.2.0-alpha.0', expectedRevision: 4 }],
+      ['migrate', detail.pluginId, `${digest}-replacement`],
+    ]);
+  } finally {
+    await app.close();
+  }
+});
 
 test('detail and crafted disconnect preserve Host-reserved binding while ordinary disconnect works', async () => {
   const store = new MemoryConnectorThreadBindingStore();
@@ -1129,6 +1374,53 @@ test('repair retains the Manager owner, strict revision and audit boundaries', a
     assert.equal(ok.statusCode, 200, ok.payload);
     assert.deepEqual(calls, [['repair', 'official.video', { expectedRevision: 3 }]]);
     assert.equal(audits.at(-1).data.operation, 'repair');
+  } finally {
+    await app.close();
+  }
+});
+
+test('address discovery and editing use existing owner auth, hide action methods and retain exact revision', async () => {
+  const calls = [];
+  const { app } = await harness({
+    addressedTargets: {
+      list: async () => [
+        {
+          kind: 'plugin',
+          id: 'pi_dot',
+          pluginId: 'official.dot',
+          alias: 'dot',
+          lifecycleRevision: 7,
+          addressRevision: 2,
+          displayName: 'Dot',
+        },
+      ],
+      known: async () => [],
+      configure: async (...args) => {
+        calls.push(args);
+        if (args[1].expectedRevision !== 2) throw new Error('Stale address revision');
+      },
+    },
+  });
+  try {
+    const url = '/api/plugin-manager/instances/pi_dot/address';
+    const payload = { alias: 'assistant', icon: 'blocks', expectedRevision: 2 };
+    assert.equal((await app.inject({ method: 'PATCH', url, payload })).statusCode, 403);
+    const discovery = await app.inject({ url: '/api/plugin-manager/addressed-targets', headers: readHeaders });
+    assert.equal(discovery.statusCode, 200);
+    assert.equal(discovery.json().targets[0].id, 'pi_dot');
+    assert.equal('method' in discovery.json().targets[0], false);
+    assert.equal((await app.inject({ method: 'PATCH', url, headers: writeHeaders, payload })).statusCode, 200);
+    assert.deepEqual(calls[0], ['pi_dot', payload]);
+    assert.equal(
+      (await app.inject({ method: 'PATCH', url, headers: writeHeaders, payload: { ...payload, expectedRevision: 1 } }))
+        .statusCode,
+      409,
+    );
+    assert.equal(
+      (await app.inject({ method: 'PATCH', url, headers: writeHeaders, payload: { ...payload, method: 'arbitrary' } }))
+        .statusCode,
+      400,
+    );
   } finally {
     await app.close();
   }

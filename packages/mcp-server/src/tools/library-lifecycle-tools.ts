@@ -4,8 +4,9 @@ import { invocationFetch } from './invocation-auth.js';
 /**
  * Library Lifecycle Tools — F188 Phase I (AC-I4)
  *
- * MCP wrappers for collection lifecycle management:
- * list, dry-run, create, rebuild, archive.
+ * MCP wrappers for collection lifecycle management: list and rebuild.
+ * Archive (2026-11-09) and create/dry-run (2026-11-10) moved to the owner
+ * library page, which calls the same /api/library routes.
  *
  * KD-8: callerCollections/collections NOT in MCP schema.
  * Visibility is server-derived; v1 sees all localhost-owned collections.
@@ -87,129 +88,6 @@ function formatCatalog(items: CatalogItem[]): string {
   return lines.join('\n');
 }
 
-// --- library_dry_run ---
-
-export const libraryDryRunInputSchema = {
-  root: z.string().describe('Absolute path to the directory to scan.'),
-  exclude: z.array(z.string()).optional().describe('Glob patterns to exclude from scan.'),
-};
-
-export async function handleLibraryDryRun(input: {
-  root: string;
-  exclude?: readonly string[] | undefined;
-}): Promise<ToolResult> {
-  try {
-    const body: Record<string, unknown> = { root: input.root };
-    if (input.exclude) body.exclude = input.exclude;
-    const response = await invocationFetch(`${resolveApiUrl()}/api/library/bind-dry-run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      return errorResult(`library_dry_run failed (${response.status}): ${text}`);
-    }
-    const data = (await response.json()) as Record<string, unknown>;
-    return successResult(formatDryRun(data));
-  } catch (err) {
-    return errorResult(`library_dry_run error: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function formatDryRun(data: Record<string, unknown>): string {
-  const lines: string[] = [];
-  lines.push('Dry-run scan results:');
-  for (const [key, value] of Object.entries(data)) {
-    lines.push(`  ${key}: ${JSON.stringify(value)}`);
-  }
-  return lines.join('\n');
-}
-
-// --- library_create ---
-
-export const libraryCreateInputSchema = {
-  kind: z.enum(['project', 'world', 'domain', 'research', 'global']).describe('Collection kind.'),
-  name: z.string().describe('Short lowercase name (e.g. "finance"). Used in collection ID as <kind>:<name>.'),
-  displayName: z.string().describe('Human-readable name shown in UI.'),
-  root: z
-    .string()
-    .optional()
-    .describe('Absolute path to bind. Omit for managed vault (auto-created under ~/.cat-cafe/library/sources/).'),
-  sensitivity: z
-    .enum(['public', 'internal', 'private', 'restricted'])
-    .optional()
-    .describe('Access level (default: private).'),
-  exclude: z.array(z.string()).optional().describe('Glob patterns to exclude from indexing.'),
-};
-
-export async function handleLibraryCreate(input: {
-  kind: string;
-  name: string;
-  displayName: string;
-  root?: string | undefined;
-  sensitivity?: string | undefined;
-  exclude?: readonly string[] | undefined;
-}): Promise<ToolResult> {
-  const id = `${input.kind}:${input.name}`;
-  try {
-    const body: Record<string, unknown> = {
-      id,
-      kind: input.kind,
-      name: input.name,
-      displayName: input.displayName,
-    };
-    if (input.root) body.root = input.root;
-    if (input.sensitivity) body.sensitivity = input.sensitivity;
-    if (input.exclude) body.exclude = input.exclude;
-    const response = await invocationFetch(`${resolveApiUrl()}/api/library/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      return errorResult(`library_create failed (${response.status}): ${text}`);
-    }
-    const data = (await response.json()) as { manifest: Record<string, unknown> };
-
-    let rebuildWarning = '';
-    try {
-      const rebuildRes = await invocationFetch(`${resolveApiUrl()}/api/library/${id}/rebuild`, {
-        method: 'POST',
-        headers: libraryAuthHeaders(),
-      });
-      if (!rebuildRes.ok) {
-        rebuildWarning = `\n\nWarning: rebuild failed (${rebuildRes.status}). Run cat_cafe_library_rebuild manually.`;
-      } else {
-        const rebuildData = (await rebuildRes.json()) as Record<string, unknown>;
-        if (rebuildData.blocked) {
-          const secrets = rebuildData.secretFindings;
-          rebuildWarning = `\n\nWarning: collection is BLOCKED — ${secrets} secret(s) detected during indexing. Review and remove secrets, then run cat_cafe_library_rebuild.`;
-        }
-      }
-    } catch {
-      rebuildWarning = '\n\nWarning: rebuild failed (network error). Run cat_cafe_library_rebuild manually.';
-    }
-
-    return successResult(formatCreated(data.manifest) + rebuildWarning);
-  } catch (err) {
-    return errorResult(`library_create error: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function formatCreated(manifest: Record<string, unknown>): string {
-  return [
-    `Collection created: ${manifest.id}`,
-    `  displayName: ${manifest.displayName}`,
-    `  status: ${manifest.status ?? 'registered'}`,
-    `  root: ${manifest.root}`,
-    `  sensitivity: ${manifest.sensitivity}`,
-    '',
-    'Next: run cat_cafe_library_rebuild to index documents.',
-  ].join('\n');
-}
-
 // --- library_rebuild ---
 
 export const libraryRebuildInputSchema = {
@@ -272,46 +150,10 @@ export const libraryLifecycleTools = [
     },
   }),
   defineTool({
-    name: 'cat_cafe_library_dry_run',
-    description: [
-      'Scan a directory and report what would be indexed (file count, size, secrets, scanner level).',
-      'Use BEFORE cat_cafe_library_create to preview what a collection bind would include.',
-      'Does NOT persist anything — safe to run multiple times.',
-    ].join('\n'),
-    inputSchema: libraryDryRunInputSchema,
-    handler: handleLibraryDryRun,
-    governance: {
-      implementationExport: 'handleLibraryDryRun',
-      action: 'command',
-      risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full'],
-      targetExposure: 'lazy-discoverable',
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_library_create',
-    description: [
-      'Create a new collection. Two modes:',
-      '  1. Bind existing dir: provide root path (e.g. ~/docs/finance)',
-      '  2. Managed vault: omit root — auto-creates under ~/.cat-cafe/library/sources/',
-      'Collection ID auto-derived as <kind>:<name>.',
-      'After creation, run cat_cafe_library_rebuild to populate the index.',
-    ].join('\n'),
-    inputSchema: libraryCreateInputSchema,
-    handler: handleLibraryCreate,
-    governance: {
-      implementationExport: 'handleLibraryCreate',
-      action: 'command',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-      targetExposure: 'lazy-discoverable',
-    },
-  }),
-  defineTool({
     name: 'cat_cafe_library_rebuild',
     description: [
       'Rebuild the index for a collection — scans root directory for new/changed/deleted files.',
-      'Use after: creating a collection, adding files to a bound directory.',
+      'Use after: a collection is created on the owner library page, or files are added to a bound directory.',
       'Incremental by default; use force=true for full rebuild.',
     ].join('\n'),
     inputSchema: libraryRebuildInputSchema,
