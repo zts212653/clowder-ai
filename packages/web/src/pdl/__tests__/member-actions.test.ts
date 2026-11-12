@@ -163,6 +163,7 @@ it('projects actual strategy capability and native launch choices without turnin
             models: [],
             acp: { command: '/tools/dsh', startupArgs: ['--profile', 'work profile', 'acp'] },
             readiness: { status: 'unknown', checkedAt: 4 },
+            dshDesktop: true,
           },
         ],
       });

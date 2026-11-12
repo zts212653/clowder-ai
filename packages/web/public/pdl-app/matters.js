@@ -116,7 +116,7 @@ async function matterWrite(command) {
   }
 }
 onStart('late', function () {
-  window.addEventListener('cat-cafe:memory-matter-changed', function () {
+  window.addEventListener('cat-cafe:memory-changed', function () {
     heldNeeded.forEach(function (key) {
       if (key.indexOf('matters:') !== 0) return;
       const detail = key.indexOf('matters:detail:') === 0;
