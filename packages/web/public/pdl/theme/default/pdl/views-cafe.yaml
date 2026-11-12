@@ -86,7 +86,7 @@ views:
               map: {failed: danger, _: ""}
             strong:
               of: $.state
-              map: {creating: "", sending: "", failed: t:chat.homeStrong.failed, _: $.state}
+              map: {failed: t:chat.homeStrong.failed, _: ""}
             text:
               t: chat.homeState
               args: [$.state]

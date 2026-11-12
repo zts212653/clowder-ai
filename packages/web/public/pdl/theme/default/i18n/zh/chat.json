@@ -333,7 +333,8 @@
     "homeState": {
       "creating": "正在建立对话…",
       "sending": "正在发送第一条消息…",
-      "failed": " 后端连接异常，草稿已保留。"
+      "failed": " 后端连接异常，草稿已保留。",
+      "disconnected": "后端连接中断，草稿已保留，恢复后自动重连。"
     },
     "homeStrong": {
       "failed": "对话没有建好。"
