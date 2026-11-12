@@ -183,4 +183,34 @@ describe('DSH turn client channel', () => {
       expectedTurn: 3,
     });
   });
+
+  it('isolates a throwing turn listener and keeps the readline channel alive', async () => {
+    const { client, agentStdout } = create((message, stdout) => {
+      if (message.method === 'initialize') return agentRespond(stdout, message.id, INIT_RESULT);
+      if (message.method === '_clowder/turn/status') return agentRespond(stdout, message.id, { state: 'unknown' });
+      return agentError(stdout, message.id, -32601, 'Method not found');
+    });
+    await client.initialize();
+
+    const received = [];
+    let escaped;
+    const onUncaught = (error) => {
+      escaped = error;
+    };
+    process.once('uncaughtException', onUncaught);
+    const unsubscribeThrow = client.onTurnBridgeEvent((event) => {
+      if (event.type === 'turn_started') throw new Error('owner mismatch');
+    });
+    const unsubscribeCollect = client.onTurnBridgeEvent((event) => received.push(event));
+    agentNotify(agentStdout, '_clowder/turn', { sessionId: 's1', type: 'turn_started', nativeTurnId: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    process.removeListener('uncaughtException', onUncaught);
+    unsubscribeThrow();
+    unsubscribeCollect();
+
+    assert.equal(escaped, undefined, `turn listener threw into readline: ${escaped?.message}`);
+    assert.deepEqual(received, [{ sessionId: 's1', type: 'turn_started', nativeTurnId: 1 }]);
+    // A later RPC response still reaches the same client after the listener failure.
+    assert.deepEqual(await client.inspectTurnInput('s1', 'd1'), { state: 'unknown' });
+  });
 });
