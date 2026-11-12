@@ -43,6 +43,8 @@ export const threadSignalsCopy = defineShellCopy(
       recentFirst: '最近活跃（默认）',
       runningFirst: '运行优先',
       sort: '组内排序',
+      arrangeRecentHint: '这组按最近排，想自己排顺序：点完成后在组的「⋯」里选手动顺序',
+      arrangeRunningHint: '这组按运行优先排，想自己排顺序：点完成后在组的「⋯」里选手动顺序',
       conversations: '个对话',
       catsWorking: (count: number) => `${count} 只在干活`,
       groupErrors: (count: number) => `${count} 个出错`,
@@ -103,6 +105,10 @@ export const threadSignalsCopy = defineShellCopy(
       recentFirst: 'Recent activity (default)',
       runningFirst: 'Running first',
       sort: 'Group order',
+      arrangeRecentHint:
+        'This group uses recent order. To arrange it yourself, click Done, then choose Manual order in the group’s ⋯ menu.',
+      arrangeRunningHint:
+        'This group uses running-first order. To arrange it yourself, click Done, then choose Manual order in the group’s ⋯ menu.',
       conversations: 'conversations',
       catsWorking: (count: number) => `${count} working`,
       groupErrors: (count: number) => `${count} error${count === 1 ? '' : 's'}`,
