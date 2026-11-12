@@ -1247,7 +1247,25 @@ export class AcpClient {
       // reset the idle watchdog as if it were model activity.
       if (method?.startsWith('_clowder/')) {
         const event = parseDshTurnBridgeEvent(msg.params);
-        if (event) for (const listener of this.turnBridgeListeners) listener(event);
+        if (event) {
+          for (const listener of this.turnBridgeListeners) {
+            try {
+              listener(event);
+            } catch (error) {
+              // A Host binding can explicitly reject this turn (for example an
+              // owner mismatch). Keep the readline/RPC channel alive while the
+              // remaining listeners still receive this same event.
+              log.warn(
+                {
+                  sessionId: event.sessionId,
+                  type: event.type,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                'ACP turn bridge listener failed',
+              );
+            }
+          }
+        }
         return;
       }
 
