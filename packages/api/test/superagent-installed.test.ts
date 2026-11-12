@@ -20,7 +20,10 @@ import { RedisThreadStore } from '../src/domains/cats/services/stores/redis/Redi
 import { createPublishingMessageStore } from '../src/domains/messaging/publishing-message-store.js';
 import { createMessagingStores } from '../src/domains/messaging/stores/factory.js';
 import { withPluginCallContext } from '../src/domains/plugin/carrier/plugin-call-context.js';
-import { listPluginConversations } from '../src/domains/plugin/declared/plugin-conversations.js';
+import {
+  listPluginConversations,
+  openPluginConversation,
+} from '../src/domains/plugin/declared/plugin-conversations.js';
 import { createPluginConversationDelivery } from '../src/domains/plugin/host-surface/plugin-conversation-delivery.js';
 import {
   InstalledPluginOperations,
@@ -219,6 +222,14 @@ test(
     await operation('activity', 'enable', {}, true);
     const main = view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {}));
     assert.equal(main.status, 'listening');
+    const bound = await openPluginConversation(
+      { inventory: runtime.inventoryStore, runtime: runtime.supervisor, threads },
+      owner,
+      instance,
+      'conversation',
+    );
+    assert.equal(bound.threadId, main.threadId, 'an explicit owner open binds the actual installed plugin main thread');
+    assert.equal((await entries())[0].threadId, main.threadId, 'ordinary list reads use the durable Host binding');
     const native = (threadId: string, catId = 'codex') => ({
       catId,
       threadId,
@@ -288,6 +299,7 @@ test(
     composition = manager();
     await runtime.supervisor.start(instance);
     assert.equal(view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {})).threadId, main.threadId);
+    assert.equal((await entries())[0].threadId, main.threadId, 'the Host instance binding survives process composition restart');
     const feedback = await say(second.id, '导出修复还漏了空文件，请沿原事项补上。');
     await tick();
     inbox = inspected.parse(await call('superagent.inspect', {})).inbox;
