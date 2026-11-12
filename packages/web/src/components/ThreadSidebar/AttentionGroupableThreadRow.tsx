@@ -112,7 +112,10 @@ export function AttentionGroupableThreadRow({
         }
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
       }}
-      onDragLeave={() => setInsertion(null)}
+      onDragLeave={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setInsertion(null);
+      }}
       onDrop={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -134,11 +137,7 @@ export function AttentionGroupableThreadRow({
       )}
       {children}
       {dropHint && (
-        <span
-          role="status"
-          data-attention-arrange-hint="true"
-          className="pointer-events-none absolute inset-x-1 bottom-full z-30 rounded-md border border-cafe-subtle bg-cafe-surface-elevated px-2 py-1 text-xs text-cafe-secondary shadow-md"
-        >
+        <span role="status" data-attention-arrange-hint="true" className="sr-only">
           {dropHint}
         </span>
       )}

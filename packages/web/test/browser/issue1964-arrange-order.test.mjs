@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { startSearchGroupApi } from './f277-search-group.harness.mjs';
 import { startSearchGroupBrowserFixture } from './f277-search-group-browser.harness.mjs';
+import { verifyArrangeProjectMembership } from './issue1964-arrange-project.journey.mjs';
 
 const evidence = process.env.ISSUE1964_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence', 'issue1964');
 const owner = 'f277-search-browser-owner';
@@ -52,12 +53,20 @@ test(
     const errors = [];
     const results = [];
     try {
-      for (const [width, dark, reducedMotion, tab] of [
-        [300, false, 'no-preference', 'recent'],
-        [240, true, 'reduce', 'recent'],
-        [300, false, 'reduce', 'project'],
-        [300, false, 'reduce', 'virtual'],
+      for (const [width, dark, reducedMotion, tab, language] of [
+        [300, false, 'no-preference', 'recent', 'zh'],
+        [240, true, 'reduce', 'recent', 'zh'],
+        [240, false, 'reduce', 'recent', 'en'],
+        [300, false, 'reduce', 'project', 'zh'],
+        [300, false, 'reduce', 'virtual', 'zh'],
       ]) {
+        const otherMembers =
+          tab === 'project'
+            ? Array.from({ length: 2 }, (_, index) =>
+                fixture.store.create(owner, `另一个项目 ${index}`, '/workspace/other'),
+              )
+            : [];
+        const doneText = language === 'en' ? 'Done' : '完成';
         if (tab === 'virtual')
           Array.from({ length: 60 }, (_, index) =>
             fixture.store.create(owner, `虚拟列表 ${index}`, '/workspace/virtual'),
@@ -70,13 +79,13 @@ test(
         const page = await context.newPage();
         page.on('pageerror', (error) => errors.push(error.message));
         await page.addInitScript(
-          ({ dark }) => {
+          ({ dark, language }) => {
             localStorage.setItem('cat-cafe:shell-presentation', 'v2');
-            localStorage.setItem('cat-cafe:shell-language', 'zh');
+            localStorage.setItem('cat-cafe:shell-language', language);
             localStorage.setItem('cat-cafe:sidebar:active-tab', 'recent');
             localStorage.setItem('theme', dark ? 'dark' : 'light');
           },
-          { dark },
+          { dark, language },
         );
         await page.goto(`${fixture.webUrl}/dev/f277-attention-preview/search`);
         await page.waitForFunction(
@@ -109,7 +118,7 @@ test(
         const beforeOrder = await order();
         const remainder = await page.locator(`[data-sidebar-row-key="remainder:group:${group.id}"]`).textContent();
         const barHeight = (await page.getByTestId('sidebar-tabs-row').boundingBox()).height;
-        const label = `${width}-${tab}`;
+        const label = `${width}-${tab}${language === 'en' ? '-en' : ''}`;
         await page.screenshot({ path: path.join(evidence, `${label}-01-browse.png`) });
         const source = page.locator(`[data-attention-draggable-thread="${members[1].id}"]`);
         await source.hover();
@@ -129,7 +138,7 @@ test(
           });
           const doneBox = await page
             .getByTestId('attention-arrange-toolbar')
-            .getByRole('button', { name: '完成', exact: true })
+            .getByRole('button', { name: doneText, exact: true })
             .boundingBox();
           assert.ok(
             doneBox.y >= 0 && doneBox.y + doneBox.height <= 520,
@@ -142,9 +151,25 @@ test(
         }
         await source.dragTo(page.locator(`[data-attention-draggable-thread="${members[2].id}"]`));
         await source.locator('[data-attention-arrange-hint]').waitFor();
+        const sortHint = page.locator('[data-arrange-sort-hint]');
+        await sortHint.waitFor();
+        const hintBox = await sortHint.boundingBox();
+        const toolbarBox = await page.getByTestId('attention-arrange-toolbar').boundingBox();
+        assert.ok(hintBox.y >= toolbarBox.y && hintBox.y + hintBox.height <= toolbarBox.y + toolbarBox.height);
+        assert.ok(
+          await sortHint.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+          'the actionable hint fits without clipping',
+        );
+        assert.ok(
+          (await source.locator('[data-attention-arrange-hint]').boundingBox()).height <= 1,
+          'source announcement must not cover a neighbour',
+        );
         assert.deepEqual(await order(), beforeOrder);
         await page.screenshot({ path: path.join(evidence, `${label}-03-recent-hint.png`) });
-        await page.getByTestId('attention-arrange-toolbar').getByRole('button', { name: '完成', exact: true }).click();
+        await page
+          .getByTestId('attention-arrange-toolbar')
+          .getByRole('button', { name: doneText, exact: true })
+          .click();
         assert.deepEqual(await positions(), before, 'Done with no mutation must restore the same positions');
         await page.screenshot({ path: path.join(evidence, `${label}-04-done.png`) });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -196,7 +221,7 @@ test(
           );
           await page
             .getByTestId('attention-arrange-toolbar')
-            .getByRole('button', { name: '完成', exact: true })
+            .getByRole('button', { name: doneText, exact: true })
             .click();
           const saved = await (await fetch(`${fixture.apiUrl}/api/config/thread-attention`)).json();
           assert.deepEqual(saved.groups.find((item) => item.id === group.id).threadIds.slice(0, 3), [
@@ -254,7 +279,7 @@ test(
           await page.screenshot({ path: path.join(evidence, '300-membership-remainder.png') });
           await page
             .getByTestId('attention-arrange-toolbar')
-            .getByRole('button', { name: '完成', exact: true })
+            .getByRole('button', { name: doneText, exact: true })
             .click();
           assert.equal(await memberRows.count(), 7, 'Done preserves the explicit reveal choice');
           await fixture.api.app.inject({
@@ -263,7 +288,8 @@ test(
             payload: { action: 'remove', groupId: group.id, threadId: outsideId },
           });
         }
-        results.push({ width, dark, reducedMotion, tab, before, remainder, barHeight });
+        if (tab === 'project') await verifyArrangeProjectMembership(page, fixture, group, otherMembers, evidence);
+        results.push({ width, dark, reducedMotion, tab, language, before, remainder, barHeight });
         await context.close();
       }
       assert.deepEqual(errors, []);

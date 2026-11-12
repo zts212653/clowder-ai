@@ -93,41 +93,43 @@ export function moveArrangeThread(
   modes: Readonly<Record<string, ThreadAttentionMemberSort>>,
   liveRows: readonly SidebarSnapshotRow[],
 ): ArrangeLayout {
-  const destination = savedGroups.find((group) => group.threadIds.includes(sourceId));
   const savedAnchors = new Set(savedGroups.map((group) => `group:${group.id}`));
   const sourceList = Object.entries(layout).find(([, items]) =>
     items.some((item) => (item.kind === 'thread' ? item.id === sourceId : item.memberIds.includes(sourceId))),
   );
   if (!sourceList) return layout;
   const [sourceKey, sourceItems] = sourceList;
+  // The captured members already define this list's scope (including its hidden tail).
+  // A grouping command changes membership, never the conversation's project.
+  const admitted = new Set(sourceItems.flatMap((item) => (item.kind === 'thread' ? [item.id] : item.memberIds)));
+  const savedDestination = savedGroups.find((group) => group.threadIds.includes(sourceId));
+  const destinationIds = savedDestination?.threadIds.filter((id) => admitted.has(id)) ?? [];
+  const destination =
+    savedDestination && destinationIds.length >= 2 ? { ...savedDestination, threadIds: destinationIds } : undefined;
   const sourceIndex = sourceItems.findIndex((item) =>
     item.kind === 'thread' ? item.id === sourceId : item.memberIds.includes(sourceId),
   );
   const sourceItem = sourceItems[sourceIndex];
   const sourceVisible =
     sourceItem?.kind === 'group' && sourceItem.memberIds.indexOf(sourceId) < sourceItem.visibleCount;
-  const next: ArrangeLayout = Object.fromEntries(
-    Object.entries(layout).map(([key, items]) => [
-      key,
-      items.flatMap<ArrangeItem>((item) => {
-        if (item.kind === 'thread') return item.id === sourceId ? [] : [item];
-        if (!item.memberIds.includes(sourceId)) return [item];
-        const memberIds = item.memberIds.filter((id) => id !== sourceId);
-        if (!savedAnchors.has(item.anchor)) return memberIds.map((id) => ({ kind: 'thread' as const, id }));
-        return [{ ...item, memberIds, visibleCount: item.visibleCount - (sourceVisible ? 1 : 0) }];
-      }),
-    ]),
-  );
+  const items = sourceItems.flatMap<ArrangeItem>((item) => {
+    if (item.kind === 'thread') return item.id === sourceId ? [] : [item];
+    if (!item.memberIds.includes(sourceId)) return [item];
+    const memberIds = item.memberIds.filter((id) => id !== sourceId);
+    if (!savedAnchors.has(item.anchor) || memberIds.length < 2)
+      return memberIds.map((id) => ({ kind: 'thread' as const, id }));
+    return [{ ...item, memberIds, visibleCount: item.visibleCount - (sourceVisible ? 1 : 0) }];
+  });
+  const next = { ...layout, [sourceKey]: items };
   if (!destination) {
-    next[sourceKey]?.splice(sourceIndex + 1, 0, { kind: 'thread', id: sourceId });
+    items.splice(sourceIndex + Number(sourceItem?.kind === 'group'), 0, { kind: 'thread', id: sourceId });
     return next;
   }
   const destinationAnchor = `group:${destination.id}`;
   const rowsById = new Map(liveRows.map((row) => [row.id, row]));
   const mode = modes[destinationAnchor] ?? 'recent';
-  for (const items of Object.values(next)) {
-    const target = items.find((item) => item.kind === 'group' && item.anchor === destinationAnchor);
-    if (target?.kind !== 'group') continue;
+  const target = items.find((item) => item.kind === 'group' && item.anchor === destinationAnchor);
+  if (target?.kind === 'group') {
     const showAll = target.visibleCount === target.memberIds.length;
     const sameGroup = sourceItem?.kind === 'group' && sourceItem.anchor === target.anchor;
     let memberIds: string[];
@@ -157,25 +159,22 @@ export function moveArrangeThread(
     return next;
   }
   // A newly created group replaces its target conversation, at that conversation's old location.
-  for (const items of Object.values(next)) {
-    const targetIndex = items.findIndex((item) => item.kind === 'thread' && destination.threadIds.includes(item.id));
-    if (targetIndex < 0) continue;
-    const memberIds = orderGroupMemberIds(
-      destination.threadIds.flatMap((id) => {
-        const row = rowsById.get(id);
-        return row ? [row] : [];
-      }),
-      mode,
-      true,
-    );
-    items.splice(targetIndex, 1, {
-      kind: 'group',
-      anchor: destinationAnchor,
-      memberIds,
-      visibleCount: memberIds.length,
-      expanded: true,
-    });
-    return next;
-  }
+  const targetIndex = items.findIndex((item) => item.kind === 'thread' && destination.threadIds.includes(item.id));
+  if (targetIndex < 0) return next;
+  const memberIds = orderGroupMemberIds(
+    destination.threadIds.flatMap((id) => {
+      const row = rowsById.get(id);
+      return row ? [row] : [];
+    }),
+    mode,
+    true,
+  );
+  items.splice(targetIndex, 1, {
+    kind: 'group',
+    anchor: destinationAnchor,
+    memberIds,
+    visibleCount: memberIds.length,
+    expanded: true,
+  });
   return next;
 }

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
-import { type ArrangeLayout, moveArrangeThread, projectArrangeLayout } from '../attention-arrange-layout';
-import { buildAttentionClusters } from '../attention-clusters';
+import {
+  type ArrangeLayout,
+  captureArrangeLayout,
+  moveArrangeThread,
+  projectArrangeLayout,
+} from '../attention-arrange-layout';
+import { arrangeAttentionRows, buildAttentionClusters, flattenAttentionRows } from '../attention-clusters';
 
 const row = (id: string, lastActiveAt: number): SidebarSnapshotRow => ({
   id,
@@ -32,6 +37,57 @@ const ids = (layout: ArrangeLayout) =>
   layout.recent?.flatMap((item) => (item.kind === 'thread' ? [item.id] : item.memberIds));
 
 describe('arrange membership deltas', () => {
+  it.each(['move', 'create'] as const)('keeps cross-project %s membership inside each captured section', (action) => {
+    const live = [row('a1', 50), row('a2', 40), row('b1', 30), row('b2', 20)].map((item) => ({
+      ...item,
+      projectPath: item.id.startsWith('a') ? '/A' : '/B',
+    }));
+    const beforeGroups = action === 'move' ? [{ id: 'g', threadIds: ['a1', 'a2'] }] : [];
+    const beforeClusters = buildAttentionClusters(live, beforeGroups);
+    const lists = Object.fromEntries(
+      ['/A', '/B'].map((key) => {
+        const scoped = live.filter((item) => item.projectPath === key);
+        return [
+          key,
+          flattenAttentionRows(arrangeAttentionRows(scoped, scoped, beforeClusters, 'project'), () => true, ''),
+        ];
+      }),
+    );
+    const layout = captureArrangeLayout(lists, lists);
+    const after = [{ id: 'g', threadIds: action === 'move' ? ['a1', 'a2', 'b1'] : ['a1', 'b1'] }];
+    const next = moveArrangeThread(layout, 'b1', after, {}, live);
+    const projected = projectArrangeLayout(next, live, buildAttentionClusters(live, after));
+    const idsBySection = Object.fromEntries(
+      Object.entries(projected).map(([key, items]) => [
+        key,
+        items.flatMap((item) =>
+          item.kind === 'thread' ? [item.thread.id] : item.kind === 'cluster-member' ? [item.member.id] : [],
+        ),
+      ]),
+    );
+    expect(idsBySection).toEqual({ '/A': ['a1', 'a2'], '/B': ['b1', 'b2'] });
+    expect(next['/A']).toEqual(layout['/A']);
+  });
+
+  it('forms the destination group only with members from the source project and dissolves its old local shell', () => {
+    const layout: ArrangeLayout = {
+      '/A': [{ ...group(['a', 'b'], 2), anchor: 'group:destination' }],
+      '/B': [
+        { ...group(['incoming', 'd'], 2), anchor: 'group:source' },
+        { kind: 'thread', id: 'e' },
+      ],
+    };
+    const groups = [
+      { id: 'destination', threadIds: ['a', 'b', 'e', 'incoming'] },
+      { id: 'source', threadIds: ['d', 'c'] },
+    ];
+    const result = moveArrangeThread(layout, 'incoming', groups, {}, rows);
+    expect(result['/A']).toEqual(layout['/A']);
+    expect(result['/B']).toEqual([
+      { kind: 'thread', id: 'd' },
+      { ...group(['incoming', 'e'], 2), anchor: 'group:destination' },
+    ]);
+  });
   it.each([
     [45, 5, ['a', 'incoming', 'b', 'c', 'd']],
     [1, 4, ['a', 'b', 'c', 'd']],

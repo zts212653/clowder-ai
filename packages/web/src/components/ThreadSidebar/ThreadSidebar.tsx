@@ -572,7 +572,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   const [classicArrangeMode, setClassicArrangeMode] = useState(false);
   const arrangeSession = useAttentionArrangeSession(liveThreads, attentionClusters, attentionMemberSort);
   const attentionArrangeMode = isV2 ? arrangeSession.active : classicArrangeMode;
-  const [arrangeHint, setArrangeHint] = useState<{ threadId: string; text: string } | null>(null);
+  const [arrangeHint, setArrangeHint] = useState<{ threadId: string; text: string; summary: string } | null>(null);
   useEffect(() => {
     if (!arrangeHint) return;
     const timer = window.setTimeout(() => setArrangeHint(null), 4000);
@@ -623,6 +623,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           setArrangeHint({
             threadId: sourceThreadId,
             text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
+            summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
           });
           return;
         }
@@ -655,6 +656,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
           setArrangeHint({
             threadId: sourceThreadId,
             text: mode === 'running-first' ? rowCopy.arrangeRunningHint : rowCopy.arrangeRecentHint,
+            summary: mode === 'running-first' ? rowCopy.arrangeRunningSummary : rowCopy.arrangeRecentSummary,
           });
         }
         return;
@@ -1741,6 +1743,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   const arrangeToolbar = (
     <AttentionArrangeToolbar
       compact={isV2}
+      hint={arrangeHint}
       draggedThreadId={draggedAttentionThreadId}
       canRemoveDragged={Boolean(
         draggedAttentionThreadId && attentionClusterByThreadId.get(draggedAttentionThreadId)?.groupId,

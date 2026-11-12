@@ -1,7 +1,12 @@
 'use client';
 
+import { AppTooltip } from '../AppTooltip';
+import { useShellCopy } from '../shell/shell-copy';
+import { threadSignalsCopy } from './thread-signals.shell-copy';
+
 interface AttentionArrangeToolbarProps {
   compact?: boolean;
+  hint?: { text: string; summary: string } | null;
   draggedThreadId: string | null;
   canRemoveDragged: boolean;
   onRemoveDragged: (threadId: string) => void;
@@ -10,15 +15,17 @@ interface AttentionArrangeToolbarProps {
 
 export function AttentionArrangeToolbar({
   compact = false,
+  hint,
   draggedThreadId,
   canRemoveDragged,
   onRemoveDragged,
   onDone,
 }: AttentionArrangeToolbarProps) {
+  const copy = useShellCopy(threadSignalsCopy);
   return (
     <div
       role="toolbar"
-      aria-label="整理对话"
+      aria-label={compact ? copy.arrangeTitle : '整理对话'}
       data-testid="attention-arrange-toolbar"
       className={
         compact
@@ -27,9 +34,23 @@ export function AttentionArrangeToolbar({
       }
       data-scroll-occluder={compact || undefined}
     >
-      {(!compact || !draggedThreadId || !canRemoveDragged) && (
-        <span className="min-w-0 flex-1 truncate">拖到另一条对话上建 Group</span>
+      {compact && (
+        <span className="sr-only" role="status">
+          {copy.arrangeEntered}
+        </span>
       )}
+      {(!compact || !draggedThreadId || !canRemoveDragged) &&
+        (hint && compact ? (
+          <AppTooltip label={hint.text} intent="content" side="top" multiline>
+            <span data-arrange-sort-hint className="min-w-0 flex-1 text-xs leading-tight line-clamp-2">
+              {hint.summary}
+            </span>
+          </AppTooltip>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">
+            {compact ? copy.arrangeInstruction : '拖到另一条对话上建 Group'}
+          </span>
+        ))}
       {draggedThreadId && canRemoveDragged && (
         <button
           type="button"
@@ -45,7 +66,7 @@ export function AttentionArrangeToolbar({
           }}
           className={`${compact ? 'min-w-0 flex-1 text-left' : 'shrink-0'} rounded-md px-2 py-1 text-conn-red-text hover:bg-conn-red-bg`}
         >
-          移出 Group
+          {compact ? copy.arrangeRemove : '移出 Group'}
         </button>
       )}
       <button
@@ -53,7 +74,7 @@ export function AttentionArrangeToolbar({
         onClick={onDone}
         className="shrink-0 rounded-md bg-cafe-accent px-2 py-1 font-medium text-[var(--cafe-surface)]"
       >
-        完成
+        {compact ? copy.arrangeDone : '完成'}
       </button>
     </div>
   );

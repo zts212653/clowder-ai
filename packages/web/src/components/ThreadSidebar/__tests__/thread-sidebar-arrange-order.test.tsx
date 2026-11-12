@@ -121,6 +121,9 @@ describe('Issue #1964 production arrange interaction', () => {
     await act(async () =>
       target?.dispatchEvent(new MouseEvent('dragover', { bubbles: true, clientY: after ? 1 : -1 })),
     );
+    await act(async () =>
+      target?.dispatchEvent(new MouseEvent('dragleave', { bubbles: true, relatedTarget: target.firstElementChild })),
+    );
     const line = target?.getAttribute('data-attention-insertion');
     await act(async () => target?.dispatchEvent(new MouseEvent('drop', { bubbles: true })));
     await harness.flush();
@@ -142,6 +145,11 @@ describe('Issue #1964 production arrange interaction', () => {
     expect(
       harness.container.querySelector('[data-attention-draggable-thread="old-pin"] [role="status"]')?.textContent,
     ).toContain(mode === 'recent' ? '最近' : '运行');
+    expect(
+      harness.container.querySelector('[data-testid="attention-arrange-toolbar"] [data-arrange-sort-hint]')
+        ?.textContent,
+    ).toContain('手动');
+    expect(harness.container.querySelector('[data-attention-arrange-hint]')?.classList.contains('sr-only')).toBe(true);
     await done();
     expect(harness.container.querySelector('[data-attention-arrange-hint]')).toBeNull();
   });
@@ -181,6 +189,9 @@ describe('Issue #1964 production arrange interaction', () => {
     expect(hidden).toContain('2');
     await enterArrange();
     expect(order()).toEqual(before);
+    expect(
+      harness.container.querySelector('[data-testid="attention-arrange-toolbar"] [role="status"]')?.textContent,
+    ).toContain('已进入整理模式');
     expect(remainder()).toBe(hidden);
     expect(harness.container.querySelector('[aria-label="取消置顶 old-pin"]')).not.toBeNull();
     await done();
@@ -238,5 +249,36 @@ describe('Issue #1964 production arrange interaction', () => {
       mockApiFetch.mock.calls.some(([path, init]) => path === '/api/threads/old-pin' && init?.method === 'PATCH'),
     ).toBe(true);
     expect(order()).toEqual(before);
+  });
+
+  it.each([409, 500])('keeps the captured layout when the membership writer returns %s', async (status) => {
+    await setup('flat', 'manual');
+    const normalApi = mockApiFetch.getMockImplementation()!;
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) =>
+      path.endsWith('/groups') ? Promise.resolve(new Response('{}', { status })) : normalApi(path, init),
+    );
+    await enterArrange();
+    const before = order();
+    expect(await drag('unpinned', 'old-pin', true)).toBe('after');
+    expect(order()).toEqual(before);
+    expect(mockApiFetch.mock.calls.filter(([path]) => path.endsWith('/groups'))).toHaveLength(1);
+    await done();
+    expect(order()).toEqual(before);
+  });
+
+  it('retains the classic arrange toolbar, animation and click behavior', async () => {
+    await setup('flat');
+    await act(async () => writeShellPresentation('classic'));
+    await enterArrange();
+    const toolbar = harness.container.querySelector('[data-testid="attention-arrange-toolbar"]');
+    expect(toolbar?.classList.contains('sticky')).toBe(false);
+    expect(harness.container.querySelector('[data-attention-arranging]')?.className).toContain('f277-jiggle');
+    expect(await drag('old-pin', 'new-pin')).toBeNull();
+    expect(harness.container.querySelector('[data-attention-arrange-hint]')).toBeNull();
+    expect(mockApiFetch.mock.calls.filter(([path]) => path.endsWith('/groups'))).toHaveLength(1);
+    await act(async () =>
+      harness.container.querySelector<HTMLButtonElement>('[aria-label="取消置顶 old-pin"]')?.click(),
+    );
+    expect(mockApiFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
   });
 });
