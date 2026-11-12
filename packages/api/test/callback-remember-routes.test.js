@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { registerCallbackAuthHook, requireCallbackAuth } from '../src/routes/callback-auth-prehandler.js';
-import { registerCallbackRememberRoutes } from '../src/routes/callback-remember-routes.js';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { registerCallbackAuthHook, requireCallbackAuth } from '../dist/routes/callback-auth-prehandler.js';
+import { registerCallbackRememberRoutes } from '../dist/routes/callback-remember-routes.js';
 
 async function fixture(t) {
   const app = Fastify(),

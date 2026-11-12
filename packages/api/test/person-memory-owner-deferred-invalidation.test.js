@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
-import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.ts';
-import { DEFERRED_RECEIPT_FORGET_LUA } from '../src/domains/memory/deferred-person-memory-redis-contract.ts';
-import { RedisPersonMemoryStore } from '../src/domains/memory/people/RedisPersonMemoryStore.ts';
-import { RedisDeferredPersonMemoryReceiptStore } from '../src/domains/memory/RedisDeferredPersonMemoryReceiptStore.ts';
-import { registerCallbackAuthHook } from '../src/routes/callback-auth-prehandler.ts';
-import { registerCallbackDeferPersonMemoryRoutes } from '../src/routes/callback-defer-person-memory-routes.ts';
-import { personMemoryOwnerReadRoutes } from '../src/routes/person-memory-owner-read.ts';
-import { executeOwnerPersonRedaction } from '../src/routes/person-memory-owner-redaction.ts';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { DEFERRED_RECEIPT_FORGET_LUA } from '../dist/domains/memory/deferred-person-memory-redis-contract.js';
+import { RedisPersonMemoryStore } from '../dist/domains/memory/people/RedisPersonMemoryStore.js';
+import { RedisDeferredPersonMemoryReceiptStore } from '../dist/domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
+import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
+import { registerCallbackDeferPersonMemoryRoutes } from '../dist/routes/callback-defer-person-memory-routes.js';
+import { personMemoryOwnerReadRoutes } from '../dist/routes/person-memory-owner-read.js';
+import { executeOwnerPersonRedaction } from '../dist/routes/person-memory-owner-redaction.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,

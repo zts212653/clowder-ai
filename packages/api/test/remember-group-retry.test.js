@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import Fastify from 'fastify';
-import { ApprovalIngress } from '../src/domains/approval-hub/ApprovalIngress.js';
-import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { FileProfileRepository } from '../src/domains/cats/services/profile/ProfileRepository.js';
-import { InMemoryProfileUpdateProposalStore } from '../src/domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
-import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
-import { RedisMessageStore } from '../src/domains/cats/services/stores/redis/RedisMessageStore.js';
-import { callbacksRoutes } from '../src/routes/callbacks.js';
+import { ApprovalIngress } from '../dist/domains/approval-hub/ApprovalIngress.js';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { FileProfileRepository } from '../dist/domains/cats/services/profile/ProfileRepository.js';
+import { InMemoryProfileUpdateProposalStore } from '../dist/domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { assertRedisIsolationOrThrow, cleanupClientKeyspace } from './helpers/redis-test-helpers.js';
 
 test('correcting a rejected item with the same request key refreshes the persisted group and socket payload', async (t) => {

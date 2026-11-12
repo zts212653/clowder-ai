@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import { PERSON_MEMORY_LIMITS } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { PersonMemoryRecallService } from '../src/domains/memory/people/PersonMemoryRecallService.ts';
-import { applyMigrations } from '../src/domains/memory/schema.ts';
-import { registerCallbackPersonMemoryRoutes } from '../src/routes/callback-person-memory-routes.ts';
+import { PersonMemoryRecallService } from '../dist/domains/memory/people/PersonMemoryRecallService.js';
+import { applyMigrations } from '../dist/domains/memory/schema.js';
+import { registerCallbackPersonMemoryRoutes } from '../dist/routes/callback-person-memory-routes.js';
 
 const catA = 'codex61-sol';
 const catB = 'codex61-terra';

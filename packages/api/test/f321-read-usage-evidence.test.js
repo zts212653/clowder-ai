@@ -5,14 +5,14 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { MemoryCueEpisodeStore } from '../src/domains/memory/cue/MemoryCueEpisodeStore.ts';
+import { MemoryCueEpisodeStore } from '../dist/domains/memory/cue/MemoryCueEpisodeStore.js';
 import {
   MemoryDirectReadConflict,
   recordMemoryDirectRead,
-} from '../src/domains/memory/read-usage/MemoryDirectReadEvidence.ts';
-import { readMemoryUsage } from '../src/domains/memory/read-usage/MemoryReadUsageReader.ts';
-import { applyMigrations } from '../src/domains/memory/schema.ts';
-import { personMemoryOwnerReadRoutes } from '../src/routes/person-memory-owner-read.ts';
+} from '../dist/domains/memory/read-usage/MemoryDirectReadEvidence.js';
+import { readMemoryUsage } from '../dist/domains/memory/read-usage/MemoryReadUsageReader.js';
+import { applyMigrations } from '../dist/domains/memory/schema.js';
+import { personMemoryOwnerReadRoutes } from '../dist/routes/person-memory-owner-read.js';
 
 const revision = `sha256:${'a'.repeat(64)}`,
   next = `sha256:${'b'.repeat(64)}`;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { listOwnerDeferredPersonMemoryPage } from '../src/domains/memory/deferred-person-memory-owner-read.ts';
-import { DeferredPersonMemoryReceiptKeys } from '../src/domains/memory/deferred-person-memory-redis-contract.ts';
+import { listOwnerDeferredPersonMemoryPage } from '../dist/domains/memory/deferred-person-memory-owner-read.js';
+import { DeferredPersonMemoryReceiptKeys } from '../dist/domains/memory/deferred-person-memory-redis-contract.js';
 
 const owner = 'owner-page';
 const receipt = (char) => ({

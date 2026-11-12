@@ -5,16 +5,16 @@ import Fastify from 'fastify';
 import {
   DEFERRED_RECEIPT_OWNER_FORGET_PREPARE_LUA,
   DEFERRED_RECEIPT_WITHDRAW_LUA,
-} from '../src/domains/memory/deferred-person-memory-redis-contract.ts';
-import { PersonMemoryKeys } from '../src/domains/memory/people/person-memory-keys.ts';
-import { REDACT_ITEM_LUA } from '../src/domains/memory/people/person-memory-lifecycle-lua.ts';
+} from '../dist/domains/memory/deferred-person-memory-redis-contract.js';
+import { PersonMemoryKeys } from '../dist/domains/memory/people/person-memory-keys.js';
+import { REDACT_ITEM_LUA } from '../dist/domains/memory/people/person-memory-lifecycle-lua.js';
 import {
   personClaimOwnerRevision,
   personInteractionOwnerRevision,
-} from '../src/domains/memory/people/person-memory-owner-revision.ts';
-import { RedisPersonMemoryStore } from '../src/domains/memory/people/RedisPersonMemoryStore.ts';
-import { RedisDeferredPersonMemoryReceiptStore } from '../src/domains/memory/RedisDeferredPersonMemoryReceiptStore.ts';
-import { personMemoryOwnerReadRoutes } from '../src/routes/person-memory-owner-read.ts';
+} from '../dist/domains/memory/people/person-memory-owner-revision.js';
+import { RedisPersonMemoryStore } from '../dist/domains/memory/people/RedisPersonMemoryStore.js';
+import { RedisDeferredPersonMemoryReceiptStore } from '../dist/domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
+import { personMemoryOwnerReadRoutes } from '../dist/routes/person-memory-owner-read.js';
 import {
   auth,
   claim,

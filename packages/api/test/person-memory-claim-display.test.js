@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ownerMemoryActionEvidenceSchema, personClaimVersionSchema } from '@cat-cafe/shared';
-import { PersonMemoryOwnerReadService } from '../src/domains/memory/people/PersonMemoryOwnerReadService.ts';
-import { updatePersonMemoryCandidate } from '../src/domains/memory/people/person-memory-candidate.ts';
-import { personAggregateOwnerRevision } from '../src/domains/memory/people/person-memory-owner-revision.ts';
+import { PersonMemoryOwnerReadService } from '../dist/domains/memory/people/PersonMemoryOwnerReadService.js';
+import { updatePersonMemoryCandidate } from '../dist/domains/memory/people/person-memory-candidate.js';
+import { personAggregateOwnerRevision } from '../dist/domains/memory/people/person-memory-owner-revision.js';
 
 const owner = 'owner-display';
 const sourceRef = { kind: 'message', threadId: 'thread_display', messageId: 'message_display' };

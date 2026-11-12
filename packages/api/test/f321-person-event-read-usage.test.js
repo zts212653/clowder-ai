@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
-import { EventMemoryStore } from '../src/domains/memory/EventMemoryStore.ts';
-import { PersonMemoryRecallService } from '../src/domains/memory/people/PersonMemoryRecallService.ts';
-import { applyMigrations } from '../src/domains/memory/schema.ts';
-import { registerCallbackPersonMemoryRoutes } from '../src/routes/callback-person-memory-routes.ts';
-import { eventsRoutes } from '../src/routes/events.ts';
+import { EventMemoryStore } from '../dist/domains/memory/EventMemoryStore.js';
+import { PersonMemoryRecallService } from '../dist/domains/memory/people/PersonMemoryRecallService.js';
+import { applyMigrations } from '../dist/domains/memory/schema.js';
+import { registerCallbackPersonMemoryRoutes } from '../dist/routes/callback-person-memory-routes.js';
+import { eventsRoutes } from '../dist/routes/events.js';
 
 const revision = `sha256:${'a'.repeat(64)}`;
 const card = { personId: 'person_usage', displayName: 'Fixture', relationship: {}, claims: [], recentEvents: [] };
