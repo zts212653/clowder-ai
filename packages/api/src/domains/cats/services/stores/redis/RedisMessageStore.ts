@@ -3432,6 +3432,15 @@ export class RedisMessageStore {
     }
   }
 
+  /**
+   * Authoritative thread-timeline score. Delivery metadata can be rewritten
+   * after positioning, so pagination must bind to the real ZSET member score.
+   */
+  async getThreadTimelineScore(threadId: string, messageId: string): Promise<number | undefined> {
+    const raw = await this.redis.zscore(MessageKeys.thread(threadId), messageId);
+    return raw === null ? undefined : parseRedisNumber(raw);
+  }
+
   async getByThreadBefore(
     threadId: string,
     timestamp: number,

@@ -193,6 +193,17 @@ export function getTimelineOrderTime(message: StoredMessage): number {
   return message.deliveredAt ?? message.timestamp;
 }
 
+/**
+ * Score actually used by the thread timeline ZSET for pagination cursors.
+ * Published speech keeps its authoring position even when later delivery
+ * metadata rewrote timelineOrderAt; hidden queued work enters at delivery.
+ * Stores that own a real ZSET should prefer reading its score directly.
+ */
+export function getStorageTimelineScore(message: StoredMessage): number {
+  if (isTimelinePublished(message)) return message.timestamp;
+  return message.timelineOrderAt ?? message.deliveredAt ?? message.timestamp;
+}
+
 /** Who is viewing */
 export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonly catId: CatId };
 

@@ -919,3 +919,66 @@ test('thread-context does not repeat one published message when the storage curs
   assert.equal(pluginCopies.length, 1, `expected one plugin wake, got ${pluginCopies.length}`);
   assert.equal(betweenCopies.length, 1, `expected one between message, got ${betweenCopies.length}`);
 });
+
+test('a full filtered page must not hide older visible owner history', async (t) => {
+  const f = await fixture(t);
+  const time = Date.now() - 10_000;
+  const older = f.messages.append({
+    userId: f.userId,
+    threadId: f.threadId,
+    from: { kind: 'user', userId: f.userId },
+    content: 'older owner request must remain reachable',
+    mentions: [],
+    timestamp: time - 100,
+  });
+  const plugin = f.messages.append({
+    userId: f.userId,
+    threadId: f.threadId,
+    from: { kind: 'plugin', instanceId: 'pi_isolated_cursor' },
+    content: 'isolated plugin wake',
+    mentions: [],
+    timestamp: time,
+    extra: {
+      pluginMessage: {
+        instanceId: 'pi_isolated_cursor',
+        revision: 1,
+        provenance: {},
+        elements: [],
+        appendOps: [],
+      },
+    },
+  });
+  // The incident's later delivery metadata, not the real thread ZSET score.
+  plugin.timelineOrderAt = time + 1_000;
+  const hidden = Array.from({ length: 49 }, (_, index) =>
+    f.messages.append({
+      userId: f.userId,
+      threadId: f.threadId,
+      from: { kind: 'system', service: 'isolated-review' },
+      origin: 'briefing',
+      content: 'filtered briefing row',
+      mentions: [],
+      timestamp: time + index + 1,
+    }),
+  );
+  const indexed = [older, plugin, ...hidden];
+  // Documented Redis contract: page by real ZSET publication score while the
+  // returned record retains the incident's later delivery metadata.
+  f.messages.getByThreadBefore = (_threadId, cursorTime, limit, beforeId) => {
+    const rows = indexed
+      .filter((row) => row.timestamp < cursorTime || (row.timestamp === cursorTime && (!beforeId || row.id < beforeId)))
+      .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id))
+      .slice(0, limit)
+      .reverse();
+    return rows;
+  };
+
+  const response = await f.read({ limit: '5' });
+  assert.equal(response.statusCode, 200, response.body);
+  const messages = response.json().messages;
+  assert.equal(messages.filter((message) => message.id === plugin.id).length, 1, 'no duplicate plugin');
+  assert.ok(
+    messages.some((message) => message.id === older.id),
+    'older visible owner input must not be silently lost',
+  );
+});

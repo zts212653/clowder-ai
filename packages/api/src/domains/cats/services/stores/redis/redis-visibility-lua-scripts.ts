@@ -377,7 +377,12 @@ end
 -- If so, preserve the immutable canonical position — only update delivery fields.
 local existingVis = redis.call('HGET', hash, 'visibilitySeq')
 if existingVis ~= false then
-  redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'timelineOrderAt', timelineScore, 'deliveryStatus', 'delivered')
+  -- Already positioned at append. Preserve the real thread-timeline score;
+  -- timelineScore (deliveredAt for non-cat speech) must not rewrite it.
+  local canonicalOrder = redis.call('ZSCORE', kp .. 'msg:thread:' .. threadId, msgId)
+  if canonicalOrder == false then canonicalOrder = redis.call('HGET', hash, 'timelineOrderAt') end
+  if canonicalOrder == false then canonicalOrder = timestamp end
+  redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'timelineOrderAt', canonicalOrder, 'deliveryStatus', 'delivered')
   return redis.call('HGETALL', hash)
 end
 

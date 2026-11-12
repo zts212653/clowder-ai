@@ -4439,25 +4439,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
           if (batch.length === 0) break;
 
-          // A cursor can fail to advance when persisted delivery metadata
-          // (timelineOrderAt) no longer matches the thread ZSET score. Never
-          // replay a row already fetched for this read or spin on a
-          // non-advancing batch: treat it as the end of available history.
-          const newItems: typeof batch = [];
+          // Advancing by reconstructed timelineOrderAt can point past the real
+          // ZSET position when delivery rewrote metadata. Ask the store for the
+          // authoritative score of the oldest fetched row. Seen ids suppress
+          // duplicate output only; they must never stop cursor progress.
+          const previousCursorId = cursorId;
           for (const item of batch) {
             if (seenIds.has(item.id)) continue;
             seenIds.add(item.id);
-            newItems.push(item);
-          }
-          if (newItems.length === 0) break;
-
-          for (const item of newItems) {
             if (!canIncludeContextItemWithoutKeyword(item)) continue;
             visible.push(item);
           }
 
-          const oldest = newItems[0]!;
-          cursorTimestamp = getTimelineOrderTime(oldest);
+          const oldest = batch[0]!;
+          if (oldest.id === previousCursorId) break;
+          const oldestScore = await messageStore.getThreadTimelineScore?.(effectiveThreadId, oldest.id);
+          cursorTimestamp = oldestScore ?? getTimelineOrderTime(oldest);
           cursorId = oldest.id;
         }
 

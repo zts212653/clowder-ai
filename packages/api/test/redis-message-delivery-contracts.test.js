@@ -297,4 +297,22 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     assert.equal(await redis.zscore(MessageKeys.thread(threadId), msg.id), String(repairedScore));
     assert.equal(await redis.zscore(MessageKeys.TIMELINE, msg.id), String(repairedScore));
   });
+
+  // 16. A row positioned before delivery keeps its real thread score; later
+  // delivery metadata must not rewrite timelineOrderAt to deliveredAt.
+  it('markDelivered preserves the real thread score for an already-positioned row', async () => {
+    const base = Date.now();
+    const threadId = 'thread-dlv-positioned-16';
+    const msg = await createQueued('userA', threadId, base);
+    // Simulate a row that already entered the thread timeline before delivery.
+    await redis.hset(MessageKeys.detail(msg.id), 'visibilitySeq', String(base + 1));
+
+    const delivered = await store.markDelivered(msg.id, base + 1000);
+
+    assert.ok(delivered, 'delivery must succeed');
+    assert.equal(delivered.timelineOrderAt, base, 'delivery must preserve the real thread score');
+    assert.equal(await redis.zscore(MessageKeys.thread(threadId), msg.id), String(base));
+    assert.equal(await redis.zscore(MessageKeys.TIMELINE, msg.id), String(base));
+    await assertConsistency(msg.id, 'positioned-delivery');
+  });
 });

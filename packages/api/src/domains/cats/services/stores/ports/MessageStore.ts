@@ -79,6 +79,7 @@ import { storedMessageSource } from '../message-source.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
+  getStorageTimelineScore,
   getTimelineOrderTime,
   isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
@@ -2291,6 +2292,15 @@ export interface IMessageStore {
     userId?: string,
     options?: ThreadMessageReadOptions,
   ): StoredMessage[] | Promise<StoredMessage[]>;
+  /**
+   * Authoritative thread-timeline ZSET score for one message, when the store
+   * owns one. Cursor builders use it instead of reconstructed delivery metadata,
+   * which may be rewritten after the row was positioned.
+   */
+  getThreadTimelineScore?(
+    threadId: string,
+    messageId: string,
+  ): number | undefined | Promise<number | undefined>;
   getByThreadBeforeBounded(
     threadId: string,
     timestamp: number,
@@ -3631,6 +3641,15 @@ export class MessageStore {
     const seq = this.visibilitySeq.get(messageId);
     if (seq == null) return messageId;
     return cursorFor({ id: messageId, visibilitySeq: seq });
+  }
+
+  /**
+   * In-memory companion to the Redis ZSET score. Published speech keeps its
+   * authoring position even when delivery later rewrote timelineOrderAt.
+   */
+  getThreadTimelineScore(threadId: string, messageId: string): number | undefined {
+    const message = this.messages.find((candidate) => candidate.id === messageId && candidate.threadId === threadId);
+    return message ? getStorageTimelineScore(message) : undefined;
   }
 
   /**
