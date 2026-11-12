@@ -66,6 +66,7 @@ function bindMembers() {
     if (!meta) return null;
     const id = S.route === 'memberNew' ? '' : S.param,
       key = id || 'new';
+    if (!id && S.route !== 'memberNew') return null; // a member page names its member
     if (!editor || editor.key !== key) {
       const cat = id
         ? cats().find(function (cat) {
