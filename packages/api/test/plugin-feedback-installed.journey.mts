@@ -51,7 +51,8 @@ try {
   await panel.getByText('草稿已保存到反馈记录', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭插件面板', exact: true }).click();
   await page.getByRole('button', { name: '问题反馈', exact: true }).click();
-  assert.equal(await panel.getByLabel('描述').inputValue(), '');
+  await panel.locator('#feedback-body:not(:disabled)').waitFor();
+  assert.equal(await panel.getByLabel('描述').inputValue(), '第一条还没有投递');
   await history();
   await panel
     .locator('.history-item')
