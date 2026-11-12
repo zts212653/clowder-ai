@@ -35,7 +35,7 @@ test('an existing Desktop member gets a turn overlay after its own and secret pa
   assert.equal(prepared.at(-2), '--patch');
   const patch = prepared.at(-1);
   assert.ok(patch);
-  assert.equal(verifyDshTurnPatch(patch), true);
+  assert.equal(verifyDshTurnPatch(patch, command, args), true);
   const rows = parse(readFileSync(patch, 'utf8'));
   assert.deepEqual(rows[0], { id: 'acp', disabled: true });
   const bridge = rows[1].insert[0];
@@ -46,7 +46,7 @@ test('an existing Desktop member gets a turn overlay after its own and secret pa
   assert.ok(bridge.config.nativeScope.includes('app.asar'));
   assert.deepEqual(await prepareDshTurnPatch(command, args, root, selection), prepared);
   writeFileSync(patch, readFileSync(patch, 'utf8').replace('deepseek-flash', 'other-model'));
-  assert.equal(verifyDshTurnPatch(patch), false, 'a modified managed overlay cannot launch');
+  assert.equal(verifyDshTurnPatch(patch, command, args), false, 'a modified managed overlay cannot launch');
   assert.equal(await prepareDshTurnPatch(command, args, root, 'unknown'), args);
   for (const desktopVersion of ['0.2.1-rc.2', 'unreviewed']) {
     writeFileSync(manifest, JSON.stringify({ desktopVersion }));

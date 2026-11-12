@@ -468,7 +468,11 @@ export async function createAcpServiceForConfig(
     const verifyCwd = verified.verifyCwd;
     verified.verifyCwd = (...args) => {
       if (secretPatch && !verifyDshSecretPatch(secretPatch)) throw new Error('secret_dsh_patch_changed');
-      if (turnPatch && !verifyDshTurnPatch(turnPatch)) throw new Error('dsh_turn_patch_changed');
+      if (turnPatch && !verifyDshTurnPatch(turnPatch, bootstrap.command, secretArgs)) {
+        throw new Error(
+          'dsh_turn_admission_changed: DSH Desktop version, launch binding or managed bridge patch changed; refresh this member before retrying.',
+        );
+      }
       return verifyCwd(...args);
     };
   }

@@ -42,14 +42,26 @@ function template(config: z.infer<typeof configSchema>) {
   );
 }
 
-export function verifyDshTurnPatch(path: string) {
+function resolveSupportedDshDesktopLaunch(command: string, args: readonly string[]) {
+  const plan = resolveDshDesktopLaunch(resolveCliCommandOrBare(command), args);
+  if (!plan) return null;
+  const runtime: unknown = JSON.parse(
+    readFileSync(join(dirname(plan.command), 'resources/runtime/primary-runtime/runtime.json'), 'utf8'),
+  );
+  return z.object({ desktopVersion: z.literal('0.2.2-rc.1') }).safeParse(runtime).success ? plan : null;
+}
+
+export function verifyDshTurnPatch(path: string, command: string, args: readonly string[]) {
   try {
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size >= 8192) return false;
     const content = readFileSync(path, 'utf8');
     if (!content.startsWith(PREFIX)) return false;
     const config = configSchema.parse(JSON.parse(content.slice(PREFIX.length, content.indexOf('\n'))));
+    const plan = resolveSupportedDshDesktopLaunch(command, args);
     return (
+      plan !== null &&
+      config.nativeScope === dirname(dirname(dirname(plan.args[1]))) &&
       content === template(config) &&
       basename(path) === `dsh-turn-${digest(content)}.patch.yml` &&
       digest(readFileSync(BRIDGE)) === BRIDGE_HASH
@@ -66,14 +78,10 @@ export async function prepareDshTurnPatch(
   projectRoot: string,
   modelSelection?: string,
 ) {
-  const plan = resolveDshDesktopLaunch(resolveCliCommandOrBare(command), args);
-  if (!plan) return args;
   let config: z.infer<typeof configSchema>;
   try {
-    const runtime: unknown = JSON.parse(
-      readFileSync(join(dirname(plan.command), 'resources/runtime/primary-runtime/runtime.json'), 'utf8'),
-    );
-    if (!z.object({ desktopVersion: z.literal('0.2.2-rc.1') }).safeParse(runtime).success) return args;
+    const plan = resolveSupportedDshDesktopLaunch(command, args);
+    if (!plan) return args;
     const [provider, model] = selectionSchema.parse(JSON.parse(modelSelection ?? 'null'));
     if (provider === 'unknown' || model === 'unknown') return args;
     config = { nativeScope: dirname(dirname(dirname(plan.args[1]))), provider, model };
@@ -89,6 +97,6 @@ export async function prepareDshTurnPatch(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
-  if (!verifyDshTurnPatch(path)) throw new Error('dsh_turn_patch_changed');
+  if (!verifyDshTurnPatch(path, command, args)) throw new Error('dsh_turn_patch_changed');
   return [...args, '--patch', path];
 }
