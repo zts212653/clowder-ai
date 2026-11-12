@@ -831,13 +831,19 @@ function pcfInstant(inst) {
     })
   );
 }
+// The new value shows at once as the field's value (not a draft, so no save bar), and goes back if the save fails.
 async function pcfSaveOne(inst, key, value) {
-  const st = pcfState(inst);
-  pcfSet(inst, key, value);
+  const f = pcfField(inst, key),
+    before = f.currentValue;
+  f.currentValue = value;
   render(true);
-  await PCF_SRC[inst].save([{ key: key, value: value }]);
-  delete st.draft[key];
-  render(true);
+  try {
+    await PCF_SRC[inst].save([{ key: key, value: value }]);
+  } catch (error) {
+    f.currentValue = before;
+    render(true);
+    throw error;
+  }
 }
 Object.assign(A, {
   /* 插件配置的一个操作（配置协议）：op = bool（字段开关）| recBool（记录里的开关）| add / del（一列值的增删）| recAdd / recDel（记录的增删）| discard（丢掉草稿）；没写 op = 字段声明的操作（a） */
