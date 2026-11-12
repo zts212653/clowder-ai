@@ -2393,7 +2393,7 @@ views:
       - type: notice
         tone: warn
         text: t:runtime.companionLost
-        when: $.frame.state
+        when: $.frame.lost
         action:
           type: button
           label: t:runtime.companionRestore

@@ -66,8 +66,19 @@ function bindPluginSpaces() {
     }
     await chatDataRender();
   };
+  // A lost window, or a ball its owner hid: either can be shown again.
+  function companionState() {
+    return companion.desktopLost ? 'lost' : companion.presence && companion.presence.state === 'hidden' ? 'hidden' : '';
+  }
+  // A desktop window row shows whether the window is hidden or lost, and shows it again.
+  function companionDesk() {
+    if (projectionNeeded) projectionNeeded.add('companion');
+    const state = companionState();
+    return { lost: state === 'lost', hidden: state === 'hidden', canRestore: !!state, lossId: companion.lossId };
+  }
   A.companionRestore = async function (d) {
-    if (d.lossId !== companion.lossId || !companion.desktopLost) return;
+    const state = companionState();
+    if (!state || (state === 'lost' && d.lossId !== companion.lossId)) return;
     try {
       const receipt = await api.post('/api/concierge/desktop/show', {}, {});
       if (!receipt.presence || receipt.presence.state !== 'visible' || receipt.presence.maxAgeMs <= 0) {
@@ -230,8 +241,9 @@ function bindPluginSpaces() {
       frame:
         S.route === 'companion'
           ? {
-              state: companion.desktopLost ? 'lost' : '',
-              canRestore: !!companion.desktopLost,
+              lost: companionState() === 'lost',
+              hidden: companionState() === 'hidden',
+              canRestore: !!companionState(),
               lossId: companion.lossId,
             }
           : null,
@@ -396,22 +408,28 @@ function bindPluginSpaces() {
       if (active && projectionNeeded) projectionNeeded.add('pluginTools:' + plugin.pluginId);
       const kind = kinds[capability.kind] || capability.kind;
       if (!groups.has(kind)) groups.set(kind, { kind: kind, scheduler: kind === 'scheduler', items: [] });
-      groups.get(kind).items.push({
-        key: capability.id,
-        kind: kind,
-        is: { [kind]: true },
-        titleMode: 'plain',
-        title: capability.name,
-        sub: capability.description,
-        installed: plugin.artifact === 'installed',
-        tools: (active ? owner.pluginTools[plugin.pluginId] || [] : [])
-          .filter(function (tool) {
-            return tool.contributionId === capability.id;
-          })
-          .map(function (tool) {
-            return tool.name;
-          }),
-      });
+      const desk = kind === 'desktop' && active ? companionDesk() : null;
+      groups.get(kind).items.push(
+        Object.assign(
+          {
+            key: capability.id,
+            kind: kind,
+            is: { [kind]: true },
+            titleMode: 'plain',
+            title: capability.name,
+            sub: capability.description,
+            installed: plugin.artifact === 'installed',
+            tools: (active ? owner.pluginTools[plugin.pluginId] || [] : [])
+              .filter(function (tool) {
+                return tool.contributionId === capability.id;
+              })
+              .map(function (tool) {
+                return tool.name;
+              }),
+          },
+          desk,
+        ),
+      );
     });
     return {
       readme: owner.pluginDocumentation[plugin.pluginId]

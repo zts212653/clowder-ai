@@ -964,7 +964,11 @@ views:
                           args: ["@coveredRegion"]
                         when: "@cover"
                       - {text: t:pluginPage.contributions.memberReplyOnlySuffix, when: "@catOnly"}
+                      - {text: t:runtime.companionHidden, when: "@hidden"}
+                      - {text: t:runtime.companionLost, when: "@lost"}
                     sep: ""
+                  acts:
+                    - {label: t:runtime.companionRestore, icon: eye, act: companionRestore, args: {lossId: "@lossId"}, when: "@canRestore"}
                   act:
                     of: "@kind"
                     map: {skills: open, mcps: open, _: ""}

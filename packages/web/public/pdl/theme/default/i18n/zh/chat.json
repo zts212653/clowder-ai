@@ -1344,7 +1344,8 @@
       "missing": "缺失",
       "stale": "有变更"
     },
-    "connectionFailed": "连接失败"
+    "connectionFailed": "连接失败",
+    "companionHidden": "猫猫球已隐藏"
   },
   "theater": {
     "label": "回放剧场",
