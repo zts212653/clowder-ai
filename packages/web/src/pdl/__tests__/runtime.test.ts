@@ -5687,8 +5687,16 @@ describe('unmodified runtime and project chat bindings', () => {
   });
 
   it('uses the full-window export frame, exact mids and the same readonly message nodes', async () => {
-    const { dom, w } = await boot(['reply-1']);
+    // The host binds no project data in export mode; the page still settles.
+    const { dom, w } = await boot(['reply-1'], undefined, undefined, {}, (port) => {
+      Object.defineProperty(port, 'data', {
+        value: { ...Reflect.get(port, 'data'), project: undefined },
+        writable: true,
+      });
+    });
     try {
+      // A sender named by id resolves without the plugin list (this threw inside every render frame, so __settled never came).
+      expect(w.eval("fromOf('codex').kind")).toBe('agent');
       const frame = w.document.querySelector('[data-view="thread.export"]');
       expect(frame).not.toBeNull();
       expect(

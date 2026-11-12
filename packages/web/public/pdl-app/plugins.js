@@ -7,8 +7,10 @@ function bindPluginSpaces() {
   // plugin id → the fragment it is registered with: install, update and uninstall re-register only what changed
   const registered = {};
   let companion = { load: 'loading' };
+  // The export view has no project data: no plugin identities to resolve.
   const pluginRows = function () {
-    return placementData().plugins ? placementData().plugins.plugins : [];
+    const settings = placementData();
+    return settings && settings.plugins ? settings.plugins.plugins : [];
   };
   const mutationErrors = {};
   // Install / update / uninstall in flight, per plugin: the button itself shows it until the request settles.

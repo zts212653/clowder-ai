@@ -1,7 +1,7 @@
 /* Placement owners: the host pushes receipts; these VMs project the held settings snapshot. */
 'use strict';
 function placementData() {
-  return chatDataSnapshot.project.settings;
+  return chatDataSnapshot.project && chatDataSnapshot.project.settings;
 }
 function bindPlacement() {
   RESETS.voice = {
