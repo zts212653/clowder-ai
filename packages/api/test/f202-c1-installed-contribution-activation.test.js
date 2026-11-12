@@ -643,7 +643,11 @@ test('local archive MCP materialization resolves its verified dependency closure
         contractVersion: manifest.contractVersion,
         manifest,
         signalSchemas: {},
-        provenance: { kind: 'local-archive', packageName: '@clowder-ai/local-mcp-dependency-fixture' },
+        provenance: {
+          kind: 'local-archive',
+          packageName: '@clowder-ai/local-mcp-dependency-fixture',
+          dependencyClosure: 'shipped',
+        },
         packageState: 'installed',
         verifiedAt: 1,
         updatedAt: 1,
@@ -669,6 +673,7 @@ test('local archive MCP materialization resolves its verified dependency closure
           materializerCalls += 1;
           assert.equal(input.packageName, '@clowder-ai/local-mcp-dependency-fixture');
           assert.equal(input.sourceKind, 'local-archive');
+          assert.equal(input.dependencyClosure, 'shipped');
           return {
             rootDir: packageRoot,
             manifest,
