@@ -68,7 +68,8 @@ const nextConfig = {
   transpilePackages: ['@cat-cafe/ui'],
   ...(testDistDir ? { distDir: testDistDir } : {}),
   ...(testTsconfigPath ? { typescript: { tsconfigPath: testTsconfigPath } } : {}),
-  experimental: { proxyTimeout: 120_000 },
+  // Keep same-origin API rewrites alive beyond the panel's 180s server / 185s client deadlines.
+  experimental: { proxyTimeout: 190_000 },
   env: {
     NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: webBuildRevision ?? '',
     NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: deploymentRevisionRequired ? '1' : '0',
