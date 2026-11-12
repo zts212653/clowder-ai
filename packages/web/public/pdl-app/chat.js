@@ -738,12 +738,17 @@ window.clowderChat = {
     });
     ['cafeExport', 'cafeMultiExport'].forEach(function (name) {
       A[name] = function (d) {
-        return chatAction(name, d).then(function (file) {
-          if (file) {
-            A.download(file);
-            file.release();
-          }
-        });
+        return chatAction(name, d).then(
+          function (file) {
+            if (file) {
+              A.download(file);
+              file.release();
+            }
+          },
+          function (error) {
+            toast(error.message, null, 'danger');
+          },
+        );
       };
     });
     A.cafeQueueSend = function (d) {

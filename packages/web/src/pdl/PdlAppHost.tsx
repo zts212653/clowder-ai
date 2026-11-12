@@ -192,6 +192,8 @@ function subscribeLocation(changed: () => void) {
   };
 }
 const browserLocation = () => window.location.pathname + window.location.search + window.location.hash;
+// The server render has no address after #; the console starts once the browser's full address (an export page) is known.
+const subscribeNever = () => () => {};
 type PendingThreadJump = { threadId: string; mid: string; catId?: string };
 
 /** Message images as files again, for a retry or a recalled message going back into the input. */
@@ -219,6 +221,11 @@ function subscribeDraftOwner(onChange: () => void): () => void {
 export function PdlAppHost() {
   const pathname = usePathname() || '/';
   const browserPath = useSyncExternalStore(subscribeLocation, browserLocation, () => pathname);
+  const inBrowser = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
   const exportAddress = readThreadExportAddress(new URL(browserPath, 'https://pdl.invalid'));
   const threadId = exportAddress?.threadId ?? getThreadIdFromPathname(browserPath);
   const pendingJump = useRef<PendingThreadJump | null>(null);
@@ -226,14 +233,16 @@ export function PdlAppHost() {
   return (
     <ThreadChatRuntimeProvider routeThreadId={threadId} neededSources={needed}>
       <div id="app" />
-      <ChatBinding
-        key={browserPath.includes('#export-') ? browserPath : 'console'}
-        threadId={threadId}
-        pendingJump={pendingJump}
-        needed={needed}
-        setNeeded={setNeeded}
-        exportMids={exportAddress?.mids}
-      />
+      {inBrowser && (
+        <ChatBinding
+          key={browserPath.includes('#export-') ? browserPath : 'console'}
+          threadId={threadId}
+          pendingJump={pendingJump}
+          needed={needed}
+          setNeeded={setNeeded}
+          exportMids={exportAddress?.mids}
+        />
+      )}
     </ThreadChatRuntimeProvider>
   );
 }
