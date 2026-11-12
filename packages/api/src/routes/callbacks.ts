@@ -983,6 +983,10 @@ export interface CallbackRoutesOptions {
   /** F167 Phase S: durable subject/action/slot admission for A2A successor dispatch. */
   actionSuccessorAdmissionService?: import('../domains/ball-custody/ActionSuccessorAdmissionService.js').ActionSuccessorAdmissionService;
   ordinaryTaskHandoffs?: import('../domains/ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
+  taskRecovery?: Pick<
+    import('../domains/ball-custody/TaskRecoveryReadModel.js').TaskRecoveryReadModel,
+    'project' | 'projectMany'
+  >;
   /** Exact Task/Message/Queue recovery for pre-atomic direct carriers with no execution. */
   taskActionSuccessorOrphanRecovery?: import('../domains/ball-custody/TaskActionSuccessorOrphanRecovery.js').TaskActionSuccessorOrphanRecovery;
   /**
@@ -5957,6 +5961,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       taskStore,
       registry,
       ...(opts.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: opts.ordinaryTaskHandoffs } : {}),
+      ...(opts.taskRecovery ? { taskRecovery: opts.taskRecovery } : {}),
       ...(opts.ownedWaitStatusReader ? { ownedWaitStatusReader: opts.ownedWaitStatusReader } : {}),
       messageStore: opts.messageStore,
       socketManager,
