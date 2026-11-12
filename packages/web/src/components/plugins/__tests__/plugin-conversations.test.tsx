@@ -67,6 +67,7 @@ it('the live entry selects its existing conversation and displays only the suppl
   await act(async () => button?.click());
   expect(select).toHaveBeenCalledWith('bot-main');
   expect(container.querySelector('[aria-label="2 项待处理"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="我的助手设置"]')?.getAttribute('title')).toBe('我的助手设置');
 });
 
 it('a temporary read failure preserves the previously confirmed native navigation', async () => {

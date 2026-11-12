@@ -196,6 +196,7 @@ export function PluginConversationEntries({
                 style={isV2 ? { color: 'var(--shell-muted)' } : undefined}
                 href={settings}
                 aria-label={`${entry.label}设置`}
+                title={`${entry.label}设置`}
               >
                 <ShellGlyph name="settings" className="h-3.5 w-3.5" />
               </a>

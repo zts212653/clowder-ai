@@ -76,6 +76,7 @@ test('resident native binding survives read failure and is not duplicated in eit
           memoryIconX: memory?.querySelector('svg')?.getBoundingClientRect().x,
           text: element.textContent,
           imageCount: element.querySelectorAll('img').length,
+          color: getComputedStyle(element).color,
         };
       });
       assert.equal(geometry.height, 32);
@@ -89,6 +90,17 @@ test('resident native binding survives read failure and is not duplicated in eit
       await resident
         .locator('xpath=ancestor::aside[1]')
         .screenshot({ path: path.join(evidence, `sidebar-${shell}-ready.png`) });
+      assert.equal(await resident.getByRole('link', { name: '我的助手设置' }).getAttribute('title'), '我的助手设置');
+      await page.evaluate(() => window.__f322Chat.theme('dark'));
+      await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+      const darkColor = await ready.evaluate((element) => getComputedStyle(element).color);
+      assert.notEqual(darkColor, geometry.color, 'the production theme chain changes the resident text color');
+      await page.screenshot({ path: path.join(evidence, `resident-${shell}-dark.png`), fullPage: true });
+      await resident
+        .locator('xpath=ancestor::aside[1]')
+        .screenshot({ path: path.join(evidence, `sidebar-${shell}-dark.png`) });
+      await page.evaluate(() => window.__f322Chat.theme('light'));
+      await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
       await resident.getByRole('button', { name: '我的助手，可用' }).click();
       await page.waitForURL(`**/thread/${BUSY_THREAD}`);
       await page.waitForFunction(
@@ -131,6 +143,7 @@ test('resident native binding survives read failure and is not duplicated in eit
       receipts.push({
         shell,
         geometry,
+        darkColor,
         narrowContained: contained,
         explicitOpens: opens,
         retainedNavigation: true,
