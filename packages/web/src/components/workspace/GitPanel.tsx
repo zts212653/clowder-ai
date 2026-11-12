@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 import type { GitCommit } from '../../hooks/useGitPanel';
 import { useGitPanel } from '../../hooks/useGitPanel';
@@ -129,7 +130,7 @@ function GitPanelClassic() {
 
       {error && (
         <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-[var(--semantic-critical-surface)]">
-          {error}
+          {isGitWorktreeRequired(error) ? 'This is a bare Git repository; this view requires a working tree' : error}
         </div>
       )}
 
