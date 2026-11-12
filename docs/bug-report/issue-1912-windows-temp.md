@@ -7,7 +7,7 @@ created: 2026-11-09
 
 # #1912：Windows 临时目录选择与测试收尾
 
-原始委托：`thread_owned_5e20c7ec2b594449fa5c55a1c2250d9560f82865#0001794154806703-000444-27d8d64b`。目标分支为 `next`，开发基线 `c14eed1c454244c6769306346ec1572926e17677`。
+问题跟踪：[Issue #1912](https://github.com/zts212653/clowder-ai/issues/1912)；修复提交：[PR #1913](https://github.com/zts212653/clowder-ai/pull/1913)。目标分支为 `next`，开发基线 `c14eed1c454244c6769306346ec1572926e17677`。
 
 缅因猫与鲸鲸先讨论方案，再实施。Windows 原生 Node 会把 `/tmp` 解释到当前盘根；模板预加载器为每个测试进程复制配置，子进程遭终止时无法依赖自己的 exit hook 清理。旧 Bash 包装器的 `trap EXIT` 又被末尾 `exec` 绕过。
 
