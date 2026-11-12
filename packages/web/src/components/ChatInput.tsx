@@ -348,7 +348,12 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [textareaReady, setTextareaReady] = useState(false);
+  const attachTextarea = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (node) setTextareaReady(true);
+  }, []);
   useCatCardComposer(input, setInput, textareaRef);
   useComposerKeyboardFocus(shellV2, textareaRef);
   useEffect(() => {
@@ -1147,12 +1152,13 @@ export function ChatInput({
             <ComposerLinkMirror
               input={input}
               textareaRef={textareaRef}
+              textareaReady={textareaReady}
               composing={routingCompositionActive}
               links={webLinks}
             />
           )}
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
