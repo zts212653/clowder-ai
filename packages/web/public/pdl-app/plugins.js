@@ -311,6 +311,7 @@ function bindPluginSpaces() {
                 args: { pluginId: chosen.pluginId, key: b.key, threadId: b.threadId, createdAt: b.createdAt },
               };
             }),
+            address: addressVM(chosen),
             permissions:
               chosen.artifact === 'installed' && placementData().pluginDetails[chosen.pluginId]?.permissions
                 ? pluginPermissionsVM(chosen.pluginId, placementData().pluginDetails[chosen.pluginId].permissions.label)
@@ -318,6 +319,61 @@ function bindPluginSpaces() {
           }
         : null,
     };
+  };
+  // The instance's address (@alias and avatar): editable presentation of this host, not package configuration.
+  function addressVM(plugin) {
+    const detail = placementData().pluginDetails[plugin.pluginId],
+      address = detail && detail.address;
+    return address
+      ? {
+          alias: address.alias,
+          custom: !!address.icon,
+          who: { kind: 'plugin', id: plugin.pluginId, icon: address.icon ? api.file(address.icon) : undefined },
+          off: plugin.intent !== 'enabled',
+          args: { p: plugin.pluginId, inst: plugin.pluginInstanceId },
+        }
+      : null;
+  }
+  async function addressSave(d, patch) {
+    const address = placementData().pluginDetails[d.p].address;
+    try {
+      await api.post(
+        '/api/plugin-manager/instances/' + encodeURIComponent(d.inst) + '/address',
+        { method: 'PATCH' },
+        Object.assign({ alias: address.alias, icon: address.icon || null, expectedRevision: address.revision }, patch),
+      );
+    } catch (error) {
+      const code = error.status === 403 ? 'forbidden' : error.code;
+      const why = tcOf('ext.address.error', code);
+      toast(why === 'ext.address.error.' + code ? tc('ext.address.error.unknown') : why, null, 'danger');
+      return false;
+    }
+    window.dispatchEvent(new Event('plugin-targets-changed'));
+    await readDetail(d.p);
+    toast(tc('ext.address.saved', patch.alias || address.alias));
+    return true;
+  }
+  A.pluginAliasSave = function (d) {
+    const alias = (document.getElementById('plugin-alias').value || '').trim().replace(/^@/, '');
+    if (!alias) {
+      toast(tc('ext.address.error.empty'), null, 'danger');
+      return false;
+    }
+    return addressSave(d, { alias: alias });
+  };
+  A.pluginIconReset = function (d) {
+    return addressSave(d, { icon: null });
+  };
+  // A new avatar: the same uploadable avatar as the member form; choosing a picture saves it.
+  CHANGES.pluginIcon = async function (e) {
+    const target = e.target;
+    if (!target.files || !target.files[0]) return;
+    try {
+      const url = await chatPort.action('avatarUpload', {}, target);
+      await addressSave({ p: target.dataset.p, inst: target.dataset.inst }, { icon: url });
+    } catch (error) {
+      toast(error.message, null, 'danger');
+    }
   };
   function description(plugin) {
     return plugin.description === undefined ? '' : plugin.description;

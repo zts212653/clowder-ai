@@ -23,7 +23,7 @@ function fromOf(x) {
   if (typeof x === 'string') return x === 'user' || x === 'me' ? { kind: 'user', userId: 'me' } : x === 'system' ? { kind: 'system', service: 'system' } : senderDef(x) && !WHO_DATA.members().some(function (m) { return m.id === x; }) ? { kind: 'plugin', instanceId: x } : { kind: 'agent', catId: x };
   if (x.kind === 'agent' || x.kind === 'member') return { kind: 'agent', catId: x.catId || x.id, name: x.name };
   if (x.kind === 'user') return { kind: 'user', userId: x.userId || 'me' };
-  if (x.kind === 'plugin') return { kind: 'plugin', instanceId: senderAlias(x.instanceId || x.id) || x.instanceId || x.id, name: x.name };
+  if (x.kind === 'plugin') return { kind: 'plugin', instanceId: senderAlias(x.instanceId || x.id) || x.instanceId || x.id, name: x.name, icon: x.icon };   /* icon：这个实例自己的头像（插件的称呼里换过的），优先于插件包的图标 */
   if (x.kind === 'external') return x;
   if (x.kind === 'system') return { kind: 'system', service: x.service || x.id || 'system', name: x.name };
   if (x.id == null && x.name != null) return { kind: 'draft', name: x.name, tint: x.tint, color: x.color, fixedColor: x.fixedColor, avatarPath: x.avatarPath };   /* 还不是成员的身份（新建成员的表单、所有者）：名字 + 代表色，不按 id 去查 */
@@ -73,7 +73,7 @@ function whoInfo(x, source) {
   const base = srcName || (f.kind === 'plugin' ? tc('who.plugin') : f.kind === 'system' ? f.service : tc('who.unknown'));
   const actor = source.sender && source.sender.name || f.sender && f.sender.name || '';
   const col = source.themeColor || def && def.color, hue = col ? senderHue(col) : null, nm = hue != null ? 'oklch(from var(--name-1) l c ' + hue + ')' : null;
-  const ic = [source.icon, def && def.icon].find(function (n) { return n && (glyphSrc(n) || ICONS[n]); }) || (f.kind === 'system' ? 'system' : 'robot'), img = glyphSrc(ic);
+  const ic = [source.icon, f.icon, def && def.icon].find(function (n) { return n && (glyphSrc(n) || ICONS[n]); }) || (f.kind === 'system' ? 'system' : 'robot'), img = glyphSrc(ic);
   return { kind: f.kind === 'external' ? 'external' : f.kind, id: id, name: actor ? base + ' · ' + actor : base, handle: '',   /* 不加“插件 / 系统”这类种类标签：只有成员有句柄 */
     glyph: icon(img ? (f.kind === 'system' ? 'system' : 'robot') : ic, 13), img: img,   /* 包图片沿用同一个头像铺满口；图标仍用原来的尺寸。 */
     color: nm, bg: 'var(--bg-raised)', ink: nm || 'var(--fg-strong)', shape: 'square',   /* 形状只看是不是人（成员、你）：其余来源一律方形，不枚举种类 */
