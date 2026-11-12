@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS, catRegistry, createCompanionIdentitySnapshot } from '@cat-cafe/shared';
+import { catRegistry, createCompanionIdentitySnapshot } from '@cat-cafe/shared';
 import { validateCompanionReply as validateCompanionReplyBeta20 } from '@clowder-ai/plugin-contract-beta20';
 import { validateCompanionReply } from '@clowder-ai/plugin-contract-beta21';
 import cookie from '@fastify/cookie';
@@ -23,6 +23,7 @@ import {
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../src/routes/concierge.js';
 import { requirePluginOwnerLocalAccess } from '../src/routes/plugin-access-guards.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 const { toPublishedWindowReply } = createRequire(import.meta.url)('../../../desktop/plugin-window/window.cjs');
 
@@ -47,15 +48,12 @@ async function fixture() {
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: 'bridge-owner' });
   const config = new MemoryConciergeConfigStore();
-  await config.put('bridge-owner', {
-    ...CONCIERGE_CONFIG_DEFAULTS,
-    dutyCatProfileId: 'opus',
-    displayName: 'My familiar companion',
-  });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus', displayName: 'My familiar companion' });
   const messages = new MessageStore();
-  const threads = new ConciergeThreadService({ threadStore: new ThreadStore(), conciergeConfigStore: config });
+  const threads = new ConciergeThreadService({ threadStore: new ThreadStore(), companionSettings: companion.read });
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
+    companionSettings: companion.read,
     conciergeThreadService: threads,
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),

@@ -265,9 +265,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       targetCatId: 'gpt-pro',
     });
     let dutyCatProfileId = 'opus';
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId }),
-    };
+    const companionSettings = async () => ({ dutyCatProfileId });
     const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -276,7 +274,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
       cloudReturnGrantStore: grantStore,
       messageStore: store,
       threadStore,
-      conciergeConfigStore,
+      companionSettings,
       socketManager: { broadcastAgentMessage: () => undefined },
     });
     const payload = {

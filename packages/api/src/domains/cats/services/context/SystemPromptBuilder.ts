@@ -9,7 +9,6 @@ import type {
   CatConfig,
   CatId,
   CompiledPackBlocks,
-  ConciergeConfig,
   CrossThreadCoordination,
   WorldContextEnvelope,
 } from '@cat-cafe/shared';
@@ -19,6 +18,7 @@ import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
+import type { CompanionSettings } from '../../../concierge/companion-settings.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
@@ -179,10 +179,10 @@ export interface InvocationContext {
    */
   threadKind?: 'concierge';
   /**
-   * F229: Per-user concierge configuration.
+   * F229: 猫猫球's settings (official.companion plugin configuration).
    * Required when threadKind === 'concierge'. Provides displayName / personaTone / dutyCatProfileId.
    */
-  conciergeConfig?: ConciergeConfig;
+  conciergeConfig?: CompanionSettings;
   /** Server-owned admitted Live surface; never inferred from a concierge thread or message content. */
   liveCompanion?: { householdToolsEnabled: boolean; compositionInstructions?: string };
 }

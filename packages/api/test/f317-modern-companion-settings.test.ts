@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -12,8 +11,10 @@ import { ConciergeThreadService } from '../src/domains/concierge/ConciergeThread
 import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHostBridge.js';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import { createLiveConfigChange } from '../src/domains/concierge/live/live-config-transition.js';
+import { readPluginConfig } from '../src/domains/plugin/plugin-config-store.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../src/routes/concierge.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 async function fixture() {
   const owner = 'modern-settings-owner';
@@ -22,14 +23,18 @@ async function fixture() {
   const app = Fastify();
   const store = new MemoryConciergeConfigStore();
   const sessions = new LiveCompanionSessions();
-  const { behaviorEnabled: _absentInLegacy, ...legacy } = CONCIERGE_CONFIG_DEFAULTS;
-  await store.put(owner, { ...legacy, dutyCatProfileId: 'retired-selected-profile' });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'retired-selected-profile' });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: owner });
+  companion.register(app);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: store,
-    conciergeThreadService: new ConciergeThreadService({ conciergeConfigStore: store, threadStore: new ThreadStore() }),
+    companionSettings: companion.read,
+    conciergeThreadService: new ConciergeThreadService({
+      companionSettings: companion.read,
+      threadStore: new ThreadStore(),
+    }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: new MessageStore(),
@@ -55,6 +60,8 @@ async function fixture() {
     unified: new CompanionHostBridge({ ...options, companionContract: '0.1.0-beta.24' }),
     legacy: new CompanionHostBridge(options),
     store,
+    companion,
+    saved: () => readPluginConfig(companion.projectRoot, 'official.companion'),
     mediaPreparations: () => mediaPreparations,
     changing: () => sessions.isChangingPreferences(owner),
     cleanup: async () => {
@@ -66,7 +73,7 @@ async function fixture() {
   };
 }
 
-test('modern settings read fills canonical legacy defaults without rewriting the saved selection or record', async (t) => {
+test('modern settings read takes the manifest defaults without rewriting the saved selection or configuration', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
   const read = await f.modern.request({ kind: 'settings.read' });
@@ -76,7 +83,7 @@ test('modern settings read fills canonical legacy defaults without rewriting the
   assert.equal(read.values.behaviorEnabled, true);
   assert.equal(read.values.ballSize, 72);
   assert.equal(read.selectedCompanionStatus, 'unavailable');
-  assert.equal((await f.store.getSaved('modern-settings-owner')).behaviorEnabled, undefined);
+  assert.deepEqual(f.saved(), { dutyCatProfileId: 'retired-selected-profile' });
   assert.equal(f.mediaPreparations(), 0);
   assert.deepEqual(await f.legacy.request({ kind: 'settings.read' }), { kind: 'error', code: 'invalid_request' });
 });
@@ -84,11 +91,7 @@ test('modern settings read fills canonical legacy defaults without rewriting the
 test('published modern contracts downlevel a saved compact size without losing its owner preference', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
-  await f.store.put('modern-settings-owner', {
-    ...CONCIERGE_CONFIG_DEFAULTS,
-    dutyCatProfileId: 'opus',
-    ballSize: 43,
-  });
+  f.companion.set({ dutyCatProfileId: 'opus', ballSize: 43 });
   for (const bridge of [f.modern, f.unified]) {
     const read = await bridge.request({ kind: 'settings.read' });
     if (read.kind !== 'settings' || read.status !== 'available') assert.fail('published settings must stay readable');
@@ -96,7 +99,7 @@ test('published modern contracts downlevel a saved compact size without losing i
     const state = await bridge.request({ kind: 'state' });
     assert.equal(state.kind, 'state', 'the downlevel value must not break Host state/config reads');
   }
-  assert.equal((await f.store.getSaved('modern-settings-owner')).ballSize, 43);
+  assert.equal(f.saved().ballSize, '43');
 });
 
 test(
@@ -120,25 +123,31 @@ test(
       persisted();
     };
     try {
-      assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'behaviorEnabled', value: false }), {
-        kind: 'settings-update',
-        field: 'behaviorEnabled',
-        outcome: 'unconfirmed',
-        callStatus: 'unchanged',
-        reconcile: 'settings.read',
-      });
+      assert.deepEqual(
+        await f.modern.request({ kind: 'settings.update', field: 'householdReadsAllowed', value: false }),
+        {
+          kind: 'settings-update',
+          field: 'householdReadsAllowed',
+          outcome: 'unconfirmed',
+          callStatus: 'unchanged',
+          reconcile: 'settings.read',
+        },
+      );
       assert.equal(f.changing(), true);
-      assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'skin', value: 'yarn-ball' }), {
-        kind: 'error',
-        code: 'busy',
-      });
+      assert.deepEqual(
+        await f.modern.request({ kind: 'settings.update', field: 'householdReadsAllowed', value: true }),
+        {
+          kind: 'error',
+          code: 'busy',
+        },
+      );
       finish();
       await done;
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(f.changing(), false);
       const read = await f.modern.request({ kind: 'settings.read' });
       if (read.kind !== 'settings' || read.status !== 'available') assert.fail('settled configuration is readable');
-      assert.equal(read.values.behaviorEnabled, false);
+      assert.equal(read.values.householdReadsAllowed, false);
       assert.equal(f.mediaPreparations(), 0);
     } finally {
       finish();
@@ -146,7 +155,7 @@ test(
   },
 );
 
-test('persona tone settles for the next call while source-read failure does not become a fake stop failure', async (t) => {
+test('persona tone saves into the plugin configuration for the next call; the plugin save rejects an undeclared option', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
   assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'personaTone', value: '说话简短' }), {
@@ -156,20 +165,15 @@ test('persona tone settles for the next call while source-read failure does not 
     callStatus: 'unchanged',
     applies: 'next_call',
   });
-  f.store.getSaved = async () => {
-    throw new Error('source unavailable');
-  };
-  assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'behaviorEnabled', value: false }), {
-    kind: 'settings-update',
-    field: 'behaviorEnabled',
-    outcome: 'rejected',
-    callStatus: 'unchanged',
-    reason: 'save_failed',
+  assert.equal((await f.companion.read()).personaTone, '说话简短');
+  assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'skin', value: 'black-cat' }), {
+    kind: 'error',
+    code: 'invalid_request',
   });
   assert.equal(f.mediaPreparations(), 0);
 });
 
-test('settings writes settle through the owner config route and refuse unavailable selections before writing', async (t) => {
+test('companion settings save through the plugin configuration, whose save validates members', async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
   assert.deepEqual(await f.modern.request({ kind: 'settings.update', field: 'behaviorEnabled', value: false }), {
@@ -179,7 +183,8 @@ test('settings writes settle through the owner config route and refuse unavailab
     callStatus: 'unchanged',
     applies: 'now',
   });
-  assert.equal((await f.store.getSaved('modern-settings-owner')).behaviorEnabled, false);
+  assert.equal(f.saved().behaviorEnabled, 'false');
+  assert.equal((await f.store.get('modern-settings-owner')).behaviorEnabled, undefined);
   assert.deepEqual(
     await f.modern.request({ kind: 'settings.update', field: 'dutyCatProfileId', value: 'missing-profile' }),
     {
@@ -187,9 +192,9 @@ test('settings writes settle through the owner config route and refuse unavailab
       field: 'dutyCatProfileId',
       outcome: 'rejected',
       callStatus: 'unchanged',
-      reason: 'selection_unavailable',
+      reason: 'invalid_value',
     },
   );
-  assert.equal((await f.store.getSaved('modern-settings-owner')).dutyCatProfileId, 'retired-selected-profile');
+  assert.equal(f.saved().dutyCatProfileId, 'retired-selected-profile');
   assert.equal(f.mediaPreparations(), 0);
 });

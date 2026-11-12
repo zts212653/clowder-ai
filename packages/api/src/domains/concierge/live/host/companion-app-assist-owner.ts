@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { IConciergeConfigStore } from '../../ConciergeConfigStore.js';
+import type { ReadCompanionSettings } from '../../companion-settings.js';
 import { type AppAssistPolicyListener, appAssistAllowed } from '../../concierge-app-assist-store.js';
 
 export const appAssistOwnerCommand = z.discriminatedUnion('kind', [
@@ -21,6 +22,7 @@ export class CompanionAppAssistOwner implements DesktopAppAssistOwner {
   constructor(
     private readonly options: {
       store: IConciergeConfigStore | undefined;
+      companionSettings: ReadCompanionSettings;
       ownerUserId: string;
       timeZone: () => string | undefined;
       assertCurrent: () => Promise<void>;
@@ -53,6 +55,8 @@ export class CompanionAppAssistOwner implements DesktopAppAssistOwner {
     const { store, ownerUserId } = this.options;
     if (!store?.claimAppAssistDay || !store.watchAppAssistPolicy)
       return command.kind === 'read' ? { status: 'source_unavailable' } : 'unavailable';
+    if (!(await this.options.companionSettings()).enabled)
+      return command.kind === 'read' ? { status: 'off' } : 'disabled';
     if (command.kind === 'claim') {
       const day = this.day();
       if (!day) return 'unavailable';
@@ -60,7 +64,7 @@ export class CompanionAppAssistOwner implements DesktopAppAssistOwner {
       await this.options.assertCurrent();
       return this.watching ? result : 'unavailable';
     }
-    const config = await (store.getSaved?.(ownerUserId) ?? store.get(ownerUserId));
+    const config = await store.get(ownerUserId);
     await this.options.assertCurrent();
     if (!this.watching) return { status: 'source_unavailable' };
     if (!appAssistAllowed(config)) return { status: 'off' };

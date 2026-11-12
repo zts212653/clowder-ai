@@ -6,16 +6,16 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS, createCatId } from '@cat-cafe/shared';
+import { createCatId } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
-import { MemoryConciergeConfigStore } from '../src/domains/concierge/ConciergeConfigStore.js';
 import { ConciergeThreadService } from '../src/domains/concierge/ConciergeThreadService.js';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeLiveRoutes } from '../src/routes/concierge-live.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 const OWNER = 'default-user';
 
@@ -25,14 +25,13 @@ async function fixture() {
   const threadStore = new ThreadStore();
   const messageStore = new MessageStore();
   const threadService = new ConciergeThreadService({ threadStore });
-  const configStore = new MemoryConciergeConfigStore();
-  await configStore.put(OWNER, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus', displayName: '宪宪' });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus', displayName: '宪宪' });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute);
   await app.register(conciergeLiveRoutes, {
     ownerUserId: OWNER,
-    configStore,
+    companionSettings: companion.read,
     sessions,
     threadService,
     messageStore,

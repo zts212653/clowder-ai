@@ -10,7 +10,7 @@ import { conciergeRoutes } from '../dist/routes/concierge.js';
 test('entry discovery reads only its authenticated owner carrier and creates no thread', async (t) => {
   const threadStore = new ThreadStore();
   const conciergeConfigStore = new MemoryConciergeConfigStore();
-  const service = new ConciergeThreadService({ threadStore, conciergeConfigStore });
+  const service = new ConciergeThreadService({ threadStore });
   const app = Fastify();
   t.after(() => app.close());
   await app.register(conciergeRoutes, { conciergeConfigStore, conciergeThreadService: service });

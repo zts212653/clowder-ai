@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CONCIERGE_CONFIG_DEFAULTS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../src/config/cat-config-loader.js';
 import { MemoryConciergeConfigStore } from '../src/domains/concierge/ConciergeConfigStore.js';
 import { readCompanionSettingsSource } from '../src/domains/concierge/live/host/companion-settings-read.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 import { createIsolatedTemplateRoot } from './helpers/isolated-template-root.js';
 
 test('settings availability uses the real registry, roster and native selection rules', async (t) => {
@@ -22,21 +23,16 @@ test('settings availability uses the real registry, roster and native selection 
   );
   assert.ok(native);
   const store = new MemoryConciergeConfigStore();
-  await store.put('owner', { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: native.id });
-  const available = await readCompanionSettingsSource(store, 'owner');
+  const companion = companionConfigurationFixture({ dutyCatProfileId: native.id });
+  const available = await readCompanionSettingsSource(store, companion.read, 'owner');
   assert.equal(available.status, 'available');
   if (available.status !== 'available') assert.fail('settings unavailable');
   assert.equal(available.selectedCompanionStatus, 'available');
   assert.equal(available.companions.find((row) => row.catProfileId === native.id)?.available, true);
   getRoster({ ...template, roster: { ...roster, [native.id]: { ...roster[native.id], available: false } } });
-  const unavailable = await readCompanionSettingsSource(store, 'owner');
+  const unavailable = await readCompanionSettingsSource(store, companion.read, 'owner');
   if (unavailable.status !== 'available') assert.fail('configuration is still readable');
   assert.equal(unavailable.config.dutyCatProfileId, native.id);
   assert.equal(unavailable.selectedCompanionStatus, 'unavailable');
   assert.equal(unavailable.companions.find((row) => row.catProfileId === native.id)?.available, false);
-  const oldAdapter = { get: store.get.bind(store), put: store.put.bind(store) };
-  assert.deepEqual(await readCompanionSettingsSource(oldAdapter, 'owner'), {
-    status: 'unavailable',
-    reason: 'host_upgrade_required',
-  });
 });

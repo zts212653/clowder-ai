@@ -8,30 +8,10 @@
 
 /** ConciergeConfig: 前台猫配置（per-user 持久化，用户可见可追溯可恢复） */
 export interface ConciergeConfig {
-  /** A separate household role; the front-desk enabled flag does not turn it off. */
+  /** A separate household role; the companion's enabled setting does not turn it off. */
   watcher?: import('./watcher.js').WatcherConfig;
-  /** 是否启用前台猫 (default true) */
-  enabled: boolean;
-  /** 皮肤 — E1: xianxian-codex 默认；yanyan-codex / ragdoll-v1 / yarn-ball 可选 */
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
-  /** 前台猫显示名（KD-6: per-deployment 可配置，本家 Phase A 落地投票） */
-  displayName: string;
-  /** 一句话人设基调（注入岗位 prompt） */
-  personaTone: string;
-  /** 值班猫 profileId — 指向已配置的 cat profile (KD-7: provider-agnostic) */
-  dutyCatProfileId: string;
-  /**
-   * 主动性等级（OQ-4 四级白名单）:
-   * - 'ambient': Tier 0 仅环境感知，零主动文本
-   * - 'quiet-badge': Tier 0-1 低优先级 badge，hover 才出文字（Phase A 默认）
-   */
-  proactivePolicy: 'ambient' | 'quiet-badge';
   /** 球位置 (PR-A3b INV-P3: per-user 持久化) — null = default bottom-right */
   ballPosition: { x: number; y: number } | null;
-  /** 球大小 (E3: per-user 持久化, 43-192px) — undefined/null = BALL_SIZE_DEFAULT */
-  ballSize?: number;
-  /** 自主行为引擎开关 (E4, default true). When false, cat stays in business-projected state. */
-  behaviorEnabled?: boolean;
   /** Application-name-only assistance is a separate saved opt-in; absent is false. */
   appAssistEnabled?: boolean;
   /** Household lookup choice shared by all companion surfaces; absent means the owner default (allowed). */
@@ -62,16 +42,9 @@ export function clampBallSize(size: number | null | undefined): number {
   return Math.max(BALL_SIZE_MIN, Math.min(BALL_SIZE_MAX, rounded));
 }
 
-/** ConciergeConfig 默认值（dutyCatProfileId 由 API 层根据 roster 解析） */
-export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'> = {
-  enabled: true,
-  skin: 'xianxian-codex',
-  displayName: '猫猫球',
-  personaTone: '温暖、简短、不啰嗦',
-  proactivePolicy: 'quiet-badge',
+/** ConciergeConfig 默认值 */
+export const CONCIERGE_CONFIG_DEFAULTS: ConciergeConfig = {
   ballPosition: null,
-  ballSize: BALL_SIZE_DEFAULT,
-  behaviorEnabled: true,
   appAssistEnabled: false,
 };
 

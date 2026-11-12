@@ -11,10 +11,12 @@ import { MemoryConciergeRelayStore } from '../src/domains/concierge/ConciergeRel
 import { ConciergeThreadService } from '../src/domains/concierge/ConciergeThreadService.js';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import { createLiveConfigChange } from '../src/domains/concierge/live/live-config-transition.js';
+import { readPluginConfig } from '../src/domains/plugin/plugin-config-store.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../src/routes/concierge.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
-test('settings view reads the saved owner selection and refuses header-only or proxied readers', async (t) => {
+test('settings view reads the saved plugin selection and refuses header-only or proxied readers', async (t) => {
   const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = 'settings-owner';
   const app = Fastify();
@@ -27,17 +29,21 @@ test('settings view reads the saved owner selection and refuses header-only or p
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: 'settings-owner' });
   const config = new MemoryConciergeConfigStore();
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'retired-selected-profile' });
+  let settingsReadable = true;
+  const companionSettings = async () => {
+    if (!settingsReadable) throw new Error('source temporarily unreachable');
+    return companion.read();
+  };
   const threadStore = new ThreadStore();
   const sessions = new LiveCompanionSessions();
   t.after(() => sessions.close());
   let revocations = 0;
-  await config.put('settings-owner', { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'retired-selected-profile' });
+  await config.put('settings-owner', { ...CONCIERGE_CONFIG_DEFAULTS });
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
-    conciergeThreadService: new ConciergeThreadService({
-      conciergeConfigStore: config,
-      threadStore,
-    }),
+    companionSettings,
+    conciergeThreadService: new ConciergeThreadService({ companionSettings, threadStore }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: new MessageStore(),
@@ -56,12 +62,9 @@ test('settings view reads the saved owner selection and refuses header-only or p
   const read = await app.inject({ url, headers });
   assert.equal(read.statusCode, 200);
   assert.equal(read.json().config.dutyCatProfileId, 'retired-selected-profile');
+  assert.equal(read.json().config.ballSize, 72, 'manifest default');
   assert.equal(read.json().selectedCompanionStatus, 'unavailable');
   assert.equal(read.headers['cache-control'], 'no-store');
-  assert.notEqual(
-    (await app.inject({ url: '/api/concierge/config', headers })).json().config.dutyCatProfileId,
-    'retired-selected-profile',
-  );
   for (const view of ['settings', 'native']) {
     const endpoint = `/api/concierge/config?view=${view}`;
     const untrusted = await app.inject({ url: endpoint, headers: { 'x-cat-cafe-user': 'settings-owner' } });
@@ -69,54 +72,33 @@ test('settings view reads the saved owner selection and refuses header-only or p
     const proxied = await app.inject({ url: endpoint, headers: { ...headers, 'x-forwarded-for': '203.0.113.10' } });
     assert.equal(proxied.statusCode, 403);
   }
-  const visual = await app.inject({ method: 'PUT', url: '/api/concierge/config', headers, payload: { ballSize: 96 } });
-  assert.equal(visual.statusCode, 200);
-  assert.equal(
-    (await config.getSaved('settings-owner')).dutyCatProfileId,
-    'retired-selected-profile',
-    'an unrelated settings write cannot replace the saved selection',
-  );
-  assert.equal((await config.getSaved('settings-owner')).ballSize, 96);
-  const compact = await app.inject({ method: 'PUT', url: '/api/concierge/config', headers, payload: { ballSize: 43 } });
-  assert.equal(compact.statusCode, 200);
-  assert.equal((await config.getSaved('settings-owner')).ballSize, 43);
-  const tooSmall = await app.inject({
-    method: 'PUT',
-    url: '/api/concierge/config',
-    headers,
-    payload: { ballSize: 42 },
-  });
-  assert.equal(tooSmall.statusCode, 400);
-  assert.equal((await config.getSaved('settings-owner')).ballSize, 43);
-  const opened = await app.inject({ method: 'POST', url: '/api/concierge/thread', headers });
-  assert.equal(opened.statusCode, 200);
-  const before = (await threadStore.get(opened.json().threadId))?.preferredCats;
   const ordinary = await app.inject({
     method: 'PUT',
     url: '/api/concierge/config',
     headers,
     payload: { householdReadsAllowed: true },
   });
-  const effective = (await app.inject({ url: '/api/concierge/config', headers })).json().config;
-  assert.equal(ordinary.json().config.dutyCatProfileId, effective.dutyCatProfileId);
-  assert.deepEqual((await threadStore.get(opened.json().threadId))?.preferredCats, before);
-  assert.equal((await config.getSaved('settings-owner')).dutyCatProfileId, 'retired-selected-profile');
-  const savedRead = config.getSaved.bind(config);
-  config.getSaved = async () => {
-    throw new Error('source temporarily unreachable');
-  };
+  assert.equal(ordinary.statusCode, 200);
+  assert.deepEqual(
+    readPluginConfig(companion.projectRoot, 'official.companion'),
+    { dutyCatProfileId: 'retired-selected-profile' },
+    'a runtime write cannot touch the plugin configuration',
+  );
+  settingsReadable = false;
   const sourceFailure = await app.inject({ url, headers });
   assert.equal(sourceFailure.statusCode, 503);
   assert.equal(sourceFailure.json().reason, 'temporarily_unavailable');
+  config.get = async () => {
+    throw new Error('source temporarily unreachable');
+  };
   const rejectedWrite = await app.inject({
     method: 'PUT',
     url: '/api/concierge/config',
     headers,
-    payload: { personaTone: 'calm' },
+    payload: { householdReadsAllowed: false },
   });
   assert.equal(rejectedWrite.statusCode, 503);
   assert.equal(rejectedWrite.json().code, 'configuration_read_failed');
   assert.equal(rejectedWrite.json().callStatus, 'unchanged');
   assert.equal(revocations, 0, 'a failed preference read cannot be reported as a failed media stop');
-  assert.equal((await savedRead('settings-owner')).personaTone, CONCIERGE_CONFIG_DEFAULTS.personaTone);
 });

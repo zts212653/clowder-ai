@@ -24,6 +24,7 @@ import {
 import { desktopWindowManifest, windowHtml } from '../f317-window.fixture.js';
 import { approval } from '../growing/unified-attention-fixtures.js';
 import { staticEditorFixture } from '../plugin-static-editor.fixture.js';
+import { COMPANION_DEFAULTS } from './companion-configuration-fixture.js';
 
 export async function modernCompanionInstallFixture(
   t: TestContext,
@@ -86,7 +87,7 @@ export async function modernCompanionInstallFixture(
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: owner });
-  const config = { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'composition-selected' };
+  const config = { ...CONCIERGE_CONFIG_DEFAULTS, ...COMPANION_DEFAULTS, dutyCatProfileId: 'composition-selected' };
   app.get('/api/concierge/config', async () => ({
     status: 'available',
     config,

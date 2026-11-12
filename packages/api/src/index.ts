@@ -2592,18 +2592,14 @@ async function main(): Promise<void> {
   const worldKnowledgeAdapter = new WorldKnowledgeAdapter(memoryServices.evidenceStore);
   const worldContextProvider = new WorldContextProvider(worldStore, worldKnowledgeAdapter);
 
-  // F229: Concierge config store — created before AgentRouter so it can be passed into
-  // invocationDeps for routing-layer 岗位 prompt injection (ConciergeRoutingInterceptor).
-  const {
-    RedisConciergeConfigStore: _RCCSEarly,
-    MemoryConciergeConfigStore: _MCCSEarly,
-    moveConciergeSettingsToPlugin,
-  } = await import('./domains/concierge/ConciergeConfigStore.js');
-  const conciergeProjectRoot = resolveActiveProjectRoot();
-  if (redis) await moveConciergeSettingsToPlugin(redis, conciergeProjectRoot, privateUserId);
-  const conciergeConfigStoreShared = redis
-    ? new _RCCSEarly(redis, conciergeProjectRoot)
-    : new _MCCSEarly(conciergeProjectRoot);
+  // F229: Concierge runtime state store — created before AgentRouter.
+  const { RedisConciergeConfigStore: _RCCSEarly, MemoryConciergeConfigStore: _MCCSEarly } = await import(
+    './domains/concierge/ConciergeConfigStore.js'
+  );
+  const conciergeConfigStoreShared = redis ? new _RCCSEarly(redis) : new _MCCSEarly();
+  // 猫猫球's settings are official.companion's plugin configuration (read when used, after plugins compose).
+  const { readCompanionSettings } = await import('./domains/concierge/companion-settings.js');
+  const companionSettings = () => readCompanionSettings(pluginManagerRuntime.configuration);
 
   // F229 Phase B: TriagePlan store (needed by AgentRouter for reply validator)
   const { RedisConciergeTriagePlanStore: _RTPSEarly, MemoryConciergeTriagePlanStore: _MTPSEarly } = await import(
@@ -2984,7 +2980,7 @@ async function main(): Promise<void> {
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     turnCustodyProjectionService,
     frustrationIssueStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
     cloudReturnGrantStore,
@@ -4588,7 +4584,7 @@ async function main(): Promise<void> {
   const conciergeThreadServiceShared = new ConciergeThreadService({
     threadStore,
     redis: redis ?? undefined,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
   });
   // F229 PR-A3b: relay + confirmation stores
   const { RedisConciergeRelayStore, MemoryConciergeRelayStore } = await import(
@@ -4604,6 +4600,7 @@ async function main(): Promise<void> {
   // F229 Phase B: triage plan store — already created above for AgentRouter, reuse here
   await app.register(conciergeRoutes, {
     conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeThreadService: conciergeThreadServiceShared,
     conciergeRelayStore,
     conciergeConfirmationStore,
@@ -4832,7 +4829,7 @@ async function main(): Promise<void> {
     }
     const { conciergeLiveRoutes } = await import('./routes/concierge-live.js');
     await app.register(conciergeLiveRoutes, {
-      configStore: conciergeConfigStoreShared,
+      companionSettings,
       ownerUserId: privateUserId,
       sessions: liveCompanionSessions,
       pageActionOwner,
@@ -5068,7 +5065,7 @@ async function main(): Promise<void> {
     ownedWaitStatusReader,
     backlogStore,
     threadStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     sessionChainStore,
     runtimeSessionStore,
     proposalStore,
@@ -5568,6 +5565,7 @@ async function main(): Promise<void> {
           ? {
               appAssist: new CompanionAppAssistOwner({
                 store: redis ? conciergeConfigStoreShared : undefined,
+                companionSettings,
                 ownerUserId: privateUserId,
                 timeZone: () => getCoCreatorConfig().timeZone,
                 assertCurrent: assertWorkCurrent,

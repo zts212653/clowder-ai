@@ -14,7 +14,7 @@ export async function readConfigurationForChange(
   userId: string,
 ): Promise<ConciergeConfig> {
   try {
-    return await (store.getSaved?.(userId) ?? store.get(userId));
+    return await store.get(userId);
   } catch {
     throw new ConfigurationReadFailedError();
   }
@@ -46,10 +46,7 @@ export function createLiveConfigChange(options: {
     );
 }
 
-/** Only a changed execution identity or household-read grant ends this call. */
+/** Only a changed household-read grant ends this call; a saved plugin configuration restarts the companion. */
 export function requiresLiveConfigStop(existing: ConciergeConfig, patch: Readonly<Record<string, unknown>>): boolean {
-  return (
-    ('dutyCatProfileId' in patch && patch.dutyCatProfileId !== existing.dutyCatProfileId) ||
-    ('householdReadsAllowed' in patch && patch.householdReadsAllowed !== (existing.householdReadsAllowed !== false))
-  );
+  return 'householdReadsAllowed' in patch && patch.householdReadsAllowed !== (existing.householdReadsAllowed !== false);
 }

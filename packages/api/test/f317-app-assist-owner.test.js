@@ -15,6 +15,7 @@ async function fixture(t, store = new MemoryConciergeConfigStore()) {
   let emit;
   const owner = new CompanionAppAssistOwner({
     store,
+    companionSettings: async () => ({ enabled: true }),
     ownerUserId: 'fixture-owner',
     timeZone: () => zone,
     now: () => now,
@@ -174,6 +175,7 @@ test('a saved opt-out revokes observation even when the execution-lease read is 
   });
   const owner = new CompanionAppAssistOwner({
     store,
+    companionSettings: async () => ({ enabled: true }),
     ownerUserId: 'fixture-owner',
     timeZone: () => 'UTC',
     assertCurrent: async () => {
@@ -199,6 +201,7 @@ test('a saved opt-out revokes observation even when the execution-lease read is 
 test('production without its durable owner adapter cannot start collection', async () => {
   const owner = new CompanionAppAssistOwner({
     store: undefined,
+    companionSettings: async () => ({ enabled: true }),
     ownerUserId: 'fixture-owner',
     timeZone: () => 'UTC',
     assertCurrent: async () => {},
@@ -231,6 +234,7 @@ test('subscription setup failure leaves app assistance unavailable without faili
   };
   const owner = new CompanionAppAssistOwner({
     store,
+    companionSettings: async () => ({ enabled: true }),
     ownerUserId: 'fixture-owner',
     timeZone: () => 'UTC',
     assertCurrent: async () => {},
@@ -242,4 +246,25 @@ test('subscription setup failure leaves app assistance unavailable without faili
   assert.equal(policy, null);
   assert.deepEqual(await owner.request({ kind: 'read' }), { status: 'source_unavailable' });
   await dispose();
+});
+
+test('a hidden companion (plugin configuration enabled=false) offers no app assistance even with consent', async (t) => {
+  const store = new MemoryConciergeConfigStore();
+  await store.patch('fixture-owner', { appAssistEnabled: true });
+  let enabled = false;
+  const owner = new CompanionAppAssistOwner({
+    store,
+    companionSettings: async () => ({ enabled }),
+    ownerUserId: 'fixture-owner',
+    timeZone: () => 'UTC',
+    assertCurrent: async () => {},
+  });
+  const dispose = await owner.watch(() => {});
+  t.after(dispose);
+  const appKey = 'a'.repeat(64);
+  assert.deepEqual(await owner.request({ kind: 'read' }), { status: 'off' });
+  assert.equal(await owner.request({ kind: 'claim', appKey }), 'disabled');
+  enabled = true;
+  assert.equal((await owner.request({ kind: 'read' })).status, 'ready');
+  assert.equal(await owner.request({ kind: 'claim', appKey }), 'claimed');
 });

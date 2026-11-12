@@ -4,19 +4,18 @@
  * Decouples concierge context logic from routing core (GuideRoutingInterceptor 同模式).
  *
  * Called once before the per-cat loop:
- *   const conciergeCtx = await prepareConciergeContext(routeThread, userId, deps.invocationDeps.conciergeConfigStore);
+ *   const conciergeCtx = await prepareConciergeContext(routeThread, deps.invocationDeps.companionSettings);
  *   // Inside buildInvocationContext:
  *   ...conciergeCtx,
  */
 
-import type { ConciergeConfig } from '@cat-cafe/shared';
 import type { Thread } from '../cats/services/stores/ports/ThreadStore.js';
-import type { IConciergeConfigStore } from './ConciergeConfigStore.js';
+import type { CompanionSettings, ReadCompanionSettings } from './companion-settings.js';
 
 /** Shape spread into buildInvocationContext when thread is a concierge thread. */
 export interface ConciergeInvocationContext {
   threadKind: 'concierge';
-  conciergeConfig: ConciergeConfig;
+  conciergeConfig: CompanionSettings;
 }
 
 /**
@@ -24,18 +23,16 @@ export interface ConciergeInvocationContext {
  *
  * Returns ConciergeInvocationContext when:
  *   - thread.threadKind === 'concierge', AND
- *   - conciergeConfigStore is provided
+ *   - the companion settings reader is provided
  *
  * Returns empty object otherwise (normal threads unaffected).
  */
 export async function prepareConciergeContext(
   thread: Thread | null,
-  userId: string,
-  store: IConciergeConfigStore | undefined,
+  readSettings: ReadCompanionSettings | undefined,
 ): Promise<ConciergeInvocationContext | Record<string, never>> {
-  if (thread?.threadKind !== 'concierge' || !store) return {};
-  const config = await store.get(userId);
-  return { threadKind: 'concierge', conciergeConfig: config };
+  if (thread?.threadKind !== 'concierge' || !readSettings) return {};
+  return { threadKind: 'concierge', conciergeConfig: await readSettings() };
 }
 
 /**

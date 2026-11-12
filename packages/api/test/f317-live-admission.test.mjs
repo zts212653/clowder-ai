@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { MemoryConciergeConfigStore } from '../dist/domains/concierge/ConciergeConfigStore.js';
 import { ConciergeThreadService } from '../dist/domains/concierge/ConciergeThreadService.js';
 import { createOwnerLocalNoteProfile } from '../dist/domains/concierge/live/host/owner-local-note-profile.js';
 import { OwnerPageActionService } from '../dist/domains/concierge/live/host/owner-page-action-service.js';
@@ -16,6 +14,7 @@ import { companionDecisionRoutes } from '../dist/routes/companion-decision-route
 import { conciergeLiveRoutes } from '../dist/routes/concierge-live.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
 import './helpers/setup-cat-registry.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.ts';
 
 test('Live surface enters ordinary messages with a real owner session and cannot replace or borrow a call', async (t) => {
@@ -40,12 +39,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
     actionLedger = newLedger();
     return actionLedger;
   };
-  const configStore = new MemoryConciergeConfigStore();
-  await configStore.put('default-user', {
-    ...CONCIERGE_CONFIG_DEFAULTS,
-    dutyCatProfileId: 'opus',
-    displayName: '宪宪',
-  });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus', displayName: '宪宪' });
   let passedPort;
   let sourceMessage;
   let startupItems;
@@ -126,7 +120,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   await app.register(companionDecisionRoutes, { ownerUserId: 'default-user' });
   await app.register(conciergeLiveRoutes, {
     ownerUserId: 'default-user',
-    configStore,
+    companionSettings: companion.read,
     sessions,
     pageActionOwner,
     threadService: new ConciergeThreadService({ threadStore }),
@@ -307,7 +301,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   assert.equal(projectedHistory.statusCode, 200);
   const projectedSpoken = projectedHistory.json().messages.find((message) => message.id === spoken.id);
   assert.deepEqual(projectedSpoken.extra.liveCompanion.identity, ownerIdentity.json().identity);
-  await configStore.put('default-user', { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'gemini' });
+  companion.set({ dutyCatProfileId: 'gemini' });
   assert.deepEqual(spoken.extra.liveCompanion.identity, ownerIdentity.json().identity);
   const changed = await app.inject({ method: 'GET', url: `/api/concierge/live/${status.callId}`, headers });
   assert.equal(changed.statusCode, 409);

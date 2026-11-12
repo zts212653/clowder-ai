@@ -1,12 +1,16 @@
 import { catRegistry } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import type { IConciergeConfigStore } from '../../ConciergeConfigStore.js';
+import type { ReadCompanionSettings } from '../../companion-settings.js';
 import { resolveLiveCompanionSelection } from '../live-companion-selection.js';
 
-/** Read the original configuration and current roster; no default substitution or writes. */
-export async function readCompanionSettingsSource(store: IConciergeConfigStore, userId: string) {
-  if (!store.getSaved) return { status: 'unavailable' as const, reason: 'host_upgrade_required' as const };
-  const config = await store.getSaved(userId);
+/** Read the companion's plugin configuration, the owner's runtime choices and the current roster; no writes. */
+export async function readCompanionSettingsSource(
+  store: IConciergeConfigStore,
+  readSettings: ReadCompanionSettings,
+  userId: string,
+) {
+  const config = { ...(await store.get(userId)), ...(await readSettings()) };
   const cats = Object.values(catRegistry.getAllConfigs());
   const availableCats = cats.filter((cat) => isCatAvailable(cat.id));
   const canSelect = (catId: string): boolean => {

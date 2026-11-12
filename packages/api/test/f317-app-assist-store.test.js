@@ -1,9 +1,6 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 import {
   MemoryConciergeConfigStore,
@@ -17,9 +14,7 @@ const key = (n) => createHash('sha256').update(`fixture-${n}`).digest('hex');
 for (const adapter of ['memory', 'redis']) {
   test(`${adapter}: consent and daily claim are atomic, bounded and durable without application content`, async () => {
     const client = adapter === 'redis' ? fixture.client('day:') : null;
-    const store = client
-      ? new RedisConciergeConfigStore(client, mkdtempSync(join(tmpdir(), 'concierge-')))
-      : new MemoryConciergeConfigStore();
+    const store = client ? new RedisConciergeConfigStore(client) : new MemoryConciergeConfigStore();
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-02'), 'disabled');
     await store.patch('owner', { appAssistEnabled: true });
     const claims = await Promise.all(
@@ -29,9 +24,9 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(claims.filter((v) => v === 'already_claimed').length, 11);
     await Promise.all([
       store.patch('owner', { appAssistEnabled: false }),
-      store.patch('owner', { personaTone: 'Fixture' }),
+      store.patch('owner', { householdReadsAllowed: false }),
     ]);
-    assert.equal((await store.getSaved('owner')).appAssistEnabled, false);
+    assert.equal((await store.get('owner')).appAssistEnabled, false);
     assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-02'), 'disabled');
     await store.patch('owner', { appAssistEnabled: true });
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-02'), 'already_claimed');
@@ -41,19 +36,14 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-01'), 'clock_rollback');
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-03'), 'claimed');
     assert.equal(await store.claimAppAssistDay('other', key(1), '2030-01-03'), 'disabled');
-    await store.patch('owner', { enabled: false });
-    assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-03'), 'disabled');
     await assert.rejects(store.claimAppAssistDay('owner', 'org.fixture.raw', '2030-01-03'));
     if (client) {
       const saved = JSON.parse(await client.get(ConciergeKeys.appAssistDay('owner')));
       assert.deepEqual(saved, { day: '2030-01-03', keys: [key(1)] });
       assert.equal(await client.ttl(ConciergeKeys.config('owner')), -1);
       assert.equal(await client.ttl(ConciergeKeys.appAssistDay('owner')), -1);
-      const restarted = new RedisConciergeConfigStore(
-        fixture.client('day:'),
-        mkdtempSync(join(tmpdir(), 'concierge-')),
-      );
-      await restarted.patch('owner', { enabled: true });
+      const restarted = new RedisConciergeConfigStore(fixture.client('day:'));
+      await restarted.patch('owner', { householdReadsAllowed: true });
       assert.equal(await restarted.claimAppAssistDay('owner', key(1), '2030-01-03'), 'already_claimed');
       assert.deepEqual((await client.keys('day:*')).sort(), [
         'day:concierge:app-assist-day:owner',
@@ -66,8 +56,8 @@ for (const adapter of ['memory', 'redis']) {
 test('two real Redis adapters propagate opt-out and subscription loss without waiting for application activation', async (t) => {
   const first = fixture.client('watch:');
   const second = fixture.client('watch:');
-  const storeA = new RedisConciergeConfigStore(first, mkdtempSync(join(tmpdir(), 'concierge-')));
-  const storeB = new RedisConciergeConfigStore(second, mkdtempSync(join(tmpdir(), 'concierge-')));
+  const storeA = new RedisConciergeConfigStore(first);
+  const storeB = new RedisConciergeConfigStore(second);
   const changes = [];
   let changed;
   const next = () =>

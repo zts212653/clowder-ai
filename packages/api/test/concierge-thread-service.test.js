@@ -1,14 +1,15 @@
 /**
  * ConciergeThreadService tests (F229 PR-A1)
- * 使用 MemoryConciergeConfigStore + in-memory ThreadStore，无需真实 Redis
+ * 使用猫猫球插件配置 fixture + in-memory ThreadStore，无需真实 Redis
  */
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
-// Register gemini35 for tests so resolveDefaultDutyCatProfileId() can find it
+// Register gemini35 for tests so the default member can be found
 // even when this file runs with an isolated minimal registry.
 if (!catRegistry.has('gemini35')) {
   catRegistry.register('gemini35', {
@@ -29,24 +30,21 @@ if (!catRegistry.has('gemini35')) {
 describe('ConciergeThreadService', () => {
   let ConciergeThreadService;
   let ThreadStore;
-  let MemoryConciergeConfigStore;
 
   beforeEach(async () => {
     const svcModule = await import('../dist/domains/concierge/ConciergeThreadService.js');
     ConciergeThreadService = svcModule.ConciergeThreadService;
     const tsModule = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     ThreadStore = tsModule.ThreadStore;
-    const storeModule = await import('../dist/domains/concierge/ConciergeConfigStore.js');
-    MemoryConciergeConfigStore = storeModule.MemoryConciergeConfigStore;
   });
 
   function makeService(opts = {}) {
     const threadStore = opts.threadStore ?? new ThreadStore();
-    const conciergeConfigStore = opts.conciergeConfigStore ?? new MemoryConciergeConfigStore();
+    const companion = companionConfigurationFixture();
     return {
-      service: new ConciergeThreadService({ threadStore, conciergeConfigStore }),
+      service: new ConciergeThreadService({ threadStore, companionSettings: companion.read }),
       threadStore,
-      conciergeConfigStore,
+      companion,
     };
   }
 
@@ -193,99 +191,27 @@ describe('ConciergeThreadService', () => {
     assert.strictEqual(found, threadId);
   });
 
-  it('syncPreferredCats is no-op when thread does not exist', async () => {
-    const { service } = makeService();
-    // Should not throw
-    await service.syncPreferredCats('user-8', 'gemini35');
-  });
-
-  it('syncPreferredCats updates preferredCats on existing thread', async () => {
-    const { service, threadStore } = makeService();
-    const threadId = await service.getOrCreate('user-9');
-
-    // Change duty cat via syncPreferredCats directly
-    await service.syncPreferredCats('user-9', 'opus47');
-
-    const thread = await threadStore.get(threadId);
-    assert.ok(thread, 'thread should exist');
-    assert.deepStrictEqual(thread.preferredCats, ['opus47'], 'preferredCats should update to new duty cat');
-  });
-
-  it('getOrCreate syncs preferredCats to [dutyCatProfileId] from config', async () => {
-    const { service, threadStore, conciergeConfigStore } = makeService();
-
-    // Pre-configure the duty cat — use gemini25 (its catId).
-    // FIX-3 R2: ConciergeConfigStore.get() now validates dutyCatProfileId against catRegistry,
-    // so using an alias would be re-resolved to the default.
-    await conciergeConfigStore.put('user-6', {
-      enabled: true,
-      skin: 'ragdoll-v1',
-      displayName: '猫猫球',
-      personaTone: '温暖',
-      dutyCatProfileId: 'gemini25',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-    });
+  it('getOrCreate syncs preferredCats to [dutyCatProfileId] from the companion configuration', async () => {
+    const { service, threadStore, companion } = makeService();
+    companion.set({ dutyCatProfileId: 'gemini25' });
 
     const threadId = await service.getOrCreate('user-6');
     const thread = await threadStore.get(threadId);
 
     assert.ok(thread, 'thread should exist');
-    assert.ok(Array.isArray(thread.preferredCats), 'preferredCats should be an array');
     assert.deepStrictEqual(thread.preferredCats, ['gemini25'], 'preferredCats should contain dutyCatProfileId');
   });
 
-  it('getOrCreate normalizes stale dutyCatProfileId to valid catId (FIX-3 R2)', async () => {
-    const { service, threadStore, conciergeConfigStore } = makeService();
-
-    // Store a config with a stale/invalid dutyCatProfileId (e.g., removed cat).
-    // FIX-3: ConciergeConfigStore.get() should re-resolve it to the default (gemini35).
-    await conciergeConfigStore.put('user-stale', {
-      enabled: true,
-      skin: 'ragdoll-v1',
-      displayName: '猫猫球',
-      personaTone: '温暖',
-      dutyCatProfileId: 'removed-cat-xyz',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-    });
-
-    const threadId = await service.getOrCreate('user-stale');
-    const thread = await threadStore.get(threadId);
-
-    assert.ok(thread, 'thread should exist');
-    // The stale 'removed-cat-xyz' should be re-resolved to 'gemini35' (default duty cat)
-    assert.deepStrictEqual(
-      thread.preferredCats,
-      ['gemini35'],
-      'stale dutyCatProfileId should be normalized to valid catId via ConciergeConfigStore.get()',
-    );
+  it('companion settings come from the plugin manifest defaults for an unconfigured owner', async () => {
+    const settings = await companionConfigurationFixture().read();
+    assert.equal(settings.dutyCatProfileId, 'gemini35', 'an unchosen member falls back to gemini35');
+    assert.equal(settings.skin, 'xianxian-codex', 'default skin should be 宪宪');
+    assert.equal(settings.enabled, true);
+    assert.equal(settings.ballSize, 72);
   });
 
-  it('MemoryConciergeConfigStore returns current defaults for an unconfigured user', async () => {
-    // Default duty cat: gemini35 (暹罗猫 Gemini Flash, current 3.6 Flash).
-    const { MemoryConciergeConfigStore } = await import('../dist/domains/concierge/ConciergeConfigStore.js');
-    const store = new MemoryConciergeConfigStore();
-    const config = await store.get('user-default-check');
-    assert.equal(config.dutyCatProfileId, 'gemini35', 'default duty cat should be gemini35 (暹罗猫 Gemini Flash)');
-    assert.equal(config.skin, 'xianxian-codex', 'default skin should be 宪宪');
-  });
-
-  it('MemoryConciergeConfigStore preserves an existing user skin choice', async () => {
-    const { MemoryConciergeConfigStore } = await import('../dist/domains/concierge/ConciergeConfigStore.js');
-    const store = new MemoryConciergeConfigStore();
-    await store.put('user-existing-skin', {
-      enabled: true,
-      skin: 'yanyan-codex',
-      displayName: '猫猫球',
-      personaTone: '温暖',
-      dutyCatProfileId: 'gemini35',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-      ballPosition: null,
-    });
-
-    const config = await store.get('user-existing-skin');
-    assert.equal(config.skin, 'yanyan-codex');
+  it('companion settings keep a saved skin choice', async () => {
+    const companion = companionConfigurationFixture({ skin: 'yanyan-codex' });
+    assert.equal((await companion.read()).skin, 'yanyan-codex');
   });
 });

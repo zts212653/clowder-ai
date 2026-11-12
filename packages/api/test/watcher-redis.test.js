@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { parseWatcherSessionState } from '@cat-cafe/shared';
 import { createRedisClient } from '@cat-cafe/shared/utils';
@@ -37,7 +34,7 @@ test(
   'selected scope and per-thread choices persist, and scope changes fence already prepared output',
   options,
   async () => {
-    const configs = new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-'))),
+    const configs = new RedisConciergeConfigStore(redis),
       threads = new RedisThreadStore(redis),
       messages = new RedisMessageStore(redis);
     const userId = 'selected-scope-owner',
@@ -62,11 +59,7 @@ test(
     await assert.rejects(append(old), /watcher_output_control_changed/);
     assert.equal(await readWatcherOutputFence(owners, userId, thread.id, 'codex'), null);
     await threads.updateWatcherControl(thread.id, 0, { enabled: true });
-    assert.equal(
-      (await new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-'))).readWatcherConfig(userId))
-        .scope,
-      'selected',
-    );
+    assert.equal((await new RedisConciergeConfigStore(redis).readWatcherConfig(userId)).scope, 'selected');
     assert.equal((await new RedisThreadStore(redis).get(thread.id)).watcher.enabled, true);
     const selected = await readWatcherOutputFence(owners, userId, thread.id, 'codex');
     assert.ok(selected);
@@ -131,7 +124,7 @@ test('a preference CAS racing initial activation retains the complete published-
       if (property === 'get')
         return async (...args) => {
           const before = await target.get(...args);
-          const initializer = new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-')));
+          const initializer = new RedisConciergeConfigStore(redis);
           await initializer.initializeWatcherCursor('activation-race', 91);
           boundary = await initializer.readWatcherConfig('activation-race');
           return before;
@@ -140,10 +133,7 @@ test('a preference CAS racing initial activation retains the complete published-
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  const result = await new RedisConciergeConfigStore(
-    interleaved,
-    mkdtempSync(join(tmpdir(), 'concierge-')),
-  ).updateWatcherConfig('activation-race', 0, {
+  const result = await new RedisConciergeConfigStore(interleaved).updateWatcherConfig('activation-race', 0, {
     doNotDisturbLabelIds: ['private'],
   });
   assert.equal(result.startedAfterSequence, 91);
@@ -293,16 +283,12 @@ test('Redis daily pages retain usage and exact settlement order without expiring
   );
   assert.equal(second.records[0].watcherUsage.cacheReadTokens, 20);
   assert.equal((await turns.listSettled({ ...query, watcherDay: query.watcherDay + 1 })).records.length, 0);
-  const configs = new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-')));
+  const configs = new RedisConciergeConfigStore(redis);
   await configs.initializeWatcherCursor('daily-u', 7);
   await configs.updateWatcherConfig('daily-u', 0, { enabled: false });
   await configs.updateWatcherConfig('daily-u', 1, { enabled: true }, 20);
   assert.equal((await configs.readWatcherConfig('daily-u')).startedAfterSequence, 20);
-  assert.equal(
-    (await new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-'))).readWatcherConfig('daily-u'))
-      .activationRevision,
-    2,
-  );
+  assert.equal((await new RedisConciergeConfigStore(redis).readWatcherConfig('daily-u')).activationRevision, 2);
   const threads = new RedisThreadStore(redis);
   const thread = await threads.create('daily-u');
   const opened = await threads.updateWatcherControl(

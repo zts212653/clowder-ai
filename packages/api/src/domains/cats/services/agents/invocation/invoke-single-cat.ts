@@ -1226,8 +1226,8 @@ export interface InvocationDeps {
   readonly guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6: Dismiss tracker for guide offer suppression */
   readonly dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
-  /** F229: Concierge config store for duty-cat岗位 prompt injection (optional, fail-open) */
-  readonly conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  /** F229: 猫猫球 settings for duty-cat岗位 prompt injection (optional, fail-open) */
+  readonly companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions (optional, fail-open) */
   readonly conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /**

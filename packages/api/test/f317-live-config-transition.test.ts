@@ -49,10 +49,7 @@ test('permission writes through the existing route await physical media revocati
   let reject = false;
   await app.register(conciergeRoutes, {
     conciergeConfigStore: config,
-    conciergeThreadService: new ConciergeThreadService({
-      conciergeConfigStore: config,
-      threadStore: new ThreadStore(),
-    }),
+    conciergeThreadService: new ConciergeThreadService({ threadStore: new ThreadStore() }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: messages,
@@ -111,17 +108,10 @@ test('permission writes through the existing route await physical media revocati
       method: 'PUT',
       url: '/api/concierge/config',
       headers,
-      payload: { ballPosition: { x: 1, y: 2 }, behaviorEnabled: false },
+      payload: { ballPosition: { x: 1, y: 2 } },
     });
-    assert.equal(visual.statusCode, 200, 'geometry and autonomous preference do not open or close media');
-    const tone = await app.inject({
-      method: 'PUT',
-      url: '/api/concierge/config',
-      headers,
-      payload: { personaTone: 'calm' },
-    });
-    assert.equal(tone.statusCode, 200);
-    assert.equal(next.status().state, 'preparing', 'tone affects the next call without mutating current media');
+    assert.equal(visual.statusCode, 200, 'geometry does not open or close media');
+    assert.equal(next.status().state, 'preparing', 'geometry does not mutate current media');
     reject = false;
     loseWriteReply = true;
     const unknown = await app.inject({
@@ -147,16 +137,11 @@ test('permission writes through the existing route await physical media revocati
   }
 });
 
-test('the preparation snapshot changes only for changed duty or read permission, including legacy default read permission', () => {
-  const config = { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
+test('the preparation snapshot changes only for changed read permission, including legacy default read permission', () => {
+  const config = { ...CONCIERGE_CONFIG_DEFAULTS };
   assert.equal(requiresLiveConfigStop(config, { householdReadsAllowed: true }), false);
   assert.equal(requiresLiveConfigStop(config, { householdReadsAllowed: false }), true);
-  assert.equal(requiresLiveConfigStop(config, { dutyCatProfileId: 'opus' }), false);
-  assert.equal(requiresLiveConfigStop(config, { dutyCatProfileId: 'fable-5' }), true);
-  assert.equal(
-    requiresLiveConfigStop(config, { personaTone: 'quiet', behaviorEnabled: false, skin: 'yarn-ball' }),
-    false,
-  );
+  assert.equal(requiresLiveConfigStop(config, { ballPosition: { x: 1, y: 2 } }), false);
 });
 
 test('a timed-out write returns reconciliation truth while retaining the transition fence until settlement', async (t) => {
@@ -189,7 +174,7 @@ test('a timed-out write returns reconciliation truth while retaining the transit
   const call = await sessions.prepare(options);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: store,
-    conciergeThreadService: new ConciergeThreadService({ conciergeConfigStore: store, threadStore: new ThreadStore() }),
+    conciergeThreadService: new ConciergeThreadService({ threadStore: new ThreadStore() }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: messages,
@@ -214,7 +199,7 @@ test('a timed-out write returns reconciliation truth while retaining the transit
   assert.equal(response.json().code, 'configuration_write_unconfirmed');
   assert.equal(response.json().callStatus, 'stopped');
   assert.equal(call.status().state, 'closed');
-  assert.equal((await store.getSaved('owner')).householdReadsAllowed, false, 'timeout does not claim rollback');
+  assert.equal((await store.get('owner')).householdReadsAllowed, false, 'timeout does not claim rollback');
   await assert.rejects(
     sessions.prepare({ ...options, binding: { ...options.binding, callId: 'too-early' } }),
     /active/,
@@ -223,7 +208,7 @@ test('a timed-out write returns reconciliation truth while retaining the transit
     method: 'PUT',
     url: '/api/concierge/config',
     headers,
-    payload: { skin: 'ragdoll-v1' },
+    payload: { ballPosition: { x: 3, y: 4 } },
   });
   assert.equal(second.statusCode, 409, 'a timed-out write cannot race a later full configuration write');
   release();
@@ -233,9 +218,9 @@ test('a timed-out write returns reconciliation truth while retaining the transit
     method: 'PUT',
     url: '/api/concierge/config',
     headers,
-    payload: { skin: 'ragdoll-v1' },
+    payload: { ballPosition: { x: 3, y: 4 } },
   });
   assert.equal(retry.statusCode, 200);
   assert.equal(retry.json().callStatus, 'unchanged');
-  assert.equal((await store.getSaved('owner')).householdReadsAllowed, false);
+  assert.equal((await store.get('owner')).householdReadsAllowed, false);
 });

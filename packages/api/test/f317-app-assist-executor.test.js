@@ -1,8 +1,5 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { RedisConciergeConfigStore } from '../dist/domains/concierge/ConciergeConfigStore.js';
@@ -13,7 +10,7 @@ import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 const redis = ownedRedisFixture('f317-app-assist-executor');
 
 test('actual executor/private pipes and Host instances enforce the same owner daily claim and immediate saved opt-out', async (t) => {
-  const store = new RedisConciergeConfigStore(redis.client('executor:'), mkdtempSync(join(tmpdir(), 'concierge-')));
+  const store = new RedisConciergeConfigStore(redis.client('executor:'));
   await store.patch('fixture-owner', { appAssistEnabled: true });
   const frames = [];
   const windows = [];
@@ -22,7 +19,8 @@ test('actual executor/private pipes and Host instances enforce the same owner da
   });
   for (let i = 0; i < 2; i++) {
     const owner = new CompanionAppAssistOwner({
-      store: new RedisConciergeConfigStore(redis.client('executor:'), mkdtempSync(join(tmpdir(), 'concierge-'))),
+      store: new RedisConciergeConfigStore(redis.client('executor:')),
+      companionSettings: async () => ({ enabled: true }),
       ownerUserId: 'fixture-owner',
       timeZone: () => 'Pacific/Honolulu',
       now: () => Date.parse('2030-01-02T12:00:00Z'),

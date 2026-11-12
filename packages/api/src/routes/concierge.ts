@@ -1,8 +1,8 @@
 /**
  * Concierge API Routes (F229 PR-A1 + A3b + Phase B)
  *
- * GET  /api/concierge/config         — 获取当前用户的前台猫配置（不存在则返回默认值）
- * PUT  /api/concierge/config         — 覆盖写入用户的前台猫配置（TTL=0 持久化）
+ * GET  /api/concierge/config         — 获取当前用户的猫猫球运行状态（view=native / settings 附带插件配置）
+ * PUT  /api/concierge/config         — 写入猫猫球运行状态（位置、应用协助、家内读取；TTL=0 持久化）
  * POST /api/concierge/thread         — 懒创建/获取 per-user concierge thread，返回 threadId
  * POST /api/concierge/relay          — 投递 relay 消息到目标 thread (§1a RelayReceipt)
  * POST /api/concierge/confirm        — 更新确认卡状态 (§1b PendingConfirmation)
@@ -15,9 +15,6 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  BALL_SIZE_MAX,
-  BALL_SIZE_MIN,
-  type CatId,
   type ConciergeConfig,
   catIdSchema,
   type InvestigationJob,
@@ -26,7 +23,6 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { isCatAvailable } from '../config/cat-config-loader.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
 import type { IConciergeConfirmationStore } from '../domains/concierge/ConciergeConfirmationStore.js';
@@ -36,6 +32,7 @@ import { executeInvestigation } from '../domains/concierge/ConciergeInvestigatio
 import type { IConciergeRelayStore } from '../domains/concierge/ConciergeRelayStore.js';
 import type { ConciergeThreadService } from '../domains/concierge/ConciergeThreadService.js';
 import type { IConciergeTriagePlanStore } from '../domains/concierge/ConciergeTriagePlanStore.js';
+import type { ReadCompanionSettings } from '../domains/concierge/companion-settings.js';
 import { readCompanionSettingsSource } from '../domains/concierge/live/host/companion-settings-read.js';
 import { LiveCallAlreadyActiveError } from '../domains/concierge/live/LiveCompanionSessions.js';
 import {
@@ -55,30 +52,8 @@ const log = createModuleLogger('concierge-routes');
  */
 const patchConciergeConfigSchema = z
   .object({
-    enabled: z.boolean(),
-    skin: z.enum(['yarn-ball', 'ragdoll-v1', 'yanyan-codex', 'xianxian-codex']),
-    // No newlines/CR allowed: both fields are interpolated verbatim into the concierge
-    // system prompt. Embedded newlines would inject prompt directives (P1 prompt injection).
-    displayName: z
-      .string()
-      .min(1)
-      .max(50)
-      .regex(/^[^\n\r]+$/, 'displayName must not contain newlines'),
-    personaTone: z
-      .string()
-      .min(1)
-      .max(200)
-      .regex(/^[^\n\r]+$/, 'personaTone must not contain newlines'),
-    dutyCatProfileId: catIdSchema().refine((id) => isCatAvailable(id), {
-      message: 'Duty cat is currently unavailable',
-    }),
-    proactivePolicy: z.enum(['ambient', 'quiet-badge']),
     /** PR-A3b: ball position persistence (INV-P3) */
     ballPosition: z.object({ x: z.number().finite(), y: z.number().finite() }).nullable(),
-    /** E3: ball size persistence, shared with public and native companion geometry. */
-    ballSize: z.number().int().min(BALL_SIZE_MIN).max(BALL_SIZE_MAX),
-    /** E4: autonomous behavior engine toggle */
-    behaviorEnabled: z.boolean(),
     appAssistEnabled: z.boolean(),
     householdReadsAllowed: z.boolean(),
   })
@@ -136,6 +111,7 @@ const triageConfirmSchema = z
 
 interface ConciergeRoutesOptions {
   conciergeConfigStore: IConciergeConfigStore;
+  companionSettings: ReadCompanionSettings;
   conciergeThreadService: ConciergeThreadService;
   conciergeRelayStore: IConciergeRelayStore;
   conciergeConfirmationStore: IConciergeConfirmationStore;
@@ -403,20 +379,18 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
       reply.header('Cache-Control', 'no-store');
       const access = requirePluginOwnerLocalAccess(request, 'read');
       if ('error' in access) return reply.code(access.status).send({ error: access.error });
-      const config = await conciergeConfigStore.get(access.operator);
+      const settings = await opts.companionSettings();
+      const config = { ...(await conciergeConfigStore.get(access.operator)), ...settings };
       const transitionInactive =
         !opts.withLiveConfigChange || opts.isLiveConfigChangePending?.(access.operator) === false;
-      return {
-        config,
-        behaviorEnabled: (config.behaviorEnabled ?? true) === true && transitionInactive,
-      };
+      return { config, behaviorEnabled: settings.behaviorEnabled && transitionInactive };
     }
     if ((request.query as { view?: unknown }).view === 'settings') {
       reply.header('Cache-Control', 'no-store');
       const access = requirePluginOwnerLocalAccess(request, 'read');
       if ('error' in access) return reply.code(access.status).send({ error: access.error });
       try {
-        const source = await readCompanionSettingsSource(conciergeConfigStore, access.operator);
+        const source = await readCompanionSettingsSource(conciergeConfigStore, opts.companionSettings, access.operator);
         return reply.code(source.status === 'available' ? 200 : 503).send(source);
       } catch {
         return reply.code(503).send({ status: 'unavailable', reason: 'temporarily_unavailable' });
@@ -511,8 +485,6 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
     } finally {
       if (writeTimer) clearTimeout(writeTimer);
     }
-    // Persistence keeps the exact selected ID; ordinary Web/routing consumers
-    // continue using the same effective selection as their default GET.
     try {
       updated = await conciergeConfigStore.get(userId);
     } catch {
@@ -522,16 +494,6 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
         callStatus,
         error: 'Saved settings readback unconfirmed',
       });
-    }
-    // P2 cloud fix: sync thread.preferredCats immediately so duty-cat change takes effect
-    // on the next @mention-free message without requiring a /api/concierge/thread roundtrip.
-    // Fail-open: getOrCreate self-heals on next call if this races or throws.
-    if (updated.dutyCatProfileId) {
-      try {
-        await conciergeThreadService.syncPreferredCats(userId, updated.dutyCatProfileId as CatId);
-      } catch {
-        // best-effort — routing stale at worst until next getOrCreate
-      }
     }
     return { config: updated, callStatus };
   });

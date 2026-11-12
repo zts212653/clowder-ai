@@ -5,29 +5,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { catRegistry } from '@cat-cafe/shared';
-
-// Register gemini35 for tests so resolveDefaultDutyCatProfileId() finds the expected default.
-if (!catRegistry.has('gemini35')) {
-  catRegistry.register('gemini35', {
-    id: 'gemini35',
-    name: '暹罗猫 Gemini 3.6 Flash',
-    displayName: '暹罗猫',
-    avatar: '/avatars/gemini25.png',
-    color: { primary: '#2563EB', secondary: '#DBEAFE' },
-    mentionPatterns: ['@gemini35', '@gemini36'],
-    clientId: 'google',
-    defaultModel: 'Gemini 3.6 Flash (High)',
-    mcpSupport: true,
-    roleDescription: '暹罗猫 Gemini 3.6 Flash',
-    personality: '创意灵感丰富',
-  });
-}
-
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -61,7 +39,7 @@ describe('RedisConciergeConfigStore', { skip: redisIsolationSkipReason(REDIS_URL
       await redis.quit().catch(() => {});
       return;
     }
-    store = new RedisConciergeConfigStore(redis, mkdtempSync(join(tmpdir(), 'concierge-')));
+    store = new RedisConciergeConfigStore(redis);
   });
 
   after(async () => {
@@ -78,104 +56,39 @@ describe('RedisConciergeConfigStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('get returns defaults when no config stored', async () => {
     const config = await store.get('user-1');
-    assert.equal(config.enabled, true);
-    assert.equal(config.skin, 'xianxian-codex');
-    assert.equal(config.displayName, '猫猫球');
-    assert.equal(config.personaTone, '温暖、简短、不啰嗦');
-    assert.equal(config.proactivePolicy, 'quiet-badge');
-    assert.equal(config.muted, false);
-    // dutyCatProfileId default: 'gemini35' (暹罗猫 Gemini Flash) if in roster, else first available
-    assert.ok(typeof config.dutyCatProfileId === 'string' && config.dutyCatProfileId.length > 0);
+    assert.equal(config.ballPosition, null);
+    assert.equal(config.appAssistEnabled, false);
   });
 
   it('put persists config and get returns it (round-trip)', async () => {
-    const input = {
-      enabled: false,
-      skin: 'ragdoll-v1',
-      displayName: 'KittyDesk',
-      personaTone: '简洁',
-      dutyCatProfileId: 'gpt52',
-      proactivePolicy: 'ambient',
-      muted: true,
-    };
-    await store.put('user-2', input);
+    await store.put('user-2', { ballPosition: { x: 1, y: 2 }, householdReadsAllowed: false, appAssistEnabled: true });
     const retrieved = await store.get('user-2');
-    assert.equal(retrieved.enabled, false);
-    assert.equal(retrieved.skin, 'ragdoll-v1');
-    assert.equal(retrieved.displayName, 'KittyDesk');
-    assert.equal(retrieved.dutyCatProfileId, 'gpt52');
-    assert.equal(retrieved.proactivePolicy, 'ambient');
-    assert.equal(retrieved.muted, true);
+    assert.deepEqual(retrieved.ballPosition, { x: 1, y: 2 });
+    assert.equal(retrieved.householdReadsAllowed, false);
+    assert.equal(retrieved.appAssistEnabled, true);
   });
 
   it('put is idempotent — second put overwrites first', async () => {
-    await store.put('user-3', {
-      enabled: true,
-      skin: 'ragdoll-v1',
-      displayName: 'First',
-      personaTone: 'test',
-      dutyCatProfileId: 'sonnet',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-    });
-    await store.put('user-3', {
-      enabled: false,
-      skin: 'ragdoll-v1',
-      displayName: 'Second',
-      personaTone: 'test2',
-      dutyCatProfileId: 'codex',
-      proactivePolicy: 'ambient',
-      muted: true,
-    });
+    await store.put('user-3', { ballPosition: { x: 1, y: 1 }, householdReadsAllowed: true });
+    await store.put('user-3', { ballPosition: { x: 2, y: 2 }, householdReadsAllowed: false });
     const config = await store.get('user-3');
-    assert.equal(config.displayName, 'Second');
-    assert.equal(config.dutyCatProfileId, 'codex');
-    assert.equal(config.enabled, false);
+    assert.deepEqual(config.ballPosition, { x: 2, y: 2 });
+    assert.equal(config.householdReadsAllowed, false);
   });
 
   it('config is stored with TTL=0 (persistent, no expiry)', async () => {
-    await store.put('user-4', {
-      enabled: true,
-      skin: 'ragdoll-v1',
-      displayName: 'NeverExpire',
-      personaTone: 'test',
-      dutyCatProfileId: 'sonnet',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-    });
+    await store.put('user-4', { ballPosition: null });
     // ioredis keyPrefix auto-applies; TTL=-1 means persistent
     const prefix = redis.options.keyPrefix ?? '';
     const ttl = await redis.ttl(`${prefix}concierge:config:user-4`);
-    // Strip prefix before calling ttl (which auto-adds prefix)
     const ttlDirect = await redis.ttl('concierge:config:user-4');
-    // Either approach: TTL should be -1 (persistent)
     assert.ok(ttlDirect === -1 || ttl === -1, `expected TTL=-1, got direct=${ttlDirect} prefixed=${ttl}`);
   });
 
   it('different users have independent configs', async () => {
-    await store.put('user-a', {
-      enabled: true,
-      skin: 'ragdoll-v1',
-      displayName: 'Alice',
-      personaTone: 'warm',
-      dutyCatProfileId: 'gemini35',
-      proactivePolicy: 'quiet-badge',
-      muted: false,
-    });
-    await store.put('user-b', {
-      enabled: false,
-      skin: 'ragdoll-v1',
-      displayName: 'Bob',
-      personaTone: 'brief',
-      dutyCatProfileId: 'sonnet',
-      proactivePolicy: 'ambient',
-      muted: true,
-    });
-    const a = await store.get('user-a');
-    const b = await store.get('user-b');
-    assert.equal(a.displayName, 'Alice');
-    assert.equal(b.displayName, 'Bob');
-    assert.equal(a.muted, false);
-    assert.equal(b.muted, true);
+    await store.put('user-a', { ballPosition: { x: 1, y: 1 }, householdReadsAllowed: true });
+    await store.put('user-b', { ballPosition: { x: 9, y: 9 }, householdReadsAllowed: false });
+    assert.equal((await store.get('user-a')).householdReadsAllowed, true);
+    assert.equal((await store.get('user-b')).householdReadsAllowed, false);
   });
 });

@@ -7,6 +7,7 @@ import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHost
 import { assertCompanionWorkProject } from '../src/domains/concierge/live/host/companion-work-port.js';
 import { CompanionWorkOverview } from '../src/domains/concierge/live/work/companion-work-overview.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 import { workFixture } from './helpers/f317-companion-work-fixture.mjs';
 
 async function fixture(t: TestContext, owner = 'beta25-owner') {
@@ -14,7 +15,10 @@ async function fixture(t: TestContext, owner = 'beta25-owner') {
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: owner });
-  const config = { ...CONCIERGE_CONFIG_DEFAULTS, ballSize: 43, dutyCatProfileId: 'codex61-sol' };
+  const config = {
+    ...CONCIERGE_CONFIG_DEFAULTS,
+    ...(await companionConfigurationFixture({ ballSize: 43, dutyCatProfileId: 'codex61-sol' }).read()),
+  };
   app.get('/api/concierge/config', async () => ({
     status: 'available',
     config,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS, createCatId } from '@cat-cafe/shared';
+import { createCatId } from '@cat-cafe/shared';
 import {
   resolveLiveCompanionSelection,
   sameLiveExecutionSelection,
@@ -13,7 +13,12 @@ const cat = (id: string, clientId: 'openai' | 'anthropic', isDefaultVariant = fa
   isDefaultVariant,
 });
 const cats = [cat('opus', 'anthropic', true), cat('codex-alternate', 'openai'), cat('codex', 'openai', true)];
-const config = { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus', displayName: '我的猫' };
+const config = {
+  dutyCatProfileId: 'opus',
+  displayName: '我的猫',
+  skin: 'xianxian-codex' as const,
+  personaTone: '温暖、简短、不啰嗦',
+};
 
 test('non-OpenAI duty keeps its identity while the explicit catalog default carries Live', () => {
   for (const candidates of [cats, [...cats].reverse()]) {

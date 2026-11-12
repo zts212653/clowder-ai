@@ -10,6 +10,7 @@ import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageS
 import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHostBridge.js';
 import { LivePresentationObservations } from '../src/domains/concierge/live/live-presentation-observations.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
+import { COMPANION_DEFAULTS } from './helpers/companion-configuration-fixture.js';
 
 async function fixture(t: TestContext) {
   const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
@@ -21,7 +22,7 @@ async function fixture(t: TestContext) {
   const callId = randomUUID();
   app.get('/api/concierge/config', async () => ({
     status: 'available',
-    config: { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'codex', ballSize: 43 },
+    config: { ...CONCIERGE_CONFIG_DEFAULTS, ...COMPANION_DEFAULTS, dutyCatProfileId: 'codex', ballSize: 43 },
     companions: [{ catProfileId: 'codex', displayName: 'Fixture', available: true }],
     selectedCompanionStatus: 'available',
   }));

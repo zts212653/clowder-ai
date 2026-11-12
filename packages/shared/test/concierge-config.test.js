@@ -1,32 +1,12 @@
 /**
- * F229 E3: ConciergeConfig ballSize field tests
+ * F229 E3: ball size constants
  *
- * Validates that:
- * - ballSize field exists on ConciergeConfig type (via defaults)
- * - Default ballSize is 72 (legacy BALL_SIZE constant)
- * - MIN/MAX size constants are exported and within sprite resolution bounds
+ * Validates that MIN/MAX size constants are exported and within sprite resolution bounds.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  BALL_SIZE_DEFAULT,
-  BALL_SIZE_MAX,
-  BALL_SIZE_MIN,
-  CONCIERGE_CONFIG_DEFAULTS,
-  clampBallSize,
-} from '../src/types/concierge.js';
+import { BALL_SIZE_DEFAULT, BALL_SIZE_MAX, BALL_SIZE_MIN, clampBallSize } from '../src/types/concierge.js';
 
-describe('ConciergeConfig defaults', () => {
-  it('uses the Xianxian atlas for unconfigured users', () => {
-    expect(CONCIERGE_CONFIG_DEFAULTS.skin).toBe('xianxian-codex');
-  });
-});
-
-describe('ConciergeConfig ballSize (E3)', () => {
-  it('CONCIERGE_CONFIG_DEFAULTS includes ballSize with value 72', () => {
-    expect(CONCIERGE_CONFIG_DEFAULTS).toHaveProperty('ballSize');
-    expect(CONCIERGE_CONFIG_DEFAULTS.ballSize).toBe(72);
-  });
-
+describe('ball size (E3)', () => {
   it('exports the approved compact desktop size', () => {
     expect(BALL_SIZE_MIN).toBe(43);
     expect(clampBallSize(42)).toBe(43);
