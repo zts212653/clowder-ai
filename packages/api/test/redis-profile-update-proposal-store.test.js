@@ -80,6 +80,63 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
     assert.equal(got.signalProvenance.sourceMessageId, 'msg_1');
   });
 
+  it('commits the request binding with the proposal and keeps recovery durable across store restart', async () => {
+    const { ProfileUpdateProposalKeys: keys } = await import(
+      '../dist/domains/cats/services/stores/redis-keys/proposals/profile-update-proposal-keys.js'
+    );
+    await store.reserveDedup('user_landy', 'durable-request', 'durable-proposal');
+    await store.create(baseInput({ proposalId: 'durable-proposal', clientRequestId: 'durable-request' }));
+    assert.equal(await redis.ttl(keys.dedup('user_landy', 'durable-request')), -1, 'completed request cannot expire');
+    const fresh = new RedisProfileUpdateProposalStore(redis);
+    assert.equal(await fresh.reserveDedup('user_landy', 'durable-request', 'duplicate'), 'durable-proposal');
+    assert.equal((await fresh.get('durable-proposal')).afterContent, 'NEW');
+    assert.equal((await fresh.listPending('user_landy')).length, 1);
+  });
+
+  it('retains a legacy live request binding once its original proposal is recovered', async () => {
+    const { ProfileUpdateProposalKeys: keys } = await import(
+      '../dist/domains/cats/services/stores/redis-keys/proposals/profile-update-proposal-keys.js'
+    );
+    await store.reserveDedup('user_landy', 'legacy-request', 'legacy-proposal');
+    await store.create(baseInput({ proposalId: 'legacy-proposal' }));
+    assert.equal(await store.reserveDedup('user_landy', 'legacy-request', 'legacy-proposal'), 'legacy-proposal');
+    assert.equal(await redis.ttl(keys.dedup('user_landy', 'legacy-request')), -1);
+    const fresh = new RedisProfileUpdateProposalStore(redis);
+    assert.equal((await fresh.get('legacy-proposal')).clientRequestId, 'legacy-request');
+    await fresh.abortStaged('legacy-proposal', 'card never persisted');
+    assert.equal(await fresh.getDedupProposalId('user_landy', 'legacy-request'), null);
+  });
+
+  it('atomically releases a durable binding with an aborted staged proposal even if its caller disappears', async () => {
+    await store.reserveDedup('user_landy', 'aborted-request', 'aborted-proposal');
+    await store.create(baseInput({ proposalId: 'aborted-proposal', clientRequestId: 'aborted-request' }));
+    await store.abortStaged('aborted-proposal', 'card never persisted');
+    // No route-level cleanup runs here: a fresh process must still recover this request.
+    const fresh = new RedisProfileUpdateProposalStore(redis);
+    assert.equal(await fresh.get('aborted-proposal'), null);
+    assert.equal(await fresh.getDedupProposalId('user_landy', 'aborted-request'), null);
+    assert.deepEqual(await fresh.listPending('user_landy'), []);
+    assert.equal(await fresh.reserveDedup('user_landy', 'aborted-request', 'replacement'), 'replacement');
+  });
+
+  it('fences a late create after its empty reservation expired and a retry won', async () => {
+    const { ProfileUpdateProposalKeys: keys } = await import(
+      '../dist/domains/cats/services/stores/redis-keys/proposals/profile-update-proposal-keys.js'
+    );
+    const key = keys.dedup('user_landy', 'expired-reservation');
+    await store.reserveDedup('user_landy', 'expired-reservation', 'old');
+    await redis.pexpire(key, 0); // deterministic expiration: no clock sleeps
+    await store.reserveDedup('user_landy', 'expired-reservation', 'winner');
+    await assert.rejects(
+      store.create(baseInput({ proposalId: 'old', clientRequestId: 'expired-reservation' })),
+      /reservation/i,
+    );
+    assert.equal(await store.get('old'), null);
+    await store.create(baseInput({ proposalId: 'winner', clientRequestId: 'expired-reservation' }));
+    assert.equal((await store.listPending('user_landy')).length, 1);
+    assert.equal(await redis.ttl(key), -1);
+  });
+
   it('CAS claim: real concurrent claim — exactly one wins (Lua atomicity)', async () => {
     const p = await store.create(baseInput());
     const [a, b] = await Promise.all([

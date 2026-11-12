@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { EventAuditLog } from '../src/domains/cats/services/orchestration/EventAuditLog.js';
-import { executeOpenAIPlatformRequest } from '../src/domains/services/openai-platform/request.js';
+import { executePlatformRequest } from '../src/domains/services/openai-platform/request.js';
 
 let root: string;
 let previousRoot: string | undefined;
@@ -46,7 +46,7 @@ test('full JSON parameters and caller model reach the official API, independentl
   };
   const raw = '{"output_text":"fixture","future_response":{"a":1},"usage":{"input_tokens":3,"output_tokens":4}}\n';
   let calls = 0;
-  const result = await executeOpenAIPlatformRequest(
+  const result = await executePlatformRequest(
     options(async (url, init) => {
       calls++;
       assert.equal(url, 'https://api.openai.com/v1/responses');
@@ -92,7 +92,7 @@ test('the actual GIF multipart shape preserves arbitrary parameters, file bytes 
     data: [{ b64_json: 'R'.repeat(3_000_000) }],
     usage: { input_tokens: 1455, output_tokens: 3568 },
   });
-  const result = await executeOpenAIPlatformRequest(
+  const result = await executePlatformRequest(
     options(async (url, init) => {
       assert.equal(url, 'https://api.openai.com/v1/images/edits');
       assert.equal(new Headers(init?.headers).has('content-type'), false, 'fetch must generate the multipart boundary');
@@ -137,7 +137,7 @@ test('binary and SSE results remain original bytes; usage is recorded without re
       Buffer.from('data: {"response":{"usage":{"input_tokens":2,"output_tokens":1}}}\n\ndata: [DONE]\n\n'),
     ],
   ] as const) {
-    const result = await executeOpenAIPlatformRequest(
+    const result = await executePlatformRequest(
       options(async () => new Response(bytes, { headers: { 'content-type': contentType } })),
       input({
         method: 'POST',
@@ -154,7 +154,7 @@ test('binary and SSE results remain original bytes; usage is recorded without re
 test('non-2xx provider responses are preserved; no paid retry or error-body substitution occurs', async () => {
   let calls = 0;
   const raw = '{"error":{"type":"invalid_parameter","message":"caller chooses parameters"}}';
-  const result = await executeOpenAIPlatformRequest(
+  const result = await executePlatformRequest(
     options(async () => {
       calls++;
       return new Response(raw, { status: 400, headers: { 'content-type': 'application/json' } });
@@ -194,9 +194,9 @@ test('foreign destinations, administrative APIs, auth overrides and credential/f
       files: { file: { path } },
     })),
   ])
-    await assert.rejects(executeOpenAIPlatformRequest(opts, input(request)));
+    await assert.rejects(executePlatformRequest(opts, input(request)));
   await assert.rejects(
-    executeOpenAIPlatformRequest(
+    executePlatformRequest(
       { ...opts, outputDir: join(root, 'FAKE_PLATFORM_KEY') },
       input({ method: 'GET', path: '/v1/models' }),
     ),
@@ -220,7 +220,7 @@ test('an interrupted response is unconfirmed, cleans partial files, and never re
     }),
     signal: controller.signal,
   };
-  const result = await executeOpenAIPlatformRequest(
+  const result = await executePlatformRequest(
     opts,
     input({ method: 'POST', path: '/v1/responses', contentType: 'application/json', body: { model: 'fixture' } }),
   );
@@ -234,7 +234,7 @@ test('oversized or credential-echoing streams never publish a partial response o
   for (const echo of [false, true]) {
     let calls = 0;
     const bytes = echo ? ['safe prefix FAKE_PLAT', 'FORM_KEY suffix'] : ['too', 'large'];
-    const result = await executeOpenAIPlatformRequest(
+    const result = await executePlatformRequest(
       options(async () => {
         calls++;
         return new Response(

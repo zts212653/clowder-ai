@@ -153,6 +153,7 @@ jobs:
         run: >-
           pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
           pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
+          src/components/plugins/__tests__/plugin-ui-close.test.tsx
           src/components/plugins/__tests__/plugin-panel-http.test.ts
       - name: Provider EOF and plugin UI stop preserve lifecycle fences
         run: >-
@@ -219,6 +220,11 @@ jobs:
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
         run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Plugin close recovery in restricted embed with real theme CSS
+        env:
+          FEEDBACK_JOURNEY_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-panel-close-ci
+          FEEDBACK_PLAYWRIGHT_MODULE: ${{ github.workspace }}/packages/web/node_modules/playwright
+        run: pnpm --filter @cat-cafe/api exec node --import tsx test/plugin-panel-close-recovery.journey.mts
       - name: Plugin document direct-navigation origin isolation
         env:
           PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
@@ -236,6 +242,7 @@ jobs:
             .tmp/first-run-entry-ci
             .tmp/native-team-setup-ci
             .tmp/plugin-document-origin-ci
+            .tmp/plugin-panel-close-ci
           if-no-files-found: ignore
           retention-days: 7
 

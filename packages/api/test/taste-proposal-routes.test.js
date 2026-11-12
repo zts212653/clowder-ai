@@ -1,8 +1,12 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
+import { tasteContentSnapshot } from '../dist/domains/taste/services/taste-decision-snapshot.js';
+import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { anchorApproval } from './approval-hub/helpers.js';
+import { tasteSourceStore } from './helpers/taste-source-fixture.js';
 
 // ── Minimal stubs ──
 
@@ -29,6 +33,7 @@ describe('taste-proposal-decision-routes', () => {
   /** @type {(proposal: any) => Promise<{slug: string, path: string}>} */
   let mockWriter;
   let writerCalls;
+  let browserHeaders;
 
   beforeEach(async () => {
     ({ InMemoryTasteProposalStore } = await import('../dist/domains/taste/stores/InMemoryTasteProposalStore.js'));
@@ -45,12 +50,23 @@ describe('taste-proposal-decision-routes', () => {
     };
 
     app = Fastify();
+    await app.register(cookie);
+    await app.register(sessionAuthPlugin);
+    await app.register(sessionRoute, { ownerUserId: 'user-1' });
     registerTasteProposalDecisionRoutes(app, {
       tasteProposalStore: store,
+      messageStore: tasteSourceStore({ ids: ['taste-route-source'] }),
       socketManager,
       writeVignette: mockWriter,
     });
     await app.ready();
+    const origin = 'http://localhost:3003';
+    const login = await app.inject({ method: 'GET', url: '/api/session', headers: { origin } });
+    browserHeaders = {
+      origin,
+      cookie: login.headers['set-cookie'].split(';', 1)[0],
+      'x-csrf-token': login.json().csrfToken,
+    };
   });
 
   afterEach(() => app?.close());
@@ -60,6 +76,8 @@ describe('taste-proposal-decision-routes', () => {
       userId: 'user-1',
       catId: 'opus',
       threadId: 'thread-1',
+      sourceMessageId: 'taste-route-source',
+      approvalOriginRef: { kind: 'message', threadId: 'thread-1', messageId: 'taste-route-source' },
       scene: 'operator said "太客服了"',
       quote: '太客服了，我要的是活人感',
       tags: ['活人感'],
@@ -75,17 +93,23 @@ describe('taste-proposal-decision-routes', () => {
       requesterCatId: proposal.catId,
       threadId: proposal.threadId,
       createdAt: proposal.createdAt,
+      originRef: proposal.approvalOriginRef,
     });
     return proposal;
   };
 
-  const inject = (method, url, body) =>
-    app.inject({
+  const inject = (method, url, body) => {
+    const proposalId = url.split('/')[3];
+    const proposal = store.get(proposalId);
+    const payload =
+      url.endsWith('/approve') && proposal ? { ...body, decisionDigest: tasteContentSnapshot(proposal)?.digest } : body;
+    return app.inject({
       method,
       url,
-      headers: { 'x-cat-cafe-user': 'user-1', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
-      ...(body !== undefined ? { payload: body } : {}),
+      headers: { ...browserHeaders, ...(payload !== undefined ? { 'content-type': 'application/json' } : {}) },
+      ...(payload !== undefined ? { payload } : {}),
     });
+  };
 
   // ── GET /api/taste-proposals/:id ──
 
@@ -172,12 +196,23 @@ describe('taste-proposal-decision-routes', () => {
       // Recreate app with failing writer
       await app.close();
       app = Fastify();
+      await app.register(cookie);
+      await app.register(sessionAuthPlugin);
+      await app.register(sessionRoute, { ownerUserId: 'user-1' });
       registerTasteProposalDecisionRoutes(app, {
         tasteProposalStore: store,
+        messageStore: tasteSourceStore({ ids: ['taste-route-source'] }),
         socketManager,
         writeVignette: failWriter,
       });
       await app.ready();
+      const origin = 'http://localhost:3003';
+      const login = await app.inject({ method: 'GET', url: '/api/session', headers: { origin } });
+      browserHeaders = {
+        origin,
+        cookie: login.headers['set-cookie'].split(';', 1)[0],
+        'x-csrf-token': login.json().csrfToken,
+      };
 
       const p = await makeProposal();
       const res = await inject('POST', `/api/taste-proposals/${p.id}/approve`);

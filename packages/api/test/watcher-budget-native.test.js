@@ -47,22 +47,30 @@ test(
       },
     });
     try {
-      const rows = captured.rows.map((m) => ({ ...m, userId: 'watcher-owner', threadId: w.thread.id }));
-      const anchor = {
-        id: 'prior-consumed-original',
-        content: '',
-        timestamp: 1,
-        userId: 'watcher-owner',
-        threadId: w.thread.id,
-      };
-      const originalGet = w.messages.getById.bind(w.messages),
-        originalBefore = w.messages.getByThreadBefore.bind(w.messages);
-      w.messages.getById = async (id) => rows.find((m) => m.id === id) ?? (id === anchor.id ? anchor : originalGet(id));
-      w.messages.getByThreadAfter = async (tid, id, limit, user) => {
-        const index = id === anchor.id ? -1 : rows.findIndex((m) => m.id === id);
-        if (index === rows.length - 1) return originalBefore(tid, Date.now() + 1, limit, undefined, user);
-        return rows.slice(index + 1, index + 1 + limit);
-      };
+      const anchor = w.messages.appendWithReservedId(
+        {
+          userId: 'watcher-owner',
+          threadId: w.thread.id,
+          from: { kind: 'agent', catId: 'codex' },
+          content: '',
+          timestamp: 1,
+          mentions: [],
+        },
+        'prior-consumed-original',
+      );
+      const rows = captured.rows.map((m) =>
+        w.messages.appendWithReservedId(
+          {
+            userId: 'watcher-owner',
+            threadId: w.thread.id,
+            from: { kind: 'agent', catId: m.catId ?? m.from?.catId ?? 'codex' },
+            content: m.content,
+            timestamp: m.timelineOrderAt ?? m.timestamp,
+            mentions: [],
+          },
+          m.id,
+        ),
+      );
       w.executions.createRunning({
         invocationId: 'captured-source',
         parentInvocationId: 'ordinary-parent',

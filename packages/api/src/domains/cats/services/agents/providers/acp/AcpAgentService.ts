@@ -42,6 +42,7 @@ import type {
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
+  type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpStreamIdleError,
@@ -68,6 +69,7 @@ import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
 import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
+import { DshTurnInput } from './dsh/dsh-turn-input.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import {
@@ -154,6 +156,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
+  dshTurnInput?: boolean;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -221,6 +225,7 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -262,6 +267,7 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
@@ -354,11 +360,12 @@ export class AcpAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
+    // Factory admission verifies the bridge; each invocation still requires a successful wire handshake.
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: 'unsupported',
-      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: this.dshTurnInput ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.dshTurnInput ? 'supported' : 'unsupported',
     };
   }
 
@@ -661,6 +668,7 @@ export class AcpAgentService implements AgentService {
     let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
+    let dshTurn: DshTurnInput | undefined;
     let agyActive = true;
     let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
@@ -1102,6 +1110,17 @@ export class AcpAgentService implements AgentService {
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       let hasResponseOutput = false;
+      if (this.dshTurnInput) {
+        const dshClient = lease.client as unknown as AcpClient;
+        const capability = await dshClient.probeTurnBridge();
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
+        const bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (bridgeSteerAvailable && options?.activeRunDispatch)
+          dshTurn = new DshTurnInput(dshClient, sessionId, options);
+      }
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -1235,6 +1254,10 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          if (dshTurn && options) {
+            await dshTurn.dispose();
+            dshTurn = new DshTurnInput(lease.client as unknown as AcpClient, freshSessionId, options);
+          }
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
@@ -1468,6 +1491,7 @@ export class AcpAgentService implements AgentService {
       if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
       deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
+      const [dshSettlement] = await Promise.allSettled([dshTurn?.dispose()]);
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
@@ -1558,6 +1582,7 @@ export class AcpAgentService implements AgentService {
           }
           throw releaseError;
         }
+        if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
         if (deferredTerminal) {
           yield {
             type: 'done',

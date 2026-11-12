@@ -8,7 +8,7 @@
  * 4. detectMenuTrigger returns filter string
  */
 import { describe, expect, it } from 'vitest';
-import { buildCatOptions, detectMenuTrigger } from '@/components/chat-input-options';
+import { buildCatOptions, detectMenuTrigger, filterMentionOptions } from '@/components/chat-input-options';
 import type { CatData } from '@/hooks/useCatData';
 
 const MANY_CATS: CatData[] = [
@@ -89,51 +89,87 @@ describe('mention filter matching', () => {
   const options = buildCatOptions(MANY_CATS);
 
   it('filters by label match', () => {
-    const lower = 'op';
-    const filtered = options.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(lower) ||
-        opt.insert.toLowerCase().includes(lower) ||
-        opt.id.toLowerCase().includes(lower),
-    );
-    // Should match opus (id) and possibly sonnet's label if it contains 'op'
+    const filtered = filterMentionOptions(options, 'op');
     expect(filtered.some((o) => o.id === 'opus')).toBe(true);
     expect(filtered.some((o) => o.id === 'gemini')).toBe(false);
   });
 
   it('filters by id match', () => {
-    const lower = 'codex';
-    const filtered = options.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(lower) ||
-        opt.insert.toLowerCase().includes(lower) ||
-        opt.id.toLowerCase().includes(lower),
-    );
+    const filtered = filterMentionOptions(options, 'codex');
     expect(filtered).toHaveLength(1);
     expect(filtered[0].id).toBe('codex');
   });
 
   it('returns empty for non-matching filter', () => {
-    const lower = 'xyz';
-    const filtered = options.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(lower) ||
-        opt.insert.toLowerCase().includes(lower) ||
-        opt.id.toLowerCase().includes(lower),
-    );
-    expect(filtered).toHaveLength(0);
+    expect(filterMentionOptions(options, 'xyz')).toHaveLength(0);
   });
 
   it('empty filter returns all options', () => {
-    const lower = '';
-    const filtered = lower
-      ? options.filter(
-          (opt) =>
-            opt.label.toLowerCase().includes(lower) ||
-            opt.insert.toLowerCase().includes(lower) ||
-            opt.id.toLowerCase().includes(lower),
-        )
-      : options;
-    expect(filtered).toHaveLength(options.length);
+    expect(filterMentionOptions(options, '')).toHaveLength(options.length);
+  });
+});
+
+describe('mention filter finds members by the names people call them', () => {
+  // 11-10: You typed "@小太阳" and the menu was empty. Every Sol variant is called
+  // 小太阳·砚砚, but the label shows breed + model and the insert only the first alias.
+  const SOL_CATS: CatData[] = [
+    {
+      id: 'codex-sol',
+      displayName: '缅因猫 Sol',
+      nickname: '小太阳·砚砚',
+      variantLabel: 'GPT-5.6 Sol',
+      color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+      mentionPatterns: ['@codex-sol', '@sol', '@小太阳·砚砚'],
+      clientId: 'openai',
+      carrier: 'cli',
+      defaultModel: 'gpt-5.6-sol',
+      avatar: '/s56.png',
+      roleDescription: 'dev',
+      personality: 'sunny',
+    },
+    {
+      id: 'codex61-sol',
+      displayName: '缅因猫 Sol',
+      nickname: '小太阳·砚砚',
+      variantLabel: 'GPT-6.1 Sol',
+      color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+      mentionPatterns: ['@codex61-sol', '@gpt61-sol', '@sol61'],
+      clientId: 'openai',
+      carrier: 'cli',
+      defaultModel: 'gpt-6.1-sol',
+      avatar: '/s61.png',
+      roleDescription: 'dev',
+      personality: 'sunny',
+    },
+    {
+      id: 'codex-astra',
+      displayName: '缅因猫 Astra',
+      nickname: '小星星·砚砚',
+      variantLabel: 'GPT-6 Astra',
+      color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+      mentionPatterns: ['@codex-astra', '@astra', '@小星星'],
+      clientId: 'openai',
+      carrier: 'cli',
+      defaultModel: 'gpt-6-astra',
+      avatar: '/astra.png',
+      roleDescription: 'review',
+      personality: 'calm',
+    },
+  ];
+  const options = buildCatOptions(SOL_CATS);
+  const ids = (filter: string) => filterMentionOptions(options, filter).map((o) => o.id);
+
+  it('"@小太阳" lists every Sol variant, including one whose aliases never say 小太阳', () => {
+    expect(ids('小太阳')).toEqual(['codex-sol', 'codex61-sol']);
+  });
+
+  it('a later alias finds its member even when the insert uses the first alias', () => {
+    expect(ids('sol61')).toEqual(['codex61-sol']);
+    expect(ids('小星星')).toEqual(['codex-astra']);
+  });
+
+  it("picking the entry still inserts the member's own first alias", () => {
+    const picked = filterMentionOptions(options, '小太阳').find((o) => o.id === 'codex61-sol');
+    expect(picked?.insert).toBe('@codex61-sol ');
   });
 });

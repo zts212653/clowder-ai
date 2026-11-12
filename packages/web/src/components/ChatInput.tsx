@@ -48,7 +48,7 @@ import { ComposerRoutingPreview } from './ComposerRoutingPreview';
 import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { type ContextPickerMode, detectContextShortcut } from './chat-context-reference';
-import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import { buildCatOptions, type CatOption, detectMenuTrigger, filterMentionOptions } from './chat-input-options';
 import {
   deriveImageLifecycleStatus,
   type ImageLifecycleStatus,
@@ -348,7 +348,12 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [textareaReady, setTextareaReady] = useState(false);
+  const attachTextarea = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (node) setTextareaReady(true);
+  }, []);
   useCatCardComposer(input, setInput, textareaRef);
   useComposerKeyboardFocus(shellV2, textareaRef);
   useEffect(() => {
@@ -424,14 +429,7 @@ export function ChatInput({
   }, [showMentions]);
   const filteredCatOptions = useMemo(() => {
     const choices = whisperMode ? catOptions.filter((option) => !option.isPlugin) : catOptions;
-    if (!mentionFilter) return choices;
-    const lower = mentionFilter.toLowerCase();
-    return choices.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(lower) ||
-        opt.insert.toLowerCase().includes(lower) ||
-        (opt.isPlugin ? opt.desc.toLowerCase().includes(lower) : opt.id.toLowerCase().includes(lower)),
-    );
+    return filterMentionOptions(choices, mentionFilter);
   }, [catOptions, mentionFilter, whisperMode]);
 
   const activeMenu = showMentions ? 'mention' : null;
@@ -1154,12 +1152,13 @@ export function ChatInput({
             <ComposerLinkMirror
               input={input}
               textareaRef={textareaRef}
+              textareaReady={textareaReady}
               composing={routingCompositionActive}
               links={webLinks}
             />
           )}
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}

@@ -91,7 +91,7 @@ test('a consumed wait repairs its lost producer acknowledgment without another a
   assert.equal(messages.getByThread('thread').length, 1);
 });
 
-test('a parked producer commits one notice despite a post-append crash and preserves its execution', async (t) => {
+test('a parked producer remains on the original job without a second Message and preserves its execution', async (t) => {
   const principal = { userId: 'owner', threadId: 'thread', catId: 'codex61-sol' };
   const service = new ManagedJobService();
   const job = await service.submit(principal, {
@@ -111,13 +111,12 @@ test('a parked producer commits one notice despite a post-append crash and prese
       job.jobId,
       Date.now(),
     );
-  updateManagedJobRecovery(job, readManagedJobRecovery(job).revision, recovery);
+  updateManagedJobRecovery(job, readManagedJobRecovery(job).revision, {
+    ...recovery,
+    nextAttemptAt: 0,
+    notification: { key: 'legacy-job-notice', reasonCode: 'production_receipt_unavailable', attempts: 1 },
+  });
   const messages = new MessageStore();
-  const append = messages.append.bind(messages);
-  messages.append = (input) => {
-    append(input);
-    throw new Error('post-commit observer crash');
-  };
   const db = new Database(':memory:');
   t.after(() => db.close());
   applyMigrations(db);
@@ -151,10 +150,13 @@ test('a parked producer commits one notice despite a post-append crash and prese
   });
   await sweep.runOnce();
   await sweep.runOnce();
-  assert.equal(messages.getByThread('thread').length, 1);
-  assert.ok(readManagedJobRecovery(job).recovery.notification.deliveredAt);
-  assert.equal(messages.getByThread('thread')[0].source.meta.cancelable, 'unchanged');
-  assert.equal(readManagedJobRecovery(job).recovery.nextAttemptAt, null);
+  assert.equal(messages.getByThread('thread').length, 0);
+  assert.equal(
+    readManagedJobRecovery(job).recovery.notification,
+    undefined,
+    'upgrade retires the old notification outbox',
+  );
+  assert.equal(readManagedJobRecovery(job).recovery.nextAttemptAt, null, 'upgrade removes the job from the due index');
   assert.equal(service.get(principal, job.jobId).state, 'queued', 'parking never invents execution termination');
   assert.equal(tasks.getManagedCommandRecoveryState(job.originTaskId).fact.reasonCode, 'producer_parked');
   assert.equal(tasks.getManagedCommandRecoveryState(job.originTaskId).fact.nextAttemptAt, null);

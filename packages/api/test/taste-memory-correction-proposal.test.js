@@ -22,6 +22,7 @@ import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-
 import { callbackProposeTasteRoutes } from '../dist/routes/callback-propose-taste-routes.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
 import { registerTasteProposalDecisionRoutes } from '../dist/routes/taste-proposal-decision-routes.js';
+import { tasteSourceStore } from './helpers/taste-source-fixture.js';
 
 const ownerUserId = 'taste-correction-owner';
 const origin = 'http://localhost:3003';
@@ -260,6 +261,11 @@ describe('F321 Taste correction callback', () => {
     });
     await app.register(callbackProposeTasteRoutes, {
       registry: { isLatest: async () => true },
+      messageStore: tasteSourceStore({
+        ids: ['message-correction'],
+        userId: ownerUserId,
+        threadId: 'thread-correction',
+      }),
       tasteProposalStore: store,
       socketManager: { emitToUser: () => {} },
       tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'callback-test' },
@@ -331,5 +337,30 @@ describe('F321 Taste correction callback', () => {
     const created = await propose({ scene: '场景', tags: [' spaced '] }, 'trimmed');
     assert.equal(created.statusCode, 200, created.body);
     assert.deepEqual(app.testStore.get(created.json().proposalId).tags, ['spaced']);
+  });
+
+  it('recovers an approved correction after its old target revision is gone, but rejects a changed retry', async () => {
+    const expectedRevision = revisionOf(readFileSync(join(root, sourcePath)));
+    const payload = {
+      target: { sourceAnchor, expectedRevision, reason: 'outdated', suggestedPatch: { scene: 'Corrected' } },
+      clientRequestId: 'taste-correction-replay-018f2d5e-9f45-7d8c-a829-88f6440a4f15',
+    };
+    const first = await app.inject({ method: 'POST', url: '/api/callbacks/propose-taste', payload });
+    assert.equal(first.statusCode, 200, first.body);
+    const id = first.json().proposalId;
+    app.testStore.claimForApproval(id, ownerUserId);
+    app.testStore.finalizeApproval(id, ownerUserId, 'correction-target', sourcePath);
+    writeFileSync(join(root, sourcePath), vignette('Approved replacement'), 'utf8');
+    const retry = await app.inject({ method: 'POST', url: '/api/callbacks/propose-taste', payload });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().proposalId, id);
+    assert.equal(retry.json().status, 'approved');
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-taste',
+      payload: { ...payload, target: { ...payload.target, suggestedPatch: { scene: 'Different correction' } } },
+    });
+    assert.equal(conflict.statusCode, 409, conflict.body);
+    assert.equal(conflict.json().error, 'client_request_conflict');
   });
 });

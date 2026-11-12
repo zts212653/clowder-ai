@@ -211,6 +211,18 @@ const receiptBaseSchema = z
     processorInvocationId: boundedString(240).optional(),
     resolution: z.enum(['insufficient_evidence', 'unresolved_after_clerk_attempt']).optional(),
     proposalId: captureCandidateIdSchema.optional(),
+    /** Content-free recovery plan while an owner-confirmed permanent forget finishes invalidation. */
+    ownerForget: z
+      .object({
+        requestId: z
+          .string()
+          .min(32)
+          .max(200)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+        expectedRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
     /**
      * Survivor field: deliberately excluded from the terminal payload-purge set below, because the
      * whole point of the lineage is to remain provable after the receipt reaches `proposed`.
@@ -253,6 +265,13 @@ function validateDeferredReceiptPayload(value: DeferredReceiptShape, actionable:
 }
 
 function validateDeferredReceiptLifecycle(value: DeferredReceiptShape, ctx: z.RefinementCtx): void {
+  if (value.ownerForget && value.state !== 'withdrawn') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ownerForget'],
+      message: 'owner forget plans require a withdrawn content-free receipt',
+    });
+  }
   if (value.state === 'claimed' && (!value.claimId || value.claimUntil === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['claimId'], message: 'claimed receipt requires a lease' });
   }

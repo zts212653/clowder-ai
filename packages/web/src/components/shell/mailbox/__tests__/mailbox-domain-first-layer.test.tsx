@@ -45,9 +45,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 it.each(
-  (['F193', 'F221', 'F260'] as const).flatMap((feature) => [false, true].map((outage) => ({ feature, outage }))),
-)('puts original $feature on the first layer (Collective failure=$outage) and retains the current-read barrier', async ({
+  (['F193', 'F221', 'F260'] as const).flatMap((feature) =>
+    (feature === 'F221' ? ['public', 'sensitive'] : ['public']).flatMap((privacy) =>
+      [false, true].map((outage) => ({ feature, privacy, outage })),
+    ),
+  ),
+)('puts original $feature on the first layer ($privacy, Collective failure=$outage) and retains the current-read barrier', async ({
   feature,
+  privacy,
   outage,
 }) => {
   item = storeItem({
@@ -61,7 +66,7 @@ it.each(
       quote: 'Original quote',
       dimension: 'cognitive-honesty',
       tags: ['evidence'],
-      privacy: 'public',
+      privacy,
       canonicalName: 'Original entity',
       aliases: ['Original alias'],
       entityType: 'concept',
@@ -107,7 +112,7 @@ it.each(
   const button = container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]');
   expect(button).not.toBeNull();
   expect(button?.disabled).toBe(false);
-  expect(container.querySelector('details')?.open).toBe(false);
+  expect(container.querySelector('details')?.open).toBe(feature === 'F221' && privacy === 'public');
   generation = 2;
   await act(async () => button?.click());
   expect(vi.mocked(apiFetch).mock.calls.some(([, o]) => o?.method === 'POST')).toBe(false);
