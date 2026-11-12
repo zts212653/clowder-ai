@@ -460,7 +460,8 @@ function pvListBody(b, sc, root) {
     return b.inline ? (rows ? '<div class="lr-inline"' + lrCols(items.map(function (it) { return pvRow(b.row, it, root, null); })) + '>' + rows + '</div>' : emptyState({ text: pvText(b.empty, sc, root) || tc('list.empty') })) : '<div class="group lr-list"' + lrCols(items.map(function (it) { return pvRow(b.row, it, root, null); })) + '>' + (rows || emptyState({ html: pvText(b.empty, sc, root) || h(tc('list.empty')) })) + '</div>' + more;
   }
   if (b.inline) { const rs = items.map(function (it) { return pvRow(b.row, it, root, null); }); return rs.length ? '<div class="lr-inline"' + lrCols(rs) + '>' + rs.map(lrow).join('') + '</div>' : emptyState({ text: pvText(b.empty, sc, root) || tc('list.empty') }); }   /* 嵌在别处的紧凑列表：小行、不带框；各行的数据列和操作照样上下对齐（列轨，data-cols）；没有项也是空状态 */
-  return lrList(id, items.map(function (it) { return pvRow(b.row, it, root, id); }), { empty: pvText(b.empty, sc, root), emptyActs: b.emptyAction ? pvControl(b.emptyAction, sc, root) : '', rows: b.rows || 0, many: b.expand === 'many', order: b.order ? pv(b.order, sc, root) : null, cls: (b.scroll ? 'vw-scroll scroll' : '') }) + more;   /* rows：最多显示几行，更多在列表里滚动；order：拖动排序交给哪个动作 */
+  const esc = b.searchable ? Object.assign({}, sc, { q: LIST_Q[id] || '' }) : sc;   /* 空列表的说明和操作读得到筛选词（@q）：筛不到时按它做下一步 */
+  return lrList(id, items.map(function (it) { return pvRow(b.row, it, root, id); }), { empty: pvText(b.empty, esc, root), emptyActs: b.emptyAction ? pvControl(b.emptyAction, esc, root) : '', rows: b.rows || 0, many: b.expand === 'many', order: b.order ? pv(b.order, sc, root) : null, cls: (b.scroll ? 'vw-scroll scroll' : '') }) + more;   /* rows：最多显示几行，更多在列表里滚动；order：拖动排序交给哪个动作 */
 }
 Object.assign(PDL_BLOCKS, {
   head: pvHead,
@@ -512,7 +513,8 @@ Object.assign(PDL_BLOCKS, {
     const n = b.groups ? pvList(b.groups, sc, root).filter(function (g) { return g.items.length || g.keep; }).length : pvList(b.from, sc, root).length;
     if (b.optional && !n) return '';
     const pt = pv(b.partial, sc, root), q = b.searchable && n ? listQField(pv(b.id, sc, root)) : '';
-    const lab = b.label ? lrSection(pvText(b.label, sc, root), q, { count: b.count != null ? pv(b.count, sc, root) : null }) : q ? '<div class="lr-section-label">' + q + '</div>' : '';   /* 筛选框在列表自己的头里：有组标签时在它的行尾，没有时单独一行头 */
+    const acts = b.actions ? pvControls(b.actions, sc, root) : '';
+    const lab = b.label ? lrSection(pvText(b.label, sc, root), q + acts, { count: b.count != null ? pv(b.count, sc, root) : null }) : q || acts ? '<div class="lr-section-label">' + q + acts + '</div>' : '';   /* 筛选框和列表的操作在列表自己的头里：有组标签时在它的行尾，没有时单独一行头 */
     return lab + (pt ? '<div class="lr-partial" data-tone="warn" role="status">' + icon('alert', 14) + h(pt) + '</div>' : '') + pvListBody(b, sc, root) + listNextHtml(b.next, sc, root);
   },
   tree: function (b, sc, root) {

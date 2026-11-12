@@ -186,16 +186,6 @@ views:
                         items: {slot: chat.composer.notice, from: $.notices}
                         when: $.top
                         hideWhileTyping: true
-                      - type: notice
-                        tone: warn
-                        when: $.input.draft.lost
-                        text: t:composer.attachLost
-                        action:
-                          - {type: button, label: t:composer.retryRecover, act: cafeAttRetry}
-                          - type: button
-                            label: t:composer.removeLost
-                            act: remove
-                            args: {entity: attLost, id: x}
               - share: 2
                 name: queue
                 align: end
@@ -642,7 +632,6 @@ views:
                   of: $.send.reason
                   map:
                     readonly: t:runtime.updateRequired
-                    lost: t:chat.sendReason.lost
                     uploading: t:chat.sendReason.uploading
                     whisper: t:composer.pickOneCat
                     unavailable: chat.send.toast4
@@ -2337,7 +2326,7 @@ views:
                       args:
                         - $.imported.tool
                         - t: chat.emptyValue
-                          args: [$.imported.ago]
+                          args: [{of: $.imported.ago, fmt: ago}]
                         - of: $.imported.hasWho
                           map:
                             "true":
@@ -3442,103 +3431,56 @@ views:
                 variant: meta
                 text: t:importSession.noMembersForTool
                 when: "!$.cats"
-            foot:
-              - control:
-                  type: button
-                  link: true
-                  label: t:importSession.addCat
-                  act: open
-                  args: {page: memberNew}
-      - type: label
-        text: t:importSession.recentSessions
-        action:
-          type: button
-          iconOnly: true
-          icon: refresh
-          label: t:importSession.refreshList
-          act: cafeImRefresh
-      - type: box
-        variant: group
+              - type: button
+                iconOnly: true
+                icon: plus
+                label: t:importSession.addCat
+                act: open
+                args: {page: memberNew}
+      - type: list
+        id: im-sess
+        label: t:importSession.recentSessions
+        searchable: true
+        actions:
+          - type: button
+            iconOnly: true
+            icon: refresh
+            label: t:importSession.refreshList
+            act: cafeImRefresh
         load: $.sessLoad
         error: t:importSession.sessionsError
-        empty: t:importSession.sessionsEmpty
         retry: {act: cafeImRefresh}
-        blocks:
-          - type: each
-            from: $.sessions
-            item:
-              boundRow:
-                - first: "@first"
-                  bound: "@boundThread.id"
-                  boundTitle: "@boundThread.title"
-                  when: "@alreadyBound"
-              pick:
-                - v: "@id"
-                  label: "@first"
-                  sub: ["@proj", "@ago"]
-                  when: "!@alreadyBound"
-              cur: $.selected
-            blocks:
-              - type: list
-                inline: true
-                from: "@boundRow"
-                row:
-                  layout: two
-                  title: "@first"
-                  sub:
-                    - text:
-                        t: importSession.notifications.boundSub
-                        args: ["@boundTitle"]
-                      when: "@boundTitle"
-                    - {text: t:importSession.notifications.bound, when: "!@boundTitle"}
-                    - control:
-                        type: button
-                        link: true
-                        label: t:common.open
-                        act: threadOpen
-                        args: {id: "@bound"}
-                        when: "@bound"
-                  tone: off
-              - type: choices
-                from: "@pick"
-                item:
-                  sub: {of: "@sub", sep: " · "}
-                value: "@cur"
-                act: set
-                args: {path: cs.modal.sel}
-      - type: text
-        parts: [t:importSession.recent20]
-        help: t:importSession.noTurnCount
-      - type: toolbar
-        items:
-          - type: input
-            id: im-id
-            placeholder: t:importSession.pastePlaceholder
-            mono: true
-            input: cafeField
-            value: $.manualId
-            go: cafeImVerify
-            icon: check
-            goLabel: t:importSession.verify
-      - type: notice
-        when: $.verify.ok
-        text:
-          t: importSession.notifications.verifyOk
-          args:
-            - t: chat.verifyWho
-              args:
-                - of: $.firstCat.id.length
-                  gte: 1
-                  map:
-                    "true":
-                      of: [0, 1, 2]
-                      item:
-                        of: "@"
-                        map: {"0": $.firstCat.name, "1": " ", "2": $.firstCat.handle}
-                      sep: ""
-                    _: ""
-            - $.verify.proj
-            - $.verify.ago
+        from: $.sessions
+        rows: 6
+        empty:
+          of: "@q"
+          map: {"": t:importSession.sessionsEmpty, _: t:importSession.noMatch}
+        emptyAction:
+          type: button
+          label: t:importSession.verify
+          act: cafeImVerify
+          args: {v: "@q"}
+          when: "@q"
+        row:
+          layout: two
+          title: "@first"
+          sub:
+            parts:
+              - text:
+                  t: importSession.notifications.boundSub
+                  args: ["@boundThread.title"]
+                when: "@boundThread.title"
+              - {text: t:importSession.notifications.bound, when: ["@alreadyBound", "!@boundThread.title"]}
+              - {text: "@proj", when: "!@alreadyBound"}
+              - {text: " · ", when: ["!@alreadyBound", "@ago"]}
+              - {text: {of: "@ago", fmt: ago}, when: ["!@alreadyBound", "@ago"]}
+            sep: ""
+          tone: {of: "@alreadyBound", map: {"true": "off", _: ""}}
+          cur: "@cur"
+          acts:
+            - {label: t:common.open, act: threadOpen, args: {id: "@boundThread.id"}, when: "@boundThread.id"}
+          act: {of: "@alreadyBound", map: {"true": "", _: set}}
+          args: {path: cs.modal.sel, v: "@id"}
       - type: notice
         tone: warn
         when: [$.verify, "!$.verify.ok", $.verify.reason]
@@ -3557,18 +3499,19 @@ views:
             label: t:threadRow.name
             id: im-title
             control: {type: input, id: im-title, max: 200}
-      - type: toolbar
-        items:
-          - type: check
-            value: $.pin
+          - kind: field
             label: t:importSession.pinAfter
-            act: set
-            args:
-              path: cs.modal.pin
-              v:
-                of: $.pin
-                map: {"true": false, _: true}
-              cast: bool
+            id: im-pin
+            control:
+              type: switch
+              value: $.pin
+              act: set
+              args:
+                path: cs.modal.pin
+                v:
+                  of: $.pin
+                  map: {"true": false, _: true}
+                cast: bool
   page.work:
     page: true
     vm: work

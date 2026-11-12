@@ -1387,8 +1387,8 @@ describe('r136 setting owners through copied views', () => {
       await w.__settled();
       expect(w.document.querySelector('[data-pop="chat.modal"]')?.textContent).toContain('Actual first prompt');
       expect(action).not.toHaveBeenCalled();
-      w.eval("CS.f['im-id']='session-one'");
-      await w.eval('A.cafeImVerify()');
+      await w.eval("A.cafeImVerify({v:'session-one'})");
+      expect(w.eval('CS.modal.sel')).toBe('session-one');
       expect(action).not.toHaveBeenCalled();
       action.mockRejectedValue(new Error('Session has an active writer'));
       await w.eval('FORMS.cafeModal()');

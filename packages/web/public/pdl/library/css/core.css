@@ -283,7 +283,8 @@ button.avatar { border: 0; padding: 0; cursor: pointer; }
 .dialog-body { --sf-size: calc(var(--row-h-1) * .5); display: flex; flex-direction: column; gap: var(--sp-m); min-height: 0; flex: 0 1 auto; max-height: calc(round(down, min(var(--dlg-rows, 9) * var(--row-h-1), 100vh - var(--dlg-chrome)), var(--row-h-1)) + .5 * var(--row-h-1)); margin: 0 calc(-1 * var(--dlg-g));   /* 切在半行：整数行（放得下的那么多，最多 --dlg-rows）+ 半行；窗口矮时整数行变少，仍然切在半行（声明，不量） */ padding: var(--sp-hair) var(--dlg-g); }
 .dialog-body > .group { margin: 0 calc(-1 * var(--dlg-g)); padding-inline: 0; border-radius: 0; background: none; }   /* 弹窗正文的构成：列表伸到弹窗边缘，行的内容和正文对齐到同一条边（没有双重留白） */
 .dialog-body > * { flex-shrink: 0; }
-.dialog-body > .group > .row, .dialog-body > .group > .lr > .lr-head { padding-inline: var(--dlg-g); }
+.dialog-body > .group > .row, .dialog-body > .group > .field, .dialog-body > .group > .lr > .lr-head { padding-inline: var(--dlg-g); }
+.dialog-body > .lr-list[data-rows] { flex-shrink: 1; min-height: calc(2 * var(--row-step)); }   /* 限行的列表先让出高度（最少两行），它后面的字段不被挤出视野、正文不整体滚 */
 .dlg-head { display: flex; align-items: center; gap: var(--sp-s); }
 .dlg-head h3 { flex: 1; }
 /* 弹窗打开时落下的默认焦点：总是画出标准焦点环，看得出回车会按哪个 */

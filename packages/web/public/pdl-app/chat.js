@@ -693,7 +693,6 @@ window.clowderChat = {
       'cafeWhisper',
       'cafePick',
       'cafeTypedPick',
-      'cafeAttRetry',
       'cloudRecoveryRead',
       'bindRetry',
     ].forEach(function (name) {
@@ -1217,13 +1216,13 @@ window.clowderChat = {
         return chatAction('messageDelete', { mid: x.mid, v: String(v) });
       },
     };
-    ['ctx', 'att', 'attLost'].forEach(function (kind) {
+    ['ctx', 'att'].forEach(function (kind) {
       ENT[kind] = {
         get: function (id) {
           return { id: id };
         },
         remove: function (x) {
-          return chatAction(kind === 'ctx' ? 'removeContext' : kind === 'att' ? 'removeImage' : 'removeLost', {
+          return chatAction(kind === 'ctx' ? 'removeContext' : 'removeImage', {
             id: x.id,
           });
         },

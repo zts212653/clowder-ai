@@ -263,9 +263,6 @@
       "loading": "正在加载更早的消息…"
     },
     "featureName": "{0} {1}",
-    "verifyWho": {
-      "": "这只猫"
-    },
     "verifyFailure": {
       "running": "这个会话正在 {0} 里运行",
       "bound": "这个会话已接在一条对话里。",
@@ -323,7 +320,6 @@
       "": "（还没选）"
     },
     "sendReason": {
-      "lost": "有附件没找回，先处理",
       "uploading": "附件还在上传"
     },
     "inputPlaceholder": {
@@ -473,7 +469,6 @@
     },
     "attachment": {
       "up": "上传中…",
-      "lost": "没有找回",
       "ok": "{0}",
       "undefined": "{0}"
     },
@@ -1096,7 +1091,6 @@
       "title": "接上一个已有的会话",
       "bound": "已绑定",
       "boundSub": "已接在「{0}」对话里",
-      "verifyOk": "{0} 接着做 · {1} · 最后活动 {2}",
       "foot": "接上并打开"
     },
     "sessionFrom": "会话来自",
@@ -1107,11 +1101,10 @@
     "refreshList": "刷新列表",
     "sessionsError": "最近会话暂时读不到。",
     "sessionsEmpty": "没有找到最近的会话",
-    "recent20": "最近 20 个",
-    "noTurnCount": "本机会话索引不记录轮数。",
-    "pastePlaceholder": "会话 ID",
     "verify": "核对会话",
-    "pinAfter": "建好后置顶"
+    "pinAfter": "建好后置顶",
+    "noMatch": "最近会话里没有匹配的，可以按 ID 核对",
+    "pastePlaceholder": "会话 ID"
   },
   "work": {
     "view": {

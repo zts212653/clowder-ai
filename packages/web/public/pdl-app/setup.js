@@ -42,7 +42,6 @@ function bindSetup() {
       error: '',
       pin: false,
     };
-    CS.f['im-id'] = '';
     CS.f['im-title'] = '';
     await A.cafeImRefresh();
     render(true);
@@ -65,26 +64,16 @@ function bindSetup() {
     }
     render(true);
   };
-  SET_AFTER['cs.modal.sel'] = function () {
-    if (CS.modal.kind === 'import') CS.modal.verify = null;
-  };
-  const field = INPUTS.cafeField;
-  INPUTS.cafeField = function (e) {
-    field(e);
-    if (CS.modal && CS.modal.kind === 'import' && e.target.id === 'im-id') {
-      CS.modal.verify = null;
-      CS.modal.sel = null;
-      render(true);
-    }
-  };
-  A.cafeImVerify = async function () {
+  // An id the recent list does not have (typed into the list's filter): the verified session becomes a selected row.
+  A.cafeImVerify = async function (d) {
     const m = CS.modal,
-      id = CS.f['im-id'].trim();
+      id = String(d.v || '').trim();
+    if (!id) return;
     try {
-      m.sel = null;
       m.verify = (
         await api.get('/api/local-sessions/' + encodeURIComponent(m.cat) + '/' + encodeURIComponent(id))
       ).session;
+      m.sel = m.verify.sessionId;
       m.error = '';
     } catch (error) {
       m.verify = null;
@@ -105,8 +94,7 @@ function bindSetup() {
     await A.cafeImRefresh();
   };
   MODALS.import = function (m) {
-    const options = members(m.tool),
-      first = options[0];
+    const options = members(m.tool);
     return {
       vm: {
         tool: m.tool,
@@ -122,25 +110,22 @@ function bindSetup() {
         }),
         cat: m.cat,
         sessLoad: m.sessLoad,
-        sessions: m.sessions.map(function (s) {
+        sessions: (m.verify ? [m.verify] : []).concat(m.sessions).map(function (s) {
           return {
             id: s.sessionId,
-            first: s.firstPrompt,
+            first: s.firstPrompt || s.sessionId,
             proj: s.projectPath,
             ago: s.lastActivityAt,
             alreadyBound: s.alreadyBound,
             boundThread: s.boundThread,
+            cur: s.sessionId === m.sel,
           };
         }),
-        selected: m.sel,
-        manualId: CS.f['im-id'],
-        verify: m.verify ? { ok: true, proj: m.verify.projectPath, ago: m.verify.lastActivityAt } : null,
-        firstCat: first ? { id: first.id, name: first.displayName, handle: first.id } : null,
         verifyTool: m.tool,
         err: m.error,
         pin: m.pin,
       },
-      submitDisabled: !m.cat || !(m.sel || m.verify),
+      submitDisabled: !m.cat || !m.sel,
       submit: true,
     };
   };
@@ -151,11 +136,9 @@ function bindSetup() {
     m.error = '';
     render(true);
     try {
-      const s =
-        m.verify ||
-        m.sessions.find(function (s) {
-          return s.sessionId === m.sel;
-        });
+      const s = (m.verify ? [m.verify] : []).concat(m.sessions).find(function (s) {
+        return s.sessionId === m.sel;
+      });
       await chatPort.action('sessionImport', {
         value: JSON.stringify({
           catId: m.cat,
