@@ -161,6 +161,10 @@ On failure it sends `close.cancel` to enable another close attempt and shows the
 own editor. Source-window and nonce checks also apply to these messages. Unregistered panels
 keep their existing immediate close behavior. Plugin deactivation still invalidates the panel
 immediately; this callback cannot extend an installation's authority.
+Host waits 200ms before showing slow-save controls, while `close.cancel` offers recovery
+immediately. Discard confirmation reuses `ConfirmDialog` inside the native panel dialog,
+so it remains visible and usable when an embedding frame forbids native browser modals.
+The Host toolbar reserves its own themed surface above the plugin instead of covering it.
 
 ## Verification boundaries
 

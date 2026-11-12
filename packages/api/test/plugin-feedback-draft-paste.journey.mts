@@ -65,7 +65,7 @@ try {
     return canvas.toDataURL('image/png').split(',')[1];
   });
   await panel.getByLabel('描述').focus();
-  await page.keyboard.press('Control+V');
+  await page.keyboard.press('ControlOrMeta+V');
   await panel.locator('.picture img').waitFor();
   assert.equal(await panel.getByLabel('描述').inputValue(), '输入后立即关闭，不手动保存');
   await panel
@@ -104,7 +104,7 @@ try {
     `window.decodeImage=createImageBitmap;window.createImageBitmap=async file=>{await new Promise(resolve=>window.finishDecode=resolve);return window.decodeImage(file)}`,
   );
   await panel.getByLabel('描述').focus();
-  await page.keyboard.press('Control+V');
+  await page.keyboard.press('ControlOrMeta+V');
   await panel.locator('#feedback-body:disabled').waitFor();
   await close();
   assert.equal(await page.locator('iframe').count(), 1);

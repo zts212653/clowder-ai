@@ -4,6 +4,7 @@ import type { PluginIconSpec } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { PluginVisual } from '../settings/plugin-manager/PluginVisual';
 import { copyPanelImage, pluginPanelChannel, sandboxedPanelHtml } from './plugin-panel-bridge';
 import { requestPluginHttp } from './plugin-panel-http';
@@ -23,13 +24,20 @@ export function PluginUiEntries() {
   const [active, setActive] = useState<Entry>();
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
-  const [closing, setClosing] = useState(false);
-  const [closeFailed, setCloseFailed] = useState(false);
+  const [closePhase, setClosePhase] = useState<'idle' | 'saving' | 'slow' | 'failed'>('idle');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const closing = closePhase === 'saving' || closePhase === 'slow';
+  const discardButton = useRef<HTMLButtonElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const nonce = useRef('');
   const lifetime = useRef<AbortController>();
   const closeGuard = useRef(false);
+  useEffect(() => {
+    if (closePhase !== 'saving') return;
+    const timer = setTimeout(() => setClosePhase('slow'), 200);
+    return () => clearTimeout(timer);
+  }, [closePhase]);
   const refresh = useCallback(async () => {
     try {
       const response = await apiFetch('/api/plugin-ui');
@@ -59,14 +67,14 @@ export function PluginUiEntries() {
     setActive(undefined);
     setHtml('');
     setError('');
-    setClosing(false);
-    setCloseFailed(false);
+    setClosePhase('idle');
+    setConfirmDiscard(false);
     closeGuard.current = false;
   }, []);
   const requestClose = () => {
     if (closing) return;
     if (!closeGuard.current) return close();
-    setClosing(true);
+    setClosePhase('saving');
     frame.current?.contentWindow?.postMessage(
       { channel: pluginPanelChannel, nonce: nonce.current, type: 'before-close' },
       '*',
@@ -113,8 +121,8 @@ export function PluginUiEntries() {
           closeGuard.current = message.value === true;
           result = true;
         } else if (message.type === 'close.cancel') {
-          setClosing(false);
-          setCloseFailed(true);
+          setClosePhase('failed');
+          setConfirmDiscard(false);
           result = true;
         } else if (message.type === 'clipboard.text') {
           if (typeof message.value !== 'string' || message.value.length > 120_000) throw new Error('复制内容无效');
@@ -152,8 +160,8 @@ export function PluginUiEntries() {
     lifetime.current = controller;
     nonce.current = crypto.randomUUID();
     closeGuard.current = false;
-    setClosing(false);
-    setCloseFailed(false);
+    setClosePhase('idle');
+    setConfirmDiscard(false);
     setError('');
     setHtml('');
     setActive(entry);
@@ -193,23 +201,23 @@ export function PluginUiEntries() {
             aria-label={active.label}
             onCancel={(event) => {
               event.preventDefault();
-              requestClose();
+              if (confirmDiscard) setConfirmDiscard(false);
+              else requestClose();
             }}
-            className="m-auto h-[min(900px,94dvh)] w-[min(820px,96vw)] max-w-none overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-bg)] p-0 shadow-2xl backdrop:bg-black/40"
+            className="m-auto h-[min(900px,94dvh)] w-[min(820px,96vw)] max-w-none overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-panel-bg)] p-0 text-cafe shadow-2xl backdrop:bg-black/40"
           >
-            <div className="absolute right-3 top-2 z-10 flex items-center gap-2 rounded bg-[var(--console-bg)] px-1">
-              {closing && (
-                <span role="status" className="text-sm">
-                  正在保存…
+            <div className="flex h-10 items-center justify-end gap-2 border-b border-[var(--console-border-soft)] bg-[var(--console-panel-bg)] px-3 text-cafe">
+              {(closePhase === 'slow' || closePhase === 'failed') && (
+                <span role="status" className="text-sm text-cafe-secondary">
+                  {closePhase === 'failed' ? '草稿未保存' : '正在保存草稿…'}
                 </span>
               )}
-              {(closing || closeFailed) && (
+              {(closePhase === 'slow' || closePhase === 'failed') && (
                 <button
+                  ref={discardButton}
                   type="button"
-                  className="rounded px-2 py-1 text-sm hover:bg-black/10"
-                  onClick={() => {
-                    if (window.confirm('仍然关闭可能丢失本窗口最后未保存的内容。确定关闭？')) close();
-                  }}
+                  className="rounded px-2 py-1 text-sm hover:bg-[var(--console-hover-bg)]"
+                  onClick={() => setConfirmDiscard(true)}
                 >
                   仍然关闭
                 </button>
@@ -219,7 +227,7 @@ export function PluginUiEntries() {
                 aria-label="关闭插件面板"
                 onClick={requestClose}
                 disabled={closing}
-                className="rounded px-2 py-1 hover:bg-black/10"
+                className="rounded px-2 py-1 hover:bg-[var(--console-hover-bg)] disabled:opacity-40"
               >
                 ×
               </button>
@@ -236,13 +244,24 @@ export function PluginUiEntries() {
                 sandbox="allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
                 referrerPolicy="no-referrer"
                 srcDoc={html}
-                className="h-full w-full border-0"
+                className="h-[calc(100%-2.5rem)] w-full border-0"
               />
             ) : (
               <p role="status" className="p-8">
                 正在打开…
               </p>
             )}
+            <ConfirmDialog
+              open={confirmDiscard}
+              title="放弃未保存的修改？"
+              message="插件还没完成保存。关闭后，这个窗口里最后未保存的修改可能丢失。"
+              cancelLabel="继续等待"
+              confirmLabel="放弃并关闭"
+              variant="danger"
+              returnFocusRef={discardButton}
+              onCancel={() => setConfirmDiscard(false)}
+              onConfirm={close}
+            />
           </dialog>,
           document.body,
         )}
