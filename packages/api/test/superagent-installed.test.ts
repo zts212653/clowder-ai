@@ -172,6 +172,7 @@ test(
     const first = await threads.create(owner, '选定的开发会话', root);
     const second = await threads.create(owner, '选定的评审会话', root);
     const outside = await threads.create(owner, '未选会话', root);
+    await Promise.all(Array.from({ length: 50 }, (_, index) => threads.create(owner, `目录会话 ${index}`, root)));
     const entries = () =>
       listPluginConversations({ inventory: runtime.inventoryStore, runtime: runtime.supervisor, threads }, owner);
     assert.equal((await entries()).length, 1, 'the tgz supplies an installed top entry before activation');
@@ -214,11 +215,35 @@ test(
       assert.equal(result.statusCode, 200, result.payload);
       return result;
     };
-    await operation('scope', 'list');
+    const directoryRows = z.object({
+      data: z.object({
+        rows: z.array(
+          z.object({
+            key: z.string(),
+            actions: z.array(z.object({ action: z.string(), input: z.record(z.unknown()) })),
+          }),
+        ),
+      }),
+    });
+    const directory = directoryRows.parse((await operation('scope', 'list')).json()).data.rows;
+    const more = directory.find((row) => row.key === 'more');
+    assert.ok(more, 'a real 50-conversation directory exposes its older-page action');
+    const older = directoryRows.parse((await operation('scope', 'page', more.actions[0].input)).json()).data.rows;
+    assert.ok(
+      older.some((row) => row.key === first.id),
+      'the older source conversation is selectable',
+    );
     await operation('scope', 'choose', { selection: 'coordinator', id: 'codex' });
     await operation('scope', 'choose', { selection: 'worker', id: 'opus' });
     await operation('scope', 'choose', { selection: 'thread', id: first.id });
     await operation('scope', 'choose', { selection: 'thread', id: second.id });
+    const recent = older.find((row) => row.key === 'recent');
+    assert.ok(recent);
+    const returned = directoryRows.parse((await operation('scope', 'page', recent.actions[0].input)).json()).data.rows;
+    assert.ok(
+      returned.some((row) => row.key === first.id),
+      'selected older conversations survive returning to recent',
+    );
     await operation('activity', 'enable', {}, true);
     const main = view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {}));
     assert.equal(main.status, 'listening');

@@ -1771,6 +1771,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         )}
 
         <PluginConversationEntries
+          isV2={isV2}
           onSelect={handleSelect}
           currentThreadId={currentConversationId}
           onThreadsChange={setResidentThreadIds}

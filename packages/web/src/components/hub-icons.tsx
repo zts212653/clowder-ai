@@ -92,7 +92,15 @@ const ICON_PATHS: Record<string, string> = {
   languages: 'M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6',
 };
 
-export function HubIcon({ name, className = 'w-5 h-5' }: { name: string; className?: string }) {
+export function HubIcon({
+  name,
+  className = 'w-5 h-5',
+  strokeWidth = 2,
+}: {
+  name: string;
+  className?: string;
+  strokeWidth?: number;
+}) {
   const d = ICON_PATHS[name];
   if (!d) return null;
   return (
@@ -101,7 +109,7 @@ export function HubIcon({ name, className = 'w-5 h-5' }: { name: string; classNa
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}

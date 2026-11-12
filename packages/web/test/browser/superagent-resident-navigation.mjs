@@ -18,9 +18,10 @@ test('resident native binding survives read failure and is not duplicated in eit
   const receipts = [];
   try {
     for (const shell of ['classic', 'v2']) {
-      const context = await browser.newContext();
+      const context = await browser.newContext({ deviceScaleFactor: 2 });
       let unavailable = false;
       let retired = false;
+      let disabled = false;
       let bound = false;
       let opens = 0;
       let reads = 0;
@@ -30,8 +31,9 @@ test('resident native binding survives read failure and is not duplicated in eit
         commandId: 'main',
         label: '我的助手',
         threadId: bound ? BUSY_THREAD : null,
-        status: 'ready',
+        status: disabled ? 'disabled' : 'ready',
         openable: true,
+        icon: { type: 'svg', src: '/api/plugin-manager/plugins/official.superagent/icon' },
       });
       const harness = createChatProofHarness(context, built, evidence, [], (api) => {
         const respond = api.respond;
@@ -57,6 +59,36 @@ test('resident native binding survives read failure and is not duplicated in eit
       const { page } = proof;
       await page.evaluate((value) => window.__f322Chat.presentation(value), shell);
       const resident = page.getByRole('navigation', { name: '常驻助手' });
+      const ready = resident.getByRole('button', { name: '我的助手，可用' });
+      await ready.waitFor();
+      if (shell === 'v2') await page.getByTestId('sidebar-memory').waitFor();
+      const geometry = await ready.evaluate((element) => {
+        const glyph = element.querySelector('svg');
+        const memory = document.querySelector('[data-testid="sidebar-memory"]');
+        return {
+          height: element.getBoundingClientRect().height,
+          icon: {
+            width: glyph.getBoundingClientRect().width,
+            height: glyph.getBoundingClientRect().height,
+            x: glyph.getBoundingClientRect().x,
+            stroke: getComputedStyle(glyph).strokeWidth,
+          },
+          memoryIconX: memory?.querySelector('svg')?.getBoundingClientRect().x,
+          text: element.textContent,
+          imageCount: element.querySelectorAll('img').length,
+        };
+      });
+      assert.equal(geometry.height, 32);
+      assert.equal(geometry.icon.width, 16);
+      assert.equal(geometry.icon.height, 16);
+      assert.equal(geometry.icon.stroke, '1.75px');
+      assert.equal(geometry.text, '我的助手');
+      assert.equal(geometry.imageCount, 0);
+      if (shell === 'v2') assert.equal(geometry.icon.x, geometry.memoryIconX, 'the resident glyph aligns with Memory');
+      await page.screenshot({ path: path.join(evidence, `resident-${shell}-ready.png`), fullPage: true });
+      await resident
+        .locator('xpath=ancestor::aside[1]')
+        .screenshot({ path: path.join(evidence, `sidebar-${shell}-ready.png`) });
       await resident.getByRole('button', { name: '我的助手，可用' }).click();
       await page.waitForURL(`**/thread/${BUSY_THREAD}`);
       await page.waitForFunction(
@@ -73,12 +105,33 @@ test('resident native binding survives read failure and is not duplicated in eit
       assert.ok(reads > before);
       await page.screenshot({ path: path.join(evidence, `resident-${shell}-read-error.png`), fullPage: true });
       unavailable = false;
+      disabled = true;
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      const disabledEntry = resident.getByRole('button', { name: '我的助手，未启用' });
+      await disabledEntry.waitFor();
+      assert.equal(await disabledEntry.evaluate((element) => element.getBoundingClientRect().height), 32);
+      await page.screenshot({ path: path.join(evidence, `resident-${shell}-disabled.png`), fullPage: true });
+      await page.setViewportSize({ width: 640, height: 900 });
+      const expand = page.getByRole('button', { name: /^(展开侧栏|Show sidebar)$/ });
+      if (await expand.isVisible()) await expand.click();
+      await disabledEntry.waitFor();
+      const contained = await resident.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        return Array.from(element.querySelectorAll('button, a')).every((item) => {
+          const rect = item.getBoundingClientRect();
+          return rect.left >= bounds.left && rect.right <= bounds.right;
+        });
+      });
+      assert.equal(contained, true, 'the settings affordance remains within a narrow sidebar');
+      await page.screenshot({ path: path.join(evidence, `resident-${shell}-narrow.png`), fullPage: true });
       retired = true;
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       await resident.waitFor({ state: 'detached' });
       await page.locator(`[data-thread-id="${BUSY_THREAD}"]`).first().waitFor();
       receipts.push({
         shell,
+        geometry,
+        narrowContained: contained,
         explicitOpens: opens,
         retainedNavigation: true,
         ordinaryDuplicate: false,
