@@ -80,6 +80,7 @@ async function boot(
   const get = vi.fn<(name: string, params?: Record<string, unknown>) => Promise<unknown>>(async (name) => {
     if (name === '/api/config/env-summary?surface=system') return systemSummaryFixture();
     if (name === '/api/config/env-summary') return environmentSummaryFixture();
+    if (name === '/api/config/console-themes') return { themes: null };
     if (name === '/api/config/chat-background') return { threads: {} };
     if (name === '/api/config/chat-background/images') return { images: [] };
     if (name === '/api/plugin-manager/plugins') return { plugins };

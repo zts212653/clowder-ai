@@ -387,33 +387,35 @@ async function boot(
                 ? { threadId: null }
                 : path === '/api/concierge/work/mentions/last-handling'
                   ? { receipt: null }
-                  : path === '/api/config/chat-background'
-                    ? { threads: {} }
-                    : path === '/api/config/chat-background/images'
-                      ? { images: [] }
-                      : path === '/api/plugin-manager/plugins'
-                        ? { plugins: [] }
-                        : path === '/api/plugin-manager/pdl'
-                          ? { fragments: {} }
-                          : path.startsWith('/api/plugin-manager/pdl/')
-                            ? {}
-                            : path === '/api/push/status'
-                              ? {
-                                  capability: {
-                                    enabled: false,
-                                    vapidPublicKeyConfigured: false,
-                                    pushServiceConfigured: false,
-                                  },
-                                  subscription: { count: 0, targets: [] },
-                                  delivery: {
-                                    lastResult: 'not_attempted',
-                                    lastAttemptAt: null,
-                                    lastHttpStatus: null,
-                                    lastError: null,
-                                  },
-                                  errorHints: [],
-                                }
-                              : undefined,
+                  : path === '/api/config/console-themes'
+                    ? { themes: null }
+                    : path === '/api/config/chat-background'
+                      ? { threads: {} }
+                      : path === '/api/config/chat-background/images'
+                        ? { images: [] }
+                        : path === '/api/plugin-manager/plugins'
+                          ? { plugins: [] }
+                          : path === '/api/plugin-manager/pdl'
+                            ? { fragments: {} }
+                            : path.startsWith('/api/plugin-manager/pdl/')
+                              ? {}
+                              : path === '/api/push/status'
+                                ? {
+                                    capability: {
+                                      enabled: false,
+                                      vapidPublicKeyConfigured: false,
+                                      pushServiceConfigured: false,
+                                    },
+                                    subscription: { count: 0, targets: [] },
+                                    delivery: {
+                                      lastResult: 'not_attempted',
+                                      lastAttemptAt: null,
+                                      lastHttpStatus: null,
+                                      lastError: null,
+                                    },
+                                    errorHints: [],
+                                  }
+                                : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),
@@ -3946,8 +3948,8 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('keeps appearance preferences and complete custom theme documents in the original local store with no server writes', async () => {
-    const { dom, w, action, errors } = await boot(undefined, undefined, undefined, {}, undefined, {
+  it('keeps appearance preferences in the local store and saves complete custom theme documents to the owner preferences', async () => {
+    const { dom, w, action, port, errors } = await boot(undefined, undefined, undefined, {}, undefined, {
       tweaks: { theme: 'dark', compact: false },
       layout: 'two',
       'background-v1': { home: 'none', homeTr: 72, images: [] },
@@ -3964,7 +3966,11 @@ describe('unmodified runtime and project chat bindings', () => {
       w.document.querySelector('[data-entity="style"][data-field="readSize"][data-v="17"]').click();
       await w.__settled();
       w.eval("themeValsEdit(S.tweaks.skin,function(v){v.light.accent='#527b99'});applyThemeVals()");
-      const themes = JSON.parse(w.localStorage.getItem('clowder-proto3:pdl-themes-v1'));
+      const saves = (port.post as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([path]) => path === '/api/config/console-themes',
+      );
+      const themes = (saves.at(-1)?.[2] as { themes: { customs: { full: Record<string, any> }[] } }).themes;
+      expect(w.localStorage.getItem('clowder-proto3:pdl-themes-v1')).toBeNull();
       expect(themes.customs[0].full.style.readSize).toBe('17');
       expect(themes.customs[0].full.tokens.cream.light.accent).toBe('#527b99');
       w.eval("CHANGES.bgPick({target:{value:'bg.night'}}); INPUTS.bgOp({target:{value:'42'}})");

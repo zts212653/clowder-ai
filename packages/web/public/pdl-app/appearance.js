@@ -1,5 +1,16 @@
-/* UI preferences use the original local store; only uploaded image files have a server owner. */
+/* UI preferences use the original local store; uploaded image files and custom themes have a server owner. */
 'use strict';
+// Custom themes are kept in the owner's preferences on the host, so clearing the browser keeps them.
+THEME_DOCS = {
+  read: function () {
+    return api.get('/api/config/console-themes').then(function (r) {
+      return r.themes;
+    });
+  },
+  write: function (themes) {
+    api.post('/api/config/console-themes', {}, { themes: themes });
+  },
+};
 function bindAppearance() {
   let images = [],
     legacy = null,

@@ -70,6 +70,8 @@ export interface UserPreferences {
   deploymentWaitFolds?: Record<string, boolean>;
   /** F322: owner-private ignored work/request coordinates. No TTL or canonical lifecycle effect. */
   ignoredItems?: IgnoredItemPreferences;
+  /** The console's custom themes per owner: the theme documents and which one is active. No TTL. */
+  consoleThemes?: Record<string, unknown>;
   /** F321: background curation preference and its durable first-enable boundary. */
   memoryCuration?: { enabled: boolean; startedAt?: number; curatorCatId?: string };
   /** F166: Custom display order of cats. catIds not in this list fall back to cat-template.json order. */

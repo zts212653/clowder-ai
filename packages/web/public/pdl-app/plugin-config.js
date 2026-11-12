@@ -858,10 +858,16 @@ const PCF_OPS = {
     pcfSet(d.p, d.k, JSON.stringify(on));
     markDirty();
   },
-  bool: function (d) {
-    const f = pcfField(d.p, d.k);
-    pcfSet(d.p, d.k, pcfEffective(f, pcfState(d.p).draft) === 'true' ? 'false' : 'true');
-    markDirty();
+  // A switch saves at once, only this field; other edits stay drafts.
+  bool: async function (d) {
+    const f = pcfField(d.p, d.k),
+      st = pcfState(d.p),
+      v = pcfEffective(f, st.draft) === 'true' ? 'false' : 'true';
+    pcfSet(d.p, d.k, v);
+    render(true);
+    await PCF_SRC[d.p].save([{ key: d.k, value: v }]);
+    delete st.draft[d.k];
+    render(true);
   },
   add: pcfListOp,
   del: pcfListOp /* 一列值（kvEditor 的增删：l = 实例|路径） */,

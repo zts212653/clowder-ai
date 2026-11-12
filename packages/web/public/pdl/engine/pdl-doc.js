@@ -106,8 +106,11 @@ function pdlLimitWhy(x) {
    外观（自动 / 浅色 / 深色）是用户偏好，不属于主题。系统主题 1 = 奶油配色，系统主题 2 = 石墨配色；主题插件带来的主题也是只读主题（id 'pack:…'，配色是插件给的值） */
 const PDL_SYS_THEMES = [];   /* 系统主题描述由当前主题的数据登记。 */
 function pdlPackThemes() { return THEME_SRC.packs().map(function (t) { return { id: 'pack:' + t.id, name: t.name, src: t.src, skin: 'default', palette: t.id }; }); }
-function pdlThemes() { return store.get('pdl-themes-v1', null) || { active: PDL_SYS_THEMES[0].id, customs: [] }; }
-function pdlThemesSave(t) { store.set('pdl-themes-v1', t); }
+/* 主题文档放在哪：应用登记 THEME_DOCS = { read() → Promise<主题|null>, write(主题) }（宿主保存，清缓存也还在）；没登记时存在浏览器里。启动时先读回来（early 阶段：同一阶段的函数一起开始，主题文档在下一阶段） */
+let THEME_DOCS = null, THEMES_HELD = null;
+function pdlThemes() { return (THEME_DOCS ? THEMES_HELD && pdlClone(THEMES_HELD) : store.get('pdl-themes-v1', null)) || { active: PDL_SYS_THEMES[0].id, customs: [] }; }   /* 每次给一份副本（和读存储一样）：改了要 pdlThemesSave 才算数 */
+function pdlThemesSave(t) { if (THEME_DOCS) { const j = JSON.stringify(t); if (j === JSON.stringify(pdlThemes())) return; THEMES_HELD = JSON.parse(j); THEME_DOCS.write(t); }   /* 没变就不写宿主（启动时的整理多半什么都没改） */ else store.set('pdl-themes-v1', t); }
+onStart('early', function () { if (THEME_DOCS) return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; }); });
 function pdlThemeActive() { const t = pdlThemes(); return t.customs.find(function (c) { return c.id === t.active; }) || null; }
 function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes()).find(function (x) { return x.id === id; }) || null; }   /* 只读主题：系统主题 + 主题插件带来的主题 */
 /* 当前主题的名字（主题页、主题计算器标题都用它） */
