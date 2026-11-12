@@ -8,7 +8,13 @@ import { type QuickPhrase, type QuickPhrasesEntry, type QuickPhrasesPage, readQu
 
 const button = 'shell-focusable rounded-md px-2 py-1 text-sm hover:bg-cafe-surface-elevated disabled:opacity-40';
 
-export function QuickPhrasesList({ entry, onSelect }: { entry: QuickPhrasesEntry; onSelect: (text: string) => void }) {
+export function QuickPhrasesList({
+  entry,
+  onSelect,
+}: {
+  entry: QuickPhrasesEntry;
+  onSelect: (phrase: QuickPhrase) => void;
+}) {
   const t = useShellCopy(quickPhrasesCopy);
   const [request, setRequest] = useState({ query: '', page: 1 });
   const [result, setResult] = useState<QuickPhrasesPage | 'error'>();
@@ -95,7 +101,7 @@ export function QuickPhrasesList({ entry, onSelect }: { entry: QuickPhrasesEntry
                   <button
                     type="button"
                     title={phrase.text}
-                    onClick={() => onSelect(phrase.text)}
+                    onClick={() => onSelect(phrase)}
                     className={`${button} min-w-0 flex-1 text-left`}
                   >
                     <span className="line-clamp-2 whitespace-pre-wrap break-words">{phrase.text}</span>
