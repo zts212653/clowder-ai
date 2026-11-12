@@ -4,12 +4,24 @@ related_features: [F222, F168, F141, F128]
 topics: [community, publishing, frustration, feedback, github-issue]
 doc_kind: spec
 created: 2026-06-15
-tips_exempt: internal cat-to-community publishing pipeline — no user-facing capability change
+tips_exempt: false
 ---
 
 # F235: Feedback-to-Community Publisher — 一键发布反馈到社区
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-17
+
+## 会话里把问题整理成 Issue
+
+分析后可让猫将已有结论整理成会话草稿；核对公开报告和仓库后点“预览并提交”，再点“Submit to GitHub”才会外发。未配置 GitHub 发布插件时可以复制报告、检查隐私后打开明确目标的网页手工提交。只有出现真实 Issue 链接才算提交完成。可信执行失败的“确认记录”仍只保存本地记录，展开后可继续同一提单流程。
+
+## 2026-11 会话入口收口（Issue #1974）
+
+根因：插件迁移后，F222 的 `CommunityPublishFlow` 只保存 owner 草稿，未挂已有预览卡；Agent 卡又独立维护一次 create/publish，provider 关闭时仍可能给失败按钮。
+
+当前修复将两入口复用同一 `CommunityPublishFlow → CommunityIssuePreviewCard`：Host 已有脱敏器准备显式报告；只在用户点预览后创建插件草稿，另一次确认才发布；成功必须包含同目标真实 GitHub Issue URL/编号。已有 ID 读取原草稿，无 ID 以原 requestId/消息来源恢复；不新设数据表、不删除本地反馈或插件历史。发布插件不可用时可审阅复制报告，已明确目标可打开不带正文的 GitHub 网页，均不冒充提交成功。
+
+Architecture cell: 既有会话反馈/F235 + GitHub 插件 owner draft。Map delta: none；Host 新增无存储/无外发的报告预览 consumer，复用现有身份和诊断脱敏器，不迁移 publisher/store owner。Agent 的一次性建议由现有 rich-messaging 指引承接；不新增扫描器，不恢复退休检测。截图/多目标仍是可选 feedback 工作台，本轮不做两插件 adapter/存储合并或自动预填。
 
 ## Architecture Ownership
 
