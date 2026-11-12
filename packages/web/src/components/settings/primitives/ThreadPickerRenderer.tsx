@@ -168,7 +168,7 @@ export function ThreadPickerRenderer({
     await bootstrapSidebarThreadSnapshot();
     const refreshed = await refreshSidebarThreadSnapshot();
     const state = useSidebarProjectionStore.getState();
-    if (state.rows.length === 0 && !state.hasCanonicalSnapshot) {
+    if (!state.hasCanonicalSnapshot) {
       setDirectoryState('error');
       setDirectoryError('会话目录暂时读不到，请重试。');
       return;

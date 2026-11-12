@@ -456,6 +456,86 @@ describe('generic thread-picker renderer', () => {
     expect(container.querySelector('[data-testid="thread-picker-open"]')).toBeNull();
   });
 
+  it('does not save a cached-only directory when the canonical refresh fails', async () => {
+    useSidebarProjectionStore.setState({
+      rows: [row('t1')],
+      appliedGeneration: 0,
+      hasCanonicalSnapshot: false,
+      pendingThreadCommands: {},
+      refreshing: false,
+    });
+    useLabelStore.setState({ labels: [] });
+    const calls: Array<{ url: string; body?: string }> = [];
+    let refreshCalls = 0;
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one route table covers the 503 recovery and successful canonical retry.
+    mockApiFetch.mockImplementation(async (url, init) => {
+      const path = String(url);
+      const body = typeof init?.body === 'string' ? init.body : undefined;
+      calls.push({ url: path, ...(body === undefined ? {} : { body }) });
+      if (path.startsWith('/api/threads?view=sidebar')) {
+        refreshCalls += 1;
+        if (refreshCalls === 1) return jsonResponse({ error: 'unavailable' }, 503);
+        return snapshotResponse(
+          [
+            {
+              id: 't1',
+              title: '缓存里的会话',
+              projectPath: '/project/alpha',
+              participants: [],
+              lastActiveAt: 300,
+              pinned: false,
+              labels: [],
+              unreadCount: 0,
+              hasUserMention: false,
+              presence: { status: 'idle' },
+            },
+            {
+              id: 't2',
+              title: '缓存外的旧监听会话',
+              projectPath: '/project/alpha',
+              participants: [],
+              lastActiveAt: 200,
+              pinned: false,
+              labels: [],
+              unreadCount: 0,
+              hasUserMention: false,
+              presence: { status: 'idle' },
+            },
+          ],
+          2,
+        );
+      }
+      if (path === '/api/config/thread-attention') return jsonResponse(attention);
+      if (path.endsWith('/actions/threads/list')) {
+        return jsonResponse({ ok: true, render: 'thread-picker', data: { selected: ['t2'], excluded: [] } });
+      }
+      if (path.endsWith('/actions/threads/choose')) {
+        const parsed = JSON.parse(body ?? '{}') as { ids: string[] };
+        return jsonResponse({ ok: true, render: 'thread-picker', data: { selected: parsed.ids, excluded: [] } });
+      }
+      return jsonResponse({ error: `unexpected request ${path}` }, 500);
+    });
+
+    await act(async () => root.render(<ActionRenderer target={target} operation={operation} />));
+    await flush();
+    await flush();
+    expect(byTestId(container, 'thread-picker-retry-directory')).toBeTruthy();
+    expect(container.querySelector('[data-testid="thread-picker-open"]')).toBeNull();
+    expect(calls.some((call) => call.url.endsWith('/actions/threads/choose'))).toBe(false);
+
+    await act(async () => button(container, 'thread-picker-retry-directory').click());
+    await flush();
+    await flush();
+    await act(async () => button(container, 'thread-picker-open').click());
+    expect(container.querySelector<HTMLInputElement>('[data-testid="thread-picker-check-t2"]')?.checked).toBe(true);
+    await act(async () => button(container, 'thread-picker-save').click());
+    await flush();
+    const choose = calls.find((call) => call.url.endsWith('/actions/threads/choose'));
+    if (!choose?.body) throw new Error('missing choose body');
+    const body = JSON.parse(choose.body) as { ids: string[] };
+    expect(body.ids).toEqual(['t2']);
+  });
+
   it('does not truncate more than 200 selectable conversations', async () => {
     installFixture(
       Array.from({ length: 205 }, (_, index) => row(`t${String(index).padStart(3, '0')}`)),
