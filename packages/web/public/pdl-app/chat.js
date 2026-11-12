@@ -738,6 +738,7 @@ window.clowderChat = {
     });
     ['cafeExport', 'cafeMultiExport'].forEach(function (name) {
       A[name] = function (d) {
+        toast(tc('composer.exporting'));
         return chatAction(name, d).then(
           function (file) {
             if (file) {

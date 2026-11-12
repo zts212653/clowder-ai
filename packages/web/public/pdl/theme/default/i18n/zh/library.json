@@ -116,6 +116,7 @@
   "exportAs": "导出为",
   "text": "文本",
   "longImage": "长图",
+  "exporting": "正在生成，完成后自动下载…",
   "forward": "转发",
   "autoNamed": "自动：{0}"
  },

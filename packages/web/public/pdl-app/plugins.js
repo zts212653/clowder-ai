@@ -125,12 +125,13 @@ function bindPluginSpaces() {
           return readDetail(inst);
         },
         save: async function (updates) {
-          // Each save restarts the plugin and moves its revision: write against the current one.
-          await readDetail(inst);
+          // Each save restarts the plugin and moves its revision: write against the current one
+          // (only the revision is read here, so the page keeps showing the value being saved).
+          const current = await api.get('/api/plugin-manager/plugins/' + encodeURIComponent(inst));
           const receipt = await api.post(
             '/api/plugin-manager/plugins/' + encodeURIComponent(inst) + '/contributions/configuration',
             {},
-            { expectedRevision: placementData().pluginDetails[inst].lifecycleRevision, updates: updates },
+            { expectedRevision: current.plugin.lifecycleRevision, updates: updates },
           );
           await read();
           await readDetail(inst);

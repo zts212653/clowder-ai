@@ -778,9 +778,9 @@ function pcfDirty(inst) {
   const st = pcfState(inst);
   return Object.keys(st.draft).some(function (k) {
     const f = pcfField(inst, k);
-    return !f || String(st.draft[k]) !== String(pcfEffective(f, {}));
+    return !(st.saving || {})[k] && (!f || String(st.draft[k]) !== String(pcfEffective(f, {})));
   });
-} /* 草稿里和原值不同的字段才算改过 */
+} /* 草稿里和原值不同的字段才算改过（正在保存的不算） */
 formDraft('pcf', {
   dirty: function () {
     return Object.keys(S.pcf || {}).some(function (inst) {
@@ -831,18 +831,19 @@ function pcfInstant(inst) {
     })
   );
 }
-// The new value shows at once as the field's value (not a draft, so no save bar), and goes back if the save fails.
+// The value being saved stays as the field's value through redraws (a draft marked saving, so no save bar);
+// a successful save re-reads the plugin with it, a failed one drops it and the field goes back.
 async function pcfSaveOne(inst, key, value) {
-  const f = pcfField(inst, key),
-    before = f.currentValue;
-  f.currentValue = value;
+  const st = pcfState(inst);
+  pcfSet(inst, key, value);
+  (st.saving = st.saving || {})[key] = true;
   render(true);
   try {
     await PCF_SRC[inst].save([{ key: key, value: value }]);
-  } catch (error) {
-    f.currentValue = before;
+  } finally {
+    delete st.draft[key];
+    delete st.saving[key];
     render(true);
-    throw error;
   }
 }
 Object.assign(A, {
