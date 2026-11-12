@@ -110,9 +110,6 @@ export function ballProbeScores(
   notice: number | null;
   audit: number | null;
 } {
-  const pending = Object.values(facts.notices)
-    .filter((notice) => notice.state === 'pending')
-    .map((notice) => notice.nextAt);
   const audits = Object.values(facts.wakeAudits ?? {})
     .filter((audit) => !audit.disposition)
     .map((audit) => audit.nextAt);
@@ -121,7 +118,7 @@ export function ballProbeScores(
     probe: null as number | null,
     idle: null as number | null,
     retry: null as number | null,
-    notice: pending.length ? Math.min(...pending) : null,
+    notice: null,
   };
   if (!projection || facts.rebuilding || facts.disposition || !projection.subjectKey.startsWith('ball:task:'))
     return scores;
@@ -139,7 +136,6 @@ export function finishBallProbeFacts(
   candidate: BallRecoveryCandidate,
   outcome: BallRecoveryOutcome,
   now: number,
-  owner?: BallRecoveryOwner,
   reasonCode = 'ball_recovery_failed',
 ): boolean {
   const lane = facts[candidate.lane];
@@ -160,20 +156,6 @@ export function finishBallProbeFacts(
   if (outcome === 'permanent_error' || lane.failures >= 5) {
     lane.disposition = 'needs_attention';
     lane.reasonCode = reasonCode;
-    if (owner?.userId && owner.threadId) {
-      const key = `ball-recovery:${candidate.scope}:${candidate.lane}`;
-      if (facts.noticeReceipts?.[candidate.lane] !== key)
-        facts.notices[key] ??= {
-          key,
-          lane: candidate.lane,
-          scope: candidate.scope,
-          owner,
-          reasonCode,
-          nextAt: now,
-          failures: 0,
-          state: 'pending',
-        };
-    }
   }
   return true;
 }

@@ -159,7 +159,9 @@ if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset')
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'NOT_AVAILABLE' end
 local current = cjson.decode(raw)
+if current.ownerForget then return 'CONFLICT' end
 if current.state == 'withdrawn' then return 'REPLAYED' end
+if ARGV[5] and ARGV[5] ~= '' and raw ~= ARGV[5] then return 'STALE_REVISION' end
 if current.state ~= 'awaiting_confirmation' and current.state ~= 'deferred' and current.state ~= 'claimed' then
   return 'CONFLICT'
 end
@@ -180,10 +182,40 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local current = cjson.decode(raw)
 if current.state == 'proposed' then return 'PROPOSAL_BOUND:' .. current.proposalId end
+if current.ownerForget then
+  if not ARGV[6] or ARGV[6] ~= current.ownerForget.requestId then return 'STALE_REVISION' end
+elseif ARGV[6] and ARGV[6] ~= '' then return 'STALE_REVISION' end
+if ARGV[5] and ARGV[5] ~= '' and raw ~= ARGV[5] then return 'STALE_REVISION' end
 redis.call('DEL', KEYS[1], KEYS[2])
 redis.call('ZREM', KEYS[3], ARGV[1])
 if redis.call('GET', KEYS[4]) == ARGV[4] then redis.call('DEL', KEYS[4]) end
 if ARGV[3] == '1' and redis.call('GET', KEYS[5]) == ARGV[1] then redis.call('DEL', KEYS[5]) end
 if ARGV[2] == '1' then redis.call('SREM', KEYS[6], ARGV[1]) end
 return 1
+`;
+
+/** Freeze and purge payload before invalidation; the same canonical receipt holds recovery truth. */
+export const DEFERRED_RECEIPT_OWNER_FORGET_PREPARE_LUA = `
+${TYPE_GUARD_LUA}
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'string')
+  or not allowed_type(KEYS[3], 'zset') or not allowed_type(KEYS[4], 'string')
+  or (ARGV[4] == '1' and not allowed_type(KEYS[5], 'set')) then return 'CONFLICT' end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'ALREADY_ABSENT' end
+local current = cjson.decode(raw)
+if current.ownerUserId ~= ARGV[8] then return 'CONFLICT' end
+local locatedOwner = redis.call('GET', KEYS[2])
+if locatedOwner and locatedOwner ~= ARGV[8] then return 'CONFLICT' end
+if current.state == 'proposed' then return 'PROPOSAL_BOUND:' .. current.proposalId end
+if current.ownerForget then
+  if current.state == 'withdrawn' and current.ownerForget.requestId == ARGV[6]
+    and current.ownerForget.expectedRevision == ARGV[7] then return 'REPLAYED:' .. raw end
+  return 'STALE_REVISION'
+end
+if raw ~= ARGV[1] then return 'STALE_REVISION' end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('ZREM', KEYS[3], ARGV[3])
+if redis.call('GET', KEYS[4]) == ARGV[5] then redis.call('DEL', KEYS[4]) end
+if ARGV[4] == '1' then redis.call('SREM', KEYS[5], ARGV[3]) end
+return 'PREPARED:' .. ARGV[2]
 `;

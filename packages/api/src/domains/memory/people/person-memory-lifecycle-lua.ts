@@ -56,10 +56,24 @@ return 'APPLIED:' .. ARGV[4]
 `;
 
 export const REDACT_ITEM_LUA = `
+local function allowed_type(key, expected)
+  local actual = redis.call('TYPE', key)['ok']
+  return actual == 'none' or actual == expected
+end
+if not allowed_type(KEYS[2], 'string') then return 'CONFLICT' end
 local prior = redis.call('GET', KEYS[2])
-if prior then return 'REPLAYED:' .. prior end
+if prior then
+  if prior ~= ARGV[2] then return 'CONFLICT' end
+  return 'REPLAYED:' .. prior
+end
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[3], 'set')
+  or not allowed_type(KEYS[4], 'string') or not allowed_type(KEYS[5], 'string')
+  or not allowed_type(KEYS[6], 'string') then return 'CONFLICT' end
 if redis.call('EXISTS', KEYS[4]) == 1 then return 'NOT_AVAILABLE' end
-if redis.call('EXISTS', KEYS[1]) == 0 then return 'NOT_AVAILABLE' end
+local current = redis.call('GET', KEYS[1])
+if not current then return 'NOT_AVAILABLE' end
+if ARGV[5] and current ~= ARGV[5] then return 'CONFLICT' end
+if ARGV[6] and ARGV[6] ~= '' and redis.call('GET', KEYS[6]) ~= ARGV[6] then return 'CONFLICT' end
 redis.call('SET', KEYS[1], ARGV[1])
 if ARGV[3] == 'clear_current' and redis.call('GET', KEYS[5]) == ARGV[4] then
   redis.call('DEL', KEYS[5])

@@ -7,6 +7,7 @@ import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { useShellCopy } from '../shell/shell-copy';
 import { ManagedCommandLine } from './ManagedCommandLine';
 import { managedJobCopy } from './managed-job.shell-copy';
+import { recoveryObject as object, type RecoveryDetail, readRecovery, recoveryPending } from './recovery-projection';
 
 const ACTIVE = new Set(['queued', 'running', 'cancelling']);
 type JobState = keyof typeof managedJobCopy.zh.state;
@@ -19,10 +20,9 @@ interface JobDetail {
   exitCode?: number;
   durationMs?: number;
   transitions: { revision: number; at: number; state: string }[];
+  recovery: RecoveryDetail[];
+  recoveryPending: boolean;
 }
-const object = (value: unknown): Record<string, unknown> | null =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-
 function readDetail(body: unknown, taskId: string, jobId: string): JobDetail | null {
   const envelope = object(body);
   const job = object(envelope?.job);
@@ -53,6 +53,10 @@ function readDetail(body: unknown, taskId: string, jobId: string): JobDetail | n
             : [];
         })
       : [],
+    recovery: [readRecovery(envelope?.recovery, 'wait'), readRecovery(job.recovery, 'job')].filter(
+      (item): item is RecoveryDetail => item !== null,
+    ),
+    recoveryPending: recoveryPending(envelope?.recovery) || recoveryPending(job.recovery),
   };
 }
 
@@ -79,7 +83,12 @@ export function ManagedJobCard({
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [recheckNonce, setRecheckNonce] = useState(0);
+  const [rechecking, setRechecking] = useState(false);
   useEffect(() => {
+    // Both values intentionally invalidate the status read without changing its request shape.
+    void refreshKey;
+    void recheckNonce;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
@@ -95,7 +104,7 @@ export function ManagedJobCard({
         setUnavailable(!next);
         if (next) {
           setDetail(next);
-          terminal = !ACTIVE.has(next.state);
+          terminal = !ACTIVE.has(next.state) && !next.recoveryPending;
         }
       } catch {
         if (!disposed) setUnavailable(true);
@@ -108,7 +117,16 @@ export function ManagedJobCard({
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [taskId, jobId, expanded, refreshKey]);
+  }, [taskId, jobId, expanded, refreshKey, recheckNonce]);
+  const recheck = async () => {
+    setRechecking(true);
+    try {
+      await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/recheck`, { method: 'POST' });
+    } finally {
+      setRechecking(false);
+      setRecheckNonce((value) => value + 1);
+    }
+  };
   const execution: ActiveExecutionProjection | null =
     detail && threadId && catId && detail.cancelable
       ? {
@@ -152,6 +170,31 @@ export function ManagedJobCard({
           <ExecutionCancelButton execution={execution} label={words.stop} pendingLabel={words.stopping} />
         ) : null}
       </div>
+      {detail?.recovery.length ? (
+        <div
+          data-testid="managed-job-recovery"
+          className="rounded border border-cafe-accent/40 bg-cafe-accent/5 p-3 text-xs"
+        >
+          <p className="font-medium text-cafe-secondary">{words.recoveryTitle}</p>
+          <ul className="mt-1 space-y-1 text-cafe-muted">
+            {detail.recovery.map((incident) => (
+              <li key={`${incident.owner}:${incident.reasonCode}`}>
+                {words.recoveryState[incident.disposition]} · {words.recoveryReason(incident.reasonCode)}
+              </li>
+            ))}
+          </ul>
+          {detail.recovery.some((incident) => incident.recheck) ? (
+            <button
+              type="button"
+              disabled={rechecking}
+              onClick={() => void recheck()}
+              className="shell-focusable mt-2 rounded border border-cafe-border px-2 py-1 text-cafe-secondary disabled:opacity-50"
+            >
+              {rechecking ? words.rechecking : words.recheck}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <details className={inline ? 'group' : undefined} onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary className={`shell-focusable cursor-pointer text-xs text-cafe-muted${inline ? ' list-none' : ''}`}>
           {words.details}

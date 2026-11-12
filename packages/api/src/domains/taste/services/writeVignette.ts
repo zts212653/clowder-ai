@@ -84,7 +84,9 @@ export function formatVignette(proposal: TasteProposal): string {
   const publishable = (content: string) =>
     !(!sensitive && hasLineEndBlank(content)) &&
     parseTasteVignette(content, sensitive ? 'private' : 'public', false) !== null;
-  if (publishable(released)) return released;
+  // A newly bound owner decision covers the displayed field strings, including their line breaks.
+  // Unbound historical writer calls retain their released byte format for exact recovery.
+  if (publishable(released) && (!proposal.decisionDigest || readsBackExactly(released, proposal))) return released;
   const quoted = formatVignetteLines(proposal, yamlQuoted, yamlQuoted);
   if (publishable(quoted) && readsBackExactly(quoted, proposal)) return quoted;
   throw new Error(`Taste vignette for proposal ${proposal.id} cannot be written readable`);
@@ -207,6 +209,16 @@ function materializePublicProjection(
   if (existingIndex !== null) indexed = existingIndex.includes(`vignettes/${slug}.md`);
 
   if (existingVignette === content && indexed) return 'already-published';
+  // Upgrading an already approving claim binds today's owner confirmation but must still recognize
+  // bytes the old writer pushed before losing its checkpoint. This is readback only: absent files
+  // below always receive the newly confirmed exact format, and new claims cannot use this allowance.
+  if (
+    proposal.legacyPublicationRecovery &&
+    existingVignette !== null &&
+    indexed &&
+    existingVignette === formatVignette({ ...proposal, decisionDigest: undefined })
+  )
+    return 'already-published';
   const conflictMessage = `Taste publication conflict for proposal ${proposal.id}; refusing partial or mismatched projection`;
   if (existingVignette !== null) throw new Error(conflictMessage);
   if (indexed) throw new Error(conflictMessage);

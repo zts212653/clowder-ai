@@ -16,6 +16,8 @@ export interface ProfileItem {
     identity?: { email?: string; workspaceId: string; userId?: string };
   };
   claude?: { kind: 'long_lived_token' };
+  /** F317: Vertex AI through this machine's Google Cloud login, spending one project. */
+  googleCloud?: { credential: 'local_adc'; projectId: string };
   claudeTokenStatus?: 'saved' | 'missing' | 'expired';
   codex?: CodexManagedAccount & { status: 'not_prepared' | 'not_logged_in' | 'ready' | 'identity_changed' };
   provider?: string;

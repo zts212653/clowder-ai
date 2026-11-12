@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -10,7 +10,7 @@ import { resolveWindowsSpawnPlan } from '../src/utils/cli-spawn-win.js';
 import { resolveDshDesktopLaunch } from '../src/utils/dsh-desktop-launch.js';
 
 test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-launch-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-desktop-launch-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const resources = join(root, 'resources');
   const bin = join(resources, 'runtime/cli/bin');

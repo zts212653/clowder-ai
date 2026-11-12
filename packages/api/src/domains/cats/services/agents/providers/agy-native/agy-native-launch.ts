@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
@@ -39,6 +40,7 @@ export interface AgyNativeLaunchPlan {
   readonly cliOptions: CliSpawnOptions & { readonly cwd: string };
   readonly preparedRequest: PreparedProviderRequestV1;
   readonly agentName: string;
+  readonly volatileL0Context: string;
   readonly permissionMode: AgyNativePermissionMode;
   readonly agentTools: readonly string[];
   readonly binding: Omit<NativeSessionBinding, 'cliSessionId'>;
@@ -70,6 +72,21 @@ function assertOperatorTrustedWorkspace(config: AgyProfileConfig, workspaceRoot:
     }
   });
   if (!trusted) throw new Error('AGY native workspace is outside the operator trusted workspace list');
+}
+
+function matchesAgyNativeBindingL0(
+  prior: NativeSessionBinding,
+  catId: CatId,
+  agent: { readonly l0Hash: string; readonly agentName: string },
+  fullSystemPrompt: string,
+): boolean {
+  if (prior.l0Hash === agent.l0Hash) return prior.agentName === agent.agentName;
+  const legacyFullHash = createHash('sha256').update(fullSystemPrompt).digest('hex');
+  if (prior.l0Hash !== legacyFullHash) return false;
+  const prefix = `cat-cafe-${catId}-`;
+  const suffix = agent.agentName.slice(prefix.length + 16);
+  const expectedLegacyAgentName = `${prefix}${legacyFullHash.slice(0, 16)}${suffix}`;
+  return prior.agentName === expectedLegacyAgentName;
 }
 
 /** Prepare the ordinary native tool surface with canonical MCP identity and resume provenance. */
@@ -152,6 +169,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       profileHome: configHome,
       catId: input.catId,
       systemPrompt: input.body,
+      ...(options?.frozenL0Input ? { frozenL0Input: options.frozenL0Input } : {}),
       autoApprove: policy.permissionMode === 'always-proceed',
       tools: policy.agentTools,
     });
@@ -179,8 +197,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       prior?.v === 1 &&
       prior.carrier === 'agy_stream_json' &&
       prior.cliSessionId === options?.sessionId &&
-      prior.l0Hash === agent.l0Hash &&
-      prior.agentName === agent.agentName &&
+      matchesAgyNativeBindingL0(prior, input.catId, agent, input.body) &&
       prior.workspaceRoot === policy.workspaceRoot &&
       prior.profileHome === home &&
       prior.model === input.model &&
@@ -204,11 +221,14 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           )
         : await waitForAgyNativeProfileTurn(home, ownerInvocationId, options.signal, sessionScope(options.sessionId));
     }
+    const allowDynamicL0 = input.controlOperation !== 'compact' && !member;
+    const volatileL0Context = allowDynamicL0 ? agent.volatileL0Context : '';
     const nativeInput = prepareAgyNativeInput(
       input.prompt,
       options?.contentBlocks,
       policy.workspaceRoot,
       options?.uploadDir,
+      volatileL0Context,
     );
     if (member) mkdirSync(join(configHome, '.gemini/config/skills'), { mode: 0o700 });
     const skillDirectories = member
@@ -241,7 +261,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       v: 1,
       message: Object.freeze({
         body: nativeInput.prompt,
-        ...(nativeInput.hasAttachments ? { injectionDecision: 'adapter_native_file_attachment_references' } : {}),
+        ...(nativeInput.injectionDecision ? { injectionDecision: nativeInput.injectionDecision } : {}),
       }),
       nativeInstructions: Object.freeze([
         { body: readFileSync(agent.filePath, 'utf8'), injectionDecision: 'native_agent_file_compiled' },
@@ -282,6 +302,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       cliOptions,
       preparedRequest,
       agentName: agent.agentName,
+      volatileL0Context,
       permissionMode: policy.permissionMode,
       agentTools: [
         ...policy.agentTools,

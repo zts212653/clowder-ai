@@ -21,7 +21,7 @@ export interface VectorBackend {
 export function openVectorGeneration(
   db: Database.Database,
   model: EmbedModelInfo,
-  options: { create?: boolean; readQuery?: FileVectorQueryReader; passages?: boolean } = {},
+  options: { create?: boolean; readQuery?: FileVectorQueryReader; passages?: boolean; reconcile?: boolean } = {},
 ): VectorBackend {
   const tables = vectorGenerationTables(model.generationId ?? 'g0');
   if (tables.generationId !== 'g0' && !model.representationFingerprint)
@@ -42,7 +42,7 @@ export function openVectorGeneration(
       : generationVectorTableMatches(db, model.dim, kind, tables);
     if (!ready) throw new Error('Vector generation table is unavailable or has the wrong dimension');
   }
-  if (options.create) reconcileGenerationInvalidations(db, tables);
+  if (options.create && options.reconcile !== false) reconcileGenerationInvalidations(db, tables);
   const vectorStore = new VectorStore(db, model.dim, tables);
   if (!options.create && !vectorIdentityMatches(db, model)) throw new Error('Vector generation identity mismatch');
   return { vectorStore, passageVectorStore: new PassageVectorStore(db, model.dim, options.readQuery, tables) };

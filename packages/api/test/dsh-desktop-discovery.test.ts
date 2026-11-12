@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,8 +9,16 @@ import { discoverDshRuntimes } from '../src/routes/native-dsh-discovery.js';
 import { discoverNativeRuntimes } from '../src/routes/native-runtimes.js';
 import { resolveDshDesktopHome } from '../src/utils/dsh-desktop-launch.js';
 
+function useWin32Platform(t: test.TestContext) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+  });
+}
+
 test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP patch', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-only-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-desktop-only-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'native-home');
   const cached = join(root, 'cache/_npx/cached/node_modules/@deepseek-ai/dsh');
@@ -50,6 +58,7 @@ test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP
   const patch = join(profile, 'cordis.patch.yml');
   writeFileSync(patch, '# old native ACP is broken\n');
   await t.test('registry discovery uses asynchronous process I/O', async (t) => {
+    useWin32Platform(t);
     t.mock.method(childProcess, 'execFileSync', () => {
       throw Error('discovery must not block the API event loop');
     });
@@ -109,6 +118,7 @@ test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP
   const other = join(root, 'Desktop-two');
   cpSync(desktop, other, { recursive: true });
   await t.test('multiple installations match the running official Host or offer explicit locations', async (t) => {
+    useWin32Platform(t);
     let running = true;
     t.mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
       const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
@@ -146,6 +156,7 @@ test('automatic DSH onboarding uses Desktop alone and ignores the old native ACP
   });
   for (const failure of [new Error('Desktop process query timed out'), 'not JSON', '{"processes":[]}']) {
     await t.test(`optional Desktop disambiguation failure preserves discovery: ${String(failure)}`, async (t) => {
+      useWin32Platform(t);
       t.mock.method(childProcess, 'execFile', (_file, args, _options, callback) => {
         const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
         if (script.includes('Get-ItemProperty')) return callback(null, JSON.stringify([desktop, other]), '');

@@ -240,6 +240,8 @@ export interface AccountConfig {
   /** Official CLI inference token, private in CredentialEntry.accessToken; no identity claim. */
   readonly claude?: { readonly kind: 'long_lived_token' };
   readonly codex?: CodexManagedAccount;
+  /** F317: Vertex AI on one Google Cloud project; the host reads this machine's standard login at send time. */
+  readonly googleCloud?: { readonly credential: 'local_adc'; readonly projectId: string };
   readonly quota?: AccountQuotaObservation;
   readonly authType: 'oauth' | 'api_key';
   /** F171: Explicit client identity for API key accounts (e.g. 'anthropic', 'openai'). */

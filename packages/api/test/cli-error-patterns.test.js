@@ -29,6 +29,11 @@ const fixtures = [
     'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
     'network_error',
   ],
+  // AGY Native (Go net/http *url.Error transport EOF — witnessed in archives a62b4b95 & 2654c868)
+  ['Eligibility check failed: Get "https://www.googleapis.com/oauth2/v2/userinfo": EOF', 'network_error'],
+  ['Post "https://generativelanguage.googleapis.com/v1beta/models": unexpected EOF', 'network_error'],
+  // Carrier stdio stream drop without network request phrase stays stream_disconnected
+  ['stream disconnected before completion', 'stream_disconnected'],
   ['Error loading config.toml: invalid transport "foo"', 'invalid_config'],
   ['Failed to parse config at line 3', 'invalid_config'],
   ['config.json is malformed', 'invalid_config'],
@@ -63,6 +68,9 @@ const fixtures = [
   // until upstream archive evidence justifies expansion (LL-059 反模式防护)
   ['content policy violated', undefined],
   ['moderation flagged', undefined],
+  // LL-059 guard: non-HTTP generic EOF text must NOT be misclassified as network_error
+  ['syntax error: unexpected EOF while parsing JSON', undefined],
+  ['read /tmp/session.json: EOF', undefined],
 ];
 
 for (const [input, expected] of fixtures) {

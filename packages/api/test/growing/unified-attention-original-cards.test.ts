@@ -13,7 +13,7 @@ import { buildHandoffProposalCardBlock } from '../../src/domains/cats/services/s
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { readCompanionDecisionProjection } from '../../src/routes/companion-decision-read-service.js';
 import { buildProfileUpdateCardBlock } from '../../src/routes/profile-update-card-block.js';
-import { informationalOriginalFixture } from './informational-original-card.fixture.js';
+import { emptyCollectiveSource, informationalOriginalFixture } from './informational-original-card.fixture.js';
 import { approval } from './unified-attention-fixtures.js';
 
 const ownerUserId = 'owner';
@@ -257,7 +257,17 @@ async function projectOriginalCard(input: {
   const app = Fastify();
   app.get('/api/approval-hub/pending', async () => ({ items: [row], coverage: { state: 'complete' } }));
   app.get('/api/entrusted-work/needs-me', async () => ({ ownerReads: [], coverage: { state: 'complete' } }));
-  const result = await readCompanionDecisionProjection(app, ownerUserId, { offset: 0, limit: 20 }, messages);
+  const result = await readCompanionDecisionProjection(
+    app,
+    ownerUserId,
+    { offset: 0, limit: 20 },
+    messages,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    emptyCollectiveSource,
+  );
   await app.close();
   return { result, stored, row };
 }
