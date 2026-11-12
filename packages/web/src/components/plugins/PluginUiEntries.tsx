@@ -23,10 +23,12 @@ export function PluginUiEntries() {
   const [active, setActive] = useState<Entry>();
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
+  const [closing, setClosing] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const nonce = useRef('');
   const lifetime = useRef<AbortController>();
+  const closeGuard = useRef(false);
   const refresh = useCallback(async () => {
     try {
       const response = await apiFetch('/api/plugin-ui');
@@ -56,7 +58,18 @@ export function PluginUiEntries() {
     setActive(undefined);
     setHtml('');
     setError('');
+    setClosing(false);
+    closeGuard.current = false;
   }, []);
+  const requestClose = () => {
+    if (closing) return;
+    if (!closeGuard.current) return close();
+    setClosing(true);
+    frame.current?.contentWindow?.postMessage(
+      { channel: pluginPanelChannel, nonce: nonce.current, type: 'before-close' },
+      '*',
+    );
+  };
   useEffect(() => {
     if (
       active &&
@@ -92,7 +105,13 @@ export function PluginUiEntries() {
           close();
           return;
         }
-        if (message.type === 'clipboard.text') {
+        if (message.type === 'close.guard') {
+          closeGuard.current = message.value === true;
+          result = true;
+        } else if (message.type === 'close.cancel') {
+          setClosing(false);
+          result = true;
+        } else if (message.type === 'clipboard.text') {
           if (typeof message.value !== 'string' || message.value.length > 120_000) throw new Error('复制内容无效');
           await navigator.clipboard.writeText(message.value);
           result = true;
@@ -127,6 +146,8 @@ export function PluginUiEntries() {
     const controller = new AbortController();
     lifetime.current = controller;
     nonce.current = crypto.randomUUID();
+    closeGuard.current = false;
+    setClosing(false);
     setError('');
     setHtml('');
     setActive(entry);
@@ -164,14 +185,18 @@ export function PluginUiEntries() {
           <dialog
             ref={dialog}
             aria-label={active.label}
-            onCancel={close}
+            onCancel={(event) => {
+              event.preventDefault();
+              requestClose();
+            }}
             className="m-auto h-[min(900px,94dvh)] w-[min(820px,96vw)] max-w-none overflow-hidden rounded-2xl border border-[var(--console-border-soft)] bg-[var(--console-bg)] p-0 shadow-2xl backdrop:bg-black/40"
           >
             <div className="absolute right-3 top-2 z-10">
               <button
                 type="button"
                 aria-label="关闭插件面板"
-                onClick={close}
+                onClick={requestClose}
+                disabled={closing}
                 className="rounded px-2 py-1 hover:bg-black/10"
               >
                 ×

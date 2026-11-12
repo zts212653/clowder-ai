@@ -129,6 +129,43 @@ describe('plugin sidebar panel isolation', () => {
     expect(apiFetch.mock.calls.length).toBe(count);
     expect(post.mock.calls.at(-1)?.[0]).toHaveProperty('error');
   });
+  it.each(['button', 'escape'])('waits for a registered panel to save before closing via %s', async (method) => {
+    await act(async () => root.render(<PluginUiEntries />));
+    await act(async () => container.querySelector('button')?.click());
+    const frame = document.querySelector('iframe')!;
+    const source = frame.contentWindow!;
+    const post = vi.spyOn(source, 'postMessage');
+    let requestId = 0;
+    const send = (type: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: { channel: 'clowder-plugin-ui/v1', nonce: frame.name, requestId: ++requestId, type, value: true },
+        }),
+      );
+    await act(async () => {
+      send('close.guard');
+    });
+    let cancellation: Event | undefined;
+    await act(async () => {
+      if (method === 'button') document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.click();
+      else {
+        cancellation = new Event('cancel', { cancelable: true });
+        document.querySelector('dialog')?.dispatchEvent(cancellation);
+      }
+    });
+    expect(document.querySelector('iframe')).toBe(frame);
+    if (cancellation) expect(cancellation.defaultPrevented).toBe(true);
+    expect(post.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'before-close', nonce: frame.name });
+    await act(async () => {
+      send('close.cancel');
+    });
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="关闭插件面板"]')?.disabled).toBe(false);
+    await act(async () => {
+      send('close');
+    });
+    expect(document.querySelector('iframe')).toBeNull();
+  });
   it('production-page HTTP fixture represents an empty installed UI registry without admitting mutations', () => {
     const fixture = createChatProofApi(Date.now(), false, true);
     const url = new URL('http://localhost/api/plugin-ui');

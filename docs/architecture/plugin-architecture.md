@@ -151,6 +151,17 @@ before cleanup. Validation failures precede inventory writes. Standalone directo
 package.json retain the existing bounded copy path. Git installation can prepare a source through its
 existing declared build workflow; direct admission does not run source install/build scripts.
 
+## Optional panel close callback
+
+An opaque plugin panel can register `close.guard` with `value: true` through the existing
+`clowder-plugin-ui/v1` bridge. Host acknowledges the request. X and Escape then keep the iframe
+and its HTTP lifetime alive while sending `{channel, nonce, type: 'before-close'}` to that frame.
+The plugin finishes its current work and persists editable data before requesting `close`.
+On failure it sends `close.cancel` to enable another close attempt and shows the error inside its
+own editor. Source-window and nonce checks also apply to these messages. Unregistered panels
+keep their existing immediate close behavior. Plugin deactivation still invalidates the panel
+immediately; this callback cannot extend an installation's authority.
+
 ## Verification boundaries
 
 Exercise package admission and lifecycle against isolated data, including invalid archives, revoked
