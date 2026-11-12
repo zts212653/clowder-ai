@@ -5,6 +5,7 @@ import {
   commitLifecycleResponseFromAppendInput,
   lifecycleResponseTerminalPatchFromAppendInput,
   MessageStore,
+  prepareLifecycleResponseTerminalMessage,
 } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { messageActionsRoutes } from '../dist/routes/message-actions.js';
 import { harness, waitFor } from './helpers/issue1371-queue-harness.js';
@@ -15,7 +16,10 @@ const question = {
   kind: 'interactive',
   v: 1,
   interactiveType: 'select',
-  options: [{ id: 'custom', label: 'Other answer', customInput: true }],
+  options: [
+    { id: 'custom', label: 'Other answer', customInput: true },
+    { id: 'other', label: 'Another answer' },
+  ],
 };
 
 test('#1951 a streamed question is durable before broadcast and answerable before completion', async (t) => {
@@ -107,7 +111,7 @@ test('#1951 a streamed question is durable before broadcast and answerable befor
   assert.deepEqual(completed.extra.rich.blocks[0].selectedIds, ['custom']);
 });
 
-test('#1951 terminal output preserves the answer saved while the response was processing', async () => {
+test('#1951 terminal output preserves the latest answer and cards added after patch construction', async () => {
   const store = new MessageStore();
   const input = {
     from: { kind: 'agent', catId: 'codex' },
@@ -135,24 +139,30 @@ test('#1951 terminal output preserves the answer saved while the response was pr
     rich: { v: 1, blocks: [{ ...structuredClone(question), disabled: true, selectedIds: ['custom'] }] },
   });
 
-  const output = { ...input, content: 'Finished', extra: { rich: { v: 1, blocks: [structuredClone(question)] } } };
+  const output = {
+    ...input,
+    content: 'Finished',
+    extra: { rich: { v: 1, blocks: [{ ...question, title: 'Final title' }] } },
+  };
   const patch = lifecycleResponseTerminalPatchFromAppendInput(
     store.getById(response.id),
     'turn',
     { status: 'completed', completedAt: 200 },
     output,
   );
-  assert.equal(patch.extra.rich.blocks[0].disabled, true, 'Redis must receive the saved state in patch.extra');
-  const completed = await commitLifecycleResponseFromAppendInput(
-    store,
-    response.id,
-    'turn',
-    { status: 'completed', completedAt: 200 },
-    output,
-  );
+  store.setInteractiveBlockState(response.id, question.id, { selectedIds: ['other'] });
+  store.augmentStreamMetadata(response.id, {
+    extra: { rich: { v: 1, blocks: [{ ...question, id: 'later', disabled: true, selectedIds: ['custom'] }] } },
+  });
+  const prepared = prepareLifecycleResponseTerminalMessage(store.getById(response.id), patch);
+  assert.equal(prepared.extra.rich.blocks[0].disabled, true, 'Terminal preparation must retain the saved state');
+  const { message: completed } = store.commitLifecycleResponseTerminal(response.id, patch);
 
   assert.equal(completed.extra.rich.blocks[0].disabled, true);
-  assert.deepEqual(completed.extra.rich.blocks[0].selectedIds, ['custom']);
+  assert.deepEqual(completed.extra.rich.blocks[0].selectedIds, ['other']);
+  assert.equal(completed.extra.rich.blocks[0].title, 'Final title');
+  assert.equal(completed.extra.rich.blocks[1].id, 'later');
+  assert.deepEqual(completed.extra.rich.blocks[1].selectedIds, ['custom']);
 });
 
 test('#1951 a failed question write exposes a turn error instead of an unanswerable card', async (t) => {

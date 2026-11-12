@@ -14,6 +14,19 @@ const question = {
 };
 const answered = { ...question, disabled: true, selectedIds: ['a'] };
 
+test('client merging keeps the incoming nonempty selection by default', () => {
+  const [merged] = preserveInteractiveBlockStates([{ ...question, selectedIds: ['b'] }], [answered]);
+  assert.deepEqual(merged.selectedIds, ['b']);
+});
+
+test('terminal preparation can prefer the latest persisted nonempty selection', () => {
+  const [merged] = preserveInteractiveBlockStates([{ ...question, selectedIds: ['b'] }], [answered], {
+    preferSavedSelection: true,
+  });
+  assert.deepEqual(merged.selectedIds, ['a']);
+  assert.equal(merged.disabled, true);
+});
+
 test('replayed questions preserve compatible saved answers even when option order changes', () => {
   const [merged] = preserveInteractiveBlockStates(
     [{ ...question, options: [...question.options].reverse() }],

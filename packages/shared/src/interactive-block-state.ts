@@ -1,7 +1,11 @@
 import type { RichBlock } from './types/rich.js';
 
 /** Replayed provider blocks keep their presentation; the compatible saved answer survives. */
-export function preserveInteractiveBlockStates(blocks: readonly RichBlock[], saved: readonly RichBlock[]): RichBlock[] {
+export function preserveInteractiveBlockStates(
+  blocks: readonly RichBlock[],
+  saved: readonly RichBlock[],
+  { preferSavedSelection = false } = {},
+): RichBlock[] {
   return blocks.map((block) => {
     if (block.kind !== 'interactive') return block;
     const previous = saved.find((candidate) => candidate.id === block.id);
@@ -10,7 +14,10 @@ export function preserveInteractiveBlockStates(blocks: readonly RichBlock[], sav
     if (previous.options.length !== optionIds.size || previous.options.some((option) => !optionIds.has(option.id))) {
       return block;
     }
-    const selectedIds = block.selectedIds?.length ? block.selectedIds : previous.selectedIds;
+    const selections = preferSavedSelection
+      ? [previous.selectedIds, block.selectedIds]
+      : [block.selectedIds, previous.selectedIds];
+    const selectedIds = selections.find((ids) => ids?.length);
     return {
       ...block,
       ...(previous.disabled === true ? { disabled: true } : {}),

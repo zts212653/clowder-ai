@@ -35,6 +35,7 @@ import type {
   ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   ReplyPreview,
+  RichInteractiveBlock,
   RichMessageExtra,
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
@@ -1666,12 +1667,6 @@ export function lifecycleResponseTerminalPatchFromAppendInput(
   const publicInputIds = new Set(current.lifecycle?.kind === 'response' ? current.lifecycle.inputMessageIds : []);
   const responseReplyTo = [message.replyTo, current.replyTo].find((id) => id && publicInputIds.has(id));
   const extra = { ...current.extra, ...message.extra };
-  if (extra.rich && current.extra?.rich) {
-    extra.rich = {
-      ...extra.rich,
-      blocks: preserveInteractiveBlockStates(extra.rich.blocks, current.extra.rich.blocks),
-    };
-  }
   // Stop may close the route before its buffered Runner cancellation reaches the writer.
   // The canonical response terminal still settles the same persisted startup projection.
   if (
@@ -1961,6 +1956,21 @@ export interface StreamMetadataAugmentInput {
   replyTo?: string;
   mentionsUser?: boolean;
   extra?: HostMessageExtra;
+}
+
+export type InteractiveBlockState = Pick<RichInteractiveBlock, 'disabled' | 'selectedIds'>;
+
+export function applyInteractiveBlockState(
+  message: StoredMessage,
+  blockId: string,
+  state: InteractiveBlockState,
+): StoredMessage | null {
+  if (message.recall || message._tombstone) return null;
+  const block = message.extra?.rich?.blocks.find((candidate) => candidate.id === blockId);
+  if (block?.kind !== 'interactive') return null;
+  if (state.disabled !== undefined) block.disabled = state.disabled;
+  if (state.selectedIds !== undefined) block.selectedIds = [...state.selectedIds];
+  return message;
 }
 
 function richBlockDedupeKey(block: unknown, index: number): string {
@@ -2331,6 +2341,12 @@ export interface IMessageStore {
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F096: Update generic extra data; protected outcome fields keep their dedicated authority. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Persist only the selected block's state against the latest rich block collection. */
+  setInteractiveBlockState(
+    id: string,
+    blockId: string,
+    state: InteractiveBlockState,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F310: atomically fence source body and prior custody state before changing the source-owned carrier. */
   compareAndTransitionCustodyOffer(
     id: string,
@@ -2548,6 +2564,18 @@ function applyLifecycleResponseTerminalPatch(
   replaceOptionalField(next, 'toolEvents', patch.toolEvents);
   replaceOptionalField(next, 'metadata', patch.metadata);
   replaceOptionalField(next, 'extra', patch.extra);
+  const rich = mergeRichExtra(patch.extra?.rich, current.extra?.rich);
+  if (rich) {
+    next.extra = {
+      ...next.extra,
+      rich: {
+        ...rich,
+        blocks: preserveInteractiveBlockStates(rich.blocks, current.extra?.rich?.blocks ?? [], {
+          preferSavedSelection: true,
+        }),
+      },
+    };
+  }
   replaceOptionalField(next, 'thinking', patch.thinking);
   replaceOptionalField(next, 'origin', patch.origin);
   replaceOptionalField(next, 'mentionsUser', patch.mentionsUser);
@@ -3902,6 +3930,15 @@ export class MessageStore {
     if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
+  }
+
+  setInteractiveBlockState(id: string, blockId: string, state: InteractiveBlockState): StoredMessage | null {
+    const message = this.messages.find((candidate) => candidate.id === id);
+    if (!message) return null;
+    const previousRich = JSON.stringify(message.extra?.rich);
+    const updated = applyInteractiveBlockState(message, blockId, state);
+    if (updated && previousRich !== JSON.stringify(updated.extra?.rich)) notifyMessageTimelineChange(this, updated);
+    return updated;
   }
 
   compareAndTransitionCustodyOffer(id: string, input: CustodyOfferTransitionInput): CustodyOfferTransitionResult {
