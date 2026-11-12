@@ -85,6 +85,9 @@ test('modern settings read takes the manifest defaults without rewriting the sav
     'a retired member reads as the roster default',
   );
   assert.notEqual(read.values.dutyCatProfileId, 'retired-selected-profile');
+  assert.equal(read.selectedCompanionStatus, 'available', 'the fallback is a member the live selection accepts');
+  const state = await f.modern.request({ kind: 'state' });
+  assert.equal(state.kind, 'state', 'the window gets duty and carrier, so it has an identity');
   assert.equal(read.values.behaviorEnabled, true);
   assert.equal(read.values.ballSize, 72);
   assert.deepEqual(f.saved(), { dutyCatProfileId: 'retired-selected-profile' });

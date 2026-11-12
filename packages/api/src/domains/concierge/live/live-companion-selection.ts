@@ -41,6 +41,16 @@ export function resolveLiveCompanionSelection(
   };
 }
 
+/** Whether this member can be the companion's duty with a single Live carrier among these cats. */
+export function liveSelectable(dutyCatProfileId: string, cats: readonly Candidate[]): boolean {
+  try {
+    resolveLiveCompanionSelection({ dutyCatProfileId, displayName: '', skin: 'xianxian-codex', personaTone: '' }, cats);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function sameLiveExecutionSelection(a: LiveCompanionSelection, b: LiveCompanionSelection): boolean {
   return a.duty.catId === b.duty.catId && a.carrier.catId === b.carrier.catId;
 }

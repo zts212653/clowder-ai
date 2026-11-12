@@ -1,6 +1,8 @@
 import { catRegistry } from '@cat-cafe/shared';
+import { isCatAvailable } from '../../config/cat-config-loader.js';
 import { sliceUnicodeSafe } from '../../utils/unicode-safe-slice.js';
 import type { HostPluginConfigurationService } from '../plugin/manager/plugin-manager-configuration.js';
+import { liveSelectable } from './live/live-companion-selection.js';
 
 export const COMPANION_PLUGIN_ID = 'official.companion';
 
@@ -17,11 +19,11 @@ export interface CompanionSettings {
 
 export type ReadCompanionSettings = () => Promise<CompanionSettings>;
 
-/** A member field declares no default; until a current member is chosen the roster default answers. */
+/** A member field declares no default; until a current member is chosen, the first available member the
+ * companion's live selection accepts answers (the same rule the settings view offers members by). */
 function defaultMember(): string {
-  const ids = catRegistry.getAllIds();
-  if (ids.includes('gemini35' as never)) return 'gemini35';
-  return ids[0] ?? 'sonnet';
+  const cats = Object.values(catRegistry.getAllConfigs()).filter((cat) => isCatAvailable(cat.id));
+  return (cats.find((cat) => liveSelectable(cat.id, cats)) ?? cats[0])?.id ?? '';
 }
 
 /** Name and persona tone go into a member's prompt: one line, bounded (50 / 200, as the manifest describes). */

@@ -204,7 +204,12 @@ describe('ConciergeThreadService', () => {
 
   it('companion settings come from the plugin manifest defaults for an unconfigured owner', async () => {
     const settings = await companionConfigurationFixture().read();
-    assert.equal(settings.dutyCatProfileId, 'gemini35', 'an unchosen member falls back to gemini35');
+    const { liveSelectable } = await import('../dist/domains/concierge/live/live-companion-selection.js');
+    const cats = Object.values(catRegistry.getAllConfigs());
+    assert.ok(
+      liveSelectable(settings.dutyCatProfileId, cats),
+      'an unchosen member falls back to one live selection accepts',
+    );
     assert.equal(settings.skin, 'xianxian-codex', 'default skin should be 宪宪');
     assert.equal(settings.ballSize, 72);
   });
