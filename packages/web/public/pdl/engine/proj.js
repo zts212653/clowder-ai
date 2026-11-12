@@ -145,10 +145,24 @@ function navOpen(o, from) {
   navSwitchC(host, o.f, o.a);
   return host;
 }
+/* 页面 / 帧声明了 keep：被别的页面从外面盖住时它留在下面，盖上来的那层有返回回到它（对话被入口打开的记忆盖住）；入口之间仍是切换，只换它上面那一层 */
+function navKeptLayer(f) { f = String(f); return !!(f.indexOf('node:') === 0 ? PDL_VIEWS[f.slice(5)] || {} : PDL_PAGES[f] || {}).keep; }
+/* 留在下面的那一层：c 自己栈里的，或者 c 包着页面容器、页面容器现在显示的是它（窄栏入口盖住外壳）；返回的是 c 里它之上的那些层被换掉的位置 */
+function navKeptAt(c, f) {
+  if (navKeptLayer(f)) return -1;
+  const s = navStack(c); for (let i = s.length - 1; i >= 0; i--) if (navKeptLayer(s[i].f)) return i;
+  return c !== ctPages() && ctAnc(ctPages()).indexOf(c) >= 0 && navCoverFrom(c) && navKeptLayer(navTop(ctPages()).f) ? 0 : -1;
+}
+function navCoverKept(c, k, f, a, then) {
+  const s = navStack(c), kept = navKeptLayer(s[k].f) ? s[k] : navTop(ctPages()), ly = document.querySelector('[data-layer~="' + kept.id + '"]');
+  navLeave(navIdsFrom(c, k + 1).concat(navCoveringIds(c)), function () { navUncover(c); navDrop(s.splice(k + 1)); navPushRaw(c, f, a, ly ? navTitleAt(ly) : navTitleNow(), navBackLabel({}, ly && ly.querySelector('[data-view]'))); navAfter(); if (then) then(); });
+}
 /* 从外面切换容器 c：c 的栈换成这一层；盖着 c 的层离开。
    切走的栈是兄弟，不销毁（navHide）：隐藏 + inert 留在 DOM 里，数据变了记成过期，再切回来（同一个底层）时原样回来——滚动位置、展开状态、输入框里的东西都在。
    能覆盖的容器底层也被换掉（再关就回到底层），它的栈不留。before：在离开检查之后、换栈之前做的事（换空间） */
 function navSwitchC(c, f, a, then, force, before) {
+  const k = force || before ? -1 : navKeptAt(c, f);
+  if (k >= 0) { navCoverKept(c, k, f, a, then); return; }
   const own = navIdsFrom(c, 0), dirty = !force && navEls(own).some(leaveDirty);
   (force ? function (ids, fn) { fn(); } : navLeave)(own.concat(navCoveringIds(c)), function () {   /* force：程序里的切换（没有触发元素，比如保存之后跳转），不问 */
     if (before) before();

@@ -941,6 +941,7 @@ spaces:
     own: true
   settings: {home: members, fallback: true}
 pages:
+  chat: {keep: true}
   system:
     blocks:
       - {id: general}
