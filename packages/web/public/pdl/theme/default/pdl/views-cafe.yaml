@@ -1452,7 +1452,7 @@ views:
                 key: mem-logs
                 title: t:memory.runLog
                 blocks:
-                  - {type: pre, text: $.status.logs, when: $.status.logs}
+                  - {type: pre, rows: 12, text: $.status.logs, when: $.status.logs}
                   - {type: empty, text: t:memory.noLogs, when: "!$.status.logs"}
               - type: notice
                 tone: warn

@@ -1100,6 +1100,7 @@ button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身
    往上翻了由浏览器的滚动锚定停在原处；新画出来的节点本来就在底部。坐标随之反过来：scrollTop ≤ 0（0 = 底），滚动时间线 0% = 底。里面只放一个子元素 */
 .scroll.stick-end { display: flex; flex-direction: column-reverse; animation-name: scroll-fade-end; }
 .scroll.stick-end > * { flex: none; width: 100%; }   /* 横向照常铺满（子元素自己的 max-width + 左右 auto 外边距仍然居中；flex 里 auto 外边距会让它缩成内容宽） */
+.vw-code-rows { max-height: calc(var(--rows) * 1.6 * var(--fs-xs) + 2 * var(--sp-s) + var(--sp-xs)); border-radius: var(--r-m); }   /* 限行的原样文字（日志）：行数 × 原样文字的行高（加上框的内边距） */
 @keyframes scroll-fade-end { 0% { --sf-b: 0px; --sf-t: var(--sf-size); } 3% { --sf-b: var(--sf-size); } 97% { --sf-t: var(--sf-size); } 100% { --sf-b: var(--sf-size); --sf-t: 0px; } }
 /* 渐隐高度：默认一小段（不限行数的滚动区：边缘的普通渐隐，和行无关）；限行数的列表（和折叠同一条规则）= k 整行 + 1 整行渐隐到透明；弹出层、启动面板、弹窗正文按一行的一半 */
 .scroll[data-rows] { --sf-size: var(--row-step); max-height: calc((var(--rows) + 1) * var(--row-step)); box-sizing: content-box; }   /* 高度量的是行（内容区），容器自己的内边距另算，切口才落在整行上 */

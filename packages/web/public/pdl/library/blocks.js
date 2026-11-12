@@ -706,7 +706,12 @@ Object.assign(PDL_BLOCKS, {
   /* 容器：给一组块套组件库里的一种角色（见 PDL_ROLES.box）；里面什么都没有就不画。tone：带状态色调的容器（告警卡片）；faint：被新的取代了（旧提议） */
   dialog: function (b, sc, root) { return dialogHtml({ key: pv(b.pop, sc, root), title: pv(b.title, sc, root), help: pv(b.help, sc, root), wide: pv(b.wide, sc, root), layout: pv(b.layout, sc, root), span: pv(b.span, sc, root), form: pv(b.form, sc, root), error: pv(b.error, sc, root), actions: pvControls(b.actions, sc, root), body: pvBlocks(b.blocks, sc, root), acts: pvBlocks(b.footer, sc, root) }); },
   box: function (b, sc, root) { const body = pvBlocks(b.blocks, sc, root), cls = BOX[b.variant || ''] + (pv(b.follow, sc, root) ? ' scroll stick-end' : ''); if (!body) return ''; const tone = pv(b.tone, sc, root); return '<div class="' + cls + '"' + (b.key ? ' data-key="' + h(pv(b.key, sc, root)) + '"' : '') + (tone ? ' data-tone="' + h(tone) + '"' : '') + (pv(b.faint, sc, root) ? ' data-faint' : '') + (b.open != null ? ' data-open="' + !!pv(b.open, sc, root) + '"' : '') + (pv(b.fill, sc, root) ? ' data-fill' : '') + pvNote(pv(b.note, sc, root)) + '>' + (/\bstick-end\b/.test(cls) ? '<div>' + body + '</div>' : body) + '</div>'; },   /* 停在底部的容器（stick-end）里只放一个子元素 */
-  pre: function (b, sc, root) { const t = pv(b.text, sc, root); return t ? '<pre class="vw-code mono">' + annotationHtml(h(t), pvList(b.annotations, sc, root)) + '</pre>' : ''; },   /* 原样的文字（代码、日志、原始记录）：一个样子；不在里面限高滚动——它在的页面 / 详情铺满容器，由页面滚动 */
+  pre: function (b, sc, root) {   /* 原样的文字（代码、日志、原始记录）：一个样子；默认不在里面限高滚动——它在的页面 / 详情铺满容器，由页面滚动。
+     rows：持续追加的文字（日志）在页面里只占几行，框里自己滚动，停在最新的一行（stick-end） */
+    const t = pv(b.text, sc, root); if (!t) return '';
+    const pre = '<pre class="vw-code mono">' + annotationHtml(h(t), pvList(b.annotations, sc, root)) + '</pre>';
+    return b.rows ? '<div class="scroll stick-end vw-code-rows" style="--rows:' + (+b.rows) + '">' + pre + '</div>' : pre;
+  },
   /* 正文（Markdown）：一个样子。text 是 Markdown 文字；from 是一组段落；more 是接在后面的段落；clamp 收成几行 */
   markdown: function (b, sc, root) {
     const t = pv(b.text, sc, root), paras = pvList(b.from, sc, root).concat(pvList(b.more, sc, root));

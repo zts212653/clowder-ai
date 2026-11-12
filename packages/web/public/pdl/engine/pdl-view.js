@@ -169,7 +169,7 @@ const PDL_SCHEMA = {
   notice: { action: 1, each: 1, from: 1, items: 1, note: 1, num: 1, parts: 1, strong: 1, text: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], when: 1 },
   ordered: { blocks: 1, order: 1, when: 1 },
   picker: { act: 1, args: 1, items: 1, auto: 1, autoTip: 1, check: 1, disabled: 1, icon: 1, label: 1, parts: 1, prefix: 1, tip: 1, when: 1, who: 1 },
-  pre: { annotations: 1, text: 1, when: 1 },
+  pre: { annotations: 1, rows: 1, text: 1, when: 1 },
   pop: { blocks: 1, page: 1, pos: 1, view: 1, label: 1, variant: R('pop'), when: 1 },
   opts: { empty: 1, from: 1, when: 1 },
   chatpage: { bar: 1, body: 1, dock: 1, head: 1, side: 1, top: 1 },   /* 子容器 stream / composer 的顺序由用户层的 order['main.chat'] 决定 */
