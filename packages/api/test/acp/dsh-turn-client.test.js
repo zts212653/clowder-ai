@@ -193,24 +193,21 @@ describe('DSH turn client channel', () => {
     await client.initialize();
 
     const received = [];
-    let escaped;
-    const onUncaught = (error) => {
-      escaped = error;
-    };
-    process.once('uncaughtException', onUncaught);
     const unsubscribeThrow = client.onTurnBridgeEvent((event) => {
       if (event.type === 'turn_started') throw new Error('owner mismatch');
     });
     const unsubscribeCollect = client.onTurnBridgeEvent((event) => received.push(event));
-    agentNotify(agentStdout, '_clowder/turn', { sessionId: 's1', type: 'turn_started', nativeTurnId: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    process.removeListener('uncaughtException', onUncaught);
-    unsubscribeThrow();
-    unsubscribeCollect();
-
-    assert.equal(escaped, undefined, `turn listener threw into readline: ${escaped?.message}`);
+    const started = { sessionId: 's1', type: 'turn_started', nativeTurnId: 1 };
+    assert.doesNotThrow(() =>
+      agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: '_clowder/turn', params: started })}\n`),
+    );
     assert.deepEqual(received, [{ sessionId: 's1', type: 'turn_started', nativeTurnId: 1 }]);
+    const ended = { sessionId: 's1', type: 'turn_ended', nativeTurnId: 1, reason: 'completed' };
+    agentStdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: '_clowder/turn', params: ended })}\n`);
+    assert.deepEqual(received, [started, ended]);
     // A later RPC response still reaches the same client after the listener failure.
     assert.deepEqual(await client.inspectTurnInput('s1', 'd1'), { state: 'unknown' });
+    unsubscribeThrow();
+    unsubscribeCollect();
   });
 });
