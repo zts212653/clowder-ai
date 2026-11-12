@@ -299,7 +299,11 @@ test(
     composition = manager();
     await runtime.supervisor.start(instance);
     assert.equal(view.parse(await runtime.supervisor.invoke(instance, 'superagent.view', {})).threadId, main.threadId);
-    assert.equal((await entries())[0].threadId, main.threadId, 'the Host instance binding survives process composition restart');
+    assert.equal(
+      (await entries())[0].threadId,
+      main.threadId,
+      'the Host instance binding survives process composition restart',
+    );
     const feedback = await say(second.id, '导出修复还漏了空文件，请沿原事项补上。');
     await tick();
     inbox = inspected.parse(await call('superagent.inspect', {})).inbox;
