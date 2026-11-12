@@ -818,11 +818,13 @@ function pcfSet(inst, key, v) {
   st.draft[key] = v;
   delete st.errors[key];
 }
-// Switches, dropdowns and multi-picks save at once, only that field; text inputs keep the save bar.
+// On a plugin's configuration page (a source that saves itself), switches, dropdowns and multi-picks save at once,
+// only that field; text inputs keep the save bar. Inside a member form the member's save owns them.
 // A config with branches or step modes keeps the bar for all: a change there moves what is required.
 function pcfInstant(inst) {
   const c = pcfCtx(inst);
   return (
+    !!c.src.save &&
     !c.vp &&
     !(c.src.steps || []).some(function (s) {
       return s.mode;
