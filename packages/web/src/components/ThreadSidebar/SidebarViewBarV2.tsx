@@ -56,7 +56,7 @@ export function SidebarViewBarV2({
 
   return (
     <div
-      className="sticky top-0 z-10 flex items-center gap-1 px-3 py-1.5"
+      className="sticky top-0 z-10 flex h-10 items-center gap-1 px-3"
       data-chat-background-surface="frame"
       style={{ background: 'var(--shell-frame)' }}
       data-testid="sidebar-tabs-row"
