@@ -145,8 +145,42 @@ function calcTreeHtml() {
     '<div class="calc-row"><span>' + h(tc('structure.span')) + helpTip(tc('structure.helpSpan')) + '</span>' + seg(['fit', '1', '2', '3'].map(function (x) { return { v: x, g: sel, label: tcOf('structure.spanOptions', x), active: String(n.span || 'fit') === x, why: fixed || (si.parent ? '' : tc('structure.whyLocked')) }; }), 'setStatus', undefined, '', ' data-entity="ct" data-id="' + h(sel) + '" data-field="span"') + '<span></span></div>' +
     '<div class="calc-row"><span>' + h(tc('structure.hideEmpty')) + helpTip(tc('structure.helpHideEmpty')) + '</span>' + sw(!!n.hideEmpty, 'calcCtHideEmpty', ' data-k="' + h(sel) + '"', tc('structure.hideEmpty'), !!(n.pages || n.space || n.tabs)) + '<span></span></div>' +
     (n.surface || !n.flat && !(n.kids || []).length ? calcSurfaceHtml(sel) : '') + '</div>';
-  return '<div class="calc-sec calc-tree">' + tree + '</div>' + props + calcHostsHtml(si, t, label);
+  return '<div class="calc-sec calc-tree">' + tree + '</div>' + props + calcPolicyHtml(si, t, label) + calcHostsHtml(si, t, label);
 }
+/* 选中的容器的打开策略：这里的按钮默认开到哪（opens，声明在容器里的内容容器上；没有内容容器的容器声明在自己身上），选了强制就一律按它；
+   下面是这个容器里的按钮，各自跟随容器或单独指定 */
+function calcPolicyHtml(si, t, label) {
+  const k = si.node.key, opts = [], slots = (si.node.slots || []).filter(pdlSlotDef);
+  pdlTreeWalk(t, function (n) { opts.push({ v: n.key, label: label(n) }); });
+  const holders = slots.length ? slots.map(function (sl) { return { kind: 'slot', id: sl, name: pdlText(pdlSlotDef(sl).label) || sl, rule: pdlSlotDef(sl).opens || null }; })
+    : [{ kind: 'ct', id: k, name: '', rule: si.node.opens || null }];
+  const data = function (x) { return ' data-kind="' + x.kind + '" data-id="' + h(x.id) + '"'; };
+  const policy = '<div class="calc-sec"><div class="calc-sec-h">' + h(tc('structure.openPolicy')) + helpTip(tc('structure.helpOpenPolicy')) + '</div>' + holders.map(function (x) {
+    return srow(holders.length > 1 ? x.name : tc('structure.openTo'), pick('calc-opens-' + x.id, [{ v: '', label: tc('structure.openUnset') }].concat(opts), x.rule ? x.rule.anchor : '', tc('structure.openTo'), 'calcCtOpens', data(x))) +
+      srow(tc('structure.force'), sw(!!(x.rule && x.rule.force), 'calcCtForce', data(x), tc('structure.force'), !x.rule));
+  }).join('') + '</div>';
+  const trig = pdlEntryIds().filter(function (id) { const e = pdlEntry(id), sl = pdlSlotOf(id); return sl && pdlSlotBox(sl) === k && e && e.open && !e.open.ref && !e.open.action && !e.open.space; });
+  if (!trig.length) return policy;
+  return policy + '<div class="calc-sec"><div class="calc-sec-h">' + h(tc('structure.triggersHere')) + helpTip(tc('structure.helpTriggersHere')) + '</div>' + trig.map(function (id) {
+    const e = pdlEntry(id), o = pdlOpenOf(id), own = e.open.anchor || e.open.as ? o.target || '' : '';
+    return srow(e.title || id, o.forced ? muted(h(tc('structure.whyForced'))) : pick('calc-trig-' + id, [{ v: '', label: tc('structure.followContainer') }].concat(opts), own, tc('structure.openTo'), 'calcTrigTo', ' data-id="' + h(id) + '"'));
+  }).join('') + '</div>';
+}
+/* 改一处打开策略：内容容器的在主题文档的 slots 里，容器自己的在容器树上 */
+function calcOpensSet(kind, id, fn) {
+  if (kind === 'slot') pdlDocNodes(function (own) { const box = own('slots', id), next = fn(box.opens || null); if (next) box.opens = next; else delete box.opens; });
+  else pdlCtSet(id, { opens: fn(pdlCtInfo(id).node.opens || null) || undefined });
+  render(true); calcDraw();
+}
+CHANGES.calcCtOpens = function (e) { const v = e.target.value; calcOpensSet(e.target.dataset.kind, e.target.dataset.id, function (rule) { return v ? Object.assign({}, rule, { anchor: v, as: (rule && rule.as) || 'cover' }) : null; }); };
+A.calcCtForce = function (d) { calcOpensSet(d.kind, d.id, function (rule) { return rule && Object.assign({}, rule, { force: !rule.force }); }); };
+/* 按钮跟随容器 = 去掉它自己的 anchor / depth / as；单独指定 = 和“开在这里的按钮”同一个改法 */
+CHANGES.calcTrigTo = function (e) {
+  const id = e.target.dataset.id, v = e.target.value;
+  if (v) pdlOpenRebind(id, v);
+  else { const open = Object.assign({}, pdlEntry(id).open); delete open.anchor; delete open.depth; delete open.as; pdlNodeSet(id, { open: open }); }
+  render(true); calcDraw();
+};
 /* 选中的容器里会打开东西的按钮：每个按钮单独改开到哪（用户容器要删时先在这里迁移承载）；所在容器强制去处的按钮改不了 */
 function calcHostsHtml(si, t, label) {
   if (!si.hosts.length) return '';
