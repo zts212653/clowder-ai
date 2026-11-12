@@ -1,3 +1,4 @@
+import { isAppendRepeatSource } from '@cat-cafe/shared';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { QueueLedgerEntry } from './queue-ledger/QueueLedger.js';
 
@@ -28,50 +29,39 @@ export function isOwnerRecoverableRoutingTarget(
   );
 }
 
-/** A repeat is a new user input; it never changes the original uncertain delivery. */
+/** History facts offer a new owner-authenticated input, never authority to replay an old run. */
 export function isOwnerRepeatableAppendTarget(
-  entry: QueueLedgerEntry,
   source: StoredMessage,
   targetCatId: string,
   response?: StoredMessage | null,
 ): boolean {
-  const failure = entry.delivery.appendRecoveryByTarget?.[targetCatId];
-  const ref = source.lifecycle?.dispatchRefs?.find((candidate) => candidate.targetId === targetCatId);
-  const eligible = Boolean(
-    entry.owner.kind === 'user' &&
-      entry.owner.userId === source.userId &&
-      entry.threadId === source.threadId &&
-      entry.payload.messageId === source.id &&
-      (source.visibility !== 'whisper' || source.whisperTo?.some((catId) => catId === targetCatId)) &&
-      !source.deletedAt &&
-      !source.recall &&
-      !source._tombstone &&
-      source.deliveryStatus !== 'canceled' &&
-      entry.targets.includes(targetCatId) &&
-      !entry.execution.executionScope &&
-      !entry.execution.liveSessionId &&
-      failure?.acceptance === 'unknown' &&
-      ref?.statusMessageId === failure.responseMessageId &&
-      ref.appendAcceptance !== 'accepted',
+  const ref = source.lifecycle?.dispatchRefs?.find((item) => item.targetId === targetCatId);
+  const failure = source.lifecycle?.appendFailures?.find(
+    (item) => item.targetId === targetCatId && item.responseMessageId === ref?.statusMessageId,
   );
-  if (!eligible) return false;
-  const pending = entry.delivery.appendPendingByTarget?.[targetCatId];
-  if (pending?.requiresCompletion && ref?.inputRead?.status === 'read') {
-    // Native still owns its completion receipt. Only an ended exact receiver enables an explicit new input.
-    return (
-      (source.from?.kind === 'user' || source.from?.kind === 'agent') &&
-      pending.invocationId === failure?.invocationId &&
-      pending.responseMessageId === ref.statusMessageId &&
-      response?.id === ref.statusMessageId &&
-      response.userId === source.userId &&
-      response.threadId === source.threadId &&
-      response.lifecycle?.kind === 'response' &&
-      response.lifecycle.invocationId === failure?.invocationId &&
-      response.lifecycle.targetId === targetCatId &&
-      ['failed', 'interrupted', 'canceled'].includes(response.lifecycle.status)
-    );
-  }
-  return (
-    source.from?.kind === 'user' && !pending && failure?.checkedAt !== undefined && ref?.inputRead?.status !== 'read'
-  );
+  if (
+    !isAppendRepeatSource(source.from, ref, failure) ||
+    (source.from?.kind === 'user' && source.from.userId !== source.userId) ||
+    !ref ||
+    !failure ||
+    ref.appendAcceptance === 'accepted' ||
+    source.deletedAt ||
+    source.recall ||
+    source._tombstone ||
+    source.deliveryStatus === 'canceled' ||
+    (source.visibility === 'whisper' && !source.whisperTo?.some((id) => id === targetCatId))
+  )
+    return false;
+  if (
+    response &&
+    (response.threadId !== source.threadId ||
+      response.userId !== source.userId ||
+      response.lifecycle?.kind !== 'response' ||
+      response.lifecycle.invocationId !== failure.invocationId ||
+      response.lifecycle.targetId !== targetCatId)
+  )
+    return false;
+  if (failure.acceptance === 'incomplete') return ref.appendDelivery?.requiresCompletion === true;
+  if (ref.inputRead?.status === 'read' || ref.appendAcceptance === 'written') return false;
+  return failure.acceptance === 'not_accepted' || failure.checkedAt !== undefined;
 }

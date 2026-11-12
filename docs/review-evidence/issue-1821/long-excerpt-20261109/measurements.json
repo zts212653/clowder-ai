@@ -1,0 +1,98 @@
+[
+  {
+    "case": "desktop-long-excerpt",
+    "state": "collapsed",
+    "measurement": {
+      "cardWidth": 612,
+      "pageWidth": 1280,
+      "pageScroll": 1280,
+      "summary": {
+        "height": 42.25,
+        "lineHeight": 21.125,
+        "clientHeight": 42,
+        "scrollHeight": 63
+      },
+      "overflowing": []
+    }
+  },
+  {
+    "case": "desktop-long-excerpt",
+    "state": "expanded",
+    "measurement": {
+      "cardWidth": 612,
+      "pageWidth": 1280,
+      "pageScroll": 1280,
+      "summary": {
+        "height": 147.875,
+        "lineHeight": 21.125,
+        "clientHeight": 148,
+        "scrollHeight": 148
+      },
+      "overflowing": []
+    }
+  },
+  {
+    "case": "mobile-long-excerpt",
+    "state": "collapsed",
+    "measurement": {
+      "cardWidth": 251.59375,
+      "pageWidth": 320,
+      "pageScroll": 320,
+      "summary": {
+        "height": 63.375,
+        "lineHeight": 21.125,
+        "clientHeight": 63,
+        "scrollHeight": 169
+      },
+      "overflowing": []
+    }
+  },
+  {
+    "case": "mobile-long-excerpt",
+    "state": "expanded",
+    "measurement": {
+      "cardWidth": 251.59375,
+      "pageWidth": 320,
+      "pageScroll": 320,
+      "summary": {
+        "height": 359.125,
+        "lineHeight": 21.125,
+        "clientHeight": 359,
+        "scrollHeight": 359
+      },
+      "overflowing": []
+    }
+  },
+  {
+    "case": "mobile-375-long-excerpt",
+    "state": "collapsed",
+    "measurement": {
+      "cardWidth": 298.34375,
+      "pageWidth": 375,
+      "pageScroll": 375,
+      "summary": {
+        "height": 63.375,
+        "lineHeight": 21.125,
+        "clientHeight": 63,
+        "scrollHeight": 127
+      },
+      "overflowing": []
+    }
+  },
+  {
+    "case": "mobile-375-long-excerpt",
+    "state": "expanded",
+    "measurement": {
+      "cardWidth": 298.34375,
+      "pageWidth": 375,
+      "pageScroll": 375,
+      "summary": {
+        "height": 316.875,
+        "lineHeight": 21.125,
+        "clientHeight": 317,
+        "scrollHeight": 317
+      },
+      "overflowing": []
+    }
+  }
+]

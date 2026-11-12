@@ -18,20 +18,21 @@ test('installed Manager configuration exposes complete editable values and masks
   const service = new HostPluginConfigurationService({
     projectRoot,
     inventory: {
-      snapshot: async () => ({
-        instances: [{ pluginId, lifecycleState: 'installed', packageDigest: 'digest' }],
-        packages: [
-          {
-            packageDigest: 'digest',
-            manifest: {
-              configuration: [
-                { key: 'labels', label: 'Labels', kind: 'text', required: false },
-                { key: 'token', label: 'Token', kind: 'secret', required: true },
-              ],
-            },
-          },
-        ],
-      }),
+      readCurrentAuthority: async (requestedPluginId) =>
+        requestedPluginId === pluginId
+          ? {
+              instance: { pluginId, lifecycleState: 'installed', packageDigest: 'digest' },
+              packageRecord: {
+                packageDigest: 'digest',
+                manifest: {
+                  configuration: [
+                    { key: 'labels', label: 'Labels', kind: 'text', required: false },
+                    { key: 'token', label: 'Token', kind: 'secret', required: true },
+                  ],
+                },
+              },
+            }
+          : undefined,
     },
   });
   const fields = await service.fields(pluginId);

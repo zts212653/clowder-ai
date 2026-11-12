@@ -51,15 +51,15 @@ export function ThreadChatExport({
 
   return (
     <div
-      className="bg-[var(--console-shell-bg)]"
+      className="bg-[var(--shell-work)] p-4 text-[var(--shell-ink)]"
       data-export-root
       {...(ready ? { 'data-export-ready': 'true' } : {})}
       data-export-message-count={selection.messages.length}
     >
-      <div className="mx-auto max-w-4xl p-4">
-        <header className="mb-4 border-b border-cafe-divider pb-3">
-          <h1 className="text-lg font-semibold text-cafe-primary">{threadTitle ?? '未命名对话'}</h1>
-          <p className="mt-1 text-xs text-cafe-muted">来源 Thread: {threadId}</p>
+      <div className="mx-auto w-full max-w-[720px]" data-thread-chat-reading-column>
+        <header className="mb-4 border-b border-[var(--shell-hairline)] pb-3">
+          <h1 className="text-lg font-semibold">{threadTitle ?? '未命名对话'}</h1>
+          <p className="mt-1 text-xs text-[var(--shell-muted)]">来源 Thread: {threadId}</p>
         </header>
         {selection.messages.map((message) => {
           const dedupInfo = cliDedupMap.get(message.id);

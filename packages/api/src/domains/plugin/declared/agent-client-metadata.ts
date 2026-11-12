@@ -48,7 +48,7 @@ export async function recoverAgentClientMetadata(input: {
   packages: VerifiedPluginPackageLocator;
   onFailure(pluginId: string): void;
 }): Promise<void> {
-  const snapshot = await input.inventory.snapshot();
+  const snapshot = await input.inventory.snapshot({ currentOnly: true });
   const installed = new Set(
     snapshot.instances
       .filter((instance) => instance.lifecycleState === 'installed')
@@ -81,14 +81,14 @@ export async function recoverAgentClientMetadata(input: {
           metadata = await readAgentClientMetadata(located);
         }
       }
-      await input.inventory.transaction(({ packages }) => {
-        const current = packages.get(record.packageDigest);
+      await input.inventory.transaction(async ({ packages }) => {
+        const current = await packages.get(record.packageDigest);
         if (
           current &&
           current.agentClientMetadata === undefined &&
           isDeepStrictEqual(current.manifest, record.manifest)
         )
-          packages.put({ ...current, agentClientMetadata: metadata });
+          await packages.put({ ...current, agentClientMetadata: metadata });
       });
     } catch {
       input.onFailure(record.pluginId);

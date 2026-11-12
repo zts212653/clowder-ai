@@ -1,4 +1,8 @@
-export const CLAIM_ACTION_SUCCESSOR_LUA = `
+import { ACTION_SUCCESSOR_RECOVERY_LUA } from './action-successor-recovery-lua.js';
+
+export const CLAIM_ACTION_SUCCESSOR_LUA = `${ACTION_SUCCESSOR_RECOVERY_LUA}
+assertRecoveryIndexTypes({KEYS[5],KEYS[6],KEYS[7]})
+assertActionAllType(KEYS[4])
 local terminal = redis.call('GET', KEYS[3])
 if terminal then return {'subject_terminal', terminal} end
 local detailKey = redis.call('GET', KEYS[2])
@@ -11,30 +15,32 @@ if detailKey then
   end
   redis.call('DEL', KEYS[2])
 end
-redis.call('SET', KEYS[1], ARGV[2])
+local encoded = saveActionRecoveryOwner(KEYS[1],cjson.decode(ARGV[2]),nil,{KEYS[5],KEYS[6],KEYS[7]},false,ARGV[2])
 redis.call('SET', KEYS[2], KEYS[1])
 redis.call('SADD', KEYS[4], KEYS[1])
-return {'claimed', ARGV[2]}
+return {'claimed', encoded}
 `;
 
-export const CAS_ACTION_SUCCESSOR_LUA = `
+export const CAS_ACTION_SUCCESSOR_LUA = `${ACTION_SUCCESSOR_RECOVERY_LUA}
+assertRecoveryIndexTypes({KEYS[3],KEYS[4],KEYS[5]})
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local current = cjson.decode(raw)
 if tonumber(current.revision) ~= tonumber(ARGV[1]) then return -1 end
 if redis.call('GET', KEYS[2]) ~= KEYS[1] then return -2 end
-redis.call('SET', KEYS[1], ARGV[2])
+saveActionRecoveryOwner(KEYS[1],cjson.decode(ARGV[2]),current,{KEYS[3],KEYS[4],KEYS[5]},true,ARGV[2])
 return 1
 `;
 
-export const COMMIT_ACTION_SUCCESSOR_CAS_LUA = `
+export const COMMIT_ACTION_SUCCESSOR_CAS_LUA = `${ACTION_SUCCESSOR_RECOVERY_LUA}
+assertRecoveryIndexTypes({KEYS[4],KEYS[5],KEYS[6]})
 if redis.call('EXISTS', KEYS[3]) == 1 then return -3 end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local current = cjson.decode(raw)
 if tonumber(current.revision) ~= tonumber(ARGV[1]) then return -1 end
 if redis.call('GET', KEYS[2]) ~= KEYS[1] then return -2 end
-redis.call('SET', KEYS[1], ARGV[2])
+saveActionRecoveryOwner(KEYS[1],cjson.decode(ARGV[2]),current,{KEYS[4],KEYS[5],KEYS[6]},true,ARGV[2])
 return 1
 `;
 
@@ -43,7 +49,9 @@ return 1
  * identity pointer to a new lease for a fresh predicate. Replays naming the
  * same successor dispatch return the already-installed lease.
  */
-export const CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA = `
+export const CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA = `${ACTION_SUCCESSOR_RECOVERY_LUA}
+assertRecoveryIndexTypes({KEYS[6],KEYS[7],KEYS[8]})
+assertActionAllType(KEYS[5])
 if redis.call('EXISTS', KEYS[4]) == 1 then return {'subject_terminal', ''} end
 local oldRaw = redis.call('GET', KEYS[1])
 if not oldRaw then return {'lease_missing', ''} end
@@ -61,10 +69,10 @@ if indexedDetailKey ~= KEYS[1] then
   return {'identity_advanced', oldRaw}
 end
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'successor_exists', oldRaw} end
-redis.call('SET', KEYS[2], ARGV[3])
+local encoded = saveActionRecoveryOwner(KEYS[2],cjson.decode(ARGV[3]),old,{KEYS[6],KEYS[7],KEYS[8]},true,ARGV[3])
 redis.call('SET', KEYS[3], KEYS[2])
 redis.call('SADD', KEYS[5], KEYS[2])
-return {'continued', ARGV[3]}
+return {'continued', encoded}
 `;
 
 export const MARK_ACTION_SUBJECT_TERMINAL_LUA = `

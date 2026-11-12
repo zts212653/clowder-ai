@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
@@ -568,19 +578,137 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.match(restoreFunction, /cp -p /, 'target-owned files must retain timestamps during restore');
   });
 
+  it('checks the real public closure despite unrelated Git output exceeding 16 MiB', () => {
+    // Run the actual consumer in a tiny Git repo. Keeping this fixture below ROOT
+    // lets its copied checker resolve this worktree's TypeScript/YAML dependencies.
+    const fixtureParent = resolve(ROOT, '.cat-cafe/tmp');
+    mkdirSync(fixtureParent, { recursive: true });
+    const fixture = mkdtempSync(join(fixtureParent, 'public-closure-git-'));
+    const write = (path, source) => {
+      mkdirSync(dirname(resolve(fixture, path)), { recursive: true });
+      writeFileSync(resolve(fixture, path), source);
+    };
+    const checker = 'scripts/check-sync-manifest-runtime-closure.test.mjs';
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const run = () => {
+      const result = spawnSync(
+        process.execPath,
+        ['--test', '--test-reporter=tap', '--test-name-pattern=exports static relative dependencies', checker],
+        { cwd: fixture, env: childEnv, encoding: 'utf8', timeout: 30_000 },
+      );
+      assert.ifError(result.error);
+      return { status: result.status, output: result.stdout + result.stderr };
+    };
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: fixture });
+      for (const path of [
+        checker,
+        'scripts/lib/root-check-chain.mjs',
+        'scripts/lib/sync-public-export-coverage.mjs',
+        'packages/api/scripts/resolve-public-test-files.mjs',
+      ]) {
+        write(path, readFileSync(resolve(ROOT, path), 'utf8'));
+      }
+      write('packages/api/config/public-test-exclusions.json', '{"version":2,"entries":[]}');
+      write(
+        'sync-manifest.yaml',
+        [
+          'managed_roots:',
+          '  - public runtime',
+          '  - packages/api',
+          '  - packages/web',
+          'managed_files:',
+          '  - config [本地]*.mjs',
+          '  - not-a-node-carrier',
+          'managed_scripts:',
+          '  - scripts/guarded-bin/gh',
+          'excluded:',
+          '  - private/',
+          '  - packages/api/source-tests/',
+          'transforms:',
+          '  - type: copy',
+          '    source: private/template.mjs',
+          '    target: generated.mjs',
+          '',
+        ].join('\n'),
+      );
+      write('scripts/sync-to-opensource.sh', 'cp "$STAGING_DIR/private/template.mjs" "$FILTERED_DIR/generated.mjs"\n');
+      write('private/dependency.mjs', 'export {};\n');
+      const importers = [
+        ['public runtime/tracked ignored.mjs', "import '../private/dependency.mjs';\n"],
+        ['public runtime/中文 空格\n入口.mjs', "import '../private/dependency.mjs';\n"],
+        ['packages/api/test/选中 未跟踪.test.js', "import '../../../private/dependency.mjs';\n"],
+        ['config [本地]*.mjs', "import './private/dependency.mjs';\n"],
+        ['generated.mjs', "import './private/dependency.mjs';\n"],
+        ['scripts/guarded-bin/gh', "#!/usr/bin/env node\nimport '../../private/dependency.mjs';\n"],
+      ];
+      for (const [path] of importers) write(path, 'export {};\n');
+      execFileSync('git', ['add', '--', importers[0][0]], { cwd: fixture });
+      write('.gitignore', 'public runtime/tracked ignored.mjs\npublic runtime/ignored.mjs\n');
+      write('public runtime/ignored.mjs', "import '../private/dependency.mjs';\n");
+      write('packages/api/source-tests/home.js', "import '../../../private/dependency.mjs';\n");
+      write('packages/web/test/home.test.js', "import '../../../private/dependency.mjs';\n");
+      write('not-a-node-carrier', "import './private/dependency.mjs';\n");
+
+      // Empty real, untracked cache files produce >16 MiB of NUL-delimited Git
+      // paths without allocating that much file content or touching home caches.
+      const cache = join('unrelated-cache', ...Array(3).fill('c'.repeat(180)));
+      const leaf = (index) => `cache-${String(index).padStart(5, '0')}-${'x'.repeat(200)}`;
+      const cacheFileCount = 24_000;
+      assert.ok(Buffer.byteLength(`${join(cache, leaf(0))}\0`) * cacheFileCount > 16 * 1024 * 1024);
+      mkdirSync(resolve(fixture, cache), { recursive: true });
+      for (let index = 0; index < cacheFileCount; index += 1) {
+        writeFileSync(resolve(fixture, cache, leaf(index)), '');
+      }
+
+      const baseline = run();
+      assert.equal(baseline.status, 0, baseline.output);
+      assert.match(baseline.output, /exports static relative dependencies/, baseline.output);
+      assert.match(baseline.output, /# pass 1\b/, baseline.output);
+      for (const [path, source] of importers) {
+        write(path, source);
+        const missing = run();
+        assert.notEqual(missing.status, 0, `${path} must be checked even before git add:\n${missing.output}`);
+        assert.match(missing.output, /sync-manifest omits direct runtime dependencies/);
+        assert.match(missing.output, /-> private\/dependency\.mjs/);
+        write(path, 'export {};\n');
+      }
+      write('sync-manifest.yaml', '{}\n');
+      const emptyExport = run();
+      assert.equal(emptyExport.status, 0, emptyExport.output);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('exports static relative dependencies of public runtime, build configuration and selected tests', async () => {
     const coverage = loadPublicExportCoverage(ROOT);
     const { selectedFiles } = await resolvePublicTestFiles();
     const selectedPublicTests = new Set(selectedFiles.map((path) => `packages/api/${path}`));
-    const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
-    }).split('\0');
+    // Apply the export domain before buffering Git output. Literal pathspecs
+    // preserve filenames containing spaces, Unicode or Git wildcard characters.
+    const exportPathspecs = [
+      ...new Set([...coverage.prefixes, ...coverage.exact, ...coverage.materializedTransformExact]),
+    ].map((path) => `:(top,literal)${path}`);
+    const files =
+      exportPathspecs.length === 0
+        ? []
+        : execFileSync(
+            'git',
+            ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...exportPathspecs],
+            {
+              cwd: ROOT,
+              encoding: 'utf8',
+              maxBuffer: 16 * 1024 * 1024,
+            },
+          ).split('\0');
     const missing = [];
 
     for (const importer of new Set(files)) {
-      if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(importer) || !isCoveredByPublicExport(importer, coverage)) continue;
+      if (!isCoveredByPublicExport(importer, coverage)) continue;
+      const codeExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/.test(importer);
+      if (!codeExtension && extname(importer)) continue;
       // The public API resolver deliberately excludes home-only provider/OS
       // fixtures. Browser journeys are another home-gate resource contract,
       // not public API inputs. Never make their private dependencies public
@@ -593,9 +721,11 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       )
         continue;
       const importerPath = resolve(ROOT, importer);
-      if (!existsSync(importerPath)) continue;
+      if (!existsSync(importerPath) || !statSync(importerPath).isFile()) continue;
 
       const source = readFileSync(importerPath, 'utf8');
+      // Executable Node carriers such as guarded-bin/gh have no extension.
+      if (!codeExtension && !/^#![^\r\n]*\bnode(?:\s|$)/.test(source)) continue;
       for (const specifier of collectRelativeImports(source, importer)) {
         const dependency = resolveLocalImport(importer, specifier);
         const dependencyPath = toRepoPath(dependency);
@@ -842,25 +972,50 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
   });
 
   it('exports the embedding policy probe executed by the public API regression test', () => {
-    const policyTest = readFileSync(resolve(ROOT, 'packages/api/test/embed-runtime-policy.test.js'), 'utf8');
-    assert.match(
-      policyTest,
-      /scripts\/services\/test_embed_runtime_policy\.py/,
-      'test must bind the real policy probe path',
-    );
-    assert.ok(
-      managedScripts.has('scripts/services/test_embed_runtime_policy.py'),
-      'sync-manifest must export the Python policy probe used by embed-runtime-policy.test.js',
-    );
+    const bridge = 'packages/api/test/embed-runtime-policy.test.js';
+    const policyTest = readFileSync(resolve(ROOT, bridge), 'utf8');
+    assert.match(policyTest, /['"]discover['"]/, 'public bridge must discover the Python policy suite');
+    assert.match(policyTest, /['"]test_embed_\*\.py['"]/, 'public bridge must retain the embedding test scope');
+    const probes = readdirSync(resolve(ROOT, 'scripts/services')).filter((name) => /^test_embed_.*\.py$/.test(name));
+    assert.ok(probes.length > 0, 'the public discovery scope must contain actual probes');
+    for (const path of [
+      'scripts/services/embed-api.py',
+      'scripts/services/embed_runtime_policy.py',
+      'scripts/services/embed_process_footprint.py',
+      ...probes.map((name) => `scripts/services/${name}`),
+    ]) {
+      assert.ok(managedScripts.has(path), `${path} must accompany the public embedding service and discovery suite`);
+      assert.ok(!excluded.has(path), `${path} must not be excluded from the filtered tree`);
+    }
     assert.match(
       readFileSync(resolve(ROOT, 'scripts/services/test_embed_runtime_policy.py'), 'utf8'),
       /from embed_runtime_policy import/,
       'policy probe must bind its sibling runtime module',
     );
-    assert.ok(
-      managedScripts.has('scripts/services/embed_runtime_policy.py'),
-      'sync-manifest must export the runtime module imported by the Python policy probe',
+    assert.match(
+      readFileSync(resolve(ROOT, 'scripts/services/embed_runtime_policy.py'), 'utf8'),
+      /from embed_process_footprint import read_process_footprint_bytes/,
+      'runtime policy must bind the exported native reader',
     );
+    const filtered = mkdtempSync(join(tmpdir(), 'public-embedding-policy-'));
+    const coverage = loadPublicExportCoverage(ROOT);
+    try {
+      for (const path of [bridge, ...managedScripts].filter(
+        (path) => path === bridge || (path.startsWith('scripts/services/') && path.endsWith('.py')),
+      )) {
+        if (!isCoveredByPublicExport(path, coverage)) continue;
+        mkdirSync(dirname(resolve(filtered, path)), { recursive: true });
+        copyFileSync(resolve(ROOT, path), resolve(filtered, path));
+      }
+      execFileSync(process.execPath, ['--test', resolve(filtered, bridge)], {
+        cwd: filtered,
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+        stdio: 'pipe',
+        timeout: 20_000,
+      });
+    } finally {
+      rmSync(filtered, { recursive: true, force: true });
+    }
   });
 
   it('does not make the public review guard depend on the home-only inbound playbook', () => {

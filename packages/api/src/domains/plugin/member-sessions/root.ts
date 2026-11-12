@@ -41,9 +41,9 @@ export function createRootMemberSessions(deps: {
   const installed = async (scope: MemberSessionScope) => {
     await scope.assertCurrent();
     if (scope.ownerUserId !== deps.ownerUserId) throw new Error('member_session_owner_mismatch');
-    const snapshot = await deps.pluginRuntime().inventoryStore.snapshot();
-    const instance = snapshot.instances.find((i) => i.pluginInstanceId === scope.pluginInstanceId);
-    const pkg = snapshot.packages.find((p) => p.packageDigest === scope.packageDigest);
+    const authority = await deps.pluginRuntime().inventoryStore.readAuthority(scope.pluginInstanceId);
+    const instance = authority?.instance;
+    const pkg = authority?.packageRecord?.packageDigest === scope.packageDigest ? authority.packageRecord : undefined;
     if (
       !instance ||
       instance.packageDigest !== scope.packageDigest ||

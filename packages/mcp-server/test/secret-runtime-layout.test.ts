@@ -58,6 +58,14 @@ for (const layout of ['standalone', 'node_modules'] as const) {
       const managed=withOpenCodeSecretGuard({mcp:{collab:{type:'local',command:[process.execPath,fileURLToPath(new URL('dist/collab.js',base))]}}},callback);
       assert.deepEqual(managed.mcp.collab.environment,callback,'a moved installed package still recognizes its own first-party entrypoint');
       for(const name of ['secret-native-hook.mjs','secret-kimi-hook.mjs','secret-dsh-plugin.mjs','agy-native-effect-guard.mjs','guarded-bin/gh','guarded-bin/curl','guarded-zsh/.zshenv']) assert.ok(existsSync(runtime.secretRuntimeScript(name)));
+      const auth=spawnSync(process.execPath,[runtime.secretRuntimeScript('secret-native-hook.mjs')],{
+        input:JSON.stringify({hook_event_name:'PreToolUse',tool_name:'Bash',tool_input:{command:'timeout 12 codex login </dev/null 2>&1 | head -30'}}),
+        encoding:'utf8',env:{PATH:process.env.PATH,SYSTEMROOT:process.env.SYSTEMROOT}
+      });
+      assert.equal(auth.status,0,auth.stderr);
+      assert.equal(JSON.parse(auth.stdout).hookSpecificOutput.permissionDecision,'deny','moved runtime must load the authentication policy closure');
+      const {assertNativeAuthProvider}=await import(${JSON.stringify(new URL('../../../scripts/test-helpers/native-auth-providers.mjs', import.meta.url).href)});
+      for(const provider of ['kimi','opencode','dsh']) await assertNativeAuthProvider(provider,new URL('dist/runtime/scripts/',base),process.cwd());
       const program=runtime.secretRuntimeScript('guarded-bin/gh');
       const scoped=spawnSync(process.execPath,[program,'pr','create','--title','verdict(fixture): installation probe','--body','safe fixture'],{encoding:'utf8'});
       assert.equal(scoped.status,1);

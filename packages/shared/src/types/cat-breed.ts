@@ -74,6 +74,8 @@ export interface CatVariant {
   /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
   readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
+  /** Member-only environment declarations. Account adapters retain final credential authority. */
+  readonly env?: Readonly<Record<string, string>>;
   readonly cli: CliConfig;
   /** F210 Phase G: optional isolated Antigravity CLI profile binding. */
   /** null explicitly clears a template profile in a runtime catalog overlay. */
@@ -137,6 +139,7 @@ export interface CatFeatures {
   readonly sessionStrategy?: {
     readonly strategy: 'handoff' | 'compress' | 'hybrid';
     readonly thresholds?: { readonly warn: number; readonly action: number };
+    /** generative is a historical digest read preference, never a generation switch. */
     readonly handoff?: { readonly preSealMemoryDump: boolean; readonly bootstrapDepth: 'extractive' | 'generative' };
     readonly hybrid?: { readonly maxCompressions: number };
     readonly compress?: { readonly maxCompressions?: number; readonly trackPostCompression: boolean };
@@ -237,6 +240,8 @@ export interface AccountConfig {
   /** Official CLI inference token, private in CredentialEntry.accessToken; no identity claim. */
   readonly claude?: { readonly kind: 'long_lived_token' };
   readonly codex?: CodexManagedAccount;
+  /** F317: Vertex AI on one Google Cloud project; the host reads this machine's standard login at send time. */
+  readonly googleCloud?: { readonly credential: 'local_adc'; readonly projectId: string };
   readonly quota?: AccountQuotaObservation;
   readonly authType: 'oauth' | 'api_key';
   /** F171: Explicit client identity for API key accounts (e.g. 'anthropic', 'openai'). */
@@ -279,7 +284,7 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Optional familiar form of address, prefilled as co-creator for new installations. */
+  /** Optional familiar form of address, prefilled as co-creator for new house installations. */
   readonly nickname?: string;
   /** An explicit nickname choice, including clearing it; never inferred from an unrelated edit. */
   readonly nicknameSource?: 'user';

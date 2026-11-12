@@ -143,7 +143,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
 
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
 
-    assert.ok(result.navigationHeader?.includes('真相源: 未定位'), 'stale-only ledger must fail closed');
+    assert.doesNotMatch(result.navigationHeader, /真相源: 未定位|下一步:/, 'stale-only ledger is omitted');
     assert.ok(!result.navigationHeader?.includes(staleRef), 'stale artifact must not become 真相源 or 下一步');
   });
 

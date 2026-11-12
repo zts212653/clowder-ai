@@ -5,15 +5,17 @@
  * `not_started` only where the Host refused before any package code ran for this call; once the
  * module's action is entered, any failure is `unknown`, even an error carrying the same code as a
  * Host refusal. A carrier that cannot report the boundary is `unknown` throughout. `invoke` keeps
- * its contract: the value, or the very error the call failed with.
+ * its contract: the value, or the error received from the carrier. Worker errors cross the
+ * wire with their name/message/code; in-process carrier errors retain object identity.
  */
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { PluginRuntimeCarrierRouter } from '../dist/domains/plugin/carrier/runtime-carrier.js';
 import { ExternalPluginRuntimeError } from '../dist/domains/plugin/external-runtime/types.js';
-import { cleanup, conversationHostHarness, hostManifest, METHODS } from './f202-w2-3-h3b.fixture.js';
+import { assertWorkerError, cleanup, conversationHostHarness, hostManifest, METHODS } from './f202-w2-3-h3b.fixture.js';
+import { snapshotInventoryFixture } from './helpers/snapshot-inventory-fixture.js';
 
-after(cleanup);
+afterEach(cleanup);
 
 const failedWith = (outcome, effect, code) =>
   outcome.status === 'failed' && outcome.effect === effect && (code === undefined || outcome.error?.code === code);
@@ -67,12 +69,12 @@ test('once the action is entered every failure is unknown, even a Host error wit
     const outcome = await h.router.attemptInvoke(id, METHODS.append, { n: name });
     assert.equal(outcome.status, 'failed', name);
     assert.equal(outcome.effect, 'unknown', name);
-    assert.equal(outcome.error, error, `${name}: the very error the action threw`);
+    assertWorkerError(outcome.error, error);
   }
   assert.equal(h.calls(METHODS.append).length, 3, 'each call reached the action');
 });
 
-test('invoke keeps its contract: the value, or the very error the call failed with', async () => {
+test('invoke returns the value or preserves the error sent by the real worker', async () => {
   const h = await conversationHostHarness();
   await h.enable();
   const id = h.instances[0];
@@ -83,7 +85,10 @@ test('invoke keeps its contract: the value, or the very error the call failed wi
   h.script[METHODS.list] = () => {
     throw error;
   };
-  await assert.rejects(h.router.invoke(id, METHODS.list, {}), (rejected) => rejected === error);
+  await assert.rejects(h.router.invoke(id, METHODS.list, {}), (rejected) => {
+    assertWorkerError(rejected, error);
+    return true;
+  });
   await assert.rejects(h.router.invoke(id, 'no.such.action', {}), { code: 'PROTOCOL_VIOLATION' });
 });
 
@@ -104,7 +109,7 @@ function routerWith(carrier) {
     packages: [{ packageDigest: 'digest', pluginId: 'dev.clowder.fake', manifest: {} }],
     grants: [],
   };
-  const router = new PluginRuntimeCarrierRouter({ snapshot: async () => snapshot });
+  const router = new PluginRuntimeCarrierRouter(snapshotInventoryFixture({ snapshot: async () => snapshot }));
   router.register({
     claims: () => true,
     start: async () => undefined,

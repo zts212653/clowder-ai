@@ -45,6 +45,39 @@ describe('F321 recall row facts', () => {
     expect(container.textContent).toContain('打开');
     expect(container.textContent).not.toMatch(/push|pull|used|ign\.|忽略|\[match:/);
   });
+  it('offers the verified original message and delivered memory as distinct destinations', async () => {
+    await act(async () =>
+      root.render(
+        <RecallCard
+          event={{
+            id: 'cue',
+            query: '',
+            timestamp: 1,
+            source: 'push',
+            cueStatus: 'applied',
+            resolverFamily: 'taste',
+            results: [
+              {
+                title: '先核原件',
+                sourceType: 'taste',
+                href: '/thread/source?message=original',
+                messageHref: '/thread/source?message=original',
+                memoryHref: '/memory?family=taste&memoryId=taste-one&revision=old',
+              },
+            ],
+          }}
+        />,
+      ),
+    );
+    await act(async () => container.querySelector('button')?.click());
+    const links = [...container.querySelectorAll('a')];
+    expect(links.find((a) => a.textContent?.includes('查看原消息'))?.getAttribute('href')).toBe(
+      '/thread/source?message=original',
+    );
+    expect(links.find((a) => a.textContent?.includes('在记忆页打开'))?.getAttribute('href')).toBe(
+      '/memory?family=taste&memoryId=taste-one&revision=old',
+    );
+  });
   it('preserves unknown result count and never invents zero', async () => {
     await act(async () =>
       root.render(

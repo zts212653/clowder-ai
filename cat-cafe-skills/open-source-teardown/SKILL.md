@@ -6,7 +6,7 @@ description: >
   Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
   Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
   GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
-tips_exempt: "Renewed 2026-10-10: the non-author review default changes from cross-family-first to one risk-routed reviewer; the teardown entry, outputs and execution authority are unchanged."
+tips_exempt: "Renewed 2026-11-03: the sibling-skill boundary line now names collaborative-thinking instead of the retired expert-panel; the teardown entry, outputs and execution authority are unchanged."
 triggers:
   - "拆解明星开源项目"
   - "拆解开源项目"
@@ -206,7 +206,7 @@ reliability | operability | privacy/risk
 
 - `deep-research`：多源资料调研；本 skill 是**源码优先的能力审计**。
 - `opensource-ops`：社区 issue/PR/intake；本 skill 是**项目架构和宣传真实性拆解**。
-- `expert-panel`：多猫观点碰撞；本 skill 是**固定产物和检查项**。
+- `collaborative-thinking`：多猫观点碰撞；本 skill 是**固定产物和检查项**。
 - `writing-skills`：写 skill 的质量纪律；本 skill 可产出候选 skill，但写入时仍要加载 `writing-skills`。
 
 下一步：工程/产品决策 → `collaborative-thinking` 或 `feat-lifecycle`；新 skill/修改 skill → `writing-skills`；外部社区情报 → `deep-research` 或 `opensource-ops`。

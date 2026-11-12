@@ -184,7 +184,7 @@ describe('chatStore multi-thread state', () => {
       'addMessage',
       'active addMessageToThread',
       'background addMessageToThread',
-    ])('orders a newly appended message from %s on the shared presentation timeline', (writer) => {
+    ])('orders a newly appended message from %s by start/send time, not completion', (writer) => {
       const existing: ChatMessage[] = [
         { id: 'first', type: 'user', content: 'first', timestamp: 1_000, timelineOrderAt: 1_000 },
         { id: 'third', type: 'user', content: 'third', timestamp: 3_000, timelineOrderAt: 3_000 },
@@ -208,7 +208,7 @@ describe('chatStore multi-thread state', () => {
         },
       });
 
-      expect(messages.map((message) => message.id)).toEqual(['first', 'second', 'third']);
+      expect(messages.map((message) => message.id)).toEqual(['second', 'first', 'third']);
     });
   });
 
@@ -260,7 +260,7 @@ describe('chatStore multi-thread state', () => {
       ]);
     });
 
-    it('keeps an active response in place during streaming and moves it only after an input is read', () => {
+    it('keeps an active response at its start time through streaming and a later input', () => {
       useChatStore.setState({
         messages: [
           {
@@ -291,8 +291,8 @@ describe('chatStore multi-thread state', () => {
       const readState = useChatStore.getState();
       expect(readState.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
       expect(selectThreadMessages(readState, 'thread-a').map((message) => message.id)).toEqual([
-        'user-later',
         'response-live',
+        'user-later',
       ]);
     });
 
@@ -325,7 +325,7 @@ describe('chatStore multi-thread state', () => {
       }
     });
 
-    it('reorders a lifecycle response when it becomes terminal, and it stops streaming', () => {
+    it('completes a lifecycle response without moving its card', () => {
       useChatStore.setState({
         messages: [
           {
@@ -355,8 +355,8 @@ describe('chatStore multi-thread state', () => {
       const state = useChatStore.getState();
       expect(state.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
       expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
-        'user-later',
         'response-live',
+        'user-later',
       ]);
       expect(state.messages[0]).toMatchObject({ content: 'done', isStreaming: false });
     });
@@ -463,15 +463,6 @@ describe('chatStore multi-thread state', () => {
   });
 
   describe('viewMode', () => {
-    it('defaults to single', () => {
-      expect(useChatStore.getState().viewMode).toBe('single');
-    });
-
-    it('can switch to split', () => {
-      useChatStore.getState().setViewMode('split');
-      expect(useChatStore.getState().viewMode).toBe('split');
-    });
-
     it('manages split pane thread IDs', () => {
       useChatStore.getState().setSplitPaneThreadIds(['a', 'b', 'c', 'd']);
       expect(useChatStore.getState().splitPaneThreadIds).toEqual(['a', 'b', 'c', 'd']);

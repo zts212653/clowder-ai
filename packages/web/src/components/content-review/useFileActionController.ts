@@ -23,6 +23,7 @@ export function useFileActionController({
   mime,
   src: providedSrc,
   mediaType,
+  pixelRegion,
   root,
   contextRef,
   target,
@@ -105,7 +106,7 @@ export function useFileActionController({
         const element = root?.current?.querySelector('img,video') ?? (!isVideo ? new Image() : null);
         if (!(element instanceof HTMLImageElement || element instanceof HTMLVideoElement) || !src)
           throw new Error('media_unavailable');
-        await copyArtworkPixels(element, src);
+        await copyArtworkPixels(element, src, pixelRegion);
       },
       isVideo ? 'copiedFrame' : 'copiedImage',
     );
@@ -134,10 +135,7 @@ export function useFileActionController({
   const openMenu = (x: number, y: number, focus = true) => {
     initialFocus.current = null;
     focusOnOpen.current = focus;
-    setPosition({
-      x: Math.max(8, Math.min(x, window.innerWidth - 308)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 550)),
-    });
+    setPosition({ x, y });
     void refreshInfo();
   };
   useFileMenuHover(
@@ -210,7 +208,7 @@ export function useFileActionController({
     }
   }, [position, info]);
   useEffect(() => {
-    if (!position) return;
+    if (!position && !notice) return;
     const outside = (event: PointerEvent) => {
       if (
         event.target instanceof Node &&
@@ -219,9 +217,22 @@ export function useFileActionController({
       )
         setPosition(null);
     };
+    const selecting = (event: Event) => {
+      if (event.target instanceof Node && menu.current?.contains(event.target)) return;
+      if (event.type === 'selectstart' || window.getSelection()?.toString()) {
+        if (!focusOnOpen.current) setPosition(null);
+        setNotice(null);
+      }
+    };
     document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
-  }, [position]);
+    document.addEventListener('selectstart', selecting);
+    document.addEventListener('selectionchange', selecting);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('selectstart', selecting);
+      document.removeEventListener('selectionchange', selecting);
+    };
+  }, [position, notice]);
   const canCopyContent = text !== undefined || ['markdown', 'html', 'jsx', 'text'].includes(kind);
   const copyContent = () => perform(() => copyContentText(source, text), 'copiedContent');
   return {

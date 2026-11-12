@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { recoveryGuarded, withinRecoveryDeadline } from '../dist/infrastructure/recovery/recovery-deadline.js';
 import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -8,6 +9,10 @@ const { CallerDispatchObservationRegistry } = await import(
   '../dist/domains/cats/services/agents/invocation/CallerDispatchObservationRegistry.js'
 );
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
+const { ExecutionAdmissionConflict } = await import(
+  '../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js'
+);
 const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
 const { InMemoryTurnExecutionStore } = await import(
   '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
@@ -82,6 +87,7 @@ function createHarness({
   autoDrain = false,
   ledgerStore,
   liveCompanionSessions,
+  invocationRecordStore: suppliedInvocationRecordStore,
 } = {}) {
   let processor;
   const queue = new InvocationQueue(
@@ -95,7 +101,7 @@ function createHarness({
       : {},
   );
   const messageStore = new MessageStore();
-  const invocationRecordStore = createInvocationRecordStore();
+  const invocationRecordStore = suppliedInvocationRecordStore ?? createInvocationRecordStore();
   const routeCalls = [];
   const router = {
     resolveExplicitTargets: mock.fn(async (targetCats) => [...targetCats]),
@@ -146,6 +152,66 @@ function createHarness({
   processor = new QueueProcessor(deps, processorOptions);
   return { ...deps, processor, routeCalls };
 }
+
+it('dispatches plugin queue recipients through Manager, leaving ordinary member adapters unchanged', async () => {
+  const { AddressedPluginQueueDelivery } = await import(
+    '../dist/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+  );
+  const harness = createHarness({ autoDrain: true });
+  const deliveries = [];
+  harness.processor.addressedDelivery = new AddressedPluginQueueDelivery({
+    targets: { isInstanceId: async (id) => id === 'pi_test' },
+    manager: {
+      deliverAddressed: async (id, input) => {
+        deliveries.push([id, input]);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+    queue: harness.queue,
+    messageStore: harness.messageStore,
+  });
+  const admitted = await admitMessage(harness, { targetCats: ['pi_test'], content: '@helper do work' });
+  await waitFor(() => deliveries.length === 1 && harness.queue.list('thread-1', 'user-1').length === 0);
+  assert.equal(harness.router.routeExecution.mock.callCount(), 0);
+  assert.equal(harness.invocationRecordStore.create.mock.callCount(), 0, 'plugin receipt creates no member invocation');
+  assert.equal(deliveries[0][1].envelope.messageId, admitted.message.id);
+  const receiptEvents = harness.socketManager.emitToUser.mock.calls
+    .filter(
+      ({ arguments: args }) => args[1] === 'message_snapshot_updated' && args[2].message.extra?.pluginAddressedReceipt,
+    )
+    .map(({ arguments: args }) => args[2].message);
+  assert.equal(receiptEvents[0].extra.pluginAddressedReceipt.phase, 'sending');
+  assert.equal(receiptEvents.at(-1).extra.pluginAddressedReceipt.phase, 'accepted');
+  assert.equal(receiptEvents[0].id, receiptEvents.at(-1).id);
+  assert.equal(receiptEvents[0].lifecycle, undefined);
+
+  await admitMessage(harness, { targetCats: ['opus'], content: 'ordinary member input' });
+  await waitFor(() => harness.router.routeExecution.mock.callCount() === 1);
+  assert.deepEqual(harness.router.routeExecution.mock.calls[0].arguments[4], ['opus']);
+});
+
+it('mixed plugin/member queue recipients each take their own execution path', async () => {
+  const { AddressedPluginQueueDelivery } = await import(
+    '../dist/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+  );
+  const harness = createHarness({ autoDrain: true });
+  const deliveries = [];
+  harness.processor.addressedDelivery = new AddressedPluginQueueDelivery({
+    targets: { isInstanceId: async (id) => id === 'pi_test' },
+    manager: {
+      deliverAddressed: async (id, input) => {
+        deliveries.push(id);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+    queue: harness.queue,
+    messageStore: harness.messageStore,
+  });
+  await admitMessage(harness, { targetCats: ['pi_test', 'opus'], content: '@helper @opus do work' });
+  await waitFor(() => deliveries.length === 1 && harness.router.routeExecution.mock.callCount() === 1);
+  assert.deepEqual(harness.router.routeExecution.mock.calls[0].arguments[4], ['opus']);
+  assert.deepEqual(deliveries, ['pi_test']);
+});
 
 /** Records and ends the child turn the way invoke-single-cat does, entering the response-pending ledger. */
 async function endChildTurn(turns, args, invocationId, terminal, catId = args[4][0]) {
@@ -1562,8 +1628,13 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     assert.equal(opusDispatch.mock.calls.length, 1);
     assert.equal(codexDispatch.mock.calls.length, 1);
     const recovered = await harness.queue.getDurableEntry('thread-1', admitted.entry.id);
-    assert.deepEqual(recovered.targets, ['codex']);
-    assert.deepEqual(recovered.delivery.routingHeldTargetIds, ['codex']);
+    assert.equal(recovered, null, 'both accepted and unknown handoffs belong to History');
+    await harness.processor.reconcileAppendDeliveries('thread-1');
+    await harness.processor.requestDrain('thread-1');
+    assert.equal(codexDispatch.mock.calls.length, 1, 'unknown must not be sent again');
+    const failure = (await harness.messageStore.getById(admitted.message.id)).lifecycle.appendFailures[0];
+    assert.equal(failure.targetId, 'codex');
+    assert.equal(failure.acceptance, 'unknown');
     assert.equal(result.recovery[0].acceptance, 'unknown');
     assert.deepEqual(
       (await harness.messageStore.getById(admitted.message.id)).lifecycle.dispatchRefs.map((ref) => [
@@ -2326,6 +2397,212 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
     await waitFor(() => queuedIds(harness).length === 0);
   });
 
+  // Preserve the published input/response and failure-carrier combinations from
+  // clowder-ai#1842, using the real idempotency store and canonical History facts.
+  const publishedHandoffCases = ['a2a', 'a2a_failure'].flatMap((sourceCategory) =>
+    ['input', 'response'].flatMap((sourceKind) =>
+      ['successful retry', 'permanent refusal', 'already admitted'].map((scenario) => ({
+        sourceCategory,
+        sourceKind,
+        scenario,
+      })),
+    ),
+  );
+  for (const { sourceCategory, sourceKind, scenario } of publishedHandoffCases)
+    it(`keeps a published ${sourceKind} handoff without replaying its sibling (${sourceCategory}, ${scenario})`, async (t) => {
+      const permanent = scenario === 'permanent refusal';
+      const parents = [];
+      let providerStarts = 0;
+      const harness = createHarness({
+        invocationRecordStore: new InvocationRecordStore(),
+        processorOptions: { retryDeferral: { baseDelayMs: 30 } },
+        routeExecution: async function* (...args) {
+          if (args[4][0] !== 'opus') {
+            await startLifecycle(args, 'failure-report-to-original-caller');
+            yield { type: 'done', catId: args[4][0], isFinal: true, timestamp: Date.now() };
+            return;
+          }
+          parents.push(args[6].parentInvocationId);
+          if (scenario === 'already admitted') {
+            providerStarts++;
+            await startLifecycle(args, 'accepted-before-error');
+            throw new Error('failure after the receiver committed');
+          }
+          if (permanent || parents.length === 1) {
+            throw new ExecutionAdmissionConflict(
+              'ACP process environment changed; refresh this member before admission.',
+            );
+          }
+          providerStarts++;
+          await startLifecycle(args, 'admitted-after-refresh');
+          yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+        },
+      });
+      t.after(async () => {
+        for (const entry of harness.queue.list('thread-1', 'user-1'))
+          await harness.queue.terminalizeEntryDurable('thread-1', 'user-1', entry.id, 'withdrawn');
+      });
+      const source = harness.messageStore.append({
+        from: { kind: 'agent', catId: 'codex' },
+        userId: 'user-1',
+        threadId: 'thread-1',
+        content: 'review this exact handoff',
+        mentions: ['gemini', 'opus'],
+        origin: 'stream',
+        timestamp: Date.now(),
+        lifecycle: {
+          kind: sourceKind,
+          orderKey: `1:source-${sourceKind}`,
+          ...(sourceKind === 'response'
+            ? {
+                invocationId: 'source-response',
+                targetId: 'codex',
+                inputEntryIds: [],
+                inputMessageIds: [],
+                status: 'completed',
+                startedAt: 1,
+                completedAt: 2,
+              }
+            : {}),
+        },
+      });
+      assert.equal(source.deliveryStatus, undefined, 'this is an already-published source, not a queued bubble');
+      const sibling = harness.messageStore.append({
+        from: { kind: 'agent', catId: 'gemini' },
+        userId: source.userId,
+        threadId: source.threadId,
+        content: 'already received this handoff',
+        mentions: [],
+        origin: 'stream',
+        timestamp: Date.now(),
+        lifecycle: {
+          kind: 'response',
+          orderKey: '2:sibling-response',
+          invocationId: 'sibling-response',
+          targetId: 'gemini',
+          inputEntryIds: [],
+          inputMessageIds: [source.id],
+          status: 'completed',
+          startedAt: 2,
+          completedAt: 3,
+        },
+      });
+      const siblingIdentity = {
+        orderKey: source.lifecycle.orderKey,
+        targetId: 'gemini',
+        statusMessageId: sibling.id,
+      };
+      assert.equal(
+        harness.messageStore.advanceLifecycleInputDispatch(source.id, {
+          ...siblingIdentity,
+          phase: 'dispatched',
+          dispatchedAt: 2,
+        }).kind,
+        'applied',
+      );
+      assert.equal(
+        harness.messageStore.advanceLifecycleInputDispatch(source.id, {
+          ...siblingIdentity,
+          phase: 'settled',
+        }).kind,
+        'applied',
+      );
+      const siblingBefore = structuredClone(harness.messageStore.getById(sibling.id));
+      const priorRef = structuredClone(harness.messageStore.getById(source.id).lifecycle.dispatchRefs[0]);
+      const admission = await harness.queue.enqueueExistingMessageDurable(harness.messageStore, source.id, {
+        from: source.from,
+        kind: 'message_wake',
+        userId: source.userId,
+        threadId: source.threadId,
+        content: source.content,
+        messageId: source.id,
+        sourceId: source.id,
+        sourceCategory,
+        targetCats: ['opus'],
+        ownerAuthProvenance: 'strict',
+        intent: 'execute',
+        autoExecute: true,
+        a2aTriggerMessageId: source.id,
+        idempotencyKey: `a2a:${source.id}`,
+      });
+      assert.equal(admission.outcome, 'enqueued');
+      assert.equal(admission.entry.sourceCategory, sourceCategory);
+      const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+      const receipt = await enqueueA2ATargets(
+        { ...harness, invocationQueue: harness.queue, queueProcessor: harness.processor },
+        {
+          targetCats: ['gemini', 'opus'],
+          content: source.content,
+          threadId: source.threadId,
+          userId: source.userId,
+          ownerAuthProvenance: 'strict',
+          callerCatId: 'codex',
+          triggerMessage: source,
+          preAdmittedEntries: admission.entries,
+        },
+      );
+      assert.deepEqual(receipt.enqueued, ['opus'], 'an already-dispatched sibling is excluded at admission');
+      const assertSiblingUnchanged = () => {
+        const refs = harness.messageStore.getById(source.id).lifecycle.dispatchRefs;
+        assert.deepEqual(
+          refs.filter((ref) => ref.targetId === 'gemini'),
+          [priorRef],
+        );
+        assert.deepEqual(harness.messageStore.getById(sibling.id), siblingBefore);
+        assert.ok(
+          harness.router.routeExecution.mock.calls.every((call) => !call.arguments[4].includes('gemini')),
+          'neither retry nor failure handling can invoke the delivered sibling',
+        );
+      };
+      await harness.processor.requestDrain('thread-1');
+      if (scenario === 'already admitted') {
+        await waitFor(() => {
+          const responseId = harness.messageStore
+            .getById(source.id)
+            .lifecycle.dispatchRefs?.find((ref) => ref.targetId === 'opus')?.statusMessageId;
+          return responseId && harness.messageStore.getById(responseId)?.lifecycle?.status === 'failed';
+        });
+        assert.equal(parents.length, 1, 'the original target is never replayed after its receiver committed');
+        assert.equal(providerStarts, 1);
+        await waitFor(() => harness.queue.list('thread-1', 'user-1').length === 0);
+        assert.equal(harness.queue.list('thread-1', 'user-1').length, 0);
+        assertSiblingUnchanged();
+        return;
+      }
+      await waitFor(() => parents.length >= 2 || harness.queue.list('thread-1', 'user-1').length === 0);
+      assert.equal(parents.length, 2, 'a pre-provider refusal is pending work, never a consumed duplicate');
+      assert.equal(parents[0], parents[1], 'retry reclaims the same exact idempotent parent');
+      const record = await harness.invocationRecordStore.get(parents[1]);
+      assert.equal(record.userMessageId, source.id);
+      assert.deepEqual(record.targetCats, ['opus']);
+      if (permanent) {
+        assert.equal(providerStarts, 0);
+        await waitFor(() => harness.queue.list('thread-1', 'user-1')[0]?.status === 'queued');
+        assert.equal(harness.queue.list('thread-1', 'user-1')[0]?.status, 'queued');
+        assert.equal(
+          harness.messageStore.getById(source.id).lifecycle.dispatchRefs?.filter((ref) => ref.targetId === 'opus')
+            .length ?? 0,
+          0,
+        );
+        // End only this isolated test's pending work so its retry timer cannot outlive the fixture.
+        await harness.queue.terminalizeEntryDurable(
+          'thread-1',
+          'user-1',
+          harness.queue.list('thread-1', 'user-1')[0].id,
+          'withdrawn',
+        );
+      } else {
+        await waitFor(() => harness.queue.list('thread-1', 'user-1').length === 0);
+        assert.equal(providerStarts, 1);
+        assert.equal(
+          harness.messageStore.getById(source.id).lifecycle.dispatchRefs.filter((ref) => ref.targetId === 'opus')
+            .length,
+          1,
+        );
+      }
+      assertSiblingUnchanged();
+    });
+
   const deferralLogs = (harness) =>
     harness.log.warn.mock.calls
       .filter((call) => String(call.arguments[1]).includes('waits for its retry time'))
@@ -2891,6 +3168,7 @@ describe('F293 routing through the canonical Queue', () => {
           'unavailable Live is durably settled',
         );
       } else {
+        await waitFor(() => providerCalls === 1);
         assert.equal(providerCalls, 1, 'the existing backoff retries automatic work after recovery');
         assert.notEqual(attempts.at(-1).ownerRequestedAttempt, true, 'automatic retry does not borrow owner authority');
       }
@@ -3166,4 +3444,46 @@ it('Task handoff source cannot hide behind a plain primary in a batched Steer st
     h.queue.list('thread-1', 'user-1').map((e) => e.status),
     ['queued', 'queued'],
   );
+});
+
+it('durably admitted Queue work owns its execution after the recovery caller has finished', async () => {
+  let release,
+    entered = false,
+    committed = false;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const receiver = recoveryGuarded({
+    commit: () => {
+      committed = true;
+    },
+  });
+  const h = createHarness({
+    routeExecution: async function* (...args) {
+      await startLifecycle(args, 'independent-recovery-receiver');
+      entered = true;
+      await pending;
+      receiver.commit();
+      yield { type: 'done', catId: args[4][0], isFinal: true, timestamp: Date.now() };
+    },
+  });
+  await admitMessage(h);
+  const drains = [];
+  try {
+    await withinRecoveryDeadline(
+      performance.now() + 1000,
+      () => performance.now(),
+      () => {
+        drains.push(h.processor.requestDrain('thread-1'));
+      },
+    );
+    await waitFor(() => entered);
+    release();
+    await Promise.all(drains);
+    await waitFor(() => committed);
+    assert.equal(committed, true, 'the receiver has its own admitted authority, outside the finished sweep');
+  } finally {
+    release();
+    await Promise.allSettled(drains);
+  }
 });

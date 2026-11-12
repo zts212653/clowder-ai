@@ -1,7 +1,7 @@
 /**
  * F256 Phase C: Lightweight ConventionGraphAdapter for L0 prompt builder domain.
  *
- * This adapter enables convention-edge expansion in TopkExpansionService and
+ * This adapter enables convention-edge expansion in KnowledgeAssociations and
  * CoverageSearchService without adding @cat-cafe/convention-graph as a runtime
  * dependency (which would pull in SQLite).
  *

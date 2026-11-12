@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { isolateQuotaFetchStub } from './helpers/quota-fetch-stub-environment.js';
 
 async function buildApp(observer) {
   const Fastify = (await import('fastify')).default;
@@ -82,7 +83,8 @@ describe('F051 quota refresh routing observation wiring', () => {
     }
   });
 
-  it('observes a successful official Codex refresh without exposing account identity', async () => {
+  it('observes a successful official Codex refresh without exposing account identity', async (t) => {
+    isolateQuotaFetchStub(t);
     const previousEnabled = process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
     const previousCredentialsPath = process.env.CODEX_CREDENTIALS_PATH;
     const previousCodexHome = process.env.CODEX_HOME;

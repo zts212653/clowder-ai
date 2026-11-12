@@ -9,6 +9,7 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/runtime-composition.js';
+import { SqlitePluginInventoryStore } from '../dist/domains/plugin/state-worker/stores.js';
 import { catalogEntry, packageArchive } from './plugin-official-package-installer.fixture.js';
 
 async function desktopManager(t, { preparationFails = false, projectRoot: restartedRoot } = {}) {
@@ -86,8 +87,13 @@ async function desktopManager(t, { preparationFails = false, projectRoot: restar
       },
     },
   });
+  let shutdownPromise;
+  const shutdown = (reason) => {
+    shutdownPromise ??= runtime.shutdown(reason);
+    return shutdownPromise;
+  };
   t.after(async () => {
-    await runtime.shutdown();
+    await shutdown();
     // A restarted harness shares the first harness's root; only the creator removes it.
     if (!restartedRoot) await rm(projectRoot, { recursive: true, force: true });
   });
@@ -104,7 +110,7 @@ async function desktopManager(t, { preparationFails = false, projectRoot: restar
       if (preparationFails) throw new Error('desktop component unavailable');
     },
   });
-  return { entry, observed, runtime, composition, projectRoot };
+  return { entry, observed, runtime, composition, projectRoot, shutdown };
 }
 
 async function eventually(check, message) {
@@ -132,13 +138,21 @@ async function enabledDesktopThenRestart(t) {
     expectedRevision: prepared.lifecycleRevision,
   });
   assert.equal(before.observed.opens, 1);
-  await before.runtime.shutdown('api_shutdown');
+  await before.shutdown('api_shutdown');
   const after = await desktopManager(t, { projectRoot: before.projectRoot });
   const instance = async () =>
     (await after.runtime.inventoryStore.snapshot()).instances.find(
       (candidate) => candidate.pluginInstanceId === installed.pluginInstanceId,
     );
-  return { after, instance };
+  const persistedInstance = async () => {
+    const reader = new SqlitePluginInventoryStore(after.runtime.inventoryStore.path);
+    try {
+      return await reader.read.instances.get(installed.pluginInstanceId);
+    } finally {
+      await reader.close();
+    }
+  };
+  return { after, instance, persistedInstance };
 }
 
 // The companion Host bridge calls app.inject. A desktop window resumed while main()
@@ -160,43 +174,40 @@ test('restart recovery holds an enabled desktop window, and its leases, until th
   releaseHost();
   await eventually(() => after.observed.opens === 1, 'the held desktop window opens once the Host listens');
   await eventually(async () => (await instance()).runtimeState === 'healthy', 'the resumed window becomes healthy');
-  await after.runtime.shutdown('api_shutdown');
+  await after.shutdown('api_shutdown');
 });
 
 test('shutdown while a desktop window is held keeps enabled intent for the next boot', async (t) => {
-  const { after, instance } = await enabledDesktopThenRestart(t);
+  const { after, persistedInstance } = await enabledDesktopThenRestart(t);
   const hostListening = deferred();
 
   await after.runtime.recoverAfterRestart({ desktopWindowsAfter: hostListening.promise });
-  await after.runtime.shutdown('api_shutdown');
+  await after.shutdown('api_shutdown');
 
   assert.equal(after.observed.opens, 0);
-  const current = await instance();
+  const current = await persistedInstance();
   assert.equal(current.activationState, 'enabled');
   assert.equal(current.runtimeState, 'stopped');
   assert.equal(current.lastRuntimeError, undefined);
 
   try {
     hostListening.resolve();
-    // The gate's reaction queues first; prepare joins that same instance queue
-    // without changing an already-ready configuration.
     await Promise.resolve();
-    const resumed = await after.runtime.lifecycle.prepare(current.pluginInstanceId, current.lifecycleRevision);
+    const resumed = await persistedInstance();
     assert.equal(after.observed.opens, 0, 'shutdown cancels the old Host gate');
     assert.equal(resumed.activationState, 'enabled');
     assert.equal(resumed.runtimeState, 'stopped');
     assert.equal(resumed.lastRuntimeError, undefined);
   } finally {
-    await after.runtime.shutdown('test_complete');
+    await after.shutdown('test_complete');
   }
 });
 
 test('shutdown drains an admitted restart failure without overwriting enabled intent', async (t) => {
-  const { after, instance } = await enabledDesktopThenRestart(t);
+  const { after, persistedInstance } = await enabledDesktopThenRestart(t);
   const startEntered = deferred();
   const releaseStart = deferred();
   const supervisorStopped = deferred();
-  const stopped = await instance();
   const originalStopAll = after.runtime.supervisor.stopAll.bind(after.runtime.supervisor);
   after.runtime.supervisor.stopAll = async (reason) => {
     await originalStopAll(reason);
@@ -209,7 +220,7 @@ test('shutdown drains an admitted restart failure without overwriting enabled in
   };
   await after.runtime.recoverAfterRestart();
   await startEntered.promise;
-  const completion = after.runtime.shutdown('api_shutdown');
+  const completion = after.shutdown('api_shutdown');
 
   try {
     await supervisorStopped.promise;
@@ -222,7 +233,7 @@ test('shutdown drains an admitted restart failure without overwriting enabled in
     // also join its inventory projection before a fixture can remove the root.
     releaseStart.resolve();
     await completion;
-    const current = await after.runtime.lifecycle.prepare(stopped.pluginInstanceId, stopped.lifecycleRevision);
+    const current = await persistedInstance();
     assert.equal(current.activationState, 'enabled');
     assert.equal(current.runtimeState, 'stopped');
     assert.equal(current.lastRuntimeError, undefined);
@@ -233,7 +244,7 @@ test('shutdown drains an admitted restart failure without overwriting enabled in
 });
 
 test('shutdown closes a recovered desktop that acquires ownership during the restart drain', async (t) => {
-  const { after, instance } = await enabledDesktopThenRestart(t);
+  const { after, persistedInstance } = await enabledDesktopThenRestart(t);
   const startEntered = deferred();
   const releaseStart = deferred();
   const supervisorStopped = deferred();
@@ -250,7 +261,7 @@ test('shutdown closes a recovered desktop that acquires ownership during the res
   };
   await after.runtime.recoverAfterRestart();
   await startEntered.promise;
-  const completion = after.runtime.shutdown('api_shutdown');
+  const completion = after.shutdown('api_shutdown');
 
   try {
     await supervisorStopped.promise;
@@ -259,14 +270,14 @@ test('shutdown closes a recovered desktop that acquires ownership during the res
     assert.equal(after.observed.opens, 1, 'the admitted start completes through the real desktop runtime');
     assert.equal(after.observed.closes, 1, 'shutdown must stop ownership acquired after its first snapshot');
     assert.equal(await after.runtime.desktopWindows.presence(), null);
-    const current = await instance();
+    const current = await persistedInstance();
     assert.equal(current.activationState, 'enabled');
     assert.equal(current.runtimeState, 'stopped');
     assert.equal(current.lastRuntimeError, undefined);
   } finally {
     releaseStart.resolve();
     await completion;
-    await after.runtime.shutdown('test_complete');
+    await after.shutdown('test_complete');
   }
 });
 
@@ -305,9 +316,9 @@ test('Manager repairs a current failed desktop activation without changing its p
   const { entry, observed, runtime, composition } = await desktopManager(t);
   const installed = await composition.officialRouteInstaller.install(entry.catalogId, entry);
   await runtime.lifecycle.prepare(installed.pluginInstanceId, 1);
-  await runtime.inventoryStore.transaction((tx) => {
-    const instance = tx.instances.get(installed.pluginInstanceId);
-    tx.instances.put({ ...instance, activationState: 'error', runtimeState: 'stopped' });
+  await runtime.inventoryStore.transaction(async (tx) => {
+    const instance = await tx.instances.get(installed.pluginInstanceId);
+    await tx.instances.put({ ...instance, activationState: 'error', runtimeState: 'stopped' });
   });
   const before = await runtime.inventoryStore.snapshot();
   const failed = (await composition.manager.getLocal(entry.pluginId)).plugin;

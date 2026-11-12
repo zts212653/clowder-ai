@@ -20,6 +20,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      # Branch creation has no previous commit; other runs compare the exact event baseline.
+      CAT_CAFE_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:

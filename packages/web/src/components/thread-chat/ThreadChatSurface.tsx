@@ -37,6 +37,7 @@ import type { CardConfirmationEntry } from '../rich/CardBlock';
 import { conversationViewCopy } from '../shell/conversation-view.shell-copy';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
+import { useThreadSuggestionsSync } from '../suggestions/useThreadSuggestions';
 import { ThreadComposerContext } from '../ThreadComposerContext';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
@@ -112,6 +113,7 @@ export interface ThreadChatSurfaceProps {
   onActivity?: (activity: ThreadChatActivity) => void;
   onRealMessageSent?: () => void;
   onReadingPort?: RegisterChatReadingPort;
+  onNavigateMessage?: (messageId: string, options?: { refresh?: boolean }) => boolean;
   conversationViewController?: ConversationViewPreferenceController;
   conversationViewQueue?: readonly QueueEntry[];
 }
@@ -134,6 +136,7 @@ export function ThreadChatSurface({
   onActivity,
   onRealMessageSent,
   onReadingPort,
+  onNavigateMessage,
   conversationViewController,
   conversationViewQueue = [],
 }: ThreadChatSurfaceProps) {
@@ -147,6 +150,8 @@ export function ThreadChatSurface({
   const { hasActive: hasActiveInvocation, catStatuses, catInvocations, intentMode } = liveness;
   const { socketConnected } = useThreadChatRuntime([threadId]);
   const history = useChatHistory(threadId);
+  // F335 交付二：这条对话里回话下面那一排；重连后再取一次，补上断线时错过的推送。
+  useThreadSuggestionsSync(threadId, socketConnected !== false);
   const {
     messages,
     handleScroll,
@@ -162,13 +167,23 @@ export function ThreadChatSurface({
   } = history;
   const navigateMessage = useCallback(
     (messageId: string, options?: MessageNavigationOptions): boolean => {
+      const loaded = useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.some((message) => message.id === messageId);
+      if (!loaded && !options?.loadIfNeeded) {
+        return false;
+      }
+      if (onNavigateMessage?.(messageId, { refresh: Boolean(options?.loadIfNeeded && !loaded) })) {
+        return true;
+      }
       if (options?.loadIfNeeded) {
         void navigateToMessage(messageId, undefined, { refresh: true });
         return true;
       }
       return jumpToMessage(messageId);
     },
-    [jumpToMessage, navigateToMessage],
+    [jumpToMessage, navigateToMessage, onNavigateMessage, threadId],
   );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MessageSearchService } from '../../dist/domains/memory/MessageSearchService.js';
-import { MessageQueryQualifier } from '../../dist/domains/memory/message-query-qualifier.js';
 
-// Retrieval is deliberately permissive: these tests specify publication, not
-// whether partial lexical / NN clues may enter the bounded index candidate pool.
+// Keep the original neutral samples: ordinary recall admits readable clues without
+// a semantic verdict. Cat selection, rather than this queue, judges their relevance.
 function fixture(query, rows, { sort = 'time', sourceId } = {}) {
   const thread = { id: 'visible', title: 'Source discussion', createdBy: 'owner' };
   const messages = new Map();
@@ -29,23 +28,11 @@ function fixture(query, rows, { sort = 'time', sourceId } = {}) {
     };
   });
   const service = new MessageSearchService({
-    qualifier: new MessageQueryQualifier(async (batch) =>
-      JSON.stringify({
-        requestId: batch.requestId,
-        rows: batch.rows.map((row) => {
-          const supported = [
-            'original',
-            'paraphrase',
-            'reported',
-            'old-copy',
-            'translated',
-            'forward',
-            'public',
-          ].includes(row.messageId);
-          return [row.id, supported ? 'supported' : 'rejected', supported ? row.body : null];
-        }),
-      }),
-    ),
+    qualifier: {
+      qualify() {
+        throw new Error('Generative qualification is retired');
+      },
+    },
     evidenceStore: {
       readMessagePassageState: () => ({ current: true, suppressThreadTitle: false }),
       searchMessagePassages: async () => ({
@@ -74,13 +61,13 @@ function fixture(query, rows, { sort = 'time', sourceId } = {}) {
 }
 const ids = (result) => result.results.map((hit) => hit.messageId);
 
-describe('J5 complete-query eligibility at the canonical publication boundary', () => {
+describe('ordinary recall retains readable clues without complete-query qualification', () => {
   for (const [object, event, synonym, otherEvent, another] of [
     ['Mira', '起名', '新称呼定下来了', '今天的排班', 'Nola'],
     ['Elio', '值班', '轮值时间表已经确定', '命名的原始讨论', 'Aster'],
   ]) {
     for (const sort of ['time', 'relevance']) {
-      it(`${object}/${event}/${sort}: excludes a changed object or event while preserving paraphrases and same-text history`, async () => {
+      it(`${object}/${event}/${sort}: preserves changed-object and changed-event clues as well as paraphrases and same-text history`, async () => {
         const query = `${object} ${event}`;
         // This order also establishes the independent retrieval/relevance order.
         const { service, principal, input } = fixture(
@@ -101,9 +88,10 @@ describe('J5 complete-query eligibility at the canonical publication boundary', 
         assert.deepEqual(
           ids(result),
           sort === 'time'
-            ? ['paraphrase', 'original', 'reported', 'old-copy']
-            : ['original', 'paraphrase', 'reported', 'old-copy'],
+            ? ['other-topic', 'other-event', 'other-object', 'paraphrase', 'original', 'reported', 'old-copy']
+            : ['other-topic', 'original', 'other-object', 'paraphrase', 'other-event', 'reported', 'old-copy'],
         );
+        assert.equal(result.meta.qualification, undefined);
         assert.equal(result.meta.sort, sort);
         assert.equal(result.meta.partial, true);
         assert.equal(result.meta.sourceCoverage, 'unknown');
@@ -112,7 +100,7 @@ describe('J5 complete-query eligibility at the canonical publication boundary', 
     }
   }
 
-  it('retains a semantic-only same-event message while rejecting a near-topic NN neighbour', async () => {
+  it('retains a semantic-only same-event message alongside the near-topic NN neighbours', async () => {
     const { service, principal, input } = fixture('recovery of deleted documents', [
       ['near-topic', 'Recovery exercise after a knee injury', 10, 'semantic'],
       ['other-event', 'How to organise the documents for a workshop', 15, 'semantic'],
@@ -120,23 +108,26 @@ describe('J5 complete-query eligibility at the canonical publication boundary', 
       ['paraphrase', 'Recovering a document that was accidentally removed', 30, 'semantic'],
     ]);
     const result = await service.search(input, principal);
-    assert.deepEqual(ids(result), ['translated', 'paraphrase']);
-    const translated = result.results[0];
+    assert.deepEqual(ids(result), ['near-topic', 'other-event', 'translated', 'paraphrase']);
+    assert.equal(result.meta.qualification, undefined);
+    const translated = result.results.find((row) => row.messageId === 'translated');
     assert.equal(translated.match, 'semantic');
     assert.deepEqual(translated.highlights, [], 'semantic evidence cannot fabricate literal offsets');
   });
 
-  it('requires the queried relation instead of accepting the same entities and event in reversed roles', async () => {
+  it('leaves forward and reversed relations visible for cat selection to distinguish', async () => {
     const { service, principal, input } = fixture('Ari 向 Bex 转交文稿', [
       ['reverse', 'Bex 已将文稿转交给 Ari 处理。', 10, 'semantic'],
       ['translated-reverse', 'Bex sent the draft to Ari.', 15, 'semantic'],
       ['forward', 'Ari 已将文稿转交给 Bex 处理。', 20, 'semantic'],
       ['translated', 'Ari sent the draft to Bex.', 30, 'semantic'],
     ]);
-    assert.deepEqual(ids(await service.search(input, principal)), ['forward', 'translated']);
+    const response = await service.search(input, principal);
+    assert.deepEqual(ids(response), ['reverse', 'translated-reverse', 'forward', 'translated']);
+    assert.equal(response.meta.qualification, undefined);
   });
 
-  it('preserves the same semantic-only object/event qualification in cat and direct UI calls', async () => {
+  it('ordinary cat and UI sources share raw semantics without claiming qualification', async () => {
     const { default: Fastify } = await import('fastify');
     const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
     const { service, principal, input } = fixture('laptop battery replacement', [
@@ -162,9 +153,10 @@ describe('J5 complete-query eligibility at the canonical publication boundary', 
       assert.equal(response.statusCode, 200);
       const human = response.json();
       const cat = await service.search(input, principal);
-      assert.deepEqual(ids(human), ids(cat), 'the same admitted source snapshot has one shared qualification contract');
-      assert.deepEqual(ids(cat), ['translated']);
-      assert.deepEqual(cat.results[0].highlights, []);
+      assert.deepEqual(ids(human), ids(cat), 'ordinary UI and cat paths share the same admitted source window');
+      assert.deepEqual(ids(cat), ['screen', 'phone', 'translated']);
+      assert.equal(cat.meta.qualification, undefined);
+      assert.deepEqual(cat.results.find((row) => row.messageId === 'translated').highlights, []);
     } finally {
       await app.close();
     }

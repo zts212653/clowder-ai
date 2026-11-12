@@ -10,6 +10,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { isolateQuotaFetchStub } from './helpers/quota-fetch-stub-environment.js';
 
 async function buildApp() {
   const Fastify = (await import('fastify')).default;
@@ -358,7 +359,8 @@ describe('GET /api/quota/summary', () => {
 });
 
 describe('POST /api/quota/refresh/official — provider selection', () => {
-  it('refreshes only the requested configured provider', async () => {
+  it('refreshes only the requested configured provider', async (t) => {
+    isolateQuotaFetchStub(t);
     const oldEnabled = process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
     const oldClaudeCredentialsPath = process.env.CLAUDE_CREDENTIALS_PATH;
     const oldCodexCredentialsPath = process.env.CODEX_CREDENTIALS_PATH;
@@ -425,7 +427,8 @@ describe('POST /api/quota/refresh/official — provider selection', () => {
     }
   });
 
-  it('surfaces a missing requested provider while refreshing the available provider', async () => {
+  it('surfaces a missing requested provider while refreshing the available provider', async (t) => {
+    isolateQuotaFetchStub(t);
     const oldEnabled = process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
     const oldClaudeCredentialsPath = process.env.CLAUDE_CREDENTIALS_PATH;
     const oldCodexCredentialsPath = process.env.CODEX_CREDENTIALS_PATH;

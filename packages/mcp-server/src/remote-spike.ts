@@ -37,8 +37,15 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { handleDotRemoteRequest } from './dot-remote-proxy.js';
-import { adaptModernToolHeaders, registerSharedDotTools, sharedDotRpc } from './remote-shared-dot.js';
+import { registerExternalToolProvider } from './co-creator-presentation.js';
+import { handlePluginRemoteRequest } from './plugin-remote-proxy.js';
+import { adaptModernToolHeaders, modernProtocolRpc } from './remote-modern-protocol.js';
+import {
+  callSharedExtension,
+  loadSharedExtensionSurface,
+  type SharedExtensionSurface,
+  sharedExtensionRpcMethod,
+} from './remote-shared-extension.js';
 import { registerCollabToolset, registerMemoryToolset } from './server-toolsets.js';
 import { isDirectExecution } from './utils/is-direct-execution.js';
 import { initCatCafeDir } from './utils/path-validator.js';
@@ -320,7 +327,7 @@ function isAuthorized(req: http.IncomingMessage): boolean {
 
 // === MCP server with real cat-cafe toolset (cloud-pro-phase0 mode) ====
 
-function createSpikeServer(): McpServer {
+function createSpikeServer(shared?: SharedExtensionSurface | null): McpServer {
   const server = new McpServer({
     name: 'cat-cafe-cloud-pro-b1a',
     version: SPIKE_VERSION,
@@ -330,8 +337,7 @@ function createSpikeServer(): McpServer {
   // 收窄到 11 项白名单. env 已被 validateB1aEnv 保证 mode 正确.
   registerCollabToolset(server);
   registerMemoryToolset(server);
-  registerSharedDotTools(server);
-
+  if (shared) registerExternalToolProvider(server, async () => shared.tools);
   return server;
 }
 
@@ -373,14 +379,31 @@ async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerRespo
     }
   }
 
-  const shared = await sharedDotRpc(body);
-  if (shared) {
-    res.writeHead(shared.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify(shared.body));
+  const shared = await loadSharedExtensionSurface();
+  const rpc = sharedExtensionRpcMethod(body);
+  const modernResponse = modernProtocolRpc(body, { events: (shared?.events.length ?? 0) > 0 });
+  if (modernResponse) {
+    res.writeHead(modernResponse.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(modernResponse.body));
     return;
   }
+  if (
+    shared &&
+    rpc &&
+    (rpc.method === 'events/list' ||
+      rpc.method === 'events/subscribe' ||
+      rpc.method === 'events/unsubscribe' ||
+      (rpc.method === 'tools/call' && rpc.toolName !== undefined && shared.toolNames.has(rpc.toolName)))
+  ) {
+    const result = await callSharedExtension(body as Readonly<Record<string, unknown>>);
+    if (result !== null) {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+  }
   const modern = adaptModernToolHeaders(req);
-  const server = createSpikeServer();
+  const server = createSpikeServer(shared);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: modern });
   await server.connect(transport);
 
@@ -425,10 +448,10 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (urlForLog === '/dot/mcp') {
-      void handleDotRemoteRequest(req, wrappedRes, process.env.CAT_CAFE_API_URL ?? '').catch(() => {
+    if (urlForLog === '/plugin/mcp' || urlForLog === '/dot/mcp') {
+      void handlePluginRemoteRequest(req, wrappedRes, process.env.CAT_CAFE_API_URL ?? '').catch(() => {
         if (!wrappedRes.headersSent) wrappedRes.writeHead(503);
-        wrappedRes.end(JSON.stringify({ error: 'dot_host_unavailable' }));
+        wrappedRes.end(JSON.stringify({ error: 'plugin_host_unavailable' }));
       });
       return;
     }
@@ -444,7 +467,7 @@ async function main(): Promise<void> {
     }
 
     wrappedRes.writeHead(404, { 'content-type': 'application/json' });
-    wrappedRes.end(JSON.stringify({ error: 'not found', hint: 'POST /mcp or GET /health' }));
+    wrappedRes.end(JSON.stringify({ error: 'not found', hint: 'POST /mcp, POST /plugin/mcp, or GET /health' }));
   });
 
   server.listen(PORT, HOST, () => {

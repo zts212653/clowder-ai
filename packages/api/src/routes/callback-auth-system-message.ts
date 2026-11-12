@@ -84,7 +84,7 @@ const TERMINAL_NOTICE_REASONS = new Set<AuthFailureReason>([
  * 为什么会有这个奇怪的提醒？」 caused by refresh-token timer firing while
  * cat was idle. 现场可感知性 = "用户驱动 callback 失败"，不是 "system 心跳失败"。
  *
- * Related: post_message / register_pr_tracking / update_task / retain_memory
+ * Related: post_message / register_pr_tracking / update_task
  * etc. ARE user-driven (cat invoked them as part of user task) — they remain
  * surfaceable.
  */

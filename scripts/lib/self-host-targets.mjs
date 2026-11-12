@@ -1,6 +1,6 @@
 import { commandName } from '../native-effect-shell-tokenizer.mjs';
 import { packageManagerInvocation } from './package-manager-invocation.mjs';
-import { stoppedDeploymentsIn } from './self-host-deployments.mjs';
+import { nonStoppingHelp, stoppedDeploymentsIn } from './self-host-deployments.mjs';
 import { executedInvocations, executionChainInvocations } from './shell-invocation.mjs';
 
 /**
@@ -88,6 +88,7 @@ function killerOperands(invocation) {
 }
 
 function isServiceStop(invocation) {
+  if (nonStoppingHelp(invocation)) return false;
   if (packageManagerInvocation(invocation.name, invocation.operands).script === 'preview:process') {
     const index = invocation.operands.indexOf('preview:process');
     return ['start', 'stop'].includes(invocation.operands[index + 1]);

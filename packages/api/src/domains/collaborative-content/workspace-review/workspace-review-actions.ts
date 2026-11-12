@@ -6,15 +6,29 @@ import {
   type WorkspaceContentSource,
   workspaceContentReviewActionSchema,
 } from '@cat-cafe/shared';
+import { z } from 'zod';
 import { WorkspaceContentReviewError } from './errors.js';
+
+/**
+ * Server-only: the author takes back an annotation nobody has replied to yet. Used by F335 一键提议的「撤销」
+ * (the person undoing comments a suggestion added for them). Not part of the public review action contract, so no
+ * route or page can send it.
+ */
+export const withdrawAnnotationActionSchema = z
+  .object({ kind: z.literal('withdraw_annotation'), annotationId: z.string().trim().min(1).max(256) })
+  .strict();
+export type WorkspaceReviewServerAction = WorkspaceContentReviewAction | z.infer<typeof withdrawAnnotationActionSchema>;
 
 export function applyWorkspaceReviewAction(input: {
   readonly review: WorkspaceContentReview;
   readonly source: WorkspaceContentSource;
   readonly actor: WorkspaceContentActor;
-  readonly action: WorkspaceContentReviewAction;
+  readonly action: WorkspaceReviewServerAction;
   readonly now: string;
 }): WorkspaceContentReview {
+  if (input.action.kind === 'withdraw_annotation') {
+    return withdrawAnnotation(input, withdrawAnnotationActionSchema.parse(input.action).annotationId);
+  }
   const action = workspaceContentReviewActionSchema.parse(input.action);
   switch (action.kind) {
     case 'add_visual_marks':
@@ -26,6 +40,20 @@ export function applyWorkspaceReviewAction(input: {
     case 'set_annotation_state':
       return setAnnotationState(input, action.annotationId, action.state);
   }
+}
+
+/** Only the author, and only before anyone replied: the annotation is taken back as if it had not been added. */
+function withdrawAnnotation(
+  input: Parameters<typeof applyWorkspaceReviewAction>[0],
+  annotationId: string,
+): WorkspaceContentReview {
+  const annotation = input.review.annotations.find((candidate) => candidate.id === annotationId);
+  if (!annotation || (annotation.replies?.length ?? 0) > 0 || !sameActor(annotation.author, input.actor))
+    throw new WorkspaceContentReviewError('invalid_action');
+  return {
+    ...input.review,
+    annotations: input.review.annotations.filter((candidate) => candidate.id !== annotationId),
+  };
 }
 
 function addVisualMarks(

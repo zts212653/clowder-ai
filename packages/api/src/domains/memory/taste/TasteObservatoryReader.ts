@@ -14,6 +14,8 @@ import { type MemoryCueSourceSummary, MemoryCueSourceSummaryReader } from '../cu
 import { F315_WORKSPACE_READABILITY_TASTE_BUNDLE_V1, tasteTaskBundleAnchor } from '../cue/TasteTaskBundleCatalog.js';
 import type { TasteMemoryLifecycleStore } from './TasteMemoryLifecycleStore.js';
 import { TasteMemoryReader, type TasteMemoryVisibility } from './TasteMemoryReader.js';
+import { tastePullRecallRows } from './taste-pull-recall-cache.js';
+import type { TastePullRecallRow } from './taste-pull-recall-rows.js';
 
 type Counts = MemoryCueSourceSummary['counts'];
 type Latest = MemoryCueSourceSummary['latest'];
@@ -39,15 +41,6 @@ interface Constellation {
   attribution: 'shared_hint';
   hints: Counts;
   latest: Latest;
-}
-
-interface PullRecallRow {
-  recall_id: string;
-  invocation_id: string;
-  thread_id: string;
-  candidates_json: string;
-  consumed_json: string;
-  timestamp: number;
 }
 
 export interface TasteObservatorySnapshot {
@@ -84,22 +77,6 @@ function namedTrigger(sourcePath: string): { trigger: 'eli5' | 'f315_review'; an
   return null;
 }
 
-function parseAnchors(raw: string): Set<string> {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(
-      parsed.flatMap((item) =>
-        typeof item === 'object' && item !== null && 'anchor' in item && typeof item.anchor === 'string'
-          ? [item.anchor]
-          : [],
-      ),
-    );
-  } catch {
-    return new Set();
-  }
-}
-
 function searchAnchor(sourcePath: string): string {
   return `doc:${sourcePath.replace(/^docs\//, '').replace(/\.md$/, '')}`;
 }
@@ -132,9 +109,9 @@ async function listSourcePaths(
   return paths;
 }
 
-function applySearchRow(byAnchor: Map<string, TasteEntry>, row: PullRecallRow, threadId: string): void {
-  const candidates = parseAnchors(row.candidates_json);
-  const consumed = parseAnchors(row.consumed_json);
+function applySearchRow(byAnchor: Map<string, TasteEntry>, row: TastePullRecallRow, threadId: string): void {
+  const candidates = new Set(row.candidates);
+  const consumed = new Set(row.consumed);
   for (const anchor of candidates) {
     const stats = byAnchor.get(anchor)?.search;
     if (stats) stats.hits += 1;
@@ -149,8 +126,8 @@ function applySearchRow(byAnchor: Map<string, TasteEntry>, row: PullRecallRow, t
   }
 }
 
-function recordUnverifiedRow(byAnchor: Map<string, TasteEntry>, row: PullRecallRow): boolean {
-  const anchors = new Set([...parseAnchors(row.candidates_json), ...parseAnchors(row.consumed_json)]);
+function recordUnverifiedRow(byAnchor: Map<string, TasteEntry>, row: TastePullRecallRow): boolean {
+  const anchors = new Set([...row.candidates, ...row.consumed]);
   let matched = false;
   for (const anchor of anchors) {
     const stats = byAnchor.get(anchor)?.search;
@@ -181,9 +158,11 @@ export class TasteObservatoryReader {
     ownerUserId: string,
     options: { includePrivate?: boolean; includeDimensionHints?: boolean } = {},
   ): Promise<TasteObservatorySnapshot> {
+    const rows = await tastePullRecallRows(this.db, ownerUserId);
+    // Resolve current files, privacy and withdrawal after the potentially slow observation read.
     const entries = await this.readApprovedEntries(ownerUserId, options.includePrivate !== false);
     const { constellations, dimensionHints } = this.readConstellations(ownerUserId, entries);
-    const totalUnverified = await this.applyVerifiedPullRecall(ownerUserId, entries);
+    const totalUnverified = await this.applyVerifiedPullRecall(ownerUserId, entries, rows);
     return {
       entries,
       constellations,
@@ -205,11 +184,13 @@ export class TasteObservatoryReader {
       { lifecycle: this.lifecycle },
     );
     const entries: TasteEntry[] = [];
-    for (const sourcePath of await listSourcePaths(
+    const sourcePaths = await listSourcePaths(
       root,
       includePrivate && ownerUserId === this.privateOwnerUserId,
       snapshot,
-    )) {
+    );
+    await snapshot?.prefetch?.(sourcePaths);
+    for (const sourcePath of sourcePaths) {
       const result = await reader.read({ ownerUserId, sourcePath });
       if (!result) continue;
       const trigger = namedTrigger(sourcePath);
@@ -270,16 +251,14 @@ export class TasteObservatoryReader {
     };
   }
 
-  private async applyVerifiedPullRecall(ownerUserId: string, entries: TasteEntry[]): Promise<number> {
+  private async applyVerifiedPullRecall(
+    ownerUserId: string,
+    entries: TasteEntry[],
+    rows: readonly TastePullRecallRow[],
+  ): Promise<number> {
     const byAnchor = new Map(
       entries.filter((entry) => entry.search).map((entry) => [searchAnchor(entry.sourcePath), entry]),
     );
-    const rows = this.db
-      .prepare(`SELECT recall_id, invocation_id, thread_id, candidates_json, consumed_json, timestamp
-      FROM recall_events WHERE source = 'pull'
-        AND (candidates_json LIKE '%doc:taste/vignettes/%' OR consumed_json LIKE '%doc:taste/vignettes/%')
-      ORDER BY timestamp ASC, recall_id ASC`)
-      .all() as PullRecallRow[];
     const ownership = new Map<string, InvocationOwnership>();
     const ownedThreads = new Map<string, boolean>();
     let totalUnverified = 0;
@@ -293,7 +272,7 @@ export class TasteObservatoryReader {
 
   private async classifyRecallRow(
     ownerUserId: string,
-    row: PullRecallRow,
+    row: TastePullRecallRow,
     ownership: Map<string, InvocationOwnership>,
     ownedThreads: Map<string, boolean>,
   ): Promise<InvocationOwnership | { kind: 'excluded' }> {

@@ -3,6 +3,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageNavigator } from '../MessageNavigator';
 
+vi.mock('../shell/shell-presentation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shell/shell-presentation')>()),
+  useShellPresentation: () => 'classic',
+}));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({ useCoCreatorConfig: () => ({ name: 'Owner' }) }));
 
@@ -14,7 +18,7 @@ const messages = ['one', 'two', 'three'].map((id) => ({
   timestamp: 1,
 }));
 
-describe('MessageNavigator input ownership', () => {
+describe('MessageNavigator classic input ownership', () => {
   let host: HTMLDivElement;
   let root: Root;
   let scroll: HTMLDivElement;

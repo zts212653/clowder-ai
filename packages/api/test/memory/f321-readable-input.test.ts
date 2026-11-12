@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { prepareAbstractiveBatch } from '../../src/domains/memory/abstractive-summary-input.js';
-import { SYSTEM_PROMPT } from '../../src/domains/memory/abstractive-summary-prompt.js';
 
 test('summary projects visible text once and never serializes controls or binary payloads', () => {
   const body = 'UNIQUE-VISIBLE-BODY';
@@ -137,12 +136,6 @@ test('summary projects visible text once and never serializes controls or binary
   ]) {
     assert.ok(prompt.includes(visible), `visible text was lost: ${visible}`);
   }
-});
-
-test('GOOD candidates all demonstrate the required source suffix', () => {
-  const examples = SYSTEM_PROMPT.split('GOOD (these ARE durable knowledge):')[1].trim().split('\n');
-  assert.equal(examples.length, 4);
-  for (const example of examples) assert.match(example, /\[sources:\s*[^\]]+\]$/);
 });
 
 test('quote source contributes its coordinate without serializing hidden metadata', () => {

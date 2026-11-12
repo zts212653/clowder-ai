@@ -1,13 +1,14 @@
 import { builtinAccountIdForClient, type ClientId } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import type { AccountMember, AccountSelection, ProfileItem } from '../hub-accounts.types';
-import { builtinClientLabel } from '../hub-accounts.view';
+import { builtinClientLabel, googleCloudLabel } from '../hub-accounts.view';
 import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
 
 export function accountProvider(account: ProfileItem, t = accountsCopy.zh): string {
-  if (account.authType === 'oauth') return builtinClientLabel(account.clientId);
-  if (!account.baseUrl) return account.clientId ? builtinClientLabel(account.clientId) : t.customProvider;
+  if (account.authType === 'oauth') return googleCloudLabel(account) ?? builtinClientLabel(account.clientId);
+  if (!account.baseUrl)
+    return account.clientId ? builtinClientLabel(account.clientId, account.authType) : t.customProvider;
   try {
     const host = new URL(account.baseUrl).hostname;
     const providers: Array<[string, string]> = [

@@ -4,7 +4,7 @@ related_features: [F202, F205, F247, F325, F290, F314]
 topics: [google, gemini, lyria, veo, flow, flow-music, chrome-extension, plugin, media-generation]
 doc_kind: spec
 created: 2026-10-14
-updated: 2026-10-29
+updated: 2026-11-10
 tips_exempt: "2026-10-27: PR6159 carries the music tip. Paired previews and follow-up fixes are merged; real Alpha Manager/native generation and project delivery passed. Billing/Ultra-credit verification remains open. Phase B/C have no shipped entry."
 description: "把 You 的 Google AI 订阅里家里用得上的能力（音乐、视频、Gemini 网页等）接进 Clowder AI，让猫自己用，不靠人在网页上手点转发。"
 description_source: human
@@ -31,6 +31,8 @@ You 要开 Google AI Ultra（为了只有 Ultra 能用的 Gemini Argon），订�
 一句话：**订阅里付了钱的生成能力，猫自己就能用，You 不当路由器。**
 
 ## Current State / 现状基线
+
+- **2026-11-10：Google 统一走 Vertex AI（Google Cloud 计费），不走 AI Studio。** operator：“直接改走 Vertex 本来就应该是vertex才对”“我们的音乐生成插件走的就是vertex”，并选择用本机 Google Cloud 登录、不建 key。配乐仍首选本插件；生图、TTS、Gemini 文本走 F317 的 `pnpm platform:request` +「Google Cloud（Vertex AI）」账号（PR #6933，boot 84 已上线，家里账号 `google-cloud-f33686a9-f9f5-4b95-8dfe-7d97c36663df`，与本插件同一项目 `project-ac991cb0-18d1-4ab9-91d`）。完整路线表见 [F317「家里调用外部模型走哪里」](F317-coactive-companion.md)。视频也可走 Vertex（KD-10，“对 b也可以走这个”）。此前 KD-8（10-26）已定“后续 API 走 Google Cloud，禁止 AI Studio 充值”，11-08 的 Google 平台账号增量没有对上这一条，才默认成了 AI Studio。
 
 - **2026-10-27 11:14 UTC：有界项目音频交付已获 operator 采纳，配对代码已合入。** operator 原消息 `thread_mvosmqalhrabbmvd#private-source-id` 选择“采纳，合入并发布配套预览版”。[Host #6159](https://github.com/zts212653/clowder-ai/pull/6159) 实际合入 `3608aa08d179029cd028c53e02d08864ea4dee30`；[插件仓 #137](https://github.com/zts212653/clowder-ai-plugins/pull/137) 实际合入 `8450bdf57b26671ea43970dcee74f90e3e071b53`，配套 Contract/SDK 预发布流程 `40494590987` 已启动，发布结果仍待 registry 精确版本/完整性核验。原 Argon 对 Host `3aca381f` 的独立安装/边界 10/10 和 API 类型检查批准已消费，公开产品批准及 e60 的包字节连续性也已消费。音乐包仍为 private、未上架。原 Task2559 继续自有 named Alpha 的真实 Manager 配置/显式启用、猫调用、可播放产物与账单验收；对应 AC 仍未关闭。
 
@@ -89,7 +91,7 @@ Gemini 网页里的 Argon 做成能在 thread 里说话的云端猫（像 gpt-pr
   2. 生成过程在 thread 里看得到状态：排队、生成中、成功或失败及原因
   3. 成功后文件出现在调用方指定的目录，附来源记录；猫继续剪进片子或游戏里
 - **Success evidence**: 一次真实生成的回执（文件路径、来源记录、时间），过程中没有 You 手动操作网页
-- **Non-goals**: 不做批量刷额度；不绕过 Google 的账号与安全机制；不把视频生成放在按秒计费的 API 上（KD-2）
+- **Non-goals**: 不做批量刷额度；不绕过 Google 的账号与安全机制（视频可走 Vertex API，见 KD-10）
 
 ### Supporting Journeys
 
@@ -145,7 +147,7 @@ Phase A 交付时新增 1 条 tip：「要配乐时，让猫直接调用音乐�
 |------|------|
 | 自动操作 Google 的网页属于非官方用法，可能碰到服务条款、影响 You 的账号 | 只用 You 本人账号，节奏放慢、设上限；能走官方 API 的（音乐）优先走 API |
 | 网页改版导致适配器失效 | 失败给可读原因；适配器按 F247 的做法做版本握手和回归样本 |
-| API 费用超出附带额度 | 视频不走 API（KD-2）；音乐每次调用记费用口径，接近额度时提示 |
+| API 费用超出附带额度 | 视频与音乐都可走 Vertex，花 Google Cloud 赠金（KD-10）；接近额度时提示 |
 | 生成内容对外发布的使用条款 | 来源记录里写清生成服务；对外发布前核条款（SynthID 水印、商用许可） |
 
 ## Key Decisions
@@ -153,13 +155,14 @@ Phase A 交付时新增 1 条 tip：「要配乐时，让猫直接调用音乐�
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 单独开 feature，不挂在 F247 下 | operator：「单独开一个 feat 号，对接的是Siamese家全家桶，我们用得上的都放那边」 | 2026-10-14 |
-| KD-2 | 音乐可以走官方 API；视频不走按秒计费的 API，只走 Flow 网页的订阅额度 | operator：「这个出配乐还行，视频烧不起的」 | 2026-10-14 |
+| KD-2 | 音乐可以走官方 API；视频不走按秒计费的 API，只走 Flow 网页的订阅额度（视频部分已被 KD-10 取代） | operator：「这个出配乐还行，视频烧不起的」 | 2026-10-14 |
 | KD-3 | 目标是猫自己用，You 不当路由器；起步阶段 You 可以临时当路由器 | operator：「总不能我当你们的人肉 mcp 吧」「最开始可以我当路由器的」 | 2026-10-14 |
 | KD-4 | 交给「多人创意游戏 脑洞大会」thread 认领 | operator：他们要做游戏，更需要这些对接 | 2026-10-14 |
 | KD-5 | Phase A 从脑洞大会解绑，单独执行；B/C 不在本次开工范围 | operator 同意新建执行 thread；实现 @codex61-sol，review @gemini-argon | 2026-10-26 |
 | KD-6 | 明确 OAuth 认证要求，撤回作者提出的 API-key 前置步骤 | operator source `private-source-id`；官方 API 的选择不等于 key-only 认证授权 | 2026-10-26 |
 | KD-7 | 撤回作者将 KD-6 写成 Cloud OAuth 的解释；API 获后续新许可，先交 F314 复盘 | operator `private-source-id`、`private-source-id` 明确原网页版意图；`private-source-id` 后允许 API，但不能据此倒推此前解释正确或网页已交付 | 2026-10-26 |
 | KD-8 | 后续 API 走 Google Cloud，禁止 AI Studio 充值；配置只在后台执行 | operator `private-source-id`、`private-source-id`；首授权由人主动打开链接，作者不抢占前台 | 2026-10-26 |
+| KD-10 | 视频也可以走 Vertex API（Veo，Google Cloud 计费、赠金适用），入口为 F317 `pnpm platform:request` +「Google Cloud（Vertex AI）」账号；Flow 网页通道仍可选 | operator 2026-11-10（opus55 终端会话，无 thread 坐标）选 B：“对 b也可以走这个”；起因是 Google Cloud 每月赠金已足够，取代 KD-2 的视频部分 | 2026-11-10 |
 | KD-9 | 采纳普通插件经 Host 将当次音频与来源回执新建到获准项目，合入配对候选并发布配套基础包预览版 | operator `private-source-id`；不含任意写入、覆盖或未知结果自动重复付费，音乐包保持 private，真实 Alpha/账单继续原 Task 验收 | 2026-10-27 |
 
 ## Review Gate

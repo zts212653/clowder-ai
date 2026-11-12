@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { prepareKimiMcpConfig } from '../dist/domains/cats/services/agents/providers/kimi-mcp-config.js';
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
@@ -248,7 +249,7 @@ test('host-approved collaboration remains executable and per-cat denial cannot l
       const { upstream: collab, launchEnv } = directMcpContract(effective['cat-cafe-collab']);
 
       assert.equal(collab.command, process.execPath);
-      assert.deepEqual(collab.args, [join(f.dist, 'collab.js')]);
+      assert.deepEqual(collab.args, [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))]);
       assert.equal(collab.env.CAT_CAFE_CAT_ID, 'kimi');
       assert.ok(collab.env.ALLOWED_WORKSPACE_DIRS, 'the workspace boundary stays on the upstream reader');
       assert.equal(launchEnv.CAT_CAFE_CAT_ID, 'kimi');

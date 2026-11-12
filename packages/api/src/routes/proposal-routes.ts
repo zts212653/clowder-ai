@@ -29,7 +29,7 @@ const approveBodySchema = z
     preferredCats: z.array(catIdSchema()).max(10).optional(),
     initialMessage: z.string().max(4000).nullable().optional(),
     // F128: let the user re-home the child thread at approve time. Validated against allowed
-    // roots (resolvePersistentProjectPath) — supplied-but-invalid → 400 (fail loud, never silent default).
+    // roots and new project selection policy — supplied-but-invalid → 400.
     projectPath: z.string().min(1).max(500).optional(),
     reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
     declaredWorkMode: z.enum(['subtask', 'parallel', 'investigation', 'standalone']).optional(),

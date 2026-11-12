@@ -71,8 +71,8 @@ export async function startInstalledFeedbackFixture() {
     bundle: true,
     write: false,
     format: 'iife',
-    define: { 'process.env.NODE_ENV': '"test"' },
-    alias: { '@/utils/api-client': resolve('test/fixtures/feedback-api.ts') },
+    define: { 'process.env': JSON.stringify({ NODE_ENV: 'test' }) },
+    alias: { '@': join(webRoot, 'src') },
   });
 
   let uploadedPng = Buffer.alloc(0);
@@ -210,6 +210,7 @@ export async function startInstalledFeedbackFixture() {
   app.addHook('onRequest', async (request) => {
     request.sessionUserId = 'fixture-owner';
   });
+  app.get('/api/session', async () => ({ userId: 'fixture-owner', csrfToken: 'synthetic-csrf' }));
   await app.register(pluginUiRoutes, { ui });
   await app.register(pluginWebhookForwardingRoutes, { webhooks: contributions, ui });
   app.get('/api/plugin-manager/plugins/:pluginId/icon', async (_, reply) =>
@@ -219,7 +220,7 @@ export async function startInstalledFeedbackFixture() {
     reply
       .type('text/html')
       .send(
-        `<!doctype html><html><style>dialog{margin:auto;width:min(820px,96vw);height:min(900px,94dvh);max-width:none;overflow:hidden;padding:0;border:1px solid #e9e5e1;border-radius:16px}dialog iframe{width:100%;height:100%;border:0}dialog::backdrop{background:#0006}dialog>div{position:absolute;right:12px;top:8px}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>${bundle.outputFiles[0].text}</script></body></html>`,
+        `<!doctype html><html><style>dialog{margin:auto;width:min(820px,96vw);height:min(900px,94dvh);max-width:none;overflow:hidden;padding:0;border:1px solid #e9e5e1;border-radius:16px}dialog iframe{width:100%;height:100%;border:0}dialog::backdrop{background:#0006}dialog>div{position:absolute;right:12px;top:8px}</style><body style="margin:0;background:#f8f7f5"><aside id="rail" style="position:fixed;inset:0 auto 0 0;width:56px;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:20px"></aside><main id="workspace"></main><script>document.documentElement.setAttribute('data-cat-cafe-api-origin',location.origin);${bundle.outputFiles[0].text}</script></body></html>`,
       ),
   );
   await app.listen({ host: '127.0.0.1', port: 0 });

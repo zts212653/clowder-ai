@@ -74,6 +74,16 @@ function projectPayload(
     out.consumed = true;
     return;
   }
+  if (parsed.type === 'session_seal_requested') {
+    const sealedCatId = stringField(parsed, 'catId');
+    if (sealedCatId) {
+      port.setCatInvocation(sealedCatId, { sessionSeq: parsed.sessionSeq as number | undefined, sessionSealed: true });
+    }
+    if (parsed.reason !== 'native_binding_changed') {
+      out.consumed = Boolean(sealedCatId);
+      return;
+    }
+  }
   const visible = formatVisibleSystemInfo(parsed, port.resolveCatName);
   if (visible) {
     out.content = visible.content;
@@ -84,13 +94,6 @@ function projectPayload(
   if (projectBodySystemInfo(parsed, msg, port) || projectStatusSystemInfo(parsed, msg, port)) {
     out.consumed = true;
     return;
-  }
-  if (parsed.type === 'session_seal_requested') {
-    // Client-internal continuity: update the existing invocation, never create a result row.
-    const sealedCatId = stringField(parsed, 'catId');
-    if (!sealedCatId) return;
-    port.setCatInvocation(sealedCatId, { sessionSeq: parsed.sessionSeq as number | undefined, sessionSealed: true });
-    out.consumed = true;
   }
 }
 
@@ -175,8 +178,15 @@ const BODY_PROJECTORS = new Map<string, BodyProjector>([
   ['rich_block', writeRichBlockEvent],
 ]);
 
-/** Body subtypes write into exactly the message the event names, through the named writer. */
-function projectBodySystemInfo(parsed: Record<string, unknown>, msg: SystemInfoEvent, port: SystemInfoPort): boolean {
+/**
+ * Body subtypes write into exactly the message the event names, through the named writer. Also used
+ * by the stream replay (PR-3a2) to rebuild a response's body without its status side effects.
+ */
+export function projectBodySystemInfo(
+  parsed: Record<string, unknown>,
+  msg: SystemInfoEvent,
+  port: SystemInfoPort,
+): boolean {
   const project = typeof parsed.type === 'string' ? BODY_PROJECTORS.get(parsed.type) : undefined;
   if (!project) return false;
   project(parsed, msg, port);

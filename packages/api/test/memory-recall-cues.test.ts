@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RECALL_RESOLVER_FAMILIES, type RecallResolverFamily } from '@cat-cafe/shared';
 import type { MemoryCueEventInput } from '../src/domains/memory/cue/MemoryCueEpisodeStore.js';
+import { RECALL_RESOLVER_ADMISSION_V5 } from '../src/domains/memory/cue/MemoryCueResolverRegistry.js';
 import { recallFixture } from './memory-recall-fixture.js';
 
 function cue(
@@ -30,6 +31,7 @@ function cue(
 
 test('all declared exact-delivery families preserve producer status and source owner scope without drilling seeds', async () => {
   const reads: Array<{ family: string; owner: string; invocationId: string; revision: string }> = [];
+  const pushFamilies = RECALL_RESOLVER_FAMILIES.filter((family) => RECALL_RESOLVER_ADMISSION_V5[family] === 'catalog');
   const f = await recallFixture((readers) => {
     readers.personMemoryStore = {
       getPerson: async () => ({ ownerUserId: 'owner', displayName: '主人已批准人物', status: 'active' }),
@@ -48,6 +50,7 @@ test('all declared exact-delivery families preserve producer status and source o
             vignette: { when: '真实品味标题' },
             summary: '真实事件标题',
             profileUri: 'cat-cafe-profile://corpus/current',
+            matter: { matterId: 'matter-visible', title: '事情原文' },
           },
         };
       },
@@ -55,13 +58,13 @@ test('all declared exact-delivery families preserve producer status and source o
   });
   try {
     f.invocation('parent');
-    for (const family of RECALL_RESOLVER_FAMILIES) f.episodes.append(cue(f.now, family, family));
+    for (const family of pushFamilies) f.episodes.append(cue(f.now, family, family));
     const response = await f.get('?source=push');
     const body = response.json();
-    assert.equal(body.records.length, RECALL_RESOLVER_FAMILIES.length);
+    assert.equal(body.records.length, pushFamilies.length);
     assert.deepEqual(
       body.records.map((row: { event: { resolverFamily: string } }) => row.event.resolverFamily).sort(),
-      [...RECALL_RESOLVER_FAMILIES].sort(),
+      [...pushFamilies].sort(),
     );
     assert.ok(
       body.records.every((row: { event: { cueStatus: string } }) => row.event.cueStatus === 'presented_unreported'),
@@ -76,6 +79,22 @@ test('all declared exact-delivery families preserve producer status and source o
     assert.equal(response.body.includes('drillHandle'), false);
     assert.equal(response.body.includes('payload'), false);
     assert.equal((await f.get('?source=pull')).json().records.length, 0);
+    f.episodes.appendMatterRead({
+      scope: { ownerUserId: 'owner', threadId: 'own', invocationId: 'parent' },
+      consumerCatId: 'kimi',
+      details: {
+        matterId: 'matter-visible',
+        pageRevision: 1,
+        entries: [{ entryId: 'entry', sourceRevision: 'sha256:source' }],
+      },
+    });
+    const pull = (await f.get('?source=pull')).json();
+    assert.equal(pull.records.length, 1);
+    assert.equal(pull.records[0].event.resolverFamily, 'matter');
+    assert.equal(pull.records[0].event.source, 'pull');
+    assert.equal(pull.records[0].event.cueStatus, 'drilled');
+    assert.equal(pull.records[0].event.results[0].href, '/memory?matter=matter-visible');
+    assert.equal((await f.get('?source=push')).json().records.length, pushFamilies.length);
   } finally {
     await f.close();
   }
@@ -176,11 +195,43 @@ test('foreign private person and source revision drift expose unavailable metada
     assert.equal(response.json().readStatus, 'partial');
     assert.equal(response.body.includes('秘密名字'), false);
     assert.equal(response.json().records.length, 2);
+    const results = response
+      .json()
+      .records.map(
+        (row: { event: { results: Array<{ sourceType: string; sourceUnavailableReason?: string }> } }) =>
+          row.event.results[0],
+      );
+    assert.equal(
+      results.find((item: { sourceType: string }) => item.sourceType === 'person_entity').sourceUnavailableReason,
+      undefined,
+    );
+    assert.equal(
+      results.find((item: { sourceType: string }) => item.sourceType === 'taste').sourceUnavailableReason,
+      'source_corrected',
+    );
     assert.ok(
       response
         .json()
         .records.every((row: { event: { results: Array<{ href: unknown }> } }) => row.event.results[0].href === null),
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('an explicitly corrected delivered memory is a complete readable terminal row', async () => {
+  const f = await recallFixture((readers) => {
+    readers.cueSourceReader = {
+      read: async () => ({ status: 'not_available', invalidationReason: 'source_corrected' }),
+    };
+  });
+  try {
+    f.invocation('parent');
+    f.episodes.append(cue(f.now, 'corrected'));
+    const response = await f.get();
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().readStatus, 'ready');
+    assert.equal(response.json().records[0].event.results[0].sourceUnavailableReason, 'source_corrected');
   } finally {
     await f.close();
   }

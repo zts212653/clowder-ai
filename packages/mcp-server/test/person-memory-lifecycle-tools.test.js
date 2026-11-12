@@ -31,18 +31,13 @@ describe('F276 recall and lifecycle MCP tools', () => {
     globalThis.fetch = originalFetch;
   });
 
-  test('registers live status, owner-derived recall, drill, correction, retire, amend and forget tools', async () => {
+  test('registers live status, owner-derived recall, drill and revision tools', async () => {
     const { callbackTools } = await import('../dist/tools/callback-tools.js');
     const names = [
       'cat_cafe_get_person_memory_proposal_status',
       'cat_cafe_recall_person_relationship',
       'cat_cafe_drill_person_memory',
-      'cat_cafe_correct_person_claim',
-      'cat_cafe_retire_person_claim',
-      'cat_cafe_amend_person_interaction',
-      'cat_cafe_redact_person_memory_item',
-      'cat_cafe_forget_person',
-      'cat_cafe_forget_person_memory_proposal',
+      'cat_cafe_revise_person_memory',
     ];
     for (const name of names) {
       const tool = callbackTools.find((entry) => entry.name === name);
@@ -68,22 +63,11 @@ describe('F276 recall and lifecycle MCP tools', () => {
     assert.equal(requests[0].body, undefined);
   });
 
-  test('routes recall and hard forget without accepting caller-selected ownership', async () => {
-    const { handleForgetPerson, handleForgetPersonMemoryProposal, handleRecallPersonRelationship } = await import(
-      '../dist/tools/callback-tools.js'
-    );
+  test('routes recall without accepting caller-selected ownership', async () => {
+    const { handleRecallPersonRelationship } = await import('../dist/tools/callback-tools.js');
     await handleRecallPersonRelationship({ alias: '黄挺' });
-    await handleForgetPerson({ personId: 'person_recall' });
-    await handleForgetPersonMemoryProposal({ proposalId: 'person_candidate_unbound' });
     assert.match(requests[0].url, /\/api\/callbacks\/person-memory\/recall$/);
     assert.deepEqual(requests[0].body.alias, '黄挺');
     assert.equal(requests[0].body.ownerUserId, undefined);
-    assert.match(requests[1].url, /\/api\/callbacks\/person-memory\/forget$/);
-    assert.match(requests[1].body.requestId, /^person_forget_/);
-    assert.equal(requests[1].body.ownerUserId, undefined);
-    assert.match(requests[2].url, /\/api\/callbacks\/person-memory\/forget-proposal$/);
-    assert.equal(requests[2].body.proposalId, 'person_candidate_unbound');
-    assert.match(requests[2].body.requestId, /^person_forget_proposal_/);
-    assert.equal(requests[2].body.ownerUserId, undefined);
   });
 });

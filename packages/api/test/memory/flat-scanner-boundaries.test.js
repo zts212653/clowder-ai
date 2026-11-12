@@ -41,7 +41,8 @@ it('keeps ordinary documents but stops at real nested repos and linked worktrees
     assert.ok(new Scanner('child').parseSingle(join(repo, 'doc.md'), repo));
     assert.ok(new Scanner('child').parseSingle(join(worktree, 'doc.md'), worktree));
   }
-  writeFileSync(join(repo, 'doc.md'), 'token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij');
+  const testToken = ['ghp', 'Ab0'.repeat(12)].join('_');
+  writeFileSync(join(repo, 'doc.md'), `token = ${testToken}`);
   for (const [boundRoot, blocked, indexed] of [
     [root, false, 2],
     [repo, true, 0],

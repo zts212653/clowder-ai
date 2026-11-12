@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers, summarizeAcpMcpServers } =
   await import('../../dist/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js');
@@ -302,7 +303,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe-collab');
     assert.equal(result[0].command, process.execPath);
-    assert.ok(result[0].args[0].endsWith(join('packages', 'mcp-server', 'dist', 'collab.js')));
+    assert.equal(result[0].args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')));
   });
 
   it('auto-generates cat-cafe-limb from projectRoot', async () => {
@@ -312,7 +313,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe-limb');
     assert.equal(result[0].command, process.execPath);
-    assert.ok(result[0].args[0].endsWith(join('packages', 'mcp-server', 'dist', 'limb.js')));
+    assert.equal(result[0].args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/limb.js')));
   });
 
   it('auto-generates cat-cafe-audio from projectRoot (F195)', async () => {
@@ -322,7 +323,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe-audio');
     assert.equal(result[0].command, process.execPath);
-    assert.ok(result[0].args[0].endsWith(join('packages', 'mcp-server', 'dist', 'audio.js')));
+    assert.equal(result[0].args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/audio.js')));
   });
 
   it('auto-generates cat-cafe-finance from projectRoot (F207 Phase B0)', async () => {
@@ -332,7 +333,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe-finance');
     assert.equal(result[0].command, process.execPath);
-    assert.ok(result[0].args[0].endsWith(join('packages', 'mcp-server', 'dist', 'finance.js')));
+    assert.equal(result[0].args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/finance.js')));
   });
 
   it('auto-generates all canonical 6-split builtins (F193/F195/F207)', async () => {
@@ -390,7 +391,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 2);
 
     const collab = result.find((s) => s.name === 'cat-cafe-collab');
-    assert.ok(collab.args[0].endsWith(join('packages', 'mcp-server', 'dist', 'collab.js')), 'builtin auto-generated');
+    assert.equal(collab.args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')));
 
     const pencil = result.find((s) => s.name === 'pencil');
     assert.deepStrictEqual(pencil.args, ['/path/to/pencil'], 'external from capabilities.json');
@@ -497,7 +498,7 @@ describe('resolveAcpMcpServers — per-project MCP (F145 Phase E)', () => {
     const result = await resolveAcpMcpServers(projectRoot, ['cat-cafe-collab'], userRoot);
     const collab = result.find((s) => s.name === 'cat-cafe-collab');
     assert.equal(collab.command, process.execPath); // builtin runtime Node, not python
-    assert.ok(collab.args[0].endsWith(join('packages', 'mcp-server', 'dist', 'collab.js')));
+    assert.equal(collab.args[0], fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js')));
     assert.ok(!result.some((s) => s.name === 'cat-cafe'), 'legacy monolith alias must not merge with split builtin');
     assert.ok(
       result.find((s) => s.name === 'my-tool'),

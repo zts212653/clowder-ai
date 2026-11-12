@@ -36,6 +36,7 @@ export const MEMBER_MCP_ROUTE_PATH = '/api/member-mcp/mcp';
  */
 function toolsetEnvFromInvocation(record: InvocationRecord): ToolsetEnv {
   return {
+    watcher: record.toolExecutionPolicy?.mode === 'watcher',
     hasAgentKey: false,
     agentKeyUnion: false,
     allowedToolNames: toolExecutionPolicyAllowedToolNames(record.toolExecutionPolicy),

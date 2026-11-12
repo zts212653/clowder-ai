@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { resolveInvokeCapabilityRoot } from '../dist/config/capabilities/invoke-capability-root.js';
 import { directMcpContract } from './helpers/direct-mcp-contract.js';
 import {
@@ -19,7 +20,7 @@ function transport(provider, server) {
 }
 
 for (const [provider, invoke] of Object.entries(providers)) {
-  test(`${provider}: same-repo external limb uses runtime binary and managed environment`, async (t) => {
+  test(`${provider}: same-repo external limb uses API package binary and managed environment`, async (t) => {
     const f = fixture(t);
     putConfig(f.main, [
       managed(),
@@ -34,7 +35,7 @@ for (const [provider, invoke] of Object.entries(providers)) {
     const before = f.sentinelPaths.map((p) => readFileSync(p));
     const mcp = await invoke(f);
     const limb = transport(provider, mcp['cat-cafe-limb']);
-    assert.deepEqual(limb.args, [join(f.dist, 'limb.js')]);
+    assert.deepEqual(limb.args, [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/limb.js'))]);
     const env = limb.env;
     assert.equal(env.ALLOWED_WORKSPACE_DIRS, transport(provider, mcp['cat-cafe-collab']).env.ALLOWED_WORKSPACE_DIRS);
     // OpenCode inherits callback credentials through its CLI process environment;

@@ -79,6 +79,39 @@ it('keeps the Windows directory separate from the filename in a file card', asyn
   expect(host.textContent).toContain('C:\\demo\\project with spaces\\docs\\');
 });
 
+it('preserves home metadata filename when the selected version differs from the link label', async () => {
+  transport.fetch.mockResolvedValue(
+    Response.json({
+      local: true,
+      path: windowsPath,
+      filename: 'published-version.md',
+      canOpen: false,
+      canReveal: false,
+    }),
+  );
+  await act(async () => root.render(<Reference absolutePath={windowsPath} />));
+  const file = host.querySelector<HTMLElement>('[data-chat-reference-kind="file"]')!;
+  await act(async () => file.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+  const menu = host.querySelector('[role="menu"]')!;
+  expect(menu.querySelector('strong')?.textContent).toBe('published-version.md');
+  const copy = [...menu.querySelectorAll('button')].find((button) => button.textContent === 'Copy path')!;
+  await act(async () => copy.click());
+  expect(transport.copy).toHaveBeenCalledWith(windowsPath);
+});
+
+it('preserves home unavailable-original reason without advertising native actions', async () => {
+  transport.fetch.mockResolvedValue(
+    Response.json({ local: false, canOpen: false, canReveal: false, reason: 'native_original_unavailable' }),
+  );
+  await act(async () => root.render(<Reference absolutePath={windowsPath} />));
+  const file = host.querySelector<HTMLElement>('[data-chat-reference-kind="file"]')!;
+  await act(async () => file.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+  const menu = host.querySelector('[role="menu"]')!;
+  expect(menu.querySelector('[role="status"]')?.textContent).toBe('native_original_unavailable');
+  expect(menu.textContent).not.toContain('Show in Finder');
+  expect(menu.textContent).not.toContain('Open with default application');
+});
+
 it.each([
   ['inline', 'notes\\draft.md'],
   ['card', 'notes\\draft.md'],

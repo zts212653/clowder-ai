@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { connectionDiagnosticBatchSchema } from '@cat-cafe/shared';
+import { disabledWatcherRead } from './f322-watcher-read.mjs';
 
 // HTTP fixture only: all product reads/writes still go through production apiFetch.
 export const CURRENT_THREAD = 'composer-proof-0';
@@ -110,10 +112,28 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     const method = request.method();
     const body = method === 'GET' ? null : request.postDataJSON();
     requests.push({ method, path: url.pathname, search: url.search, body });
+    const watcher = disabledWatcherRead(
+      request,
+      url,
+      threads.map((thread) => thread.id),
+    );
+    if (watcher) return watcher;
+    // The real HTTP client reports bounded timing facts after five seconds. Accept
+    // only its authenticated diagnostic batch, never arbitrary POSTs or payloads.
+    if (url.pathname === '/api/diagnostics/connection' && url.search === '' && method === 'POST') {
+      assert.equal(request.headers()['x-csrf-token'], 'fixture-only');
+      connectionDiagnosticBatchSchema.parse(body);
+      return { status: 204, body: '' };
+    }
     if (url.pathname === '/api/session') return reply({ userId: 'owner-proof', csrfToken: 'fixture-only' });
     if (url.pathname === '/api/config/chat-background' && method === 'GET') return reply({ threads: {} });
     if (['/api/plugin-ui', '/api/plugin-conversations'].includes(url.pathname) && method === 'GET')
       return reply({ entries: [] });
+    if (url.pathname === '/api/plugin-manager/addressed-targets' && method === 'GET')
+      return reply({ targets: [], knownTargets: [] });
+    const suggestionThread =
+      method === 'GET' && threads.find((thread) => url.pathname === `/api/threads/${thread.id}/suggestions`);
+    if (suggestionThread) return reply({ threadId: suggestionThread.id, suggestions: [] });
     if (url.pathname === '/api/config/process-talk' && method === 'GET')
       return reply({ ownerUserId: 'owner-proof', mode: 'whole' });
     if (url.pathname === '/api/plugins/official.collective-connector/connections' && method === 'GET')

@@ -11,9 +11,11 @@ import type {
   DevelopmentSourceQuery,
   DevelopmentWorkTransition,
 } from '../cats/services/stores/ports/DevelopmentWorkTransition.js';
+import type { DeploymentWaitAudit } from '../cats/services/stores/ports/deployment-wait/recovery-facts.js';
 import type { AttachEntrustedWorkArtifactInput } from '../cats/services/stores/ports/EntrustedWorkArtifactEvidence.js';
 import type { OrdinaryTaskMutation } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
 import type { EntrustedTaskDataControllerTransition } from '../cats/services/stores/ports/TaskDataControllerTransition.js';
+import { matchesTaskProbeSource, type TaskProbeSource } from '../cats/services/stores/ports/TaskProbeSource.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type {
   AdmitEntrustedWorkStoreInput,
@@ -114,43 +116,42 @@ class BallCustodyTaskStore implements ITaskStore {
   }
 
   update(taskId: string, input: UpdateTaskInput): MaybePromise<TaskItem | null> {
-    const beforeResult = this.inner.get(taskId);
-    const updateAfterBefore = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
-      const performUpdate = (): MaybePromise<TaskItem | null> => {
-        const updatedResult = this.inner.update(taskId, input);
-        const finish = (updated: TaskItem | null): MaybePromise<TaskItem | null> => {
-          if (!before || !updated) return updated;
-          this.recordStatusTransition(before, updated);
-          const completion = this.actionLifecycle?.completeStatusTransition(before, updated);
-          return completion ? completion.then(() => updated) : updated;
-        };
-        return isPromiseLike(updatedResult) ? updatedResult.then(finish) : finish(updatedResult);
-      };
-      const gate = before ? this.actionLifecycle?.assertUpdateAllowed(before, input) : undefined;
-      return gate ? gate.then(performUpdate) : performUpdate();
-    };
-
-    return isPromiseLike(beforeResult) ? beforeResult.then(updateAfterBefore) : updateAfterBefore(beforeResult);
+    return this.reflectUpdate(taskId, input, () => this.inner.update(taskId, input));
   }
-
-  updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): MaybePromise<TaskItem | null> {
+  updateIfThreadId(taskId: string, threadId: string, input: UpdateTaskInput): MaybePromise<TaskItem | null> {
+    return this.reflectUpdate(taskId, input, () => this.inner.updateIfThreadId(taskId, threadId, input));
+  }
+  completeProbeIfCurrent(taskId: string, source: TaskProbeSource): MaybePromise<TaskItem | null> {
+    return this.reflectUpdate(
+      taskId,
+      { status: 'done' },
+      () => this.inner.completeProbeIfCurrent(taskId, source),
+      source,
+    );
+  }
+  private reflectUpdate(
+    taskId: string,
+    input: UpdateTaskInput,
+    apply: () => MaybePromise<TaskItem | null>,
+    source?: TaskProbeSource,
+  ): MaybePromise<TaskItem | null> {
     const beforeResult = this.inner.get(taskId);
-    const updateAfterBefore = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
-      const performUpdate = (): MaybePromise<TaskItem | null> => {
-        const updatedResult = this.inner.updateIfThreadId(taskId, expectedThreadId, input);
+    const afterRead = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
+      if (source && (!before || !matchesTaskProbeSource(before, source))) return null;
+      const perform = (): MaybePromise<TaskItem | null> => {
         const finish = (updated: TaskItem | null): MaybePromise<TaskItem | null> => {
           if (!before || !updated) return updated;
           this.recordStatusTransition(before, updated);
           const completion = this.actionLifecycle?.completeStatusTransition(before, updated);
           return completion ? completion.then(() => updated) : updated;
         };
-        return isPromiseLike(updatedResult) ? updatedResult.then(finish) : finish(updatedResult);
+        const result = apply();
+        return isPromiseLike(result) ? result.then(finish) : finish(result);
       };
       const gate = before ? this.actionLifecycle?.assertUpdateAllowed(before, input) : undefined;
-      return gate ? gate.then(performUpdate) : performUpdate();
+      return gate ? gate.then(perform) : perform();
     };
-
-    return isPromiseLike(beforeResult) ? beforeResult.then(updateAfterBefore) : updateAfterBefore(beforeResult);
+    return isPromiseLike(beforeResult) ? beforeResult.then(afterRead) : afterRead(beforeResult);
   }
 
   listByThread(threadId: string): MaybePromise<TaskItem[]> {
@@ -187,8 +188,26 @@ class BallCustodyTaskStore implements ITaskStore {
     return this.inner.upsertBySubjectWithManagedWorkBinding(input, binding);
   }
 
+  listDueDeploymentWaitRecovery(limit?: number, now?: number) {
+    return this.inner.listDueDeploymentWaitRecovery(limit, now);
+  }
   listDeploymentWaitProjectionCandidates(): MaybePromise<TaskItem[]> {
-    return this.inner.listDeploymentWaitProjectionCandidates?.() ?? this.inner.listByKind('work');
+    return this.inner.listDeploymentWaitProjectionCandidates();
+  }
+  listDeploymentWaitAuditCandidates(limit?: number, now?: number) {
+    return this.inner.listDeploymentWaitAuditCandidates(limit, now);
+  }
+  ackDeploymentWaitAudit(entry: DeploymentWaitAudit) {
+    return this.inner.ackDeploymentWaitAudit(entry);
+  }
+  failDeploymentWaitAudit(entry: DeploymentWaitAudit, now: number) {
+    return this.inner.failDeploymentWaitAudit(entry, now);
+  }
+  finishDeploymentWaitRecovery(task: TaskItem, now: number, failed: boolean) {
+    return this.inner.finishDeploymentWaitRecovery(task, now, failed);
+  }
+  getDeploymentWaitRecoveryFacts(id: string) {
+    return this.inner.getDeploymentWaitRecoveryFacts(id);
   }
 
   listByKind(kind: TaskKind): MaybePromise<TaskItem[]> {

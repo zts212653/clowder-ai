@@ -132,6 +132,7 @@ describe('the real Settings entry and original reader survive the route boundary
     });
     expect(mounted.restoreReadingRef).toHaveBeenCalledWith(source?.readingRef, expect.any(AbortSignal), {
       refresh: true,
+      diagnostic: { bridgeId: expect.any(String), operationId: expect.any(String) },
     });
     expect(readSettingsReadingSession()).toBeNull();
   });

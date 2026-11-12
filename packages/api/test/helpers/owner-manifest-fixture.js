@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { ProjectContentOwnerService } from '../../dist/domains/video-studio/content-owner/service.js';
 import { ProjectContentOwnerStore } from '../../dist/domains/video-studio/content-owner/store.js';
 
@@ -46,7 +46,7 @@ export function interceptManifestReads(t, fixture, read) {
   let peak = 0;
   const paths = [];
   fs.readFile = async (path, ...args) => {
-    if (!String(path).startsWith(`${fixture.manifestRoot}/`) || !String(path).endsWith('/state.json')) {
+    if (!String(path).startsWith(`${fixture.manifestRoot}${sep}`) || basename(String(path)) !== 'state.json') {
       return original(path, ...args);
     }
     paths.push(String(path));

@@ -10,7 +10,12 @@ vi.mock('../MemoryRecall', () => ({ MemoryRecall: () => <p>召回记录</p> }));
 vi.mock('../MemoryBrakes', () => ({ MemoryBrakes: () => <p>拉闸记录</p> }));
 vi.mock('../MemoryLibrary', () => ({ MemoryLibrary: () => <p>资料库</p> }));
 vi.mock('../../CollectionGraph', () => ({ CollectionGraph: () => <p>关系图</p> }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: (url: string) => window.history.replaceState(window.history.state, '', url),
+  }),
+}));
 vi.mock('next/link', () => ({
   default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>,
 }));
@@ -50,6 +55,7 @@ const response = (title: string) => ({
   ],
 });
 beforeEach(() => {
+  window.history.replaceState(null, '', '/memory/preview?tab=all&shell=v2');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div');
   document.body.append(container);
@@ -73,6 +79,61 @@ async function search(value = '搜索') {
   await act(async () => input.closest('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 
+it('restores query, scope and depth on return while reading current sources again', async () => {
+  let title = '离开前的原源';
+  fetchMock.mockImplementation((path: string) => {
+    if (!path.includes('/search?')) return Promise.resolve(ok({}));
+    const params = new URL(path, 'http://localhost').searchParams;
+    const type = params.get('type');
+    return Promise.resolve(
+      ok({
+        query: params.get('q'),
+        readStatus: 'ready',
+        groups: (type === 'all' ? ['memory', 'documents', 'conversations'] : [type]).map((kind) => ({
+          type: kind,
+          status: 'ready',
+          hasMore: false,
+          results: [
+            {
+              id: kind,
+              title,
+              snippet: '当前来源',
+              displayType: '对话',
+              authority: null,
+              updatedAt: null,
+              destination: null,
+              graph: null,
+            },
+          ],
+        })),
+      }),
+    );
+  });
+  await render();
+  await search('回到设置');
+  await act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === '对话')?.click());
+  await act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === '包含原文')?.click());
+  const params = new URLSearchParams(window.location.search);
+  expect(params.get('q')).toBe('回到设置');
+  expect(params.get('type')).toBe('conversations');
+  expect(params.get('depth')).toBe('raw');
+  await act(() => root.unmount());
+  root = createRoot(container);
+  title = '返回后重新读取的原源';
+  fetchMock.mockClear();
+  // The router may restore a cached page with its original empty server props.
+  await act(() => root.render(<MemoryPagePreview tab="all" />));
+  expect(container.querySelector<HTMLInputElement>('input')?.value).toBe('回到设置');
+  expect(container.textContent).toContain(title);
+  const reads = fetchMock.mock.calls.filter(([url]) => url.includes('/api/memory/search?'));
+  expect(reads).toHaveLength(1);
+  expect(new URL(reads[0][0], 'http://localhost').searchParams.get('type')).toBe('conversations');
+  expect(new URL(reads[0][0], 'http://localhost').searchParams.get('depth')).toBe('raw');
+  await act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === '关闭搜索')?.click());
+  expect(new URLSearchParams(window.location.search).has('q')).toBe(false);
+  expect(new URLSearchParams(window.location.search).get('shell')).toBe('v2');
+});
+
 it('enables the topbar search and keeps only summary/raw and result-type controls', async () => {
   await render();
   expect(container.querySelector<HTMLInputElement>('input')?.disabled).toBe(false);
@@ -84,6 +145,7 @@ it('enables the topbar search and keeps only summary/raw and result-type control
 });
 
 it('lands a find keyword in the existing topbar search and submits it once through the memory owner', async () => {
+  window.history.replaceState(null, '', '/memory?q=%E4%B8%80%E8%A1%8C');
   fetchMock.mockImplementation((path: string) =>
     Promise.resolve(ok(path.includes('/search?') ? { ...response('同源记忆结果'), query: '一行' } : {})),
   );

@@ -47,6 +47,12 @@ export interface PublishingMessageStoreDeps {
   readonly events: Pick<EventLogStore, 'append'>;
   /** Schedules subscriber delivery after a durable publish. Must return immediately. */
   readonly onPublished?: (threadId: string) => void;
+  /**
+   * In-process observers of a message that just became complete and visible (a plain append, or a
+   * reply's terminal commit; never a processing placeholder, whisper or plugin message). Must return
+   * immediately. F335 交付三: the desk hears that a reply's work card has landed.
+   */
+  readonly onMessagePublished?: (message: StoredMessage) => void;
   /** Event-log retention per thread; the same bound the send path uses. */
   readonly retentionCount?: number;
   /**
@@ -66,6 +72,16 @@ export interface PublishingMessageStoreDeps {
    * so there is no default that quietly discards it.
    */
   onPublishFailure(error: unknown, stored: StoredMessage): void;
+  /**
+   * PR-3a: the Hub's own observer of every lifecycle terminal commit (a reply's terminal, or a
+   * pre-admission failure and its input), told whether the store applied it now or replayed an
+   * identical one. It is not the subscriber stream: none of `publish()`'s filters (whisper, plugin,
+   * deferred media, no envelope) apply, and a failure here never fails the commit or the publish.
+   */
+  readonly lifecycleObserver?: {
+    committed(message: StoredMessage, commit: 'applied' | 'replayed'): void;
+    failed(error: unknown, message: StoredMessage): void;
+  };
 }
 
 export function createPublishingMessageStore<T extends IMessageStore>(inner: T, deps: PublishingMessageStoreDeps): T {
@@ -107,6 +123,7 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
         retention,
       );
       deps.onPublished?.(stored.threadId);
+      deps.onMessagePublished?.(stored);
     } catch (error) {
       deps.onPublishFailure(error, stored);
     }
@@ -143,6 +160,25 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
     });
   }
 
+  function observeLifecycle(kind: string, ...messages: Array<StoredMessage | undefined>): void {
+    const observer = deps.lifecycleObserver;
+    if (!observer || (kind !== 'applied' && kind !== 'replayed')) return;
+    for (const message of messages) {
+      if (!message) continue;
+      try {
+        observer.committed(message, kind);
+      } catch (error) {
+        observer.failed(error, message);
+      }
+    }
+  }
+
+  async function observedTerminal<R extends { kind: string; message?: StoredMessage }>(commit: Promise<R>): Promise<R> {
+    const result = await commit;
+    observeLifecycle(result.kind, result.message);
+    return result;
+  }
+
   // Proxied rather than hand-forwarded: `IMessageStore` is a wide port, and a written-out
   // forwarding list would silently stop covering whatever method is added to it next.
   return new Proxy(inner, {
@@ -177,19 +213,32 @@ export function createPublishingMessageStore<T extends IMessageStore>(inner: T, 
       }
       if (property === 'commitLifecycleResponseTerminal') {
         return (id: string, patch: LifecycleResponseTerminalPatch) =>
-          commitTerminal(id, patch, (prepared) => target.commitLifecycleResponseTerminal(id, prepared));
+          observedTerminal(
+            commitTerminal(id, patch, (prepared) => target.commitLifecycleResponseTerminal(id, prepared)),
+          );
       }
       if (property === 'commitLifecycleResponseTerminalWithQueueLedgerAdmission') {
         return (...args: Parameters<IMessageStore['commitLifecycleResponseTerminalWithQueueLedgerAdmission']>) =>
-          commitTerminal(args[0], args[1], (prepared) =>
-            target.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
-              args[0],
-              prepared,
-              args[2],
-              args[3],
-              args[4],
+          observedTerminal(
+            commitTerminal(args[0], args[1], (prepared) =>
+              target.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
+                args[0],
+                prepared,
+                args[2],
+                args[3],
+                args[4],
+              ),
             ),
           );
+      }
+      if (property === 'commitLifecyclePreAdmissionFailure') {
+        return async (...args: Parameters<IMessageStore['commitLifecyclePreAdmissionFailure']>) => {
+          const result = await target.commitLifecyclePreAdmissionFailure(...args);
+          if (result.kind === 'applied' || result.kind === 'replayed') {
+            observeLifecycle(result.kind, result.inputMessage, result.failureMessage);
+          }
+          return result;
+        };
       }
       if (property === 'append') {
         return (msg: AppendMessageInput): Promise<StoredMessage> =>

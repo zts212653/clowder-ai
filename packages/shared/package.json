@@ -46,6 +46,10 @@
       "import": "./dist/profile-frontmatter-parser.js",
       "types": "./dist/profile-frontmatter-parser.d.ts"
     },
+    "./markdown-frontmatter": {
+      "import": "./dist/markdown-frontmatter.js",
+      "types": "./dist/markdown-frontmatter.d.ts"
+    },
     "./profile-contract": {
       "import": "./dist/profile-contract.js",
       "types": "./dist/profile-contract.d.ts"

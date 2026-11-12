@@ -10,6 +10,7 @@ import { PassageVectorStore, passageVectorKey } from '../../dist/domains/memory/
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
 import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
+import { captureVectorSource, commitVectorSource } from '../../dist/domains/memory/vector-source-binding.js';
 
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'memory-vector-layout-'));
@@ -98,10 +99,51 @@ test('thread metadata and position refresh retain embeddings for unchanged searc
 
 test('canonical embedding activation packs a sparse projection without reembedding or changing unique NN results', async (t) => {
   const f = await fixture(t);
+  await f.store.upsert([
+    {
+      anchor: 'thread-layout',
+      kind: 'thread',
+      status: 'active',
+      title: 'Layout',
+      sourceHash: 'one',
+      updatedAt: '2026-11-09',
+    },
+  ]);
+  f.documents.initMeta({ modelId: 'fixture', modelRev: '1', dim: 4 });
+  f.documents.upsert('thread-layout', new Float32Array([1, 0, 0, 0]));
   const insert = f.db.prepare('INSERT INTO passage_vectors(passage_key,embedding) VALUES(?,?)');
   f.db.transaction(() => {
-    for (let i = 0; i < 32 * 1024; i++) insert.run(`key-${i}`, new Float32Array([1, i / 32768, 0, 0]));
-    for (let i = 0; i < 32 * 1024; i++) if (i % 1024) f.vectors.delete(`key-${i}`);
+    for (let i = 0; i < 32 * 1024; i += 1024)
+      f.db
+        .prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES(?,?,?,?)')
+        .run('thread-layout', `msg-${i}`, `Neutral ${i}`, '2026-11-09');
+    for (let i = 0; i < 32 * 1024; i++)
+      insert.run(passageVectorKey('thread-layout', `msg-${i}`), new Float32Array([1, i / 32768, 0, 0]));
+    for (let i = 0; i < 32 * 1024; i++) if (i % 1024) f.vectors.delete(passageVectorKey('thread-layout', `msg-${i}`));
+    const model = { modelId: 'fixture', modelRev: '1', dim: 4 };
+    assert.equal(
+      commitVectorSource(
+        f.db,
+        f.documents,
+        captureVectorSource(f.db, 'documents', 'thread-layout'),
+        new Float32Array([1, 0, 0, 0]),
+        model,
+      ),
+      true,
+    );
+    for (let i = 0; i < 32 * 1024; i += 1024) {
+      const key = passageVectorKey('thread-layout', `msg-${i}`);
+      assert.equal(
+        commitVectorSource(
+          f.db,
+          f.vectors,
+          captureVectorSource(f.db, 'passages', key),
+          new Float32Array([1, i / 32768, 0, 0]),
+          model,
+        ),
+        true,
+      );
+    }
   })();
   const before = f.vectors.search(new Float32Array([1, 0, 0, 0]), 32);
   assert.equal(f.db.prepare('SELECT count(*) AS c FROM passage_vectors_chunks').get().c, 32);

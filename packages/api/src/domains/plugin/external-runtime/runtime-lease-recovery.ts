@@ -39,8 +39,8 @@ export async function projectRuntimeReplacementFailure(
   target: RuntimeRecoveryTarget,
   now: () => number,
 ): Promise<void> {
-  await inventory.transaction((transaction) => {
-    const instance = transaction.instances.get(target.pluginInstanceId);
+  await inventory.transaction(async (transaction) => {
+    const instance = await transaction.instances.get(target.pluginInstanceId);
     if (
       !instance ||
       instance.packageDigest !== target.packageDigest ||
@@ -51,7 +51,7 @@ export async function projectRuntimeReplacementFailure(
     ) {
       return;
     }
-    transaction.instances.put({
+    await transaction.instances.put({
       ...instance,
       activationState: 'error',
       runtimeState: 'stopped',

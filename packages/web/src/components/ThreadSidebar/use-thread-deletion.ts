@@ -1,5 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
-import { useThreadDeletePreference } from '@/hooks/useThreadDeletePreference';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import {
   projectSidebarRows,
   type SidebarSnapshotRow,
@@ -24,27 +23,27 @@ export function useThreadDeletion({
   loadTrash: (afterCurrentGet?: boolean) => Promise<void>;
 }) {
   const copy = useShellCopy(threadDeletionCopy);
-  const preference = useThreadDeletePreference();
+  const identity = useSyncExternalStore(apiSessionIdentity.subscribe, apiSessionIdentity.getSnapshot, () => null);
   const [deleteDraft, setDeleteDraft] = useState<{
     thread: SidebarSnapshotRow;
-    identity: typeof preference.identity;
+    identity: typeof identity;
   } | null>(null);
   // Identity generations also invalidate drafts after an A → B → A change.
-  const deleteTarget = deleteDraft?.identity === preference.identity ? deleteDraft.thread : null;
+  const deleteTarget = deleteDraft?.identity === identity ? deleteDraft.thread : null;
   const pending = useRef(new Set<string>());
   const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(new Set());
   const currentConversation = useRef(currentThreadId);
   currentConversation.current = currentThreadId;
 
   const performDelete = useCallback(
-    (thread: SidebarSnapshotRow, remember = false) => {
-      if (preference.identity !== apiSessionIdentity.getSnapshot() || pending.current.has(thread.id)) return;
+    (thread: SidebarSnapshotRow) => {
+      if (identity !== apiSessionIdentity.getSnapshot() || pending.current.has(thread.id)) return;
       pending.current.add(thread.id);
       setDeletingIds(new Set(pending.current));
       setDeleteDraft(null);
       const controller = new AbortController();
       const unsubscribeIdentity = apiSessionIdentity.subscribe(() => {
-        if (preference.identity !== apiSessionIdentity.getSnapshot()) controller.abort();
+        if (identity !== apiSessionIdentity.getSnapshot()) controller.abort();
       });
       const isSystem = thread.isHubThread || !!thread.systemKind;
       const url = `/api/threads/${thread.id}${isSystem ? '?force=true' : ''}`;
@@ -56,16 +55,15 @@ export function useThreadDeletion({
             useToastStore.getState().addToast({ type: 'error', title: copy.failedTitle, message, duration: 5000 });
             return;
           }
-          const saved = !remember || isSystem || preference.setConfirmBeforeDelete(false);
           if (thread.id === currentConversation.current) navigateToThread('default');
           await invalidateSidebarProjection();
           if (controller.signal.aborted) return;
           if (showTrash) await loadTrash(true);
           if (controller.signal.aborted) return;
           useToastStore.getState().addToast({
-            type: saved ? 'success' : 'info',
+            type: 'success',
             title: copy.deletedTitle,
-            message: saved ? copy.deletedMessage(thread.title ?? copy.unnamed) : copy.deletedPreferenceFailed,
+            message: copy.deletedMessage(thread.title ?? copy.unnamed),
             duration: 5000,
           });
         })
@@ -82,7 +80,7 @@ export function useThreadDeletion({
           setDeletingIds(new Set(pending.current));
         });
     },
-    [copy, loadTrash, navigateToThread, preference.identity, preference.setConfirmBeforeDelete, showTrash],
+    [copy, loadTrash, navigateToThread, identity, showTrash],
   );
 
   const requestDelete = useCallback(
@@ -90,18 +88,13 @@ export function useThreadDeletion({
       if (id === 'default' || pending.current.has(id)) return;
       const thread = projectSidebarRows(useSidebarProjectionStore.getState()).find((row) => row.id === id);
       if (!thread) return;
-      if (thread.isHubThread || thread.systemKind || preference.confirmBeforeDelete)
-        setDeleteDraft({ thread, identity: preference.identity });
-      else performDelete(thread);
+      setDeleteDraft({ thread, identity });
     },
-    [performDelete, preference.confirmBeforeDelete, preference.identity],
+    [identity],
   );
-  const confirmDelete = useCallback(
-    (remember: boolean) => {
-      if (deleteTarget) performDelete(deleteTarget, remember);
-    },
-    [deleteTarget, performDelete],
-  );
+  const confirmDelete = useCallback(() => {
+    if (deleteTarget) performDelete(deleteTarget);
+  }, [deleteTarget, performDelete]);
   const cancelDelete = useCallback(() => setDeleteDraft(null), []);
-  return { deleteTarget, deletingIds, requestDelete, confirmDelete, cancelDelete, canRemember: preference.ready };
+  return { deleteTarget, deletingIds, requestDelete, confirmDelete, cancelDelete };
 }

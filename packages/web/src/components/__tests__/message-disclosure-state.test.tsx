@@ -8,6 +8,7 @@ import {
   buildRichHtmlDisclosureKey,
   resetMessageDisclosureStateForTest,
 } from '../message-disclosure-state';
+import { SHELL_LANGUAGE_STORAGE_KEY, writeShellLanguage } from '../shell/shell-language';
 import { ThinkingContent } from '../ThinkingContent';
 
 const LONG_MESSAGE = Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n');
@@ -27,6 +28,7 @@ describe('message disclosure state', () => {
   });
 
   beforeEach(() => {
+    writeShellLanguage('en');
     resetMessageDisclosureStateForTest();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -37,6 +39,7 @@ describe('message disclosure state', () => {
     act(() => root.unmount());
     container.remove();
     window.history.replaceState(null, '', '/');
+    window.localStorage.removeItem(SHELL_LANGUAGE_STORAGE_KEY);
   });
 
   it('renders the complete long message without disclosure chrome in export mode', () => {

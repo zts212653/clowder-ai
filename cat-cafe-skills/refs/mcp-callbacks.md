@@ -26,8 +26,11 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | assigned cat 接/退 community route | `github_community_validate_route` | 已安装 GitHub 插件原生 action，输入 `{id, payload}` |
 | 记录 external review verdict + delivery | `github_record_external_review_verdict` | 已安装 GitHub 插件原生 action，按当前工具 schema 提交 |
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
-| 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
 | 创建 rich block | `cat_cafe_create_rich_block` | `POST /api/callbacks/create-rich-block` |
+| 回话下面挂一键提议（F335） | `cat_cafe_offer_suggestion` | `POST /api/callbacks/suggestions` |
+| 消息下面挂一行回执 | `cat_cafe_post_action_receipt` | `POST /api/callbacks/suggestion-receipts` |
+| 把做好的作品交桌面猫带给人（F335 交付三） | `cat_cafe_bring_to_desk` | `POST /api/callbacks/desk-deliveries` |
+| 读提议按种类的事实 / 不再提某类 | `cat_cafe_suggestion_facts` | `POST /api/callbacks/suggestion-facts` |
 | 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |
 | 开多猫 vote | `cat_cafe_start_vote` | `POST /api/callbacks/start-vote` |
 

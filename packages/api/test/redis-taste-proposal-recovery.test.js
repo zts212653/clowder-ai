@@ -5,6 +5,7 @@ import {
   cleanupPrefixedRedisKeys,
   redisIsolationSkipReason,
 } from './helpers/redis-test-helpers.js';
+import { publicTasteApprovalEvidence } from './helpers/taste-source-fixture.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 const KEY_PATTERNS = [
@@ -51,6 +52,8 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
       userId: 'user-1',
       catId: 'codex-sol',
       threadId: 'thread-1',
+      sourceMessageId: 'taste-redis-source',
+      approvalOriginRef: { kind: 'message', threadId: 'thread-1', messageId: 'taste-redis-source' },
       scene: 'durable Git write completed before process loss',
       quote: 'resume safely',
       takeaway: '我们以为 You 喜欢可恢复的审批。',
@@ -64,9 +67,8 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
       ownerUserId: proposal.userId,
       requesterCatId: proposal.catId,
       originRef: {
-        kind: 'event',
-        anchor: 'test:redis-taste-recovery',
-        summary: 'Redis taste proposal crash recovery fixture',
+        kind: 'message',
+        messageId: 'taste-redis-source',
         threadId: proposal.threadId,
       },
       approvalCardRef: { threadId: proposal.threadId, messageId: 'message-redis-taste-recovery' },
@@ -88,6 +90,7 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
     let writerCalls = 0;
     const deps = {
       store: afterRestart,
+      ...publicTasteApprovalEvidence(await afterRestart.get(proposal.id)),
       lock: new SessionMutex(),
       lockKey: () => '/repo/docs/taste/index.md',
       writeVignette: async () => {
@@ -202,5 +205,55 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
     assert.equal((await store.listCorrectionsBySource('user-correction', sourceAnchor)).length, 1);
     await store.markRejected(secondId, 'Not applicable', 'user-correction');
     assert.deepEqual(await store.listCorrectionsBySource('user-correction', sourceAnchor), []);
+  });
+
+  it('persists the exact owner decision through restart and fences changed approving content', async () => {
+    const { tasteContentSnapshot, tasteDecisionSnapshot } = await import(
+      '../dist/domains/taste/services/taste-decision-snapshot.js'
+    );
+    const store = new RedisTasteProposalStore(redis);
+    const originRef = { kind: 'message', threadId: 'proof-thread', messageId: 'proof-source' };
+    const proposal = await store.create({
+      userId: 'proof-owner',
+      catId: 'opus',
+      threadId: 'proof-thread',
+      sourceMessageId: 'proof-source',
+      approvalOriginRef: originRef,
+      scene: 'Complete scene',
+      quote: 'First quote',
+      resolvedQuotes: ['First quote', 'Second quote'],
+      tags: ['proof'],
+      dimension: 'cognitive-honesty',
+      privacy: 'public',
+    });
+    await store.commitEnvelope(proposal.id, {
+      canonicalProposalId: proposal.id,
+      sourceFeatureId: 'F221',
+      ownerUserId: proposal.userId,
+      requesterCatId: proposal.catId,
+      originRef,
+      approvalCardRef: { threadId: proposal.threadId, messageId: 'proof-card' },
+      createdAt: proposal.createdAt,
+    });
+    const snapshot = tasteDecisionSnapshot(await store.get(proposal.id));
+    assert.ok(snapshot);
+    const claimed = await store.claimForApproval(proposal.id, proposal.userId, snapshot);
+    assert.equal(claimed.decisionDigest, snapshot.digest);
+    const restarted = new RedisTasteProposalStore(redis);
+    const current = await restarted.get(proposal.id);
+    assert.equal(current.decisionDigest, snapshot.digest);
+    assert.equal(current.approvedBy, proposal.userId);
+    assert.deepEqual(current.resolvedQuotes, ['First quote', 'Second quote']);
+    assert.equal(tasteContentSnapshot(current).digest, snapshot.digest);
+    await redis.hset(`taste-proposal:${proposal.id}`, 'quote', 'Changed after approval');
+    assert.equal(await restarted.recordApprovalProof(proposal.id, proposal.userId, snapshot), null);
+    await redis.hset(`taste-proposal:${proposal.id}`, 'quote', proposal.quote);
+    assert.equal(
+      (await restarted.recordApprovalProof(proposal.id, proposal.userId, snapshot)).decisionDigest,
+      snapshot.digest,
+    );
+    assert.equal(await restarted.recordApprovalProof(proposal.id, 'other-owner', snapshot), null);
+    await restarted.rollbackClaim(proposal.id);
+    assert.equal((await restarted.get(proposal.id)).decisionDigest, undefined);
   });
 });

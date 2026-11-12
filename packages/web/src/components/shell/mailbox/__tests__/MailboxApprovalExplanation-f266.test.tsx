@@ -6,10 +6,10 @@ import {
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { F266ApprovalAdapter } from '../../../../../../api/src/domains/approval-hub/adapters/F266ApprovalAdapter';
-import { EvalRepairApprovalService } from '../../../../../../api/src/infrastructure/harness-eval/eval-repair-approval';
-import type { IReevalClosureEventLog } from '../../../../../../api/src/infrastructure/harness-eval/reeval-closure-event-log';
-import type { EvalLifecycleEvent } from '../../../../../../api/src/infrastructure/harness-eval/reeval-closure-schema';
+import { F266ApprovalAdapter } from '../../../../../../api/dist/domains/approval-hub/adapters/F266ApprovalAdapter';
+import { EvalRepairApprovalService } from '../../../../../../api/dist/infrastructure/harness-eval/eval-repair-approval';
+import type { IReevalClosureEventLog } from '../../../../../../api/dist/infrastructure/harness-eval/reeval-closure-event-log';
+import type { EvalLifecycleEvent } from '../../../../../../api/dist/infrastructure/harness-eval/reeval-closure-schema';
 import { EvalRepairDecisionDetails } from '../../../rich/eval-repair/EvalRepairDecisionDetails';
 import { evalRepairModel } from '../../../rich/eval-repair-model';
 

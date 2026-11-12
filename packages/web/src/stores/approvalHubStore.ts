@@ -23,17 +23,24 @@ import { isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { createApprovalDecisionActions } from './approval-decision-actions';
-import { consumeDecisionAttempt, type DecisionAttempts } from './approval-decision-attempts';
+import {
+  consumeDecisionAttempt,
+  type DecisionAttempts,
+  isScheduleDriftBlocked,
+  type ScheduleDriftBlocked,
+} from './approval-decision-attempts';
 import {
   applyConflictFeedback,
   type DecidingMap,
   type DecisionErrorBody,
   decisionErrorMessage,
   resolveEndpoint,
+  tasteApprovalRequest,
 } from './approval-decision-http';
 
 /** Result of a batch operation for a single item. */
 interface BatchItemResult {
+  code?: 'SCHEDULE_TASK_DRIFT';
   proposalId: string;
   success: boolean;
   error?: string;
@@ -55,6 +62,8 @@ interface ApprovalHubState {
    * Not part of `items`/`count`, not a lifecycle: absence never means success.
    */
   decisionAttempts: DecisionAttempts;
+  scheduleDriftBlocked: ScheduleDriftBlocked;
+  rememberScheduleDrift: (item: Pick<ApprovalHubItem, 'proposalId' | 'ownerUserId' | 'createdAt'>) => void;
   /** Drop an attempt once a host has read it; a no-op unless it is still the attempt the caller saw. */
   consumeDecisionAttempt: (proposalId: string, attemptId: number) => void;
   /** AC-D5: Set of selected proposalIds for batch operations */
@@ -78,7 +87,7 @@ interface ApprovalHubState {
   close: () => void;
   toggle: () => void;
   /** F246 Phase B: approve an inlineApprovable dispatch proposal */
-  approveProposal: (proposalId: string) => Promise<void>;
+  approveProposal: (proposalId: string, displayedDigest?: string) => Promise<void>;
   /** F246 Phase B: reject an inlineApprovable dispatch proposal */
   rejectProposal: (proposalId: string, feedback?: HumanDispositionFeedbackInput) => Promise<boolean>;
   /** F276: approve an exact subset of the proposal's remaining drafts. */
@@ -111,6 +120,14 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
   error: null,
   deciding: {},
   decisionAttempts: {},
+  scheduleDriftBlocked: {},
+  rememberScheduleDrift: (item) =>
+    set((state) => ({
+      scheduleDriftBlocked: {
+        ...state.scheduleDriftBlocked,
+        [item.proposalId]: { ownerUserId: item.ownerUserId, createdAt: item.createdAt },
+      },
+    })),
   selectedIds: new Set<string>(),
   batchResults: [],
   settledItems: [],
@@ -187,7 +204,12 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
 
   batchApprove: async () => {
     const { selectedIds, items } = get();
-    const targets = items.filter((i) => selectedIds.has(i.proposalId) && isApprovalItemBatchDecidable(i));
+    const targets = items.filter(
+      (i) =>
+        selectedIds.has(i.proposalId) &&
+        isApprovalItemBatchDecidable(i) &&
+        !isScheduleDriftBlocked(i, get().scheduleDriftBlocked),
+    );
     if (targets.length === 0) return [];
 
     const results: BatchItemResult[] = [];
@@ -202,9 +224,14 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
     // Execute sequentially to avoid overwhelming the server
     for (const t of targets) {
       try {
-        const res = await apiFetch(resolveEndpoint(t.sourceFeatureId, t.proposalId, 'approve'), { method: 'POST' });
+        const res = await apiFetch(resolveEndpoint(t.sourceFeatureId, t.proposalId, 'approve'), {
+          method: 'POST',
+          ...tasteApprovalRequest(t.sourceFeatureId, t.detail.decisionDigest),
+        });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
+          const drift = t.sourceFeatureId === 'F139' && res.status === 409 && data.code === 'SCHEDULE_TASK_DRIFT';
+          if (drift) get().rememberScheduleDrift(t);
           if (data.conflict) {
             const message = decisionErrorMessage(data, `${res.status}`);
             set((state) => ({
@@ -214,6 +241,7 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
           results.push({
             proposalId: t.proposalId,
             success: false,
+            ...(drift ? { code: 'SCHEDULE_TASK_DRIFT' as const } : {}),
             error: decisionErrorMessage(data, `${res.status}`),
           });
         } else {
@@ -310,6 +338,7 @@ apiSessionIdentity.subscribe(() => {
       settledRequestVersion: state.settledRequestVersion + 1,
       selectedIds: new Set(),
       decisionAttempts: {},
+      scheduleDriftBlocked: {},
       deciding: {},
     }));
   }

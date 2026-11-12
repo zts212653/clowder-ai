@@ -46,7 +46,8 @@ export interface ResponseDraftSettlementDeps {
    * response-pending ledger entry clears once R is confirmed terminal. Without it the fence cannot
    * be read, so no draft is published.
    */
-  turnStore?: Pick<ITurnExecutionStore, 'get' | 'clearResponsePending'>;
+  turnStore?: Pick<ITurnExecutionStore, 'get' | 'clearResponsePending'> &
+    Partial<Pick<ITurnExecutionStore, 'markResponseSettled'>>;
   /**
    * Resolves the fence of a turn recorded before the fence existed: its parent invocation records
    * whether the dispatch carried action custody. Without it such a turn's draft is withheld.
@@ -59,6 +60,8 @@ export interface ResponseDraftSettlementDeps {
 }
 
 export interface ResponseDraftSettlementInput {
+  /** Only the route which completed without admitting R can supply this fact. A recovery read returning null cannot. */
+  noResponseProof?: 'route_completed_without_response_admission';
   userId: string;
   threadId: string;
   /** The child turn id that keys both R and its draft. */
@@ -98,9 +101,21 @@ export async function settleResponseFromDraft(
     lifecycleResponseIdempotencyKey(input.invocationId),
   );
   if (response?.lifecycle?.kind !== 'response') {
+    const child = await deps.turnStore?.get(input.invocationId);
+    if (
+      child?.executionKind === 'ordinary' &&
+      child.responseSettlement?.kind !== 'no_response' &&
+      input.noResponseProof !== 'route_completed_without_response_admission'
+    )
+      throw new Error('response_admission_unconfirmed');
     // No R will ever take this draft's body. Drafts no longer expire (F117 KD-23), so it goes before
     // the turn leaves the ledger, like every other settlement.
     await deps.draftStore?.delete(input.userId, input.threadId, input.invocationId);
+    await deps.turnStore?.markResponseSettled?.(input.invocationId, {
+      kind: 'no_response',
+      reason: 'recovered_no_response',
+      settledAt: Math.max(Date.now(), input.endedAt),
+    });
     await deps.turnStore?.clearResponsePending(input.invocationId);
     return { kind: 'no_response' };
   }
@@ -127,6 +142,11 @@ export async function settleResponseFromDraft(
   await settleLifecycleResponseInputs(deps.messageStore, settled.message, settled.message.id);
   deps.emit?.(input.userId, settled.message);
   await deps.draftStore?.delete(input.userId, input.threadId, input.invocationId);
+  await deps.turnStore?.markResponseSettled?.(input.invocationId, {
+    kind: 'message',
+    messageId: settled.message.id,
+    settledAt: Math.max(Date.now(), input.endedAt),
+  });
   await deps.turnStore?.clearResponsePending(input.invocationId);
   return settled;
 }

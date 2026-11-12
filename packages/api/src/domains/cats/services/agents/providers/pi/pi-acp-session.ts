@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs';
 import { PiAcpEvents } from './pi-acp-events.js';
-import { type PiRecord, PiRpcProcess, PiRpcRequestRejectedError, record } from './pi-rpc-process.js';
+import { PiDiagnosticError, type PiRecord, PiRpcProcess, PiRpcRequestRejectedError, record } from './pi-rpc-process.js';
 import { piSessionLaunch } from './pi-session-launch.js';
 import { piMcpExtension } from './pi-session-mcp.js';
 import { assertPiNativeIdentity, type PiSessionSlot } from './pi-session-store.js';
@@ -160,7 +160,17 @@ export class PiAcpSession {
         finished = true;
         if (cancelled || event.aborted === true) complete('cancelled');
         else if (events.failure) fail(events.failure);
-        else if (!events.completedAssistant) fail(new Error('Pi settled without a completed assistant response'));
+        else if (!events.completedAssistant)
+          fail(
+            new PiDiagnosticError('Pi settled without a completed assistant response', this.rpc.diagnosticContext()),
+          );
+        else if (!events.hasResponseOutput)
+          fail(
+            new PiDiagnosticError(
+              'Pi settled without usable assistant text or tool calls',
+              this.rpc.diagnosticContext(),
+            ),
+          );
         else complete('end_turn');
       }
     });

@@ -66,23 +66,45 @@ export function AccountConnectionFields({
   clearError: () => void;
 }) {
   const t = useShellCopy(accountFormCopy);
+  const selectedClient = initialClientId ?? clientId;
+  const isPlatformKey = !isOAuth && ['anthropic', 'openai', 'google'].includes(selectedClient ?? '');
+  const isAnthropicKey = !isOAuth && selectedClient === 'anthropic';
+  const isGoogleKey = !isOAuth && selectedClient === 'google';
+  const suggestedModels = selectedClient
+    ? (MODEL_SUGGESTIONS[selectedClient] ?? []).filter((model) => !models.includes(model))
+    : [];
   return (
     <>
       {/* API Key mode: Base URL + API Key */}
       {!isOAuth && (
         <>
           <div>
-            <label className="mb-1 block text-xs font-medium text-cafe-secondary">{t.baseUrl}</label>
+            <label className="mb-1 block text-xs font-medium text-cafe-secondary">
+              {isPlatformKey ? t.platformBaseUrl : t.baseUrl}
+            </label>
             <input
+              aria-label={t.baseUrl}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.openai.com/v1"
+              placeholder={
+                isAnthropicKey
+                  ? 'https://api.anthropic.com'
+                  : isGoogleKey
+                    ? 'https://aiplatform.googleapis.com'
+                    : 'https://api.openai.com/v1'
+              }
               className={formInputClass}
             />
+            {isPlatformKey && (
+              <p className="mt-1 text-xs text-cafe-muted">
+                {isAnthropicKey ? t.anthropicPlatformHint : isGoogleKey ? t.googlePlatformHint : t.platformHint}
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-cafe-secondary">API Key{isEdit && t.keyKeep}</label>
             <input
+              aria-label="API Key"
               type="password"
               autoComplete="off"
               value={apiKey}
@@ -90,7 +112,7 @@ export function AccountConnectionFields({
                 setApiKey(e.target.value);
                 clearError();
               }}
-              placeholder={isEdit ? '••••••••••••' : 'sk-...'}
+              placeholder={isEdit ? '••••••••••••' : isAnthropicKey ? 'sk-ant-...' : isGoogleKey ? 'AIza...' : 'sk-...'}
               className={formInputClass}
             />
           </div>
@@ -109,30 +131,26 @@ export function AccountConnectionFields({
               commitLabel={t.commitModel}
               removeLabel={t.removeModel}
               placeholder={t.modelHint}
-              emptyLabel={isOAuth ? t.modelsOptional : t.modelsRequired}
+              emptyLabel={isPlatformKey ? t.platformModelsOptional : isOAuth ? t.modelsOptional : t.modelsRequired}
               onChange={setModels}
               minCount={0}
             />
             {/* Model suggestions for builtin clients */}
-            {isOAuth &&
-              clientId &&
-              (MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  <span className="text-micro text-cafe-muted">{t.recommended}</span>
-                  {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? [])
-                    .filter((m) => !models.includes(m))
-                    .map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setModels([...models, m])}
-                        className="rounded-full border border-dashed border-[var(--console-border-soft)] px-2 py-0.5 text-micro text-cafe-secondary transition hover:border-cafe-accent hover:text-cafe-accent"
-                      >
-                        + {m}
-                      </button>
-                    ))}
-                </div>
-              )}
+            {isOAuth && clientId && suggestedModels.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <span className="text-micro text-cafe-muted">{t.recommended}</span>
+                {suggestedModels.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setModels([...models, m])}
+                    className="rounded-full border border-dashed border-[var(--console-border-soft)] px-2 py-0.5 text-micro text-cafe-secondary transition hover:border-cafe-accent hover:text-cafe-accent"
+                  >
+                    + {m}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* F171: 高级配置 — collapsible env var injection */}

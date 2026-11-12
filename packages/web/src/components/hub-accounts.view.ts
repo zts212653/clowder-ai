@@ -21,14 +21,14 @@ export function normalizeBuiltinClientIds(profiles: ProfileItem[]): ProfileItem[
   });
 }
 
-export function builtinClientLabel(client?: BuiltinAccountClient): string {
+export function builtinClientLabel(client?: BuiltinAccountClient, authType?: ProfileItem['authType']): string {
   switch (client) {
     case 'anthropic':
-      return 'Claude';
+      return authType === 'api_key' ? 'Anthropic API' : 'Claude';
     case 'openai':
-      return 'Codex';
+      return authType === 'api_key' ? 'OpenAI Platform' : 'Codex';
     case 'google':
-      return 'Gemini';
+      return authType === 'api_key' ? 'Google API' : 'Gemini';
     case 'kimi':
       return 'Kimi';
     case 'opencode':
@@ -38,6 +38,11 @@ export function builtinClientLabel(client?: BuiltinAccountClient): string {
     default:
       return 'Builtin';
   }
+}
+
+/** A Google Cloud login account is not the Gemini CLI login, although both are Google OAuth. */
+export function googleCloudLabel(profile: Pick<ProfileItem, 'googleCloud'>): string | null {
+  return profile.googleCloud ? `Google Cloud（Vertex AI · ${profile.googleCloud.projectId}）` : null;
 }
 
 export function accountTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {

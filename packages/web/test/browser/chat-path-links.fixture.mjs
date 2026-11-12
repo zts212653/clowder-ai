@@ -10,6 +10,7 @@ import { resolveWorkspaceContentRoot } from '../../../api/dist/domains/workspace
 import { workspaceRoutes } from '../../../api/dist/routes/workspace.js';
 import { registerWorkspaceContentReviewRoutes } from '../../../api/dist/routes/workspace-content-review-routes.js';
 import { seedChatPathDesignSample } from './chat-path-design.fixture.mjs';
+import { installChatPathGitHubFixture } from './chat-path-github.fixture.mjs';
 import { createInboxProposalFixture } from './f322-inbox-proposal.fixture.mjs';
 
 const web = fileURLToPath(new URL('../..', import.meta.url));
@@ -39,7 +40,8 @@ export async function createChatPathFixture(language) {
     configureRuntime: async ({ app, owner, threads, messages }) => {
       const root = await mkdtemp(path.join(tmpdir(), 'f322-chat-paths-'));
       const reviewState = await mkdtemp(path.join(tmpdir(), 'f322-chat-reviews-'));
-      let reviews;
+      let reviews,
+        restoreGitHub = () => {};
       const fileSourceRequests = [];
       app.addHook('onSend', async (request, reply, payload) => {
         if (request.url === '/api/workspace/resolve-file-source' && fileSourceRequests.length < 64) {
@@ -175,6 +177,7 @@ export async function createChatPathFixture(language) {
           content: '`../shared/index.md:2`\n\n`../shared/gone.md`\n\n`' + path.join(alias, 'docs/archive.7z') + '`',
         });
         const design = await seedChatPathDesignSample({ app, root, owner, threads, messages, language });
+        restoreGitHub = await installChatPathGitHubFixture(reviewState, sha, design.commit);
         await app.register(workspaceRoutes, { threadStore: threads });
         reviews = createWorkspaceContentReviewComposition({ dataDir: reviewState, ownerUserId: owner });
         registerWorkspaceContentReviewRoutes(app, {
@@ -198,12 +201,14 @@ export async function createChatPathFixture(language) {
           close: async () => {
             closeReviews();
             restoreLinkedRoots();
+            restoreGitHub();
             await Promise.all([root, reviewState].map((directory) => rm(directory, { recursive: true, force: true })));
           },
         };
       } catch (error) {
         closeReviews();
         restoreLinkedRoots();
+        restoreGitHub();
         await Promise.all([root, reviewState].map((directory) => rm(directory, { recursive: true, force: true })));
         throw error;
       }

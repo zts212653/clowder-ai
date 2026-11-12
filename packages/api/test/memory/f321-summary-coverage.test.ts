@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { createAbstractiveClient } from '../../src/domains/memory/AbstractiveSummaryClient.js';
 import type { SummaryAttempt } from '../../src/domains/memory/abstractive-summary-types.js';
+import { createLunaCurationClient } from '../../src/domains/memory/LunaCurationClient.js';
 import { processThread, type SummaryCompactionDeps } from '../../src/domains/memory/SummaryCompactionTask.js';
 import { applyMigrations } from '../../src/domains/memory/schema.js';
 import { SUMMARY_CONFIG } from '../../src/domains/memory/summary-config.js';
@@ -165,31 +165,40 @@ test('invalid coverage records the final failure while retaining generation usag
   ]);
 });
 
-for (const failure of ['second fragment fails', 'model output reaches token limit']) {
+for (const failure of ['second fragment fails', 'native output reaches token limit']) {
   test(`${failure} leaves the entire oversized message unacknowledged`, async () => {
-    const prior = globalThis.fetch;
     let calls = 0;
-    globalThis.fetch = async () => {
-      calls++;
-      if (failure === 'second fragment fails' && calls === 2) return new Response('unavailable', { status: 503 });
-      return Response.json({
-        content: [{ type: 'text', text: '# Fixture\n\nUseful summary.' }],
-        stop_reason: failure === 'model output reaches token limit' ? 'max_tokens' : 'end_turn',
-      });
-    };
-    try {
-      const client = createAbstractiveClient(
-        async () => ({ mode: 'api_key', apiKey: 'fixture', baseUrl: 'https://fixture.invalid' }),
-        { info() {}, error() {} },
-      );
-      const result = await run(client, [{ id: 'oversized', content: 'x'.repeat(170000), timestamp: 1000 }]);
-      assert.equal(result.changed, false);
-      assert.equal(result.state.last_summarized_message_id, null);
-      assert.equal(result.segments.length, 0);
-      assert.equal(calls, failure === 'second fragment fails' ? 2 : 1);
-    } finally {
-      globalThis.fetch = prior;
-    }
+    const client = createLunaCurationClient({
+      workingDirectory: '/tmp',
+      logger: { info() {}, error() {} },
+      resolveService: () => ({
+        catId: 'codex6-luna',
+        model: 'fixture-model',
+        service: {
+          async *invoke() {
+            calls++;
+            if (failure === 'second fragment fails' && calls === 2) throw new Error('unavailable');
+            yield {
+              type: 'text',
+              catId: 'codex6-luna',
+              timestamp: 0,
+              content: '# Fixture\nUseful summary [sources: oversized]',
+            };
+            yield {
+              type: 'done',
+              catId: 'codex6-luna',
+              timestamp: 1,
+              ...(failure === 'native output reaches token limit' ? { errorCode: 'max_tokens' } : {}),
+            };
+          },
+        },
+      }),
+    });
+    const result = await run(client, [{ id: 'oversized', content: 'x'.repeat(170000), timestamp: 1000 }]);
+    assert.equal(result.changed, false);
+    assert.equal(result.state.last_summarized_message_id, null);
+    assert.equal(result.segments.length, 0);
+    assert.equal(calls, failure === 'second fragment fails' ? 2 : 1);
   });
 }
 

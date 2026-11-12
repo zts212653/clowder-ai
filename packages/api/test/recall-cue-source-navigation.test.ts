@@ -71,14 +71,17 @@ it('links a person cue to its revision-checked original message, never its curre
   const view = await read({
     threadStore: threads,
     personMemoryStore: { getPerson: async () => ({ ownerUserId: 'owner', status: 'active', displayName: '人物名字' }) },
-    cueSourceReader: {
-      read: async (input) => {
-        assert.equal(input.expectedRevision, 'delivered-card-revision');
-        return { status: 'ok', payload: { displayName: '人物名字', provenanceRefs: [ref], facts: ['PRIVATE'] } };
-      },
+    personDeliveryReader: async (_owner, _id, revision) => {
+      assert.equal(revision, 'delivered-card-revision');
+      return { status: 'ready', displayName: '人物名字', message: ref };
     },
   });
   assert.equal(view.href, href(ref));
+  assert.equal(view.messageHref, href(ref));
+  assert.equal(
+    view.memoryHref,
+    '/memory?family=person&memoryId=person_one&revision=delivered-card-revision&from=current',
+  );
   assert.equal(view.title, '人物名字');
   assert.ok(!JSON.stringify(view).includes('PRIVATE'));
 });
@@ -89,23 +92,21 @@ it('does not revive a corrected person cue from a readable current person name',
     personMemoryStore: {
       getPerson: async () => ({ ownerUserId: 'owner', status: 'active', displayName: 'Current name' }),
     },
-    cueSourceReader: { read: async () => ({ status: 'not_available', invalidationReason: 'source_corrected' }) },
+    personDeliveryReader: async () => ({ status: 'version_changed' }),
   });
   assert.equal(view.href, null);
   assert.equal(view.title, undefined);
   assert.equal(view.sourceUnavailableReason, 'source_corrected');
 });
 
-it('never links a person provenance into a foreign thread or invents a source for owner-only records', async () => {
-  const ref = source('other');
+it('keeps owner-readable person memory navigable when its original message is unavailable', async () => {
   seed('person_entity', 'person-memory:person_one', 'card');
-  for (const provenanceRefs of [[ref], []]) {
-    const view = await read({
-      threadStore: threads,
-      cueSourceReader: { read: async () => ({ status: 'ok', payload: { displayName: '人物名字', provenanceRefs } }) },
-    });
-    assert.equal(view.href, null);
-  }
+  const view = await read({
+    personDeliveryReader: async () => ({ status: 'ready', displayName: '人物名字', message: null }),
+  });
+  assert.equal(view.messageHref, null);
+  assert.equal(view.title, '人物名字');
+  assert.match(view.memoryHref ?? '', /family=person/);
 });
 
 function taste() {
@@ -125,7 +126,7 @@ function taste() {
   const sourcePath = 'docs/taste/vignettes/cue-source.md';
   assert.ok(proposalStore.claimForApproval(proposal.id, 'owner'));
   assert.ok(proposalStore.finalizeApproval(proposal.id, 'owner', 'cue-source', sourcePath));
-  const content = `---\nwhen: 先核真实来源\nquotes: ["PRIVATE quote"]\nscene: PRIVATE scene\ntags: [truth]\ndimension: cognitive-honesty\nprivacy: public\nproposalId: ${proposal.id}\n---\n`;
+  const content = `---\nwhen: 2026-11-09\ntakeaway: 先核真实来源\nquotes: ["PRIVATE quote"]\nscene: PRIVATE scene\ntags: [truth]\ndimension: cognitive-honesty\nprivacy: public\nproposalId: ${proposal.id}\n---\n`;
   mkdirSync(join(root, 'docs/taste/vignettes'), { recursive: true });
   writeFileSync(join(root, sourcePath), content);
   const revision = `sha256:${createHash('sha256').update(content).digest('hex')}`;
@@ -145,6 +146,8 @@ it('links a taste cue through its settled proposal and exact canonical vignette 
   seed('taste', `taste-vignette:${item.sourcePath}`, item.revision);
   const view = await read({ tasteSources: item.readers });
   assert.equal(view.href, href(item.ref));
+  assert.equal(view.messageHref, href(item.ref));
+  assert.match(view.memoryHref ?? '', /^\/memory\?family=taste&memoryId=taste-[a-f0-9]{24}&revision=sha256%3A/);
   assert.equal(view.title, '先核真实来源');
   assert.ok(!JSON.stringify(view).includes('PRIVATE'));
 });
@@ -171,8 +174,6 @@ it('does not relabel the configured taste repository as another requesting owner
       consumer_cat_id: 'sonnet',
     },
     { ownerUserId: 'other', threadId: 'current' },
-    async () => ({ href: null }),
-    undefined,
     { tasteSources: { ...item.readers, ownerUserId: 'owner' } },
   );
   assert.equal(view?.title, undefined);
@@ -216,6 +217,8 @@ it('opens an old event source as its owner without extending the model short-liv
     },
   });
   assert.equal(view.href, href(item.ref));
+  assert.equal(view.messageHref, href(item.ref));
+  assert.match(view.memoryHref ?? '', /^\/memory\?family=event&memoryId=evt_history&revision=sha256%3A/);
   assert.equal(view.title, item.record.summary);
   const modelReader = new EventMemoryCueSource({
     ownerUserId: 'owner',
@@ -259,4 +262,24 @@ it('keeps event revision, owner, and original-message visibility fences before p
     },
   });
   assert.equal(view.href, null);
+  assert.equal(view.title, item.record.summary);
+  assert.equal(view.titleStatus, undefined);
+  assert.match(view.memoryHref ?? '', /family=event/);
+});
+
+it('does not infer forgotten from an unavailable person without lifecycle evidence', async () => {
+  const view = await readOwnerMessageView(
+    {
+      invocation_id: 'inv',
+      cue_id: 'cue',
+      resolver_family: 'person_entity',
+      source_anchor: 'person-memory:person_unknown',
+      source_revision: 'old',
+      consumer_cat_id: 'sonnet',
+    },
+    { ownerUserId: 'owner', threadId: 'current' },
+    { personDeliveryReader: async () => ({ status: 'not_available' }) },
+  );
+  assert.equal(view?.titleStatus, 'unavailable');
+  assert.equal(view?.sourceUnavailableReason, undefined);
 });

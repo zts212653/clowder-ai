@@ -276,6 +276,7 @@ test('rechecks the staged tree after runtime-state projection and performs zero 
   };
   const inventory = {
     snapshot: () => harness.inventory.snapshot(),
+    readAuthority: (id) => harness.inventory.readAuthority(id),
     async transaction(work) {
       const result = await harness.inventory.transaction(work);
       if (mutationCount === 0) {
@@ -315,6 +316,14 @@ test('rejects traversal and symlink entrypoints before spawn', async (t) => {
     const supervisor = new ExternalPluginRuntimeSupervisor({
       inventory: {
         snapshot: async () => structuredClone(snapshot),
+        readAuthority: async (id) =>
+          id === EXTERNAL_INSTANCE_ID
+            ? {
+                instance: snapshot.instances[0],
+                current: snapshot.instances[0],
+                packageRecord: snapshot.packages[0],
+              }
+            : undefined,
         transaction: async () => assert.fail('traversal must reject before runtime state changes'),
       },
       broker: harness.broker,

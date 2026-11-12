@@ -16,8 +16,7 @@ export async function readArtifactPrTitles<T extends ThreadArtifactDTO>(
   ].slice(0, 20);
   const titles = new Map<string, string>();
   const pending = refs.values();
-  // Refresh at most the 20 most recent PR titles, with four readers and one shared deadline.
-  // Older works remain in the catalogue; metadata decoration cannot turn a global read into unbounded GitHub requests.
+  // Read at most twenty local projections. Provider fetches belong to the separate background title lookup.
   const signal = AbortSignal.timeout(2_000);
   await Promise.all(
     Array.from({ length: Math.min(4, refs.length) }, async () => {
@@ -34,7 +33,7 @@ export async function readArtifactPrTitles<T extends ThreadArtifactDTO>(
   );
   return artifacts.map((artifact) => {
     if (artifact.type !== 'pr' || !artifact.ref) return artifact;
-    const name = titles.get(artifact.ref) ?? (artifact.name.startsWith('PR tracking: ') ? artifact.ref : artifact.name);
+    const name = titles.get(artifact.ref) ?? artifact.ref;
     return name === artifact.name ? artifact : { ...artifact, name };
   });
 }

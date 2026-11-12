@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { parseSharedInvocationContext, type SharedInvocationContext } from '../shared-invocation-context.js';
 
 export interface InvocationCredentialValues {
+  /** Host-owned native tool admission; never populated from MCP arguments or model metadata. */
+  watcherAdmission?: { callId: string; toolName: string };
   invocationId: string | undefined;
   callbackToken: string | undefined;
   /**
@@ -24,6 +26,13 @@ export interface InvocationCredentialValues {
 }
 
 const requestCredentials = new AsyncLocalStorage<InvocationCredentialValues>();
+const watcherToolCall = new AsyncLocalStorage<string>();
+export function withWatcherToolCall<T>(callId: string, operation: () => T): T {
+  return watcherToolCall.run(callId, operation);
+}
+export function currentWatcherAdmission() {
+  return requestCredentials.getStore()?.watcherAdmission;
+}
 
 /** Native carriers bind credentials per runtime turn, never by mutating process.env. */
 export function withInvocationCredentials<T>(credentials: InvocationCredentialValues, run: () => T): T {
@@ -47,7 +56,10 @@ export function resolveInvocationRequestSignal(signal?: AbortSignal | null): Abo
 /** Preserve each helper's timeout while cancelling only its admitted request. */
 export const invocationFetch: typeof fetch = (input, init) => {
   const signal = resolveInvocationRequestSignal(init?.signal ?? (input instanceof Request ? input.signal : undefined));
-  return fetch(input, signal ? { ...init, signal } : init);
+  const callId = watcherToolCall.getStore();
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  if (callId) headers.set('x-watcher-tool-call-id', callId);
+  return fetch(input, { ...init, ...(signal ? { signal } : {}), ...(callId ? { headers } : {}) });
 };
 
 function readCredentialFile(): { invocationId: string; callbackToken: string } | null {

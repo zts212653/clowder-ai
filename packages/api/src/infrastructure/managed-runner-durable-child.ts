@@ -6,6 +6,7 @@ import {
   createDurableManagedGateAttempt,
   type DurableManagedGateCleanupSignal,
 } from './managed-runner-durable-attempt.js';
+import { managedShellInvocation } from './managed-runner-environment.js';
 
 export interface DurableManagedGateChildResult {
   readonly code: number | null;
@@ -43,6 +44,8 @@ export function spawnDurableManagedGateAttempt(input: {
   readonly reconcileFrom: number | null;
   readonly capture: (chunk: Buffer) => void;
   readonly beforeSpawn?: (attemptToken: string) => void;
+  /** Ordinary cat commands yield CPU and disk to the API on macOS; gates keep standard priority. */
+  readonly yieldToApi?: boolean;
 }): DurableManagedGateAttemptProcess {
   const attempt = createDurableManagedGateAttempt(
     input.job,
@@ -51,8 +54,11 @@ export function spawnDurableManagedGateAttempt(input: {
     input.reconcileFrom,
   );
   input.beforeSpawn?.(attempt.attemptToken);
-  const child = spawn(input.command, {
-    shell: true,
+  const invocation = input.yieldToApi
+    ? managedShellInvocation(input.command)
+    : { file: input.command, args: [], shell: true };
+  const child = spawn(invocation.file, invocation.args, {
+    shell: invocation.shell,
     cwd: input.cwd,
     env: { ...input.environment, ...attempt.environment },
     stdio: ['ignore', 'pipe', 'pipe'],

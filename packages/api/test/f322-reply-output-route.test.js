@@ -291,13 +291,19 @@ for (const [name, route] of [
     assert.deepEqual(live.filter((event) => event.type === 'done').at(-1).extra.outputLayout, layout);
   });
 
-  for (const toolAfter of ['first delta', 'all deltas'])
-    test(`${name}: signature removal after an interleaved tool preserves one answer (${toolAfter})`, async () => {
+  for (const [toolAfter, inherited] of ['first delta', 'all deltas'].flatMap((toolAfter) =>
+    [false, true].map((inherited) => [toolAfter, inherited]),
+  ))
+    test(`${name}: signature removal after an interleaved tool preserves one answer (${toolAfter}, inherited=${inherited})`, async () => {
       const { deps, records, live } = fixture();
       const signature = '[Sol/gpt-6.1-sol🐾]';
       const body = '结论一\n\n结论二';
       deps.services.codex.invoke = async function* () {
-        const state = { hadPriorTextTurn: false, signatureIdentity: 'Sol', canonicalSignature: signature };
+        const state = {
+          hadPriorTextTurn: false,
+          signatureIdentity: 'Sol',
+          canonicalSignature: inherited ? undefined : signature,
+        };
         for (const [index, delta] of ['结论一', `\n\n结论二\n\n${signature}`].entries()) {
           yield transformCodexEvent(
             { type: 'item.agent_message.delta', thread_id: 'native', turn_id: 'turn', item_id: 'answer', delta },
@@ -335,6 +341,10 @@ for (const [name, route] of [
       assert.equal(stored.content.split('结论二').length - 1, 1);
       assert.equal(stored.content.split(signature).length - 1, 1);
       assert.equal(stored.extra.outputLayout.status, 'available');
+      assert.equal(
+        stored.extra.outputLayout.hostTail.basis,
+        inherited ? 'provider_observed_fallback' : 'runtime_canonical',
+      );
     });
 
   for (const interleaved of [false, true])

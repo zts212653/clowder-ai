@@ -210,7 +210,6 @@ export function WorkspaceDestinationOwnerSurface({
       <ChangesPanel
         worktreeId={target.worktreeId}
         pullRequestTarget={target}
-        chatSource={surface.navigationOrigin?.kind === 'chat-file-link'}
         basisPct={40}
         onBack={onReturnToNavigationOrigin}
       />

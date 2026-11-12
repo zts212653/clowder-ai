@@ -2,14 +2,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import { initialState } from '../hub-cat-editor.model';
+import { initialState, splitCommandArgs } from '../hub-cat-editor.model';
 import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
 import { matchesRuntime } from '../settings/members/member-runtime-draft';
+import { needsDshPreparation, prepareNativeMember } from '../settings/members/prepare-native-member';
 import { syncDraftToStorage } from '../thread-drafts';
 import { legacyCreationKey, legacySharedKey } from './legacy-creation-key';
 import { buildNativeCreationPayload } from './native-creation-payload';
 import { repairLegacyNativeIdentityFields } from './native-identity-repair';
 import {
+  hasNativeIdentityConflict,
   type NativePartner,
   nativeRuntimeSelectable,
   newNativeRequestKey,
@@ -37,11 +39,21 @@ interface SetupDraft {
   /** Only a new, verified empty roster may prepare the personal entry reminder. */
   initialRosterEmpty?: boolean;
 }
+class NativeCreationRejected extends Error {}
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init);
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `请求失败 (${response.status})`);
+    const body = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    const message = body?.error ?? `请求失败 (${response.status})`;
+    // These responses precede catalog mutation. Generic 400s may come from post-write readback.
+    if (
+      path === '/api/cats' &&
+      init?.method === 'POST' &&
+      response.status === 400 &&
+      (body?.error === 'Invalid request' || body?.code === 'acp_profile_invalid')
+    )
+      throw new NativeCreationRejected(message);
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }
@@ -68,10 +80,19 @@ export function useNativeOnboarding(
   const [busy, setBusy] = useState('');
   const [reload, setReload] = useState(0);
   const key = useRef('');
+  const rosterCats = useRef<CatData[]>([]);
   const inFlight = useRef(false);
   const latest = useRef(draft);
   latest.current = draft;
   const persist = useCallback((next: SetupDraft) => {
+    const selected = next.partners.filter((partner) => partner.selected);
+    next = {
+      ...next,
+      partners: next.partners.map((partner) => ({
+        ...partner,
+        identityConflict: hasNativeIdentityConflict(partner, rosterCats.current, selected),
+      })),
+    };
     latest.current = next;
     setDraft(next);
     try {
@@ -109,20 +130,31 @@ export function useNativeOnboarding(
         }
         const journeyId = saved?.journeyId ?? newJourneyId();
         const currentCats = roster.cats;
+        rosterCats.current = currentCats;
         const partners = recommendNativePartners(discovered.runtimes, templates.templates, currentCats, journeyId).map(
           (partner) => {
-            const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
+            const previous = saved?.partners.find(
+              (p) =>
+                p.form &&
+                (matchesRuntime(p.form, partner.runtime) ||
+                  (partner.runtime.dshDesktop &&
+                    p.runtime?.id === partner.runtime.id &&
+                    p.runtime.acp?.command === partner.runtime.acp?.command)),
+            );
             if (!previous?.form) return partner;
+            // A prepared Desktop keeps its private HOME/patch across reopening this saved draft.
+            const runtime =
+              partner.runtime.dshDesktop && previous.runtime
+                ? { ...previous.runtime, installed: partner.runtime.installed }
+                : partner.runtime;
             const savedMember = currentCats.find(
-              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), partner.runtime),
+              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), runtime),
             );
             const acknowledged = saved?.created[partner.id] ?? saved?.created[previous.id];
             const confirmed = Boolean(previous.existingId || (acknowledged && savedMember?.id === acknowledged.id));
             const receiptMismatch =
               acknowledged &&
-              currentCats.some(
-                (cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), partner.runtime),
-              );
+              currentCats.some((cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), runtime));
             const restoredForm = confirmed && savedMember ? initialState(savedMember) : previous.form;
             // Repair a pre-identity default even when the draft is not confirmed:
             // a draft whose member is no longer in the roster (for example, a
@@ -131,13 +163,12 @@ export function useNativeOnboarding(
             // exists may be the exact body of a lost-response retry, so leave
             // that wire shape untouched.
             const identityRepair =
-              confirmed || !savedMember
-                ? repairLegacyNativeIdentityFields(restoredForm, partner.form, partner.runtime)
-                : {};
+              confirmed || !savedMember ? repairLegacyNativeIdentityFields(restoredForm, partner.form, runtime) : {};
             const identityChanged = Object.keys(identityRepair).length > 0;
             const form = identityChanged ? { ...restoredForm, ...identityRepair } : restoredForm;
-            return {
+            const restored = {
               ...partner,
+              runtime,
               // A repaired form is a new request: its old key may belong to a
               // different payload. A true lost-response retry keeps its key.
               creationRequestKey: receiptMismatch
@@ -148,15 +179,16 @@ export function useNativeOnboarding(
                     ? legacyCreationKey(previous, saved.partners)
                     : (previous.creationRequestKey ?? partner.creationRequestKey),
               legacySharedRequestKey: saved?.idScheme ? legacySharedKey(previous, saved.partners) : undefined,
+              creationForm: previous.creationForm,
               existingId: confirmed && savedMember ? savedMember.id : undefined,
               missingExisting: Boolean(previous.existingId && !savedMember),
               ...(!confirmed && savedMember && !saved?.idScheme
                 ? { recoverable: { id: savedMember.id, form: initialState(savedMember) } }
                 : {}),
-              selected:
-                nativeRuntimeSelectable(partner.runtime, form) && (!previous.runtime?.installed || previous.selected),
+              selected: nativeRuntimeSelectable(runtime, form) && (!previous.runtime?.installed || previous.selected),
               form,
             };
+            return { ...restored, selected: restored.selected && !hasNativeIdentityConflict(restored, currentCats) };
           },
         );
         persist({
@@ -225,6 +257,11 @@ export function useNativeOnboarding(
       setErrorStage('save');
       return;
     }
+    if (selected.some((p) => !current.created[p.id] && hasNativeIdentityConflict(p, rosterCats.current, selected))) {
+      setError('存在同名伙伴，请调整新伙伴的昵称或取消选择后再创建。');
+      setErrorStage('save');
+      return;
+    }
     inFlight.current = true;
     setError('');
     setErrorStage(null);
@@ -236,9 +273,37 @@ export function useNativeOnboarding(
         await prepareFirstRunEntry();
       }
       for (const selection of selected) {
-        const partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
+        let partner = progress.partners.find((p) => p.id === selection.id) ?? selection;
         const id = partner.id;
         if (progress.created[id]) continue;
+        const prepareBeforeSaving =
+          !!partner.runtime.dshDesktop &&
+          !partner.existingId &&
+          needsDshPreparation(partner.form, undefined, partner.runtime);
+        if (prepareBeforeSaving && !partner.creationForm) {
+          setBusy(`正在准备 ${partner.form.displayName} 的 Desktop 配置…`);
+          const form = await prepareNativeMember(partner.form, undefined, partner.runtime);
+          partner = {
+            ...partner,
+            form,
+            creationForm: form,
+            runtime: {
+              ...partner.runtime,
+              env: form.env,
+              configuredModel: form.defaultModel,
+              acp: {
+                command: form.acpCommand,
+                startupArgs: splitCommandArgs(form.acpStartupArgs),
+                transport: form.acpTransport,
+              },
+            },
+          };
+          progress = { ...progress, partners: progress.partners.map((p) => (p.id === id ? partner : p)) };
+          persist(progress); // Stable complete request body is recoverable before POST.
+        }
+        if (partner.creationForm && JSON.stringify(partner.creationForm) !== JSON.stringify(partner.form)) {
+          throw Error('上次创建结果待核对。请先恢复上次提交的草稿，避免用同一请求覆盖不同配置。');
+        }
         setBusy(`正在添加 ${partner.form.displayName}…`);
         pendingPartner = partner;
         const result = partner.existingId
@@ -249,7 +314,9 @@ export function useNativeOnboarding(
                 mentionPatterns: partner.form.mentionPatterns.split(/[\s,]+/).filter(Boolean),
               },
             }
-          : await readJson<{ cat: { id: string; displayName: string; mentionPatterns: string[] } }>('/api/cats', {
+          : await readJson<{
+              cat: { id: string; displayName: string; mentionPatterns: string[]; configurationRevision?: string };
+            }>('/api/cats', {
               method: 'POST',
               headers: {
                 ...headers,
@@ -308,6 +375,23 @@ export function useNativeOnboarding(
       refresh();
       onCreated(progress.threadId, lead.name);
     } catch (cause) {
+      if (pendingPartner && cause instanceof NativeCreationRejected) {
+        const rejectedId = pendingPartner.id;
+        progress = {
+          ...progress,
+          partners: progress.partners.map((partner) =>
+            partner.id === rejectedId
+              ? {
+                  ...partner,
+                  creationForm: undefined,
+                  creationRequestKey: newNativeRequestKey(),
+                  legacySharedRequestKey: undefined,
+                }
+              : partner,
+          ),
+        };
+        persist(progress);
+      }
       const message = cause instanceof Error ? cause.message : '保存失败，请重试；已添加的伙伴会保留。';
       setError(
         pendingPartner

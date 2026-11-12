@@ -1,16 +1,30 @@
 import { CONTEXT_SOURCE_OPPORTUNITY_SCHEMA } from './cue/ContextSourceOpportunityStore.js';
+import { installWorkPreparationSchema } from './cue/preparation/preparation-schema.js';
+import { admitMatterCueFamily } from './matters/matter-cue-schema.js';
+import { MATTER_DISCOVERY_SCHEMA } from './matters/matter-discovery-index.js';
+import { MATTER_MEMORY_SCHEMA } from './matters/matter-schema.js';
 import { addMessageSearchAnswerRecoveryColumn, MESSAGE_SEARCH_ANSWER_SCHEMA } from './message-search-answer-schema.js';
 import { PROFILE_READ_SCHEMA } from './profile/profile-read-schema.js';
+import { DIRECT_MEMORY_READ_SCHEMA } from './read-usage/direct-read-schema.js';
 // F102: SQLite schema — evidence_docs + evidence_fts + edges + markers + schema_version
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
 import type Database from 'better-sqlite3';
 import { addDevelopmentReturnColumn } from '../../infrastructure/scheduler/development-return/development-return-schema.js';
+import { installManagedCommandRecoverySchema } from '../../infrastructure/scheduler/managed-command/recovery-schema.js';
 import { MANAGED_COMMAND_CANDIDATE_INDEX } from '../../infrastructure/scheduler/managed-command-candidate-schema.js';
+import { migrateScheduleParameterUpdates } from '../../infrastructure/scheduler/mutations/schedule-parameter-update-schema.js';
+import { SCHEDULE_LIST_INDEX } from '../../infrastructure/scheduler/schedule-list-schema.js';
 import { admitThreadOverviewCueFamily } from './curation/thread-cue-schema-migration.js';
 import { migrateEntityMentionProjections } from './entity-mention-projection-schema.js';
 import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
 import { ensureTasteMemoryProjectionFence } from './taste/taste-memory-projection-fence.js';
+import {
+  ensureGenerationVectorTable,
+  type VectorGenerationTables,
+  vectorGenerationTables,
+} from './vector-generation-tables.js';
+import { installVectorSourceBindings } from './vector-source-binding.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -81,7 +95,7 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 74;
+export const CURRENT_SCHEMA_VERSION = 83;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1823,6 +1837,68 @@ export function applyMigrations(db: Database.Database): void {
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(74, new Date().toISOString());
     })();
   }
+  // Historical hold carriers stay immutable and readable; index only listable tasks.
+  if (currentVersion < 75) {
+    db.transaction(() => {
+      db.exec(SCHEDULE_LIST_INDEX);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(75, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 76) {
+    db.transaction(() => {
+      db.exec(MATTER_MEMORY_SCHEMA);
+      admitMatterCueFamily(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(76, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 77) {
+    db.transaction(() => {
+      installManagedCommandRecoverySchema(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(77, new Date().toISOString());
+    })();
+  }
+
+  if (currentVersion < 78) {
+    db.transaction(() => {
+      migrateScheduleParameterUpdates(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(78, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 79) {
+    db.transaction(() => {
+      db.exec(MATTER_DISCOVERY_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(79, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 80) {
+    db.transaction(() => {
+      installWorkPreparationSchema(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(80, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 81) {
+    db.transaction(() => {
+      installVectorSourceBindings(db);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(81, new Date().toISOString());
+    })();
+  } else {
+    installVectorSourceBindings(db);
+  }
+  if (currentVersion < 82) {
+    db.transaction(() => {
+      db.exec(DIRECT_MEMORY_READ_SCHEMA);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(82, new Date().toISOString());
+    })();
+  }
+  // V83: hold-ball and thread task reads filter by delivery thread on the API thread. Without this
+  // index each call scanned the whole task history and its JSON overflow pages, then sorted it.
+  if (currentVersion < 83) {
+    db.transaction(() => {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_dynamic_task_defs_delivery_thread
+        ON dynamic_task_defs(delivery_thread_id, created_at DESC)`);
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(83, new Date().toISOString());
+    })();
+  }
 }
 
 /**
@@ -1831,18 +1907,12 @@ export function applyMigrations(db: Database.Database): void {
  * Safe to call multiple times (IF NOT EXISTS).
  * Returns true if table was created/exists, false if extension unavailable.
  */
-export function ensureVectorTable(db: Database.Database, dim: number): boolean {
-  try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS evidence_vectors USING vec0(
-        anchor TEXT PRIMARY KEY,
-        embedding float[${dim}]
-      )
-    `);
-    return true;
-  } catch {
-    return false; // sqlite-vec not loaded — fail-open
-  }
+export function ensureVectorTable(
+  db: Database.Database,
+  dim: number,
+  tables: VectorGenerationTables = vectorGenerationTables(),
+): boolean {
+  return ensureGenerationVectorTable(db, dim, 'documents', tables);
 }
 
 /**
@@ -1850,16 +1920,10 @@ export function ensureVectorTable(db: Database.Database, dim: number): boolean {
  * Kept separate from evidence_vectors because hydration target is
  * evidence_passages, not evidence_docs.
  */
-export function ensurePassageVectorTable(db: Database.Database, dim: number): boolean {
-  try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS passage_vectors USING vec0(
-        passage_key TEXT PRIMARY KEY,
-        embedding float[${dim}]
-      )
-    `);
-    return true;
-  } catch {
-    return false; // sqlite-vec not loaded — fail-open
-  }
+export function ensurePassageVectorTable(
+  db: Database.Database,
+  dim: number,
+  tables: VectorGenerationTables = vectorGenerationTables(),
+): boolean {
+  return ensureGenerationVectorTable(db, dim, 'passages', tables);
 }

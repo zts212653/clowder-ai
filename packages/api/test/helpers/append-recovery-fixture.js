@@ -16,14 +16,22 @@ export async function appendRecoveryFixture(
     from = { kind: 'user', userId: 'owner' },
     content = 'one original input',
     inputCompletionReceipt = false,
+    executionScope,
+    ownerAuthProvenance = 'strict',
+    replyTo,
     invocationId = 'turn',
     messageDisposition,
+    beforeAdmission,
+    projectRoot,
+    onAdmitted,
     routeExecution = async function* () {},
   } = {},
 ) {
   const invocationTracker = new InvocationTracker();
   invocationTracker.start('thread', 'opus', 'owner', ['opus'], 'parent');
   const queue = new InvocationQueue(ledgerStore, {
+    projectRoot,
+    onAdmitted,
     invocationTracker,
     resolveTargets: async (targets) => targets,
     resolveCarrierCapability: () => ({
@@ -33,6 +41,7 @@ export async function appendRecoveryFixture(
       deliverySemantics: 'exact_active_turn',
     }),
   });
+  await beforeAdmission?.({ queue, messageStore, invocationTracker });
   const admission = await queue.send(
     messageStore,
     canonicalTestMessageInput({
@@ -44,6 +53,7 @@ export async function appendRecoveryFixture(
       mentions: ['opus'],
       timestamp: Date.now(),
       deliveryStatus: 'queued',
+      ...(replyTo ? { replyTo } : {}),
       ...(visibility === 'whisper' ? { visibility, whisperTo: ['opus'] } : {}),
     }),
     canonicalTestQueueInput({
@@ -51,7 +61,8 @@ export async function appendRecoveryFixture(
       userId: 'owner',
       threadId: 'thread',
       kind: from.kind === 'agent' ? 'message_wake' : 'conversation_input',
-      ownerAuthProvenance: 'strict',
+      ownerAuthProvenance,
+      ...(executionScope ? { executionScope } : {}),
       content,
       targetCats: ['opus'],
       intent: 'execute',

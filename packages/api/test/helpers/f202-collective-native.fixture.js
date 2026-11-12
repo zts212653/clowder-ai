@@ -6,6 +6,7 @@ import { NativePluginActions } from '../../src/domains/plugin/declared/native-pl
 import { createPluginMessagingHost } from '../../src/domains/plugin/host-surface/plugin-messaging-host.js';
 import { pluginNativeActionRoutes } from '../../src/routes/plugin-native-action-routes.js';
 import { collectivePackageRoot, loadCollectiveModule } from './f202-collective-installed-business.js';
+import { readPluginNativeToken } from './plugin-native-credential.js';
 
 /** Real package handlers behind Host native auth, source projection and module invocation.
  * Only the already authenticated local thread/session and running Cat are fixtures.
@@ -55,7 +56,7 @@ export async function installCollectiveNativeFixture({ app, f, registry, message
   };
   const carrier = createModuleHostInvocation({ runtime: { actions: () => actions } });
   const nativeActions = new NativePluginActions(async () => admission);
-  nativeActions.activate(admission, 0, (method, input) => carrier.invoke(instanceId, method, input));
+  await nativeActions.activate(admission, 0, (method, input) => carrier.invoke(instanceId, method, input));
   await app.register(pluginNativeActionRoutes, {
     actions: nativeActions,
     registry,
@@ -77,5 +78,5 @@ export async function installCollectiveNativeFixture({ app, f, registry, message
       },
     },
   });
-  return nativeActions.environment(instanceId, native.COLLECTIVE_NATIVE_ID).CLOWDER_PLUGIN_ACTION_TOKEN;
+  return readPluginNativeToken(nativeActions.environment(instanceId, native.COLLECTIVE_NATIVE_ID));
 }

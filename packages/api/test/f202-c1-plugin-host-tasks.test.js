@@ -15,8 +15,10 @@ import {
 } from '../dist/domains/plugin/index.js';
 
 const roots = [];
+const runtimes = [];
 
 afterEach(async () => {
+  for (const runtime of runtimes.splice(0).reverse()) await runtime.shutdown();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -92,6 +94,7 @@ test('module plugins create, read, and update ordinary tasks through the Host ta
     threadOwnerUserId: 'owner',
     contract: { manifestContractRange: '0.1.0', validateManifest },
   });
+  runtimes.push(runtime);
   const composition = createPluginManagerRuntimeComposition({
     runtime,
     catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 1 }) },

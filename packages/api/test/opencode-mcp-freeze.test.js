@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   invokeSingleCat,
@@ -214,7 +215,9 @@ for (const source of ['capabilities', 'project-config', 'plugin-mcp', 'mcp-path'
     assert.ok(messages.some((message) => message.type === 'text' && message.content === 'owned-fixture-reply'));
     assert.deepEqual(
       launched.mcp[serverName].command.slice(1),
-      source === 'mcp-path' ? [join(host, 'packages', 'mcp-server', 'dist', 'collab.js')] : ['--fixture=before'],
+      source === 'mcp-path'
+        ? [fileURLToPath(import.meta.resolve('@cat-cafe/mcp-server/dist/collab.js'))]
+        : ['--fixture=before'],
     );
     assert.equal(launched.mcp[serverName].environment.FIXTURE_SCOPE, 'before');
     assert.deepEqual(

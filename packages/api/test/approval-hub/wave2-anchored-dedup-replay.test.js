@@ -1,8 +1,9 @@
+import { tasteSourceStore } from '../helpers/taste-source-fixture.js';
 import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { anchorApproval, proposedTaskAction } from './helpers.js';
+import { anchorApproval, createTestApprovalIngress, proposedTaskAction } from './helpers.js';
 
 describe('Wave 2 anchored dedup fanout replay', () => {
   let callbackProposeEntityRoutes;
@@ -36,10 +37,11 @@ describe('Wave 2 anchored dedup fanout replay', () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
   });
 
-  function addCallbackAuth(app, invocationId, threadId) {
+  function addCallbackAuth(app, invocationId, threadId, originMessageId) {
     app.addHook('preHandler', (request, _reply, done) => {
       request.callbackAuth = {
         invocationId,
+        originTriggerMessageId: originMessageId,
         callbackToken: 'token',
         catId: 'opus',
         threadId,
@@ -78,6 +80,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       requesterCatId: 'opus',
       threadId: 'thread-source',
       createdAt: entity.createdAt,
+      originRef: entity.approvalOriginRef,
     });
 
     const tasteStore = new InMemoryTasteProposalStore();
@@ -93,7 +96,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       dimension: 'cognitive-honesty',
       privacy: 'public',
       clientRequestId: 'taste-replay',
-      approvalOriginRef: { kind: 'event', threadId: 'thread-source', anchor: 'taste:first', summary: 'taste' },
+      approvalOriginRef: { kind: 'message', threadId: 'thread-source', messageId: 'taste-original-source' },
     });
     await anchorApproval(tasteStore, {
       proposalId: taste.id,
@@ -102,6 +105,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       requesterCatId: 'opus',
       threadId: 'thread-source',
       createdAt: taste.createdAt,
+      originRef: taste.approvalOriginRef,
     });
 
     const fixtures = [
@@ -124,7 +128,11 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       },
       {
         route: callbackProposeTasteRoutes,
-        deps: { registry: { isLatest: async () => true }, tasteProposalStore: tasteStore },
+        deps: {
+          registry: { isLatest: async () => true },
+          tasteProposalStore: tasteStore,
+          messageStore: tasteSourceStore({ ids: ['taste-original-source'], threadId: 'thread-source' }),
+        },
         url: '/api/callbacks/propose-taste',
         body: {
           scene: 'Replay fanout',
@@ -142,11 +150,16 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       const drafts = [];
       const app = Fastify();
       apps.push(app);
-      addCallbackAuth(app, `inv-${fixture.expectedId}`, 'thread-source');
+      addCallbackAuth(
+        app,
+        `inv-${fixture.expectedId}`,
+        'thread-source',
+        fixture.expectedId === taste.id ? 'taste-original-source' : undefined,
+      );
       await app.register(fixture.route, {
         ...fixture.deps,
         socketManager: { emitToUser() {}, broadcastToRoom() {} },
-        approvalIngress: { publish: async (draft) => drafts.push(draft) },
+        approvalIngress: { ...createTestApprovalIngress(), publish: async (draft) => drafts.push(draft) },
       });
       await app.ready();
 
@@ -201,7 +214,7 @@ describe('Wave 2 anchored dedup fanout replay', () => {
       router: { async *routeExecution() {}, getExecutions: () => [] },
       invocationRecordStore: { create: () => ({ outcome: 'created' }), update() {}, get: () => null },
       dispatchProposalStore: store,
-      approvalIngress: { publish: async (draft) => drafts.push(draft) },
+      approvalIngress: { ...createTestApprovalIngress(), publish: async (draft) => drafts.push(draft) },
     });
     await app.ready();
 

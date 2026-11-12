@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { DeclaredPluginUi } from '../../domains/plugin/declared/declared-plugin-ui.js';
+import { composerQuickPhrasesGroup, type DeclaredPluginUi } from '../../domains/plugin/declared/declared-plugin-ui.js';
 import {
   listPluginConversations,
   type PluginConversationDependencies,
@@ -11,10 +11,12 @@ export const pluginUiRoutes: FastifyPluginAsync<{
   ui: DeclaredPluginUi;
   conversations?: PluginConversationDependencies;
 }> = async (app, { ui, conversations }) => {
-  app.get('/api/plugin-ui', async (request, reply) => {
+  app.get<{ Querystring: { group?: string } }>('/api/plugin-ui', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');
     if ('error' in access) return pluginAccessError(reply, access);
-    return { entries: ui.list() };
+    return {
+      entries: ui.list(request.query.group === composerQuickPhrasesGroup ? composerQuickPhrasesGroup : undefined),
+    };
   });
   app.get('/api/plugin-conversations', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');

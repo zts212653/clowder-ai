@@ -4,6 +4,7 @@ import type { MediaContextAttachment } from '@cat-cafe/shared';
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { inheritContentSurfaceOrigin } from '@/components/workbench/resolve-content-surface';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
+import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { ArtworkMediaViewportProvider } from './ArtworkMediaViewport';
 import type { ArtworkGallery } from './artwork-gallery';
 
@@ -15,6 +16,8 @@ export type FloatingArtwork = {
   caption?: string;
   reason?: string;
   surface: WorkspaceSurfaceDescriptor | null;
+  /** The clicked entry survives pending/unavailable media admission, when no surface exists. */
+  navigationOrigin?: WorkspaceFileNavigationOrigin;
   pending?: boolean;
   /** Non-media cards render their existing document owner directly inside the same floating shell. */
   ownerContentOnly?: boolean;

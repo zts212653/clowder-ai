@@ -4,12 +4,12 @@ related_features: [F038, F148, F167, F188, F203, F209, F227, F231, F236, F237, F
 topics: [memory, context, retrieval, delivery, reliability, command]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-11-01
+updated: 2026-11-02
 description: "让猫以可控的上下文成本取得可信、完整可续读的记忆，减少旧消息回放、检索绕路与启动时的重复负担。"
 description_source: human
 description_author: codex-astra
 description_updated_at: 2026-09-27T12:29:12Z
-tips_exempt: "Renewed 2026-11-01: records bounded acceptance of the existing reader and F322 search-disclosure deliveries. No new operation or discovery surface is introduced here; runtime activation and natural recovery remain with the original Tasks."
+tips_exempt: "Renewed 2026-11-03: the November 2 addition records one bounded natural-query result, its measured cost and remaining evidence limits for the existing reader. The existing lookup and search-disclosure entry points are unchanged; this acceptance record introduces no new user operation or discovery surface, and the original Tasks retain further acceptance."
 ---
 
 # F324: Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口

@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
 import type {
+  InventorySnapshotSelection,
   PackageInventoryStore,
   PluginInstanceStore,
   PluginInventoryStore,
   PluginInventoryTransaction,
 } from './ports.js';
+import {
+  inventoryReadAuthority,
+  inventoryReadCurrentAuthority,
+  inventoryReadPorts,
+  selectInventorySnapshot,
+} from './read-ports.js';
 import {
   clonePluginInventorySnapshot,
   emptyPluginInventorySnapshot,
@@ -45,7 +52,8 @@ function transactionFor(
       const value = state.packages.get(digest);
       return value ? clone(value) : undefined;
     },
-    list: () => [...state.packages.values()].map(clone),
+    list: (packageState?: string) =>
+      [...state.packages.values()].filter((r) => !packageState || r.packageState === packageState).map(clone),
     put: (record) => {
       state.packages.set(record.packageDigest, clone(record));
       written = true;
@@ -62,7 +70,12 @@ function transactionFor(
       );
       return value ? clone(value) : undefined;
     },
-    list: () => [...state.instances.values()].map(clone),
+    list: (pluginId?: string, lifecycleState?: string) =>
+      [...state.instances.values()]
+        .filter(
+          (r) => (!pluginId || r.pluginId === pluginId) && (!lifecycleState || r.lifecycleState === lifecycleState),
+        )
+        .map(clone),
     put: (record) => {
       state.instances.set(record.pluginInstanceId, clone(record));
       written = true;
@@ -135,6 +148,17 @@ export interface MemoryPluginInventoryStoreOptions {
 }
 
 export class MemoryPluginInventoryStore implements PluginInventoryStore {
+  readonly read = inventoryReadPorts(this);
+  async hasRecords(): Promise<boolean> {
+    const snapshot = await this.snapshot();
+    return snapshot.instances.length > 0 || snapshot.packages.length > 0;
+  }
+  readAuthority(id: string) {
+    return inventoryReadAuthority(this, id);
+  }
+  readCurrentAuthority(id: string) {
+    return inventoryReadCurrentAuthority(this, id);
+  }
   private state: PluginInventorySnapshot;
   private readonly queue = new TransactionQueue();
 
@@ -146,9 +170,9 @@ export class MemoryPluginInventoryStore implements PluginInventoryStore {
       initial === undefined ? emptyPluginInventorySnapshot() : parsePluginInventorySnapshot(initial, options.contract);
   }
 
-  async snapshot(): Promise<PluginInventorySnapshot> {
+  async snapshot(selection?: InventorySnapshotSelection): Promise<PluginInventorySnapshot> {
     await this.queue.settled();
-    return clonePluginInventorySnapshot(this.state);
+    return clonePluginInventorySnapshot(selectInventorySnapshot(this.state, selection));
   }
 
   async transaction<T>(
@@ -174,6 +198,17 @@ function isNotFound(error: unknown): boolean {
 }
 
 export class FilePluginInventoryStore implements PluginInventoryStore {
+  readonly read = inventoryReadPorts(this);
+  async hasRecords(): Promise<boolean> {
+    const snapshot = await this.snapshot();
+    return snapshot.instances.length > 0 || snapshot.packages.length > 0;
+  }
+  readAuthority(id: string) {
+    return inventoryReadAuthority(this, id);
+  }
+  readCurrentAuthority(id: string) {
+    return inventoryReadCurrentAuthority(this, id);
+  }
   readonly path: string;
   private readonly queue: TransactionQueue;
   private readonly fileOps: InventoryFileOps;
@@ -187,6 +222,18 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
   }
 
   private async load(): Promise<PluginInventorySnapshot> {
+    let migrated = false;
+    try {
+      await access(`${this.path}.state.sqlite`);
+      migrated = true;
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
+    if (migrated)
+      throw new PluginInventoryError(
+        'INVENTORY_INVARIANT',
+        'Legacy JSON store was migrated; use the SQLite state owner',
+      );
     let raw: string;
     try {
       raw = await this.fileOps.readFile(this.path, 'utf8');
@@ -203,10 +250,10 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
     return parsePluginInventorySnapshot(parsed, this.contract);
   }
 
-  async snapshot(): Promise<PluginInventorySnapshot> {
+  async snapshot(selection?: InventorySnapshotSelection): Promise<PluginInventorySnapshot> {
     await this.queue.settled();
     // Each load parses current file bytes into an unshared snapshot.
-    return this.load();
+    return selectInventorySnapshot(await this.load(), selection);
   }
 
   async transaction<T>(

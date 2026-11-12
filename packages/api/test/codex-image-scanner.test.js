@@ -1,3 +1,10 @@
+import sharp from 'sharp';
+
+const imageBytes = (seed) =>
+  sharp({ create: { width: 2, height: 2, channels: 3, background: seed.startsWith('second') ? '#be6d47' : '#48705b' } })
+    .png()
+    .toBuffer();
+
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -27,7 +34,7 @@ describe('scanAndPublishCodexImages', () => {
     const sessionId = 'test-session-001';
     const sessionDir = join(codexHome, 'generated_images', sessionId);
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(join(sessionDir, 'ig_abc123.png'), Buffer.from('fake-png'));
+    await writeFile(join(sessionDir, 'ig_abc123.png'), await imageBytes('fake-png'));
 
     const uploadDir = await makeTempDir('uploads-');
 
@@ -89,7 +96,7 @@ describe('scanAndPublishCodexImages', () => {
     const codexHome = await makeTempDir('codex-home-');
     const sessionDir = join(codexHome, 'generated_images', 'mixed-session');
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(join(sessionDir, 'ig_abc.png'), Buffer.from('fake-png'));
+    await writeFile(join(sessionDir, 'ig_abc.png'), await imageBytes('fake-png'));
     await writeFile(join(sessionDir, 'notes.txt'), 'not an image');
     await writeFile(join(sessionDir, '.DS_Store'), 'mac junk');
 
@@ -113,8 +120,8 @@ describe('scanAndPublishCodexImages', () => {
     const codexHome = await makeTempDir('codex-home-');
     const sessionDir = join(codexHome, 'generated_images', 'multi-session');
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(join(sessionDir, 'ig_001.png'), Buffer.from('img1'));
-    await writeFile(join(sessionDir, 'ig_002.jpeg'), Buffer.from('img2'));
+    await writeFile(join(sessionDir, 'ig_001.png'), await imageBytes('img1'));
+    await writeFile(join(sessionDir, 'ig_002.jpeg'), await imageBytes('img2'));
 
     const uploadDir = await makeTempDir('uploads-');
 
@@ -137,7 +144,7 @@ describe('scanAndPublishCodexImages', () => {
     const codexHome = await makeTempDir('codex-home-');
     const sessionDir = join(codexHome, 'generated_images', 'replay-session');
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(join(sessionDir, 'ig_replay.png'), Buffer.from('replay-img'));
+    await writeFile(join(sessionDir, 'ig_replay.png'), await imageBytes('replay-img'));
 
     const uploadDir = await makeTempDir('uploads-');
     const opts = { codexSessionId: 'replay-session', uploadDir, codexHome };

@@ -55,6 +55,7 @@ function createDependencies(overrides = {}) {
         intent: { intent: 'execute' },
       })),
       resolveExplicitTargets: mock.fn(async (cats) => cats),
+      resolveAdmissionTargets: mock.fn((cats) => cats),
       resolveConversationTargetsAtAdmission: mock.fn(async (cats) => (cats.length > 0 ? cats : ['opus'])),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };

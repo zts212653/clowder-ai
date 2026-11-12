@@ -110,6 +110,7 @@ it('reopens the same saved find result and popover position without requerying',
   expect(host.querySelector<HTMLInputElement>('input')?.value).toBe('一行');
   expect(button('全局')?.getAttribute('aria-pressed')).toBe('true');
   expect(host.querySelector<HTMLElement>('[data-message-search-scroll]')?.scrollTop).toBe(214);
-  expect(host.textContent).toContain('本次检索未找到');
+  expect(host.textContent).toContain('本次资格核对情况未知');
+  expect(host.textContent).not.toContain('本次检索未找到');
   expect(fetchMock).not.toHaveBeenCalled();
 });

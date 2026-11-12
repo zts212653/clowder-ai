@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { projectReplyOutput } from '@/components/reply-layers/reply-output';

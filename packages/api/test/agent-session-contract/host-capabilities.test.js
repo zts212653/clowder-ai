@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { resolveInvocationCapacitySnapshot } from '../../dist/domains/cats/services/agents/invocation/invocation-capacity-snapshot.js';
+import { InvocationServiceScope } from '../../dist/domains/cats/services/agents/invocation/invocation-service-scope.js';
 import { assertToolExecutionPolicySupported } from '../../dist/domains/cats/services/agents/invocation/tool-execution-policy.js';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import {
@@ -31,6 +32,30 @@ function bound(provider) {
   const service = new RegisteredSessionAgentService({ catId: 'codex', ref, registry });
   return { registry, remove, service };
 }
+
+test('a pinned registered service preserves the concrete host coverage it was frozen with', async () => {
+  for (const coverage of [true, false, undefined]) {
+    const concrete = {
+      windowsProviderHosts: coverage,
+      async *invoke() {
+        assert.fail('no model invocation');
+      },
+    };
+    const registry = new SessionImplementationRegistry();
+    const implementationRef = { builtin: `coverage-${String(coverage)}` };
+    registry.register(implementationRef, () => ({ hostService: () => concrete }));
+    const registered = new RegisteredSessionAgentService({ catId: 'codex', ref: implementationRef, registry });
+    assert.equal(registered.windowsProviderHosts, coverage, 'the registered service delegates the capability');
+    const scope = new InvocationServiceScope();
+    try {
+      const pinned = scope.pin(registered);
+      assert.equal(pinned.windowsProviderHosts, coverage, `pinned view must keep coverage ${coverage}`);
+      assert.equal(Boolean(pinned.windowsProviderHosts), Boolean(coverage), 'no coverage is invented');
+    } finally {
+      await scope.dispose();
+    }
+  }
+});
 function sameHostConsumers(service, actual) {
   assert.equal(service.injectsL0Natively?.(), actual.injectsL0Natively());
   assert.deepEqual(service.freshnessCarrierCapability?.(), actual.freshnessCarrierCapability());

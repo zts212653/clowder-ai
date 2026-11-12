@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Invocation-id canonicalization invariant fixture (砚砚 GPT-5.5 2026-04-26 — thread_mogj6kvwp3l80x56).
  *

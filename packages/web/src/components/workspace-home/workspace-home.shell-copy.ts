@@ -44,6 +44,12 @@ export const homeCopy = defineShellCopy(
         loading: '正在同步所有对话的运行状态…',
         unverified: '当前无法验证运行状态，请稍后重试。',
         stale: '同步暂时失败，以上为最近一次已验证状态。',
+        // A held ball: the cat's run ended and a wake is armed. Waiting, never counted as running.
+        waitingTail: (count: number) => ` · ${count} 件在等`,
+        projectWaiting: (count: number) => `${count} 件在等`,
+        holding: '在等',
+        wakesAt: (time: string) => `${time} 醒`,
+        cancelHold: (name: string) => `取消${name}的持球`,
       },
       // The design's name for each managed-command kind ("全量门禁" is an internal word: it reads 完整检查).
       activity: {
@@ -191,6 +197,11 @@ export const homeCopy = defineShellCopy(
         loading: 'Syncing run status across conversations…',
         unverified: "Can't verify run status right now. Try again shortly.",
         stale: "Couldn't sync. Showing the last verified status.",
+        waitingTail: (count: number) => ` · ${count} waiting`,
+        projectWaiting: (count: number) => `${count} waiting`,
+        holding: 'Waiting',
+        wakesAt: (time: string) => `wakes ${time}`,
+        cancelHold: (name: string) => `Cancel ${name}'s hold`,
       },
       activity: {
         full_gate: 'Full check',
@@ -315,6 +326,10 @@ export const homeCopy = defineShellCopy(
   {
     samples: {
       'live.scope': [[1], [12]],
+      'live.waitingTail': [[1], [12]],
+      'live.projectWaiting': [[1], [12]],
+      'live.wakesAt': [['02:11'], ['23:40']],
+      'live.cancelHold': [['Sol'], ['Opus']],
       'live.partialScope': [[0], [1], [12]],
       'live.projectCount': [[1], [12]],
       'live.projectRunning': [

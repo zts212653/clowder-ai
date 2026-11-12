@@ -3942,7 +3942,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST retain-memory submits to marker queue', async () => {
+  test('POST retain-memory is gone (2026-11-09 memory entry subtraction)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const submitCalls = [];
@@ -3955,57 +3955,11 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/retain-memory',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'When storage is unavailable, fail-closed and surface explicit errors.',
-      },
+      payload: { content: 'should not be written' },
     });
 
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'ok');
-    assert.equal(submitCalls.length, 1);
-    assert.equal(submitCalls[0].content, 'When storage is unavailable, fail-closed and surface explicit errors.');
-    assert.equal(submitCalls[0].status, 'captured');
-    assert.ok(submitCalls[0].source.includes('codex'));
-    assert.ok(submitCalls[0].source.includes(invocationId));
-  });
-
-  test('POST retain-memory returns 401 for invalid callback token', async () => {
-    const app = await createApp();
-    const { invocationId } = await registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
-      payload: {
-        content: 'memory',
-      },
-    });
-
-    assert.equal(response.statusCode, 401);
-  });
-
-  test('POST retain-memory degrades when marker queue throws', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
-    markerQueue.submit = async () => {
-      throw new Error('queue error');
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'memory item',
-      },
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'degraded');
-    assert.equal(body.degradeReason, 'marker_queue_error');
+    assert.equal(response.statusCode, 404);
+    assert.equal(submitCalls.length, 0, 'retired route must not write markers');
   });
 
   // --- Exact-attempt callback lifecycle guard ---
@@ -4177,6 +4131,735 @@ describe('Callback Routes', () => {
     assert.equal(richMsg.invocationId, invocationId, 'rich_block system_info broadcast must include invocationId');
   });
 
+  test('stale-block cleanup and successor invocations cannot settle an active post before its actual outcome', async (t) => {
+    const { setImmediate } = await import('node:timers/promises');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffer = getRichBlockBuffer();
+    const app = await createApp();
+    const append = messageStore.appendIdempotent.bind(messageStore);
+    const lookup = messageStore.getByIdempotencyKey.bind(messageStore);
+    const realNow = Date.now;
+    let now = realNow();
+    t.mock.method(Date, 'now', () => now);
+    try {
+      for (const failPost of [false, true]) {
+        const threadId = `widget-expired-publication-${failPost}`;
+        const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+        const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+        const block = { id: 'old-stage', kind: 'html_widget', v: 1, html: '<p>Retain until the write settles</p>' };
+        await app.inject({ method: 'POST', url: '/api/callbacks/create-rich-block', headers, payload: { block } });
+        now += 16 * 60 * 1000;
+        let resume;
+        let entered;
+        const gate = new Promise((resolve) => {
+          resume = resolve;
+        });
+        const atAppend = new Promise((resolve) => {
+          entered = resolve;
+        });
+        messageStore.getByIdempotencyKey = (...args) => {
+          if (failPost) {
+            entered();
+            return gate.then(() => {
+              throw new Error('pre-write lookup failed');
+            });
+          }
+          return lookup(...args);
+        };
+        messageStore.appendIdempotent = async (input) => {
+          entered();
+          await gate;
+          return append(input);
+        };
+        const post = app
+          .inject({
+            method: 'POST',
+            url: '/api/callbacks/post-message',
+            headers,
+            payload: { content: 'Interim stage spanning cleanup', clientMessageId: `clock-${failPost}` },
+          })
+          .then((response) => response);
+        await atAppend;
+        let terminalResolved = false;
+        const terminal = buffer.consume(threadId, 'opus', invocationId).then((blocks) => {
+          terminalResolved = true;
+          return blocks;
+        });
+        let successor;
+        try {
+          buffer.hasBlock(threadId, block.id); // Same prune used by the periodic timer.
+          await setImmediate();
+          assert.equal(terminalResolved, false, 'an idle TTL must not invent an in-flight write outcome');
+          const duplicateInFlight = await app.inject({
+            method: 'POST',
+            url: '/api/callbacks/post-message',
+            headers,
+            payload: { content: 'Interim stage spanning cleanup', clientMessageId: `clock-${failPost}` },
+          });
+          assert.equal(
+            duplicateInFlight.statusCode,
+            503,
+            'an identical in-flight retry must retain its retryable outcome',
+          );
+          assert.equal(duplicateInFlight.json().code, 'RICH_BLOCK_PUBLICATION_UNCONFIRMED');
+          const late = await app.inject({
+            method: 'POST',
+            url: '/api/callbacks/create-rich-block',
+            headers,
+            payload: { block: { ...block, id: 'late' } },
+          });
+          assert.equal(late.statusCode, 409, 'terminal admission stays sealed while the owner is active');
+          successor = { id: 'next-stage', kind: 'card', v: 1, title: 'Successor owns only its own block' };
+          buffer.add(threadId, 'opus', successor, `${invocationId}-successor`);
+          await setImmediate();
+          assert.equal(terminalResolved, false, 'a successor must not settle an older write either');
+        } finally {
+          resume();
+          await Promise.allSettled([post, terminal]);
+        }
+        const [response, finalBlocks] = await Promise.all([post, terminal]);
+        assert.equal(response.statusCode, failPost ? 500 : 200, response.body);
+        const stored = await messageStore.getByThread(threadId, 10);
+        const postedBlocks = stored.flatMap((message) => message.extra?.rich?.blocks ?? []);
+        assert.deepEqual(postedBlocks, failPost ? [] : [block]);
+        assert.deepEqual(finalBlocks, failPost ? [block] : []);
+        assert.equal(postedBlocks.length + finalBlocks.length, 1, 'the actual outcome must leave exactly one owner');
+        assert.deepEqual(await buffer.consume(threadId, 'opus', `${invocationId}-successor`), [successor]);
+        messageStore.appendIdempotent = append;
+        messageStore.getByIdempotencyKey = lookup;
+      }
+    } finally {
+      messageStore.appendIdempotent = append;
+      messageStore.getByIdempotencyKey = lookup;
+      await app.close();
+    }
+  });
+
+  test('lost storage acknowledgements retain publication ownership and recover through the same keyed request', async (t) => {
+    const { setImmediate } = await import('node:timers/promises');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffer = getRichBlockBuffer();
+    const app = await createApp();
+    const append = messageStore.appendIdempotent.bind(messageStore);
+    const lookup = messageStore.getByIdempotencyKey.bind(messageStore);
+    let now = Date.now();
+    t.mock.method(Date, 'now', () => now);
+    try {
+      for (const committed of [false, true]) {
+        for (const readBackAvailable of [false, true]) {
+          const threadId = `widget-uncertain-${committed}-${readBackAvailable}`;
+          const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+          const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+          const block = { id: 'uncertain-stage', kind: 'html_widget', v: 1, html: '<p>Exactly one output</p>' };
+          const payload = {
+            content: 'Stage with a stable identity',
+            clientMessageId: `key-${committed}-${readBackAvailable}`,
+          };
+          await app.inject({ method: 'POST', url: '/api/callbacks/create-rich-block', headers, payload: { block } });
+          let writeAttempted = false;
+          let finishOldWrite;
+          const oldWrite = new Promise((resolve) => {
+            finishOldWrite = resolve;
+          });
+          let delayedWrite;
+          messageStore.appendIdempotent = async (input) => {
+            if (committed) await append(input);
+            else delayedWrite = oldWrite.then(() => append(input));
+            writeAttempted = true;
+            throw new Error('storage acknowledgement lost');
+          };
+          messageStore.getByIdempotencyKey = (...args) => {
+            if (writeAttempted && !readBackAvailable) throw new Error('read-back unavailable');
+            return lookup(...args);
+          };
+          const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+          let terminalResolved = false;
+          const terminal = buffer.consume(threadId, 'opus', invocationId).then((blocks) => {
+            terminalResolved = true;
+            return blocks;
+          });
+          try {
+            await setImmediate();
+            if (!(committed && readBackAvailable)) {
+              assert.equal(terminalResolved, false, 'an exception/missing index cannot prove that no write committed');
+              assert.equal(first.statusCode, 503, first.body);
+              now += 16 * 60 * 1000;
+              assert.equal(buffer.hasBlock(threadId, block.id), true, 'unconfirmed ownership survives idle cleanup');
+              const next = { id: 'next', kind: 'card', v: 1, title: 'Independent successor' };
+              buffer.add(threadId, 'opus', next, `${invocationId}-next`);
+              assert.deepEqual(await buffer.consume(threadId, 'opus', `${invocationId}-next`), [next]);
+              messageStore.appendIdempotent = append;
+              messageStore.getByIdempotencyKey = lookup;
+              const changedRetry = await app.inject({
+                method: 'POST',
+                url: '/api/callbacks/post-message',
+                headers,
+                payload: { ...payload, content: 'Different request must not take the unresolved lease' },
+              });
+              assert.equal(changedRetry.statusCode, 409);
+              const retry = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+              assert.equal(retry.statusCode, 200, retry.body);
+            } else {
+              assert.equal(first.statusCode, 200, first.body);
+            }
+            await setImmediate();
+            assert.equal(terminalResolved, true, 'confirmation must release the original terminal waiter');
+          } finally {
+            messageStore.getByIdempotencyKey = lookup;
+            messageStore.appendIdempotent = append;
+            finishOldWrite();
+            await delayedWrite;
+            // A failed assertion must not leave an unresolved test waiter in the singleton.
+            if (!terminalResolved) buffer.destroy();
+          }
+          assert.deepEqual(await terminal, [], 'only the keyed durable post owns this block');
+          const stored = await messageStore.getByThread(threadId, 10);
+          assert.equal(stored.length, 1, 'a delayed original write and its retry share one idempotency winner');
+          assert.deepEqual(stored[0].extra.rich.blocks, [block]);
+          messageStore.appendIdempotent = append;
+          messageStore.getByIdempotencyKey = lookup;
+        }
+      }
+    } finally {
+      messageStore.appendIdempotent = append;
+      messageStore.getByIdempotencyKey = lookup;
+      await app.close();
+    }
+  });
+
+  test('the real MCP outbox can confirm an uncertain post while its terminal consumer is already waiting', async () => {
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { setImmediate } = await import('node:timers/promises');
+    const { handlePostMessage, handleCreateRichBlock } = await import('../../mcp-server/dist/tools/callback-tools.js');
+    const { withInvocationCredentials } = await import('../../mcp-server/dist/tools/invocation-auth.js');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffer = getRichBlockBuffer();
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+    const outbox = await mkdtemp(join(tmpdir(), 'widget-unconfirmed-outbox-'));
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outbox;
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
+    const app = await createApp();
+    const threadId = 'widget-unconfirmed-mcp';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const block = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Confirmed through the real outbox</p>' };
+    const append = messageStore.appendIdempotent.bind(messageStore);
+    const lookup = messageStore.getByIdempotencyKey.bind(messageStore);
+    const invoke = (fn) =>
+      withInvocationCredentials({ invocationId, callbackToken, apiUrl: 'http://isolated-widget.test' }, fn);
+    let unconfirmed = false;
+    let terminal;
+    globalThis.fetch = async (url, options) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: new URL(url).pathname,
+        headers: options.headers,
+        payload: JSON.parse(options.body),
+      });
+      return {
+        ok: response.statusCode < 400,
+        status: response.statusCode,
+        json: async () => response.json(),
+        text: async () => response.body,
+      };
+    };
+    try {
+      await app.inject({ method: 'POST', url: '/api/callbacks/create-rich-block', headers, payload: { block } });
+      messageStore.appendIdempotent = async (input) => {
+        await append(input);
+        unconfirmed = true;
+        throw new Error('write committed but confirmation was lost');
+      };
+      messageStore.getByIdempotencyKey = (...args) => {
+        if (unconfirmed) throw new Error('read-back temporarily unavailable');
+        return lookup(...args);
+      };
+      const result = await invoke(() =>
+        handlePostMessage({ content: 'An uncertain stage', clientMessageId: 'stable-outbox-post' }),
+      );
+      assert.match(result.content[0].text, /queued_for_retry/);
+      assert.equal((await readdir(outbox)).filter((name) => name.endsWith('.json')).length, 1);
+      let terminalResolved = false;
+      terminal = buffer.consume(threadId, 'opus', invocationId).then((blocks) => {
+        terminalResolved = true;
+        return blocks;
+      });
+      await setImmediate();
+      assert.equal(terminalResolved, false);
+      messageStore.appendIdempotent = append;
+      messageStore.getByIdempotencyKey = lookup;
+      const trigger = await invoke(() =>
+        handleCreateRichBlock({
+          block: JSON.stringify({ id: 'late', kind: 'card', v: 1, title: 'Flush the original confirmation' }),
+        }),
+      );
+      assert.equal(trigger.isError, true);
+      assert.match(
+        trigger.content[0].text,
+        /409.*RICH_BLOCK_INVOCATION_COMPLETE/,
+        'the trigger is a new request after final admission closed',
+      );
+      await setImmediate();
+      assert.equal(
+        terminalResolved,
+        true,
+        'outbox replay must confirm the existing publication despite the final fence',
+      );
+      assert.deepEqual(await terminal, []);
+      assert.deepEqual(
+        (await readdir(outbox)).filter((name) => name.endsWith('.json')),
+        [],
+      );
+      const stored = await messageStore.getByThread(threadId, 10);
+      assert.equal(stored.length, 1);
+      assert.deepEqual(stored[0].extra.rich.blocks, [block]);
+    } finally {
+      buffer.destroy();
+      await terminal;
+      messageStore.appendIdempotent = append;
+      messageStore.getByIdempotencyKey = lookup;
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+      await app.close();
+      await rm(outbox, { recursive: true, force: true });
+    }
+  });
+
+  test('an old inline post replay through the real outbox cannot consume a later same-id buffered block', async () => {
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { handlePostMessage, handleCreateRichBlock } = await import('../../mcp-server/dist/tools/callback-tools.js');
+    const { withInvocationCredentials } = await import('../../mcp-server/dist/tools/invocation-auth.js');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+    const outbox = await mkdtemp(join(tmpdir(), 'widget-inline-replay-'));
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outbox;
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
+    const app = await createApp();
+    try {
+      for (const sameBody of [true, false]) {
+        const threadId = `widget-inline-replay-${sameBody}`;
+        const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+        const invoke = (fn) =>
+          withInvocationCredentials({ invocationId, callbackToken, apiUrl: 'http://isolated-widget.test' }, fn);
+        const old = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Old inline post</p>' };
+        const current = sameBody ? { ...old } : { ...old, html: '<p>Later buffered revision</p>' };
+        let phase = 'lost-response';
+        globalThis.fetch = async (url, options) => {
+          const path = new URL(url).pathname;
+          const oldPost = path.endsWith('/post-message');
+          if (oldPost && phase === 'hold-replay')
+            return { ok: false, status: 503, text: async () => 'network unavailable' };
+          const response = await app.inject({
+            method: 'POST',
+            url: path,
+            headers: options.headers,
+            payload: JSON.parse(options.body),
+          });
+          if (oldPost && phase === 'lost-response') throw new Error('post response lost after commit');
+          return {
+            ok: response.statusCode < 400,
+            status: response.statusCode,
+            json: async () => response.json(),
+            text: async () => response.body,
+          };
+        };
+        const content = `Old inline stage\n\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [old] })}\n\`\`\``;
+        const first = await invoke(() => handlePostMessage({ content, clientMessageId: `old-inline-${sameBody}` }));
+        assert.match(first.content[0].text, /queued_for_retry/);
+        phase = 'hold-replay';
+        const created = await invoke(() => handleCreateRichBlock({ block: JSON.stringify(current) }));
+        assert.match(created.content[0].text, /"operation":"added"/);
+        phase = 'replay';
+        const trigger = { id: 'flush-trigger', kind: 'card', v: 1, title: 'Flush the older receipt' };
+        const flushed = await invoke(() => handleCreateRichBlock({ block: JSON.stringify(trigger) }));
+        assert.notEqual(flushed.isError, true, flushed.content[0].text);
+        assert.deepEqual(
+          (await readdir(outbox)).filter((name) => name.endsWith('.json')),
+          [],
+        );
+        const stored = await messageStore.getByThread(threadId, 10);
+        assert.equal(stored.length, 1);
+        assert.deepEqual(stored[0].extra.rich.blocks, [old]);
+        assert.deepEqual(
+          await getRichBlockBuffer().consume(threadId, 'opus', invocationId),
+          [current, trigger],
+          'the older post receipt must not own a later block, even when ID and bytes are identical',
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+      await app.close();
+      await rm(outbox, { recursive: true, force: true });
+    }
+  });
+
+  test('a prior idempotency winner cannot confirm new same-id blocks after a stale preflight lookup', async () => {
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const app = await createApp();
+    const lookup = messageStore.getByIdempotencyKey.bind(messageStore);
+    const append = messageStore.appendIdempotent.bind(messageStore);
+    try {
+      for (const sameBody of [true, false]) {
+        const threadId = `widget-inline-winner-${sameBody}`;
+        const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+        const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+        const old = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Older winner</p>' };
+        const current = sameBody ? { ...old } : { ...old, html: '<p>Later stage</p>' };
+        const content = `Inline stage\n\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [old] })}\n\`\`\``;
+        const payload = { content, clientMessageId: `winner-${sameBody}` };
+        assert.equal(
+          (await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload })).statusCode,
+          200,
+        );
+        await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/create-rich-block',
+          headers,
+          payload: { block: current },
+        });
+        let insideStore = false;
+        messageStore.getByIdempotencyKey = (...args) => (insideStore ? lookup(...args) : null);
+        messageStore.appendIdempotent = (input) => {
+          insideStore = true;
+          try {
+            return append(input);
+          } finally {
+            insideStore = false;
+          }
+        };
+        const retry = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+        assert.equal(retry.json().status, 'duplicate', retry.body);
+        assert.deepEqual(
+          await getRichBlockBuffer().consume(threadId, 'opus', invocationId),
+          [current],
+          'attempting append cannot turn an older winner into proof of new reservation membership',
+        );
+        messageStore.getByIdempotencyKey = lookup;
+        messageStore.appendIdempotent = append;
+      }
+    } finally {
+      messageStore.getByIdempotencyKey = lookup;
+      messageStore.appendIdempotent = append;
+      await app.close();
+    }
+  });
+
+  test('a fresh post gives each same-id inline/buffered slot to the current buffered revision once', async () => {
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const app = await createApp();
+    try {
+      for (const sameBody of [true, false]) {
+        const threadId = `widget-inline-fresh-${sameBody}`;
+        const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+        const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+        const inline = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Inline revision</p>' };
+        const current = sameBody ? { ...inline } : { ...inline, html: '<p>Current buffered revision</p>' };
+        await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/create-rich-block',
+          headers,
+          payload: { block: current },
+        });
+        const content = `Stage\n\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [inline] })}\n\`\`\``;
+        const posted = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/post-message',
+          headers,
+          payload: { content, clientMessageId: `fresh-inline-${sameBody}` },
+        });
+        assert.equal(posted.statusCode, 200, posted.body);
+        const stored = await messageStore.getById(posted.json().messageId);
+        assert.deepEqual(stored.extra.rich.blocks, [current]);
+        assert.equal(typeof stored.extra.richBlockPublicationId, 'string');
+        assert.deepEqual(await getRichBlockBuffer().consume(threadId, 'opus', invocationId), []);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('publication-busy edits report an immediate MCP conflict instead of disappearing through outbox replay', async () => {
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { handleCreateRichBlock } = await import('../../mcp-server/dist/tools/callback-tools.js');
+    const { withInvocationCredentials } = await import('../../mcp-server/dist/tools/invocation-auth.js');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+    const outbox = await mkdtemp(join(tmpdir(), 'widget-busy-outbox-'));
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outbox;
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
+    const app = await createApp();
+    const threadId = 'widget-busy-visible-conflict';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const draft = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>A</p>' };
+    const corrected = { ...draft, html: '<p>B</p>' };
+    const append = messageStore.append.bind(messageStore);
+    let resume;
+    let entered;
+    const gate = new Promise((resolve) => {
+      resume = resolve;
+    });
+    const atAppend = new Promise((resolve) => {
+      entered = resolve;
+    });
+    let post;
+    let correctedAttempts = 0;
+    const publish = (block) =>
+      withInvocationCredentials({ invocationId, callbackToken, apiUrl: 'http://isolated-widget.test' }, () =>
+        handleCreateRichBlock({ block: JSON.stringify(block) }),
+      );
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.block.html === corrected.html) correctedAttempts++;
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-rich-block',
+        headers: options.headers,
+        payload: body,
+      });
+      return {
+        ok: response.statusCode < 400,
+        status: response.statusCode,
+        json: async () => response.json(),
+        text: async () => response.body,
+      };
+    };
+    try {
+      await publish(draft);
+      messageStore.append = async (input) => {
+        entered();
+        await gate;
+        return append(input);
+      };
+      post = app
+        .inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload: { content: 'Publish A' } })
+        .then((response) => response);
+      await atAppend;
+      const conflict = await publish(corrected);
+      assert.equal(conflict.isError, true, 'the caller must receive a conflict, never queued_for_retry');
+      assert.match(conflict.content[0].text, /409.*RICH_BLOCK_PUBLICATION_BUSY/);
+      assert.deepEqual(
+        (await readdir(outbox)).filter((name) => name.endsWith('.json')),
+        [],
+      );
+      resume();
+      assert.equal((await post).statusCode, 200);
+      const trigger = await publish({ id: 'flush-trigger', kind: 'card', v: 1, title: 'Next operation' });
+      assert.equal(trigger.isError, undefined);
+      assert.equal(correctedAttempts, 1, 'a later successful call must not hide a replayed B failure');
+      const stored = await messageStore.getByThread(threadId, 10);
+      assert.deepEqual(stored[0].extra.rich.blocks, [draft]);
+    } finally {
+      resume();
+      if (post) await post;
+      messageStore.append = append;
+      await Promise.resolve(getRichBlockBuffer().consume(threadId, 'opus', invocationId));
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+      await app.close();
+      await rm(outbox, { recursive: true, force: true });
+    }
+  });
+
+  test('late outbox replay cannot overwrite a corrected widget, but a fresh edit may restore the original content', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { handleCreateRichBlock } = await import('../../mcp-server/dist/tools/callback-tools.js');
+    const { withInvocationCredentials } = await import('../../mcp-server/dist/tools/invocation-auth.js');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+    const outbox = await mkdtemp(join(tmpdir(), 'widget-outbox-replay-'));
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outbox;
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
+    const app = await createApp();
+    try {
+      // Exercise both an accepted request whose response was lost and an old request never received.
+      for (const acceptedBeforeLoss of [true, false]) {
+        const threadId = `widget-outbox-${acceptedBeforeLoss}`;
+        const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+        const draft = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Broken A</p>' };
+        const corrected = { ...draft, html: '<p>Corrected B</p>' };
+        let phase = 'loss';
+        globalThis.fetch = async (_url, options) => {
+          const body = JSON.parse(options.body);
+          const isDraft = body.block.html === draft.html;
+          if (isDraft && phase === 'before-correction') {
+            return { ok: false, status: 503, text: async () => 'network unavailable' };
+          }
+          if (!isDraft || phase !== 'loss' || acceptedBeforeLoss) {
+            const response = await app.inject({
+              method: 'POST',
+              url: '/api/callbacks/create-rich-block',
+              headers: options.headers,
+              payload: body,
+            });
+            if (phase !== 'loss')
+              return {
+                ok: response.statusCode < 400,
+                status: response.statusCode,
+                json: async () => response.json(),
+                text: async () => response.body,
+              };
+          }
+          throw new Error('response lost');
+        };
+        const publish = (block) =>
+          withInvocationCredentials({ invocationId, callbackToken, apiUrl: 'http://isolated-widget.test' }, () =>
+            handleCreateRichBlock({ block: JSON.stringify(block) }),
+          );
+        const first = await publish(draft);
+        assert.match(first.content[0].text, /queued_for_retry/);
+        phase = 'before-correction';
+        assert.match((await publish(corrected)).content[0].text, /"operation":"(?:added|updated)"/);
+        phase = 'replay';
+        await publish({ id: 'flush-trigger', kind: 'card', v: 1, title: 'Trigger replay' });
+        const pending = await getRichBlockBuffer().consume(threadId, 'opus', invocationId, { final: false });
+        assert.deepEqual(
+          pending.find((block) => block.id === 'stage'),
+          corrected,
+          'a delayed old request must not replace B',
+        );
+        // Use a separate pending ID to verify intentional A -> B -> A, not merely content-history suppression.
+        const editableA = { ...draft, id: 'editable' };
+        await publish(editableA);
+        await publish({ ...editableA, html: corrected.html });
+        const restored = await publish(editableA);
+        assert.match(restored.content[0].text, /"operation":"updated"/);
+        assert.deepEqual(
+          (await getRichBlockBuffer().consume(threadId, 'opus', invocationId)).find((block) => block.id === 'editable'),
+          editableA,
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+      await app.close();
+      await rm(outbox, { recursive: true, force: true });
+    }
+  });
+
+  test('unpublished held and failed posts keep pending widgets until a real message is persisted', async () => {
+    const app = await createApp();
+    const threadId = 'widget-publication-boundary';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const draft = { id: 'stage', kind: 'html_widget', v: 1, html: '<p>Draft</p>' };
+    const corrected = { ...draft, html: '<p>Corrected</p>' };
+    const publish = (block) =>
+      app.inject({ method: 'POST', url: '/api/callbacks/create-rich-block', headers, payload: { block } });
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const lookup = messageStore.getByIdempotencyKey.bind(messageStore);
+    try {
+      await publish(draft);
+      const held = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { content: 'FYI\n@codex', targetCats: ['opus'] },
+      });
+      assert.equal(held.json().status, 'held', held.body);
+      assert.equal((await messageStore.getByThread(threadId, 10)).length, 0);
+      assert.equal(
+        getRichBlockBuffer().hasKind(threadId, 'opus', invocationId, 'html_widget'),
+        true,
+        'held post must not drain its widget',
+      );
+      assert.equal((await publish(corrected)).json().operation, 'updated');
+      messageStore.getByIdempotencyKey = () => {
+        throw new Error('pre-write lookup unavailable');
+      };
+      const failed = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { content: 'Publish corrected stage', clientMessageId: 'corrected-stage-key' },
+      });
+      assert.equal(failed.statusCode, 500);
+      assert.equal(
+        getRichBlockBuffer().hasKind(threadId, 'opus', invocationId, 'html_widget'),
+        true,
+        'a failure before the write attempt must leave pending state',
+      );
+      messageStore.getByIdempotencyKey = lookup;
+      const posted = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { content: 'Publish corrected stage', clientMessageId: 'corrected-stage-key' },
+      });
+      assert.equal(posted.statusCode, 200, posted.body);
+      const stored = await messageStore.getById(posted.json().messageId);
+      assert.deepEqual(stored.extra.rich.blocks, [corrected]);
+      assert.equal(getRichBlockBuffer().hasKind(threadId, 'opus', invocationId, 'html_widget'), false);
+      assert.equal((await publish({ ...draft, html: '<p>Too late</p>' })).statusCode, 409);
+      const memo = { content: 'Durable memo', clientMessageId: 'memo-before-next-widget' };
+      await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload: memo });
+      const next = { ...corrected, id: 'next-stage' };
+      await publish(next);
+      const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload: memo });
+      assert.equal(replay.json().status, 'duplicate');
+      assert.deepEqual(
+        await getRichBlockBuffer().consume(threadId, 'opus', invocationId),
+        [next],
+        'a duplicate prior post must not drain a newly pending block',
+      );
+    } finally {
+      messageStore.getByIdempotencyKey = lookup;
+      await getRichBlockBuffer().consume(threadId, 'opus', invocationId);
+      await app.close();
+    }
+  });
+
+  test('create-rich-block republishes pending revisions to SSE and buffers only the corrected block', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-widget-republish');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const draft = { id: 'widget', kind: 'html_widget', v: 1, html: '<button onclick="go()">Go</button>' };
+    const corrected = { ...draft, html: '<button id="go">Go</button><script>bind()</script>' };
+    const publish = (block) =>
+      app.inject({ method: 'POST', url: '/api/callbacks/create-rich-block', headers, payload: { block } });
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    try {
+      assert.equal((await publish(draft)).statusCode, 200);
+      const update = await publish(corrected);
+      assert.equal(update.statusCode, 200, update.body);
+      assert.equal(update.json().operation, 'updated');
+      const retry = await publish(corrected);
+      assert.equal(retry.json().operation, 'duplicate');
+      assert.deepEqual(
+        socketManager.getMessages().map((msg) => JSON.parse(msg.content).block),
+        [draft, corrected],
+      );
+      assert.deepEqual(
+        await getRichBlockBuffer().consume('thread-widget-republish', 'opus', invocationId, { final: false }),
+        [corrected],
+      );
+      const published = await publish({ ...corrected, html: '<p>Too late</p>' });
+      assert.equal(published.statusCode, 409);
+      assert.equal(published.json().code, 'RICH_BLOCK_ALREADY_PUBLISHED');
+      assert.equal(socketManager.getMessages().length, 2);
+    } finally {
+      await getRichBlockBuffer().consume('thread-widget-republish', 'opus', invocationId);
+      await app.close();
+    }
+  });
+
   test('create-rich-block resolves registered local images before buffering and broadcasting', async () => {
     const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
@@ -4200,7 +4883,7 @@ describe('Callback Routes', () => {
       assert.equal(block.items[0].url, '/api/workspace/file/raw?worktreeId=rich-images&path=a+%23100%25.png');
       assert.equal(block.items[0].alt, 'draft');
       const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
-      assert.deepEqual(getRichBlockBuffer().consume('thread-local-images', 'opus', invocationId), [block]);
+      assert.deepEqual(await getRichBlockBuffer().consume('thread-local-images', 'opus', invocationId), [block]);
     } finally {
       await app.close();
       await rm(root, { recursive: true, force: true });
@@ -4269,7 +4952,7 @@ describe('Callback Routes', () => {
     );
     const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
     assert.deepEqual(
-      getRichBlockBuffer().consume('thread-conversation-decision', 'opus', invocationId),
+      await getRichBlockBuffer().consume('thread-conversation-decision', 'opus', invocationId),
       [],
       'durable decisions must not also enter the generic final-response buffer',
     );
@@ -4528,7 +5211,7 @@ describe('Callback Routes', () => {
     assert.equal(creationBroadcasts.length, 2, 'retry does not broadcast another creation event');
 
     const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
-    getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
+    await getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
     const late = await createBlock('block-late');
     assert.equal(late.statusCode, 409);
     assert.equal(JSON.parse(late.body).code, 'RICH_BLOCK_INVOCATION_COMPLETE');
@@ -4556,7 +5239,7 @@ describe('Callback Routes', () => {
 
     const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
     assert.deepEqual(
-      getRichBlockBuffer().consume(thread.id, 'opus', invocationId),
+      await getRichBlockBuffer().consume(thread.id, 'opus', invocationId),
       [],
       'deleted thread must not receive buffered rich blocks',
     );
@@ -4629,7 +5312,7 @@ describe('Callback Routes', () => {
 
       const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
       assert.deepEqual(
-        getRichBlockBuffer().consume(thread.id, 'opus', invocationId),
+        await getRichBlockBuffer().consume(thread.id, 'opus', invocationId),
         [],
         'deleted thread must not receive generated file rich blocks',
       );
@@ -4649,7 +5332,7 @@ describe('Callback Routes', () => {
       const thread = threadStore.create('user-1', 'Completed document target');
       const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
       const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
-      getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
+      await getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
 
       const response = await app.inject({
         method: 'POST',

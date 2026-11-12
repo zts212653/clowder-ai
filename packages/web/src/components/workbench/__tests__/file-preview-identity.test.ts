@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
 import * as adapters from '../real-surface-adapters';
 import {

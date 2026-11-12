@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog, isDeepStrictEqual } from 'node:util';
 import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
+import { persistCliExecutionStopEvidence } from './cli-execution-stop-evidence.js';
 import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 
 export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
@@ -760,6 +761,8 @@ export function quarantineInvalidCliProcessOwnerManifests(
 }
 
 export function completeCliProcessOwnerCleanup(record: CliProcessOwnerRecord): void {
+  // Preserve exact stopped-tree proof before removing its only durable ownership join.
+  persistCliExecutionStopEvidence(record);
   if (record.manifest.socketDirectory) {
     if (!isValidatedCodexSocketDirectory(record.manifest.socketDirectory)) {
       throw new Error('refusing unsafe socket directory cleanup');

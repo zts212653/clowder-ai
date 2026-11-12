@@ -14,4 +14,4 @@ try {
 }
 process.on('exit', () => prepared.dispose());
 const PATH = (process.env.PATH ?? '').split(delimiter).filter((part) => part && resolve(part) !== ownDir).join(delimiter);
-process.exit(await executeSecretSafeCommand('curl', prepared.args, { ...process.env, PATH }));
+process.exit(await executeSecretSafeCommand('curl', prepared.args, { ...process.env, PATH }, prepared.credentials));

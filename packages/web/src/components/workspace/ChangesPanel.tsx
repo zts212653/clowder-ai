@@ -5,24 +5,13 @@ import { useLayoutEffect, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
+import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { ChangesPanelV2 } from './ChangesPanelV2';
 import { DiffViewer } from './DiffViewer';
 import { FileIcon } from './FileIcons';
+import { getStatusInfo } from './git-file-status';
 import { PullRequestChangesEmpty, PullRequestChangesStatus } from './PullRequestChangesStatus';
 import { useChangesDiff } from './useChangesDiff';
-
-const statusLabels: Record<string, { label: string; color: string }> = {
-  M: { label: 'M', color: 'text-amber-400' },
-  A: { label: 'A', color: 'text-green-400' },
-  D: { label: 'D', color: 'text-conn-red-text' },
-  R: { label: 'R', color: 'text-blue-400' },
-  '?': { label: 'U', color: 'text-cafe-muted' },
-  '??': { label: 'U', color: 'text-cafe-muted' },
-};
-
-function getStatusInfo(status: string) {
-  return statusLabels[status] ?? { label: status, color: 'text-cafe-muted' };
-}
 
 interface ChangesPanelProps {
   worktreeId: string | null;
@@ -30,7 +19,6 @@ interface ChangesPanelProps {
   threadId?: string | null;
   onOpenFile?: (path: string) => void;
   pullRequestTarget?: PullRequestChangesTarget;
-  chatSource?: boolean;
   commitTarget?: CommitChangesTarget;
   onBack?: () => void;
 }
@@ -40,16 +28,10 @@ function ChangesPanelClassic({
   basisPct,
   threadId,
   pullRequestTarget,
-  chatSource,
   commitTarget,
   onBack,
 }: ChangesPanelProps) {
-  const { data, loading, error, refresh, targetKey } = useChangesDiff(
-    worktreeId,
-    pullRequestTarget,
-    chatSource,
-    commitTarget,
-  );
+  const { data, loading, error, refresh, targetKey } = useChangesDiff(worktreeId, pullRequestTarget, commitTarget);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   useLayoutEffect(() => setSelectedFile(null), [targetKey]);
 
@@ -60,7 +42,13 @@ function ChangesPanelClassic({
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {pullRequestTarget && (
-        <PullRequestChangesStatus target={pullRequestTarget} data={data} error={error} onBack={onBack} />
+        <PullRequestChangesStatus
+          target={pullRequestTarget}
+          data={data}
+          error={error}
+          onBack={onBack}
+          onRetry={() => void refresh()}
+        />
       )}
       {threadId && !pullRequestTarget && (
         <details
@@ -119,7 +107,13 @@ function ChangesPanelClassic({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : 'No uncommitted changes'}
+            {data.isGitRepository === false ? (
+              'Not a Git repository'
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              'No uncommitted changes'
+            )}
           </div>
         )}
       </div>
@@ -129,9 +123,12 @@ function ChangesPanelClassic({
         {data?.diff ? (
           <DiffViewer diff={data.diff} filePath={selectedFile ?? undefined} />
         ) : (
-          <div className="p-4 text-center text-cafe-secondary text-xs">
-            {loading ? 'Loading...' : 'Select a file to view diff'}
-          </div>
+          <ChangesDiffPlaceholder
+            loading={loading}
+            failed={Boolean(pullRequestTarget && error)}
+            loadingLabel="Loading..."
+            selectFileLabel="Select a file to view diff"
+          />
         )}
       </div>
     </div>

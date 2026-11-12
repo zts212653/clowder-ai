@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { WorkspaceReviewMediaElement } from '@/components/workbench/content-review/WorkspaceReviewMediaElement';
+import { ArtworkActionsVisibility } from '../ArtworkChrome';
 import { ArtworkVideoPlayback } from '../ArtworkVideoPlayback';
 import { VideoArtworkControls } from '../VideoArtworkControls';
 
@@ -110,7 +111,11 @@ it('has one custom seek control, keeps native controls for other viewers and tra
   expect(container.querySelector('video')?.controls).toBe(false);
   expect(container.querySelectorAll('input[aria-label="视频播放位置"]')).toHaveLength(1);
   await act(async () => writeShellLanguage('en'));
-  expect(container.textContent).not.toMatch(/选时间段|圈这一帧|画笔|播放|视频/);
+  // The video element's fallback prose is not an interactive tool label.
+  const controls = [...container.querySelectorAll('button, input, select, label')]
+    .map((node) => `${node.textContent} ${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''}`)
+    .join(' ');
+  expect(controls).not.toMatch(/选时间段|圈这一帧|画笔|播放|视频/);
   const range = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Select range');
   await act(async () => range?.click());
   expect(container.querySelector('[aria-label="Range start"]')).toBeTruthy();
@@ -158,6 +163,14 @@ it('keeps circle disabled until an actually presented paused frame is ready and 
     onAnnotationActive: vi.fn(),
     children: null,
   };
+  await act(async () =>
+    root.render(
+      <ArtworkActionsVisibility visible={false}>
+        <VideoArtworkControls {...props} frameReady />
+      </ArtworkActionsVisibility>,
+    ),
+  );
+  expect([...container.querySelectorAll('button')].some((b) => b.textContent === '圈这一帧')).toBe(false);
   await act(async () => root.render(<VideoArtworkControls {...props} frameReady={false} />));
   const buttons = () => [...container.querySelectorAll('button')];
   expect(buttons().find((b) => b.textContent === '圈这一帧')?.disabled).toBe(true);

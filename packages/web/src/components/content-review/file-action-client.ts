@@ -1,10 +1,13 @@
 import { isContentFileBasename } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
 import { contentApiBase, contentFileUrl, workspaceFileSourceFromUrl } from './file-source';
+
+export { type ArtworkPixelRegion, copyArtworkPixels } from './artwork-pixel-copy';
 export type ContentFileInfo = {
   local: boolean;
   canOpen?: boolean;
   canReveal?: boolean;
+  reason?: string;
   path?: string;
   displayPath?: string;
   filename?: string;
@@ -123,39 +126,11 @@ export async function copyContentText(source: FileActionSource, text?: string) {
   else await navigator.clipboard.writeText(await value);
 }
 
-/** ClipboardItem receives the promise during the user gesture, preserving Safari's activation. */
-export async function copyArtworkPixels(element: HTMLImageElement | HTMLVideoElement, src: string) {
-  const pixels = (async () => {
-    const canvas = document.createElement('canvas');
-    const video = element instanceof HTMLVideoElement;
-    let bitmap: ImageBitmap | null = null;
-    if (video) {
-      if (element.readyState < 2 || element.seeking || !element.videoWidth) throw new Error('frame_not_ready');
-      canvas.width = element.videoWidth;
-      canvas.height = element.videoHeight;
-    } else {
-      const source = new URL(src, apiBase());
-      const response =
-        source.origin === apiBase().origin ? await apiFetch(`${source.pathname}${source.search}`) : await fetch(src);
-      if (!response.ok) throw new Error('image_unavailable');
-      bitmap = await createImageBitmap(await response.blob());
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-    }
-    try {
-      if (!canvas.width || !canvas.height || canvas.width * canvas.height > 40_000_000)
-        throw new Error('invalid_pixels');
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('canvas_unavailable');
-      context.drawImage(bitmap ?? element, 0, 0, canvas.width, canvas.height);
-      return await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('encoding_failed'))), 'image/png'),
-      );
-    } finally {
-      bitmap?.close();
-    }
-  })();
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': pixels })]);
+export function originalMediaDownloadName(filename: string, contentType: string) {
+  const mime = contentType.split(';')[0].trim().toLowerCase();
+  const extension = mime === 'image/gif' ? '.gif' : mime === 'image/svg+xml' ? '.svg' : null;
+  if (!extension || filename.toLowerCase().endsWith(extension)) return filename;
+  return `${filename.replace(/\.(?:png|jpe?g|webp|gif|svg)$/i, '') || '作品'}${extension}`;
 }
 
 export async function downloadContentFile(url: string, filename: string) {
@@ -175,7 +150,7 @@ export async function downloadContentFile(url: string, filename: string) {
   const objectUrl = URL.createObjectURL(await response.blob());
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
-  anchor.download = filename;
+  anchor.download = originalMediaDownloadName(filename, response.headers.get('content-type') ?? '');
   document.body.append(anchor);
   anchor.click();
   anchor.remove();

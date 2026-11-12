@@ -60,6 +60,7 @@ vi.mock('@/utils/api-client', () => ({
 
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorDisplay: () => ({ name: 'ME', nickname: 'co-creator', role: 'operator', mention: '@co-creator' }),
   useCoCreatorConfig: () => ({
     name: 'ME',
     aliases: [],
@@ -159,12 +160,15 @@ describe('ThreadItem draft badge', () => {
     });
     container = document.createElement('div');
     document.body.appendChild(container);
+    // The original cases below exercise the retained classic interface.
+    window.localStorage.setItem('cat-cafe:shell-presentation', 'classic');
     root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.localStorage.removeItem('cat-cafe:shell-presentation');
   });
 
   afterAll(() => {

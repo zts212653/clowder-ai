@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';

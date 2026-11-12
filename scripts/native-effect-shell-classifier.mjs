@@ -1,6 +1,7 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { shellSegments } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
+import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import { DELETE_PROGRAMS, findArgvDeletes, findExecutedCommands } from './native-effect-find-classifier.mjs';
 import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
 import { classifyHttpOperation } from './native-effect-http-classifier.mjs';
@@ -41,6 +42,7 @@ export const SHELL_EFFECT_PRIORITY = new Map([
   ['repository_rewrite', 6],
   ['remote_mutation', 7],
   ['service_mutation', 8],
+  ['auth_mutation', 9],
 ]);
 
 export function classifyShellSegment(raw) {
@@ -51,6 +53,8 @@ export function classifyShellSegment(raw) {
   if (httpEffect) return httpEffect;
   const execution = executedInvocations(command);
   const invocations = execution.pipelines.flat();
+  const authEffect = codexAuthenticationEffect(invocations);
+  if (authEffect === 'auth_mutation') return authEffect;
   const signals = invocations.filter(({ name }) => ['kill', 'pkill', 'killall'].includes(name));
   if (signals.some((invocation) => !isLivenessProbe(invocation))) return 'process_control';
   if (isRepositoryRefresh(command)) return 'repository_refresh';
@@ -65,7 +69,7 @@ export function classifyShellSegment(raw) {
   if (isWriteOperation(command)) return 'write';
   if (invocations.some(({ name, operands }) => name === 'find' && findExecutedCommands(operands).length))
     return 'unknown';
-  if (execution.complete && isReadOperation(command)) return 'read';
+  if (execution.complete && (authEffect === 'read' || isReadOperation(command))) return 'read';
   return 'unknown';
 }
 
@@ -94,7 +98,7 @@ export function destructiveInvocationEffect({ name, operands = [] } = {}) {
 
 const DATA_PROGRAMS = new Set(
   `base64 bat cat column curl cut diff echo envsubst fmt fold gh grep head jq less md5 md5sum more nl od
-   paste pbcopy printf pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
+   paste pbcopy printf pgrep ps lsof pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
     .trim()
     .split(/\s+/),
 );
@@ -264,7 +268,7 @@ function isLocalObservation(raw) {
   if (['du', 'sleep'].includes(executable)) return true;
   if (executable === 'shasum') return !tokens.slice(1).some((token) => ['-c', '--check', '--status'].includes(token));
   if (isLivenessProbe({ name: executable, operands: tokens.slice(1) })) return true;
-  if (['ps', '/bin/ps', '/usr/bin/ps', 'lsof', '/usr/bin/lsof', '/usr/sbin/lsof'].includes(executable)) return true;
+  if (/^(?:\/(?:usr\/)?s?bin\/)?(?:ps|pgrep|lsof)$/.test(executable)) return true;
   if (['test', '/bin/test', '/usr/bin/test'].includes(executable)) return tokens.length > 1;
   return ['[', '/bin/[', '/usr/bin/['].includes(executable) && tokens.at(-1) === ']';
 }

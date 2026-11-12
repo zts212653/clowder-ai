@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { coCreatorDisplay } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { bootstrapCatCatalog } from '../src/config/cat-catalog-store.js';
 import { _resetCachedConfig, getCoCreatorConfig, loadResolvedCatConfig } from '../src/config/cat-config-loader.js';
@@ -53,7 +54,7 @@ function fixture(owner: Record<string, unknown>) {
   return { root, template, display, raw };
 }
 
-test('new installations prefill co-creator in the template and runtime catalog', () => {
+test('new installations prefill the house address in the template and runtime catalog', () => {
   const root = mkdtempSync(join(tmpdir(), 'co-creator-default-'));
   roots.push(root);
   const templatePath = join(root, 'cat-template.json');
@@ -86,6 +87,17 @@ test('missing nickname and existing custom nicknames preserve their configured b
     [{ nickname: 'co-creator' }, 'co-creator'],
   ] as const)
     assert.equal(fixture(owner).display(), expected);
+});
+
+test('inactive legacy nickname preserves the house role and literal mention contract', () => {
+  const f = fixture({ nickname: '大当家', mentionPatterns: ['@m.(a+b)'] });
+  assert.equal(f.display(), 'co-creator');
+  assert.deepEqual(coCreatorDisplay(getCoCreatorConfig()), {
+    name: 'co-creator',
+    nickname: 'co-creator',
+    role: 'operator',
+    mention: '@m.(a+b)',
+  });
 });
 
 test('manual nickname save, clear and reselect survive reload without changing routing', () => {

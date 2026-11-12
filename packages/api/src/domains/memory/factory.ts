@@ -1,6 +1,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 // F102: Memory service factory — creates SQLite-backed memory services
 
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -27,13 +28,17 @@ import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
 import { MemoryEmbeddingLifecycle } from './MemoryEmbeddingLifecycle.js';
 import type { PassageVectorStore } from './PassageVectorStore.js';
+import { PublishedDocumentIndex } from './PublishedDocumentIndex.js';
+import { PublishedDocumentSource } from './PublishedDocumentSource.js';
 import { createPersonalMemoryStore, registerPrivateAndExternalCollections } from './private-collection-bindings.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore, type SqliteEvidenceStoreOptions } from './SqliteEvidenceStore.js';
+import { TasteMemoryLifecycleStore } from './taste/TasteMemoryLifecycleStore.js';
 import type { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {
   evidenceStore: IEvidenceStore;
+  publishedDocuments?: PublishedDocumentIndex;
   /** Phase G: direct store access for summary compaction task (getDb()) */
   store: SqliteEvidenceStore;
   /** F227: typed event index (magic-word / cognitive-transition events). */
@@ -47,6 +52,7 @@ export interface MemoryServices {
   materializationService?: IMaterializationService;
   embeddingLifecycle: MemoryEmbeddingLifecycle;
   embeddingService?: IEmbeddingService;
+  legacyEmbeddingService?: IEmbeddingService;
   vectorStore?: VectorStore;
   passageVectorStore?: PassageVectorStore;
   /** F-4: Global knowledge index builder (Skills + MEMORY.md) */
@@ -63,6 +69,7 @@ export interface MemoryServices {
 
 export interface MemoryConfig {
   type: 'sqlite';
+  publishedProjectRoot?: string;
   /** API composition-root diagnostics apply only to the project connection shared with schedulerDb. */
   readDiagnostics?: SqliteEvidenceStoreOptions['readDiagnostics'];
   /** For sqlite: path to evidence.sqlite file */
@@ -165,6 +172,30 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   const externals = loadExternalCollections(dataDir);
   const childExcludes = computeChildExcludes(docsRoot, externals);
 
+  const publishedDocuments = config.publishedProjectRoot
+    ? new PublishedDocumentIndex(
+        new PublishedDocumentSource(config.publishedProjectRoot, {
+          exclude: childExcludes,
+          ownerUserId: config.privateUserId,
+          lifecycle: new TasteMemoryLifecycleStore(store.getDb()),
+          lifecycleRevision: () =>
+            createHash('sha256')
+              .update(
+                JSON.stringify(
+                  store
+                    .getDb()
+                    .prepare(
+                      'SELECT source_path, status, projected_revision FROM taste_memory_lifecycle ORDER BY owner_user_id, source_path',
+                    )
+                    .all(),
+                ),
+              )
+              .digest('hex')
+              .slice(0, 16),
+        }),
+        store,
+      )
+    : undefined;
   const indexBuilder = new IndexBuilder(
     store,
     docsRoot,
@@ -175,16 +206,16 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     config.excludeThreadIdsFn,
     undefined,
     childExcludes.length > 0 ? childExcludes : undefined,
+    publishedDocuments,
   );
   const embeddingLifecycle = new MemoryEmbeddingLifecycle(store, indexBuilder, embedConfig, {
+    requireLegacyConsumer: true,
     getDependentStores: () =>
-      [...stores.values()].filter(
-        (candidate): candidate is SqliteEvidenceStore => candidate instanceof SqliteEvidenceStore,
-      ),
+      [...stores].flatMap(([id, candidate]) => {
+        const status = catalog.get(id)?.status;
+        return candidate instanceof SqliteEvidenceStore && (!status || status === 'active') ? [candidate] : [];
+      }),
   });
-  if (embedConfig.embedMode !== 'off') {
-    await embeddingLifecycle.activate(embedConfig.embedMode);
-  }
 
   const markerQueue = new MarkerQueue(markersDir);
   const materializationService = new MaterializationService(markerQueue, docsRoot, indexBuilder);
@@ -266,6 +297,8 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     now,
   });
 
+  if (embedConfig.embedMode !== 'off') await embeddingLifecycle.activate(embedConfig.embedMode);
+
   const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore, catalog, stores });
 
   // F227: typed Event Memory store (magic-word truth source, LL-048 fail-loud).
@@ -274,6 +307,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   return {
     evidenceStore: store,
+    publishedDocuments,
     store,
     eventMemoryStore,
     eventMemoryDbPath,
@@ -285,6 +319,9 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     embeddingLifecycle,
     get embeddingService(): IEmbeddingService | undefined {
       return embeddingLifecycle.getService();
+    },
+    get legacyEmbeddingService(): IEmbeddingService | undefined {
+      return embeddingLifecycle.getLegacyConsumerService();
     },
     get vectorStore(): VectorStore | undefined {
       return embeddingLifecycle.getVectorStore();

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F071-D1: Regression tests for the shared Lightbox component.
  *
@@ -15,6 +16,13 @@ import { CopyButton, Lightbox } from '@/components/Lightbox';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { writeShellPresentation } from '@/components/shell/shell-presentation';
 
+const copy = vi.hoisted(() => ({ pixels: vi.fn() }));
+// OS clipboard/canvas I/O stops here; the shared FileActions controller and its live copy are real.
+vi.mock('@/components/content-review/file-action-client', async (original) => ({
+  ...(await original<typeof import('@/components/content-review/file-action-client')>()),
+  copyArtworkPixels: copy.pixels,
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -28,6 +36,10 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  localStorage.clear();
+  writeShellPresentation('classic');
+  writeShellLanguage('zh');
+  copy.pixels.mockReset().mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -36,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.clear();
 });
 
 function renderLightbox(props: Partial<React.ComponentProps<typeof Lightbox>> = {}) {
@@ -54,21 +67,47 @@ function renderLightbox(props: Partial<React.ComponentProps<typeof Lightbox>> = 
 }
 
 it.each([
-  ['v2', 'zh', '复制', '复制图片', '已复制'],
-  ['v2', 'en', 'Copy', 'Copy image', 'Copied!'],
-  ['classic', 'zh', 'Copy', 'Copy image', 'Copied!'],
-] as const)('uses %s/%s for the image copy action and successful feedback', async (presentation, language, copy, title, copied) => {
+  ['v2', 'zh', '复制图片', '已复制图片'],
+  ['v2', 'en', 'Copy image', 'Image copied'],
+  ['classic', 'zh', '复制图片', '已复制图片'],
+] as const)('uses %s/%s for the shared image copy action and successful feedback', async (presentation, language, label, copied) => {
   writeShellPresentation(presentation);
   writeShellLanguage(language);
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   await act(async () => root.render(React.createElement(CopyButton, { url: '/test-image.png', placement: 'below' })));
-  expect(container.textContent).toBe(copy);
-  expect(container.querySelector('button')?.title).toBe(title);
+  expect(container.textContent).toBe(label);
+  expect(container.querySelector('button')?.title).toBe(label);
   await act(async () => container.querySelector('button')?.click());
-  expect(writeText).toHaveBeenCalledWith('/test-image.png');
+  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/test-image.png');
   expect(container.textContent).toBe(copied);
-  await act(async () => writeShellPresentation('classic'));
+});
+
+it('translates a pending copy and its eventual result without remounting or repeating the action', async () => {
+  let finish!: () => void;
+  copy.pixels.mockReturnValue(
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => root.render(React.createElement(CopyButton, { url: '/original.png' })));
+  const button = container.querySelector('button')!;
+  await act(async () => button.click());
+  expect(button.textContent).toBe('复制图片');
+  await act(async () => writeShellLanguage('en'));
+  expect(container.querySelector('button')).toBe(button);
+  expect(button.textContent).toBe('Copy image');
+  await act(async () => finish());
+  expect(button.textContent).toBe('Image copied');
+  await act(async () => writeShellLanguage('zh'));
+  expect(button.textContent).toBe('已复制图片');
+  expect(copy.pixels).toHaveBeenCalledExactlyOnceWith(expect.any(HTMLImageElement), '/original.png');
+});
+
+it('keeps clipboard failure distinct from a copied image', async () => {
+  copy.pixels.mockRejectedValue(new Error('clipboard denied'));
+  await act(async () => root.render(React.createElement(CopyButton, { url: '/original.png' })));
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.textContent).toBe('操作未完成，请重试。');
+  expect(copy.pixels).toHaveBeenCalledOnce();
 });
 
 describe('Lightbox', () => {

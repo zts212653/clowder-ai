@@ -329,6 +329,11 @@ export function isPromptCaptureEnabled(catId?: string): boolean {
   return allowedCats.split(',').some((c) => c.trim() === catId);
 }
 
+/**
+ * Display estimate for the debug prompt capture (length / 3.5), shown as "~N
+ * tokens (est)". It is not the budget counter: on Chinese text it reads about
+ * 30% of the o200k count that budget decisions use (`utils/token-counter`).
+ */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.5);
 }

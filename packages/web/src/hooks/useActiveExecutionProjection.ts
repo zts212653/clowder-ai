@@ -1,6 +1,10 @@
 'use client';
 
-import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
+import type {
+  ActiveExecutionListResponse,
+  ActiveExecutionProjection,
+  ActiveHoldWaitProjection,
+} from '@cat-cafe/shared';
 import { useEffect, useLayoutEffect } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -74,6 +78,21 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;
   }
+}
+
+/**
+ * Cancel a held ball through the same DELETE the hold card uses. A 404 means the hold already ended (fired,
+ * replaced or cancelled elsewhere), which is the state the user asked for. Returns whether the hold is gone.
+ */
+export async function cancelHoldWait(wait: ActiveHoldWaitProjection): Promise<boolean> {
+  if (wait.cancelability.state !== 'cancelable') return false;
+  const { taskId } = wait.cancelability.target;
+  const response = await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+  if (!response.ok && response.status !== 404) return false;
+  const store = useActiveExecutionStore.getState();
+  store.settleWaitCancellation(wait.waitId);
+  if (store.anchorThreadId) await refreshActiveExecutionProjection(store.anchorThreadId, store.projectPath);
+  return true;
 }
 
 /** Stop a legacy socket witness, then refresh and stop the canonical replacement if one appeared. */

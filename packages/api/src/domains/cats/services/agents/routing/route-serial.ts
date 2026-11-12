@@ -197,21 +197,30 @@ import {
 } from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { responseProducers } from '../invocation/response-producer-registry.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
+import { settleChildResponse } from '../invocation/settle-child-response.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { AgentServiceUnavailableError, ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import {
+  AgentServiceUnavailableError,
+  ExecutionAdmissionConflict,
+  terminalExecutionBindingFailure,
+} from '../registry/AgentServiceUnavailableError.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
-import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
+import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { readDurableA2ALineage } from './durable-a2a-lineage.js';
-import { validateRoutingSyntax } from './final-routing-slot.js';
+import { finalRoutingSlot, validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { resolveEventBackedRoutingExit } from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { requestOwnerAskCorrection } from './owner-ask-correction.js';
+import { detectUnaddressedOwnerAsk, opensOwnerDecision } from './owner-ask-detect.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
 import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
@@ -482,6 +491,9 @@ export async function* routeSerial(
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
   const invocationServices = new InvocationServiceScope();
+  // PR-3a: the R of every turn this route admits is the route's to commit until its own terminal
+  // commit has run, so no stop or repair path writes it meanwhile (ResponseProducerRegistry).
+  const routeResponseProducers = responseProducers.openRouteScope();
   const preparationStartedAt = performance.now();
   let memberPreparationStartedAt = preparationStartedAt;
   let preparationCheckpointAt = preparationStartedAt;
@@ -549,15 +561,6 @@ export async function* routeSerial(
   let yieldedFinalDone = false;
   let providerTeardownUnconfirmed = false;
   let routeFailed = false;
-  // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
-  let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
-  if (deps.invocationDeps.threadStore) {
-    try {
-      activeParticipants = await deps.invocationDeps.threadStore.getParticipantsWithActivity(threadId);
-    } catch {
-      /* best-effort: activity fetch failure does not block invocation */
-    }
-  }
   // F042: Fetch thread routingPolicy once before loop (threadId doesn't change).
   checkpointPreparation('lineage_and_participants');
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
@@ -832,17 +835,32 @@ export async function* routeSerial(
           ...(catSignal ? { signal: catSignal } : {}),
         });
       try {
+        if (
+          !pinnedService &&
+          terminalExecutionBindingFailure(servicePreparationError) &&
+          options.onExecutionBindingRejected
+        )
+          throw servicePreparationError;
         if (pinnedService) {
           const admitted = await invocationServices.admit(
             pinnedService,
             () => getService(deps.services, catId, deps.unavailableServices),
             capture,
             catSignal,
+            deps.refreshServices,
           );
           pinnedService = admitted.service;
           executionBinding = admitted.executionBinding;
         } else executionBinding = await capture();
       } catch (error) {
+        const terminalReason = terminalExecutionBindingFailure(error);
+        if (
+          catSignal?.aborted ||
+          (terminalReason && (await options.onExecutionBindingRejected?.(catId, terminalReason)))
+        ) {
+          index++;
+          continue;
+        }
         yield {
           type: 'error',
           catId,
@@ -951,7 +969,6 @@ export async function* routeSerial(
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
       const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
-      const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
@@ -1232,7 +1249,6 @@ export async function* routeSerial(
           ...(pingPongWarning ? { pingPongWarning } : {}),
           ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
           ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
-          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
           ...(voiceMode ? { voiceMode } : {}),
@@ -1449,6 +1465,8 @@ export async function* routeSerial(
                 : {}),
               sameRouteOutputMessageIds,
               exactA2ATriggerMessageId: streamReplyTo,
+              invocationInputMessageIds: isOriginalTarget ? options.persistedPromptMessageIds : undefined,
+              nowMs: Date.now(),
               ...(contextProjection ? { contextProjection } : {}),
             },
           );
@@ -1485,6 +1503,8 @@ export async function* routeSerial(
               : undefined;
             pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
               ...inc.briefingContext,
+              receiverCatId: catId,
+              receiverDisplayName: catConfig?.displayName,
               ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
             });
           } else {
@@ -1651,6 +1671,8 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      // Set when this turn put a decision in front of the owner (approval card, decision card, …).
+      let openedOwnerDecision = false;
       const pendingToolResults: PendingToolResult[] = [];
       const recordPersistedOutputMessageId = (messageId: string): void => {
         sameRouteOutputMessageIds.add(messageId);
@@ -1752,7 +1774,6 @@ export async function* routeSerial(
         message: AppendMessageInput,
         terminal: { status: 'completed'; completedAt: number },
         targets: readonly CatId[],
-        allowDotReturn: boolean,
       ): Promise<StoredMessage> => {
         if (!ownInvocationId || !lifecycleResponseMessageId) throw new Error('canonical response identity missing');
         return commitCompletedRouteResponse(deps, {
@@ -1761,8 +1782,6 @@ export async function* routeSerial(
           message,
           terminal,
           targetCats: [...targets],
-          allowDotReturn,
-          triggerMessageId: turnTriggerMessageId,
           admitWake: commitCompletedA2AWake,
           userId,
           ownerAuthProvenance,
@@ -2047,7 +2066,12 @@ export async function* routeSerial(
             }
           : {}),
         ...(options.onLifecycleInvocationStarted
-          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          ? {
+              // Claimed before R exists, so no stop can find it admitted and unclaimed.
+              onLifecycleInvocationStarted: routeResponseProducers.claimingAdmission(
+                options.onLifecycleInvocationStarted,
+              ),
+            }
           : {}),
         ...(options.onAgentClientActiveRunReady
           ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
@@ -2211,6 +2235,7 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
+            if (opensOwnerDecision(effectiveMsg.toolName, effectiveMsg.toolInput)) openedOwnerDecision = true;
             pendingToolResults.push({
               toolName: effectiveMsg.toolName,
               ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
@@ -2475,7 +2500,7 @@ export async function* routeSerial(
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
+      const bufferedBlocks = await getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
 
       // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;
@@ -2728,7 +2753,7 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId);
+        a2aMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -2916,6 +2941,26 @@ export async function* routeSerial(
           pendingRoutingFeedback.push({ targetCatId: catId, reason: 'void_hold' });
           // F192 Phase D — capture trigger for deferred sample event emission.
           pendingC2VoidHoldSampleTrigger = voidHoldFireAttr[TRIGGER] as string;
+        }
+
+        // 2026-11-09 dropped-ball census: replies that wait for the owner without a line-start
+        // mention never reach the mailbox. Remind the cat next turn; after storage, wake it once
+        // to decide or mention the owner when he is away (see owner-ask-correction.ts).
+        const unaddressedOwnerAsk =
+          localCvoHasCoCreatorLineStartMention || detectUserMention(storedContent)
+            ? null
+            : detectUnaddressedOwnerAsk({
+                text: storedContent,
+                routedToCat: routingExitLineStartMentions.length > 0 || structuredTargetCats.size > 0,
+                blocks: allRichBlocks,
+                openedOwnerDecision,
+              });
+        if (unaddressedOwnerAsk) {
+          pendingRoutingFeedback.push({ targetCatId: catId, reason: 'owner_ask_unaddressed' });
+          log.info(
+            { catId: catId as string, threadId, kind: unaddressedOwnerAsk },
+            'Owner ask without a line-start mention',
+          );
         }
 
         // One write preserves both inline-routing and wait facts instead of overwriting either.
@@ -3176,14 +3221,12 @@ export async function* routeSerial(
                 }
               : undefined;
           const completedA2AWakeCommit =
-            lifecycleResponse?.status === 'completed' &&
-            (a2aMentions.length > 0 || (!collectiveBoundTurn && deps.dotReplyTarget))
+            lifecycleResponse?.status === 'completed' && a2aMentions.length > 0
               ? (message: AppendMessageInput) =>
                   commitCompletedResponse(
                     message,
                     { status: 'completed', completedAt: lifecycleResponse.completedAt },
                     a2aMentions,
-                    !collectiveBoundTurn,
                   )
               : undefined;
           const failedA2AReportCommit =
@@ -3265,6 +3308,26 @@ export async function* routeSerial(
           storedMsgId = storedMsg?.id;
           turnStoredMessageId = storedMsgId;
           if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
+          const ownerAskCorrectionDeliver = deps.invocationDeps.ownerAskCorrectionDeliver;
+          if (unaddressedOwnerAsk && storedMsg && ownerAskCorrectionDeliver) {
+            try {
+              const correction = await requestOwnerAskCorrection(
+                { messages: deps.messageStore, deliver: ownerAskCorrectionDeliver },
+                {
+                  userId,
+                  threadId,
+                  catId: catId as string,
+                  askMessageId: storedMsg.id,
+                  answeredAt: Date.now(),
+                  ...(currentUserMessageId ? { triggerMessageId: currentUserMessageId } : {}),
+                  excerpt: finalRoutingSlot(stripTrailingCatSignatures(storedContent)),
+                },
+              );
+              log.info({ catId: catId as string, threadId, outcome: correction.outcome }, 'Owner ask correction');
+            } catch (err) {
+              log.warn({ catId: catId as string, threadId, err }, 'Owner ask correction was not delivered');
+            }
+          }
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
           if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
             try {
@@ -3479,19 +3542,6 @@ export async function* routeSerial(
                 : undefined;
             const answerBearingNoText =
               hasRichBlocks || Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
-            const completedNoTextCommit =
-              answerBearingNoText &&
-              lifecycleResponse?.status === 'completed' &&
-              !collectiveBoundTurn &&
-              deps.dotReplyTarget
-                ? (message: AppendMessageInput) =>
-                    commitCompletedResponse(
-                      message,
-                      { status: 'completed', completedAt: lifecycleResponse.completedAt },
-                      [],
-                      true,
-                    )
-                : undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvocationId) {
               const decision = await deps.freshnessOutputCommitCoordinator.commit({
                 userId,
@@ -3502,7 +3552,6 @@ export async function* routeSerial(
                 originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
                 message: noTextMessageInput,
                 ...(lifecycleResponse ? { lifecycleResponse } : {}),
-                ...(completedNoTextCommit ? { commitLifecycleResponse: completedNoTextCommit } : {}),
               });
               outputCommitDecision = decision;
               if (options.persistenceContext) {
@@ -3513,15 +3562,13 @@ export async function* routeSerial(
               }
               storedNoText = await deps.messageStore.getById(decision.messageId);
             } else if (lifecycleResponse && ownInvocationId) {
-              storedNoText = completedNoTextCommit
-                ? await completedNoTextCommit(noTextMessageInput)
-                : await commitLifecycleResponseFromAppendInput(
-                    deps.messageStore,
-                    lifecycleResponse.messageId,
-                    ownInvocationId,
-                    lifecycleResponse,
-                    noTextMessageInput,
-                  );
+              storedNoText = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponse.messageId,
+                ownInvocationId,
+                lifecycleResponse,
+                noTextMessageInput,
+              );
             } else {
               // A tool-only record is audit output, not answer content: no frontier-annotated
               // commit, because there is no bubble whose position anyone reads. The replay-unsafe
@@ -3911,6 +3958,27 @@ export async function* routeSerial(
         await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
       }
 
+      if (ownInvocationId) {
+        await settleChildResponse(
+          { messageStore: deps.messageStore, turnStore: deps.invocationDeps.turnExecutionStore },
+          {
+            invocationId: ownInvocationId,
+            ...((turnStoredMessageId ?? lifecycleResponseMessageId)
+              ? { responseMessageId: turnStoredMessageId ?? lifecycleResponseMessageId }
+              : {}),
+            ...(!catProducedOutput && !turnStoredMessageId && !lifecycleResponseMessageId && doneMsg
+              ? {
+                  noResponseReason: collectedToolEvents.length ? ('tool_only' as const) : ('empty_turn' as const),
+                  noResponseProof: 'route_completed_without_response_admission' as const,
+                }
+              : {}),
+          },
+        ).catch((err) =>
+          log.warn({ err, invocationId: ownInvocationId }, 'Child response settlement retained for recovery'),
+        );
+      }
+      // This turn's R has had its one terminal commit from this route; a stop may end it from here on.
+      if (ownInvocationId) routeResponseProducers.leave(ownInvocationId);
       if (doneMsg) {
         if (cancellationDiagnostics) {
           const stored = turnStoredMessageId ? await deps.messageStore.getById(turnStoredMessageId) : undefined;
@@ -3949,6 +4017,8 @@ export async function* routeSerial(
     routeFailed = true;
     throw error;
   } finally {
+    // However the route exits, it commits no R after this.
+    routeResponseProducers.leaveAll();
     await invocationServices.dispose();
     // Turn-custody observation is recorded after the turn settles: current output persistence,
     // operator handoff writes, and inline child receiver-boundary handoffs must all

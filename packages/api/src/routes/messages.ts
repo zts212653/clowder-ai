@@ -41,6 +41,7 @@ import {
   MessageSelectionResolver,
 } from '../domains/cats/services/context/MessageSelectionResolver.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
+import { cursorFor } from '../domains/cats/services/stores/cursor.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import { storedMessageSource } from '../domains/cats/services/stores/message-source.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -255,6 +256,13 @@ const getMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(10000).default(50),
   /** Cursor: "timestamp:id" or legacy plain timestamp */
   before: z.string().optional(),
+  /** Applied publication frontier; unlike `before`, this is not timeline order. */
+  afterVisibility: z
+    .string()
+    .max(512)
+    .regex(/^(?:|v2:\d{16}:.+)$/)
+    .refine((value) => !value || Number.isSafeInteger(Number(value.slice(3, 19))))
+    .optional(),
   threadId: z.string().min(1).max(100).optional(),
 });
 
@@ -548,9 +556,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
     if (!replayedSource && whisperVisibility && whisperRecipients?.length) {
-      const validRecipients = await router.resolveExplicitTargets(whisperRecipients, resolvedThreadId, {
-        persist: false,
-      });
+      // Whispers are a member-only visibility boundary. Addressable plugin
+      // instances may receive ordinary conversation work, but they are not
+      // principals in the private member audience model.
+      const validRecipients = router.resolveAdmissionTargets(whisperRecipients);
       if (validRecipients.length !== whisperRecipients.length) {
         return reply
           .code(400)
@@ -987,13 +996,68 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     },
   );
 
+  // Derived, disposable proof of hidden-only ranges. Raw positions stay here:
+  // exposing them would disclose other owners' activity in the shared lobby.
+  const scanBookmarks = new Map<string, number>();
+  const rememberScan = (threadId: string, userId: string, watermark: string | null, scannedThrough: number) => {
+    const key = JSON.stringify([threadId, userId, watermark]);
+    scanBookmarks.delete(key);
+    scanBookmarks.set(key, scannedThrough);
+    if (scanBookmarks.size > 512) scanBookmarks.delete(scanBookmarks.keys().next().value!);
+  };
+  const readBrowserWatermark = async (threadId: string, userId: string) => {
+    const head = await opts.messageStore.getVisibilityHead(threadId);
+    const watermark =
+      (
+        await opts.messageStore.getLatestVisibleCursor(threadId, {
+          evidence: 'browser_timeline',
+          viewerUserId: userId,
+        })
+      )?.cursor ?? null;
+    rememberScan(threadId, userId, watermark, Math.max(head, watermark ? Number(watermark.slice(3, 19)) : 0));
+    return watermark;
+  };
+  const readBrowserChanges = async (threadId: string, userId: string, after: string | null) => {
+    const head = await opts.messageStore.getVisibilityHead(threadId);
+    const appliedSeq = after ? Number(after.slice(3, 19)) : 0;
+    const scannedThrough = scanBookmarks.get(JSON.stringify([threadId, userId, after])) ?? appliedSeq;
+    if (head <= scannedThrough) return { messages: [], watermark: after, exhausted: true };
+    const changes = await opts.messageStore.getBrowserHistoryChanges(threadId, userId, scannedThrough);
+    const watermark = changes.messages.length ? cursorFor(changes.messages.at(-1)!) : after;
+    rememberScan(threadId, userId, watermark, changes.scannedThrough);
+    return { messages: changes.messages, watermark, exhausted: changes.exhausted };
+  };
+
+  // The same durable publication frontier backs discovery and successful History hydration.
+  app.get('/api/threads/:threadId/watermark', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const parsed = getMessagesSchema.pick({ threadId: true }).required().safeParse(request.params);
+    if (!parsed.success) return reply.status(400).send({ error: 'Invalid threadId' });
+    const userId = resolveUserId(request, {});
+    if (!userId) return reply.status(401).send({ error: 'Identity required' });
+    const thread = await opts.threadStore?.get(parsed.data.threadId);
+    if (!thread || thread.deletedAt) return reply.status(404).send({ error: 'Thread not found' });
+    if (thread.createdBy !== 'system' && thread.createdBy !== userId) {
+      return reply.status(403).send({ error: 'Forbidden' });
+    }
+    const query = getMessagesSchema.pick({ afterVisibility: true }).safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ error: 'Invalid applied watermark' });
+    const after = query.data.afterVisibility;
+    return {
+      watermark:
+        after === undefined
+          ? await readBrowserWatermark(parsed.data.threadId, userId)
+          : (await readBrowserChanges(parsed.data.threadId, userId, after || null)).watermark,
+    };
+  });
+
   // GET /api/messages - 获取历史消息
   app.get('/api/messages', async (request) => {
     const parseResult = getMessagesSchema.safeParse(request.query);
     if (!parseResult.success) {
       return { messages: [], hasMore: false };
     }
-    const { limit, before, threadId } = parseResult.data;
+    const { limit, before, threadId, afterVisibility } = parseResult.data;
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       return { messages: [], hasMore: false };
@@ -1017,6 +1081,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Always thread-scoped — default to 'default' thread for lobby
     const resolvedThreadId = threadId ?? 'default';
+
+    // Capture before reading: a commit during hydration must remain discoverable on the next probe.
+    const changes =
+      !before && afterVisibility !== undefined
+        ? await readBrowserChanges(resolvedThreadId, userId, afterVisibility || null)
+        : undefined;
+    const historyWatermark = before
+      ? undefined
+      : changes
+        ? changes.watermark
+        : await readBrowserWatermark(resolvedThreadId, userId).catch(() => undefined);
 
     // Loop-scan: iteratively fetch batches from the store, filtering out
     // internal system messages, until we have `limit + 1` visible items
@@ -1089,7 +1164,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // hasMore: true if we collected more visible items than the page size,
     // or if we haven't exhausted the store (more may exist deeper).
     const hasMore = allVisible.length > limit || !storeExhausted;
-    const page = allVisible.length > limit ? allVisible.slice(allVisible.length - limit) : allVisible;
+    const timelinePage = allVisible.length > limit ? allVisible.slice(allVisible.length - limit) : allVisible;
+    const oldest = timelinePage[0];
+    const historyPageCursor = oldest ? `${getTimelineOrderTime(oldest)}:${oldest.id}` : null;
+    // Publication order can advance for a response whose timeline position is
+    // older than this window. Recover those records before acknowledging them.
+    const recovered = changes?.messages ?? [];
+    const page = [...new Map([...timelinePage, ...recovered].map((message) => [message.id, message])).values()].sort(
+      (a, b) => getTimelineOrderTime(a) - getTimelineOrderTime(b) || a.id.localeCompare(b.id),
+    );
 
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {
@@ -1123,6 +1206,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
+        m.extra?.pluginAddressedReceipt ||
+        m.extra?.targetResponse ||
+        m.extra?.targetResponseResult ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1151,6 +1237,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
+                ...(m.extra?.pluginAddressedReceipt ? { pluginAddressedReceipt: m.extra.pluginAddressedReceipt } : {}),
+                ...(m.extra?.targetResponse ? { targetResponse: m.extra.targetResponse } : {}),
+                ...(m.extra?.targetResponseResult ? { targetResponseResult: m.extra.targetResponseResult } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),
@@ -1275,6 +1364,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     return normalizeJsonUnicode({
       messages: chatItems,
       hasMore,
+      historyPageCursor,
+      ...(historyWatermark !== undefined ? { historyWatermark } : {}),
     });
   });
 };

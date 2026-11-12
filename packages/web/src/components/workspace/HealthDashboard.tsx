@@ -132,7 +132,11 @@ export function HealthDashboard() {
           {loading && <div className="text-micro text-cafe-interactive/40">Loading...</div>}
           {error && <div className="text-xs text-conn-red-text">{error}</div>}
 
-          {health && totalIssues === 0 && !health.runtimeDrift && (
+          {health?.isGitRepository === false && (
+            <div className="text-xs text-cafe-interactive/60">Not a Git repository</div>
+          )}
+
+          {health?.isGitRepository !== false && health && totalIssues === 0 && !health.runtimeDrift && (
             <div className="text-xs text-conn-green-text">All clean!</div>
           )}
 

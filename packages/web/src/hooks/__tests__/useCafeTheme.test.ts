@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F056 Phase D: useCafeTheme hook tests
  * TDD — tests written before implementation.

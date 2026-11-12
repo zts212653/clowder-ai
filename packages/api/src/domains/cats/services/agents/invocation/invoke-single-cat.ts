@@ -8,14 +8,10 @@ import type {
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
 import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
-import { ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
+import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
 import { freezeExecutionWorkspace } from './execution-workspace.js';
-import {
-  captureHostExecutionBoundary,
-  changedHostExecutionBoundary,
-  hostExecutionBoundaryRef,
-} from './host-execution-boundary.js';
+import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
@@ -104,11 +100,17 @@ import { ToolSpanTracker } from '../../../../../infrastructure/telemetry/tool-sp
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { withEnvironmentReferenceOverrides } from '../../../../../utils/env-references.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { readProcessActivity } from '../../../../../utils/process-activity-registry.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import {
+  bindWindowsProviderHostScope,
+  createWindowsProviderHostScope,
+  type WindowsProviderHostScope,
+} from '../../../../../utils/windows-provider-host.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
   type MemoryCueInvocationPromptResolver,
@@ -122,6 +124,7 @@ import type {
   EntityNudgePromptPresentation,
   EntityNudgeService,
 } from '../../../../memory/EntityNudgeService.js';
+import { matterOpeningDirectory } from '../../../../memory/matters/matter-opening-directory.js';
 import {
   AsrPersonMemoryOpportunityPromptService,
   type AsrPersonMemoryPresentationEnvelope,
@@ -639,7 +642,6 @@ import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import {
-  hasUnconfirmedProviderTeardown,
   type ITurnExecutionStore,
   type TurnExecutionCausalRefs,
   type TurnExecutionKind,
@@ -677,12 +679,14 @@ import {
   isPromptTokenLimitExceededError,
   isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
+  isTransientAgyNativePreInitFailure,
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
 import { MEMBER_TIMEOUT_REASON, MemberOutputTimeout, type MemberTimeoutEvent } from './member-output-timeout.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
 import { assertToolExecutionPolicySupported, normalizeToolExecutionPolicy } from './tool-execution-policy.js';
+import { findWindowsLiveOwner } from './WindowsJobStopRecovery.js';
 
 function usesAgyNativeCarrier(service: AgentService): boolean {
   return service instanceof AgyNativeAgentService;
@@ -1160,6 +1164,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
+  readonly ownerAskCorrectionDeliver?: (
+    opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
+  ) => Promise<string>;
   readonly ordinaryTaskHandoffs?: import('../../../../ball-custody/OrdinaryTaskHandoffService.js').OrdinaryTaskHandoffService;
   readonly resolveInvocationPluginMcpView?: () => Promise<
     import('../../../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
@@ -1247,6 +1255,10 @@ export interface InvocationDeps {
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
   readonly contextSourceAdmission?: Pick<ContextSourceAdmission, 'prepare'>;
+  readonly matterMemoryService?: Pick<
+    import('../../../../memory/matters/MatterMemoryService.js').MatterMemoryService,
+    'catalog'
+  >;
   /** F312: lane-owned standing predicate for an unconsumed canonical Profile revision. */
   readonly profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   /** F312: lane-owned temporal/subject predicate for one unconsumed F227 Event revision. */
@@ -1454,11 +1466,14 @@ export async function prepareInvocationExecutionBinding(
   const memberRegistryRevision = catRegistry.getRevision();
   const catConfig = catRegistry.tryGet(input.catId as string)?.config;
   if (!isPublishedCatalogSnapshotCurrent(catConfig))
-    throw new ExecutionAdmissionConflict('Member catalog publication is stale; retry after configuration refresh.');
+    throw new ExecutionAdmissionConflict(
+      'Member catalog publication is stale; retry after configuration refresh.',
+      true,
+    );
   const carrier = input.service?.freshnessCarrierCapability?.();
   const declaredImplementation = input.service?.implementationSnapshot?.();
   if (declaredImplementation?.clientId && declaredImplementation.clientId !== catConfig?.clientId)
-    throw new ExecutionAdmissionConflict(
+    throw new StaleServiceSourceConflict(
       'execution_client_changed: 成员与已准备的 client 不一致，请在配置刷新后重试。',
     );
   const implementationSource =
@@ -1539,60 +1554,62 @@ export async function prepareInvocationExecutionBinding(
     catConfig?.mcpSupport !== false &&
     input.toolExecutionPolicy?.mode !== 'read_only';
   let isPluginMcpCurrent = () => true;
-  const mcpSources = await captureInvocationMcpSources(async () =>
-    captureOptions || captureOpenCodeMcp || captureSharedMcp
-      ? await preflightRace(
-          Promise.resolve().then(async () => {
-            const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
-            isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
-            input.signal?.throwIfAborted();
-            return withInvocationPluginMcpView(
-              async () => {
-                const providerOptions = captureOptions
-                  ? await captureOptions({
-                      signal: input.signal,
-                      workingDirectory: workspace.workingDirectory,
-                      toolExecutionPolicy: input.toolExecutionPolicy,
-                      accountEnv: binding.accountEnv,
-                      accountRef: binding.resolvedAccount?.id,
-                      mcpSupport: binding.catConfig?.mcpSupport !== false,
-                      liveCompanion: input.liveCompanion,
-                    })
-                  : undefined;
-                input.signal?.throwIfAborted();
-                const openCodeMcpConfig = captureOpenCodeMcp
-                  ? await captureOpenCodeMcpConfig(
-                      binding.projectRoot,
-                      input.catId,
-                      captureOpenCodeMcp,
-                      workspace.workingDirectory,
-                    )
-                  : undefined;
-                input.signal?.throwIfAborted();
-                const sharedMcpContext = captureSharedMcp
-                  ? await prepareSharedMcpLaunch({
-                      catId: input.catId,
-                      apiUrl: deps.apiUrl,
-                      workingDirectory: workspace.workingDirectory,
-                      transport: mcpTransport,
-                    })
-                  : undefined;
-                return {
-                  ...(providerOptions ? { providerOptions } : {}),
-                  ...(openCodeMcpConfig ? { openCodeMcpConfig } : {}),
-                  sharedMcpLaunch: { transport: mcpTransport, context: sharedMcpContext },
-                };
-              },
-              view,
-              input.ownerAuthProvenance === 'strict' && exposureProject
-                ? { kind: 'member', projectRoot: exposureProject, memberCatId: input.catId }
-                : undefined,
-            );
-          }),
-          'service.captureInvocationOptions:execution-binding',
-          input.signal,
-        )
-      : { sharedMcpLaunch: { transport: mcpTransport } },
+  const mcpSources = await captureInvocationMcpSources(() =>
+    withEnvironmentReferenceOverrides(binding.accountEnv ?? {}, async () =>
+      captureOptions || captureOpenCodeMcp || captureSharedMcp
+        ? await preflightRace(
+            Promise.resolve().then(async () => {
+              const view = isScopedMember ? undefined : await deps.resolveInvocationPluginMcpView?.();
+              isPluginMcpCurrent = () => view?.isCurrent?.() !== false;
+              input.signal?.throwIfAborted();
+              return withInvocationPluginMcpView(
+                async () => {
+                  const providerOptions = captureOptions
+                    ? await captureOptions({
+                        signal: input.signal,
+                        workingDirectory: workspace.workingDirectory,
+                        toolExecutionPolicy: input.toolExecutionPolicy,
+                        accountEnv: binding.accountEnv,
+                        accountRef: binding.resolvedAccount?.id,
+                        mcpSupport: binding.catConfig?.mcpSupport !== false,
+                        liveCompanion: input.liveCompanion,
+                      })
+                    : undefined;
+                  input.signal?.throwIfAborted();
+                  const openCodeMcpConfig = captureOpenCodeMcp
+                    ? await captureOpenCodeMcpConfig(
+                        binding.projectRoot,
+                        input.catId,
+                        captureOpenCodeMcp,
+                        workspace.workingDirectory,
+                      )
+                    : undefined;
+                  input.signal?.throwIfAborted();
+                  const sharedMcpContext = captureSharedMcp
+                    ? await prepareSharedMcpLaunch({
+                        catId: input.catId,
+                        apiUrl: deps.apiUrl,
+                        workingDirectory: workspace.workingDirectory,
+                        transport: mcpTransport,
+                      })
+                    : undefined;
+                  return {
+                    ...(providerOptions ? { providerOptions } : {}),
+                    ...(openCodeMcpConfig ? { openCodeMcpConfig } : {}),
+                    sharedMcpLaunch: { transport: mcpTransport, context: sharedMcpContext },
+                  };
+                },
+                view,
+                input.ownerAuthProvenance === 'strict' && exposureProject
+                  ? { kind: 'member', projectRoot: exposureProject, memberCatId: input.catId }
+                  : undefined,
+              );
+            }),
+            'service.captureInvocationOptions:execution-binding',
+            input.signal,
+          )
+        : { sharedMcpLaunch: { transport: mcpTransport } },
+    ),
   );
   const captured = mcpSources.value;
   input.signal?.throwIfAborted();
@@ -1603,10 +1620,12 @@ export async function prepareInvocationExecutionBinding(
   if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
     throw new ExecutionAdmissionConflict(
       'Thread execution configuration changed during admission; retry this invocation.',
+      true,
     );
   if (catRegistry.getRevision() !== memberRegistryRevision || !isPublishedCatalogSnapshotCurrent(catConfig))
     throw new ExecutionAdmissionConflict(
       'Member configuration changed during execution admission; retry this invocation.',
+      true,
     );
   const currentAccountBinding = freezeExecutionAccountBinding({
     catId: input.catId,
@@ -1617,19 +1636,22 @@ export async function prepareInvocationExecutionBinding(
   if (!isDeepStrictEqual(binding, currentAccountBinding))
     throw new ExecutionAdmissionConflict(
       'Execution configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (
     input.service?.implementationSnapshot &&
     !isDeepStrictEqual(input.service.implementationSnapshot(), implementation)
   )
-    throw new ExecutionAdmissionConflict('session_host_generation_changed');
+    throw new ExecutionAdmissionConflict('session_host_generation_changed', true);
   if (!mcpSources.isCurrent())
     throw new ExecutionAdmissionConflict(
       'MCP configuration changed during execution admission; retry this invocation.',
+      true,
     );
   if (!isPluginMcpCurrent())
     throw new ExecutionAdmissionConflict(
       'Plugin MCP activation changed during execution admission; retry this invocation.',
+      true,
     );
   const frozenL0Input =
     catConfig && (input.service?.injectsL0Natively?.() || catConfig.clientId === 'opencode')
@@ -1762,6 +1784,30 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
   const { transport: mcpTransport, context: admittedSharedMcpContext } = sharedMcpLaunch;
   const sharedMcpContext = isScopedMember ? undefined : admittedSharedMcpContext;
+  // #1838: an earlier execution of this exact role that a Windows host job or its exact controller
+  // API still owns is a live writer on the same native session; a per-process session mutex cannot
+  // see it across API instances. Only that positive proof refuses entry, and it must refuse before
+  // registry.create, which replaces the live turn's callback credential. An unknown or unlinked one
+  // is no live owner and settles through the ordinary #1849 path, so it never blocks.
+  if (process.platform === 'win32' && deps.turnExecutionStore) {
+    callerSignal?.throwIfAborted();
+    const running = await deps.turnExecutionStore.listRunningByUser(userId);
+    const liveOwner = await findWindowsLiveOwner({
+      records: running.filter((record) => record.threadId === threadId && record.catId === catId),
+    });
+    if (liveOwner) {
+      // Refused like any admission that ends before an invocation exists: an error, then done.
+      yield {
+        type: 'error',
+        catId,
+        errorCode: 'prior_provider_live_owner',
+        error: `同一角色的上一轮执行仍有存活的 owner，暂不能开始新任务。阻塞执行 invocationId=${liveOwner.invocationId}`,
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+      return;
+    }
+  }
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -1949,6 +1995,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
+    if (deps.matterMemoryService && params.ownerAuthProvenance === 'strict') {
+      invocationPromptAdditions.push(await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId));
+    }
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {
       try {
         const pendingDecisionPrompt = await deps.runtimeInteractionPort.pendingConversationDecisionPrompt(
@@ -2314,6 +2363,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
   const unclosedServiceIterators = new Set<AsyncIterator<AgentMessage>>();
   let providerTeardownUnconfirmed = false;
+  // #1838: this turn's link to the API's kernel job; removed once its terminal and teardown are durable.
+  let windowsHostScope: WindowsProviderHostScope | undefined;
   const unconfirmedTeardownMessage = () => ({
     type: 'status' as const,
     catId,
@@ -2992,115 +3043,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       await refreshInvocationPolicyExecution();
     }
 
-    if (deps.turnExecutionStore) {
-      signal.throwIfAborted();
-      const running = await preflightRace(
-        Promise.resolve(deps.turnExecutionStore.listRunningByUser(userId)),
-        'turnExecutionStore.priorProviderStop',
-        signal,
-      );
-      if (
-        running.some(
-          (record) =>
-            record.invocationId !== invocationId &&
-            record.threadId === threadId &&
-            record.catId === catId &&
-            hasUnconfirmedProviderTeardown(record),
-        )
-      ) {
-        turnExecutionFailureReason = 'prior_provider_teardown_unconfirmed';
-        throw new Error('同一角色的上一轮执行尚未确认停止，暂不能开始新任务。请先核对或受控停止原执行。');
-      }
-    }
-
     const catConfig = frozenExecutionBinding.catConfig;
     const provider = catConfig?.clientId;
     let firstReplyNamingInstruction = '';
     const { workingDirectory, threadProjectPath } = frozenExecutionBinding.workspace;
     const hostExecutionBoundary = frozenExecutionBinding.hostExecutionBoundary;
     if (deps.sessionChainStore && !hostExecutionBoundary) throw new Error('execution_boundary_missing');
-    const boundaryPreflight = <T>(label: string, run: () => T | Promise<T>): Promise<T> => {
-      signal.throwIfAborted();
-      // Attach the race observer before calling an owner that may synchronously abort and reject.
-      return preflightRace(Promise.resolve().then(run), label, signal);
-    };
-    if (deps.sessionChainStore && activeSessionRecordForResume && hostExecutionBoundary) {
-      const prior = activeSessionRecordForResume;
-      const changes = changedHostExecutionBoundary(prior.hostExecutionBoundary, hostExecutionBoundary);
-      if (changes.length > 0 && (prior.cliSessionId || prior.hostExecutionBoundary)) {
-        if (prior.externalImport)
-          throw new Error(
-            'imported_session_execution_boundary_unproven: 无法核验导入会话的执行绑定，未发送任务或替换历史。请先核验原客户端、账号和工作区。',
-          );
-        // Do not seal a history unless a replacement can receive authorized context.
-        if (!deps.sessionSealer || (!params.contextPromptFactory && !params.rebuildPromptAfterSessionSeal))
-          throw new Error(
-            'execution_boundary_rollover_unavailable: 会话执行绑定已变化或无法核验，当前入口不能安全建立带上下文的新片段，未发送任务。',
-          );
-        const reason = `execution_boundary:${changes.join(',')}`;
-        const sealer = deps.sessionSealer;
-        const sealed = await boundaryPreflight('executionBoundary.requestSeal', () =>
-          sealer.requestSeal({ sessionId: prior.id, reason }),
-        );
-        if (!sealed.accepted) throw new Error('execution_boundary_seal_conflict');
-        const finalized = await boundaryPreflight('executionBoundary.finalize', () =>
-          sealer.finalize({ sessionId: prior.id }),
-        );
-        if (!finalized.sealed) throw new Error('execution_boundary_finalize_failed');
-        await boundaryPreflight('executionBoundary.clearResume', () => sessionManager.delete(userId, catId, threadId));
-        sessionId = undefined;
-        const store = deps.sessionChainStore;
-        const replacement = await boundaryPreflight('executionBoundary.replacement', () =>
-          getOrCreateManagedSessionRecord(store, {
-            threadId,
-            catId,
-            userId,
-            ...(bgChainKey ? { chainKey: bgChainKey } : {}),
-            compressionCount: invocationCapacitySnapshot?.capability.observesCompression === true ? 0 : null,
-          }),
-        );
-        if (replacement.id === prior.id || replacement.cliSessionId)
-          throw new Error('execution_boundary_replacement_conflict');
-        activeSessionRecordForResume = replacement;
-        invocationPolicyRecordId = replacement.id;
-        invocationHasAuthoritativeUsage = false;
-        await refreshInvocationPolicyExecution();
-        if (params.rebuildPromptAfterSessionSeal) prompt = await params.rebuildPromptAfterSessionSeal();
-        yield {
-          type: 'system_info',
-          catId,
-          timestamp: Date.now(),
-          content: JSON.stringify({
-            type: 'session_seal_requested',
-            sessionId: prior.id,
-            sessionSeq: prior.seq + 1,
-            catId,
-            reason,
-          }),
-        };
-      }
-      const store = deps.sessionChainStore;
-      const target = activeSessionRecordForResume;
-      const bound = await boundaryPreflight('executionBoundary.persist', () =>
-        store.bindHostExecutionBoundary(target.id, target.cliSessionId, hostExecutionBoundary),
-      );
-      if (!bound) throw new Error('execution_boundary_binding_conflict');
-      try {
-        await auditLog.append({
-          type: AuditEventTypes.SESSION_EXECUTION_BOUNDARY_RECORDED,
-          threadId,
-          data: {
-            sessionId: bound.id,
-            invocationId,
-            boundaryRef: hostExecutionBoundaryRef(hostExecutionBoundary),
-            changedDimensions: changes,
-          },
-        });
-      } catch (error) {
-        throw new Error('execution_boundary_audit_write_failed', { cause: error });
-      }
-      activeSessionRecordForResume = bound;
-    }
     if (frozenExecutionBinding.workspace.usesDefaultWorkspace)
       yield { type: 'system_info', catId, content: `本次使用默认工作区：${workingDirectory}`, timestamp: Date.now() };
     if (threadStore) {
@@ -5376,7 +5324,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             const digestInput = captureExecutionDigest(
               capturedMissionPack,
               {
-                summary: '', // Populated by HandoffDigestGenerator in future enhancement
+                summary: '', // Visible invocation metadata is populated by the running member.
                 filesChanged: [],
                 blocked: false,
                 hadError: hadStreamError,
@@ -5699,6 +5647,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     let allowSessionRetry = !isScopedMember && Boolean(sessionId) && !requiresImportedHistory && !isAgyAcp;
     let allowTransientRetry = !isScopedMember && !isAgyAcp;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let retryFreshReason: 'resume_rejected' | 'resume_failed' | undefined;
     let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await scopedMemberLaunch?.assertCurrent();
@@ -5926,6 +5875,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               evidence,
               coordinate: contextContinuityHandshake.coordinate,
               invocationId,
+              ...(retryFreshReason ? { freshReason: retryFreshReason } : {}),
             }),
           };
           await applyProviderCompactions(compactions);
@@ -5953,18 +5903,37 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         const entryChanges = changedHostExecutionBoundary(hostExecutionBoundary, providerEntryBoundary);
         if (entryChanges.length > 0)
           throw new Error(`execution_boundary_changed_before_provider_entry:${entryChanges.join(',')}`);
+        // Session identity fence (read-only, atomic in the store): the logical session must still be the
+        // active owner and carry the native ID this turn resumes. A concurrent bind/restore/registration
+        // during prompt preparation would otherwise send the task to a stale native session.
         const store = deps.sessionChainStore;
         const logicalId = invocationPolicyRecordId;
         const target = activeSessionRecordForResume;
-        const bound = await boundaryPreflight('executionBoundary.providerEntry', () =>
-          store.bindHostExecutionBoundary(
-            logicalId,
-            target?.id === logicalId ? target.cliSessionId : undefined,
-            hostExecutionBoundary,
-          ),
+        const expectedCliSessionId = target?.id === logicalId ? target.cliSessionId : undefined;
+        signal.throwIfAborted();
+        const identityHolds = await preflightRace(
+          Promise.resolve().then(() => store.isActiveOwnerSession(logicalId, expectedCliSessionId)),
+          'sessionIdentity.providerEntry',
+          signal,
         );
-        if (!bound) throw new Error('execution_boundary_provider_entry_conflict');
+        if (!identityHolds) throw new Error('session_identity_changed_before_provider_entry');
       }
+      // #1838: a covered Windows provider runs in hosts whose own kernel jobs own its tree; the API
+      // stays outside every job. The first host is owned and linked to this exact execution BEFORE
+      // the provider is marked started, so an API killed from here on leaves a stop proof the next
+      // instance can join. A host that cannot be owned fails this turn before any provider exists,
+      // while its record can still settle; nothing is launched until the seam takes the host.
+      // An opt-in tmux carrier launches the provider in a pane, never in a host: no link for it.
+      if (
+        process.platform === 'win32' &&
+        service.windowsProviderHosts &&
+        !spawnCliOverride &&
+        !agentCarrierSessionFactory &&
+        deps.turnExecutionStore?.markProviderStarted
+      )
+        windowsHostScope = await createWindowsProviderHostScope({
+          execution: { executionId: executionParentInvocationId, invocationId, threadId, catId, userId },
+        });
       if (
         deps.turnExecutionStore?.markProviderStarted &&
         !(await deps.turnExecutionStore.markProviderStarted(invocationId, Date.now()))
@@ -5982,15 +5951,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         throw new Error('execution_boundary_changed_before_provider_entry:implementation');
       const exposureProject = pluginMcpExposureProject(threadProjectPath, workingDirectory);
       if (injectSystemPrompt && !nativeAuthContinuation) _staticIdentityDigest.delete(identityKey);
-      const serviceIter = bindInvocationPluginMcpView(
+      const serviceIter = bindWindowsProviderHostScope(
         () =>
-          (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
-            ? service.invokeWithContinuityPreflight(continuityPreflight, options)
-            : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
-        localPluginMcpView,
-        params.ownerAuthProvenance === 'strict' && exposureProject
-          ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
-          : undefined,
+          bindInvocationPluginMcpView(
+            () =>
+              (usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
+                ? service.invokeWithContinuityPreflight(continuityPreflight, options)
+                : service.invoke(effectivePrompt, options))[Symbol.asyncIterator](),
+            localPluginMcpView,
+            params.ownerAuthProvenance === 'strict' && exposureProject
+              ? { kind: 'member', projectRoot: exposureProject, memberCatId: catId }
+              : undefined,
+          ),
+        windowsHostScope,
       );
       activeServiceIterator = serviceIter;
       unclosedServiceIterators.add(serviceIter);
@@ -6175,7 +6148,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          (isAgyNative
+            ? isTransientAgyNativePreInitFailure(msg)
+            : isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
         ) {
           suppressedTransientCliError = msg;
           continue;
@@ -6507,6 +6482,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (shouldRetryWithoutSession && !requiresImportedHistory && attempt + 1 < maxAttempts) {
         await presentationDelivery?.release('provider_generation_replaced');
         const nativeBindingChanged = suppressedMissingSessionError?.errorCode === 'AGY_NATIVE_RESUME_MISMATCH';
+        const currentRetryFreshReason: 'resume_rejected' | 'resume_failed' = nativeBindingChanged
+          ? 'resume_rejected'
+          : 'resume_failed';
+        retryFreshReason = currentRetryFreshReason;
         const retryReason = nativeBindingChanged
           ? 'native_binding_changed'
           : suppressedPromptLimitError
@@ -6637,7 +6616,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ? resolveContextContinuity({
                 capability: contextCapability,
                 invocationId,
-                freshReason: 'resume_failed',
+                freshReason: currentRetryFreshReason,
                 invocationOrigin: params.invocationOrigin ?? 'unknown',
                 routeTopology: params.routeTopology ?? 'independent',
                 // F296 B4 (kimi review): without this the retry silently
@@ -6916,7 +6895,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         };
       }
       try {
-        if (unclosedServiceIterators.size === 0) {
+        // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
+        // every one of them is verifiably closed; otherwise the turn keeps its stop protection.
+        if (unclosedServiceIterators.size === 0 && (!windowsHostScope || (await windowsHostScope.close()))) {
           terminal = { ...terminal, providerTeardownAt: terminal.endedAt };
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
@@ -6952,6 +6933,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             log.warn({ invocationId, err }, 'F293 durable dispatch signal observation failed');
           }
         }
+        // #1838: a durable terminal with confirmed teardown needs no stop proof; any other state keeps it.
+        if (windowsHostScope && result.record?.status !== 'running' && result.record?.providerTeardownAt !== undefined)
+          windowsHostScope.clearEvidence();
       } catch (err) {
         // A running record is deliberately left for startup reconciliation;
         // never manufacture lifecycle truth from logs or the auth registry.

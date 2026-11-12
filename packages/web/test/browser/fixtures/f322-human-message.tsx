@@ -4,6 +4,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
 import { INIT_DARK, INIT_LIGHT, type TunerState } from '@/components/dev/oklch-tuner-engine';
 import { HubCoCreatorOverviewCard } from '@/components/HubMemberOverviewCard';
+import { MessageActions } from '@/components/MessageActions';
 import { ReplyPill } from '@/components/ReplyPill';
 import { ReplyPreviewBar } from '@/components/ReplyPreviewBar';
 import { ThemeApplier } from '@/components/ThemeApplier';
@@ -96,6 +97,46 @@ const messages: ChatMessageData[] = [
   },
 ];
 
+// The live host can have a receipt or reply label much wider than the human's text.
+// Keep the real receipt renderer: a bare short ChatMessage misses this sizing relationship.
+const hostMessages: ChatMessageData[] = messages.map((message) => {
+  if (message.id === 'h-short')
+    return {
+      ...message,
+      content: '会关注这个？',
+      lifecycle: {
+        kind: 'input',
+        orderKey: String(T0),
+        dispatchRefs: [
+          {
+            targetId: 'codex',
+            phase: 'settled',
+            statusMessageId: 'c-2',
+            dispatchedAt: T0,
+            inputRead: { status: 'read', at: T0 },
+          },
+        ],
+      },
+    };
+  if (message.id === 'c-2')
+    return {
+      ...message,
+      lifecycle: {
+        kind: 'response',
+        orderKey: String(T0 - minute),
+        invocationId: 'host-receipt',
+        targetId: 'codex',
+        inputEntryIds: [],
+        inputMessageIds: ['earlier-input', 'h-short'],
+        status: 'completed',
+        startedAt: T0 - minute,
+        completedAt: T0 + minute,
+      },
+    };
+  if (message.id === 'h-run-a') return { ...message, replyTo: 'h-run-b' };
+  return message;
+});
+
 function params(base: 'light' | 'dark', overrides?: (p: TunerState) => void): TunerState {
   const next = structuredClone(base === 'light' ? INIT_LIGHT : INIT_DARK);
   overrides?.(next);
@@ -143,21 +184,26 @@ window.__human = {
 
 function Thread() {
   const { getCatById } = useCatData();
-  const width = Number(new URLSearchParams(window.location.search).get('w') ?? '720');
+  const query = new URLSearchParams(window.location.search);
+  const width = Number(query.get('w') ?? '720');
+  const shownMessages = query.has('host-layout') ? hostMessages : messages;
   return (
     <div
       data-testid="column"
+      data-thread-chat-reading-column
+      data-chat-container
       style={{ width, padding: '16px 20px', background: 'var(--shell-work)', color: 'var(--cafe-text)' }}
     >
-      {messages.map((message) => (
-        <ChatMessage
-          key={message.id}
-          message={message}
-          threadId="thread-human"
-          timelineMessages={messages}
-          getCatById={getCatById}
-          onEditCoCreator={() => undefined}
-        />
+      {shownMessages.map((message) => (
+        <MessageActions key={message.id} message={message} threadId="thread-human">
+          <ChatMessage
+            message={message}
+            threadId="thread-human"
+            timelineMessages={shownMessages}
+            getCatById={getCatById}
+            onEditCoCreator={() => undefined}
+          />
+        </MessageActions>
       ))}
     </div>
   );
@@ -186,14 +232,19 @@ function Consumers() {
     <div data-testid="consumers" style={{ width: 720, padding: '16px 20px', background: 'var(--shell-work)' }}>
       <div data-consumer="reply-pill" style={{ padding: 12 }}>
         <ReplyPill
-          replyPreview={{ senderCatId: null, content: '三版封面，暖一点。' }}
+          replyPreview={{ from: { kind: 'user', userId: 'default-user' }, senderCatId: null, content: SHORT }}
           replyToId="h-short"
           getCatById={getCatById}
         />
       </div>
       <div data-consumer="reply-bar" style={{ padding: 12 }}>
         <ReplyPreviewBar
-          replyToMessage={{ id: 'h-short', senderCatId: null, content: '三版封面，暖一点。' }}
+          replyToMessage={{
+            id: 'h-short',
+            from: { kind: 'user', userId: 'default-user' },
+            senderCatId: null,
+            content: SHORT,
+          }}
           cats={cats}
           onClear={() => undefined}
         />
@@ -203,7 +254,7 @@ function Consumers() {
       </div>
       {layers.map((layer) => (
         <div key={layer} data-layer={layer} style={{ background: `var(${layer})`, padding: 20 }}>
-          <div data-lineage-focus="true" style={{ height: 24 }} />
+          <div data-message-jump-focus="true" style={{ height: 24 }} />
         </div>
       ))}
     </div>

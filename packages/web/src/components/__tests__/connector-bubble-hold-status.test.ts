@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * F167 Phase Q — hold-ball lifecycle status refresh.
  */
@@ -151,4 +152,27 @@ describe('ConnectorBubble hold status lifecycle', () => {
     expect(container.textContent).not.toContain('取消持球');
     expect(container.textContent).not.toContain('取消并反馈');
   });
+
+  for (const [status, reason] of [
+    ['retired_expired', '已超过等待截止'],
+    ['retired_invalid', '等待窗口无效'],
+  ]) {
+    it(`explains ${status} on the original waiting card without a second notification, including after reload`, async () => {
+      mockApiFetch.mockResolvedValue(new Response(JSON.stringify({ status, cancelable: false }), { status: 200 }));
+      const initial = holdMessage({ content: '等待中：检查 CI。预计稍后唤醒。' });
+      act(() => root.render(React.createElement(ConnectorBubble, { message: initial, timelineMessages: [initial] })));
+      await flushEffects();
+      expect(container.textContent).toContain(reason);
+      expect(container.textContent).toContain('原任务未完成');
+      expect(container.textContent).toContain('当前对话');
+      expect(container.textContent).not.toContain('取消持球');
+      act(() => root.unmount());
+      root = createRoot(container);
+      mockApiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ status, cancelable: false }), { status: 200 }));
+      act(() => root.render(React.createElement(ConnectorBubble, { message: initial, timelineMessages: [initial] })));
+      await flushEffects();
+      expect(container.textContent).toContain(reason);
+      expect(container.textContent).toContain('原任务未完成');
+    });
+  }
 });

@@ -164,6 +164,26 @@ export type AuthFailureReason = 'invalid_token' | 'unknown_invocation' | 'stale_
 export type VerifyResult = { ok: true; record: InvocationRecord } | { ok: false; reason: AuthFailureReason };
 
 export class InvocationRegistry {
+  isWatcherToolCallAdmitted(invocationId: string, callId: string): Promise<boolean> {
+    return this.backend.isWatcherToolCallAdmitted(invocationId, callId);
+  }
+  consumeWatcherToolCall(
+    invocationId: string,
+    callId: string,
+    toolName: string,
+  ): Promise<'accepted' | 'replayed' | 'exhausted'> {
+    if (!callId || callId.length > 200) throw new Error('invalid watcher tool call identity');
+    return this.backend.consumeWatcherToolCall(invocationId, callId, toolName);
+  }
+  watcherToolCallCount(invocationId: string) {
+    return this.backend.watcherToolCallCount(invocationId);
+  }
+  claimWatcherToolCallback(...args: Parameters<IAuthInvocationBackend['claimWatcherToolCallback']>) {
+    return this.backend.claimWatcherToolCallback(...args);
+  }
+  completeWatcherToolCallback(...args: Parameters<IAuthInvocationBackend['completeWatcherToolCallback']>) {
+    return this.backend.completeWatcherToolCallback(...args);
+  }
   private readonly backend: IAuthInvocationBackend;
   private readonly turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   private readonly onLifecycleSignal?: (signal: CallbackAuthLifecycleSignal) => void;

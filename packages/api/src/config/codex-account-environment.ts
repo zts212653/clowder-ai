@@ -9,7 +9,7 @@ import {
   readCodexLaunchProjection,
 } from './codex-launch-config.js';
 import { validateCodexManagedLayout } from './codex-managed-layout.js';
-import { assertCodexSharedStateRoots } from './codex-shared-state.js';
+import { assertCodexSharedStateRoots, codexUsesSharedState } from './codex-shared-state.js';
 
 // These native inputs select another principal or its authentication transport, even with an isolated home.
 const ALTERNATIVE_CREDENTIAL_ENV = [
@@ -73,12 +73,15 @@ function assertApiOverrideKey(key: string): void {
     ].includes(root)
   )
     throw new Error(`codex_api_account_configuration_conflict:${root}`);
-  if (key === 'model_providers' || key === 'model_providers.custom')
-    throw new Error('codex_api_account_configuration_conflict:model_providers');
-  if (key.startsWith('model_providers.custom.')) {
-    const field = key.slice('model_providers.custom.'.length).split('.')[0];
-    if (API_OWNED_PROVIDER_FIELDS.has(field))
-      throw new Error(`codex_api_account_configuration_conflict:model_providers.custom.${field}`);
+  // F320 KD-3: an official key may run on the owned openai_https provider; it is account-owned like custom.
+  for (const provider of ['custom', 'openai_https']) {
+    if (key === 'model_providers' || key === `model_providers.${provider}`)
+      throw new Error('codex_api_account_configuration_conflict:model_providers');
+    if (key.startsWith(`model_providers.${provider}.`)) {
+      const field = key.slice(`model_providers.${provider}.`.length).split('.')[0];
+      if (API_OWNED_PROVIDER_FIELDS.has(field))
+        throw new Error(`codex_api_account_configuration_conflict:model_providers.${provider}.${field}`);
+    }
   }
 }
 /** Account routing is not a member preference. Ordinary model/tool/retry settings remain configurable. */
@@ -177,10 +180,13 @@ export function finalizeCodexAccountEnvironment(
     cwd: string;
     executionHome?: string;
     rpcConfig?: Record<string, unknown>;
+    /** F320 KD-3: an official API key keeps its private execution home but shares these conversation roots. */
+    sharedConversationRoots?: { readonly stateRoot: string; readonly sqliteHome: string };
   },
 ): CodexAccountEnvironment {
-  if (descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth'))
-    assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
+  const apiShared = input.sharedConversationRoots;
+  const sharedState = codexUsesSharedState(descriptor);
+  if (sharedState) assertCodexSharedStateRoots(descriptor.accountOwnerRoot, { launch: descriptor });
   if (descriptor.managed) {
     validateCodexManagedLayout({
       kind: 'managed',
@@ -194,7 +200,7 @@ export function finalizeCodexAccountEnvironment(
     if (!sameCodexIdentity(descriptor.identity, currentIdentity)) throw new Error('codex_account_identity_unavailable');
   }
   const home = codexCanonicalPath(input.executionHome ?? descriptor.credentialHome, input.cwd);
-  const sqliteHome = input.executionHome ? home : descriptor.sqliteHome;
+  const sqliteHome = apiShared ? apiShared.sqliteHome : input.executionHome ? home : descriptor.sqliteHome;
   const env: CodexAccountEnvironment = {
     ...input.env,
     CODEX_HOME: home,
@@ -203,22 +209,10 @@ export function finalizeCodexAccountEnvironment(
     CODEX_CAT_EXPECTED_USER_ID: descriptor.identity?.userId ?? null,
     CODEX_CAT_EXPECTED_WORKSPACE_ID: descriptor.identity?.workspaceId ?? null,
     CODEX_CAT_EXPECTED_CREDENTIAL_HOME: descriptor.identity ? home : null,
-    CODEX_CAT_ACCOUNT_REF:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.accountRef
-        : null,
-    CODEX_CAT_STATE_ROOT:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.stateRoot
-        : null,
-    CODEX_CAT_SHARED_SQLITE_HOME:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.sqliteHome
-        : null,
-    CODEX_CAT_ACCOUNT_OWNER_ROOT:
-      descriptor.managed || (descriptor.accountRef === 'codex' && descriptor.authMode === 'oauth')
-        ? descriptor.accountOwnerRoot
-        : null,
+    CODEX_CAT_ACCOUNT_REF: sharedState ? descriptor.accountRef : null,
+    CODEX_CAT_STATE_ROOT: sharedState ? descriptor.stateRoot : null,
+    CODEX_CAT_SHARED_SQLITE_HOME: sharedState ? descriptor.sqliteHome : null,
+    CODEX_CAT_ACCOUNT_OWNER_ROOT: sharedState ? descriptor.accountOwnerRoot : null,
   };
   if (descriptor.authMode === 'auto') return env;
   if (descriptor.managed && descriptor.authMode === 'oauth') Object.assign(env, withoutUnreviewedCodexEnvironment(env));
@@ -228,6 +222,8 @@ export function finalizeCodexAccountEnvironment(
     env[key] = descriptor.authMode === 'api_key' ? (input.selectedApiEnv?.[key] ?? null) : null;
   if (descriptor.authMode === 'api_key') {
     validateCodexApiAccountOverrides(input.memberConfigArgs ?? [], input.rpcConfig);
+    // The builtin provider ranks this ahead of any stored login; app-server logs it in memory instead.
+    if (apiShared) env.CODEX_API_KEY = input.selectedApiEnv?.OPENAI_API_KEY ?? null;
     return env;
   }
   if (input.args.some((arg) => arg === '--oss' || arg === '--local-provider' || arg.startsWith('--local-provider=')))

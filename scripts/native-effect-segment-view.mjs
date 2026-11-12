@@ -2,6 +2,8 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { kernelPath, unfoldedJoin } from './lib/shell-directory.mjs';
 import { withoutInterpreterSource } from './native-effect-interpreter-source.mjs';
 import { invocationTargetView, observedReadProgram } from './native-effect-invocation-targets.mjs';
+import { physicalWriteTarget } from './native-effect-media-classifier.mjs';
+import { classifyShellSegment } from './native-effect-shell-classifier.mjs';
 import { commandName, shellInvocation, shellWords } from './native-effect-shell-tokenizer.mjs';
 import { fileProgramAnalysis } from './native-effect-write-effects.mjs';
 
@@ -37,16 +39,50 @@ export function segmentView(segment, location, roleSource = segment, namespaceSt
   // must not turn generated interpreter source into a literal execution fact.
   const roles = invocationTargetView(roleSource, location);
   const roleContext = roles ? gitDirectoryContext(roles.text, roles.call.cwd) : { command, location: context.location };
+  const redirectedRead = namespaceStable ? readOutputTargets(roles, command) : null;
   return {
     command,
     location: roleContext.location,
-    targetCwd: roles ? (actsOnlyOnAbsoluteOperands(roleContext.command) ? undefined : roleContext.location) : targetCwd,
+    targetCwd: redirectedRead
+      ? redirectedRead.effect === 'read'
+        ? undefined
+        : roleContext.location
+      : roles
+        ? actsOnlyOnAbsoluteOperands(roleContext.command)
+          ? undefined
+          : roleContext.location
+        : targetCwd,
     roles,
     unprovedReadProgram:
       readProgram.unproved ??
       (commandName(program?.value) === 'diff' || (commandName(program?.value) === 'gh' && program.value.includes('/'))),
-    targetText: withObservedWriteAliases(withoutGhMessageData(roleContext.command), roleContext.location),
+    targetText:
+      redirectedRead?.text ?? withObservedWriteAliases(withoutGhMessageData(roleContext.command), roleContext.location),
   };
+}
+
+/** A read program's inputs do not become writes when the shell redirects stdout.
+ * Resolve every output alias before excluding the read-source namespace. */
+function readOutputTargets(roles, command) {
+  if (!roles || roles.call.delegated || roles.call.generatedCode) return null;
+  if (classifyShellSegment(command) !== 'write') return null;
+  const call = roles.call;
+  const body = [call.name, ...call.programOperands.map((word) => JSON.stringify(word))].join(' ');
+  // Unknown program effects still retain their working-directory boundary;
+  // redirecting their output never certifies the program as readonly.
+  const effect = classifyShellSegment(body);
+  if (!['read', 'unknown'].includes(effect)) return null;
+  const outputs = (call.redirections ?? []).filter((redirect) => /^(?:\d*|&)(?:>|>>|>\||<>)$/.test(redirect.operator));
+  if (!outputs.length) return null;
+  const paths = outputs.map((redirect) => {
+    if (!redirect.operand?.literal) return null;
+    const value = redirect.operand.value;
+    const base = call.cwd ? kernelPath(call.cwd) : null;
+    return isAbsolute(value) ? value : base ? unfoldedJoin(base, value) : null;
+  });
+  const targets = paths.map((path) => (path ? physicalWriteTarget(path) : null));
+  if (targets.some((path) => !path)) return null;
+  return { text: [...paths, ...targets].map((path) => JSON.stringify(path)).join(' '), effect };
 }
 
 function withObservedWriteAliases(command, location) {

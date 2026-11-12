@@ -118,4 +118,17 @@ describe('BindingDryRun (AC-C4)', () => {
 
     assert.throws(() => BindingDryRun.run(dir, { exclude: [123, null] }), /exclude must be a string array/);
   });
+
+  it('F314-11: the dry run and the real scan exclude the same markdown files', async () => {
+    const { FlatScanner } = await import('../../dist/domains/memory/FlatScanner.js');
+    const root = mkdtempSync(join(tmpdir(), 'dry-run-parity-'));
+    for (const dir of ['notes/deep', 'drafts/inner', 'docs']) mkdirSync(join(root, dir), { recursive: true });
+    for (const file of ['notes/a.md', 'notes/deep/b.md', 'drafts/inner/c.md', 'docs/d.md', 'docs/e.tmp.md', 'f.md']) {
+      writeFileSync(join(root, file), `# ${file}\n\nbody`);
+    }
+    for (const exclude of [[], ['drafts/**'], ['**/*.tmp.md'], ['notes/*.md'], ['notes/**', 'docs/e.tmp.md']]) {
+      const scanned = new FlatScanner('test:parity', exclude).discover(root).length;
+      assert.equal(BindingDryRun.run(root, { exclude }).markdownFiles, scanned, `exclude ${JSON.stringify(exclude)}`);
+    }
+  });
 });

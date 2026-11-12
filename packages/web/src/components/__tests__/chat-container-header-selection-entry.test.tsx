@@ -49,11 +49,4 @@ describe('F294 message-selection ownership', () => {
     expect(container.querySelector('[data-testid="thread-select-messages"]')).toBeNull();
     expect(container.querySelector('[data-testid="workspace-panel-toggle"]')).not.toBeNull();
   });
-
-  it('keeps the workspace control without introducing a second selection entry', async () => {
-    await renderHeader(root);
-
-    expect(container.querySelector('[data-testid="thread-select-messages"]')).toBeNull();
-    expect(container.querySelector('[data-testid="workspace-panel-toggle"]')).not.toBeNull();
-  });
 });

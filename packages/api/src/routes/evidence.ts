@@ -31,9 +31,17 @@ import type {
   SearchExecutionMeta,
   SearchOptions,
 } from '../domains/memory/interfaces.js';
+import { KnowledgeResolver } from '../domains/memory/KnowledgeResolver.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import type { MessageSearchService } from '../domains/memory/MessageSearchService.js';
+import type { PublishedDocumentIndex, PublishedIndexStatus } from '../domains/memory/PublishedDocumentIndex.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
+import { relevanceEvidence } from '../domains/memory/relevance-evidence.js';
+import {
+  type VectorGenerationTables,
+  validateVectorGenerationTables,
+  vectorGenerationTables,
+} from '../domains/memory/vector-generation-tables.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -45,6 +53,7 @@ import {
 import { boundTopkSearchResponse } from './evidence-topk-budget.js';
 import { registerMessageNavigationSourceRoute } from './message-navigation-source-route.js';
 import { executeMessageSearch, messageSearchQuerySchema, toMessageSearchInput } from './message-search-handler.js';
+import { registerPublishedEvidenceSource } from './published-evidence-source.js';
 
 /** Accepted query parameters — Phase D: scope/mode/depth added */
 const searchSchema = z.object({
@@ -85,6 +94,7 @@ import type { EvidenceFreshness, EvidenceReimportTrigger } from './evidence-help
 
 export interface EvidenceSearchResponse {
   results: EvidenceResult[];
+  sourceProjection?: PublishedIndexStatus;
   degraded: boolean;
   degradeReason?: string;
   /** Actual retrieval mode after resolver/store degradation handling. */
@@ -132,6 +142,8 @@ export interface EvidenceSearchResponse {
 }
 
 export interface EvidenceRoutesOptions {
+  publishedDocuments?: PublishedDocumentIndex;
+  publishedOwnerUserId?: string;
   messageSearchService?: MessageSearchService;
   docsRoot?: string;
   /** F256 Phase C: repo root for L0 convention graph adapter (reads compiler file) */
@@ -139,6 +151,7 @@ export interface EvidenceRoutesOptions {
   evidenceStore: IEvidenceStore;
   embeddingService?: Pick<IEmbeddingService, 'isReady'>;
   getEmbeddingService?: () => Pick<IEmbeddingService, 'isReady'> | undefined;
+  getEmbeddingGenerationStatus?: () => { desired: string; effective?: string; building: boolean };
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
   rebuildJobTracker?: RebuildJobTracker;
@@ -178,6 +191,7 @@ function readPersistedVectorCount(
 
 export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (app, opts) => {
   registerMessageNavigationSourceRoute(app, opts.messageSearchService);
+  registerPublishedEvidenceSource(app, opts.publishedDocuments, opts.publishedOwnerUserId);
   app.get('/api/evidence/search', async (request, reply) => {
     const parseResult = searchSchema.safeParse(request.query);
     if (!parseResult.success) {
@@ -348,26 +362,16 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         authorizedCollections: authorizedCollections ?? [],
         explain,
         includePullOnly: true,
+        includeExpansion: rawIncludeExpansion !== 'false' && rawIncludeExpansion !== '0',
         signal: searchAbort.signal,
         deadlineAt: searchDeadlineAt,
       };
       let searchMeta: SearchExecutionMeta = { degraded: false };
-      // F-4: Use KnowledgeResolver for federated project + global search
-      const resolveResult = opts.knowledgeResolver ? await opts.knowledgeResolver.resolve(q, searchOpts) : null;
-      let retrievedItems: EvidenceItem[];
-      if (resolveResult) {
-        retrievedItems = resolveResult.results;
-        searchMeta = resolveResult.meta ?? missingResolverMeta(searchOpts);
-      } else {
-        if (opts.evidenceStore.searchWithMeta) {
-          const execution = await opts.evidenceStore.searchWithMeta(q, searchOpts);
-          retrievedItems = execution.items;
-          searchMeta = execution.meta;
-        } else {
-          retrievedItems = await opts.evidenceStore.search(q, searchOpts);
-          searchMeta = missingResolverMeta(searchOpts);
-        }
-      }
+      const resolver =
+        opts.knowledgeResolver ?? new KnowledgeResolver({ projectStore: opts.evidenceStore, repoRoot: opts.repoRoot });
+      const resolveResult = await resolver.resolve(q, searchOpts);
+      const retrievedItems = resolveResult.results;
+      searchMeta = resolveResult.meta ?? missingResolverMeta(searchOpts);
       // F263 R11: threadId is a hard result boundary, not a best-effort hint to
       // whichever resolver/provider happens to execute the query. Enforce the
       // invariant again at the common response boundary so an unfiltered
@@ -381,44 +385,13 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // Tag per-result source when dimension is explicit (single-source)
       const singleSource = resolvedSources && resolvedSources.length === 1 ? resolvedSources[0] : undefined;
 
-      // F256 Phase B+D: expansion hints for topk results (opt-out via include_expansion=false).
-      // F263 R11 exact-thread filters remain a hard boundary: expanding them
-      // with unscoped related directions would leak evidence from other scopes.
-      const wantExpansion = rawIncludeExpansion !== 'false' && rawIncludeExpansion !== '0';
-      let expansionHints: import('../domains/memory/TopkExpansionService.js').ExpansionHint[] | undefined;
-      let expansionMeta: ExpansionFunnelMeta;
-      if (!wantExpansion) {
-        expansionMeta = blockedExpansionHealth('opt_out');
-      } else if (threadId) {
-        expansionMeta = blockedExpansionHealth('exact_thread_filter');
-      } else if (items.length === 0) {
-        expansionMeta = blockedExpansionHealth('no_results');
-      } else if (!opts.evidenceStore.searchWithMeta) {
-        expansionMeta = blockedExpansionHealth('store_unsupported');
-      } else {
-        try {
-          const { TopkExpansionService } = await import('../domains/memory/TopkExpansionService.js');
-          const l0Adapter = await getL0Adapter();
-          const expansionService = new TopkExpansionService(
-            {
-              searchWithMeta: (query, options) =>
-                opts.evidenceStore.searchWithMeta!(query, {
-                  ...options,
-                  signal: searchAbort.signal,
-                  deadlineAt: searchDeadlineAt,
-                }),
-            },
-            l0Adapter,
-          );
-          const expandResult = await expansionService.expandWithMeta(items, q);
-          expansionHints = expandResult.hints;
-          expansionMeta = successfulExpansionHealth(expandResult.funnel, expandResult.hints);
-        } catch {
-          // Search remains fail-open, but the health funnel must not make the
-          // failed stage disappear.
-          expansionMeta = failedExpansionHealth();
-        }
-      }
+      const expansionAllowed = !threadId && searchOpts.includeExpansion;
+      const expansionHints = expansionAllowed ? resolveResult.expansionHints : undefined;
+      const expansionMeta = threadId
+        ? blockedExpansionHealth('exact_thread_filter')
+        : !searchOpts.includeExpansion
+          ? blockedExpansionHealth('opt_out')
+          : (resolveResult.expansionMeta ?? blockedExpansionHealth('store_unsupported'));
 
       // Phase F: assemble task context for salience gating (no-op when absent)
       const salienceCtx: SalienceTaskContext = {
@@ -464,6 +437,9 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           anchor: item.anchor,
           snippet: item.summary ?? '',
           matchRank: rankToMatchRank(index),
+          rank: index + 1,
+          relevance: relevanceEvidence(item, q),
+          ...(item.sourceHash ? { sourceHash: item.sourceHash } : {}),
           ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
           sourceType: mapKindToSourceType(item.kind),
           boostSource: effectiveBoostSource,
@@ -506,6 +482,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
             {
               query: q,
               resultCount: results.length,
+              resolverVersion: resolveResult.resolverVersion ?? 'unknown',
               limit: effectiveLimit,
               scope,
               dimension,
@@ -556,6 +533,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
 
       return boundTopkSearchResponse({
         results,
+        ...(opts.publishedDocuments ? { sourceProjection: opts.publishedDocuments.getStatus() } : {}),
         degraded: searchMeta.degraded,
         variantId,
         ...(searchMeta.degradeReason ? { degradeReason: searchMeta.degradeReason } : {}),
@@ -631,6 +609,16 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         | undefined;
       if (!db) return fatalShape('no_db');
 
+      const bound = opts.evidenceStore as { getVectorGenerationTables?: () => VectorGenerationTables };
+      const tables = validateVectorGenerationTables(bound.getVectorGenerationTables?.() ?? vectorGenerationTables());
+      let generationQuarantined = false;
+      try {
+        generationQuarantined =
+          db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()
+            ?.value === '1';
+      } catch {
+        /* A pre-vector database has no quarantine fact. */
+      }
       const docCount = (db.prepare('SELECT count(*) AS c FROM evidence_docs').get() as { c: number }).c;
       const threadCount = (
         db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
@@ -645,7 +633,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // Preserve the legacy field for existing consumers, including manually stamped databases.
       let lastUpdated: string | null = null;
       try {
-        const stampRow = db.prepare("SELECT value FROM embedding_meta WHERE key = 'last_rebuild_at'").get() as
+        const stampRow = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'last_rebuild_at'`).get() as
           | { value: string }
           | undefined;
         lastUpdated = stampRow?.value ?? null;
@@ -671,16 +659,17 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       const passageEmbeddingReady = (opts.getEmbeddingService?.() ?? opts.embeddingService)?.isReady() === true;
       const passageVectors = readPersistedVectorCount(
         db,
-        'SELECT count(*) AS c FROM passage_vectors',
-        'SELECT count(*) AS c FROM passage_vectors_rowids',
+        `SELECT count(*) AS c FROM ${tables.passages}`,
+        `SELECT count(*) AS c FROM ${tables.passages}_rowids`,
       );
       const passageVectorCount = passageVectors.count;
-      const passageVectorsSupported = passageVectors.virtualTableReadable && passageEmbeddingReady;
+      const passageVectorsSupported =
+        passageVectors.virtualTableReadable && passageEmbeddingReady && !generationQuarantined;
 
       // Embedding model from embedding_meta (VectorStore.initMeta writes embedding_model_id)
       let embeddingModel: string | null = null;
       try {
-        const row = db.prepare("SELECT value FROM embedding_meta WHERE key = 'embedding_model_id'").get() as
+        const row = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'embedding_model_id'`).get() as
           | { value: string }
           | undefined;
         embeddingModel = row?.value ?? null;
@@ -690,8 +679,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
 
       const vectorsCount = readPersistedVectorCount(
         db,
-        'SELECT count(*) AS c FROM evidence_vectors',
-        'SELECT count(*) AS c FROM evidence_vectors_rowids',
+        `SELECT count(*) AS c FROM ${tables.documents}`,
+        `SELECT count(*) AS c FROM ${tables.documents}_rowids`,
       ).count;
 
       // F188 Phase K (AC-K2): build signals → evaluate config warnings →
@@ -734,6 +723,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         last_rebuild_at: lastUpdated,
         last_document_updated_at: lastDocumentUpdated,
         embedding_model: embeddingModel,
+        ...(opts.getEmbeddingGenerationStatus ? { embedding_generation: opts.getEmbeddingGenerationStatus() } : {}),
         // F188 Phase K (AC-K1/K3): config health surface.
         functionalStatus,
         configWarnings,

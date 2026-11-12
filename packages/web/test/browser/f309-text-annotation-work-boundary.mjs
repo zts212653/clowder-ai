@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { collapseV2Workspace } from './f307-workspace-open.mjs';
+import { nativeArtworkAction } from './f309-artwork-native-opening.mjs';
 
 async function readDraft(page, threadId) {
   return page.evaluate((id) => {
     const drafts = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]');
     return new Map(drafts).get(id) ?? [];
   }, threadId);
+}
+
+async function readOriginalMessage(page, source) {
+  const viewport = page.locator('[data-chat-container]');
+  const bounds = await viewport.boundingBox();
+  assert.ok(bounds);
+  // scrollIntoView alone is layout movement: it must not cancel Chat's bottom-follow owner.
+  // Visit the original message with the same trusted reading gesture as a person scrolling back.
+  await page.mouse.move(bounds.x + 8, bounds.y + 24);
+  await page.mouse.wheel(0, -(await viewport.evaluate((element) => element.scrollHeight)));
+  await page.waitForFunction((element) => element.scrollTop <= 1, await viewport.elementHandle());
+  await source.scrollIntoViewIfNeeded();
 }
 
 async function selectOriginalWords(page, messageId, start, end, comment) {
@@ -75,7 +88,7 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
   const panel = page.getByTestId('workspace-panel-toggle');
   if ((await panel.getAttribute('aria-label')) === '收起 Workspace') await collapseV2Workspace(page);
   const source = page.locator('[data-message-id="' + fixture.publication.id + '"]');
-  await source.scrollIntoViewIfNeeded();
+  await readOriginalMessage(page, source);
   const composer = page.getByLabel('消息输入框', { exact: true });
   const originalComposer = await composer.elementHandle();
   const draftText = await composer.inputValue();
@@ -83,14 +96,14 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
   await selectOriginalWords(page, fixture.publication.id, 4, 9, '保留原文字批注二');
   const quotes = (await readDraft(page, fixture.owner.thread.id)).filter((item) => item.kind === 'quote');
   assert.equal(quotes.length, 2);
-  await source.scrollIntoViewIfNeeded();
+  await readOriginalMessage(page, source);
   const textMarks = page.locator('[data-testid^="context-annotation-marker-"]');
   await textMarks.nth(1).waitFor();
   assert.equal(await textMarks.filter({ visible: true }).count(), 2);
   await page.screenshot({ path: path.join(evidence, 'text-quotes-original.png') });
 
-  await source.getByRole('button', { name: /打开作品/ }).click();
-  const dialog = page.getByRole('dialog');
+  await source.getByTestId('file-block-cover').click();
+  const dialog = page.getByRole('dialog', { name: fixture.filename, exact: true });
   const surface = dialog.getByTestId('workspace-content-review-surface');
   await surface.getByTestId('workspace-content-review-media').waitFor();
   await waitForDecodedImage(page, '[role="dialog"]');
@@ -108,7 +121,7 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
   assert.equal(selected.selections.length, 1);
   await page.screenshot({ path: path.join(evidence, 'text-quotes-floating.png') });
 
-  await page.getByTestId('lightbox-open-workspace').click();
+  await (await nativeArtworkAction(page, dialog, '作品模式')).click();
   const host = page.getByTestId('contextual-workspace-host');
   await page.waitForFunction(
     (expected) =>
@@ -123,14 +136,7 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
   assert.equal(await host.getByTestId('review-pending-chat-mark').filter({ visible: true }).count(), 1);
 
   if (width >= 768) {
-    const toggleFullWindow = async () => {
-      await page.getByTestId('v2-workspace-chrome').getByLabel('更多 Workspace 操作', { exact: true }).click();
-      await page
-        .getByRole('menu', { name: '更多 Workspace 操作', exact: true })
-        .getByRole('menuitemcheckbox', { name: '整窗', exact: true })
-        .click();
-    };
-    await toggleFullWindow();
+    await host.getByTestId('f307-artifact-enter-full-window').click();
     await page.waitForFunction(
       () =>
         document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
@@ -142,11 +148,11 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
     assert.equal(await composer.evaluate((node, original) => node === original, originalComposer), true);
     assert.equal(await host.getByTestId('review-pending-chat-mark').filter({ visible: true }).count(), 1);
     await page.screenshot({ path: path.join(evidence, 'text-quotes-full-window.png') });
-    await toggleFullWindow();
+    await host.getByTestId('f307-artifact-exit-full-window').click();
   }
   if (width >= 768) await page.getByTestId('artwork-work-mode-return').click();
   else await host.getByRole('button', { name: '‹ 聊天', exact: true }).click();
-  await source.scrollIntoViewIfNeeded();
+  await readOriginalMessage(page, source);
   await textMarks.first().waitFor();
   assert.equal(await textMarks.filter({ visible: true }).count(), 2);
   assert.equal(await composer.inputValue(), draftText);
@@ -161,7 +167,7 @@ export async function verifyTextAnnotationWorkBoundary(page, fixture, evidence, 
   );
   await page.reload({ waitUntil: 'domcontentloaded' });
   await composer.waitFor();
-  await source.scrollIntoViewIfNeeded();
+  await readOriginalMessage(page, source);
   await textMarks.first().waitFor();
   assert.equal(await textMarks.filter({ visible: true }).count(), 2);
   assert.equal(await composer.inputValue(), draftText);
