@@ -4423,6 +4423,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         const pageSize = Math.max(requestedLimit * 2, 50);
         let cursorTimestamp = Number.MAX_SAFE_INTEGER;
         let cursorId: string | undefined;
+        const seenIds = new Set<string>();
 
         while (visible.length < requestedLimit) {
           const batch = effectiveThreadId
@@ -4438,12 +4439,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
           if (batch.length === 0) break;
 
+          // A cursor can fail to advance when persisted delivery metadata
+          // (timelineOrderAt) no longer matches the thread ZSET score. Never
+          // replay a row already fetched for this read or spin on a
+          // non-advancing batch: treat it as the end of available history.
+          const newItems: typeof batch = [];
           for (const item of batch) {
+            if (seenIds.has(item.id)) continue;
+            seenIds.add(item.id);
+            newItems.push(item);
+          }
+          if (newItems.length === 0) break;
+
+          for (const item of newItems) {
             if (!canIncludeContextItemWithoutKeyword(item)) continue;
             visible.push(item);
           }
 
-          const oldest = batch[0]!;
+          const oldest = newItems[0]!;
           cursorTimestamp = getTimelineOrderTime(oldest);
           cursorId = oldest.id;
         }

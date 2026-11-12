@@ -871,3 +871,51 @@ test('fresh compiled MCP full context commits actual exact-child History adoptio
   assert.deepEqual((await f.queue.getDurableEntry(f.threadId, a.entry.id)).targets, ['codex']);
   assert.equal(f.messages.getById(a.message.id).lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
 });
+
+test('thread-context does not repeat one published message when the storage cursor fails to advance', async (t) => {
+  const f = await fixture(t);
+  const plugin = f.messages.append({
+    userId: f.userId,
+    threadId: f.threadId,
+    from: { kind: 'plugin', instanceId: 'pi_isolated_cursor' },
+    content: 'isolated plugin wake',
+    mentions: [],
+    timestamp: Date.now() - 1_000,
+    extra: {
+      pluginMessage: {
+        instanceId: 'pi_isolated_cursor',
+        revision: 1,
+        provenance: {},
+        elements: [],
+        appendOps: [],
+      },
+    },
+  });
+
+  const between = f.messages.append({
+    userId: f.userId,
+    threadId: f.threadId,
+    from: { kind: 'user', userId: f.userId },
+    content: 'isolated between wake',
+    mentions: [],
+    timestamp: plugin.timestamp + 100,
+  });
+
+  // Production incident shape: the ZSET timeline score is the publication
+  // timestamp, while the delivery metadata moved timelineOrderAt to deliveredAt.
+  // A caller therefore hands back a cursor timestamp newer than the stored score
+  // and the storage cursor returns the same row again instead of advancing.
+  const baseGetByThreadBefore = f.messages.getByThreadBefore.bind(f.messages);
+  f.messages.getByThreadBefore = (threadId, timestamp, limit, beforeId, userId, options) => {
+    if (beforeId === plugin.id) return [plugin, between];
+    return baseGetByThreadBefore(threadId, timestamp, limit, beforeId, userId, options);
+  };
+
+  const result = await f.read({ limit: '5' });
+  assert.equal(result.statusCode, 200, result.body);
+  const messages = result.json().messages;
+  const pluginCopies = messages.filter((message) => message.id === plugin.id);
+  const betweenCopies = messages.filter((message) => message.id === between.id);
+  assert.equal(pluginCopies.length, 1, `expected one plugin wake, got ${pluginCopies.length}`);
+  assert.equal(betweenCopies.length, 1, `expected one between message, got ${betweenCopies.length}`);
+});
