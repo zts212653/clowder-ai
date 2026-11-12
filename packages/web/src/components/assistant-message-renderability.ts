@@ -1,6 +1,6 @@
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
-import { toCliEvents } from './cli-output/toCliEvents';
+import { hasCliEvents } from './cli-output/toCliEvents';
 
 /**
  * Single visual handoff contract for assistant messages.
@@ -26,22 +26,19 @@ export interface EmptyResponseLifecycleNotice {
 export function hasAssistantBody(message: ChatMessage, context: AssistantMessageRenderContext = {}): boolean {
   const hasTextContent = message.content.trim().length > 0;
   const hasBlocks = Boolean(message.contentBlocks?.length);
+  if (hasTextContent || hasBlocks || message.extra?.rich?.blocks?.length || message.thinking) return true;
   const isStreamOrigin = message.origin === 'stream';
   const mergedCliStdout = message.extra?.stream?.cliStdout;
   const mergedSpeechContent = message.extra?.stream?.speechContent;
   const cachedSpeechStdout =
     isStreamOrigin &&
     mergedCliStdout === '' &&
-    !hasTextContent &&
     typeof mergedSpeechContent === 'string' &&
     mergedSpeechContent.trim().length > 0
       ? mergedSpeechContent
       : undefined;
-  const projectedCliStdout =
-    isStreamOrigin && mergedCliStdout === '' && hasTextContent ? message.content : mergedCliStdout;
-  const cliStdoutContent = cachedSpeechStdout ?? projectedCliStdout ?? (isStreamOrigin ? message.content : undefined);
-  const hasCliBlock = context.hasCliBlock ?? toCliEvents(message.toolEvents, cliStdoutContent).length > 0;
-  return Boolean(hasTextContent || hasCliBlock || hasBlocks || message.extra?.rich?.blocks?.length || message.thinking);
+  const cliStdoutContent = cachedSpeechStdout ?? mergedCliStdout ?? (isStreamOrigin ? message.content : undefined);
+  return context.hasCliBlock ?? hasCliEvents(message.toolEvents, cliStdoutContent);
 }
 
 const FAILED_RESPONSE_LABEL = '回复失败。';

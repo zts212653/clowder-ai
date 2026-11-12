@@ -1,35 +1,23 @@
 import { cleanCliToolLabel, projectCliToolUseLabel, withFinalizedCliToolInputs } from '@cat-cafe/shared';
 import type { CliEvent, ToolEvent } from '@/stores/chat-types';
 
-interface ToolProjectionState {
-  events: CliEvent[];
-  skipNextResult: boolean;
+/** The same visibility rule serves timeline projection and the cheap existence check. */
+function* visibleToolEvents(events: readonly ToolEvent[]) {
+  let skipNextResult = false;
+  for (const event of events) {
+    if (event.type === 'tool_use') {
+      skipNextResult = cleanCliToolLabel(event.label) === 'unknown';
+      if (skipNextResult) continue;
+    } else if (skipNextResult) {
+      skipNextResult = false;
+      continue;
+    }
+    yield event;
+  }
 }
 
-function appendToolEvent(event: ToolEvent, state: ToolProjectionState): void {
-  if (event.type === 'tool_use') {
-    state.skipNextResult = cleanCliToolLabel(event.label) === 'unknown';
-    if (state.skipNextResult) return;
-    state.events.push({
-      id: event.id,
-      kind: event.type,
-      timestamp: event.timestamp,
-      label: projectCliToolUseLabel(event.label, event.detail),
-      detail: event.detail,
-    });
-    return;
-  }
-  if (state.skipNextResult) {
-    state.skipNextResult = false;
-    return;
-  }
-  state.events.push({
-    id: event.id,
-    kind: event.type,
-    timestamp: event.timestamp,
-    label: event.label,
-    detail: event.detail,
-  });
+export function hasCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: string | undefined): boolean {
+  return Boolean(streamContent?.trim()) || !visibleToolEvents(toolEvents ?? []).next().done;
 }
 
 /** F097: Adapt existing ToolEvent[] + stream content → CliEvent[] unified timeline.
@@ -41,9 +29,14 @@ export function toCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: 
     // F148: collect IDs of "unknown" tool_use events so we can also skip their paired tool_result.
     // CliOutputBlock pairs toolUses[i] with toolResults[i] by position, so skipping a use
     // without its result would mis-pair all subsequent rows.
-    const state: ToolProjectionState = { events, skipNextResult: false };
-    for (const te of withFinalizedCliToolInputs(toolEvents)) {
-      appendToolEvent(te, state);
+    for (const event of visibleToolEvents(withFinalizedCliToolInputs(toolEvents))) {
+      events.push({
+        id: event.id,
+        kind: event.type,
+        timestamp: event.timestamp,
+        label: event.type === 'tool_use' ? projectCliToolUseLabel(event.label, event.detail) : event.label,
+        detail: event.detail,
+      });
     }
   }
 

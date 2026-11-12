@@ -342,15 +342,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   callbacksRef.current = callbacks;
   const lastPreviewAutoOpenEventIdRef = useRef<string | null>(null);
 
-  // clowder-ai#789: coalesce synchronous agent_message bursts into one microtask flush.
-  // callbacksRef.current is always live (updated above on every render), so the closure
-  // never goes stale. One coalescer per socket mount — reset only when the component unmounts.
+  // The effect owns its queue, including cancellation of a replay suspended between browser tasks.
   const agentMessageCoalescerRef = useRef<AgentMessageCoalescer | null>(null);
-  if (agentMessageCoalescerRef.current === null) {
-    agentMessageCoalescerRef.current = createAgentMessageCoalescer((item) =>
-      dispatchAgentQueueItem<AgentMessage>(item, (msg) => callbacksRef.current.onMessage(msg)),
-    );
-  }
 
   // PR-3a2: a thread room's stream replay joins the agent-message queue together with the join
   // confirmation it was sent under. PR-3a contract 3.2 still holds: whatever the room broadcast before
@@ -396,6 +389,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   } = useHubSocketOutlet(socketRef);
 
   useEffect(() => {
+    const coalescer = createAgentMessageCoalescer((item) =>
+      dispatchAgentQueueItem<AgentMessage>(item, (msg) => callbacksRef.current.onMessage(msg)),
+    );
+    agentMessageCoalescerRef.current = coalescer;
     userIdRef.current = getUserId();
     // PR-3b: a page subscribes to its foreground threads only. Background threads learn what
     // happened from the owner room (PR-3a), and a thread that returns to the foreground is read back
@@ -1318,6 +1315,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     return () => {
       disposed = true;
+      coalescer.dispose();
+      if (agentMessageCoalescerRef.current === coalescer) agentMessageCoalescerRef.current = null;
       socket.off('artifact_review_changed', onArtifactReviewChanged);
       socket.off('content_modification_source_saved', onContentModificationSourceSaved);
       clearInterval(watchdogTimer);

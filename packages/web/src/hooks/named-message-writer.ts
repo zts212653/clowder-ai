@@ -76,7 +76,8 @@ export function writeStoredSnapshot(threadId: string, message: ChatMessage, sour
   const before = store.getThreadState(threadId).messages.find((candidate) => candidate.id === message.id);
   store.upsertLifecycleMessage(threadId, message);
   if (message.lifecycle?.kind !== 'response') return;
-  countUnreadIfFirstBody(threadId, message.id, before ? hasAssistantBody(before) : false, source);
+  if (threadId !== store.currentThreadId)
+    countUnreadIfFirstBody(threadId, message.id, before ? hasAssistantBody(before) : false, source);
 }
 
 /**
@@ -107,7 +108,7 @@ function writeStreamed(target: NamedMessageTarget, write: (store: NamedMessageSt
   // PR-3a2: this page does not hold the start of the response's stream (`stream-position`), so it
   // cannot tell where a live delta goes; the History draft shows until the terminal snapshot.
   if (before.streamPrefix === 'incomplete') return;
-  const hadBody = hasAssistantBody(before);
+  const hadBody = target.threadId === store.currentThreadId || hasAssistantBody(before);
   write(store);
   if (before.isStreaming !== true) source().setThreadMessageStreaming(target.threadId, target.messageId, true);
   countUnreadIfFirstBody(target.threadId, target.messageId, hadBody, source);
