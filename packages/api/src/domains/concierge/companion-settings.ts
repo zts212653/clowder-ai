@@ -1,4 +1,5 @@
 import { catRegistry } from '@cat-cafe/shared';
+import { sliceUnicodeSafe } from '../../utils/unicode-safe-slice.js';
 import type { HostPluginConfigurationService } from '../plugin/manager/plugin-manager-configuration.js';
 
 export const COMPANION_PLUGIN_ID = 'official.companion';
@@ -24,6 +25,11 @@ function defaultMember(): string {
   return ids[0] ?? 'sonnet';
 }
 
+/** Name and persona tone go into a member's prompt: one line, bounded (50 / 200, as the manifest describes). */
+function line(value: string, max: number): string {
+  return sliceUnicodeSafe(value.replace(/\s*[\r\n]+\s*/g, ' ').trim(), 0, max);
+}
+
 export async function readCompanionSettings(
   configuration: Pick<HostPluginConfigurationService, 'readActionInput'>,
 ): Promise<CompanionSettings> {
@@ -31,11 +37,11 @@ export async function readCompanionSettings(
   return {
     enabled: values.enabled === 'true',
     dutyCatProfileId: values.dutyCatProfileId ?? defaultMember(),
-    displayName: values.displayName,
-    personaTone: values.personaTone,
+    displayName: line(values.displayName, 50),
+    personaTone: line(values.personaTone, 200),
     proactivePolicy: values.proactivePolicy as CompanionSettings['proactivePolicy'],
     behaviorEnabled: values.behaviorEnabled === 'true',
     skin: values.skin as CompanionSettings['skin'],
-    ballSize: Number(values.ballSize),
+    ballSize: Math.min(192, Math.max(43, Number(values.ballSize))),
   };
 }
