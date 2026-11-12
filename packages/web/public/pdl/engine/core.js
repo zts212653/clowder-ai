@@ -492,8 +492,8 @@ function navIsPage(r) {
   if (also) return false;
   return Object.keys(PDL_SPACES).some(function (k) { const s = PDL_SPACES[k]; return s.home === r || s.threadView === r || (s.routes || []).indexOf(r) >= 0 || (s.prefix && r.indexOf(s.prefix) === 0); });
 }
-/* 地址栏保存页面容器的底层路由及参数；临时叠加内容不覆盖可恢复的地址。盖在上面、自己声明了路由的帧（从地址打开的那一层）例外，地址是它 */
-function navHash() { const fc = navCovers().find(function (c) { const l = navStack(c)[0]; return l && String(l.f).indexOf('node:') === 0 && navRouteOf(l); }), base = navStack(fc || ctPages())[0], r = navRouteOf(base), p = ENGINE_PARTS.addressParam(r, base.a); try { history.replaceState(null, '', '#' + (p != null ? r + '-' + p : r)); } catch (e) { /* 某些环境不允许改地址 */ } }
+/* 地址栏保存页面容器的底层路由及参数（底层是 keep 的页面、上面盖着一页时是那一页）；临时叠加内容不覆盖可恢复的地址。盖在上面、自己声明了路由的帧（从地址打开的那一层）例外，地址是它 */
+function navHash() { const fc = navCovers().find(function (c) { const l = navStack(c)[0]; return l && String(l.f).indexOf('node:') === 0 && navRouteOf(l); }), st = navStack(fc || ctPages()), base = st[navKeptLayer(st[0].f) && st[1] ? 1 : 0], r = navRouteOf(base), p = ENGINE_PARTS.addressParam(r, base.a); try { history.replaceState(null, '', '#' + (p != null ? r + '-' + p : r)); } catch (e) { /* 某些环境不允许改地址 */ } }
 /* 去一个路由（页面或详情，见 navIsPage）：
    - 触发处在投影的某一层里、去的是详情 → 打开（proj.js 的 navOpen：默认层级，盖住了触发处就压栈、有返回）；分栏的列表里选一项 → 分栏声明的 data-into（并排时换掉详情，不压栈；收起时压栈）；
    - 程序里去一个详情（没有触发元素）→ 换掉焦点那一层；
