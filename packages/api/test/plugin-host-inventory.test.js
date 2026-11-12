@@ -71,7 +71,7 @@ describe('K-2A contract-native inventory', () => {
       createHash('sha256').update(archive).digest('hex'),
       'c9540ea7876c71df8cf5a8a8d987f07e30508a63772a13353ce9c05dce0966b7',
     );
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.3.3-candidate.1');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.4.0-candidate.0');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
     assert.equal(PLUGIN_MANIFEST_CONTRACT_RANGE, `>=0.1.0-beta.13 <=${PLUGIN_CONTRACT_PACKAGE_VERSION}`);
   });
@@ -169,7 +169,7 @@ describe('K-2A contract-native inventory', () => {
   });
 
   it('rejects declarations below the compatibility floor or above the implemented contract without writes', async () => {
-    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.4.0-candidate.1', '0.3.3', '0.4.0', '1.0.0']) {
+    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.4.0-candidate.1', '0.4.0', '1.0.0']) {
       const { store, controlPlane } = harness();
       const before = await store.snapshot();
       await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) })), {

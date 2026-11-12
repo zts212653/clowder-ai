@@ -1001,11 +1001,12 @@ function lifecycleFailure(error: unknown): never {
       throw new PluginManagerServiceError('RUNTIME_START_FAILED', error.message);
     }
   }
+  // the underlying code and error type only (messages can carry plugin text or paths)
   lifecycleLog.warn(
     {
       cause: {
         code: (error as { code?: unknown })?.code,
-        message: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+        type: error instanceof Error ? error.name : typeof error,
       },
     },
     'Plugin lifecycle operation failed',

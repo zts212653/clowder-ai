@@ -29,11 +29,10 @@ export function warnPluginPackageFailure(
       ? error.code
       : 'PLUGIN_MANAGER_FAILED';
   const diagnostic = error instanceof PluginManagerServiceError ? error.diagnostic : undefined;
-  // the wrapped reason (e.g. the inventory's CONTRACT_VERSION_MISMATCH behind INVENTORY_REJECTED)
+  // the wrapped reason's code (e.g. the inventory's CONTRACT_VERSION_MISMATCH behind INVENTORY_REJECTED); never its text
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause : undefined;
-  const causeInfo = cause
-    ? { cause: { code: (cause as { code?: unknown }).code, message: cause.message.slice(0, 500) } }
-    : {};
+  const causeCode = cause && (cause as { code?: unknown }).code;
+  const causeInfo = typeof causeCode === 'string' ? { cause: { code: causeCode } } : {};
   request.log.warn(
     { reqId: request.id, ...context, code, ...diagnostic, ...causeInfo },
     'Plugin package operation failed',
