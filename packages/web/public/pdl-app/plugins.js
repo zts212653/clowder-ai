@@ -148,6 +148,7 @@ function bindPluginSpaces() {
     });
   }
   async function read() {
+    if (chatPort.exportMids !== undefined) return; // the read-only export view has no plugin list
     try {
       await chatPort.action('settingsPluginsRead', {});
       receivePlugins(placementData().plugins.plugins);
