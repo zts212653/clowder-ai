@@ -839,13 +839,16 @@ views:
                     text: $.sel.permissions.error
                     when: $.sel.permissions.error
                   - type: toolbar
-                    when: $.sel.permissions.dirty
+                    variant: savebar
+                    hidden: "!$.sel.permissions.dirty"
                     items:
+                      - {type: text, text: t:ext.unsaved}
+                      - {type: grow}
                       - type: button
-                        label: t:common.cancel
+                        label: t:ext.discard
                         act: pcfOp
                         args: {op: discard, p: $.sel.permissions.p}
-                      - {type: button, label: t:common.save, primary: true, submit: true}
+                      - {type: button, primary: true, label: t:ext.saveConfig, submit: true}
           - type: section
             title: t:ext.docs
             when: [$.sel.docs, "!$.sel.connection"]

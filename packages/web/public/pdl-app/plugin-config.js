@@ -1013,19 +1013,23 @@ function pluginPermissionsVM(plugin, label) {
     p: inst,
     error: pcfState(inst).saveError || '',
     dirty: !!PCF_SRC[inst] && pcfDirty(inst),
-    form: pcfModel(inst, { plugin: plugin, revision: r.revision, fields: fields, installed: true }),
+    form: pcfModel(inst, {
+      plugin: plugin,
+      revision: r.revision,
+      fields: fields,
+      installed: true,
+      save: function (updates) {
+        return pluginPermissionsPut(inst, updates);
+      },
+    }),
   };
 }
-FORMS.pluginPermissions = async function (form) {
-  const inst = form.dataset.p,
-    state = pcfState(inst),
-    src = PCF_SRC[inst];
-  if (pcfValidate(inst).length) {
-    render(true);
-    return false;
-  }
-  const body = { expectedRevision: src.revision };
-  pcfUpdates(inst).forEach(function (u) {
+// The permissions' save takes only the given fields: a switch is one, the save bar is every changed one.
+async function pluginPermissionsPut(inst, updates) {
+  const state = pcfState(inst),
+    src = PCF_SRC[inst],
+    body = { expectedRevision: src.revision };
+  updates.forEach(function (u) {
     const f = pcfField(inst, u.key);
     body[u.key] = f.kind === 'boolean' ? u.value === 'true' : JSON.parse(u.value);
   });
@@ -1036,13 +1040,27 @@ FORMS.pluginPermissions = async function (form) {
   try {
     await chatPort.action('settingsPluginPermissionsSave', { id: src.plugin, value: JSON.stringify(body) });
     state.saveError = '';
-    state.draft = {};
-    state.errors = {};
-    return true;
   } catch (error) {
     state.saveError = error.message;
-    return false;
+    throw error;
   } finally {
     render(true);
   }
+}
+FORMS.pluginPermissions = async function (form) {
+  const inst = form.dataset.p,
+    state = pcfState(inst);
+  if (pcfValidate(inst).length) {
+    render(true);
+    return false;
+  }
+  try {
+    await pluginPermissionsPut(inst, pcfUpdates(inst));
+  } catch {
+    return false;
+  }
+  state.draft = {};
+  state.errors = {};
+  render(true);
+  return true;
 };
