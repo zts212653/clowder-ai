@@ -603,7 +603,7 @@ function bindMembers() {
     };
   }
   VM.member = function () {
-    if (projectionNeeded) projectionNeeded.add('members:' + S.param);
+    if (projectionNeeded && S.param) projectionNeeded.add('members:' + S.param);
     const state = draft();
     if (!state) return null;
     const cat = state.member;
