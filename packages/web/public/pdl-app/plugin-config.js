@@ -818,6 +818,25 @@ function pcfSet(inst, key, v) {
   st.draft[key] = v;
   delete st.errors[key];
 }
+// Switches, dropdowns and multi-picks save at once, only that field; text inputs keep the save bar.
+// A config with branches or step modes keeps the bar for all: a change there moves what is required.
+function pcfInstant(inst) {
+  const c = pcfCtx(inst);
+  return (
+    !c.vp &&
+    !(c.src.steps || []).some(function (s) {
+      return s.mode;
+    })
+  );
+}
+async function pcfSaveOne(inst, key, value) {
+  const st = pcfState(inst);
+  pcfSet(inst, key, value);
+  render(true);
+  await PCF_SRC[inst].save([{ key: key, value: value }]);
+  delete st.draft[key];
+  render(true);
+}
 Object.assign(A, {
   /* 插件配置的一个操作（配置协议）：op = bool（字段开关）| recBool（记录里的开关）| add / del（一列值的增删）| recAdd / recDel（记录的增删）| discard（丢掉草稿）；没写 op = 字段声明的操作（a） */
   pcfOp: function (d) {
@@ -855,20 +874,18 @@ const PCF_OPS = {
       i = on.indexOf(String(d.id));
     if (i >= 0) on.splice(i, 1);
     else on.push(String(d.id));
+    if (pcfInstant(d.p)) return pcfSaveOne(d.p, d.k, JSON.stringify(on));
     pcfSet(d.p, d.k, JSON.stringify(on));
     markDirty();
   },
-  // A switch saves at once, only this field; other edits stay drafts.
-  bool: async function (d) {
+  bool: function (d) {
     const f = pcfField(d.p, d.k),
-      st = pcfState(d.p),
-      v = pcfEffective(f, st.draft) === 'true' ? 'false' : 'true';
+      v = pcfEffective(f, pcfState(d.p).draft) === 'true' ? 'false' : 'true';
+    if (pcfInstant(d.p)) return pcfSaveOne(d.p, d.k, v);
     pcfSet(d.p, d.k, v);
-    render(true);
-    await PCF_SRC[d.p].save([{ key: d.k, value: v }]);
-    delete st.draft[d.k];
-    render(true);
+    markDirty();
   },
+
   add: pcfListOp,
   del: pcfListOp /* 一列值（kvEditor 的增删：l = 实例|路径） */,
   /* records：加一行（从模板开始，或者空的）、删一行、行里的开关 */
@@ -935,6 +952,7 @@ Object.assign(INPUTS, {
 Object.assign(CHANGES, {
   pcfSel: function (e) {
     const t = e.target;
+    if (pcfInstant(t.dataset.p)) return pcfSaveOne(t.dataset.p, t.dataset.k, t.value);
     pcfSet(t.dataset.p, t.dataset.k, t.value);
     markDirty();
     render(true);
