@@ -12,7 +12,6 @@ import { resolveNpmInvocation } from './npm-invocation.js';
 
 const execFileAsync = promisify(execFile);
 const RECEIPT = '.clowder-local-source.json';
-const MAX_INSTANCES = 512;
 
 interface Member {
   readonly path: string;
@@ -311,7 +310,6 @@ async function sourceGraph(root: LocalDirectorySourceCoordinates): Promise<Map<s
     lifetime.step();
     const source = pending[cursor];
     if (!source || nodes.has(source.root)) continue;
-    if (nodes.size >= MAX_INSTANCES) invalid('DEPENDENCY_PREPARATION_LIMIT', 'source package count exceeded');
     if (!source.manifest) invalid('DEPENDENCY_SOURCE_INVALID', 'runtime package.json is missing');
     if (source.manifest.bundledDependencies || source.manifest.bundleDependencies) {
       invalid('DEPENDENCY_SPEC_UNSUPPORTED', 'bundled dependencies require an explicit attested topology');
@@ -455,8 +453,6 @@ export async function prepareLocalDirectoryDistribution(
         if (ancestor && mounted.get(ancestor) === edge.root) continue;
         const target = resolve(destination, 'node_modules', edge.name);
         if (mounted.has(target)) invalid('DEPENDENCY_LOCK_MISMATCH', 'conflicting installed resolution');
-        if (mounted.size >= MAX_INSTANCES)
-          invalid('DEPENDENCY_PREPARATION_LIMIT', 'installed package instance count exceeded');
         mounted.set(target, edge.root);
         pending.push(target);
       }
