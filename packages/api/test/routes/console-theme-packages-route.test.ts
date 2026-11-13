@@ -69,13 +69,22 @@ describe('owner console theme packages', () => {
   let app: FastifyInstance;
   let projectRoot: string;
   let previousOwner: string | undefined;
-  const upload = (zip: Buffer) =>
-    app.inject({
+  const upload = (zip: Buffer) => {
+    const boundary = 'theme-package-boundary';
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="theme.zip"\r\nContent-Type: application/zip\r\n\r\n`,
+      ),
+      zip,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    return app.inject({
       method: 'POST',
       url,
-      headers: { ...headers, 'content-type': 'application/zip' },
-      payload: zip,
+      headers: { ...headers, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload,
     });
+  };
   const install = (entries = files()) => upload(writeZip(entries));
   const get = (path = '') => app.inject({ method: 'GET', url: url + path, headers });
   async function reject(zip: Buffer, reason: RegExp) {

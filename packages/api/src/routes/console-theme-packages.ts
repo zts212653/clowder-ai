@@ -1,5 +1,6 @@
 import { readFile, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import multipart from '@fastify/multipart';
 import type { FastifyInstance } from 'fastify';
 import {
   assetMimes,
@@ -33,13 +34,16 @@ export async function consoleThemePackageRoutes(app: FastifyInstance, opts: { pr
       return reply.code(404).send({ error: 'Theme or asset not found' });
     return reply.send(error);
   });
-  app.addContentTypeParser('application/zip', { parseAs: 'buffer' }, (_request, body, done) => done(null, body));
+  // The package zip arrives like other console uploads: one multipart file.
+  await app.register(multipart, { limits: { fileSize: 32 * 1024 * 1024, files: 1 } });
   const url = '/api/console-themes/packages';
 
-  app.post(url, { bodyLimit: 32 * 1024 * 1024 }, async (request, reply) => {
-    if (!Buffer.isBuffer(request.body)) return reply.code(400).send({ error: 'Expected a zip body' });
+  app.post(url, async (request, reply) => {
+    const file = request.isMultipart() ? await request.file() : undefined;
+    if (!file) return reply.code(400).send({ error: 'Expected a zip file' });
+    const zip = await file.toBuffer();
     try {
-      return await installPackage(opts.projectRoot, request.body);
+      return await installPackage(opts.projectRoot, zip);
     } catch (error) {
       return reply.code(400).send({ error: (error as Error).message });
     }
