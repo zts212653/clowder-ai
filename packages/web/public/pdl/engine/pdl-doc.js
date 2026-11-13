@@ -110,24 +110,30 @@ function pdlPackThemes() { return THEME_SRC.packs().map(function (t) { return { 
 let THEME_DOCS = null, THEMES_HELD = null, THEMES_WRITE = Promise.resolve();
 function pdlThemes() { return (THEME_DOCS ? THEMES_HELD && pdlClone(THEMES_HELD) : store.get('pdl-themes-v1', null)) || { active: PDL_SYS_THEMES[0].id, customs: [] }; }   /* 每次给一份副本（和读存储一样）：改了要 pdlThemesSave 才算数 */
 function pdlThemesSave(t) { if (THEME_DOCS) { const j = JSON.stringify(t); if (j === JSON.stringify(pdlThemes())) return; THEMES_HELD = JSON.parse(j); THEMES_WRITE = Promise.resolve(THEME_DOCS.write(t)); }   /* 没变就不写宿主（启动时的整理多半什么都没改） */ else store.set('pdl-themes-v1', t); }
-/* 主题包：内置主题和别的主题都是主题包——theme.yaml（身份、pdl、uses：用到的组件包；可选 i18n、assets）。组件包（css、js，和 library/ 同一种写法：
-   同名的画法换掉默认的，新的画法经组件库的登记点注册）按 id 存一份（components），装好的主题包存在 packs（只记引用，不含组件代码）。
-   一次只渲染一套主题：启动时加载当前主题的包——默认组件库与文案之后，依次是它用到的组件包、文案、素材、pdl（同 id 盖过默认，缺的回落默认）。
-   切换主题 = 存完后整页重新载入（pdlThemeGo）；在包上做的自定义主题记着它基于的包（theme） */
-let PACK_LOADED = null;
-function pdlThemePacks() { return (pdlThemes().packs || []).map(function (p) { return { id: 'pkg:' + p.id, name: p.name, src: p.version, skin: 'default', palette: themeDefault(), theme: p.id }; }); }
-function pdlActivePack(t) { const x = t.customs.find(function (c) { return c.id === t.active; }) || pdlSysTheme(t.active) || {}; return (t.packs || []).some(function (p) { return p.id === x.theme; }) ? x.theme : null; }
+/* 主题包（spec 主题包）：zip 由后端解开、按主题 id 存成目录；应用登记 THEME_PACKS = { list() → Promise<[{ id, name, version, contractVersion }]>,
+   read(id) → Promise<包：pdl、uses 用到的组件包代码 components、文案 i18n、素材 assets（地址）>, install(文件) → Promise<{ id } | { custom: 自定义主题 }>,
+   remove(id), export(id), exportCustom(自定义主题) }。主题存储只记当前主题和自定义主题（自定义主题的 theme 是它基于的包）。
+   一次只渲染一套主题：启动时按当前主题的包 id 读这一个包——默认组件库与文案之后，依次是它用到的组件包、文案、素材、pdl（同 id 盖过默认，缺的回落默认）。
+   切换主题 = 存完后整页重新载入（pdlThemeGo） */
+let THEME_PACKS = null, PACK_LIST = [], PACK_LOADED = null;
+function pdlThemePacks() { return PACK_LIST.map(function (p) { return { id: 'pkg:' + p.id, name: p.name, src: p.version, skin: 'default', palette: themeDefault(), theme: p.id }; }); }
+function pdlActivePack(t) { const x = t.customs.find(function (c) { return c.id === t.active; }) || pdlSysTheme(t.active) || {}; return PACK_LIST.some(function (p) { return p.id === x.theme; }) ? x.theme : null; }
 function pdlPackBoot() {
-  const t = pdlThemes(), id = pdlActivePack(t), p = id && t.packs.find(function (x) { return x.id === id; }); if (!p) return;
-  const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
-  (p.uses || []).forEach(function (u) { const c = t.components[u]; c.css.forEach(function (x) { add('style', x); }); c.js.forEach(function (x) { add('script', x); }); });
-  Object.keys(p.i18n || {}).forEach(function (l) { defineI18n(l, p.i18n[l]); });
-  Object.assign(ASSETS, p.assets || {});
-  pdlThemeLoad(p.pdl, { id: p.id, name: p.name, version: p.version, contractVersion: p.contractVersion }); pdlBaseTake();
-  PACK_LOADED = id;
+  if (!THEME_PACKS) return;
+  return THEME_PACKS.list().then(function (list) {
+    PACK_LIST = list; const id = pdlActivePack(pdlThemes()); if (!id) return;
+    return THEME_PACKS.read(id).then(function (p) {
+      const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
+      Object.keys(p.components).forEach(function (u) { p.components[u].css.forEach(function (x) { add('style', x); }); p.components[u].js.forEach(function (x) { add('script', x); }); });
+      Object.keys(p.i18n).forEach(function (l) { defineI18n(l, p.i18n[l]); });
+      Object.assign(ASSETS, p.assets);
+      pdlThemeLoad(p.pdl, { id: p.id, name: p.name, version: p.version, contractVersion: p.contractVersion }); pdlBaseTake();
+      PACK_LOADED = id;
+    });
+  });
 }
 function pdlThemeGo(t) { pdlThemesSave(t); THEMES_WRITE.then(function () { location.reload(); }); }
-onStart('early', function () { if (!THEME_DOCS) { pdlPackBoot(); return; } return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; pdlPackBoot(); }); });
+onStart('early', function () { if (!THEME_DOCS) return pdlPackBoot(); return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; return pdlPackBoot(); }); });
 function pdlThemeActive() { const t = pdlThemes(); return t.customs.find(function (c) { return c.id === t.active; }) || null; }
 function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes(), pdlThemePacks()).find(function (x) { return x.id === id; }) || null; }   /* 只读主题：系统主题 + 主题插件带来的主题 + 装好的主题包 */
 /* 当前主题的名字（主题页、主题计算器标题都用它） */
@@ -214,19 +220,19 @@ ENT.theme = {
     return function () { const t2 = pdlThemes(); t2.customs.splice(Math.min(i, t2.customs.length), 0, c); t2.active = was; pdlThemesSave(t2); pdlThemeSync(); };
   }
 };
-ENT.themePack = {   /* 卸载主题包：正在用它就回到系统主题 1；没有主题包再用的组件包一起删 */
-  coll: function () { return pdlThemes().packs || []; },
+ENT.themePack = {   /* 卸载主题包（后端删它的目录）：正在用它就回到系统主题 1 */
+  coll: function () { return PACK_LIST; },
   remove: function (p) {
-    const t = pdlThemes(), on = pdlActivePack(t) === p.id;
-    t.packs = t.packs.filter(function (x) { return x.id !== p.id; });
-    Object.keys(t.components).forEach(function (u) { if (!t.packs.some(function (x) { return (x.uses || []).indexOf(u) >= 0; })) delete t.components[u]; });
-    if (on) { t.active = PDL_SYS_THEMES[0].id; pdlThemeGo(t); } else pdlThemesSave(t);
+    return THEME_PACKS.remove(p.id).then(function () {
+      const t = pdlThemes(), on = pdlActivePack(t) === p.id;
+      PACK_LIST = PACK_LIST.filter(function (x) { return x.id !== p.id; });
+      if (on) { t.active = PDL_SYS_THEMES[0].id; pdlThemeGo(t); } else render(true);
+    });
   }
 };
 /* ───────── 导入 / 导出─────────
-   主题包 = theme.yaml：身份字段（id、name、version、contractVersion，和插件的 plugin.yaml 一样；extends 是它派生自的主题）+ pdl 段
-   （palette、skin、doc（完整的主题文档：页面描述的摆放 / 结构、配色的值、背景、样式）、base（基线快照，升级用））。
-   YAML 由宿主读写（平台口 packRead / packSave），引擎只拿到对象。用户背景和个人照片不属于主题。导入校验不过：对话框留着，显示错误 */
+   自定义主题的 theme.yaml：身份字段（id、name、version、contractVersion；extends 是它基于的主题）+ pdl 段
+   （palette、skin、doc（完整的主题文档：摆放 / 结构、配色的值、背景、样式）、base（基线快照，升级用））。用户背景和个人照片不属于主题 */
 /* 用户对插件节点的调整（摆放、顺序、隐藏）按 plugin:<插件>/<节点> 记，读的时候插件在才生效；导出的主题包不带它们 */
 function pdlDropPluginRefs(doc) {
   const strip = function (x) {
@@ -236,55 +242,42 @@ function pdlDropPluginRefs(doc) {
   };
   strip(doc);
 }
-/* 一个装好的主题包，连同它用到的组件包（导出、自定义主题导出时附带）*/
-function pdlPackFile(t, pid) { const p = pdlClone(t.packs.find(function (x) { return x.id === pid; })); p.components = {}; (p.uses || []).forEach(function (u) { p.components[u] = t.components[u]; }); return p; }
 function pdlThemePack(id) {
   const t = pdlThemes(), c = t.customs.find(function (x) { return x.id === id; }), ro = c ? null : pdlSysTheme(id) || PDL_SYS_THEMES[0];
-  if (ro && ro.theme) return pdlPackFile(t, ro.theme);
-  const base = (c || ro).theme;
   const doc = c ? pdlClone(c.full) : {};
   pdlDropPluginRefs(doc);
-  return { id: c ? c.id : ro.id, name: c ? c.name : pdlRoName(ro), version: '1', contractVersion: PDL_THEME.contractVersion, extends: base || PDL_THEME.id, bundle: base ? pdlPackFile(t, base) : undefined,
+  return { id: c ? c.id : ro.id, name: c ? c.name : pdlRoName(ro), version: '1', contractVersion: PDL_THEME.contractVersion, extends: (c || ro).theme || PDL_THEME.id,
     pdl: { palette: c ? c.palette : ro.palette, skin: c ? c.skin : ro.skin, doc: doc, base: c ? pdlClone(c.base) : pdlBaseNew() } };
 }
-A.pdlThemeExport = function (d) {   /* 文件落到下载文件夹，界面上看不到：保留提示（最近一次记在 S.lastExport） */
-  const pack = pdlThemePack(d.id), name = pack.name.replace(/\s+/g, '-') + '.theme.zip';
-  S.lastExport = { name: name, pack: pack };
-  return Promise.resolve(PLATFORM.packSave(name, pack)).then(function () { toast(tc('pdlDoc.exported', name)); });
+/* 导出（文件落到下载文件夹，保留提示；最近一次记在 S.lastExport）：装好的主题包由后端把目录打回 zip；系统主题、自定义主题导出成自定义主题的 zip */
+A.pdlThemeExport = function (d) {
+  const ro = pdlSysTheme(d.id);
+  if (ro && ro.theme) return Promise.resolve(THEME_PACKS.export(ro.theme)).then(function (name) { toast(tc('pdlDoc.exported', name)); });
+  const pack = pdlThemePack(d.id); S.lastExport = { pack: pack };
+  return Promise.resolve(THEME_PACKS.exportCustom(pack)).then(function (name) { S.lastExport.name = name; toast(tc('pdlDoc.exported', name)); });
 };
-/* 导入（一个入口）：自定义主题（pdl.doc：文档 + 基线快照，bundle 是它基于的主题包）或主题包（pdl 是主题数据，components 是附带的组件包）。
-   主题包同 id 的换成新的，组件包按 id 存一份；用到的组件包既没附带也没装过 → 报缺哪个。校验不过：对话框留着，显示错误 */
-function pdlPackWhy(t, p) {
-  if (!p || !p.id || !p.pdl || typeof p.pdl !== 'object' || p.pdl.doc) return tc('pdlDoc.importBad');
-  const miss = (p.uses || []).filter(function (u) { return !(p.components || {})[u] && !t.components[u]; });
-  return miss.length ? tc('pdlDoc.importMissing', miss.join(', ')) : '';
-}
-function pdlPackAdd(t, p) {
-  Object.keys(p.components || {}).forEach(function (u) { t.components[u] = p.components[u]; });
-  const x = { id: String(p.id), name: String(p.name || p.id), version: p.version, contractVersion: p.contractVersion, uses: p.uses || [], pdl: p.pdl, i18n: p.i18n, assets: p.assets };
-  t.packs = t.packs.filter(function (y) { return y.id !== x.id; }).concat(x);
-}
+/* 导入（一个入口）：zip 交给后端。主题包：后端存好，列表多一行（正在用的包换了新版就重新载入）；自定义主题（pdl.doc：文档 + 基线快照，extends 是它基于的包）：
+   后端解开交回，校验后加成一份自定义主题。校验不过：对话框留着，显示错误 */
 function pdlThemePackWhy(o) {
   const x = o && typeof o === 'object' && o.pdl;
-  if (!x || typeof x !== 'object') return tc('pdlDoc.importBad');
-  if (!x.doc) return pdlPackWhy(pdlThemes(), o);
-  if (typeof x.doc !== 'object' || x.doc.place || !x.base || typeof x.base !== 'object' || !x.palette) return tc('pdlDoc.importIncomplete');
+  if (!x || typeof x !== 'object' || typeof x.doc !== 'object' || x.doc.place || !x.base || typeof x.base !== 'object' || !x.palette) return tc('pdlDoc.importIncomplete');
   const big = pdlLimitWhy(x.doc); if (big) return tc('pdlDoc.importTooLarge.' + big);   /* 上限只在这里校验一次 */
-  return o.bundle ? pdlPackWhy(pdlThemes(), o.bundle) : '';
+  return '';
 }
 function pdlThemeAdd(o) {
-  const t = pdlThemes(); t.packs = t.packs || []; t.components = t.components || {};
-  if (!o.pdl.doc) { pdlPackAdd(t, o); if (PACK_LOADED === String(o.id)) pdlThemeGo(t); else pdlThemesSave(t); return; }   /* 正在用的包换了新版：重新载入 */
-  if (o.bundle) pdlPackAdd(t, o.bundle);
-  const taken = t.customs.some(function (c) { return c.name === o.name; }) || PDL_SYS_THEMES.some(function (x) { return pdlRoName(x) === o.name; });
-  const c = { id: 'c' + Date.now(), name: o.name && !taken ? String(o.name) : pdlCustomName(t), skin: o.pdl.skin || 'default', palette: o.pdl.palette, theme: o.bundle ? String(o.bundle.id) : undefined, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
+  const t = pdlThemes(), taken = t.customs.some(function (c) { return c.name === o.name; }) || PDL_SYS_THEMES.some(function (x) { return pdlRoName(x) === o.name; });
+  const base = PACK_LIST.some(function (p) { return p.id === o.extends; }) ? o.extends : undefined;
+  const c = { id: 'c' + Date.now(), name: o.name && !taken ? String(o.name) : pdlCustomName(t), skin: o.pdl.skin || 'default', palette: o.pdl.palette, theme: base, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
   t.customs.push(c); pdlThemesSave(t); return c;
 }
 A.pdlThemeImport = function () {
   dialog({ title: tc('pdlDoc.importTitle'), fields: [{ id: 'theme-file', label: tc('pdlDoc.importFile'), file: { accept: '.zip' } }], ok: tc('common.import'), on: function () {
     const el = document.getElementById('theme-file'), f = el && el.files && el.files[0];
     if (!f) return Promise.resolve({ error: tc('pdlDoc.importNoFile') });
-    return PLATFORM.packRead(f).then(function (o) { const why = pdlThemePackWhy(o); if (why) return { error: why }; pdlThemeAdd(o); }, function () { return { error: tc('pdlDoc.importBad') }; });
+    return THEME_PACKS.install(f).then(function (r) {
+      if (r.custom) { const why = pdlThemePackWhy(r.custom); if (why) return { error: why }; pdlThemeAdd(r.custom); return; }
+      return THEME_PACKS.list().then(function (list) { PACK_LIST = list; if (PACK_LOADED === r.id) location.reload(); else render(true); });
+    }, function () { return { error: tc('pdlDoc.importBad') }; });
   } });
 };
 /* 恢复默认 = 切回系统主题 1（自定义主题留在列表里） */

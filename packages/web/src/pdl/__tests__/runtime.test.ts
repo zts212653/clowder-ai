@@ -389,33 +389,35 @@ async function boot(
                   ? { receipt: null }
                   : path === '/api/config/console-themes'
                     ? { themes: null }
-                    : path === '/api/config/chat-background'
-                      ? { threads: {} }
-                      : path === '/api/config/chat-background/images'
-                        ? { images: [] }
-                        : path === '/api/plugin-manager/plugins'
-                          ? { plugins: [] }
-                          : path === '/api/plugin-manager/pdl'
-                            ? { fragments: {} }
-                            : path.startsWith('/api/plugin-manager/pdl/')
-                              ? {}
-                              : path === '/api/push/status'
-                                ? {
-                                    capability: {
-                                      enabled: false,
-                                      vapidPublicKeyConfigured: false,
-                                      pushServiceConfigured: false,
-                                    },
-                                    subscription: { count: 0, targets: [] },
-                                    delivery: {
-                                      lastResult: 'not_attempted',
-                                      lastAttemptAt: null,
-                                      lastHttpStatus: null,
-                                      lastError: null,
-                                    },
-                                    errorHints: [],
-                                  }
-                                : undefined,
+                    : path === '/api/console-themes/packages'
+                      ? { packages: [] }
+                      : path === '/api/config/chat-background'
+                        ? { threads: {} }
+                        : path === '/api/config/chat-background/images'
+                          ? { images: [] }
+                          : path === '/api/plugin-manager/plugins'
+                            ? { plugins: [] }
+                            : path === '/api/plugin-manager/pdl'
+                              ? { fragments: {} }
+                              : path.startsWith('/api/plugin-manager/pdl/')
+                                ? {}
+                                : path === '/api/push/status'
+                                  ? {
+                                      capability: {
+                                        enabled: false,
+                                        vapidPublicKeyConfigured: false,
+                                        pushServiceConfigured: false,
+                                      },
+                                      subscription: { count: 0, targets: [] },
+                                      delivery: {
+                                        lastResult: 'not_attempted',
+                                        lastAttemptAt: null,
+                                        lastHttpStatus: null,
+                                        lastError: null,
+                                      },
+                                      errorHints: [],
+                                    }
+                                  : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),

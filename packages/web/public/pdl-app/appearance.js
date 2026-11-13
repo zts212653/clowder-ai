@@ -11,6 +11,39 @@ THEME_DOCS = {
     return api.post('/api/config/console-themes', {}, { themes: themes });
   },
 };
+// Theme packages live in the host: the zip is uploaded, unpacked and stored per theme id; one package is read by id.
+const THEME_PACK_URL = '/api/console-themes/packages';
+function themeDownload(action, args) {
+  return chatAction(action, args).then(function (file) {
+    A.download(file);
+    file.release();
+    return file.name;
+  });
+}
+THEME_PACKS = {
+  list: function () {
+    return api.get(THEME_PACK_URL).then(function (r) {
+      return r.packages;
+    });
+  },
+  read: function (id) {
+    return api.get(THEME_PACK_URL + '/' + encodeURIComponent(id));
+  },
+  install: function (file) {
+    const body = new FormData();
+    body.append('file', file);
+    return api.post(THEME_PACK_URL, {}, body);
+  },
+  remove: function (id) {
+    return api.post(THEME_PACK_URL + '/' + encodeURIComponent(id), { method: 'DELETE' }, {});
+  },
+  export: function (id) {
+    return themeDownload('themePackExport', { id: id });
+  },
+  exportCustom: function (theme) {
+    return themeDownload('themeCustomExport', { theme: theme });
+  },
+};
 function bindAppearance() {
   let images = [],
     legacy = null,

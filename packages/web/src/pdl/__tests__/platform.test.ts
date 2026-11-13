@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { resolveAssetUrl } from '@/components/artifacts/artifact-view';
-import { packRead, packText, richRender, terminal } from '../platform';
+import { richRender, terminal } from '../platform';
 
 const renderer = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -98,20 +98,4 @@ it('provides the installed terminal port and its own stylesheet without a CDN or
   expect(xterm.port.onData).toHaveBeenCalledWith(input);
   expect(xterm.port.onResize).toHaveBeenCalledWith(resize);
   expect(xterm.port.dispose).toHaveBeenCalledOnce();
-});
-
-describe('PDL project theme package port', () => {
-  it('reads and writes the theme.yaml manifest so the console only handles objects', async () => {
-    const pack = {
-      id: 'c1',
-      name: 'Mine',
-      version: '1',
-      pdl: { palette: 'cream', doc: { tokens: {} }, base: { v: 4 } },
-    };
-    const text = packText(pack);
-    expect(text).toContain('palette: cream');
-    const file = (body: string) => ({ text: async () => body }) as File;
-    expect(await packRead(file(text))).toEqual(pack);
-    await expect(packRead(file('pdl: [not: closed'))).rejects.toThrow();
-  });
 });

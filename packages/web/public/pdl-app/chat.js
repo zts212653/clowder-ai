@@ -499,10 +499,6 @@ window.clowderChat = {
     platformProvide({
       richRender: port.richRender,
       terminal: port.terminal,
-      packRead: port.packRead,
-      packSave: function (name, pack) {
-        PLATFORM.download(name, port.packText(pack), 'application/yaml');
-      },
     });
     api.on('composer:changed', function () {
       render(true); // the host changed composer state (a restored draft): the composer shows it now

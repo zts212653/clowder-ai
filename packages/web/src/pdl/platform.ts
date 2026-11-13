@@ -1,6 +1,5 @@
 import type { ITerminalInitOnlyOptions, ITerminalOptions } from '@xterm/xterm';
 import DOMPurify from 'dompurify';
-import { parse, stringify } from 'yaml';
 
 let diagramId = 0;
 
@@ -53,12 +52,4 @@ export async function richRender(kind: string, source: string, inline = false): 
 export async function downloadPayload(response: Response, name: string) {
   const source = URL.createObjectURL(await response.blob());
   return { source, name, release: () => URL.revokeObjectURL(source) };
-}
-
-/** Theme packages: the manifest (theme.yaml) is YAML only in the host; the console reads and writes objects. */
-export async function packRead(file: File): Promise<unknown> {
-  return parse(await file.text());
-}
-export function packText(pack: unknown): string {
-  return stringify(pack);
 }

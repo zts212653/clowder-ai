@@ -142,7 +142,7 @@ import {
 } from './message-selection';
 import { request, write } from './owner-api';
 import { type ProjectBindings, ProjectDataBinding } from './ProjectDataBinding';
-import { downloadPayload, packRead, packText, richRender, terminal } from './platform';
+import { downloadPayload, richRender, terminal } from './platform';
 import { callPluginOperation, readPluginSpaces, readPluginSubtree } from './plugin-spaces';
 import type { ScheduleBinding } from './proposal-models';
 import {
@@ -1672,6 +1672,23 @@ function ChatBinding({
         ui.current.pendingMid = args.mid;
         return;
       }
+      case 'themePackExport':
+      case 'themeCustomExport': {
+        const response =
+          name === 'themePackExport'
+            ? await apiFetch(`/api/console-themes/packages/${encodeURIComponent(String(args.id))}/export`)
+            : await apiFetch('/api/console-themes/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ theme: args.theme }),
+              });
+        if (!response.ok) throw new Error((await response.json()).error || '导出失败');
+        const theme = args.theme as { name?: string } | undefined;
+        return downloadPayload(
+          response,
+          `${name === 'themePackExport' ? String(args.id) : String(theme?.name ?? 'theme').replace(/\s+/g, '-')}.theme.zip`,
+        );
+      }
       case 'cafeExport':
       case 'cafeMultiExport': {
         const format =
@@ -1822,8 +1839,6 @@ function ChatBinding({
       },
       richRender,
       terminal,
-      packRead,
-      packText,
       get: (path, params) =>
         path === '/api/plugin-manager/pdl'
           ? readPluginSpaces()

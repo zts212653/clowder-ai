@@ -61,45 +61,8 @@ function webTerminal(el, o) {
       onData: function (fn) { term.onData(fn); }, onResize: function (fn) { term.onResize(fn); }, dispose: function () { term.dispose(); } };
   });
 }
-/* 主题包的清单（theme.yaml）：YAML 只在这一层读写（第一次用到时加载 yaml），引擎只拿到对象 */
-let webYaml = null;
-function webYamlLib() { return webYaml = webYaml || import('https://cdn.jsdelivr.net/npm/yaml@2.8.2/browser/index.js'); }
-/* 主题包是一个 zip：theme.yaml（身份、uses、pdl）+ components/<组件包>/*.js|css + i18n/<语言>/*.json + assets/<素材 id>.<扩展名>；
-   解开后交给引擎的是一个对象（组件包、文案、素材挂在包上；自定义主题挂在它附带的 bundle 上），zip 只在平台层 */
-let webZip = null;
-function webZipLib() { return webZip = webZip || import('https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js'); }
-const PACK_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf' };
-function webPackRead(file) {
-  return Promise.all([webYamlLib(), webZipLib(), file.arrayBuffer()]).then(function (r) {
-    const Z = r[1], files = Z.unzipSync(new Uint8Array(r[2])), text = function (n) { return Z.strFromU8(files[n]); };
-    const o = r[0].parse(text('theme.yaml')), comps = {}, i18n = {}, assets = {};
-    Object.keys(files).sort().forEach(function (n) {
-      let m = /^components\/([^/]+)\/[^/]+\.(js|css)$/.exec(n); if (m) { (comps[m[1]] = comps[m[1]] || { js: [], css: [] })[m[2]].push(text(n)); return; }
-      m = /^i18n\/([^/]+)\/[^/]+\.json$/.exec(n); if (m) { i18n[m[1]] = Object.assign(i18n[m[1]] || {}, JSON.parse(text(n))); return; }
-      m = /^assets\/(.+)\.(\w+)$/.exec(n); if (m && PACK_MIME[m[2]]) assets[m[1]] = { type: /^font/.test(PACK_MIME[m[2]]) ? 'font' : 'image', mime: PACK_MIME[m[2]], src: 'data:' + PACK_MIME[m[2]] + ';base64,' + btoa(Z.strFromU8(files[n], true)) };
-    });
-    const pack = o.pdl && o.pdl.doc ? o.bundle : o;   /* 自定义主题：组件、文案、素材属于它附带的主题包 */
-    if (pack) Object.assign(pack, Object.keys(comps).length ? { components: comps } : {}, Object.keys(i18n).length ? { i18n: i18n } : {}, Object.keys(assets).length ? { assets: assets } : {});
-    return o;
-  });
-}
-function webPackSave(name, pack) {
-  return Promise.all([webYamlLib(), webZipLib()]).then(function (r) {
-    const Z = r[1], o = JSON.parse(JSON.stringify(pack)), p = o.pdl && o.pdl.doc ? o.bundle : o, files = {};
-    if (p) {
-      Object.keys(p.components || {}).forEach(function (u) { ['js', 'css'].forEach(function (x) { p.components[u][x].forEach(function (src, i) { files['components/' + u + '/' + String(i).padStart(2, '0') + '.' + x] = Z.strToU8(src); }); }); });
-      Object.keys(p.i18n || {}).forEach(function (l) { files['i18n/' + l + '/text.json'] = Z.strToU8(JSON.stringify(p.i18n[l], null, 1)); });
-      Object.keys(p.assets || {}).forEach(function (id) { const a = p.assets[id], ext = Object.keys(PACK_MIME).find(function (k) { return PACK_MIME[k] === a.mime; }); files['assets/' + id + '.' + ext] = Z.strToU8(atob(a.src.split(',')[1]), true); });
-      delete p.components; delete p.i18n; delete p.assets;
-    }
-    files['theme.yaml'] = Z.strToU8(r[0].stringify(o));
-    PLATFORM.download(name, { url: URL.createObjectURL(new Blob([Z.zipSync(files)], { type: 'application/zip' })) });
-  });
-}
 platformProvide({
   richRender: webRichRender,
-  packRead: webPackRead,
-  packSave: webPackSave,
   terminal: webTerminal,
   assets: { get: webAssetGet, put: webAssetPut, remove: webAssetRemove },
   clipboard: function (text) { try { navigator.clipboard.writeText(text); } catch (e) { /* 剪贴板不可用时忽略 */ } },
