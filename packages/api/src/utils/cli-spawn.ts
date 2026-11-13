@@ -48,6 +48,7 @@ import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
 import { RUNTIME_ONLY_LIFECYCLE_ENV_KEYS } from './runtime-only-env.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 import { createStderrTail } from './stderr-tail.js';
+import { type WindowsProviderHost, windowsProviderHostScopeFor } from './windows-provider-host.js';
 
 const log = createModuleLogger('cli-spawn');
 
@@ -301,12 +302,10 @@ export function buildCliTimeoutTelemetryAttributes(terminal: CliTimeoutTerminalC
   } as const;
 }
 
-async function waitForIteratorUntil<T>(
-  pending: Promise<IteratorResult<T>>,
-  deadlineMs: number,
-): Promise<IteratorResult<T> | undefined> {
+async function waitUntil<T>(pending: Promise<T>, deadlineMs: number): Promise<T | undefined> {
   const remainingMs = deadlineMs - Date.now();
-  if (remainingMs <= 0) return undefined;
+  // Observe a pending rejection even when the deadline has already elapsed.
+  if (remainingMs <= 0) return Promise.race([undefined, pending]);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -401,15 +400,25 @@ export async function* spawnCli(
     workingDirectory: options.cwd,
     inheritParentEnv: options.inheritParentEnv,
   });
-  const child = doSpawn(options.command, options.args, {
-    cwd: options.cwd,
-    env: childEnv,
-    // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
-    // provided, open stdin as a pipe so the prompt can be streamed off the command
-    // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
-    stdio: [options.stdinInput != null || options.onStdinReady ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-    bindExecutionOwner: options.bindExecutionOwner !== false,
-  });
+  // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
+  // provided, open stdin as a pipe so the prompt can be streamed off the command
+  // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
+  const stdin = options.stdinInput != null || options.onStdinReady ? 'pipe' : 'ignore';
+  // #1838: inside its execution's host scope, a Windows provider starts in a linked host whose own
+  // kernel job owns the whole tree. Same spawn plan as defaultSpawn; only the parent changes.
+  const hostScope = !deps?.spawnFn && IS_WINDOWS ? windowsProviderHostScopeFor(options.invocationId) : undefined;
+  const child = hostScope
+    ? launchInWindowsHost(await hostScope.take(), options.command, options.args, {
+        cwd: options.cwd,
+        env: childEnv,
+        stdin,
+      })
+    : doSpawn(options.command, options.args, {
+        cwd: options.cwd,
+        env: childEnv,
+        stdio: [stdin, 'pipe', 'pipe'],
+        bindExecutionOwner: options.bindExecutionOwner !== false,
+      });
   if (options.bindExecutionOwner !== false) {
     const executionOwner = cliExecutionOwnerRefFromEnvironment({
       ...childEnv,
@@ -532,6 +541,7 @@ export async function* spawnCli(
   let processAliveAtTimeout = false;
   let timeoutObservedSilenceMs: number | undefined;
   let terminalCause: 'response_timeout' | 'stall_timeout' | 'abort' | 'cleanup' | undefined;
+  let semanticDrainDeadline: number | undefined;
   const terminationController = new CliTerminationController({
     child,
     isChildExited: () => childExited,
@@ -606,7 +616,7 @@ export async function* spawnCli(
     observedSilenceDurationMs: number,
     mode: CliTerminationMode,
   ): boolean {
-    if (timedOut || killed || childExited) return false;
+    if (timedOut || killed || childExited || semanticDrainDeadline !== undefined) return false;
     terminalCause = kind;
     timedOut = true;
     stallKilled = kind === 'stall_timeout';
@@ -736,7 +746,23 @@ export async function* spawnCli(
     finalStage: terminationController.getFinalStage(),
   });
 
+  const semanticSignal = options.outputMode === 'plainText' ? undefined : options.semanticCompletionSignal;
+  let onSemanticCompletion: (() => void) | undefined;
+  const semanticRace =
+    semanticSignal &&
+    new Promise<{ source: 'semantic' }>((resolve) => {
+      onSemanticCompletion = () => {
+        if (killed) return;
+        semanticDrainDeadline = Date.now() + SEMANTIC_COMPLETION_GRACE_MS;
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        resolve({ source: 'semantic' });
+      };
+      if (semanticSignal.aborted) onSemanticCompletion();
+      else semanticSignal.addEventListener('abort', onSemanticCompletion, { once: true });
+    });
+
   let streamCompleted = false;
+  let reportedTurnFailure = false;
   try {
     if (!stdoutDrain) {
       throw new Error(`CLI process ${options.command} has no stdout`);
@@ -790,7 +816,7 @@ export async function* spawnCli(
 
         if (raceResult.source === 'termination') {
           terminationStreamDrainDeadline ??= Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
-          const drained = await waitForIteratorUntil(pendingNext, terminationStreamDrainDeadline);
+          const drained = await waitUntil(pendingNext, terminationStreamDrainDeadline);
           if (!drained) break;
           raceResult = { source: 'stdout', result: drained };
         }
@@ -837,8 +863,8 @@ export async function* spawnCli(
       for (;;) {
         if (spawnError) throw spawnError;
 
-        // F118: Drain probe warnings and check for dead process
-        if (probe && terminationStreamDrainDeadline === undefined) {
+        // F118: Drain probe warnings until a terminal drain owns the wait.
+        if (probe && terminationStreamDrainDeadline === undefined && semanticDrainDeadline === undefined) {
           for (const warning of probe.drainWarnings()) {
             yield withStreamContext(warning);
             // #774: Mark for deferred kill — don't kill here (recovery NDJSON may be pending)
@@ -846,44 +872,54 @@ export async function* spawnCli(
               pendingStallKill = warning;
             }
           }
-          if (probe.getState() === 'dead') {
+          if (semanticDrainDeadline === undefined && probe.getState() === 'dead') {
             killChild('terminate-first', 'cleanup');
             break;
           }
         }
 
-        // Race NDJSON event vs probe poll interval
+        // A semantic wake keeps the same pending read alive for the bounded tail.
         let raceTimer: ReturnType<typeof setTimeout> | undefined;
-        const ndjsonRace = pendingNext.then((result) => ({ source: 'ndjson' as const, result }));
-        let raceResult = probe
-          ? await Promise.race([
-              ndjsonRace,
-              terminationCommittedRace,
-              new Promise<{ source: 'probe' }>((resolve) => {
-                const pollMs = Math.min(probe.config.sampleIntervalMs, livenessWarningDrainIntervalMs);
-                raceTimer = setTimeout(() => resolve({ source: 'probe' }), pollMs);
-              }),
-            ])
-          : await Promise.race([ndjsonRace, terminationCommittedRace]);
+        const activeProbe = semanticDrainDeadline === undefined ? probe : undefined;
+        const nextEvent = Promise.race([
+          pendingNext.then((result) => ({ source: 'ndjson' as const, result })),
+          terminationCommittedRace,
+          ...(semanticRace && semanticDrainDeadline === undefined ? [semanticRace] : []),
+          ...(activeProbe
+            ? [
+                new Promise<{ source: 'probe' }>((resolve) => {
+                  const pollMs = Math.min(activeProbe.config.sampleIntervalMs, livenessWarningDrainIntervalMs);
+                  raceTimer = setTimeout(() => resolve({ source: 'probe' }), pollMs);
+                }),
+              ]
+            : []),
+        ]);
+        let raceResult =
+          semanticDrainDeadline !== undefined && terminationStreamDrainDeadline === undefined
+            ? await waitUntil(nextEvent, semanticDrainDeadline)
+            : await nextEvent;
         if (raceTimer !== undefined) clearTimeout(raceTimer);
+        if (!raceResult) break;
+        if (raceResult.source === 'semantic') continue;
 
         if (raceResult.source === 'termination') {
           terminationStreamDrainDeadline ??= Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
-          const drained = await waitForIteratorUntil(pendingNext, terminationStreamDrainDeadline);
+          const drained = await waitUntil(pendingNext, terminationStreamDrainDeadline);
           if (!drained) break;
           raceResult = { source: 'ndjson', result: drained };
         }
 
         if (raceResult.source === 'probe') {
-          // No NDJSON arrived — if stall-kill is pending, execute it now
-          if (pendingStallKill) {
+          // No NDJSON arrived. Exit only if the pending stall actually commits.
+          if (
+            pendingStallKill &&
             commitTimeout(
               'stall_timeout',
               pendingStallKill.silenceDurationMs,
               options.livenessProbe?.stallTerminationMode ?? 'terminate-first',
-            );
+            )
+          )
             break;
-          }
           continue;
         }
 
@@ -902,7 +938,7 @@ export async function* spawnCli(
         }
         // Reset timeout only after a valid NDJSON event.
         // Invalid chatter should not keep a stuck invocation alive forever.
-        if (terminationStreamDrainDeadline === undefined) {
+        if (terminationStreamDrainDeadline === undefined && semanticDrainDeadline === undefined) {
           resetTimeout();
           if (probe) probe.notifyActivity();
         }
@@ -930,7 +966,7 @@ export async function* spawnCli(
       }
     }
 
-    if (probe) {
+    if (probe && semanticDrainDeadline === undefined) {
       await probe.flushPendingWarnings();
       for (const warning of probe.drainWarnings()) {
         yield withStreamContext(warning);
@@ -947,31 +983,33 @@ export async function* spawnCli(
     // Check for spawn error that arrived during/after iteration
     if (spawnError) throw spawnError;
 
-    // Issue #116: If provider signaled semantic completion, give a short grace period
-    // instead of blocking on full exit. Process gets SEMANTIC_COMPLETION_GRACE_MS to
-    // exit naturally; if it doesn't, killChild() in finally will clean up.
-    const semanticDone = options.semanticCompletionSignal?.aborted === true;
+    if (!killed && !options.semanticCompletionSignal?.aborted) {
+      // EOF can arrive before either process exit or the provider's signal.
+      await Promise.race([
+        closePromise,
+        exitDrainComplete,
+        terminationCommittedRace,
+        ...(semanticRace ? [semanticRace] : []),
+      ]);
+    }
 
-    if (!semanticDone) {
-      if (killed) {
-        // A timeout/abort must not depend forever on a broken wrapper closing stdout.
-        // Wait through the bounded signal sequence, then allow one final short stdio drain.
-        await Promise.race([closePromise, terminationController.waitForCompletion()]);
-        if (!childClosed) {
-          const drainDeadline = terminationStreamDrainDeadline ?? Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
-          const remainingDrainMs = drainDeadline - Date.now();
-          if (remainingDrainMs > 0) {
-            await Promise.race([closePromise, new Promise<void>((resolve) => setTimeout(resolve, remainingDrainMs))]);
-          }
-        }
-      } else {
-        // Healthy completion still waits for close so trailing stderr is not truncated.
-        await Promise.race([closePromise, exitDrainComplete]);
+    const semanticDone = options.semanticCompletionSignal?.aborted === true;
+    if (semanticDone && !killed && !childClosed) {
+      // stdout EOF can arrive before exit or trailing stderr. Use the time left
+      // in the same semantic window, then request cleanup of a lingering child.
+      await waitUntil(
+        Promise.race([closePromise, terminationCommittedRace]),
+        semanticDrainDeadline ?? Date.now() + SEMANTIC_COMPLETION_GRACE_MS,
+      );
+      killChild();
+    }
+
+    if (killed) {
+      // Wait through the bounded signal sequence, then allow one final short stdio drain.
+      await Promise.race([closePromise, terminationController.waitForCompletion()]);
+      if (!childClosed) {
+        await waitUntil(closePromise, terminationStreamDrainDeadline ?? Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS);
       }
-    } else if (!childClosed) {
-      // Grace period: give the process time to exit naturally before force-killing.
-      // If it exits within grace, great; if not, killChild() in finally will clean up.
-      await Promise.race([closePromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
     }
 
     // F212 AC-A7 / OQ-2 (砚砚 review BLOCKED P1-1): successful exit stderr also gated by
@@ -1020,13 +1058,13 @@ export async function* spawnCli(
     // outranks a prior `turn.completed`. Sticky abort only fires when we saw NO
     // turn-level terminal at all (cell 3).
     const finalSemanticDone = localFinalTerminal === 'completed' || (localFinalTerminal === null && semanticDone);
-    // Yield error on abnormal exit (only if WE didn't kill it AND semantic completion
-    // did not truly land). Covers non-zero exitCode + external signal kills.
-    // Windows libuv-crash quirk: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN)
-    // is a libuv assertion crash on MCP subprocess shutdown. Use the same unified
-    // predicate for the tie-break so cell 2 (multi-turn failure) still surfaces.
-    const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && finalSemanticDone;
-    if (!finalSemanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
+    const abnormalExit = !killed && (exitCode !== 0 || exitSignal !== null);
+    // A late failure is real even when the process exits cleanly or cleanup
+    // supplies the exit signal. A committed timeout or cancel keeps its own verdict.
+    const lateTurnFailure =
+      semanticDrainDeadline !== undefined && localFinalTerminal === 'failed' && terminalCause !== 'abort' && !timedOut;
+    if (!finalSemanticDone && (abnormalExit || lateTurnFailure)) {
+      reportedTurnFailure = !abnormalExit;
       // F212 AC-A1 + AC-A8: build structured diagnostics from BOTH stderr and stream error events.
       // Stream errors (NDJSON `{type:"error"}`) often carry the real semantic (Codex code 1 case).
       const rawText = [...streamErrorTexts, stderrTail.value].filter(Boolean).join('\n');
@@ -1068,7 +1106,7 @@ export async function* spawnCli(
           // 安全就 omit" — the diagnostic value of cwd is redundant with `command` (binary
           // path already conveys install context) and invocationId (lookup via thread metadata).
         }),
-        'CLI abnormal exit',
+        abnormalExit ? 'CLI abnormal exit' : 'CLI semantic failure',
       );
       // F212 AC-A7 + OQ-2 + Phase F AC-F3: stderr log gated + sanitized via shared helper.
       // AC-F3 adds invocationId to the payload so frontend debugRef.invocationId can be used
@@ -1106,7 +1144,9 @@ export async function* spawnCli(
         exitCode,
         signal: exitSignal,
         // AC-A9 红线: message is humanized only — no raw stderr exposed
-        message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`,
+        message: abnormalExit
+          ? `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`
+          : 'CLI 报告本轮失败',
         command: options.command,
         ...(cliDiagnostics.reasonCode ? { reasonCode: cliDiagnostics.reasonCode } : {}),
         cliDiagnostics,
@@ -1206,6 +1246,7 @@ export async function* spawnCli(
       child.stderr?.destroy();
     }
     if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (onSemanticCompletion) semanticSignal?.removeEventListener('abort', onSemanticCompletion);
     if (closeStdin) options.stdinCloseSignal?.removeEventListener('abort', closeStdin);
     if (options.signal) {
       options.signal.removeEventListener('abort', abortHandler);
@@ -1225,6 +1266,16 @@ export async function* spawnCli(
         const timeoutAttributes = buildCliTimeoutTelemetryAttributes(timeoutTerminalContext);
         cliSpan.setAttributes(timeoutAttributes);
         emitOtelLog('ERROR', 'cli_session_timeout', timeoutAttributes, cliSpan);
+      } else if (reportedTurnFailure) {
+        cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'CLI semantic failure' });
+        emitOtelLog('ERROR', 'cli_session_error', { 'cli.exit_code': exitCode ?? -1 }, cliSpan);
+      } else if (
+        streamCompleted &&
+        semanticDrainDeadline !== undefined &&
+        terminalCause === 'cleanup' &&
+        localFinalTerminal !== 'failed'
+      ) {
+        cliSpan.setStatus({ code: SpanStatusCode.OK });
       } else if (exitCode !== null && exitCode !== 0) {
         cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: `CLI exit code ${exitCode}` });
         emitOtelLog('ERROR', 'cli_session_error', { 'cli.exit_code': exitCode }, cliSpan);
@@ -1318,6 +1369,27 @@ export function isLivenessWarning(value: unknown): value is import('./ProcessLiv
   );
 }
 
+/** #1838: defaultSpawn's Windows plan, launched in a linked provider host instead of directly. */
+function launchInWindowsHost(
+  host: WindowsProviderHost,
+  command: string,
+  args: readonly string[],
+  options: { cwd?: string | undefined; env?: NodeJS.ProcessEnv | undefined; stdin: 'pipe' | 'ignore' },
+): ChildProcessLike {
+  const plan = resolveWindowsSpawnPlan(command, args);
+  const child = host.launch({
+    command: plan.command,
+    args: plan.args,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.env || plan.env ? { env: { ...(options.env ?? process.env), ...plan.env } } : {}),
+    ...(plan.shell !== undefined ? { shell: plan.shell } : {}),
+    stdin: options.stdin,
+  });
+  // The host's own stdin is always a pipe; a provider started without stdin must not hold it open.
+  if (options.stdin === 'ignore') child.stdin?.end();
+  return child;
+}
+
 /**
  * Default spawn function wrapping child_process.spawn.
  *
@@ -1362,7 +1434,7 @@ function defaultSpawn(
     }
     return nodeSpawn(spawnPlan.command, spawnPlan.args, {
       cwd: options.cwd,
-      env: options.env,
+      env: spawnPlan.env ? { ...(options.env ?? process.env), ...spawnPlan.env } : options.env,
       stdio: options.stdio,
       ...(spawnPlan.shell !== undefined ? { shell: spawnPlan.shell } : {}),
     });

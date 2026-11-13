@@ -175,6 +175,10 @@ describe('F202 terminal Plugin Manager projection', () => {
             skipTaskbar: true,
           },
         },
+        {
+          type: 'external-request',
+          id: 'public-mcp',
+        },
       ],
     };
 
@@ -190,6 +194,7 @@ describe('F202 terminal Plugin Manager projection', () => {
       { id: 'video-analysis-guide', kind: 'skill', name: 'video-analysis-guide' },
       { id: 'docx-editor', kind: 'content-editor-provider', name: 'docx-editor' },
       { id: 'companion-window', kind: 'desktop-window', name: 'companion-window' },
+      { id: 'public-mcp', kind: 'external-request', name: 'public-mcp' },
     ]);
   });
 

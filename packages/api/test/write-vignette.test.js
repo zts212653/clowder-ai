@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { parse as parseYaml } from 'yaml';
 import {
   createVignetteWriter,
   deriveSlug,
@@ -53,6 +54,20 @@ describe('writeVignette', () => {
   });
 
   describe('formatVignette', () => {
+    it('preserves the exact approved field strings when a content digest is bound', () => {
+      const proposal = makeProposal({
+        decisionDigest: 'a'.repeat(64),
+        scene: 'First line\nSecond line',
+        quote: 'Quote\nline',
+        takeaway: 'Exact judgment',
+        tags: ['tag'],
+      });
+      const fields = parseYaml(formatVignette(proposal).split('---\n')[1]);
+      assert.equal(fields.scene, proposal.scene);
+      assert.deepEqual(fields.quotes, [proposal.quote]);
+      assert.equal(fields.takeaway, proposal.takeaway);
+      assert.deepEqual(fields.tags, proposal.tags);
+    });
     it('writes the approved one-sentence takeaway as YAML and keeps legacy files valid', () => {
       const withTakeaway = formatVignette(makeProposal({ takeaway: '我们以为 You 喜欢“有温度”的解释。' }));
       assert.match(withTakeaway, /takeaway: "我们以为 You 喜欢“有温度”的解释。"/);

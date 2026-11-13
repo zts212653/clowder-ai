@@ -2,7 +2,7 @@ import type { ArtifactReviewView } from '@cat-cafe/shared';
 import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { writeShellPresentation } from '@/components/shell/shell-presentation';
+import { SHELL_PRESENTATION_STORAGE_KEY, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts';
 import { _resetCatDataCache } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
@@ -172,6 +172,7 @@ for (const boundary of ['unknown-owner', 'foreign-thread'] as const) {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.removeItem(SHELL_PRESENTATION_STORAGE_KEY);
   vi.unstubAllGlobals();
 });
 
@@ -204,41 +205,46 @@ it('keeps the same Task context chooser in details instead of another permanent 
   expect(mocks.controller().act).not.toHaveBeenCalled();
 });
 
-for (const round of [1, 2]) {
-  it(`keeps the host's sole title and actual chooser beside Task version ${round}`, async () => {
-    const choose = vi.fn(),
-      back = vi.fn(),
-      version = vi.fn();
-    await act(async () =>
-      root.render(
-        <ArtifactReviewSurface
-          reviewId={reviewView().review.reviewId}
-          initialRound={round}
-          titleInHost
-          leadingAction={
-            <button type="button" onClick={choose}>
-              切换原作品
-            </button>
-          }
-          onBack={back}
-          onVersionChange={version}
-        />,
-      ),
-    );
-    expect(container.querySelector('h2')).toBeNull();
-    const select = container.querySelector<HTMLSelectElement>('[aria-label="审阅版本"]');
-    const switchButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === '切换原作品',
-    );
-    expect(switchButton).toBeDefined();
-    expect(switchButton?.parentElement).toBe(select?.parentElement);
-    expect(select?.value).toBe(String(round));
-    if (round === 1) expect(container.textContent).toContain('可继续讨论，画面不可改');
-    await act(async () => switchButton?.click());
-    expect(choose).toHaveBeenCalledOnce();
-    expect(mocks.controller().act).not.toHaveBeenCalled();
-  });
-}
+for (const presentation of ['classic', 'v2'] as const)
+  for (const round of [1, 2]) {
+    it(`${presentation}: keeps the host's sole title and actual chooser beside Task version ${round}`, async () => {
+      writeShellPresentation(presentation);
+      const choose = vi.fn(),
+        back = vi.fn(),
+        version = vi.fn();
+      await act(async () =>
+        root.render(
+          <ArtifactReviewSurface
+            reviewId={reviewView().review.reviewId}
+            initialRound={round}
+            titleInHost
+            leadingAction={
+              <button type="button" onClick={choose}>
+                切换原作品
+              </button>
+            }
+            onBack={back}
+            onVersionChange={version}
+          />,
+        ),
+      );
+      expect(container.querySelector('h2')).toBeNull();
+      const select = container.querySelector<HTMLSelectElement>(
+        presentation === 'v2' ? '[aria-label="作品版本"]' : '[aria-label="审阅版本"]',
+      );
+      expect(select).not.toBeNull();
+      const switchButton = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === '切换原作品',
+      );
+      expect(switchButton).toBeDefined();
+      expect(switchButton?.parentElement).toBe(select?.parentElement);
+      expect(select?.value).toBe(String(round));
+      if (round === 1) expect(container.textContent).toContain('可继续讨论，画面不可改');
+      await act(async () => switchButton?.click());
+      expect(choose).toHaveBeenCalledOnce();
+      expect(mocks.controller().act).not.toHaveBeenCalled();
+    });
+  }
 
 for (const error of [null, '暂时无法读取原Task']) {
   it(`keeps the chooser and original back/refresh usable while ${error ? 'read fails' : 'loading'}`, async () => {
@@ -275,7 +281,11 @@ for (const error of [null, '暂时无法读取原Task']) {
   });
 }
 
-it('retains missing-round identity and the chooser until an explicit current-version selection', async () => {
+it.each([
+  'classic',
+  'v2',
+] as const)('%s: retains missing-round identity until an explicit current-version selection', async (presentation) => {
+  writeShellPresentation(presentation);
   await act(async () =>
     root.render(
       <ArtifactReviewSurface
@@ -293,12 +303,20 @@ it('retains missing-round identity and the chooser until an explicit current-ver
   expect(container.querySelector('img')).toBeNull();
   const current = [...container.querySelectorAll('button')].find((button) => button.textContent === '查看当前第 2 版');
   await act(async () => current?.click());
-  expect(container.querySelector<HTMLSelectElement>('[aria-label="审阅版本"]')?.value).toBe('2');
+  expect(
+    container.querySelector<HTMLSelectElement>(
+      presentation === 'v2' ? '[aria-label="作品版本"]' : '[aria-label="审阅版本"]',
+    )?.value,
+  ).toBe('2');
   expect(container.querySelector('h2')).toBeNull();
   expect(mocks.controller().act).not.toHaveBeenCalled();
 });
 
-it('moves one real chooser into comparison and restores it without a hidden duplicate ref or work title', async () => {
+it.each([
+  'classic',
+  'v2',
+] as const)('%s: moves one real chooser into comparison and restores it without a hidden duplicate', async (presentation) => {
+  writeShellPresentation(presentation);
   const trigger = createRef<HTMLButtonElement>(),
     choose = vi.fn();
   await act(async () =>
@@ -315,7 +333,17 @@ it('moves one real chooser into comparison and restores it without a hidden dupl
       />,
     ),
   );
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="对比版本"]')?.click());
+  if (presentation === 'v2') {
+    const select = container.querySelector<HTMLSelectElement>('[aria-label="作品版本"]');
+    expect(select).not.toBeNull();
+    if (!select) throw new Error('v2 version chooser is missing');
+    await act(async () => {
+      select.value = 'compare';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  } else {
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="对比版本"]')?.click());
+  }
   const compare = container.querySelector('[data-testid="artifact-media-compare"]');
   expect(compare).not.toBeNull();
   expect(compare?.textContent).not.toContain(reviewView().review.title);
@@ -328,5 +356,9 @@ it('moves one real chooser into comparison and restores it without a hidden dupl
   const back = [...compare!.querySelectorAll('button')].find((button) => button.textContent === '返回作品');
   await act(async () => back?.click());
   expect(container.querySelector('[data-testid="artifact-media-compare"]')).toBeNull();
-  expect(container.querySelector('[aria-label="审阅版本"]')?.parentElement?.contains(trigger.current)).toBe(true);
+  expect(
+    container
+      .querySelector(presentation === 'v2' ? '[aria-label="作品版本"]' : '[aria-label="审阅版本"]')
+      ?.parentElement?.contains(trigger.current),
+  ).toBe(true);
 });

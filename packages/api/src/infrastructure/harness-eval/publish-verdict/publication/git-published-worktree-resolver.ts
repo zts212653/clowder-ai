@@ -5,6 +5,7 @@ import { posix } from 'node:path';
 import { promisify } from 'node:util';
 
 import { withHiddenGhCliWindow } from '../../../github/gh-cli-env.js';
+import { SPARSE_CHECKOUT_DIRS } from '../git-worktree-publisher.js';
 import type { ResolvePublishedOnIsolatedWorktreeOpts } from '../types.js';
 import { withGitHubRepoScope } from './git-verdict-pr.js';
 import type { VerdictPublishContractInput, VerdictPublishContractRunner } from './verdict-publish-contract-runner.js';
@@ -158,9 +159,17 @@ export function createGitPublishedWorktreeResolver(input: {
     const worktreeRoot = mkdtempSync(`${tmpdir()}/cat-cafe-resolve-publication-`);
     rmSync(worktreeRoot, { recursive: true, force: true });
     try {
-      await exec('git', ['-C', input.repoRoot, 'worktree', 'add', '--detach', worktreeRoot, publication.headRefOid], {
+      // --no-checkout + sparse checkout: same optimization as the publisher —
+      // only populate docs/harness-feedback/ and generated/ (~1.8k files vs 102k).
+      await exec(
+        'git',
+        ['-C', input.repoRoot, 'worktree', 'add', '--no-checkout', '--detach', worktreeRoot, publication.headRefOid],
+        { timeout: 30_000 },
+      );
+      await exec('git', ['-C', worktreeRoot, 'sparse-checkout', 'set', '--cone', ...SPARSE_CHECKOUT_DIRS], {
         timeout: 60_000,
       });
+      await exec('git', ['-C', worktreeRoot, 'checkout'], { timeout: 60_000 });
       await input.contractRunner({
         ...sourceContract,
         repoRoot: worktreeRoot,

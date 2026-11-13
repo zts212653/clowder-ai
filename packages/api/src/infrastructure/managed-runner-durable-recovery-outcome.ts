@@ -8,7 +8,7 @@ import {
 } from '../domains/ball-custody/durable-managed-gate-recovery.js';
 import { hasDurableGateRecoveryReadyReceipt } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
 import { durableGateRawOutcomeIsAmbiguous } from '../domains/ball-custody/durable-managed-gate-recovery-policy.js';
-import type { UnixProcessIdentity } from '../utils/cli-process-ownership.js';
+import { readUnixProcessSnapshotSync, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
 import {
   type DurableManagedGateAttemptProcess,
   type DurableManagedGateChildResult,
@@ -25,7 +25,7 @@ export type RecoveryAttemptOutcome =
 interface RecoveryContext {
   readonly job: DurableManagedGateJob;
   readonly capture: (chunk: Buffer) => void;
-  readonly readFence: () => RecoveryAttemptOutcome | null;
+  readonly readFence: () => Extract<RecoveryAttemptOutcome, { kind: 'final' }> | null;
   readonly terminationSignal: () => NodeJS.Signals | null;
 }
 
@@ -41,7 +41,10 @@ export async function finalOutcomeAfterCleanup(
     return { kind: 'final', result };
   }
   context.capture(Buffer.from('durable managed attempt cleanup could not be proven before terminal publication\n'));
-  return { kind: 'final', result: { code: 70, signal: null } };
+  // SQLite publication is fenced on cleanupProven by the worker. Preserve the
+  // child's result for pendingResult; the worker itself still exits 70 until
+  // cleanup is proved. Legacy callers have no durable pending-result fence.
+  return { kind: 'final', result: context.job.recordStorage === 'sqlite_v1' ? result : { code: 70, signal: null } };
 }
 
 export async function selfRecoveryOutcome(
@@ -54,7 +57,7 @@ export async function selfRecoveryOutcome(
   rawOutcome: DurableManagedGateChildResult | null,
   reconciliationBudgetMs: number,
   pollMs: number,
-): Promise<RecoveryAttemptOutcome> {
+): Promise<RecoveryAttemptOutcome | null> {
   const alphaObservation =
     context.job.kind === 'alpha_revision_v1' ? readAlphaRecoveryObservation(context.job, attempt.attemptToken) : null;
   if (alphaObservation?.kind === 'failed') {
@@ -65,6 +68,32 @@ export async function selfRecoveryOutcome(
       rawOutcome: { code: 1, signal: null },
     });
     return finalOutcomeAfterCleanup(context, attempt, { code: 1, signal: null }, reconciliationBudgetMs, pollMs);
+  }
+  if (alphaObservation?.kind === 'live_preparation') {
+    const process = readUnixProcessSnapshotSync({ pids: [alphaObservation.pid] })?.get(alphaObservation.pid);
+    const live = process?.startedAt === alphaObservation.startedAt && process.pid === alphaObservation.pid;
+    const ready =
+      frozenIdentity && hasDurableGateRecoveryReadyReceipt(context.job, attempt.attemptToken, frozenIdentity);
+    const fence = context.readFence();
+    if (fence) return finalOutcomeAfterCleanup(context, attempt, fence.result, reconciliationBudgetMs, pollMs);
+    if (
+      live &&
+      ready &&
+      rawOutcome === null &&
+      attempt.currentExit() === null &&
+      acknowledgeDurableGateSelfRecovery(context.job, owner, pauseEpoch, Date.now(), 'same_preparation')
+    ) {
+      context.capture(Buffer.from('[managed-gate-recovery] continuing the same live preparation after sleep\n'));
+      return null;
+    }
+    // A dead, replaced, or unfenced command cannot borrow this continuation.
+    return finalOutcomeAfterCleanup(
+      context,
+      attempt,
+      rawOutcome ?? { code: 70, signal: null },
+      reconciliationBudgetMs,
+      pollMs,
+    );
   }
   if (alphaObservation?.kind === 'unknown') {
     const cleanup = await cleanupManagedRecoveryAttempt(context.job, attempt, reconciliationBudgetMs, pollMs);
@@ -106,7 +135,7 @@ export async function selfRecoveryOutcome(
   );
   if (context.job.kind === 'alpha_revision_v1') {
     const observed = readAlphaRecoveryObservation(context.job, attempt.attemptToken, cleanup.signals);
-    if (observed.kind === 'failed' || observed.kind === 'unknown') {
+    if (observed.kind === 'failed' || observed.kind === 'unknown' || observed.kind === 'live_preparation') {
       context.capture(Buffer.from(`Alpha recovery stopped after cleanup: ${observed.kind}\n`));
       const result = { code: observed.kind === 'failed' ? 1 : 70, signal: null };
       evaluateDurableGateMutation(context.job, { ownerIdentity: owner, mutation: 'exit', rawOutcome: result });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
@@ -9,7 +10,8 @@ import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { MessageSearchAnswerPublicationService } from '../dist/domains/memory/MessageSearchAnswerPublicationService.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
-import { fixture, human } from './helpers/message-search-answer-fixture.js';
+import { toMessageSearchInput } from '../dist/routes/message-search-handler.js';
+import { fixture, human, seedHistoricalAnswer } from './helpers/message-search-answer-fixture.js';
 
 async function harness(t, transport, cloud = false) {
   const f = fixture();
@@ -49,7 +51,7 @@ async function harness(t, transport, cloud = false) {
   const producer =
     transport === 'invocation'
       ? { kind: 'invocation', id: auth.invocationId, catId: 'opus' }
-      : { kind: 'agent_key', id: key.id, catId: 'opus' };
+      : { kind: 'agent_key', id: key.agentKeyId, catId: 'opus' };
   const service = new MessageSearchAnswerPublicationService(f.store, f.search, f.messages, threadStore);
   const app = Fastify();
   t.after(() => app.close());
@@ -73,13 +75,14 @@ async function harness(t, transport, cloud = false) {
     },
     socketManager: { broadcastAgentMessage() {}, emitToUser() {} },
   });
-  const prepare = () =>
+  const prepare = (selections = f.request.selections) =>
     app.inject({
       method: 'POST',
       url: '/api/callbacks/search-evidence/answer',
       headers,
       payload: {
         operationId: 'same-answer',
+        ...(selections ? { selections } : {}),
         q: 'piano',
         mode: 'lexical',
         resultUnit: 'message',
@@ -105,6 +108,89 @@ async function harness(t, transport, cloud = false) {
 }
 
 for (const transport of ['invocation', 'agent-key']) {
+  test(`${transport}: omitted sort retries a saved time-ordered answer without changing its identity or snapshot`, async (t) => {
+    const h = await harness(t, transport);
+    const captured = await seedHistoricalAnswer({
+      ...h,
+      request: {
+        ...h.request,
+        operationId: 'same-answer',
+        producer: h.producer,
+        targetThreadId: h.origin.id,
+        input: toMessageSearchInput({ q: 'piano', mode: 'lexical', messageSort: 'time' }),
+      },
+    });
+    const savedSnapshot = h.store.get(captured.publicationRef).response_json;
+    const retried = await h.prepare(null);
+    assert.equal(retried.statusCode, 200, retried.body);
+    assert.equal(retried.json().publicationRef, captured.publicationRef);
+    assert.deepEqual(retried.json().response.results, captured.response.results);
+    assert.deepEqual(
+      { ...retried.json().response.meta, response: undefined },
+      { ...captured.response.meta, response: undefined },
+    );
+    assert.equal(h.store.get(captured.publicationRef).response_json, savedSnapshot);
+    assert.equal(retried.json().response.meta.sort, 'time');
+    assert.equal(h.searches(), 0);
+    assert.equal(h.calls(), 0);
+  });
+  test(`${transport}: a new query-only card is rejected before claim and can be corrected with selected sources`, async (t) => {
+    const h = await harness(t, transport);
+    const missing = await h.prepare(null);
+    assert.equal(missing.statusCode, 409, missing.body);
+    assert.match(missing.json().error, /Select source quotations/);
+    assert.equal(h.store.forOperation('owner', h.producer, 'same-answer'), null);
+    const prepared = await h.prepare();
+    assert.equal(prepared.statusCode, 200, prepared.body);
+    assert.equal(prepared.json().response.meta.resultKind, 'selected-answer');
+    assert.equal(prepared.json().response.meta.qualification, undefined);
+    assert.equal(h.searches(), 0);
+    assert.equal(h.calls(), 0);
+  });
+  test(`${transport}: selected quotes are bound to the authenticated cat and invalid selection is correctable`, async (t) => {
+    const h = await harness(t, transport);
+    const row = h.source[1];
+    const chosen = {
+      threadId: row.threadId,
+      messageId: row.id,
+      contentRevision: createHash('sha256').update(row.content).digest('hex'),
+      quote: 'original source 1',
+      reason: 'The exact original I selected.',
+    };
+    const prepare = (selection) =>
+      h.app.inject({
+        method: 'POST',
+        url: '/api/callbacks/search-evidence/answer',
+        headers: h.headers,
+        payload: {
+          operationId: 'chosen-answer',
+          q: 'piano',
+          resultUnit: 'message',
+          destinationThreadId: h.origin.id,
+          producer: { catId: 'user' },
+          userId: 'forged-owner',
+          selections: [selection],
+        },
+      });
+    assert.equal((await prepare({ ...chosen, author: 'user' })).statusCode, 400);
+    const invalid = await prepare({ ...chosen, quote: 'not in the original' });
+    assert.equal(invalid.statusCode, 409, invalid.body);
+    const result = await prepare(chosen);
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().response.meta.answerSelection.catId, 'opus');
+    assert.deepEqual(
+      result.json().response.results.map((row) => row.messageId),
+      [chosen.messageId],
+    );
+    const published = await h.send(result.json().publicationRef);
+    assert.equal(published.statusCode, 200, published.body);
+    const stored = h.messages.getById(published.json().messageId);
+    const view = await h.service.read(stored.id, stored.extra.messageSearchAnswer.blockId, human);
+    assert.equal(view.status, 'available');
+    assert.equal(view.response.results[0].selection.quote, chosen.quote);
+    assert.equal(h.searches(), 0);
+    assert.equal(h.calls(), 0);
+  });
   test(`${transport}: prepare and explicit post recover a lost binding response through the same durable message`, async (t) => {
     const h = await harness(t, transport);
     const prepared = await h.prepare();
@@ -124,7 +210,7 @@ for (const transport of ['invocation', 'agent-key']) {
     assert.equal(stored.extra.rich.blocks.filter((block) => block.meta?.domain === 'message-search-answer').length, 1);
     assert.equal((await h.send(ref)).json().messageId, messageId);
     assert.equal((await h.prepare()).json().publicationRef, ref);
-    assert.equal(h.searches(), 1);
+    assert.equal(h.searches(), 0);
     assert.equal(h.calls(), 0);
     assert.equal(
       (await h.service.read(messageId, stored.extra.messageSearchAnswer.blockId, human)).status,
@@ -151,7 +237,7 @@ for (const transport of ['invocation', 'agent-key']) {
     assert.equal(forwarded.statusCode, 200, forwarded.body);
     const actual = h.messages.getById(forwarded.json().messageId);
     assert.equal(actual.extra.messageSearchAnswer.forwardedFromMessageId, messageId);
-    assert.equal(h.searches(), 1);
+    assert.equal(h.searches(), 0);
     assert.equal(h.calls(), 0);
   });
 }
@@ -191,13 +277,13 @@ test('cloud prepare uses the existing exact-source grant; retry after actual ret
   const prepared = await h.prepare();
   assert.equal(prepared.statusCode, 200, prepared.body);
   assert.equal(claims, 1);
-  assert.equal(h.searches(), 1);
+  assert.equal(h.searches(), 0);
   const first = await h.send(prepared.json().publicationRef);
   assert.equal(first.statusCode, 200, first.body);
   const claimsAfterPost = claims;
   assert.equal((await h.prepare()).json().publicationRef, prepared.json().publicationRef);
   assert.equal(claims, claimsAfterPost);
-  assert.equal(h.searches(), 1);
+  assert.equal(h.searches(), 0);
   assert.equal((await h.send(prepared.json().publicationRef)).json().messageId, first.json().messageId);
   assert.equal(h.calls(), 0);
 });

@@ -577,8 +577,47 @@ test(
         const state = service.get(principal, job.jobId).state;
         assert.equal(state, index % 3 === 1 ? 'lost' : index % 3 === 2 ? 'failed' : 'succeeded');
         assert.equal(readFileSync(marker, 'utf8'), 'once', 'no replay of the side effect');
+        if (isLiveDescendant(descendant)) {
+          const evidence = service.get(principal, job.jobId);
+          const observed = readUnixProcessSnapshotSync({ pids: [descendantPid] })?.get(descendantPid);
+          const marker = `CAT_CAFE_MANAGED_GATE_ATTEMPT_TOKEN=${evidence.attemptToken}`;
+          const exact = readUnixProcessSnapshotSync({
+            pids: [descendantPid],
+            includeEnvironment: true,
+            environmentMarkers: [marker],
+          });
+          const all = readUnixProcessSnapshotSync({ includeEnvironment: true, environmentMarkers: [marker] });
+          const os = spawnSync('/bin/ps', ['eww', '-p', String(descendantPid), '-o', 'command='], {
+            encoding: 'utf8',
+            maxBuffer: 2 ** 20,
+          });
+          t.diagnostic(
+            JSON.stringify({
+              cycle: index,
+              jobId: job.jobId,
+              descendantPid,
+              state: evidence.state,
+              cleanupProven: evidence.cleanupProven,
+              owner: evidence.ownerIdentity,
+              originalChild: descendant,
+              hasAttempt: typeof evidence.attemptToken === 'string',
+              exact: exact?.get(descendantPid)?.commandAndEnvironment?.includes(marker),
+              global: all?.get(descendantPid)?.commandAndEnvironment?.includes(marker),
+              os: os.stdout?.includes(marker),
+              child: observed && {
+                pid: observed.pid,
+                ppid: observed.ppid,
+                pgid: observed.pgid,
+                state: observed.state,
+                startedAt: observed.startedAt,
+              },
+            }),
+          );
+        }
         assert.equal(isLiveDescendant(descendant), false, 'no unaccounted detached descendant');
-        assert.ok(messages.has(`hold-ball-completion:${job.originTaskId}`));
+        const completedCommand = tasks.getById(job.originTaskId).params.holdLifecycle.managedCommand;
+        assert.ok(completedCommand.productionIntentKey);
+        assert.ok(messages.has(completedCommand.productionIntentKey));
         completed++;
       }
       assert.equal(completed, 20);
@@ -630,3 +669,24 @@ test('explicit retry creates a new fenced epoch with immutable parent and princi
     /not_found/,
   );
 });
+
+// Ordinary wakeWhen commands (renders, engine builds, whole-repo sync) shared the API's CPU and disk at
+// equal priority; on 11-08 the API main thread stalled for seconds while one ran. Through the real
+// submission -> detached worker path they now start one step lower on macOS. Gates are unchanged.
+test(
+  'on macOS an ordinary command runs niced below the API through the real worker',
+  { skip: process.platform !== 'darwin' },
+  async (t) => {
+    const { getPriority } = await import('node:os');
+    const expectedNice = Math.min(20, getPriority() + 10);
+    const { service, submit } = fixture(t);
+    const job = await submit('echo "nice=$(ps -o nice= -p $$ | tr -d " ")"', 'nice-probe');
+    service.admit(principal, job.jobId, 'priority-probe');
+    const run = service.start(principal, job.jobId, new ManagedRunner());
+    await run.admission;
+    await run.completion;
+    const result = service.get(principal, job.jobId);
+    assert.equal(result.state, 'succeeded');
+    assert.match(result.result.tailOutput, new RegExp(`nice=${expectedNice}\\b`));
+  },
+);

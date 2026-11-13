@@ -30,10 +30,20 @@ export function upsertCapacityPinRecoveryNote(provenance: string, note: string):
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
-import { parseWatcherSessionState, type WatcherSessionState } from '@cat-cafe/shared';
+import {
+  parseWatcherSessionState,
+  type WatcherSessionState,
+  type WatcherSurfaceRetirement,
+  watcherSurfaceRetirementSchema,
+} from '@cat-cafe/shared';
 import { isHomeSession, watcherSessionChainKey } from '../../session/session-scope.js';
 import type { SessionChainReadOptions } from './SessionChainReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
+import {
+  assertWatcherRetirementTransition,
+  type WatcherRolloverInput,
+  watcherSuccessorState,
+} from './watcher-session-rollover.js';
 
 export interface CreateSessionInput {
   sessionPurpose?: 'watcher';
@@ -150,7 +160,10 @@ export interface ISessionChainStore {
     id: string,
     expectedRevision: number,
     next: WatcherSessionState,
+    retirement?: WatcherSurfaceRetirement,
   ): WatcherSessionState | null | Promise<WatcherSessionState | null>;
+  /** Atomic old-owner retirement, initialized successor publication and chain-index switch. */
+  rolloverWatcherSession(input: WatcherRolloverInput): SessionRecord | null | Promise<SessionRecord | null>;
   /** Create SessionRecord (seq auto-increments, status=active) */
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
   /** Atomically return the existing active record or create one logical unbound node. */
@@ -233,7 +246,19 @@ export interface ISessionChainStore {
    */
   shrinkCapacityPin(id: string, candidate: SessionCapacityPin): SessionRecord | null | Promise<SessionRecord | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
-  listSealingSessions(): string[] | Promise<string[]>;
+  listSealingSessions(limit?: number, before?: number): string[] | Promise<string[]>;
+  /** Select source versions before a potentially failing full-record read. */
+  listSealingRecoveryCandidates(
+    limit?: number,
+    before?: number,
+  ): { id: string; expectedAt: number }[] | Promise<{ id: string; expectedAt: number }[]>;
+  recordSealingRecoveryFailure(id: string, expectedAt: number): void | Promise<void>;
+  getSealingRecoveryFacts(
+    id: string,
+  ):
+    | { failures: number; disposition?: string; reasonCode?: string }
+    | null
+    | Promise<{ failures: number; disposition?: string; reasonCode?: string } | null>;
 }
 
 const MAX_RECORDS = 1000;
@@ -248,7 +273,11 @@ export class SessionChainStore implements ISessionChainStore {
       .filter((record) => {
         if (record.userId !== userId || record.sessionPurpose !== 'watcher') return false;
         const state = parseWatcherSessionState(record.watcherState);
-        return Boolean(state.attempt || state.wakeInvocationId);
+        return Boolean(
+          state.attempt ||
+            state.wakeInvocationId ||
+            (record.watcherRetirement && record.watcherRetirement.phase !== 'retired'),
+        );
       })
       .map((record) => structuredClone(record));
   }
@@ -256,6 +285,7 @@ export class SessionChainStore implements ISessionChainStore {
     id: string,
     expectedRevision: number,
     next: WatcherSessionState,
+    retirement?: WatcherSurfaceRetirement,
   ): WatcherSessionState | null {
     const record = this.records.get(id);
     if (!record || record.sessionPurpose !== 'watcher') return null;
@@ -264,14 +294,65 @@ export class SessionChainStore implements ISessionChainStore {
     const validated = parseWatcherSessionState(next);
     if (validated.revision !== expectedRevision + 1 || validated.afterSequence < current.afterSequence)
       throw new Error('invalid watcher session transition');
+    if (record.status !== 'active') return null;
+    if (retirement) {
+      const operation = watcherSurfaceRetirementSchema.parse(retirement);
+      assertWatcherRetirementTransition(record.watcherRetirement, operation);
+      record.watcherRetirement = operation;
+    }
     record.watcherState = validated;
     record.updatedAt = Date.now();
     return parseWatcherSessionState(validated);
+  }
+  rolloverWatcherSession(input: WatcherRolloverInput): SessionRecord | null {
+    const old = this.records.get(input.sessionId);
+    if (!old || old.sessionPurpose !== 'watcher' || !old.chainKey) return null;
+    const operation = old.watcherRetirement;
+    if (!operation || operation.id !== input.retirementId) return null;
+    if (operation.phase === 'retired') {
+      const successor = operation.successorSessionId && this.records.get(operation.successorSessionId);
+      return successor ? structuredClone(successor) : null;
+    }
+    const state = parseWatcherSessionState(old.watcherState);
+    if (
+      old.status !== 'active' ||
+      this.chainKeyIndex.get(old.chainKey) !== old.id ||
+      operation.phase !== 'idle' ||
+      state.revision !== input.expectedRevision ||
+      old.cliSessionId !== input.expectedCliSessionId ||
+      old.cliSessionId !== operation.nativeCliSessionId ||
+      JSON.stringify(old.nativeSessionBinding) !== JSON.stringify(input.expectedNativeSessionBinding) ||
+      state.toolSchemaHash !== operation.oldSchemaHash ||
+      state.attempt ||
+      state.wakeInvocationId
+    )
+      return null;
+    const nextState = watcherSuccessorState(state);
+    // Preflight capacity before mutating any index. No observer sees an uninitialized successor.
+    if (this.records.size >= MAX_RECORDS) throw new Error('watcher_rollover_store_at_capacity');
+    const successor = this.create({
+      sessionPurpose: 'watcher',
+      chainKey: old.chainKey,
+      userId: old.userId,
+      threadId: old.threadId,
+      catId: old.catId,
+      ...(old.workingDirectory ? { workingDirectory: old.workingDirectory } : {}),
+      ...(old.workspaceFingerprint ? { workspaceFingerprint: old.workspaceFingerprint } : {}),
+    });
+    successor.watcherState = nextState;
+    old.status = 'sealed';
+    old.sealReason = 'watcher_native_tool_surface_changed';
+    old.sealedAt = old.updatedAt = Date.now();
+    old.watcherState = { ...state, revision: state.revision + 1 };
+    old.watcherRetirement = { ...operation, phase: 'retired', successorSessionId: successor.id };
+    return structuredClone(successor);
   }
   private records = new Map<string, SessionRecord>();
   /** catId:threadId → session IDs ordered by seq */
   private chains = new Map<string, string[]>();
   /** catId:threadId → active session ID */
+  private sealingIndex = new Set<string>();
+  private sealingRecoveryFailures = new Map<string, number>();
   private activeIndex = new Map<string, string>();
   /** userId:catId:threadId → active session ID (#1329 ownership boundary). */
   private ownerActiveIndex = new Map<string, string>();
@@ -515,6 +596,8 @@ export class SessionChainStore implements ISessionChainStore {
     }
 
     record.status = 'sealing';
+    this.sealingIndex.add(id);
+    this.sealingRecoveryFailures.delete(id);
     record.sealReason = reason;
     record.updatedAt = Date.now();
     const key = this.catThreadKey(record.catId, record.threadId);
@@ -556,12 +639,16 @@ export class SessionChainStore implements ISessionChainStore {
         return { status: 'active_changed', activeSessionId };
       }
       displaced.status = 'sealing';
+      this.sealingIndex.add(displaced.id);
+      this.sealingRecoveryFailures.delete(displaced.id);
       displaced.sealReason = input.displacedSealReason;
       displaced.updatedAt = Date.now();
       displacedSessionId = displaced.id;
     }
 
     target.status = 'active';
+    this.sealingIndex.delete(target.id);
+    this.sealingRecoveryFailures.delete(target.id);
     delete target.sealReason;
     delete target.sealedAt;
     target.updatedAt = Date.now();
@@ -646,7 +733,10 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.workingDirectory !== undefined) record.workingDirectory = patch.workingDirectory;
     if (patch.workspaceFingerprint !== undefined) record.workspaceFingerprint = patch.workspaceFingerprint;
     if (patch.status !== undefined) {
+      if (record.status !== patch.status) this.sealingRecoveryFailures.delete(id);
       record.status = patch.status;
+      if (patch.status === 'sealing' && (this.sealingRecoveryFailures.get(id) ?? 0) < 5) this.sealingIndex.add(id);
+      else this.sealingIndex.delete(id);
       const key = this.catThreadKey(record.catId, record.threadId);
       if (patch.status === 'active' && isHomeSession(record)) {
         this.activeIndex.set(key, id);
@@ -768,12 +858,38 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
-  listSealingSessions(): string[] {
+  listSealingSessions(limit = 100, before = Number.POSITIVE_INFINITY): string[] {
     const ids: string[] = [];
-    for (const [id, record] of this.records) {
-      if (record.status === 'sealing') ids.push(id);
+    for (const id of this.sealingIndex) {
+      const record = this.records.get(id);
+      if (record?.status === 'sealing' && record.updatedAt <= before) ids.push(id);
+      if (ids.length >= limit) break;
     }
     return ids;
+  }
+
+  recordSealingRecoveryFailure(id: string, expectedAt: number): void {
+    const record = this.records.get(id);
+    if (record?.status !== 'sealing' || record.updatedAt !== expectedAt) return;
+    const failures = (this.sealingRecoveryFailures.get(id) ?? 0) + 1;
+    this.sealingRecoveryFailures.set(id, failures);
+    if (failures >= 5) this.sealingIndex.delete(id);
+  }
+
+  listSealingRecoveryCandidates(limit = 100, before = Number.POSITIVE_INFINITY): { id: string; expectedAt: number }[] {
+    return this.listSealingSessions(limit, before).flatMap((id) => {
+      const record = this.records.get(id);
+      return record ? [{ id, expectedAt: record.updatedAt }] : [];
+    });
+  }
+
+  getSealingRecoveryFacts(id: string): { failures: number; disposition?: string; reasonCode?: string } | null {
+    if (!this.records.has(id)) return null;
+    const failures = this.sealingRecoveryFailures.get(id) ?? 0;
+    return {
+      failures,
+      ...(failures >= 5 ? { disposition: 'needs_attention', reasonCode: 'sealing_recovery_failed' } : {}),
+    };
   }
 
   /**
@@ -852,6 +968,8 @@ export class SessionChainStore implements ISessionChainStore {
       if (chain.length === 0) this.chains.delete(key);
     }
 
+    this.sealingIndex.delete(id);
+    this.sealingRecoveryFailures.delete(id);
     this.records.delete(id);
   }
 

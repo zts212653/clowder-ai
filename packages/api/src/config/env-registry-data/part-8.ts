@@ -2,17 +2,6 @@ import type { EnvDefinition } from '../env-registry.js';
 
 export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
   {
-    name: 'CAT_CAFE_WATCHER_ENABLED',
-    defaultValue: '0',
-    description: 'F335 守望运行时启用。完成集成验收并获准后设为 1；用户开关另行持久化。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-    runtimeEditable: false,
-    restartRequired: true,
-    allowedValues: ['0', '1'],
-  },
-  {
     name: 'CAT_CAFE_CPU_CAPTURE_ONCE',
     defaultValue: '0',
     description:
@@ -23,6 +12,16 @@ export const ENV_DEFINITIONS_8: readonly EnvDefinition[] = [
     runtimeEditable: false,
     restartRequired: true,
     allowedValues: ['0', '1'],
+  },
+  {
+    name: 'EMBED_G0_URL',
+    defaultValue: '(未设置；可由同版 embedding-generations.json 的 G0 retainedEndpoint 配置)',
+    description: 'G1 冷启动时保留的 G0 编码服务固定本机地址；仅回环，独立于主 embedding 端口，重启后绑定。',
+    category: 'evidence',
+    sensitive: true,
+    maskMode: 'url',
+    runtimeEditable: true,
+    restartRequired: true,
   },
   {
     name: 'EMBED_URL',

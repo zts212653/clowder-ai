@@ -8,6 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { readGitErrorCode } from '@/utils/git-response-error';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 
 export interface ChangedFile {
@@ -16,6 +17,7 @@ export interface ChangedFile {
 }
 
 export interface ChangesDiffData {
+  isGitRepository?: boolean;
   changedFiles: ChangedFile[];
   diff: string;
   target?: PullRequestChangesTarget;
@@ -37,7 +39,8 @@ export type ChangesDiffError =
   | 'unavailable'
   | 'root_unavailable'
   | 'repository_mismatch'
-  | 'invalid_target';
+  | 'invalid_target'
+  | 'git_worktree_required';
 
 function matchesPullRequestResponse(value: unknown, key: string): value is PullRequestChangesData {
   if (!value || typeof value !== 'object') return false;
@@ -93,6 +96,8 @@ async function readChangesResponse(
   prKey: string | null,
 ): Promise<{ data: ChangesDiffData | null; error: ChangesDiffError | null }> {
   if (!response.ok) {
+    const gitError = await readGitErrorCode(response);
+    if (gitError === 'git_worktree_required') return { data: null, error: 'git_worktree_required' };
     const body: unknown = prKey ? await response.json().catch(() => null) : null;
     return { data: null, error: prKey ? responseError(body) : 'fetch_failed' };
   }

@@ -1,3 +1,9 @@
+import {
+  type InvocationOwnerHealthFacts,
+  type InvocationOwnerHealthInput,
+  type InvocationOwnerHealthReceipt,
+  observeInvocationOwnerHealth,
+} from './invocation-owner-health.js';
 /**
  * InvocationRecord Store
  * 调用状态机：将"消息写入"与"猫调用执行"解耦。
@@ -153,6 +159,18 @@ export interface UpdateInvocationInput {
  * Methods that may hit Redis are async; in-memory returns immediately.
  */
 export interface IInvocationRecordStore {
+  getOwnerRecoveryFacts(id: string): InvocationOwnerHealthFacts | null | Promise<InvocationOwnerHealthFacts | null>;
+
+  observeOwnerRecovery(
+    id: string,
+    input: InvocationOwnerHealthInput,
+  ): InvocationOwnerHealthReceipt | null | Promise<InvocationOwnerHealthReceipt | null>;
+
+  listRunningForRecovery(
+    limit?: number,
+    now?: number,
+    nextAt?: number,
+  ): InvocationRecord[] | Promise<InvocationRecord[]>;
   /** Atomic create-or-deduplicate: returns existing record if idempotency key matches */
   create(input: CreateInvocationInput): CreateResult | Promise<CreateResult>;
   /** Get a record by its ID */
@@ -217,6 +235,9 @@ const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
  */
 export class InvocationRecordStore implements IInvocationRecordStore {
   private records = new Map<string, InvocationRecord>();
+  private ownerRecoveryRunning = new Set<string>();
+  private ownerRecoveryDue = new Map<string, number>();
+  private ownerHealth = new Map<string, InvocationOwnerHealthFacts>();
   /** Latest terminal transition per (threadId,userId), matching the Redis edge-maintained pointer. */
   private latestTerminalByScope = new Map<string, string>();
   /** Map: compositeKey → { invocationId, expiresAt } */
@@ -269,6 +290,9 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (this.records.size > this.maxRecords) {
       const firstKey = this.records.keys().next().value as string;
       this.records.delete(firstKey);
+      this.ownerRecoveryRunning.delete(firstKey);
+      this.ownerRecoveryDue.delete(firstKey);
+      this.ownerHealth.delete(firstKey);
       for (const [scope, invocationId] of this.latestTerminalByScope) {
         if (invocationId === firstKey) this.latestTerminalByScope.delete(scope);
       }
@@ -335,6 +359,17 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       if (this.latestTerminalByScope.get(scope) === record.id) this.latestTerminalByScope.delete(scope);
     }
 
+    if (record.status === 'running') {
+      this.ownerRecoveryRunning.add(id);
+      if (startsNewExecutionAttempt) {
+        this.ownerRecoveryDue.delete(id);
+        this.ownerHealth.delete(id);
+      }
+    } else {
+      this.ownerRecoveryRunning.delete(id);
+      this.ownerRecoveryDue.delete(id);
+    }
+
     return record;
   }
 
@@ -343,6 +378,36 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     const entry = this.idempotencyIndex.get(composite);
     if (!entry || entry.expiresAt <= Date.now()) return null;
     return this.records.get(entry.invocationId) ?? null;
+  }
+
+  getOwnerRecoveryFacts(id: string): InvocationOwnerHealthFacts | null {
+    const facts = this.ownerHealth.get(id);
+    return facts ? { ...structuredClone(facts), recordStatus: this.records.get(id)?.status } : null;
+  }
+
+  observeOwnerRecovery(id: string, input: InvocationOwnerHealthInput): InvocationOwnerHealthReceipt | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'running') return null;
+    const scope = JSON.stringify([record.threadId, record.userId, record.createdAt, record.executionStartedAt]);
+    let facts = this.ownerHealth.get(id);
+    if (!facts || facts.scope !== scope) {
+      facts = { scope, failures: 0 };
+      this.ownerHealth.set(id, facts);
+    }
+    return observeInvocationOwnerHealth(facts, input);
+  }
+
+  listRunningForRecovery(limit = 100, now = Date.now(), nextAt = now + 5 * 60_000): InvocationRecord[] {
+    const selected: InvocationRecord[] = [];
+    for (const id of this.ownerRecoveryRunning) {
+      if ((this.ownerRecoveryDue.get(id) ?? 0) > now || this.ownerHealth.get(id)?.disposition) continue;
+      const record = this.records.get(id);
+      if (record?.status !== 'running') continue;
+      this.ownerRecoveryDue.set(id, nextAt);
+      selected.push(record);
+      if (selected.length >= limit) break;
+    }
+    return selected;
   }
 
   listRunningByThread(threadId: string, userId: string): InvocationRecord[] {

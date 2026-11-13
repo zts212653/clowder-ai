@@ -136,7 +136,7 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.expansionMeta?.eligible, false);
     assert.equal(body.expansionMeta?.gateReason, 'no_results');
     assert.equal(body.expansionMeta?.attempted, false);
-    assert.equal(body.expansionMeta?.sourceRevision, 'f256-health-v2');
+    assert.equal(body.expansionMeta?.sourceRevision, 'f332-discovery-v1');
   });
 
   it('records expansion failures instead of swallowing the health-funnel dropout', async () => {
@@ -152,7 +152,7 @@ describe('GET /api/evidence/search', () => {
                 kind: 'feature',
                 status: 'active',
                 title: 'Memory Search Strategy',
-                keywords: ['related'],
+                keywords: ['F256'],
                 updatedAt: '2026-08-04T00:00:00Z',
               },
             ],
@@ -388,7 +388,7 @@ describe('GET /api/evidence/search', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/evidence/search?q=test',
+      url: '/api/evidence/search?q=test&limit=6',
     });
 
     const body = res.json();

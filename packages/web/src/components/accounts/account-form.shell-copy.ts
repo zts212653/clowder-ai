@@ -22,6 +22,12 @@ export const accountFormCopy = defineShellCopy(
       createLogin: '创建并开始登录',
       save: '保存',
       baseUrl: 'API 服务地址 (Base URL)',
+      platformBaseUrl: 'API 服务地址（可选）',
+      platformHint: '留空使用 https://api.openai.com。此账号可供多个 OpenAI 能力共用。',
+      anthropicPlatformHint: '留空使用 https://api.anthropic.com。此账号可供多个 Anthropic 能力共用。',
+      googlePlatformHint:
+        '留空使用 Vertex AI（https://aiplatform.googleapis.com，按 Google Cloud 结算账号计费）。请填 Vertex 可用的 key，AI Studio 的 key 不能用。',
+      platformModelsOptional: '（可选；调用能力时选择模型）',
       keyKeep: '（留空保持不变）',
       models: '可用模型',
       addModel: '+ 添加',
@@ -59,6 +65,13 @@ export const accountFormCopy = defineShellCopy(
       createLogin: 'Create and start login',
       save: 'Save',
       baseUrl: 'API endpoint (Base URL)',
+      platformBaseUrl: 'API endpoint (optional)',
+      platformHint: 'Leave empty for https://api.openai.com. OpenAI capabilities can share this account.',
+      anthropicPlatformHint:
+        'Leave empty for https://api.anthropic.com. Anthropic capabilities can share this account.',
+      googlePlatformHint:
+        'Leave empty for Vertex AI (https://aiplatform.googleapis.com, billed to the Google Cloud billing account). Use a Vertex AI key; AI Studio keys do not work.',
+      platformModelsOptional: '(Optional; choose the model when calling a capability)',
       keyKeep: ' (leave blank to keep unchanged)',
       models: 'Available models',
       addModel: '+ Add',

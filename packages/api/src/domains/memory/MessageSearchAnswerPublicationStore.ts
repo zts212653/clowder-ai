@@ -46,6 +46,18 @@ export class MessageSearchAnswerPublicationStore {
         | undefined) ?? null
     );
   }
+  forOperation(
+    ownerUserId: string,
+    producer: AnswerProducer,
+    operationId: string,
+  ): MessageSearchAnswerPublication | null {
+    const key = answerDigest([ownerUserId, answerProducerKey(producer), operationId]);
+    return (
+      (this.db.prepare('SELECT * FROM message_search_answer_publications WHERE operation_key=?').get(key) as
+        | MessageSearchAnswerPublication
+        | undefined) ?? null
+    );
+  }
   forInvocation(ownerUserId: string, catId: string, invocationId: string): MessageSearchAnswerPublication | null {
     return (
       (this.db

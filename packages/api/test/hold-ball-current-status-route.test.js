@@ -366,6 +366,12 @@ describe('F167 #1449 Slice 1: GET /api/callbacks/hold-ball/current', () => {
       headers: { 'x-invocation-id': internal.invocationId, 'x-callback-token': internal.callbackToken },
     });
     assert.equal(internalRead.statusCode, 403, 'internal actor cannot borrow a different stored job owner');
+    const internalRecheck = await app.inject({
+      method: 'POST',
+      url: `/api/callbacks/hold-ball/${task.id}/recheck`,
+      headers: { 'x-invocation-id': internal.invocationId, 'x-callback-token': internal.callbackToken },
+    });
+    assert.equal(internalRecheck.statusCode, 403, 'rechecking cannot borrow another execution principal');
   });
 
   for (const actorUserId of ['scheduler', 'system']) {
@@ -378,6 +384,13 @@ describe('F167 #1449 Slice 1: GET /api/callbacks/hold-ball/current', () => {
         },
       });
       const deps = makeStubDeps([task], { [thread.id]: 'test-user' });
+      const waitRechecks = [];
+      deps.managedCommandWakeRecovery = {
+        async recoverTask(taskId, force) {
+          waitRechecks.push({ taskId, force });
+          return 'pending';
+        },
+      };
       const app = await createApp(deps);
       const root = await mkdtemp(join(tmpdir(), 'managed-internal-access-'));
       const priorRoot = process.env.CAT_CAFE_DATA_DIR;
@@ -417,6 +430,16 @@ describe('F167 #1449 Slice 1: GET /api/callbacks/hold-ball/current', () => {
       assert.equal(response.statusCode, 200, response.body);
       assert.equal(response.json().access.role, 'trigger_principal');
       assert.equal(response.json().job.jobId, job.jobId);
+      const recheck = await app.inject({ method: 'POST', url: `/api/callbacks/hold-ball/${task.id}/recheck`, headers });
+      assert.equal(recheck.statusCode, 200, recheck.body);
+      assert.equal(recheck.json().outcome, 'observed');
+      assert.deepEqual(waitRechecks, [{ taskId: task.id, force: true }]);
+      assert.equal(recheck.json().job.jobId, job.jobId);
+      assert.equal(
+        recheck.json().job.ownerIdentity,
+        undefined,
+        'rechecking observes the original job and never starts it',
+      );
       const cancelled = await app.inject({ method: 'DELETE', url: `/api/callbacks/hold-ball/${task.id}`, headers });
       assert.equal(cancelled.statusCode, 200, cancelled.body);
       assert.equal(service.get(principal, job.jobId).state, 'cancelled');

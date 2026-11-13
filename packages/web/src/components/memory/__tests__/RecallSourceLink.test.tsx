@@ -1,12 +1,12 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
+import { openSourcePlace } from '@/components/shell/mailbox/open-exact-place';
 import { WorkspaceChatRevealProvider } from '@/components/workbench/WorkspaceChatReveal';
 import { useChatStore } from '@/stores/chatStore';
 import { RecallCard } from '../RecallRow';
 
-vi.mock('@/components/shell/mailbox/open-exact-place', () => ({ openExactPlace: vi.fn() }));
+vi.mock('@/components/shell/mailbox/open-exact-place', () => ({ openSourcePlace: vi.fn() }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
@@ -63,7 +63,7 @@ it('same-thread source click enters the existing exact-place navigation instead 
   const link = await renderLink();
   const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
   await act(async () => link.dispatchEvent(event));
-  expect(openExactPlace).toHaveBeenCalledWith('message:own:source-message', '/thread/own');
+  expect(openSourcePlace).toHaveBeenCalledWith('message:own:source-message', '/thread/own');
   expect(event.defaultPrevented).toBe(true);
 });
 it('asks the owning Chat host to reveal the source conversation instead of toggling panel state itself', async () => {
@@ -74,12 +74,12 @@ it('asks the owning Chat host to reveal the source conversation instead of toggl
   await act(async () => link.click());
   expect(onReveal).toHaveBeenCalledOnce();
   expect(useChatStore.getState().rightPanelOpen).toBe(true);
-  expect(openExactPlace).toHaveBeenCalledWith('message:own:source-message', '/thread/own');
+  expect(openSourcePlace).toHaveBeenCalledWith('message:own:source-message', '/thread/own');
 });
 it('does not ask a different conversation host to reveal itself for a cross-thread source', async () => {
   const onReveal = vi.fn();
   const link = await renderLink(onReveal, '/thread/other?message=source-message');
   await act(async () => link.click());
   expect(onReveal).not.toHaveBeenCalled();
-  expect(openExactPlace).toHaveBeenCalledWith('message:other:source-message', '/thread/own');
+  expect(openSourcePlace).toHaveBeenCalledWith('message:other:source-message', '/thread/own');
 });

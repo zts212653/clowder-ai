@@ -29,9 +29,15 @@ async function showStartupFailure({ app, dialog, shell, message, logDir, error, 
   // Memory storage is a degraded mode, so it is offered only when the failure
   // itself says consent is possible, and the choice applies to a single launch.
   const canUseMemory = Boolean(error?.recovery?.allowMemoryOnce && app && userDataRoot);
-  const buttons = canUseMemory ? ['打开日志目录', '仅本次使用内存存储并重启', '退出'] : ['打开日志目录', '退出'];
+  const portConflict = Boolean(app && error?.code === 'DESKTOP_PORT_CONFLICT');
+  const buttons = portConflict
+    ? ['打开日志目录', '已关闭占用方，重启桌面版', '退出桌面版，保留原服务']
+    : canUseMemory
+      ? ['打开日志目录', '仅本次使用内存存储并重启', '退出']
+      : ['打开日志目录', '退出'];
   const detail = [
     message,
+    ...(portConflict ? ['如需启动本次桌面版，请先确认占用方并正常退出，再重启桌面版。'] : []),
     `日志目录：${resolvedLogDir}`,
     ...(canUseMemory ? ['临时内存存储只对本次启动生效：重启后历史与队列不会保留。'] : []),
   ].join('\n\n');
@@ -41,15 +47,15 @@ async function showStartupFailure({ app, dialog, shell, message, logDir, error, 
     message: '服务启动失败',
     detail,
     buttons,
-    defaultId: 0,
+    defaultId: portConflict ? buttons.length - 1 : 0,
     cancelId: buttons.length - 1,
   });
   if (result.response === 0) {
     await shell.openPath(resolvedLogDir);
     return 'quit';
   }
-  if (canUseMemory && result.response === 1) {
-    requestMemoryFallbackOnce(userDataRoot);
+  if ((canUseMemory || portConflict) && result.response === 1) {
+    if (canUseMemory) requestMemoryFallbackOnce(userDataRoot);
     app.relaunch();
     app.exit(0);
     return 'relaunch';

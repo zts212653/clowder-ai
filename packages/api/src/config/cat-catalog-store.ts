@@ -99,6 +99,61 @@ function migrateLegacyGeminiConsumerCarrier(
   return dirty;
 }
 
+const RETIRED_DOT_CAT_ID = 'gpt-dot';
+const RETIRED_DOT_FALLBACK_MENTION = '@gpt-dot';
+
+/**
+ * F202 cutover: the old Host-owned Dot setup persisted a real cloud member in the runtime catalog.
+ * Removing the writer is not enough: that byte would continue competing with gpt-pro for the
+ * chatgpt cloud provider and keep the legacy @dot address occupied forever. Preserve the member's
+ * presentation for historical messages, but make the stored identity unavailable and non-cloud.
+ */
+function retireLegacyDotRuntimeIdentity(catalog: CatCafeConfig): boolean {
+  let dirty = false;
+  let retiredLegacyIdentity = false;
+  for (const breed of catalog.breeds as unknown as Record<string, unknown>[]) {
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    for (const variant of variants) {
+      if (resolveVariantCatId(breed, variant) !== RETIRED_DOT_CAT_ID) continue;
+      const mentions = readStringArray(variant.mentionPatterns);
+      const isLegacyExecutableShape =
+        variant.clientId === 'openai' &&
+        variant.provider === 'openai-chatgpt-pro' &&
+        (variant.carrier === undefined || variant.carrier === 'app_server') &&
+        mentions.some((mention) => normalizeMentionAlias(mention) === normalizeMentionAlias('@dot'));
+      if (!isLegacyExecutableShape) continue;
+      retiredLegacyIdentity = true;
+      for (const executableField of ['provider', 'carrier', 'transport', 'cli', 'acp'] as const) {
+        if (executableField in variant) {
+          delete variant[executableField];
+          dirty = true;
+        }
+      }
+      if (variant.mcpSupport !== false) {
+        variant.mcpSupport = false;
+        dirty = true;
+      }
+      const survivingMentions = mentions.filter(
+        (mention) => normalizeMentionAlias(mention) !== normalizeMentionAlias('@dot'),
+      );
+      const retiredMentions = survivingMentions.length > 0 ? survivingMentions : [RETIRED_DOT_FALLBACK_MENTION];
+      if (JSON.stringify(variant.mentionPatterns) !== JSON.stringify(retiredMentions)) {
+        variant.mentionPatterns = retiredMentions;
+        dirty = true;
+      }
+    }
+  }
+  if (retiredLegacyIdentity && catalog.version === 2) {
+    const roster = catalog.roster as unknown as Record<string, Record<string, unknown> | undefined>;
+    const member = roster[RETIRED_DOT_CAT_ID];
+    if (member && (member.available !== false || member.lead !== false)) {
+      roster[RETIRED_DOT_CAT_ID] = { ...member, available: false, lead: false };
+      dirty = true;
+    }
+  }
+  return dirty;
+}
+
 /**
  * clowder-ai#340: One-time catalog variant migration — rewrites file on disk then never runs again.
  *   1. old `provider` (clientId value) → `clientId` (P5 field rename)
@@ -120,6 +175,8 @@ function migrateCatalogVariants(
 ): { catalog: CatCafeConfig; dirty: boolean } {
   let dirty = false;
   const next = structuredClone(catalog) as CatCafeConfig;
+
+  if (retireLegacyDotRuntimeIdentity(next)) dirty = true;
 
   // Step 4 prep: union the catalog's own breed ids with any external ones (template)
   // so legacy variants are dropped even when the catalog itself hasn't grown the new breed yet.
@@ -765,23 +822,12 @@ function replaceExactLegacyString(
 
 /** Rename only when both visible-name fields are still the old default. */
 function replaceExactLegacyName(target: Record<string, unknown>, identity: NativeToolIdentity): boolean {
-  const currentName = stringField(target, 'name');
-  const currentDisplayName = stringField(target, 'displayName');
-  const legacy = identity.legacy.name;
-  const nameIsLegacy =
-    currentName === legacy &&
-    (currentDisplayName === legacy || currentDisplayName === undefined || currentDisplayName === '');
-  if (!nameIsLegacy) return false;
-  let changed = false;
-  if (currentName !== identity.name) {
-    target.name = identity.name;
-    changed = true;
-  }
-  if (currentDisplayName !== identity.name) {
-    target.displayName = identity.name;
-    changed = true;
-  }
-  return changed;
+  const { name, legacy } = identity;
+  // A missing variant displayName inherits the breed's potentially customized name.
+  if (name === legacy.name || target.name !== legacy.name || target.displayName !== legacy.name) return false;
+  target.name = name;
+  target.displayName = name;
+  return true;
 }
 
 function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: NativeToolIdentity): boolean {
@@ -804,19 +850,23 @@ function repairLegacyIdentityRecord(record: Record<string, unknown>, identity: N
  * Idempotent: after the first successful pass every field no longer matches.
  */
 export function repairLegacyNativeToolIdentities(catalog: { breeds?: Array<Record<string, unknown>> }): boolean {
+  const identityForVariant = (variant: Record<string, unknown>) =>
+    nativeToolIdentityFor({
+      clientId: stringField(variant, 'clientId'),
+      agentProvider: variant.agentProvider === null ? null : stringField(variant, 'agentProvider'),
+      acp: variant.acp,
+    });
   let changed = false;
   for (const breed of catalog.breeds ?? []) {
     const variants = Array.isArray(breed.variants) ? (breed.variants as Array<Record<string, unknown>>) : [];
-    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId) ?? variants[0];
-    const identity = nativeToolIdentityFor({
-      clientId: defaultVariant ? stringField(defaultVariant, 'clientId') : undefined,
-      catId:
-        (defaultVariant ? stringField(defaultVariant, 'catId') : undefined) ??
-        stringField(breed, 'catId') ??
-        stringField(breed, 'id'),
-      acp: defaultVariant?.acp,
-    });
+    const defaultVariant = variants.find((variant) => variant.id === breed.defaultVariantId);
+    const identity = defaultVariant && identityForVariant(defaultVariant);
     if (!identity) continue;
+    const sameTool = variants.every(
+      (variant) => variant === defaultVariant || identityForVariant(variant)?.key === identity.key,
+    );
+    // Variants can inherit breed fields and the default variant's personality.
+    if (!sameTool) continue;
     changed = repairLegacyIdentityRecord(breed, identity) || changed;
     for (const variant of variants) {
       changed = repairLegacyIdentityRecord(variant, identity) || changed;

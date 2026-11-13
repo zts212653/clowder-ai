@@ -142,7 +142,13 @@ export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAncho
   return `external-runtime:${runtime}:${userId}`;
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action' | 'void_hold';
+export type MentionRoutingSuppressionReason =
+  | 'no_action'
+  | 'cross_paragraph'
+  | 'inline_action'
+  | 'void_hold'
+  /** The reply waited for the owner without a line-start mention, so it never reached his mailbox. */
+  | 'owner_ask_unaddressed';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {
@@ -763,6 +769,12 @@ export interface IThreadStore {
     options?: ThreadCreateOptions,
   ): Thread | Promise<Thread>;
   get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
+  /** Fresh complete thread+participants reads. Missing/default recovery matches get;
+   * transport/incomplete replies reject before any recovery. No cached authority. */
+  getMany?(
+    ids: readonly string[],
+    options?: StoreReadOptions & { recoverMissing?: false },
+  ): Promise<Map<string, Thread | null>>;
   list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
   /** Read only candidate threads admitted by the durable user visibility index. */

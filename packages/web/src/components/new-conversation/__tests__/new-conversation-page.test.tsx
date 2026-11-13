@@ -137,6 +137,7 @@ vi.mock('../RecentWorks', () => ({
   ),
 }));
 
+import { SAVE_NOTICE_DELAY_MS } from '../LocalDraftSaveNotice';
 import { landingArtworkForHour, NewConversationPage } from '../NewConversationPage';
 
 function baseAdmission() {
@@ -144,6 +145,9 @@ function baseAdmission() {
     ready: true,
     loadFailed: false,
     localSaveFailed: false,
+    localSaveState: 'idle' as 'idle' | 'saving' | 'failed' | 'cancelled',
+    canCancelSave: true,
+    preparingSend: false,
     intent: {
       v: 1 as const,
       createIdempotencyKey: '11111111-1111-4111-8111-111111111111',
@@ -165,6 +169,8 @@ function baseAdmission() {
     onDraftChange: vi.fn(),
     send: vi.fn(async () => true),
     retryLoad: vi.fn(),
+    retrySave: vi.fn(),
+    cancelSave: vi.fn(),
   };
 }
 
@@ -191,6 +197,7 @@ describe('F322 new conversation page', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.useRealTimers();
   });
 
   afterAll(() => {
@@ -202,6 +209,65 @@ describe('F322 new conversation page', () => {
     expect(landingArtworkForHour(6)).toBe('dusk');
     expect(landingArtworkForHour(21)).toBe('dusk');
     expect(landingArtworkForHour(22)).toBe('night');
+  });
+
+  it.each(['saving', 'failed', 'cancelled'] as const)('offers a clear action for a %s local save', (state) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const admission = baseAdmission();
+    admission.localSaveState = state;
+    mocks.admission = admission;
+    act(() =>
+      root.render(
+        <NewConversationPage
+          sidebarOpen
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      ),
+    );
+    // Failures and cancellations show at once; a save in progress shows once it lasts.
+    if (state === 'saving') act(() => vi.advanceTimersByTime(SAVE_NOTICE_DELAY_MS));
+    const notice = container.querySelector('[data-testid="new-conversation-save-state"]');
+    expect(notice?.getAttribute('role')).toBe(state === 'saving' ? 'status' : 'alert');
+    expect(notice?.textContent).toContain(
+      state === 'saving' ? '正在保存草稿' : state === 'failed' ? '本地持久保存失败' : '草稿仍保留',
+    );
+    act(() => notice?.querySelector('button')?.click());
+    expect(state === 'saving' ? admission.cancelSave : admission.retrySave).toHaveBeenCalledOnce();
+    expect(admission.send).not.toHaveBeenCalled();
+  });
+
+  it('does not flash the save notice for a routine save that settles quickly', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const renderWith = (localSaveState: 'idle' | 'saving') => {
+      mocks.admission = { ...baseAdmission(), localSaveState, canCancelSave: false };
+      act(() =>
+        root.render(
+          <NewConversationPage
+            sidebarOpen
+            statusPanelOpen={false}
+            hasWorkspaceActivity={false}
+            onToggleSidebar={vi.fn()}
+            onToggleStatusPanel={vi.fn()}
+            onNavigate={vi.fn()}
+          />,
+        ),
+      );
+    };
+    const notice = () => container.querySelector('[data-testid="new-conversation-save-state"]');
+
+    // Each keystroke used to mount the banner for one frame and push the page down.
+    for (let keystroke = 0; keystroke < 3; keystroke += 1) {
+      renderWith('saving');
+      expect(notice()).toBeNull();
+      act(() => vi.advanceTimersByTime(SAVE_NOTICE_DELAY_MS - 1));
+      renderWith('idle');
+    }
+    act(() => vi.advanceTimersByTime(SAVE_NOTICE_DELAY_MS));
+    expect(notice()).toBeNull();
   });
 
   it.each([
@@ -482,6 +548,38 @@ describe('F322 new conversation page', () => {
     expect(container.textContent).toContain('附件尚未完整找回');
     expect(container.textContent).toContain('明确移除后再发送');
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it.each([
+    {
+      preparingSend: false,
+      canCancelSave: false,
+      localSaveState: 'saving' as const,
+      label: '取消保存',
+      disabled: true,
+    },
+    { preparingSend: true, canCancelSave: true, localSaveState: 'idle' as const, label: '取消发送', disabled: false },
+  ])('exposes the real cancellation capability during preparation=$preparingSend', (state) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    mocks.admission = { ...baseAdmission(), ...state };
+    act(() =>
+      root.render(
+        <NewConversationPage
+          sidebarOpen
+          statusPanelOpen={false}
+          hasWorkspaceActivity={false}
+          onToggleSidebar={vi.fn()}
+          onToggleStatusPanel={vi.fn()}
+          onNavigate={vi.fn()}
+        />,
+      ),
+    );
+    if (!state.preparingSend) act(() => vi.advanceTimersByTime(SAVE_NOTICE_DELAY_MS));
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="new-conversation-cancel-save"]');
+    expect(button?.textContent).toBe(state.label);
+    expect(button?.disabled).toBe(state.disabled);
+    expect(container.textContent).toContain(state.preparingSend ? '正在准备发送' : '正在完成本次保存');
+    expect(container.textContent).not.toContain('或取消本次保存');
   });
 
   it('translates the landing header actions with the rest of the English page', () => {

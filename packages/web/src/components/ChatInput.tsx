@@ -27,6 +27,7 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
+import { refreshPluginMentionTargets, usePluginMentionTargets } from '@/hooks/usePluginMentionTargets';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
@@ -41,19 +42,23 @@ import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
 import { ChatInputStickers } from './ChatInputStickers';
+import { ComposerLinkMirror } from './ComposerLinkMirror';
+import { ComposerLinkNotice } from './ComposerLinkNotice';
 import { ComposerRoutingPreview } from './ComposerRoutingPreview';
 import { useCatCardComposer } from './cat-profile-card/CatProfileCardContext';
 import { chatComposerCopy } from './chat-composer.shell-copy';
 import { type ContextPickerMode, detectContextShortcut } from './chat-context-reference';
-import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import { buildCatOptions, type CatOption, detectMenuTrigger, filterMentionOptions } from './chat-input-options';
 import {
   deriveImageLifecycleStatus,
   type ImageLifecycleStatus,
   isImageLifecycleBlockingSend,
 } from './chat-input-upload-state';
 import { composerAttachments } from './composer-queue';
+import { composerWebLinks } from './composer-web-links';
 import { HistorySearchModal } from './HistorySearchModal';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { QuickPhrasesControl } from './plugins/QuickPhrasesControl';
 import { projectScreeningComposerConflict } from './project-screening-composer-group';
 import { conversationDecisionCopy } from './rich/conversation-decision.shell-copy';
 import { submitConversationAnswer } from './rich/runtime-conversation-model';
@@ -126,6 +131,7 @@ interface ChatInputProps {
     messageDisposition?: MessageWorkDisposition,
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  sendBlocked?: boolean;
   hasActiveInvocation?: boolean;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
@@ -200,6 +206,7 @@ export function ChatInput({
   threadId,
   onSend,
   disabled,
+  sendBlocked = false,
   hasActiveInvocation: unscopedHasActiveInvocation,
   uploadStatus = 'idle',
   uploadError = null,
@@ -210,9 +217,10 @@ export function ChatInput({
 }: ChatInputProps) {
   const v2Copy = useShellCopy(chatComposerCopy);
   const { cats } = useCatData();
+  const pluginTargets = usePluginMentionTargets();
   const ime = useIMEGuard();
   const [routingCompositionActive, setRoutingCompositionActive] = useState(false);
-  const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
+  const catOptions = useMemo(() => buildCatOptions(cats, pluginTargets), [cats, pluginTargets]);
   // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
   const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
 
@@ -284,6 +292,7 @@ export function ChatInput({
     () => '',
   );
   const input = threadId ? scopedInput : unscopedInput;
+  const webLinks = useMemo(() => composerWebLinks(shellV2 ? input : ''), [input, shellV2]);
   const setInput = useCallback<Dispatch<SetStateAction<string>>>(
     (next) => {
       if (!threadId) {
@@ -339,7 +348,12 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [textareaReady, setTextareaReady] = useState(false);
+  const attachTextarea = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (node) setTextareaReady(true);
+  }, []);
   useCatCardComposer(input, setInput, textareaRef);
   useComposerKeyboardFocus(shellV2, textareaRef);
   useEffect(() => {
@@ -398,7 +412,7 @@ export function ChatInput({
     setIsPreparingImages,
   });
   const v2UnrestoredImageCount = shellV2 ? unrestoredImageCount : 0;
-  const sendTemporarilyDisabled = isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
+  const sendTemporarilyDisabled = sendBlocked || isComposerSendBlocked(imageLifecycleStatus, v2UnrestoredImageCount);
 
   const handleTranscript = useCallback(
     (text: string) => {
@@ -410,16 +424,13 @@ export function ChatInput({
     [setInput],
   );
 
+  useEffect(() => {
+    if (showMentions) void refreshPluginMentionTargets();
+  }, [showMentions]);
   const filteredCatOptions = useMemo(() => {
-    if (!mentionFilter) return catOptions;
-    const lower = mentionFilter.toLowerCase();
-    return catOptions.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(lower) ||
-        opt.insert.toLowerCase().includes(lower) ||
-        opt.id.toLowerCase().includes(lower),
-    );
-  }, [catOptions, mentionFilter]);
+    const choices = whisperMode ? catOptions.filter((option) => !option.isPlugin) : catOptions;
+    return filterMentionOptions(choices, mentionFilter);
+  }, [catOptions, mentionFilter, whisperMode]);
 
   const activeMenu = showMentions ? 'mention' : null;
   const activeOptions = filteredCatOptions;
@@ -1133,12 +1144,21 @@ export function ChatInput({
         </AppTooltip>
 
         <div
-          className={shellV2 ? `relative col-span-3 col-start-1 ${textareaRow} min-w-0` : 'flex-1 relative'}
+          className={shellV2 ? `relative isolate col-span-3 col-start-1 ${textareaRow} min-w-0` : 'flex-1 relative'}
           data-bootcamp-step="chat-input"
           data-guide-id="chat.input"
         >
+          {shellV2 && (
+            <ComposerLinkMirror
+              input={input}
+              textareaRef={textareaRef}
+              textareaReady={textareaReady}
+              composing={routingCompositionActive}
+              links={webLinks}
+            />
+          )}
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -1157,7 +1177,7 @@ export function ChatInput({
             placeholder={textareaPlaceholder}
             className={
               shellV2
-                ? `shell-focusable block min-h-[32px] w-full resize-none rounded-lg border-0 bg-transparent px-1 py-1 text-sm leading-6 text-[var(--shell-ink)] placeholder:text-[var(--shell-muted)] ${whisperMode ? 'bg-accent-50/50' : ''}`
+                ? `shell-focusable relative z-10 block min-h-[32px] w-full resize-none rounded-lg border-0 bg-transparent px-1 py-1 text-sm leading-6 text-[var(--shell-ink)] placeholder:text-[var(--shell-muted)] ${whisperMode ? 'bg-accent-50/50' : ''}`
                 : `w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
                     whisperMode
                       ? 'border-cafe-accent/30 bg-accent-50/50 focus:ring-cafe-accent'
@@ -1167,10 +1187,11 @@ export function ChatInput({
             rows={1}
             disabled={disabled}
           />
+          {shellV2 && webLinks.unmapped > 0 && <ComposerLinkNotice targets={webLinks.targets} />}
           {ghostSuggestion && !pathCompletion.isOpen && !contextPickerMode && (
             <div
               data-testid="ghost-suggestion"
-              className={`absolute inset-0 pointer-events-none text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl ${shellV2 ? 'px-1 py-1 leading-6' : 'p-3'}`}
+              className={`absolute inset-0 pointer-events-none text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl ${shellV2 ? 'z-20 px-1 py-1 leading-6' : 'p-3'}`}
               aria-hidden="true"
             >
               <span className="invisible">{input}</span>
@@ -1196,6 +1217,13 @@ export function ChatInput({
         )}
         <div className={shellV2 ? `col-start-3 ${controlsRow} flex shrink-0 items-center gap-1` : 'contents'}>
           {shellV2 ? <GalleryDraftSummary attachments={shownContextAttachments} /> : null}
+          <QuickPhrasesControl
+            key={effectiveThreadId}
+            draft={input}
+            disabled={disabled}
+            onSelect={handleHistorySelect}
+            presentation={shellV2 ? 'v2' : 'classic'}
+          />
           <ChatInputActionButton
             onTranscript={handleTranscript}
             onSend={handleSend}

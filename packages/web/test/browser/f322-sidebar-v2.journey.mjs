@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createChatProofHarness } from './f322-chat-proof-harness.mjs';
 import { buildChatProof } from './fixtures/f322-chat-real-page-build.mjs';
 import { BUSY_THREAD, GROUP_ID } from './fixtures/f322-chat-real-page-data.mjs';
+import { readPaintedSidebarSignalLayout } from './fixtures/f322-chat-real-page-metrics.mjs';
 import {
   measureSidebarGroupHierarchy,
   measureSidebarSignalLayout,
@@ -66,7 +67,7 @@ export async function runSidebarV2Journey(t, browser) {
                     ?.getBoundingClientRect().height === height,
                 expected,
               );
-              const layout = await signals.evaluate(measureSidebarSignalLayout);
+              const layout = await readPaintedSidebarSignalLayout(signals);
               assert.equal(layout.height, expected, 'fixed facts use 20px lines with 4px gaps');
               assert.ok(layout.contained && layout.noOverlap, 'all fixed facts stay in their owners without overlap');
               assert.ok(layout.avatarsContained, 'every avatar stays 16px inside its roster');
@@ -161,7 +162,12 @@ export async function runSidebarV2Journey(t, browser) {
               await page.getByTestId('thread-project-path').locator('p').last().innerText(),
               proof.api.threads[1].projectPath,
             );
-            await page.getByRole('button', { name: '关闭对话设置', exact: true }).click();
+            await page
+              .getByRole('button', {
+                name: language === 'en' ? 'Close conversation settings' : '关闭对话设置',
+                exact: true,
+              })
+              .click();
             await page.screenshot({
               path: path.join(evidence, `${base}-${language}-${crowded ? '12cats' : '2cats'}-300.png`),
             });

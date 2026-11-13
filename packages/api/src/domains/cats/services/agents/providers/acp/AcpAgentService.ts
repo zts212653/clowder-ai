@@ -1,7 +1,7 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { buildCliDiagnosticContext } from '../../../../../../utils/cli-diagnostics.js';
-import { excerptSanitizedStderr } from '../../../../../../utils/sanitize-cli-stderr.js';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
+import { extractMissingCredential } from './dsh/credential-error.js';
 import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
@@ -23,12 +23,7 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
-import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
-import {
-  assertMappedCapabilitySource,
-  resolveInvokeCapabilityRoot,
-} from '../../../../../../config/capabilities/invoke-capability-root.js';
-import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
+import { invocationPluginMcpIssues } from '../../../../../../config/capabilities/invocation-plugin-mcp-view.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
@@ -47,6 +42,7 @@ import type {
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
+  type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpStreamIdleError,
@@ -62,7 +58,6 @@ import {
 } from './acp-credential-file.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
-import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
@@ -72,7 +67,9 @@ import {
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
+import { captureAcpMcpSources } from './configuration/acp-mcp-source.js';
 import { invokeDshMember } from './dsh/dsh-member-invocation.js';
+import { DshTurnInput } from './dsh/dsh-turn-input.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import {
@@ -125,34 +122,6 @@ function isAgentBusyError(err: unknown): boolean {
   return /turn\.agent_busy|another turn.*is active/i.test(err.message);
 }
 
-/** Issue #1798. DSH reports a missing credential reference as -32603 whose only
- *  payload is prose. Source evidence for "no structured payload": fixed DSH
- *  `packages/acp/acp/src/session.ts` calls `RequestError.internalError(undefined, detail)`,
- *  which is only valid under the SDK 1.4.0 signature `(data?, additionalMessage?)`.
- *  Match the two wordings DSH actually emits, and nothing wider. Both are anchored
- *  to their plugin prefix so unrelated MCP/other errors cannot be captured:
- *    llm-pi-ai: no credential for provider route "<route>"; its profile resolves <REF>, which is not set
- *    llm-deepseek: no API key for provider route "<route>"; store <REF> through the credentials service
- *  Deliberately NOT matched: 401/403/429, timeouts, MCP server errors, or any
- *  generic mention of "key" — those keep their existing classification. */
-const CREDENTIAL_MISSING_RE =
-  /llm-pi-ai:\s*no credential for provider route\s+"([^"]+)"[\s\S]*?resolves\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*which is not set/i;
-const MISSING_API_KEY_RE =
-  /llm-deepseek:\s*no API key for provider route\s+"([^"]+)"[\s\S]*?store\s+([A-Za-z_][A-Za-z0-9_]*)\s+through the credentials service/i;
-
-/** Bounded extraction of the route and credential reference from DSH's message.
- *  Values are echoed into a user-facing string, so they pass through the
- *  repository secret sanitizer BEFORE any length bound — truncating first would
- *  strip a token's identifying prefix and defeat redaction (F212 KD-2). */
-function extractMissingCredential(fullMsg: string): { route: string; reference?: string } | null {
-  const scrub = (value: string) => excerptSanitizedStderr(value, { edge: 'head', maxLength: 120 }).replace(/\s+$/, '');
-  const detailed = CREDENTIAL_MISSING_RE.exec(fullMsg);
-  if (detailed) return { route: scrub(detailed[1]), reference: scrub(detailed[2]) };
-  const official = MISSING_API_KEY_RE.exec(fullMsg);
-  if (official) return { route: scrub(official[1]), reference: scrub(official[2]) };
-  return null;
-}
-
 function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -187,6 +156,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
+  dshTurnInput?: boolean;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -246,7 +217,15 @@ export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  /**
+   * #1838: an ACP provider process belongs to the multiplex pool, not to one turn. It can serve
+   * several leases and outlive a turn, so no per-execution Windows host link owns it. Declaring no
+   * Job coverage keeps recovery honest: an unproven stop stays unknown instead of claiming a
+   * teardown for a shared process. A clean final prompt response remains this turn's own proof.
+   */
+  readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly dshTurnInput: boolean;
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -288,6 +267,7 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.dshTurnInput = config.dshTurnInput === true;
     this.nativeDsh = config.nativeDsh;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
@@ -320,39 +300,20 @@ export class AcpAgentService implements AgentService {
 
   /** Resolve the same existing MCP sources before admission can wait for a process. */
   async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
-    const userProjectRoot = input.workingDirectory;
     const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
-    let baseMcpServers: AcpMcpServer[];
-    if (!mcpSupport) {
-      baseMcpServers = [];
-    } else if (this.mcpWhitelist !== null) {
-      const binaryRoot = resolveBinaryRoot(this.projectRoot);
-      const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-      const {
-        config: capConfig,
-        configSourceRoot,
-        accessScope,
-      } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
-      assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
-      const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
-        mcpSupport,
-        disabledServerIds: disabled,
-        catId: this.catId as string,
-        capabilitiesConfig: capConfig,
-        configSourceRoot,
-        accessScope,
-      });
-    } else {
-      baseMcpServers = this.mcpServers;
-    }
-    let invokeServers = baseMcpServers;
-    if (mcpSupport && userProjectRoot && userProjectRoot !== this.projectRoot) {
-      const baseNames = new Set(baseMcpServers.map((s) => s.name));
-      const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
-      if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
-    }
-    return { frozenAcpMcpServers: structuredClone(invokeServers) };
+    const frozenAcpMcpServers = await captureAcpMcpSources({
+      projectRoot: this.projectRoot,
+      catId: this.catId as string,
+      mcpSupport,
+      mcpWhitelist: input.mcpWhitelist ?? this.mcpWhitelist,
+      userProjectRoot: input.workingDirectory,
+      legacyServers: this.mcpServers,
+    });
+    const toolIssues = mcpSupport ? invocationPluginMcpIssues(input.mcpWhitelist ?? this.mcpWhitelist) : [];
+    return {
+      frozenAcpMcpServers,
+      ...(toolIssues.length ? { frozenAcpMcpIssues: toolIssues } : {}),
+    };
   }
 
   /**
@@ -399,11 +360,12 @@ export class AcpAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
+    // Factory admission verifies the bridge; each invocation still requires a successful wire handshake.
     return {
       provider: this.antigravity ? 'google' : 'other',
       carrier: this.antigravity ? 'agy_acp' : 'other',
-      deliverySemantics: 'unsupported',
-      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: this.dshTurnInput ? 'exact_active_turn' : 'unsupported',
+      activeInvocationGuidance: this.dshTurnInput ? 'supported' : 'unsupported',
     };
   }
 
@@ -625,9 +587,16 @@ export class AcpAgentService implements AgentService {
     let invokeServers: AcpMcpServer[];
     let preparingMcp = true;
     try {
-      invokeServers =
-        options?.frozenAcpMcpServers ??
-        (await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory })).frozenAcpMcpServers;
+      const captured = options?.frozenAcpMcpServers
+        ? { frozenAcpMcpServers: options.frozenAcpMcpServers, frozenAcpMcpIssues: options.frozenAcpMcpIssues }
+        : await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory });
+      invokeServers = captured.frozenAcpMcpServers;
+      if (captured.frozenAcpMcpIssues?.length) {
+        const unavailable = captured.frozenAcpMcpIssues.map(({ capabilityId }) => capabilityId).join(', ');
+        const content = `可选插件工具定义无效，以下能力暂不可用：${unavailable}。其他工具不受本次限制；任务需要这些能力时请明确说明不可用，不得声称已执行。`;
+        yield { type: 'system_info', catId: this.catId, content, timestamp: Date.now() };
+        prompt = `${prompt}\n\n[Host 工具状态]\n${content}`;
+      }
       options?.signal?.throwIfAborted();
       preparingMcp = false;
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
@@ -686,13 +655,20 @@ export class AcpAgentService implements AgentService {
       readonly recentCapacitySignal: AcpCapacitySignal | null;
       clearRecentCapacitySignal(): void;
       close?(): Promise<void>;
+      /** True when the latest prompt received a final RPC response, including a provider error. */
+      hasPromptFinalResponse?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
     let promptPhase: PromptPhase = 'not_started';
+    // #1838: an abnormal terminal is held until lease.release reports whether this release actually
+    // stopped the carrier. Emitting it earlier would mark an unknown stop even when the pool then
+    // completes a controlled close, suppressing the cancel terminal the route must broadcast.
+    let deferredTerminal: { metadata: MessageMetadata; unconfirmed: boolean } | undefined;
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
+    let dshTurn: DshTurnInput | undefined;
     let agyActive = true;
     let permissionLifetime: AbortController | undefined;
     let permissionHandler: AcpPermissionHandler | undefined;
@@ -713,6 +689,12 @@ export class AcpAgentService implements AgentService {
     const markPromptAcknowledged = () => {
       if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
     };
+    // #1838: only the final prompt RPC response proves this turn's provider work ended. An abort,
+    // timeout or stream failure can leave the upstream prompt running (session/cancel is a
+    // notification; lease release and iterator return are not stop receipts), so the Host must
+    // keep the physical stop unknown. A prompt that never left the Host owns no writer.
+    const promptStopUnconfirmed = () =>
+      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -1128,6 +1110,17 @@ export class AcpAgentService implements AgentService {
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       let hasResponseOutput = false;
+      if (this.dshTurnInput) {
+        const dshClient = lease.client as unknown as AcpClient;
+        const capability = await dshClient.probeTurnBridge();
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          return;
+        }
+        const bridgeSteerAvailable = capability?.steer === true && capability.nativeTurns === true;
+        if (bridgeSteerAvailable && options?.activeRunDispatch)
+          dshTurn = new DshTurnInput(dshClient, sessionId, options);
+      }
       promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
@@ -1261,6 +1254,10 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          if (dshTurn && options) {
+            await dshTurn.dispose();
+            dshTurn = new DshTurnInput(lease.client as unknown as AcpClient, freshSessionId, options);
+          }
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
@@ -1438,7 +1435,10 @@ export class AcpAgentService implements AgentService {
             },
             timestamp: Date.now(),
           };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          // A provider error response is still the final prompt response: the turn ended, so the
+          // existing recovery path must see an acknowledged prompt rather than an unknown stop.
+          if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+          deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
           return; // Exit — error path handled completion
         }
       }
@@ -1486,8 +1486,12 @@ export class AcpAgentService implements AgentService {
         },
         timestamp: Date.now(),
       };
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      // A provider error response is still the final prompt response, so this turn ended at the
+      // protocol boundary; only a genuine transport/timeout/cancel stays unconfirmed.
+      if (sessionId && client.hasPromptFinalResponse?.(sessionId) === true) markPromptAcknowledged();
+      deferredTerminal = { metadata, unconfirmed: promptStopUnconfirmed() };
     } finally {
+      const [dshSettlement] = await Promise.allSettled([dshTurn?.dispose()]);
       if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       permissionLifetime?.abort('provider_cancelled');
@@ -1549,7 +1553,45 @@ export class AcpAgentService implements AgentService {
         if (onAbort && options?.signal) {
           options.signal.removeEventListener('abort', onAbort);
         }
-        await lease.release();
+        let releaseError: unknown;
+        let releaseStoppedCarrier = false;
+        try {
+          releaseStoppedCarrier = await lease.release();
+        } catch (err) {
+          releaseError = err;
+        }
+        // A release that kept the shared process alive is not stop proof. Only a real exit or a
+        // release whose controlled close completed is: a transport error sets isAlive false without
+        // any native exit, so availability and closed/killed never stand in for stop evidence.
+        const carrierStopped = releaseStoppedCarrier || lease.client.hasExited === true;
+        if (releaseError) {
+          log.warn(
+            { ...ctx, sessionId, err: releaseError instanceof Error ? releaseError.message : String(releaseError) },
+            'ACP lease release did not confirm the carrier stop; keeping the turn stop unknown',
+          );
+          if (deferredTerminal) {
+            // Mark the stop unknown before the failure propagates. invoke-single-cat stops on this
+            // flag; the bridge instead receives the rejected return and emits session_contract_failed.
+            yield {
+              type: 'status',
+              catId: this.catId,
+              providerTeardown: 'unconfirmed' as const,
+              content: '停止尚未确认，执行绑定仍被占用',
+              timestamp: Date.now(),
+            };
+          }
+          throw releaseError;
+        }
+        if (dshSettlement.status === 'rejected') throw dshSettlement.reason;
+        if (deferredTerminal) {
+          yield {
+            type: 'done',
+            catId: this.catId,
+            metadata: deferredTerminal.metadata,
+            ...(deferredTerminal.unconfirmed && !carrierStopped ? { providerTeardown: 'unconfirmed' as const } : {}),
+            timestamp: Date.now(),
+          };
+        }
       }
     }
   }

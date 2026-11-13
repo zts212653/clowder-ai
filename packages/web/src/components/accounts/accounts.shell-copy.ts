@@ -74,7 +74,7 @@ export const accountsCopy = defineShellCopy(
       addCodex: 'Codex · 登录另一个账号',
       addNotice: '本机默认登录不用添加。新增的号登录后不会自动换上。',
       addKey: '填一个 API 密钥',
-      addKeyHint: '填地址和密钥，再选模型。',
+      addKeyHint: 'OpenAI / Google 平台只需名称和密钥；其他账号可填写地址和模型。',
       switchTitle: '换号确认',
       switchTiming: '从下一次调用起生效。正在进行的调用继续用旧号，原会话和历史记录保留。',
       switchNative: '本机默认登录不受影响，可随时在账号列表换回来。云端 Pro 不跟着换。',
@@ -186,7 +186,8 @@ export const accountsCopy = defineShellCopy(
       addCodex: 'Codex · Sign in to another account',
       addNotice: 'Local default logins do not need adding. A new login is not selected automatically.',
       addKey: 'Add an API key',
-      addKeyHint: 'Enter an endpoint and key, then choose models.',
+      addKeyHint:
+        'OpenAI / Google platform accounts need a name and key. Other accounts can include an endpoint and models.',
       switchTitle: 'Confirm account switch',
       switchTiming:
         'Applies to the next invocation. Active invocations keep their current account; sessions and history are preserved.',

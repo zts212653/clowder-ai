@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { bootstrapCatCatalog } from '../dist/config/cat-catalog-store.js';
 import { AgentKeyRegistry } from '../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js';
 import {
   ensureCloudCatAgentKeySidecar,
@@ -21,6 +22,7 @@ import {
 } from '../dist/domains/cats/services/agents/agent-key/cloud-cat-agent-key-sidecar.js';
 import { MemoryAgentKeyBackend } from '../dist/domains/cats/services/agents/agent-key/MemoryAgentKeyBackend.js';
 import { RedisAgentKeyBackend } from '../dist/domains/cats/services/agents/agent-key/RedisAgentKeyBackend.js';
+import { resolveCloudConversationCat } from '../dist/domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
 import { FakeRedis } from './helpers/fake-agent-key-redis.js';
 
 const backends = [
@@ -315,5 +317,91 @@ test('reconciliation issues the resolved cloud cat its key, and refuses an ambig
   assert.ok(
     logs.some(([level, message]) => level === 'warn' && /cloud-alt/u.test(message) && /cloud-beta/u.test(message)),
     'the warning names the cats to fix',
+  );
+});
+
+test('catalog migration retires the real persisted gpt-dot shape before cloud-key reconciliation', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'f202-retired-dot-cloud-key-'));
+  roots.push(projectRoot);
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  const variant = (catId, provider, mentionPatterns) => ({
+    id: `${catId}-default`,
+    catId,
+    clientId: 'openai',
+    carrier: 'app_server',
+    defaultModel: catId,
+    mcpSupport: true,
+    ...(provider ? { provider } : {}),
+    mentionPatterns,
+  });
+  const catalog = {
+    version: 2,
+    breeds: [
+      {
+        id: 'maine-coon',
+        catId: 'gpt-pro',
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/gpt-pro.png',
+        color: { primary: '#111111', secondary: '#eeeeee' },
+        mentionPatterns: ['@gpt-pro'],
+        roleDescription: 'cloud',
+        defaultVariantId: 'gpt-pro-default',
+        variants: [
+          variant('gpt-pro', 'openai-chatgpt-pro', ['@gpt-pro']),
+          {
+            ...variant('gpt-dot', 'openai-chatgpt-pro', ['@dot']),
+            carrier: undefined,
+            displayName: '砚砚 · dot',
+            avatar: '/avatars/gpt-pro.png',
+          },
+        ],
+      },
+    ],
+    roster: {
+      'gpt-pro': { family: 'maine-coon', roles: ['chat'], lead: true, available: true, evaluation: 'cloud' },
+      'gpt-dot': { family: 'maine-coon', roles: ['chat'], lead: false, available: true, evaluation: 'dot' },
+      owner: { family: 'owner', roles: ['owner'], lead: false, available: true, evaluation: 'owner' },
+    },
+    reviewPolicy: {
+      requireDifferentFamily: true,
+      preferActiveInThread: true,
+      preferLead: true,
+      excludeUnavailable: true,
+    },
+    coCreator: { name: 'Owner', aliases: [], mentionPatterns: ['@owner'] },
+  };
+  await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+  await writeFile(templatePath, JSON.stringify(catalog));
+  await writeFile(catalogPath, JSON.stringify(catalog));
+  bootstrapCatCatalog(projectRoot, templatePath);
+
+  const persisted = JSON.parse(await readFile(catalogPath, 'utf8'));
+  const configs = Object.fromEntries(
+    persisted.breeds.flatMap((breed) =>
+      breed.variants.map((item) => [item.catId ?? breed.catId, item.provider ? { provider: item.provider } : {}]),
+    ),
+  );
+  const source = { getAllConfigs: () => configs };
+  assert.deepEqual(resolveCloudConversationCat(source, 'chatgpt'), { status: 'resolved', catId: 'gpt-pro' });
+
+  const keyRoot = await dataDir();
+  const env = { CAT_CAFE_DATA_DIR: keyRoot, DEFAULT_OWNER_USER_ID: 'owner-1' };
+  const registry = new AgentKeyRegistry();
+  const current = await registry.issue('gpt-pro', 'owner-1', { scope: 'cloud-conversation' });
+  await writeFile(join(keyRoot, 'agent-keys', 'gpt-pro.secret'), `${current.secret}\n`, { mode: 0o600 });
+  const warnings = [];
+  await reconcileCloudCatAgentKeys({
+    registry,
+    cats: source,
+    env,
+    log: { info() {}, warn: (message) => warnings.push(message) },
+  });
+
+  assert.equal((await registry.verify(current.secret)).ok, true, 'retirement must not revoke gpt-pro');
+  assert.equal(
+    warnings.some((message) => /ambiguous/u.test(message)),
+    false,
   );
 });

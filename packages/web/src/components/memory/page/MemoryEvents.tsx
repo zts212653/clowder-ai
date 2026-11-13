@@ -61,9 +61,9 @@ export function MemoryEvents({ onReadSummary }: { onReadSummary: (value: string)
                 aria-pressed={current?.eventId === entry.eventId}
                 onClick={() => select(entry.eventId)}
               >
-                {entry.type}
+                {entry.summary}
               </button>
-              <p className="mt-2 line-clamp-3 break-words text-compact text-cafe-muted">{entry.summary}</p>
+              <p className="mt-2 line-clamp-3 break-words text-compact text-cafe-muted">{entry.type}</p>
               <p className="mt-2 text-xs text-cafe-muted">
                 {formatMemoryDate(entry.timestamp)}
                 {entry.summaryTruncated ? ' · 较长，点击读取完整记录' : ''}

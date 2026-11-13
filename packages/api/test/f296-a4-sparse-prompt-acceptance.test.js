@@ -223,12 +223,12 @@ function assertPhaseASparse(text, label) {
   assert.ok(!text.includes('[Evidence:'), `${label}: AC-A1 — no legacy evidence body line`);
   assert.ok(!text.includes(CLOSED_QUESTION), `${label}: AC-A2 — no lifecycle-less open question`);
   assert.ok(!text.includes('待决问题'), `${label}: AC-A2 — no open-question section`);
-  // AC-A3: a deleted temp artifact must never become a directive truth source.
-  const directiveLine = text.split('\n').find((line) => line.startsWith('真相源:'));
+  // AC-A3: a deleted temp artifact must not be promoted as current work material.
+  const directiveLine = text.split('\n').find((line) => /^(?:工作材料|真相源):/.test(line));
   if (directiveLine) {
     assert.ok(
       !directiveLine.includes(STALE_ARTIFACT),
-      `${label}: AC-A3 — stale artifact must not become 真相源, got: ${directiveLine}`,
+      `${label}: AC-A3 — stale artifact must not become current work material, got: ${directiveLine}`,
     );
   }
   // AC-A4: nothing generated new prose to refill the space.
@@ -448,9 +448,14 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     const rendered = `${card.bodyMarkdown ?? ''}\n${card.fields.map((f) => `${f.label}: ${f.value}`).join('\n')}`;
 
     assertPhaseASparse(rendered, 'briefing');
-    // Sparse is honest, not silent: no qualified source → say so, and keep a drill.
-    assert.match(rendered, /真相源: 未定位/, 'briefing states 未定位 rather than promoting a stale artifact');
-    assert.match(rendered, /下一步:/, 'briefing keeps an exact drill entry');
+    assert.deepEqual(
+      card.fields.filter((field) => ['工作材料', '真相源'].includes(field.label)),
+      [],
+      'no qualified work material is rendered as a source or a recovery gap',
+    );
+    assert.doesNotMatch(rendered, /真相源: 未定位|下一步:/);
+    assert.match(rendered, /省略原文（需要时读取）/, 'omitted originals retain an optional read entry');
+    assert.match(rendered, /cat_cafe_get_thread_context\(\{ threadId: "thread-a4" \}\)/);
   });
 
   test('prompt section snapshot: the cold packet block has exactly the accepted sections', async () => {
@@ -478,7 +483,7 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     const ACCEPTED_PREFIXES = [
       '[Context Continuity]',
       '[/Context Continuity]',
-      '[导航]', // baton + truth source + next step
+      '[导航]', // exact invocation inputs and independent current work facts
       '[/导航]',
       '[对话历史增量', // window header (N omitted / M detailed)
       '[System: skipped', // tombstone for the omitted range
@@ -496,8 +501,9 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     assert.deepEqual(unexpected, [], `unexpected prompt sections appeared: ${JSON.stringify(unexpected)}`);
 
     // Sparse acceptance, stated positively: these are the things that MUST be there.
-    assert.match(block, /真相源: 未定位/, 'no qualified source → say 未定位, do not promote a candidate');
-    assert.match(block, /下一步: cat_cafe_get_thread_context/, 'an exact drill entry survives');
+    assert.match(block, /本轮输入来源（触发事实，不表示接责或新增授权）/);
+    assert.ok(block.includes(deps.currentUserMessageId), 'the actual queued source is identified');
+    assert.doesNotMatch(block, /真相源: 未定位|下一步: cat_cafe_get_thread_context/);
     assert.match(block, /\[System: skipped 49 messages/, 'the omitted range is stated, not silently dropped');
     assert.match(block, /search_evidence\(/, 'the omitted range carries an exact retrieval entry');
     assert.ok(!block.includes('[Thread Memory'), 'automatic memory summary is not a cold-packet section');

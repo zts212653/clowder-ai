@@ -1,5 +1,5 @@
 import { type ReplyPreview, type ThreadArtifactDTO, timelineMessageKind } from '@cat-cafe/shared';
-import { create } from 'zustand';
+import { create, type StateCreator } from 'zustand';
 import { getCachedCats } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { inferFileKind, inferRenderMode } from '@/lib/file-kind';
@@ -41,11 +41,13 @@ import type {
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
+import { stampMessageWrite } from './local-write-clock';
 import {
   findLatestMessageIndexByTimeline,
   getMessageTimelineCursorTime,
   isMessageTimelineActive,
 } from './message-timeline';
+import { ownsStreamedBody, withStreamedBodyOf } from './streamed-body';
 
 // Re-export types so existing consumers keep working with `import { ... } from '@/stores/chatStore'`
 export type {
@@ -537,6 +539,17 @@ export interface DefinitiveRichBlockOwner {
   turnInvocationId?: string;
 }
 
+/** Same-id revisions replace the preview at its original position. */
+function upsertMessageRichBlock(message: ChatMessage, block: RichBlock): ChatMessage {
+  const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
+  const index = rich.blocks.findIndex((existing) => existing.id === block.id);
+  if (index >= 0 && JSON.stringify(rich.blocks[index]) === JSON.stringify(block)) return message;
+  const blocks = [...rich.blocks];
+  if (index >= 0) blocks[index] = block;
+  else blocks.push(block);
+  return { ...message, extra: { ...message.extra, rich: { ...rich, blocks } } };
+}
+
 /** A messageId-bound callback owns its block; an earlier same-turn stream copy was only a preview. */
 function appendRichBlockToMessages(
   messages: ChatMessage[],
@@ -550,10 +563,10 @@ function appendRichBlockToMessages(
   let changed = false;
   const next = messages.map((message) => {
     if (message.id === messageId) {
-      const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
-      if (rich.blocks.some((existing) => existing.id === block.id)) return message;
+      const updated = upsertMessageRichBlock(message, block);
+      if (updated === message) return message;
       changed = true;
-      return { ...message, extra: { ...message.extra, rich: { ...rich, blocks: [...rich.blocks, block] } } };
+      return stampMessageWrite(message, updated);
     }
     if (!definitiveCallback || message.origin !== 'stream' || message.catId !== owner.catId) return message;
     const stream = message.extra?.stream;
@@ -562,7 +575,7 @@ function appendRichBlockToMessages(
       : Boolean(owner.invocationId && stream?.invocationId === owner.invocationId);
     if (!sameTurn || !message.extra?.rich?.blocks.some((existing) => existing.id === block.id)) return message;
     changed = true;
-    return {
+    return stampMessageWrite(message, {
       ...message,
       extra: {
         ...message.extra,
@@ -571,7 +584,7 @@ function appendRichBlockToMessages(
           blocks: message.extra.rich.blocks.filter((existing) => existing.id !== block.id),
         },
       },
-    };
+    });
   });
   return changed ? next : messages;
 }
@@ -580,7 +593,7 @@ function patchMessageInList(messages: ChatMessage[], id: string, patch: ChatMess
   const index = messages.findIndex((message) => message.id === id);
   if (index < 0) return messages;
   const nextMessages = [...messages];
-  nextMessages[index] = applyMessagePatch(messages[index]!, patch);
+  nextMessages[index] = stampMessageWrite(messages[index], applyMessagePatch(messages[index]!, patch));
   return nextMessages;
 }
 
@@ -592,16 +605,33 @@ function updateMessageInList(
   const index = messages.findIndex((message) => message.id === messageId);
   if (index < 0) return undefined;
   const updated = [...messages];
-  updated[index] = updater(messages[index]!);
+  updated[index] = stampMessageWrite(messages[index], updater(messages[index]!));
   return updated;
 }
 
-/** F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator */
-function fireOwnerMentionNotification(msg: ChatMessage, threadId: string) {
+const MAX_NOTIFIED_MENTIONS = 500;
+const notifiedMentionIds = new Set<string>();
+
+export function __resetOwnerMentionNotificationsForTests(): void {
+  notifiedMentionIds.clear();
+}
+
+/**
+ * F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator.
+ * PR-3a: one message can arrive by its thread room, `messages_delivered` and the owner-room
+ * `thread_message_appended` hint, so a page notifies each message id once.
+ */
+export function fireOwnerMentionNotification(msg: Pick<ChatMessage, 'id' | 'catId'>, threadId: string) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') {
     Notification.requestPermission();
     return;
+  }
+  if (notifiedMentionIds.has(msg.id)) return;
+  notifiedMentionIds.add(msg.id);
+  if (notifiedMentionIds.size > MAX_NOTIFIED_MENTIONS) {
+    const oldest = notifiedMentionIds.values().next().value;
+    if (oldest !== undefined) notifiedMentionIds.delete(oldest);
   }
   const cats = getCachedCats();
   const catData = cats.find((c) => c.id === msg.catId);
@@ -1160,7 +1190,12 @@ export interface ChatState {
   clearReplyTo: () => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
+/**
+ * The store's state and actions, without React. `useChatStore` is built from it; PR-3a2's stream
+ * replay builds a detached copy from it to rebuild a response with the very same writers, then
+ * commits the result to `useChatStore` in one write.
+ */
+export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
   messages: [],
   isLoading: false,
   isLoadingHistory: false,
@@ -2681,8 +2716,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Multi-thread actions ──
 
   /** Add a message to a specific thread (for background thread socket updates) */
-  addMessageToThread: (threadId, msg) =>
+  addMessageToThread: (threadId, input) =>
     set((state) => {
+      const msg = stampMessageWrite(undefined, input);
       // Active thread — delegate to flat state
       if (threadId === state.currentThreadId) {
         if (state.messages.some((m) => m.id === msg.id)) return state;
@@ -2730,9 +2766,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const upsert = (messages: ChatMessage[]): ChatMessage[] => {
         const existingIndex = messages.findIndex((candidate) => candidate.id === msg.id);
         if (existingIndex === -1) {
-          return [...messages, msg];
+          return [...messages, stampMessageWrite(undefined, msg)];
         }
         const existing = messages[existingIndex]!;
+        if (
+          existing.extra?.targetResponse &&
+          msg.extra?.targetResponse &&
+          existing.extra.targetResponse.revision > msg.extra.targetResponse.revision
+        )
+          return messages;
         if (
           existing.lifecycle?.kind === 'response' &&
           existing.lifecycle.status !== 'processing' &&
@@ -2752,8 +2794,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           extra: existing.extra || msg.extra ? { ...existing.extra, ...msg.extra } : undefined,
           ...(committedResponse ? { isStreaming: false } : {}),
         };
+        // #6727 R4: a processing snapshot has no stream position, so it never fills or extends the
+        // body of a stream the page holds from its start (see streamed-body.ts).
+        const kept = processingResponse && ownsStreamedBody(existing) ? withStreamedBodyOf(merged, existing) : merged;
         const next = [...messages];
-        next[existingIndex] = merged;
+        next[existingIndex] = stampMessageWrite(existing, kept);
         return next;
       };
 
@@ -3469,7 +3514,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setSplitPaneThreadIds: (ids) => set({ splitPaneThreadIds: ids }),
   setSplitPaneTarget: (threadId) => set({ splitPaneTargetId: threadId }),
-}));
+});
+
+export const useChatStore = create<ChatState>(chatStoreCreator);
 
 /** Apply an IDB snapshot only if no route action, manual navigation, or live
  * preview event changed the thread while IndexedDB was resolving. */

@@ -39,6 +39,10 @@ const message: ChatMessage = {
   isStreaming: true,
   extra: { stream: { turnInvocationId: 'child-exact', invocationId: 'parent' } },
 };
+const responseTarget = {
+  kind: 'append' as const,
+  expectedRun: { targetId: 'codex61-sol', invocationId: 'child-exact', responseMessageId: message.id },
+};
 function execution(over: Partial<ActiveExecutionProjection> = {}): ActiveExecutionProjection {
   return {
     kind: 'live_invocation',
@@ -134,6 +138,64 @@ describe('execution row location through the original owner', () => {
     await act(async () => locate()?.click());
     expect(navigate).toHaveBeenCalledWith(message.id);
     expect(container.querySelector('[data-testid="original-record"]')?.getAttribute('data-expanded')).toBe('true');
+  });
+
+  function withResponseTarget() {
+    return execution({
+      inputCapabilities: { append: responseTarget },
+    });
+  }
+
+  it('loads a long-running response outside the current history page through the existing reading owner', async () => {
+    const navigate = vi.fn(() => true);
+    useChatStore.setState({ messages: [{ ...message, id: 'newer-callback', isStreaming: false }] });
+    await render(withResponseTarget(), navigate);
+    await act(async () => locate()?.click());
+    expect(navigate).toHaveBeenCalledWith(message.id, { loadIfNeeded: true });
+    expect(container.querySelector('[data-testid="original-record"]')?.getAttribute('data-expanded')).toBe('true');
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('locates the exact recovered lifecycle response without requiring a streaming marker', async () => {
+    const navigate = vi.fn(() => true);
+    useChatStore.setState({
+      messages: [
+        {
+          ...message,
+          isStreaming: false,
+          lifecycle: {
+            kind: 'response',
+            invocationId: 'child-exact',
+            targetId: 'codex61-sol',
+            orderKey: 'response-order',
+            status: 'processing',
+            startedAt: message.timestamp,
+            inputEntryIds: [],
+            inputMessageIds: [],
+          },
+        },
+      ],
+    });
+    await render(execution(), navigate);
+    await act(async () => locate()?.click());
+    expect(navigate).toHaveBeenCalledWith(message.id);
+  });
+
+  it.each(['targetId', 'invocationId'] as const)('rejects a response target bound to a different %s', async (field) => {
+    const navigate = vi.fn(() => true);
+    const run = withResponseTarget();
+    const append = responseTarget;
+    useChatStore.setState({ messages: [] });
+    await render(
+      {
+        ...run,
+        inputCapabilities: { append: { ...append, expectedRun: { ...append.expectedRun, [field]: 'other-run' } } },
+      },
+      navigate,
+    );
+    await act(async () => locate()?.click());
+    expect(navigate).not.toHaveBeenCalled();
+    expect(useToastStore.getState().toasts.at(-1)?.message).toBe('读不到这次执行的位置');
   });
 
   it.each([

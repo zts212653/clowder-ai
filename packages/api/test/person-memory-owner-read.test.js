@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import {
@@ -7,6 +8,7 @@ import {
 } from '../dist/domains/memory/people/OwnerMemoryActionEvidenceIssuer.js';
 import { ownerMessageTextDigestMaterial } from '../dist/domains/memory/people/owner-message-text-projection.js';
 import { PersonMemoryOwnerReadService } from '../dist/domains/memory/people/PersonMemoryOwnerReadService.js';
+import { PersonMemoryRecallService } from '../dist/domains/memory/people/PersonMemoryRecallService.js';
 import { digestPersonMemorySourceMaterial } from '../dist/domains/memory/people/PersonMemorySourceBundleResolver.js';
 import { RedisPersonMemoryStore } from '../dist/domains/memory/people/RedisPersonMemoryStore.js';
 import { personMemoryOwnerReadRoutes } from '../dist/routes/person-memory-owner-read.js';
@@ -139,6 +141,7 @@ describe('F276 owner person-memory reads', () => {
   let messages;
   let store;
   let threads;
+  let messageStore;
 
   beforeEach(async () => {
     messages = new Map([[sourceMessage.id, { ...sourceMessage }]]);
@@ -146,6 +149,7 @@ describe('F276 owner person-memory reads', () => {
       [sourceRef.threadId, { id: sourceRef.threadId, createdBy: ownerUserId, title: '人物来源对话' }],
     ]);
     store = fakeStore();
+    messageStore = { getById: async (messageId) => messages.get(messageId) ?? null };
     app = Fastify();
     app.addHook('preHandler', async (request) => {
       request.sessionUserId = request.headers['x-test-session'];
@@ -153,7 +157,7 @@ describe('F276 owner person-memory reads', () => {
     await app.register(personMemoryOwnerReadRoutes, {
       ownerUserId,
       store,
-      messageStore: { getById: async (messageId) => messages.get(messageId) ?? null },
+      messageStore,
       threadStore: {
         get: async (threadId) => threads.get(threadId) ?? null,
         list: async () => [...threads.values()],
@@ -165,6 +169,58 @@ describe('F276 owner person-memory reads', () => {
 
   const get = (url, session = ownerUserId) =>
     app.inject({ method: 'GET', url, headers: session ? { 'x-test-session': session } : {} });
+
+  it('checks the delivered card revision separately from the whole person revision', async () => {
+    const current = await get(`/api/memory/people/${person.personId}`);
+    const recall = await new PersonMemoryRecallService(store, {}).recallByPersonId(ownerUserId, person.personId);
+    assert.equal(recall.status, 'resolved');
+    const revision = `sha256:${createHash('sha256').update(JSON.stringify(recall.card)).digest('hex')}`;
+    assert.notEqual(revision, current.json().personRevision);
+    assert.equal(
+      (
+        await get(
+          `/api/memory/people/${person.personId}?deliveryRevision=${encodeURIComponent(current.json().personRevision)}`,
+        )
+      ).statusCode,
+      409,
+    );
+    assert.equal(
+      (await get(`/api/memory/people/${person.personId}?deliveryRevision=${encodeURIComponent(revision)}`)).statusCode,
+      200,
+    );
+    assert.equal(
+      (
+        await get(
+          `/api/memory/people/${person.personId}?deliveryRevision=${encodeURIComponent(revision)}`,
+          'other-owner',
+        )
+      ).statusCode,
+      403,
+    );
+  });
+
+  it('keeps the delivered person readable when only its original message is lost, without lending it to another owner', async () => {
+    const service = new PersonMemoryOwnerReadService({
+      store,
+      messageStore: { getById: async (id) => messages.get(id) ?? null },
+      threadStore: { get: async (id) => threads.get(id) ?? null, list: async () => [...threads.values()] },
+    });
+    const recalled = await new PersonMemoryRecallService(store, {}).recallByPersonId(ownerUserId, person.personId);
+    const revision = `sha256:${createHash('sha256').update(JSON.stringify(recalled.card)).digest('hex')}`;
+    const ready = await service.readDelivery(ownerUserId, person.personId, revision);
+    assert.equal(ready.status, 'ready');
+    assert.deepEqual(ready.message, { threadId: sourceRef.threadId, messageId: sourceRef.messageId });
+    messages.clear();
+    assert.deepEqual(await service.readDelivery(ownerUserId, person.personId, revision), {
+      status: 'ready',
+      displayName: person.displayName,
+      message: null,
+    });
+    assert.deepEqual(await service.readDelivery('foreign', person.personId, revision), { status: 'not_available' });
+    assert.deepEqual(await service.readDelivery(ownerUserId, person.personId, `sha256:${'0'.repeat(64)}`), {
+      status: 'version_changed',
+    });
+  });
 
   it('requires the authenticated owner session and ignores identity headers', async () => {
     assert.equal((await get('/api/memory/people', null)).statusCode, 401);
@@ -246,6 +302,8 @@ describe('F276 owner person-memory reads', () => {
           threadId: sourceRef.threadId,
           messageId: sourceRef.messageId,
           title: '人物来源对话',
+          occurredAt: 90,
+          speaker: '你',
           canOpen: true,
         },
       ],
@@ -260,6 +318,15 @@ describe('F276 owner person-memory reads', () => {
     messages.set(sourceMessage.id, sourceMessage);
     threads.set(sourceRef.threadId, { ...threads.get(sourceRef.threadId), createdBy: 'other-owner' });
     assert.deepEqual((await get(url)).json(), { status: 'unavailable', sources: [] });
+  });
+
+  it('keeps a transient source-store failure distinct from a known unavailable source', async () => {
+    messageStore.getById = async () => {
+      throw new Error('temporary source read failure');
+    };
+    const response = await get(`/api/memory/people/${person.personId}/source?kind=claim&itemId=${claim.claimId}`);
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), { status: 'unavailable', sources: [] });
   });
 
   it('does not reveal whether a foreign or unknown person exists', async () => {
@@ -384,7 +451,7 @@ describe('PersonMemoryOwnerReadService source selector', () => {
       sources: [
         {
           kind: 'owner_action',
-          label: '主人在记忆页操作 · 修改 · 2025-10-09T08:53:20.000Z',
+          label: '你在记忆页修改',
           occurredAt: 1_760_000_000_000,
           canOpen: false,
         },

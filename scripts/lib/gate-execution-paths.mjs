@@ -22,6 +22,7 @@ export const GATE_EXECUTION_PATHS = Object.freeze([
   'scripts/lib/alpha-redis-leases.mjs',
   'scripts/lib/alpha-redis-process.mjs',
   'scripts/lib/alpha-identity-diagnostics.mjs',
+  'scripts/lib/alpha-git-trace.mjs',
   'scripts/lib/alpha-coordinates.mjs',
   'scripts/lib/process-identity.mjs',
   'scripts/lib/process-birth-identity.mjs',

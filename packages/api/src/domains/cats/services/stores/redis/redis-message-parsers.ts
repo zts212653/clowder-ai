@@ -1,3 +1,4 @@
+import { isTargetResponseRecord } from '@cat-cafe/shared';
 /**
  * Redis message field parsers — 从 RedisMessageStore 拆出的纯函数
  *
@@ -260,6 +261,9 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   taskAssignmentRequestDigest: 'parsed';
   collectiveOwnerAdmissionV1: 'parsed';
   collectiveAuthorizationInvalid: 'derived';
+  pluginAddressedReceipt: 'parsed';
+  targetResponse: 'parsed';
+  targetResponseResult: 'parsed';
   outputLayout: 'parsed';
   a2aFailureReturn: 'parsed';
   coveredA2AFailureReturns: 'parsed';
@@ -273,6 +277,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveAdmission: 'parsed';
   routingTargetSource: 'parsed';
   rich: 'parsed';
+  richBlockPublicationId: 'parsed';
   messageSearchAnswer: 'parsed';
   callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
@@ -552,6 +557,43 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       parsed.collectiveWorkDelegationV1 !== undefined
     ) {
       result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (isTargetResponseRecord(parsed.targetResponse)) {
+      result.targetResponse = parsed.targetResponse;
+      hasField = true;
+    }
+    const rr = parsed.targetResponseResult;
+    if (
+      rr &&
+      isNonEmptyString(rr.carrierMessageId) &&
+      isNonEmptyString(rr.deliveryId) &&
+      ['processing', 'completed', 'failed', 'canceled', 'interrupted'].includes(rr.status)
+    ) {
+      result.targetResponseResult = {
+        carrierMessageId: rr.carrierMessageId,
+        deliveryId: rr.deliveryId,
+        status: rr.status,
+      };
+      hasField = true;
+    }
+    const pluginReceipt = parsed.pluginAddressedReceipt;
+    if (
+      pluginReceipt &&
+      isNonEmptyString(pluginReceipt.targetId) &&
+      isNonEmptyString(pluginReceipt.inputMessageId) &&
+      typeof pluginReceipt.accepted === 'boolean'
+    ) {
+      result.pluginAddressedReceipt = {
+        targetId: pluginReceipt.targetId,
+        inputMessageId: pluginReceipt.inputMessageId,
+        accepted: pluginReceipt.accepted,
+        ...(pluginReceipt.phase === 'sending' ||
+        pluginReceipt.phase === 'accepted' ||
+        pluginReceipt.phase === 'unconfirmed'
+          ? { phase: pluginReceipt.phase }
+          : {}),
+      };
       hasField = true;
     }
     const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);
@@ -953,6 +995,10 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isNonEmptyString(parsed.richBlockPublicationId)) {
+      result.richBlockPublicationId = parsed.richBlockPublicationId;
+      hasField = true;
+    }
     if (
       typeof parsed.callbackRichRequestDigest === 'string' &&
       /^[0-9a-f]{64}$/.test(parsed.callbackRichRequestDigest)

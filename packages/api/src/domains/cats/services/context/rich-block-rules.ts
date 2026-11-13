@@ -19,6 +19,13 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
 
 **适用场景**：不只是对话！定时任务唤醒、主动触发、connector 通知等场景中，猫同样拥有全部 rich block 能力。
 
+**HTML 交付先按用途选**：
+- 随当前聊天解释局部的小图或控件用 \`html_widget\`；受托交付的自包含图解/原型，或要反复使用、持续改版的小工具，默认用 \`cat_cafe_work\` 保存作品。篇幅仅作提示，不设像素阈值，小型长期工具也可以是作品；复杂 localhost 应用走 browser-preview。
+- widget 也持久保存在聊天历史中并有目录预览；作品增加稳定身份与版本链，作品卡仍回当前 Chat。由猫直接判断，只有真实用途或权限缺口才问，不增加每次选载体的审批卡。
+- 新作品用 \`create\`：\`operationId\`、\`title\`、\`changeSummary\` 和 \`source:{kind:"html",html:"完整源码"}\`；保存成功后，用 \`publish-reference\` 携返回的 \`reference\`（\`contentRef\` + \`ownerRevision\`）附固定版本卡。保存与附卡分开；附卡失败重试同一引用，不重交一个版本。保存结果不明先 read/list 核实，必要时重试完全相同的 command/operationId。
+- 已有作品先 \`read\` 核当前版本、\`read-body\` 取原版，沿同一 \`contentRef\` 带当前 \`expectedOwnerRevision\`、新 \`operationId\`、\`title\`、\`changeSummary\` 和完整 \`source\` 做 \`submit\`，再附新版卡，不按同名重建。分页保持 command/snapshot 不变，按 nextCursor 拼齐所有 json 后解析。
+- widget 后来开始持续迭代：在现有权限内取回原 HTML，以原内容建作品首版并在 changeSummary 记原消息坐标，再沿同一作品出修改版；缺源码/来源先取原件，不捏造旧版。一次修字不必机械升级；已有作品小修仍沿原作品。“请修改”不授予别人的作品写权。操作约定见 rich-messaging skill 与 docs/guides/html-works.md。
+
 **何时使用**（默认触发）：
 - **card** (tone: info/success/warning/danger)
   - review 结论（P1/P2 列表 + 放行/阻塞决策）
@@ -57,8 +64,8 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - 发多个 interactive block 时用相同 \`groupId\` 实现批量提交（用户选完所有再一次提交）
   - 用户选择后 block 自动 disabled，选择结果持久化（刷新不丢）
 - **html_widget**（内嵌交互 HTML 小组件 — 你自己写的 HTML 直接挂上去）
-  - 数据可视化（图表、仪表盘）、交互 demo、mini 工具
-  - 定时任务中动态生成数据面板（如 repo 活跃度图表）
+  - 随当前聊天解释局部的数据可视化、控件或数据面板；作品交付按上面的用途路由
+  - 定时生成的面板也按用途选；反复使用或持续改版时保存作品
   - \`html\` 必填（完整 HTML 文档，含内联 CSS/JS）
   - \`title\` 可选（显示在 widget 顶部标题栏）
   - \`height\` 可选（像素，默认 300，范围 50-2000）
@@ -91,4 +98,5 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
 export const RICH_BLOCK_SHORT = `富消息块：结构化信息用富块，普通对话不用。先写 1-2 句摘要再发。
 ⚠️ 字段名是 "kind"（不是 "type"！），必须有 "v": 1 和唯一 id。
 支持: card / diff / checklist / file / media_gallery / audio / interactive / html_widget。
+HTML：随聊天解释局部用 html_widget；交付图解/原型、复用小工具默认 cat_cafe_work 保存并 publish-reference 回 Chat，续改沿原 contentRef。详见 rich-messaging skill / 完整规则。
 interactive: 用户可交互选择（select/multi-select/card-grid/confirm），详见 rich-blocks rules。`;

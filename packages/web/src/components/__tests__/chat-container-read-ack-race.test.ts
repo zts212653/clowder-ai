@@ -81,6 +81,7 @@ const baseStore = () => ({
   threads: [],
 });
 
+vi.mock('@/components/thread-chat/hub-socket-context', () => import('@/test-utils/hub-socket-context-mock'));
 vi.mock('@/stores/chatStore', () => {
   const hook = (selector?: (s: ReturnType<typeof baseStore>) => unknown) => {
     const state = baseStore();

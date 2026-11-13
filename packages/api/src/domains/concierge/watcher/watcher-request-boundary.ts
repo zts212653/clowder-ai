@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { WatcherUsage } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../utils/token-counter.js';
+import { WATCHER_TURN_RESERVE_TOKENS } from './context/watcher-context-budget.js';
 import { watcherProviderHttp } from './watcher-provider-http.js';
 
 export interface WatcherRequestObservation {
@@ -16,6 +17,7 @@ export async function createWatcherRequestBoundary(
   upstreamBaseUrl: string,
   input: {
     signal: AbortSignal;
+    controlOnly?: boolean;
     transportEnv?: Readonly<Record<string, string>>;
     observed?(row: WatcherRequestObservation): void | Promise<void>;
     completed?(row: WatcherRequestObservation, usage: WatcherUsage): void | Promise<void>;
@@ -37,6 +39,7 @@ export async function createWatcherRequestBoundary(
   };
   const server = createServer(async (request, reply) => {
     try {
+      if (input.controlOnly) reject('watcher_retirement_model_forbidden');
       const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
       if (
         request.method !== 'POST' ||
@@ -63,8 +66,8 @@ export async function createWatcherRequestBoundary(
       const tools = Array.isArray(body.tools) ? body.tools.length : 0;
       const inputUpperBound = estimateTokens(JSON.stringify(body)) + previousOutputs + 1024 + 64 * (items + tools);
       const available = 30000 - inputUpperBound;
-      if (available < 256) reject(`watcher_context_budget_exceeded:${inputUpperBound}`);
-      const maxOutputTokens = Math.min(4096, available);
+      if (available < WATCHER_TURN_RESERVE_TOKENS) reject(`watcher_context_budget_exceeded:${inputUpperBound}`);
+      const maxOutputTokens = WATCHER_TURN_RESERVE_TOKENS;
       body.max_output_tokens = maxOutputTokens; // Includes reasoning and final output in the Responses contract.
       const observation = {
         request: ++requests,
@@ -110,6 +113,7 @@ export async function createWatcherRequestBoundary(
             const event = JSON.parse(data) as {
               type?: string;
               response?: {
+                incomplete_details?: { reason?: string };
                 usage?: {
                   input_tokens?: number;
                   output_tokens?: number;
@@ -117,7 +121,7 @@ export async function createWatcherRequestBoundary(
                 };
               };
             };
-            if (event.type === 'response.completed') {
+            if (['response.completed', 'response.incomplete', 'response.failed'].includes(event.type ?? '')) {
               const output = event.response?.usage?.output_tokens;
               if (typeof output === 'number' && Number.isSafeInteger(output) && output >= 0) {
                 if (output > maxOutputTokens) reject('watcher_provider_output_limit_violated');
@@ -140,6 +144,12 @@ export async function createWatcherRequestBoundary(
                   : {}),
               });
             }
+            // A structured provider output limit is a budget failure, not every incomplete/native error.
+            if (
+              event.type === 'response.incomplete' &&
+              event.response?.incomplete_details?.reason === 'max_output_tokens'
+            )
+              reject('watcher_context_budget_exceeded:response_max_output_tokens');
           }
           reply.write(`${frame}\n\n`);
         }

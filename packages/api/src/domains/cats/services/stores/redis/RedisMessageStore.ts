@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recoveryRedis } from '../../../../../infrastructure/recovery/recovery-redis.js';
 import {
   type CompanionDeliveryAcceptance,
   companionDeliveryMatches,
@@ -98,6 +99,7 @@ import type {
   CustodyOfferTransitionResult,
   HostMessageExtra,
   IdempotentAppendResult,
+  InteractiveBlockState,
   LifecycleAppendAdmissionInput,
   LifecycleInputDispatchPatch,
   LifecyclePreAdmissionFailureInput,
@@ -129,6 +131,7 @@ import type {
 } from '../ports/MessageStore.js';
 import {
   advanceLifecycleInputDispatchMetadata,
+  applyInteractiveBlockState,
   applyStreamMetadataAugment,
   assertPrivateNoticeQueueAdmission,
   assertQueueMessageReplay,
@@ -155,7 +158,9 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
+  isManagedHoldConnectorMessage,
   isSystemUserMessage,
   isTimelinePublished,
   passesManagedHoldViewerBoundary,
@@ -185,6 +190,7 @@ import {
   serializeExtra,
 } from './redis-message-parsers.js';
 import { parseRedisNumber } from './redis-number.js';
+import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { readRecentMentionIds } from './redis-recent-mentions.js';
 import { readThreadReplyProjection } from './redis-thread-reply-projection.js';
 import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
@@ -471,7 +477,7 @@ if existing.status == 'processing' then
   -- A child dispatch can settle while its parent response is still processing.
   -- Never replace that newer lifecycle snapshot with a terminal state prepared
   -- from an older read; make the caller re-read and preserve the child transition.
-  if existingRaw ~= ARGV[14] then return 0 end
+  if existingRaw ~= ARGV[14] or not sameField('extra', ARGV[15]) then return 0 end
   lifecycleNeedsWrite = true
 elseif not (existingRaw == ARGV[2] and
      sameField('content', ARGV[3]) and
@@ -558,9 +564,9 @@ local lifecycleOk, existingLifecycle = pcall(cjson.decode, existingLifecycleRaw)
 if not lifecycleOk or type(existingLifecycle) ~= 'table' or existingLifecycle.kind ~= 'response' then return -2 end
 if existingLifecycle.invocationId ~= ARGV[1] then return -3 end
 
-local maxUserSources = tonumber(ARGV[15])
-local count = tonumber(ARGV[16])
-local expectedMode = ARGV[17]
+local maxUserSources = tonumber(ARGV[16])
+local count = tonumber(ARGV[17])
+local expectedMode = ARGV[18]
 if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
 
 local incoming = {}
@@ -568,7 +574,7 @@ local entryIds = {}
 local incomingIds = {}
 local incomingUserSources = {}
 for i = 1, count do
-  local raw = ARGV[17 + i]
+  local raw = ARGV[18 + i]
   local row = cjson.decode(raw)
   if row.status ~= 'queued' or not row.payload or row.payload.sourceRecordId ~= messageId or
      row.payload.messageId ~= messageId then
@@ -586,7 +592,7 @@ for i = 1, count do
   if expectedMode == 'absent' then
     if currentRaw then return -10 end
   elseif expectedMode == 'present' then
-    local expectedRaw = ARGV[17 + count + i]
+    local expectedRaw = ARGV[18 + count + i]
     if not currentRaw or currentRaw ~= expectedRaw then return -10 end
   else
     return redis.error_reply('QUEUE_ADMISSION_EXPECTATION_INVALID')
@@ -620,7 +626,7 @@ end
 
 local lifecycleNeedsWrite = false
 if existingLifecycle.status == 'processing' then
-  if existingLifecycleRaw ~= ARGV[14] then return -10 end
+  if existingLifecycleRaw ~= ARGV[14] or not sameField('extra', ARGV[15]) then return -10 end
   lifecycleNeedsWrite = true
 elseif not (existingLifecycleRaw == ARGV[2] and
      sameField('content', ARGV[3]) and
@@ -726,6 +732,10 @@ local idempotencyKey = kp .. ARGV[12]
 local ttlSec = tonumber(ARGV[13])
 local sourceMode = ARGV[14]
 local failureFromRaw = ARGV[15]
+local claimId = ARGV[16]
+local failedTargetsRaw = ARGV[17]
+local wakeRaw = ARGV[18]
+local wakeFingerprint = ARGV[19]
 
 if redis.call('EXISTS', sourceHash) == 0 then return {-1, ''} end
 if redis.call('HGET', sourceHash, 'threadId') ~= threadId or
@@ -738,6 +748,38 @@ end
 local existingFailureId = redis.call('GET', idempotencyKey)
 if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId) == 1 then
   return {2, existingFailureId}
+end
+
+local wakeId = nil
+if #KEYS > 1 then
+  local failedTargets = cjson.decode(failedTargetsRaw)
+  local raw = redis.call('HGET', KEYS[2], expectedEntryId)
+  if claimId ~= '' then
+    if not raw then return {-4, ''} end
+    local row = cjson.decode(raw)
+    if row.status ~= 'claimed' or row.claimId ~= claimId or
+       row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, failedTarget in ipairs(failedTargets) do
+      local found = false
+      for _, target in ipairs(row.claimedTargetIds or {}) do
+        if target == failedTarget then found = true end
+      end
+      if not found then return {-4, ''} end
+    end
+  elseif raw then
+    local row = cjson.decode(raw)
+    if row.payload.messageId ~= redis.call('HGET', sourceHash, 'id') then return {-4, ''} end
+    for _, target in ipairs(row.targets) do
+      for _, failedTarget in ipairs(failedTargets) do
+        if target == failedTarget then return {-4, ''} end
+      end
+    end
+  end
+  if wakeRaw ~= '' then
+    wakeId = cjson.decode(wakeRaw).id
+    if redis.call('HEXISTS', KEYS[2], wakeId) == 1 or
+       redis.call('HEXISTS', KEYS[4], wakeId) == 1 then return {-4, ''} end
+  end
 end
 
 if redis.call('HGET', sourceHash, 'recall') or redis.call('HGET', sourceHash, '_tombstone') then
@@ -843,6 +885,11 @@ redis.call('ZADD', threadKey, failedAt, failureId)
 redis.call('ZADD', visibilityKey, failureSeq, failureId)
 redis.call('HSET', metaKey, 'hwm', tostring(failureSeq), 'migrated', '1')
 redis.call('SET', idempotencyKey, failureId)
+if wakeId then
+  redis.call('HSET', KEYS[2], wakeId, wakeRaw)
+  redis.call('RPUSH', KEYS[3], wakeId)
+  redis.call('HSET', KEYS[4], wakeId, wakeFingerprint)
+end
 
 if ttlSec > 0 then
   redis.call('EXPIRE', failureHash, ttlSec)
@@ -1024,10 +1071,12 @@ return redis.call('HGETALL', KEYS[1])
 const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
+if (redis.call('HGET', KEYS[1], 'extra') or '') ~= ARGV[3] then return -1 end
 local extra=cjson.decode(ARGV[1])
 local currentRaw=redis.call('HGET',KEYS[1],'extra')
 local current={}
 if currentRaw and currentRaw ~= '' then current=cjson.decode(currentRaw) end
+extra.targetResponse=current.targetResponse
 extra.messageSearchAnswer=current.messageSearchAnswer
 if current.messageSearchAnswer then
   local binding=current.messageSearchAnswer
@@ -1042,6 +1091,16 @@ redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
 if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
 return 1
 `;
+
+const UPDATE_STREAM_METADATA_LUA = withUserMentionIndex(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return -1 end
+local fields = cjson.decode(ARGV[1])
+if fields.extra and (redis.call('HGET', KEYS[1], 'extra') or '') ~= ARGV[3] then return 0 end
+for field, value in pairs(fields) do redis.call('HSET', KEYS[1], field, value) end
+if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
+return 1
+`);
 
 const COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return {-1} end
@@ -1109,6 +1168,7 @@ function lifecycleResponseTerminalLuaArgs(
   patch: LifecycleResponseTerminalPatch,
   nextMessage: StoredMessage,
   expectedLifecycleRaw: string,
+  expectedExtraRaw: string,
 ): string[] {
   const { pluginMessage } = splitMessageExtra(patch.extra);
   return [
@@ -1118,7 +1178,7 @@ function lifecycleResponseTerminalLuaArgs(
     patch.contentBlocks === undefined ? '' : JSON.stringify(patch.contentBlocks),
     patch.toolEvents === undefined ? '' : JSON.stringify(patch.toolEvents),
     patch.metadata === undefined ? '' : JSON.stringify(patch.metadata),
-    patch.extra === undefined ? '' : serializeHostExtra(patch.extra),
+    nextMessage.extra === undefined ? '' : serializeHostExtra(nextMessage.extra),
     patch.thinking ?? '',
     patch.origin ?? '',
     JSON.stringify(patch.mentions),
@@ -1126,6 +1186,7 @@ function lifecycleResponseTerminalLuaArgs(
     patch.replyTo ?? '',
     pluginMessage ? JSON.stringify(pluginMessage) : '',
     expectedLifecycleRaw,
+    expectedExtraRaw,
   ];
 }
 
@@ -1286,6 +1347,7 @@ function parseUserMentionHandlingMetadata(raw: string): UserMentionHandlingMetad
 }
 
 export class RedisMessageStore {
+  private readonly redisAdmissionIdentity: RedisClient;
   async getLastUserMentionHandling(userId: string) {
     const result = (await this.redis.eval(
       READ_LAST_USER_MENTION_HANDLING_LUA,
@@ -1525,6 +1587,8 @@ export class RedisMessageStore {
       readDiagnostics?: MessageReadObserver;
     },
   ) {
+    this.redisAdmissionIdentity = redis;
+    redis = recoveryRedis(redis);
     this.redis = redis;
     this.readDiagnostics = options?.readDiagnostics;
     this.onAppend = options?.onAppend;
@@ -1565,7 +1629,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     const messageId = input.reservedId ?? generateSortableId(input.timestamp);
@@ -1630,7 +1694,7 @@ export class RedisMessageStore {
     entries: readonly QueueLedgerEntry[],
     ledgerStore: QueueLedgerStore,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     assertPrivateNoticeQueueAdmission(entries);
@@ -1669,7 +1733,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerMessageAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis message admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('Queue admission requires at least one row');
@@ -1737,7 +1801,7 @@ export class RedisMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): Promise<QueueLedgerLifecycleAdmissionResult> {
-    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redisAdmissionIdentity)) {
       throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
     }
     if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
@@ -1756,8 +1820,8 @@ export class RedisMessageStore {
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const key = MessageKeys.detail(messageId);
-      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
-      const current = await this.getById(messageId);
+      const snapshot = await this.redis.hgetall(key);
+      const current = this.hydrateHash(snapshot);
       if (!current) return { kind: 'not_found' };
       const prepared = prepareLifecycleResponseTerminalWithLedgerTargets(current, patch, entries);
       if (prepared.kind !== 'prepared') return prepared;
@@ -1805,7 +1869,12 @@ export class RedisMessageStore {
           QueueLedgerKeys.messageIndex(threadId!),
           MessageKeys.threadVisibility(threadId!),
           MessageKeys.threadVisibilityMeta(threadId!),
-          ...lifecycleResponseTerminalLuaArgs(patch, terminalMessageForLua, expectedLifecycleRaw),
+          ...lifecycleResponseTerminalLuaArgs(
+            patch,
+            terminalMessageForLua,
+            snapshot.lifecycle ?? '',
+            snapshot.extra ?? '',
+          ),
           maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
           String(prepared.entries.length),
           expectedMode,
@@ -1834,6 +1903,7 @@ export class RedisMessageStore {
       if (persisted.some((entry) => entry === null)) {
         throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
       }
+      notifyMessageTimelineChange(this, message);
       return {
         kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
         message,
@@ -2070,6 +2140,20 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getByIds(ids: readonly string[]): Promise<Map<string, StoredMessage | null>> {
+    const result = new Map<string, StoredMessage | null>();
+    const unique = [...new Set(ids)];
+    for (let offset = 0; offset < unique.length; offset += 8) {
+      const batch = unique.slice(offset, offset + 8);
+      const pipeline = this.redis.multi();
+      for (const id of batch) pipeline.hgetall(MessageKeys.detail(id));
+      const replies = await pipeline.exec();
+      const hashes = batch.map((_id, i) => readAuthoritativeHash(replies?.[i], 'canonical message batch'));
+      batch.forEach((id, i) => result.set(id, hashes[i] ? this.hydrateHash(hashes[i]) : null));
+    }
+    return result;
   }
 
   async getArtifactById(id: string): Promise<StoredMessage | null> {
@@ -3053,16 +3137,95 @@ export class RedisMessageStore {
    * Read-state routes select durable owner-read evidence; freshness consumers
    * keep the published timeline frontier.
    */
+  private async readBrowserVisibilityMetadata(ids: string[], viewerUserId: string) {
+    const fields = [
+      'id',
+      'userId',
+      'catId',
+      'from',
+      'threadId',
+      'timestamp',
+      'deletedAt',
+      'deliveryStatus',
+      'origin',
+      'source',
+      'lifecycle',
+      'recall',
+      '_tombstone',
+    ];
+    const pipeline = this.redis.pipeline();
+    ids.forEach((id) => pipeline.hmget(MessageKeys.detail(id), ...fields));
+    const results = await pipeline.exec();
+    if (!results) throw new Error('Browser visibility metadata unavailable');
+    return Promise.all(
+      results.map(async ([error, value]) => {
+        if (error) throw error;
+        if (
+          !Array.isArray(value) ||
+          value.length !== fields.length ||
+          !value.every((field) => field === null || typeof field === 'string')
+        ) {
+          throw new Error('Invalid browser visibility metadata');
+        }
+        const values = value as Array<string | null>;
+        const hash = Object.fromEntries(
+          fields.flatMap((field, index) => (values[index] === null ? [] : [[field, values[index]!]])),
+        );
+        const message = this.hydrateHash(hash);
+        // extra.scheduler affects only owner-bound managed-hold admission.
+        if (message?.userId === viewerUserId && isManagedHoldConnectorMessage(message)) {
+          message.extra = safeParseExtra((await this.redis.hget(MessageKeys.detail(message.id), 'extra')) ?? undefined);
+        }
+        return message;
+      }),
+    );
+  }
+
+  async getVisibilityHead(threadId: string): Promise<number> {
+    await this.ensureVisibilityMigrated(threadId);
+    const head = await this.redis.zrevrange(MessageKeys.threadVisibility(threadId), 0, 0, 'WITHSCORES');
+    return Number(head[1] ?? 0);
+  }
+
+  async getBrowserHistoryChanges(threadId: string, viewerUserId: string, afterSeq: number) {
+    await this.ensureVisibilityMigrated(threadId);
+    // Allocator and legacy migration both assign unique increasing scores.
+    const raw = await this.redis.zrangebyscore(
+      MessageKeys.threadVisibility(threadId),
+      `(${afterSeq}`,
+      '+inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      50,
+    );
+    const ids = raw.filter((_, index) => index % 2 === 0);
+    if (ids.length === 0) return { messages: [], scannedThrough: afterSeq, exhausted: true };
+    const metadata = await this.readBrowserVisibilityMetadata(ids, viewerUserId);
+    const visibleIds = metadata
+      .filter(
+        (message): message is StoredMessage =>
+          message !== null && isBrowserHistoryMessageVisibleToViewer(message, viewerUserId),
+      )
+      .map((message) => message.id);
+    const scores = new Map(ids.map((id, index) => [id, Number(raw[index * 2 + 1])]));
+    const messages = (visibleIds.length ? await this.hydrateMessages(visibleIds) : [])
+      .filter((message) => isBrowserHistoryMessageVisibleToViewer(message, viewerUserId))
+      .map((message) => ({ ...message, visibilitySeq: scores.get(message.id)! }));
+    return { messages, scannedThrough: Number(raw.at(-1)), exhausted: ids.length < 50 };
+  }
+
   async getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): Promise<{ cursor: string; messageId: string } | null> {
     await this.ensureVisibilityMigrated(threadId);
     const visKey = MessageKeys.threadVisibility(threadId);
-    const CHUNK = 20;
+    const browser = options?.evidence === 'browser_timeline';
+    const CHUNK = browser ? 100 : 20;
     const staleIds: string[] = [];
     let offset = 0;
 
@@ -3071,22 +3234,30 @@ export class RedisMessageStore {
       const raw = await this.redis.zrevrange(visKey, offset, offset + CHUNK - 1, 'WITHSCORES');
       if (raw.length === 0) break;
 
+      const browserMessages = browser
+        ? await this.readBrowserVisibilityMetadata(
+            raw.filter((_, index) => index % 2 === 0),
+            options?.viewerUserId ?? '',
+          )
+        : undefined;
+
       // Parse WITHSCORES pairs: [id, score, id, score, ...]
       for (let i = 0; i < raw.length; i += 2) {
         const id = raw[i]!;
         const score = Number(raw[i + 1]);
-        const data = await this.redis.hgetall(MessageKeys.detail(id));
-        if (!data || !data.id) {
-          staleIds.push(id);
-          continue;
-        }
-        const msg = this.hydrateHash(data as Record<string, string>);
+        const msg = browserMessages
+          ? browserMessages[i / 2]
+          : this.hydrateHash(await this.redis.hgetall(MessageKeys.detail(id)));
         if (!msg) {
           staleIds.push(id);
           continue;
         }
         const eligible =
-          options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublished(msg);
+          options?.evidence === 'browser_timeline'
+            ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
+            : options?.evidence === 'durable_owner_read'
+              ? isDurableOwnerReadEvidence(msg)
+              : isTimelinePublished(msg);
         if (!eligible) continue;
         if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
         if (msg.deletedAt) continue;
@@ -3674,10 +3845,39 @@ export class RedisMessageStore {
     return result;
   }
 
+  async compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): Promise<StoredMessage | null> {
+    const changed = await this.redis.eval(
+      `
+if redis.call('EXISTS',KEYS[1]) == 0 then return 0 end
+if redis.call('HGET',KEYS[1],'recall') or redis.call('HGET',KEYS[1],'_tombstone') then return 0 end
+local raw=redis.call('HGET',KEYS[1],'extra')
+if not raw or raw == '' then return 0 end
+local extra=cjson.decode(raw)
+local prior=extra.targetResponse
+local next=cjson.decode(ARGV[2])
+if not prior then
+  local receipt=extra.pluginAddressedReceipt
+  if tonumber(ARGV[1]) ~= 0 or next.revision ~= 1 or not receipt or
+     receipt.targetId ~= next.targetId or receipt.inputMessageId ~= next.inputMessageId then return 0 end
+elseif prior.revision ~= tonumber(ARGV[1]) or next.revision ~= prior.revision+1 or
+   next.targetId ~= prior.targetId or next.inputMessageId ~= prior.inputMessageId or
+   next.execution.id ~= prior.execution.id then return 0 end
+extra.targetResponse=next
+redis.call('HSET',KEYS[1],'extra',cjson.encode(extra))
+return 1`,
+      1,
+      MessageKeys.detail(id),
+      String(expectedRevision),
+      JSON.stringify(next),
+    );
+    return Number(changed) === 1 ? this.getById(id) : null;
+  }
+
   async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
     const {
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
@@ -3692,19 +3892,66 @@ export class RedisMessageStore {
       collectiveWorkDelegationV1: _stripCollectiveDelegation,
       ...hostPatch
     } = extra as Record<string, unknown>;
-    const merged = { ...current, ...hostPatch };
-    const updated = await this.redis.eval(
-      UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
-      1,
-      MessageKeys.detail(id),
-      serializeExtra(merged ?? {}),
-      pluginMessage ? JSON.stringify(pluginMessage) : '',
-    );
-    if (Number(updated) !== 1) return null;
-    const result = await this.getById(id);
-    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
-      notifyMessageTimelineChange(this, result);
-    return result;
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+      const merged = { ...current, ...hostPatch };
+      const updated = Number(
+        await this.redis.eval(
+          UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
+          1,
+          key,
+          serializeExtra(merged),
+          pluginMessage ? JSON.stringify(pluginMessage) : '',
+          snapshot.extra ?? '',
+        ),
+      );
+      if (updated === -1) continue;
+      if (updated !== 1) return null;
+      const result = await this.getById(id);
+      if (
+        result &&
+        hostPatch.rich !== undefined &&
+        JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich)
+      )
+        notifyMessageTimelineChange(this, result);
+      return result;
+    }
+    throw Object.assign(new Error(`Message extra changed during update: ${id}`), { statusCode: 503 });
+  }
+
+  async setInteractiveBlockState(
+    id: string,
+    blockId: string,
+    state: InteractiveBlockState,
+  ): Promise<StoredMessage | null> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const previousRich = JSON.stringify(msg.extra?.rich);
+      const updated = applyInteractiveBlockState(msg, blockId, state);
+      if (!updated) return null;
+      const result = Number(
+        await this.redis.eval(
+          UPDATE_STREAM_METADATA_LUA,
+          1,
+          key,
+          JSON.stringify({ extra: serializeHostExtra(updated.extra) }),
+          '',
+          snapshot.extra ?? '',
+        ),
+      );
+      if (result === 0) continue;
+      if (result === -1) return null;
+      if (previousRich !== JSON.stringify(updated.extra?.rich)) notifyMessageTimelineChange(this, updated);
+      return updated;
+    }
+    throw Object.assign(new Error(`Interactive state changed during save: ${id}`), { statusCode: 503 });
   }
 
   async compareAndTransitionCustodyOffer(
@@ -3764,43 +4011,50 @@ export class RedisMessageStore {
   }
 
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    const previousRich = JSON.stringify(msg.extra?.rich);
-    const augmented = applyStreamMetadataAugment(msg, patch);
-    const fields: Record<string, string> = {};
-    if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
-    if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
-    if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
-    if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
-    if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
-    const { pluginMessage } = splitMessageExtra(augmented.extra);
-    if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
-    if (Object.keys(fields).length > 0) {
-      await this.redis.eval(
-        withUserMentionIndex(`
-        local fields = cjson.decode(ARGV[1])
-        for field, value in pairs(fields) do redis.call('HSET', KEYS[1], field, value) end
-        if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
-        return 1
-      `),
-        1,
-        MessageKeys.detail(id),
-        JSON.stringify(fields),
-        pluginMessage ? JSON.stringify(pluginMessage) : '',
-      );
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const snapshot = await this.redis.hgetall(key);
+      const msg = this.hydrateHash(snapshot);
+      if (!msg) return null;
+      const previousRich = JSON.stringify(msg.extra?.rich);
+      const augmented = applyStreamMetadataAugment(msg, patch);
+      const fields: Record<string, string> = {};
+      if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
+      if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
+      if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
+      if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
+      if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
+      const { pluginMessage } = splitMessageExtra(augmented.extra);
+      if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
+      if (Object.keys(fields).length > 0) {
+        const result = Number(
+          await this.redis.eval(
+            UPDATE_STREAM_METADATA_LUA,
+            1,
+            key,
+            JSON.stringify(fields),
+            pluginMessage ? JSON.stringify(pluginMessage) : '',
+            snapshot.extra ?? '',
+          ),
+        );
+        if (result === 0) continue;
+        if (result === -1) return null;
+      }
+      const updated = (await this.getById(id)) ?? augmented;
+      if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+        notifyMessageTimelineChange(this, updated);
+      return updated;
     }
-    const updated = (await this.getById(id)) ?? augmented;
-    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
-      notifyMessageTimelineChange(this, updated);
-    return updated;
+    throw Object.assign(new Error(`Stream metadata changed during update: ${id}`), { statusCode: 503 });
   }
 
   async commitLifecycleResponseTerminal(
     id: string,
     patch: LifecycleResponseTerminalPatch,
   ): Promise<CommitLifecycleResponseTerminalResult> {
-    return this.commitLifecycleResponseTerminalInternal(id, patch);
+    const result = await this.commitLifecycleResponseTerminalInternal(id, patch);
+    if (result.kind === 'applied' || result.kind === 'replayed') notifyMessageTimelineChange(this, result.message);
+    return result;
   }
 
   private async commitLifecycleResponseTerminalInternal(
@@ -3809,11 +4063,9 @@ export class RedisMessageStore {
   ): Promise<CommitLifecycleResponseTerminalResult> {
     const key = MessageKeys.detail(id);
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      // Read the expected lifecycle before hydrating the full message. If a child
-      // settles between these reads, the Lua comparison fails instead of blessing
-      // a terminal state derived from mismatched snapshots.
-      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
-      const current = await this.getById(id);
+      // Raw CAS tokens and hydrated values must describe the same snapshot.
+      const snapshot = await this.redis.hgetall(key);
+      const current = this.hydrateHash(snapshot);
       if (!current) return { kind: 'not_found' };
       const prepared = prepareRedisLifecycleResponseTerminal(current, patch);
       if (prepared.kind === 'result') {
@@ -3832,7 +4084,12 @@ export class RedisMessageStore {
           key,
           MessageKeys.threadVisibility(current.threadId),
           MessageKeys.threadVisibilityMeta(current.threadId),
-          ...lifecycleResponseTerminalLuaArgs(patch, prepared.nextMessage, expectedLifecycleRaw),
+          ...lifecycleResponseTerminalLuaArgs(
+            patch,
+            prepared.nextMessage,
+            snapshot.lifecycle ?? '',
+            snapshot.extra ?? '',
+          ),
         ),
       );
       // Both codes mean the snapshot changed after our read. Re-read even when
@@ -3852,9 +4109,23 @@ export class RedisMessageStore {
   async commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const result = await this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private async commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
     const source = await this.getById(input.sourceMessageId);
     if (!source) return { kind: 'not_found' };
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets : undefined,
+    );
     const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -3909,11 +4180,18 @@ export class RedisMessageStore {
       input.failedAt < source.timestamp ||
       input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
       uniqueTargets.size !== input.requestedTargets.length ||
+      (input.claim && input.requestedTargets.length === 0) ||
       (!isQueuedInput && input.requestedTargets.length === 0) ||
       (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
     ) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
+    if (
+      input.claim &&
+      (!(input.claim.ledger instanceof RedisQueueLedgerStore) ||
+        !input.claim.ledger.usesRedisClient(this.redisAdmissionIdentity))
+    )
+      throw new Error('pre-admission failure requires the matching Redis Queue ledger');
     const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
     const assigned = assignLifecycleDispatchTargetsMetadata(source.lifecycle, inputIdentity, input.requestedTargets);
     if (assigned.kind === 'conflict') {
@@ -3960,10 +4238,20 @@ export class RedisMessageStore {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
     }
     await this.ensureVisibilityMigrated(source.threadId);
+    const wake = input.claim?.makeWake?.(failureId);
+    if (wake) assertQueueLedgerEntry(wake);
+    const ledgerKeys = input.claim
+      ? [
+          QueueLedgerKeys.entries(source.threadId),
+          QueueLedgerKeys.order(source.threadId),
+          QueueLedgerKeys.privateAdmissions(source.threadId),
+        ]
+      : [];
     const result = (await this.redis.eval(
       COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA,
-      1,
+      1 + ledgerKeys.length,
       MessageKeys.detail(source.id),
+      ...ledgerKeys,
       this.keyPrefix,
       failureId,
       source.threadId,
@@ -3979,6 +4267,10 @@ export class RedisMessageStore {
       String(this.ttlSeconds ?? 0),
       isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
       JSON.stringify(failureInput.from),
+      input.claim?.id ?? '',
+      JSON.stringify(input.requestedTargets),
+      wake ? JSON.stringify(wake) : '',
+      wake ? queueLedgerAdmissionFingerprint(wake) : '',
     )) as [number | string, string];
     const outcome = Number(result[0]);
     if (outcome === -1) return { kind: 'not_found' };
@@ -4045,7 +4337,10 @@ export class RedisMessageStore {
     const locked = await this.withLifecycleDispatchLock(id, () =>
       this.advanceLifecycleInputDispatchUnlocked(id, patch),
     );
-    if (locked !== null) return locked;
+    if (locked !== null) {
+      if (locked.kind === 'applied' || locked.kind === 'replayed') notifyMessageTimelineChange(this, locked.message);
+      return locked;
+    }
     const message = await this.getById(id);
     if (!message) return { kind: 'not_found' };
     return { kind: 'conflict', reason: 'contended', message };

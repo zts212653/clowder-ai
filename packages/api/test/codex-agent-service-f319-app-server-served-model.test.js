@@ -55,8 +55,13 @@ class FakeAppServerWire {
       this.inbox.push({ id: message.id, result: { config: { model_provider: 'openai' } } });
     } else if (message.method === 'configRequirements/read') {
       this.inbox.push({ id: message.id, result: { requirements: null } });
+    } else if (message.method === 'account/login/start') {
+      // F320 KD-3: an official API key is logged in to the native in-memory store.
+      this.apiKeyLogin = message.params?.type === 'apiKey';
+      this.inbox.push({ id: message.id, result: { type: message.params?.type } });
     } else if (message.method === 'account/read') {
-      this.inbox.push({ id: message.id, result: { account: { type: 'chatgpt' } } });
+      const account = this.apiKeyLogin ? { type: 'apiKey' } : { type: 'chatgpt' };
+      this.inbox.push({ id: message.id, result: { account } });
     } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       this.inbox.push({ id: message.id, result: { thread: { id: this.threadId, turns: [] } } });
     } else if (message.method === 'thread/turns/list') {
@@ -192,7 +197,7 @@ describe('F319 Phase B app-server served model', () => {
     });
   });
 
-  test('api_key label: a fresh host observation still lands on done (auth label ≠ wire)', async () => {
+  test('api_key: a fresh host observation still lands on done for the in-memory key login', async () => {
     await withEnv(OBSERVATION_DEFAULT, async () => {
       const threadId = `codex-thread-f319-label-${Date.now()}`;
       const service = createService('gpt-5.4');

@@ -52,6 +52,23 @@ export function hasUnconfirmedProviderTeardown(record: TurnExecutionRecord): boo
   );
 }
 
+/**
+ * #1838: the running execution that keeps a new turn of this thread and role from starting, because
+ * its provider started and its stop is not confirmed. Admission and its restart test share this.
+ */
+export function findUnconfirmedProviderBlocker(
+  running: readonly TurnExecutionRecord[],
+  scope: { invocationId: string; threadId: string; catId: string },
+): TurnExecutionRecord | undefined {
+  return running.find(
+    (record) =>
+      record.invocationId !== scope.invocationId &&
+      record.threadId === scope.threadId &&
+      record.catId === scope.catId &&
+      hasUnconfirmedProviderTeardown(record),
+  );
+}
+
 export interface TurnExecutionSourceQuery {
   userId: string;
   threadId: string;

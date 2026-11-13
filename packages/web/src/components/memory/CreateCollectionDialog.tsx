@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef } from 'react';
 import { LIBRARY_KINDS, libraryVisibility } from './page/library-labels';
-import { useCollectionCreation } from './use-collection-creation';
+import { type DryRunResult, useCollectionCreation } from './use-collection-creation';
 
 const KINDS = ['project', 'world', 'domain', 'research', 'global'];
 const VISIBILITIES = ['public', 'internal', 'private', 'restricted'];
@@ -11,8 +11,9 @@ const buttonClass = 'rounded-lg border border-cafe-subtle px-3 py-2 text-compact
 
 function wrapDialogFocus(element: HTMLDivElement | null, event: KeyboardEvent) {
   const elements = [
-    ...(element?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ??
-      []),
+    ...(element?.querySelectorAll<HTMLElement>(
+      'input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled)',
+    ) ?? []),
   ];
   if (!elements.length) {
     event.preventDefault();
@@ -24,6 +25,26 @@ function wrapDialogFocus(element: HTMLDivElement | null, event: KeyboardEvent) {
   event.preventDefault();
   const destination = event.shiftKey ? elements.at(-1) : elements[0];
   destination?.focus();
+}
+function DryRunPreview({ result }: { result: DryRunResult }) {
+  const skippedDirs = result.excludedDirs ?? 0;
+  const skippedFiles = result.excludedFiles ?? 0;
+  return (
+    <div className="space-y-1 rounded-lg bg-[var(--console-field-bg)] p-3 text-compact" data-testid="dry-run-preview">
+      <p className="font-medium">扫描预览</p>
+      <p>
+        {result.totalFiles} 个文件（{result.markdownFiles} 个 Markdown）
+      </p>
+      {skippedDirs + skippedFiles > 0 && (
+        <p>
+          跳过 {skippedDirs} 个目录、{skippedFiles} 个文件
+        </p>
+      )}
+      {result.secretFindings > 0 && (
+        <p className="text-conn-amber-text">检测到 {result.secretFindings} 个敏感信息，创建前请核查。</p>
+      )}
+    </div>
+  );
 }
 export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const state = useCollectionCreation(onCreated);
@@ -122,6 +143,20 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
                 />
               </label>
               <label className="block text-compact text-cafe-secondary">
+                不收录
+                <textarea
+                  aria-label="不收录"
+                  value={draft.exclude}
+                  onChange={(e) => update('exclude', e.target.value)}
+                  rows={2}
+                  placeholder={'drafts\n**/*.tmp'}
+                  className={fieldClass}
+                />
+                <span className="mt-1 block text-xs text-cafe-muted">
+                  每行一条，按根路径下的相对路径匹配；node_modules 等已默认跳过
+                </span>
+              </label>
+              <label className="block text-compact text-cafe-secondary">
                 谁能看见
                 <select
                   value={draft.sensitivity}
@@ -139,20 +174,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
             <p className="text-compact text-cafe-secondary">
               新建 {draft.displayName.trim() || '资料库'} · {libraryVisibility(draft.sensitivity)}可见
             </p>
-            {dryRun && (
-              <div
-                className="space-y-1 rounded-lg bg-[var(--console-field-bg)] p-3 text-compact"
-                data-testid="dry-run-preview"
-              >
-                <p className="font-medium">扫描预览</p>
-                <p>
-                  {dryRun.totalFiles} 个文件（{dryRun.markdownFiles} 个 Markdown）
-                </p>
-                {dryRun.secretFindings > 0 && (
-                  <p className="text-conn-amber-text">检测到 {dryRun.secretFindings} 个敏感信息，创建前请核查。</p>
-                )}
-              </div>
-            )}
+            {dryRun && <DryRunPreview result={dryRun} />}
           </div>
           <footer className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-cafe-subtle bg-[var(--console-card-bg)] p-4">
             <button type="button" onClick={onClose} disabled={busy} className={buttonClass}>

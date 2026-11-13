@@ -81,9 +81,14 @@ for (const language of ['zh', 'en'])
           const results = await Promise.allSettled([
             browser?.close(),
             server ? stopChild(server) : undefined,
-            env?.cleanup(),
             f.close(),
           ]);
+          // Next can still write its output while stopping; remove it only after exit.
+          if (!server || server.exitCode !== null || server.signalCode !== null) {
+            results.push(...(await Promise.allSettled([env?.cleanup()])));
+          } else {
+            results.push({ status: 'rejected', reason: new Error('Next server has not exited; test output retained') });
+          }
           const failures = results.filter((r) => r.status === 'rejected');
           if (failures.length)
             throw new AggregateError(
@@ -148,13 +153,13 @@ for (const language of ['zh', 'en'])
       await decide(page, chat, rejected, rejectWord, responses);
       await chat.getByTestId('decision-result-label').waitFor();
       await freeze(page, chat);
-      assert.match(await chat.innerText(), language === 'en' ? /Rejected.*You/ : /已拒绝.*你/);
+      assert.match(await chat.innerText(), language === 'en' ? /Declined.*You/ : /已拒绝.*你/);
       await page.screenshot({ path: path.join(evidence, 'chat-result.png'), fullPage: true });
       const draft = page.locator('[data-testid="chat-input-composer-row"] textarea'),
         draftText = 'Preserved original scheduled-task draft';
       await draft.fill(draftText);
       await page.getByTestId('mailbox-button').click();
-      for (const action of ['create', 'delete', 'recover']) {
+      for (const action of ['create', 'delete', 'recover', 'update']) {
         const record = source.records.find((r) => r.action === action),
           card = page.getByTestId(`schedule-approval-${record.proposalId}`);
         await card.waitFor();
@@ -165,6 +170,12 @@ for (const language of ['zh', 'en'])
         assert.equal(await row.getByTestId('mailbox-item-toggle').count(), 0);
         assert.ok(text.includes(record.task.display.label) && text.includes(record.destination.title));
         assert.ok(!text.includes(record.task.id) && !text.includes('default-user') && !text.includes('F139'));
+        if (action === 'update') {
+          const changes = card.getByRole('region', { name: language === 'en' ? 'Changes' : '本次修改' });
+          assert.match(await changes.innerText(), /fork/);
+          assert.match(await changes.innerText(), /managed/);
+          assert.deepEqual(source.tasks.getById(record.task.id), record.task);
+        }
         const disclosure = card.locator('details');
         assert.equal(await disclosure.getAttribute('open'), null);
         render.push({ entrance: 'Inbox', action, text, box: await card.boundingBox() });
@@ -190,10 +201,14 @@ for (const language of ['zh', 'en'])
           language === 'en'
             ? action === 'delete'
               ? 'Approve and permanently delete'
-              : 'Approve and create'
+              : action === 'update'
+                ? 'Approve and update'
+                : 'Approve and create'
             : action === 'delete'
               ? '批准并永久删除'
-              : '批准并创建';
+              : action === 'update'
+                ? '批准并更新'
+                : '批准并创建';
         if (action === 'recover') {
           source.failRegistrationOnce();
           await decide(page, card, record, word, responses, 500);
@@ -217,32 +232,52 @@ for (const language of ['zh', 'en'])
           await page.screenshot({ path: path.join(evidence, 'inbox-recovery.png'), fullPage: true });
           await decide(page, card, record, resume, responses);
         } else await decide(page, card, record, word, responses);
-        const result = page.getByTestId('mailbox-retained-result').filter({ hasText: record.task.display.label });
-        await result.waitFor();
-        await page.waitForFunction(({ element, word }) => element.textContent.includes(word), {
-          element: await result.elementHandle(),
-          word:
-            language === 'en'
-              ? action === 'delete'
-                ? 'Scheduled task permanently deleted'
-                : 'Scheduled task created and registered'
-              : action === 'delete'
-                ? '定时任务已永久删除'
-                : '定时任务已创建并注册',
-        });
+        const result = page.locator(
+          `[data-testid="mailbox-retained-result"][data-state="decided"][data-decision-key='${JSON.stringify(['F139', record.proposalId])}']`,
+        );
+        await result
+          .filter({
+            hasText:
+              language === 'en'
+                ? action === 'delete'
+                  ? 'Scheduled task permanently deleted'
+                  : action === 'update'
+                    ? 'Scheduled task parameters updated'
+                    : 'Scheduled task created and registered'
+                : action === 'delete'
+                  ? '定时任务已永久删除'
+                  : action === 'update'
+                    ? '定时任务参数已更新'
+                    : '定时任务已创建并注册',
+          })
+          .waitFor();
         await freeze(page, result);
         assert.match(await result.innerText(), language === 'en' ? /You/ : /你/);
         await page.screenshot({ path: path.join(evidence, `inbox-${action}-result.png`), fullPage: true });
+        if (action === 'update')
+          assert.deepEqual(source.tasks.getById(record.task.id), {
+            ...record.task,
+            params: { ...record.task.params, executionCarrier: 'managed' },
+          });
       }
       const effects = await source.effects();
-      assert.deepEqual(effects.tasks.map((t) => t.id).sort(), ['private-schedule-create', 'private-schedule-recover']);
-      assert.deepEqual(effects.registered.sort(), ['private-schedule-create', 'private-schedule-recover']);
+      assert.deepEqual(effects.tasks.map((t) => t.id).sort(), [
+        'private-schedule-create',
+        'private-schedule-recover',
+        'private-schedule-update',
+      ]);
+      assert.deepEqual(effects.registered.sort(), [
+        'private-schedule-create',
+        'private-schedule-recover',
+        'private-schedule-update',
+      ]);
       assert.equal(effects.proposals.filter((p) => p.effectCheckpoint?.kind === 'create').length, 2);
       assert.equal(effects.proposals.filter((p) => p.effectCheckpoint?.kind === 'delete').length, 1);
-      assert.equal(effects.proposals.filter((p) => p.status === 'approved' && p.effectCheckpoint).length, 3);
+      assert.equal(effects.proposals.filter((p) => p.effectCheckpoint?.kind === 'update').length, 1);
+      assert.equal(effects.proposals.filter((p) => p.status === 'approved' && p.effectCheckpoint).length, 4);
       assert.equal(effects.proposals.find((p) => p.proposalId === rejected.proposalId).status, 'rejected');
-      assert.equal(decisions.length, 5);
-      assert.equal(responses.length, 5);
+      assert.equal(decisions.length, 6);
+      assert.equal(responses.length, 6);
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();

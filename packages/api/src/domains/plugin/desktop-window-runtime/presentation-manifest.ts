@@ -22,8 +22,23 @@ const PUBLISHED_MANIFESTS: Partial<
  * new bridge literal. Installation and runtime still authenticate its exact SRI.
  */
 export function validateHostPluginManifest(value: unknown): ReturnType<typeof validateManifest> {
-  const legacy = validateManifest(value);
-  if (legacy.valid) return legacy;
+  let legacy = validateManifest(value);
+  // A newer general schema must not widen the Host's pinned desktop bridge ABI.
+  if (legacy.valid) {
+    if (!legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0'))
+      return legacy;
+    legacy = {
+      valid: false,
+      errors: [
+        {
+          instancePath: '/contributions',
+          schemaPath: '#/desktop-window/bridgeVersion',
+          keyword: 'enum',
+          message: 'Bridge 1.7.0 requires a pinned companion release',
+        },
+      ],
+    };
+  }
   const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
   const release = COMPANION_ARCHIVE_CONTRACTS.find(
     (row) => row.version === version && PUBLISHED_MANIFESTS[row.contract] !== undefined,

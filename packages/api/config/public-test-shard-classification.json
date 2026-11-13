@@ -5,5 +5,16 @@
     "rulesVersion": "f308-runtime-v2",
     "source": "Target-CI distributable lanes run inside a Linux network namespace with only loopback enabled, then irreversibly drop privilege with no_new_privs and empty capability sets before tests start. The kernel therefore denies cross-VM IP egress and prevents re-entering the parent namespace independently of the Node, native, or shell API used. Each file still runs in a fresh process, one file at a time. The preload guard adds before-I/O diagnostics for its recognized Node and child-process surfaces, including non-loopback Bash /dev/tcp and /dev/udp redirections and explicit privilege-escape commands; exact temporary executable fixtures remain explicitly declared."
   },
-  "sharedResources": []
+  "sharedResources": [
+    {
+      "id": "codex-quota-official-origin-proxy-contract",
+      "match": "^test/f320-quota-proxy\\.test\\.js$",
+      "reason": "Exercises the fixed official HTTPS origin through a test-owned loopback CONNECT proxy. The distributable URL guard rejects the official authority before the proxy contract can run; retain this exact test in the existing serial lane without excluding it or changing its assertions.",
+      "sharedResourceEvidence": {
+        "kind": "explicit-shared-resource",
+        "scope": "remote-endpoint",
+        "source": "test/f320-quota-proxy.test.js and test/helpers/quota-proxy-fixture.js: official chatgpt.com URL and CONNECT authority, but a generated test certificate, two loopback servers, synthetic credentials and a DNS stub that blocks direct official network access; no real provider or account is exercised."
+      }
+    }
+  ]
 }

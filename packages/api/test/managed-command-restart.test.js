@@ -86,7 +86,7 @@ test(
         assert.equal(response.status, 200, await response.clone().text());
         return response.json();
       };
-      return { child, get, address: ready.address };
+      return { child, get, address: ready.address, output: () => output };
     }
     async function crash(api) {
       const ended = once(api.child, 'exit');
@@ -146,7 +146,9 @@ const timer = setInterval(() => {
       return (
         state.tasks.find((task) => task.id === taskId).params.holdLifecycle.managedCommand.state === 'consumed' && state
       );
-    }, 'original result consumed by actual receiver');
+    }, 'original result consumed by actual receiver').catch((error) => {
+      throw new Error(`${error.message}\n${second.output().slice(-6000)}`, { cause: error });
+    });
     const result = settled.tasks.find((task) => task.id === taskId).params.holdLifecycle.managedCommand.result;
     assert.equal(result.exitCode, 3);
     assert.match(result.tailOutput, /REAL-RESULT-1843/);

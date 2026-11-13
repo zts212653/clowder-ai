@@ -262,6 +262,41 @@ describe('Tasks Routes', () => {
     assert.equal(events[1].event, 'task_updated');
   });
 
+  test('PATCH returns and broadcasts the canonical recovery projection', async () => {
+    const incident = {
+      v: 1,
+      ownerRef: 'task:projected',
+      incidents: [
+        {
+          source: 'ball_probe',
+          lane: 'probe',
+          disposition: 'needs_attention',
+          reasonCode: 'ball_recovery_failed',
+          executionRef: 'ball:task:projected:g1',
+        },
+      ],
+    };
+    const taskRecovery = {
+      project: async (item) => ({ ...item, recovery: { ...incident, ownerRef: `task:${item.id}` } }),
+      projectMany: async (items) => Promise.all(items.map((item) => taskRecovery.project(item))),
+    };
+    const app = await createApp({ taskRecovery });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Projected task', why: '', createdBy: 'opus' },
+    });
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${created.json().id}`,
+      payload: { why: 'still the same owner' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().recovery.incidents[0].reasonCode, 'ball_recovery_failed');
+    const event = socketManager.getEvents().findLast((entry) => entry.event === 'task_updated');
+    assert.equal(event.data.recovery.incidents[0].reasonCode, 'ball_recovery_failed');
+  });
+
   test('PATCH returns 404 for nonexistent task', async () => {
     const app = await createApp();
     const response = await app.inject({

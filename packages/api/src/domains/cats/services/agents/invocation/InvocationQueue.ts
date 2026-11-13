@@ -36,6 +36,7 @@ import {
   type ActionSuccessorFence,
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import { isTaskHandoffSource } from '../../../../ball-custody/task-handoff-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import type { LifecycleAppendRecoveryInput } from '../../stores/lifecycle-append-recovery.js';
 import { type LifecycleWakeCoverageInput, ordinaryWakeCoverageEligible } from '../../stores/lifecycle-wake-coverage.js';
@@ -44,9 +45,11 @@ import {
   assertQueueMessageReplay,
   type IMessageStore,
   isTimelinePublished,
+  type LifecyclePreAdmissionFailureInput,
   LifecycleResponseInputsChangedError,
   type LifecycleResponseTerminalPatch,
   messageIdempotencyScope,
+  preAdmissionFailureIdempotencyKey,
   reusesProseRouting,
   type StoredMessage,
 } from '../../stores/ports/MessageStore.js';
@@ -261,6 +264,19 @@ function isOrdinaryBodyReadEntry(entry: Pick<QueueEntry, 'sourceCategory' | 'exe
   );
 }
 
+/** Public message target selection and continue do not acquire a domain carrier's work. */
+export function isQueueMessageSelectionEligible(entry: QueueEntry): boolean {
+  return (
+    !isSystemPinnedQueueEntry(entry) &&
+    (entry.kind === 'conversation_input' ||
+      (entry.kind === 'message_wake' &&
+        entry.sourceCategory === 'a2a' &&
+        isOrdinaryBodyReadEntry(entry) &&
+        !entry.execution.cloudDispatchProvenance &&
+        !entry.execution.requiresExactCloudDispatchProvenance))
+  );
+}
+
 export class InvocationQueue {
   static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000;
 
@@ -395,7 +411,10 @@ export class InvocationQueue {
     );
   }
 
-  private resolveAdmissionInput(input: QueueEnqueueInput): QueueEnqueueInput {
+  private resolveAdmissionInput(
+    input: QueueEnqueueInput,
+    targetKinds?: ReadonlyMap<string, 'member' | 'plugin'>,
+  ): QueueEnqueueInput {
     if (!this.admissionPolicy.resolvePreResolvedTargets) return input;
     const implicit =
       input.from.kind === 'system' &&
@@ -411,10 +430,21 @@ export class InvocationQueue {
       !input.a2aParentInvocationId &&
       Object.keys(input.authorIntentByCatId ?? {}).length === 0 &&
       input.sourceCategory !== 'a2a_failure';
-    const targetCats = this.admissionPolicy.resolvePreResolvedTargets(input.targetCats, implicit);
-    if (input.targetCats.length > 0 && targetCats.length === 0)
+    const memberTargets = input.targetCats.filter((id) => targetKinds?.get(id) !== 'plugin');
+    const members = this.admissionPolicy.resolvePreResolvedTargets(memberTargets, implicit);
+    if (memberTargets.length > 0 && members.length === 0)
       throw new QueueAdmissionTargetUnavailableError('Queue admission has no valid target');
-    return { ...input, targetCats };
+    if (memberTargets.length === input.targetCats.length) return { ...input, targetCats: members };
+    // Plugin IDs were confirmed by inventory for this request. Recheck members at commit,
+    // and reject the entire mixed set if any member failed (never silently drop a sibling).
+    if (members.length !== memberTargets.length) throw new Error('Queue admission target identity changed');
+    let memberIndex = 0;
+    return {
+      ...input,
+      targetCats: [
+        ...new Set(input.targetCats.map((id) => (targetKinds?.get(id) === 'plugin' ? id : members[memberIndex++]))),
+      ],
+    };
   }
 
   /** A receipt probe carries the immutable producer request, before any current routing choice. */
@@ -433,6 +463,7 @@ export class InvocationQueue {
     reuseResolvedTargets = false,
     requestedTargetCats?: readonly string[],
     resolveTargets = true,
+    targetKinds?: ReadonlyMap<string, 'member' | 'plugin'>,
   ): QueueLedgerEntry[] {
     InvocationQueue.requireAdmissionContract({ ...input, messageId: messageId ?? input.messageId });
     // A stable source reuses its winning policy, including an exact parent or
@@ -444,7 +475,7 @@ export class InvocationQueue {
         throw new Error(`Queue admission identity conflict: ${sourceId}`);
       }
       if (resolveTargets)
-        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input);
+        input = replay ? { ...input, targetCats: [...replay.targets] } : this.resolveAdmissionInput(input, targetKinds);
     }
     if (
       requestedTargetCats &&
@@ -630,6 +661,15 @@ export class InvocationQueue {
     return count;
   }
 
+  /** Restore the local projection of already committed control edges after a lost acknowledgement. */
+  async reprojectFailureWakes(source: StoredMessage, targetIds: readonly string[]): Promise<void> {
+    for (const ref of source.lifecycle?.dispatchRefs ?? []) {
+      if (ref.phase !== 'settled' || !targetIds.includes(ref.targetId)) continue;
+      const wake = await this.ledgerStore.get(source.threadId, queueEntryId(ref.statusMessageId));
+      if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') this.cacheLedgerEntries([wake]);
+    }
+  }
+
   private async reconcileClaimedLedgerEntry(
     row: QueueLedgerEntry,
     messageStore?: Pick<IMessageStore, 'getById'>,
@@ -642,6 +682,7 @@ export class InvocationQueue {
     }
     const dispatchedTargets = new Set(source?.lifecycle?.dispatchRefs?.map((ref) => ref.targetId) ?? []);
     const claimedTargets = row.claimedTargetIds ?? [];
+    if (row.sourceCategory === 'a2a' && source) await this.reprojectFailureWakes(source, row.targets);
     if (claimedTargets.length > 0 && claimedTargets.every((targetId) => dispatchedTargets.has(targetId))) {
       // A response lifecycle is the durable receiver. A crash after that
       // History commit may leave the short Queue claim behind; retire only
@@ -708,6 +749,10 @@ export class InvocationQueue {
           enqueuedAt,
           input.messageId ?? undefined,
           existing ? [existing] : undefined,
+          false,
+          undefined,
+          true,
+          existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
         );
     const result =
       replay ?? (await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined));
@@ -750,7 +795,17 @@ export class InvocationQueue {
     const rows =
       replay && probe
         ? [probe]
-        : this.createLedgerRows(input, sourceId, enqueuedAt, undefined, existing ? [existing] : undefined);
+        : this.createLedgerRows(
+            input,
+            sourceId,
+            enqueuedAt,
+            undefined,
+            existing ? [existing] : undefined,
+            false,
+            undefined,
+            true,
+            existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
+          );
     const result = await messageStore.appendNoticeWithPrivateQueueAdmission(notice, rows, this.ledgerStore);
     if (result.outcome === 'full') return { outcome: 'full' };
     const entries = this.cacheLedgerEntries(result.entries);
@@ -906,7 +961,9 @@ export class InvocationQueue {
       assertQueueMessageReplay(committed, message);
       return { outcome: 'enqueued', message: committed, entries: [], deduped: true };
     }
-    if (!committedRow && !exactTargets && input.from.kind === 'system') input = this.resolveAdmissionInput(input);
+    if (!committed && !committedRow && !exactTargets && input.from.kind === 'system') {
+      input = this.resolveAdmissionInput(input, await this.admissionPolicy.resolveTargetKinds?.(input.targetCats));
+    }
     input = {
       ...input,
       targetCats: committedRow
@@ -918,6 +975,7 @@ export class InvocationQueue {
             exactTargets || input.allowConversationFallback === false,
           ),
     };
+    const targetKinds = committed ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats);
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(
       message,
@@ -929,7 +987,7 @@ export class InvocationQueue {
         // Async policy already selected canonical recipients. Validate those identities
         // at commit without interpreting a newly disabled successor as another predecessor.
         const admissionInput =
-          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true });
+          committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true }, targetKinds);
         return this.createLedgerRows(
           replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
           messageId,
@@ -961,6 +1019,80 @@ export class InvocationQueue {
     };
   }
 
+  /** One transaction for a prestart target's failure and its exact caller wake. */
+  async terminalizeClaimedAdmissionFailure(
+    messageStore: IMessageStore,
+    source: StoredMessage,
+    entry: QueueEntry,
+    targetId: string | readonly string[],
+    reason: LifecyclePreAdmissionFailureInput['reason'],
+    content?: string,
+  ) {
+    if (!entry.claimId && entry.status !== 'processing')
+      throw new Error('pre-admission failure requires its Queue claim or retired prestart attempt');
+    const requestedTargets = typeof targetId === 'string' ? [targetId] : [...targetId].sort();
+    const caller = queueEntryCallerCatId(entry);
+    const returnToCaller =
+      entry.sourceCategory === 'a2a' &&
+      caller &&
+      !requestedTargets.includes(caller) &&
+      source.from?.kind === 'agent' &&
+      source.from.catId === caller &&
+      source.userId === queueEntryOwnerId(entry) &&
+      source.threadId === entry.threadId &&
+      source.visibility !== 'whisper' &&
+      !source.deletedAt &&
+      (!entry.execution.a2aTriggerMessageId || entry.execution.a2aTriggerMessageId === source.id);
+    const committed = await messageStore.getByIdempotencyKey(
+      'system',
+      source.threadId,
+      preAdmissionFailureIdempotencyKey(entry.id, requestedTargets),
+    );
+    const failure = await messageStore.commitLifecyclePreAdmissionFailure({
+      sourceMessageId: source.id,
+      expectedEntryId: entry.id,
+      requestedTargets,
+      reason,
+      content:
+        content ??
+        (reason === 'invalid_explicit_target'
+          ? `唤起 ${requestedTargets.join('、')} 失败：指定的接收对象当前无效。`
+          : `唤起 ${requestedTargets.join('、')} 失败：成员的执行绑定无法通过准入。`),
+      failedAt: committed?.timestamp ?? Math.max(Date.now(), source.timestamp),
+      claim: {
+        ...(entry.claimId ? { id: entry.claimId } : {}),
+        ledger: this.ledgerStore,
+        ...(returnToCaller
+          ? {
+              makeWake: (failureId: string) =>
+                createQueueLedgerAdmission({
+                  kind: 'private_input',
+                  from: { kind: 'system', service: 'message_delivery' },
+                  threadId: entry.threadId,
+                  owner: entry.owner,
+                  sourceCategory: 'a2a_failure',
+                  sourceId: failureId,
+                  content: '',
+                  targetCatIds: [caller],
+                  ownerAuthProvenance: entry.execution.ownerAuthProvenance,
+                  intent: 'execute',
+                  autoExecute: true,
+                  a2aTriggerMessageId: failureId,
+                  a2aParentInvocationId: entry.execution.a2aParentInvocationId,
+                  enqueuedAt: this.nextEnqueuedAt(),
+                })[0]!,
+            }
+          : {}),
+      },
+    });
+    if (failure.kind !== 'applied' && failure.kind !== 'replayed') return failure;
+    if (returnToCaller) {
+      const wake = await this.ledgerStore.get(entry.threadId, queueEntryId(failure.failureMessage.id));
+      if (wake) this.cacheLedgerEntries([wake]);
+    }
+    return failure;
+  }
+
   /** One storage transaction for a terminal response bubble and its outbound A2A fan-out. */
   async terminalizeResponseAndEnqueueDurable(
     messageStore: IMessageStore,
@@ -990,6 +1122,10 @@ export class InvocationQueue {
       source.timestamp,
       responseMessageId,
       existing ? [existing] : undefined,
+      false,
+      undefined,
+      true,
+      existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
     );
     const result = await messageStore.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
       responseMessageId,
@@ -1039,7 +1175,17 @@ export class InvocationQueue {
     }
     const enqueuedAt = this.nextEnqueuedAt();
     const existing = await this.ledgerStore.get(input.threadId, queueEntryId(messageId));
-    const rows = this.createLedgerRows(input, messageId, enqueuedAt, messageId, existing ? [existing] : undefined);
+    const rows = this.createLedgerRows(
+      input,
+      messageId,
+      enqueuedAt,
+      messageId,
+      existing ? [existing] : undefined,
+      false,
+      undefined,
+      true,
+      existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
+    );
     const result = await messageStore.enqueueExistingMessageWithQueueLedgerAdmission(
       messageId,
       rows,
@@ -1088,16 +1234,29 @@ export class InvocationQueue {
     }
     const anchor = await this.ledgerStore.get(input.threadId, entryId);
     if (!anchor) return { outcome: 'not_found' as const, entries: [] };
+    const targetKinds = await this.admissionPolicy.resolveTargetKinds?.([...input.targetCats, bindTargetCatId]);
     if (
-      this.admissionPolicy.resolvePreResolvedTargets &&
-      !this.admissionPolicy.resolvePreResolvedTargets([bindTargetCatId], false).includes(bindTargetCatId)
+      !this.resolveAdmissionInput(
+        { ...input, targetCats: [bindTargetCatId], exactTargets: true },
+        targetKinds,
+      ).targetCats.includes(bindTargetCatId)
     ) {
       throw new Error('Queue target expansion has no valid target');
     }
     const siblingInput: QueueEnqueueInput = { ...input, sourceId: messageId, messageId };
     const siblingRows =
       siblingInput.targetCats.length > 0
-        ? this.createLedgerRows(siblingInput, messageId, anchor.enqueuedAt, messageId).map((row) => ({
+        ? this.createLedgerRows(
+            siblingInput,
+            messageId,
+            anchor.enqueuedAt,
+            messageId,
+            undefined,
+            false,
+            undefined,
+            true,
+            targetKinds,
+          ).map((row) => ({
             ...row,
             ...(anchor.position !== undefined ? { position: anchor.position } : {}),
           }))
@@ -1132,9 +1291,10 @@ export class InvocationQueue {
     if (current && queueEntryOwnerId(current) !== userId) {
       throw new Error('Queue target reconciliation owner mismatch');
     }
+    const targetKinds = await this.admissionPolicy.resolveTargetKinds?.(addTargetIds);
     const resolveTargets = this.admissionPolicy.resolvePreResolvedTargets;
     const validAdditions = resolveTargets
-      ? addTargetIds.filter((id) => resolveTargets([id], false).includes(id))
+      ? addTargetIds.filter((id) => targetKinds?.get(id) === 'plugin' || resolveTargets([id], false).includes(id))
       : addTargetIds;
     const validIntent = Object.fromEntries(
       Object.entries(authorIntentByTarget).filter(
@@ -1314,7 +1474,7 @@ export class InvocationQueue {
   }
 
   /**
-   * Bind one public conversation input to the selected member and persist
+   * Bind one ordinary public message to the selected member and persist
    * the operator's non-interrupting delivery choice. This is the Queue-panel
    * counterpart of composer admission: the same row either appends to the
    * exact current run or remains ordinary next work without canceling it.
@@ -1328,7 +1488,7 @@ export class InvocationQueue {
     at = Date.now(),
   ): Promise<QueueEntry | null> {
     const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || entry.kind !== 'conversation_input' || isSystemPinnedQueueEntry(entry)) {
+    if (!entry || entry.status !== 'queued' || !isQueueMessageSelectionEligible(entry)) {
       return null;
     }
     const assignsTargetlessConversation = entry.targets.length === 0;
@@ -1661,6 +1821,7 @@ export class InvocationQueue {
         source &&
         source.userId === userId &&
         source.threadId === threadId &&
+        !isTaskHandoffSource(source) &&
         source.visibility !== 'whisper' &&
         isTimelinePublished(source) &&
         !source.recall &&

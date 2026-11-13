@@ -35,6 +35,7 @@ import type {
   ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   ReplyPreview,
+  RichInteractiveBlock,
   RichMessageExtra,
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
@@ -46,6 +47,7 @@ import {
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  preserveInteractiveBlockStates,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
@@ -80,6 +82,7 @@ import { notifyMessageTimelineChange } from '../notify-message-timeline-change.j
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
+  isBrowserHistoryMessageVisibleToViewer,
   isDurableOwnerReadEvidence,
   isSystemUserMessage,
   isTimelinePublished as isTimelinePublishedFn,
@@ -330,6 +333,16 @@ export interface StoredMessage {
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
+    /** Durable reply outcome, distinct from the transport receipt below. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    /** Host receipt: input acceptance only, never a model response. */
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
@@ -402,6 +415,8 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /** Server-owned receipt identifying the buffered snapshot actually included in this post. */
+    richBlockPublicationId?: string;
     /** Host-only binding of a durable memory result to this exact rich block. */
     messageSearchAnswer?: import('@cat-cafe/shared').MessageSearchAnswerBinding;
     /** Outbound media owns publication until durable materialization completes. */
@@ -1143,6 +1158,12 @@ export interface LifecyclePreAdmissionFailureInput {
   content: string;
   contentBlocks?: readonly MessageContent[];
   failedAt: number;
+  /** Exact failed cohort; omit id only after every failed target left the ledger. */
+  claim?: {
+    id?: string;
+    ledger: QueueLedgerStore;
+    makeWake?: (failureId: string) => QueueLedgerEntry;
+  };
 }
 
 export type CommitLifecyclePreAdmissionFailureResult =
@@ -1155,8 +1176,11 @@ export type CommitLifecyclePreAdmissionFailureResult =
     }
   | { kind: 'not_found' };
 
-export function preAdmissionFailureIdempotencyKey(entryId: string): string {
-  return `message-lifecycle:pre-admission-failure:${entryId}`;
+export function preAdmissionFailureIdempotencyKey(entryId: string, targetId?: string | readonly string[]): string {
+  const key = `message-lifecycle:pre-admission-failure:${entryId}`;
+  if (targetId === undefined) return key;
+  const target = typeof targetId === 'string' ? targetId : targetId.length === 1 ? targetId[0] : [...targetId].sort();
+  return `${key}:${JSON.stringify(target)}`;
 }
 
 export function matchesLifecyclePreAdmissionFailure(
@@ -1176,7 +1200,7 @@ export function matchesLifecyclePreAdmissionFailure(
     lifecycle.status === 'failed' &&
     lifecycle.sourceEntryId === input.expectedEntryId &&
     lifecycle.inputMessageId === sourceMessage.id &&
-    isDeepStrictEqual(lifecycle.requestedTargets, input.requestedTargets) &&
+    isDeepStrictEqual([...lifecycle.requestedTargets].sort(), [...input.requestedTargets].sort()) &&
     lifecycle.reason === input.reason &&
     lifecycle.createdAt === input.failedAt
   );
@@ -1934,6 +1958,21 @@ export interface StreamMetadataAugmentInput {
   extra?: HostMessageExtra;
 }
 
+export type InteractiveBlockState = Pick<RichInteractiveBlock, 'disabled' | 'selectedIds'>;
+
+export function applyInteractiveBlockState(
+  message: StoredMessage,
+  blockId: string,
+  state: InteractiveBlockState,
+): StoredMessage | null {
+  if (message.recall || message._tombstone) return null;
+  const block = message.extra?.rich?.blocks.find((candidate) => candidate.id === blockId);
+  if (block?.kind !== 'interactive') return null;
+  if (state.disabled !== undefined) block.disabled = state.disabled;
+  if (state.selectedIds !== undefined) block.selectedIds = [...state.selectedIds];
+  return message;
+}
+
 function richBlockDedupeKey(block: unknown, index: number): string {
   if (block && typeof block === 'object' && 'id' in block) {
     const id = (block as { id?: unknown }).id;
@@ -2141,6 +2180,9 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Fresh full hashes in bounded batches, with one entry per requested ID.
+   * Missing is null; transport/incomplete replies reject. Never an admission grant. */
+  getByIds?(ids: readonly string[]): Promise<Map<string, StoredMessage | null>>;
   /**
    * Fresh media/visibility projection for exact publication reads. May omit
    * top-level content, thinking, metadata and toolEvents; never an authority verdict.
@@ -2291,8 +2333,20 @@ export interface IMessageStore {
     input: CompanionDeliveryAcceptance,
   ): StoredMessage | null | Promise<StoredMessage | null>;
 
-  /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
+  /** Atomically advance the existing target carrier without racing generic metadata writers. */
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F096: Update generic extra data; protected outcome fields keep their dedicated authority. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Persist only the selected block's state against the latest rich block collection. */
+  setInteractiveBlockState(
+    id: string,
+    blockId: string,
+    state: InteractiveBlockState,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F310: atomically fence source body and prior custody state before changing the source-owned carrier. */
   compareAndTransitionCustodyOffer(
     id: string,
@@ -2371,11 +2425,21 @@ export interface IMessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       /** Bind human read-state evidence to viewer-scoped managed-hold publication. */
       readonly viewerUserId?: string;
     },
   ): { cursor: string; messageId: string } | null | Promise<{ cursor: string; messageId: string } | null>;
+  /** Internal publication scan position; never exposed as another owner's browser cursor. */
+  getVisibilityHead(threadId: string): number | Promise<number>;
+  /** Read at most 50 raw publication positions, including hidden rows. */
+  getBrowserHistoryChanges(
+    threadId: string,
+    viewerUserId: string,
+    afterSeq: number,
+  ):
+    | { messages: StoredMessage[]; scannedThrough: number; exhausted: boolean }
+    | Promise<{ messages: StoredMessage[]; scannedThrough: number; exhausted: boolean }>;
   /**
    * #1200 §8.7: Canonicalize a raw message ID to a v2 cursor token.
    *
@@ -2500,6 +2564,18 @@ function applyLifecycleResponseTerminalPatch(
   replaceOptionalField(next, 'toolEvents', patch.toolEvents);
   replaceOptionalField(next, 'metadata', patch.metadata);
   replaceOptionalField(next, 'extra', patch.extra);
+  const rich = mergeRichExtra(patch.extra?.rich, current.extra?.rich);
+  if (rich) {
+    next.extra = {
+      ...next.extra,
+      rich: {
+        ...rich,
+        blocks: preserveInteractiveBlockStates(rich.blocks, current.extra?.rich?.blocks ?? [], {
+          preferSavedSelection: true,
+        }),
+      },
+    };
+  }
   replaceOptionalField(next, 'thinking', patch.thinking);
   replaceOptionalField(next, 'origin', patch.origin);
   replaceOptionalField(next, 'mentionsUser', patch.mentionsUser);
@@ -2678,6 +2754,7 @@ export class MessageStore {
     }
     message.visibilitySeq = this.visibilitySeq.get(message.id);
     this.userMentionIndex.observe(message);
+    notifyMessageTimelineChange(this, message);
   }
 
   /**
@@ -3521,38 +3598,60 @@ export class MessageStore {
   getLatestVisibleCursor(
     threadId: string,
     options?: {
-      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read' | 'browser_timeline';
       readonly viewerUserId?: string;
     },
   ): { cursor: string; messageId: string } | null {
     // Collect messages from the shared visibility order, then apply the
     // consumer-selected evidence strength.
-    const visible: Array<{ id: string; seq: number }> = [];
+    let latest: { id: string; seq: number } | undefined;
     for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
       const eligible =
-        options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublishedFn(msg);
+        options?.evidence === 'browser_timeline'
+          ? options.viewerUserId !== undefined && isBrowserHistoryMessageVisibleToViewer(msg, options.viewerUserId)
+          : options?.evidence === 'durable_owner_read'
+            ? isDurableOwnerReadEvidence(msg)
+            : isTimelinePublishedFn(msg);
       if (!eligible) continue;
       if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
       // #1200 codex P1: skip tombstones — same contract as Redis impl.
       // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
       if (msg.deletedAt) continue;
-      visible.push({ id: msg.id, seq });
+      if (!latest || seq > latest.seq || (seq === latest.seq && msg.id > latest.id)) latest = { id: msg.id, seq };
     }
-    if (visible.length === 0) return null;
-
-    // Sort descending by (seq, id) — we want the latest
-    visible.sort((a, b) => {
-      if (a.seq !== b.seq) return b.seq - a.seq;
-      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-    });
-
-    const latest = visible[0]!;
+    if (!latest) return null;
     return {
       cursor: cursorFor({ id: latest.id, visibilitySeq: latest.seq }),
       messageId: latest.id,
+    };
+  }
+
+  getVisibilityHead(threadId: string): number {
+    return this.messages.reduce(
+      (head, message) =>
+        message.threadId === threadId ? Math.max(head, this.visibilitySeq.get(message.id) ?? 0) : head,
+      0,
+    );
+  }
+
+  getBrowserHistoryChanges(threadId: string, viewerUserId: string, afterSeq: number) {
+    const byId = new Map(this.messages.map((message) => [message.id, message]));
+    const candidates: StoredMessage[] = [];
+    // Positions enter this Map only at monotonic allocation, already in scan order.
+    for (const [id, seq] of this.visibilitySeq) {
+      if (seq <= afterSeq) continue;
+      const message = byId.get(id);
+      if (!message || message.threadId !== threadId) continue;
+      candidates.push({ ...message, visibilitySeq: seq });
+      if (candidates.length === 50) break;
+    }
+    return {
+      messages: candidates.filter((message) => isBrowserHistoryMessageVisibleToViewer(message, viewerUserId)),
+      scannedThrough: candidates.at(-1)?.visibilitySeq ?? afterSeq,
+      exhausted: candidates.length < 50,
     };
   }
 
@@ -3779,10 +3878,40 @@ export class MessageStore {
     return structuredClone(msg);
   }
 
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null {
+    const message = this.messages.find((row) => row.id === id);
+    if (!message || message.recall || message._tombstone) return null;
+    const prior = message.extra?.targetResponse;
+    if (!prior) {
+      const receipt = message.extra?.pluginAddressedReceipt;
+      if (
+        expectedRevision !== 0 ||
+        next.revision !== 1 ||
+        receipt?.targetId !== next.targetId ||
+        receipt.inputMessageId !== next.inputMessageId
+      )
+        return null;
+    } else if (
+      prior.revision !== expectedRevision ||
+      next.revision !== expectedRevision + 1 ||
+      next.targetId !== prior.targetId ||
+      next.inputMessageId !== prior.inputMessageId ||
+      next.execution.id !== prior.execution.id
+    )
+      return null;
+    message.extra = { ...message.extra, targetResponse: structuredClone(next) };
+    return structuredClone(message);
+  }
+
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg || msg.recall || msg._tombstone) return null;
     const {
+      targetResponse: _stripTargetResponse,
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
@@ -3801,6 +3930,15 @@ export class MessageStore {
     if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
+  }
+
+  setInteractiveBlockState(id: string, blockId: string, state: InteractiveBlockState): StoredMessage | null {
+    const message = this.messages.find((candidate) => candidate.id === id);
+    if (!message) return null;
+    const previousRich = JSON.stringify(message.extra?.rich);
+    const updated = applyInteractiveBlockState(message, blockId, state);
+    if (updated && previousRich !== JSON.stringify(updated.extra?.rich)) notifyMessageTimelineChange(this, updated);
+    return updated;
   }
 
   compareAndTransitionCustodyOffer(id: string, input: CustodyOfferTransitionInput): CustodyOfferTransitionResult {
@@ -3885,10 +4023,24 @@ export class MessageStore {
   commitLifecyclePreAdmissionFailure(
     input: LifecyclePreAdmissionFailureInput,
   ): CommitLifecyclePreAdmissionFailureResult {
+    const result = this.commitLifecyclePreAdmissionFailureInternal(input);
+    if (result.kind === 'applied' || result.kind === 'replayed') {
+      notifyMessageTimelineChange(this, result.inputMessage);
+      notifyMessageTimelineChange(this, result.failureMessage);
+    }
+    return result;
+  }
+
+  private commitLifecyclePreAdmissionFailureInternal(
+    input: LifecyclePreAdmissionFailureInput,
+  ): CommitLifecyclePreAdmissionFailureResult {
     const index = this.messages.findIndex((message) => message.id === input.sourceMessageId);
     if (index === -1) return { kind: 'not_found' };
     const source = this.messages[index]!;
-    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(
+      input.expectedEntryId,
+      input.claim ? input.requestedTargets : undefined,
+    );
     const existingFailure = this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
     if (existingFailure) {
       if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
@@ -4002,6 +4154,26 @@ export class MessageStore {
     if (!settledLifecycle) {
       return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
     }
+    if (input.claim) {
+      const { ledger, id, makeWake } = input.claim;
+      if (!(ledger instanceof InMemoryQueueLedgerStore)) {
+        throw new Error('pre-admission failure requires the matching in-memory Queue ledger');
+      }
+      const row = ledger.getNow(source.threadId, input.expectedEntryId);
+      const ownedTarget = id
+        ? row?.status === 'claimed' &&
+          row.claimId === id &&
+          row.payload.messageId === source.id &&
+          input.requestedTargets.every((target) => row.claimedTargetIds?.includes(target))
+        : !row ||
+          (row.payload.messageId === source.id &&
+            input.requestedTargets.every((target) => !row.targets.includes(target)));
+      if (input.requestedTargets.length === 0 || !ownedTarget)
+        return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+      if (makeWake && ledger.enqueueNow([makeWake(failureId)]).outcome !== 'enqueued') {
+        throw new Error('pre-admission failure wake admission conflict');
+      }
+    }
     // Validate the entire settlement before append can publish effects. Notify
     // consumers only after the source and its failure are both committed.
     const failureMessage = this.appendWithReservedId(failureInput, failureId, { deferAppendNotification: true });
@@ -4042,6 +4214,7 @@ export class MessageStore {
     }
     if (transition.kind === 'replayed') return { kind: 'replayed', message: structuredClone(message) };
     message.lifecycle = structuredClone(transition.lifecycle);
+    notifyMessageTimelineChange(this, message);
     return { kind: 'applied', message: structuredClone(message) };
   }
 

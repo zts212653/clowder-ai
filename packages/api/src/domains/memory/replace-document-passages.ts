@@ -5,6 +5,7 @@ import { MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
 export type DocumentPassageSource = {
   item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'sourceHash' | 'updatedAt'>;
   passages: string[];
+  document?: EvidenceItem;
 };
 
 import { passageVectorKey } from './PassageVectorStore.js';
@@ -21,7 +22,7 @@ export function replaceDocumentPassages(
   );
   const deleteStmt = db.prepare(
     `DELETE FROM evidence_passages
-       WHERE doc_anchor = ? AND passage_id LIKE ?`,
+       WHERE doc_anchor = ? AND passage_id = ?`,
   );
   const insertStmt = db.prepare(`
       INSERT INTO evidence_passages
@@ -45,11 +46,14 @@ export function replaceDocumentPassages(
           deleteVector?.(passageVectorKey(source.item.anchor, old.passageId));
         }
       }
-      deleteStmt.run(source.item.anchor, passageLike);
+      for (const old of oldPassages)
+        if (!nextById.has(old.passageId)) deleteStmt.run(source.item.anchor, old.passageId);
 
       for (const [position, content] of source.passages.entries()) {
         const passageId = `${MARKDOWN_DOC_PASSAGE_PREFIX}${position}`;
         const old = oldById.get(passageId);
+        if (old?.content === content) continue;
+        if (old) deleteStmt.run(source.item.anchor, passageId);
         insertStmt.run(
           source.item.anchor,
           passageId,

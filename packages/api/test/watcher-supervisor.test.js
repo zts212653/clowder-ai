@@ -291,3 +291,68 @@ test('a watcher that never finishes cannot delay the work commit or its next tur
     await f.supervisor.stop();
   }
 });
+
+test('off or unpicked threads never resolve the member service, so an unavailable member is not retried every poll', async () => {
+  let serviceLookups = 0;
+  const runs = [];
+  const f = await setup(async (_owners, { source }) => runs.push(source.invocationId), {
+    service: () => {
+      serviceLookups++;
+      return undefined;
+    },
+  });
+  const current = await f.configs.readWatcherConfig('owner');
+  await f.configs.updateWatcherConfig('owner', current.revision, { enabled: false });
+  work(f, 'off-1');
+  settle(f, 'off-1');
+  for (let index = 0; index < 5; index++) {
+    await f.supervisor.poll();
+    await flush();
+  }
+  assert.equal(serviceLookups, 0, 'global off is decided before choosing a provider');
+  assert.deepEqual(f.errors.map(String), []);
+  assert.deepEqual(runs, []);
+
+  const on = await f.configs.readWatcherConfig('owner');
+  await f.configs.updateWatcherConfig('owner', on.revision, { enabled: true, scope: 'selected' });
+  work(f, 'unpicked-1');
+  settle(f, 'unpicked-1');
+  for (let index = 0; index < 5; index++) {
+    await f.supervisor.poll();
+    await flush();
+  }
+  assert.equal(serviceLookups, 0, 'a thread nobody picked is skipped the same way');
+  assert.deepEqual(f.errors.map(String), []);
+  assert.deepEqual(runs, []);
+  await f.supervisor.stop();
+});
+
+test('a member removed from the roster is not retried every poll while watching is off or the thread is unpicked', async () => {
+  const runs = [];
+  const f = await setup(async (_owners, { source }) => runs.push(source.invocationId));
+  const initial = await f.configs.readWatcherConfig('owner');
+  await f.configs.updateWatcherConfig('owner', initial.revision, {
+    enabled: false,
+    memberCatId: 'watcher-member-removed-from-roster',
+  });
+  work(f, 'gone-off-1');
+  settle(f, 'gone-off-1');
+  for (let index = 0; index < 5; index++) {
+    await f.supervisor.poll();
+    await flush();
+  }
+  assert.deepEqual(f.errors.map(String), [], 'global off needs no roster lookup');
+  assert.deepEqual(runs, []);
+
+  const off = await f.configs.readWatcherConfig('owner');
+  await f.configs.updateWatcherConfig('owner', off.revision, { enabled: true, scope: 'selected' });
+  work(f, 'gone-unpicked-1');
+  settle(f, 'gone-unpicked-1');
+  for (let index = 0; index < 5; index++) {
+    await f.supervisor.poll();
+    await flush();
+  }
+  assert.deepEqual(f.errors.map(String), [], 'an unpicked thread needs no roster lookup');
+  assert.deepEqual(runs, []);
+  await f.supervisor.stop();
+});

@@ -1,5 +1,6 @@
 ---
 name: schedule-tasks
+tips_exempt: "Existing scheduling surface; the parameter-update tool and approval card carry its actionable guidance. No new UI entry."
 description: >
   定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
   ⚠️ ROUTING: 定时/schedule/cron 需求优先用本 skill（Clowder AI 本地定时任务），
@@ -117,7 +118,14 @@ triggers:
 | 查看所有任务 | SchedulePanel（Workspace 调度 Tab）|
 | 暂停/恢复 | SchedulePanel UI（目前无 MCP 工具，只能在面板操作） |
 | 删除 | `cat_cafe_remove_scheduled_task` |
+| 修改既有周期任务的内容参数 | `cat_cafe_update_scheduled_task_params`（提交前后值审批，保留订阅身份） |
 | 手动触发 | SchedulePanel UI "立即执行" 按钮（目前无 MCP 工具） |
+
+只修改既有周期任务的模板参数时，传原 `taskId` 和 `paramsPatch` JSON 字符串；
+未提及的参数、触发规则、投递线程与 cursor 保持原样。猫调用只生成审批提案，批准后用于后续执行，
+正在运行的任务继续用原设置。任务定义发生变化时需重新提案，不能删除重建来绕过冲突。
+一次性任务、hold、具名 owner 管理的任务，以及 trigger/destination 修改不走此入口。
+持久 agent-key 调用还须传 `agentKeyCatId` 与归本人所有的 `sourceThreadId`。
 
 ### 删除流程（3 步）
 

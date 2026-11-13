@@ -9,6 +9,7 @@ import {
   PublicationLandingResolver,
 } from '@/components/workbench/PublicationLandingResolver';
 import { createPublicationSurface } from '@/components/workbench/publication-surface';
+import { ArtworkChromeProvider, useArtworkChrome } from '../ArtworkChrome';
 import { ArtworkOpeningPreview } from '../ArtworkOpeningPreview';
 
 const api = vi.hoisted(() => vi.fn());
@@ -251,4 +252,147 @@ it('keeps a remembered message-publication choice hidden while the exact saved o
   expect(resolved).not.toHaveBeenCalled();
   await act(async () => revalidated.resolve(response({ status: 'resolved', ownerUserId: 'operator', asset })));
   await presentedOwner();
+});
+
+function ChromeActionsSlot() {
+  const chrome = useArtworkChrome();
+  return <div ref={chrome?.setActions} data-testid="test-header-actions" />;
+}
+
+function worktreeFile(open: () => void) {
+  return (
+    <ArtifactFileSourceResolver
+      worktreeId="active-wt"
+      path="original.jpg"
+      title="原图"
+      onResolved={open}
+      onBack={() => {}}
+    />
+  );
+}
+
+it.each([
+  {
+    status: 404,
+    body: { error: { code: 'not_found' } },
+    expectedText: '尚未登记',
+  },
+  {
+    status: 409,
+    body: { error: { code: 'directory_inventory_unavailable', locations: [{ label: 'gone-worktree' }] } },
+    expectedText: 'gone-worktree',
+  },
+  {
+    status: 503,
+    body: { error: { code: 'source_resolution_unavailable' } },
+    expectedText: '暂时无法核验',
+  },
+])('keeps the readable preview, download action, and retry recovery on non-auth file source failure ($status) while current workspace read remains 200', async ({
+  status,
+  body,
+  expectedText,
+}) => {
+  let healthy = false;
+  api.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/workspace/file?')) return response({ path: 'original.jpg', mime: 'image/jpeg' });
+    return healthy
+      ? response({ kind: 'file', worktreeId: 'root', path: 'original.jpg' })
+      : new Response(JSON.stringify(body), { status });
+  });
+  await act(async () =>
+    root.render(
+      <ArtworkChromeProvider>
+        <ChromeActionsSlot />
+        <Journey entry={worktreeFile} />
+      </ArtworkChromeProvider>,
+    ),
+  );
+  expect(preview(), 'non-auth file source failure must not blank a readable preview').not.toBeNull();
+  expect(preview()?.querySelector('img')?.getAttribute('src')).toBe('http://api.test/chat.jpg');
+  expect(host.querySelector('button[aria-label="下载"]'), 'download action must remain available').not.toBeNull();
+  const fallback = host.querySelector('[data-testid="artwork-preview-fallback"]');
+  expect(fallback?.textContent).toContain('无法批注');
+  expect(fallback?.textContent).toContain(expectedText);
+  expect(preview()?.textContent).not.toContain('正在读取作品版本');
+
+  healthy = true;
+  const retry = fallback?.querySelector('button');
+  expect(retry?.textContent).toBe('重试');
+  await act(async () => retry?.click());
+  await presentedOwner();
+});
+
+it.each([
+  {
+    label: 'revoked directory 404',
+    sourceStatus: 404,
+    sourceBody: { error: { code: 'not_found' } },
+    fileStatus: 404,
+  },
+  {
+    label: 'inventory 409 after directory grant revoked',
+    sourceStatus: 409,
+    sourceBody: { error: { code: 'directory_inventory_unavailable', locations: [{ label: 'other-root' }] } },
+    fileStatus: 404,
+  },
+])('removes a cached preview without waiting for img onError when current workspace read is refused ($label)', async ({
+  sourceStatus,
+  sourceBody,
+  fileStatus,
+}) => {
+  api.mockImplementation(async (url: string) =>
+    url.startsWith('/api/workspace/file?')
+      ? new Response(JSON.stringify({ error: 'Unknown worktreeId: linked_review' }), { status: fileStatus })
+      : new Response(JSON.stringify(sourceBody), { status: sourceStatus }),
+  );
+  await act(async () =>
+    root.render(
+      <ArtworkChromeProvider>
+        <ChromeActionsSlot />
+        <Journey
+          entry={(open) => (
+            <ArtifactFileSourceResolver
+              worktreeId="linked_review"
+              path="original.jpg"
+              title="原图"
+              onResolved={open}
+              onBack={() => {}}
+            />
+          )}
+        />
+      </ArtworkChromeProvider>,
+    ),
+  );
+  expect(preview(), 'revoked directory grant must immediately unmount cached preview').toBeNull();
+  expect(host.querySelector('button[aria-label="下载"]')).toBeNull();
+  expect(resolved).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  expect(host.querySelector<HTMLElement>('[aria-hidden="false"]')?.inert).toBe(false);
+});
+
+it.each([
+  [401, 'identity_required'],
+  [403, 'access_denied'],
+  [409, 'identity_changed'],
+] as const)('removes the preview on genuine authorization or identity refusal (%s %s)', async (status, code) => {
+  api.mockResolvedValue(new Response(JSON.stringify({ error: { code } }), { status }));
+  await act(async () => root.render(<Journey entry={file} />));
+  expect(preview(), 'genuine authorization/identity refusal must not leave cached preview visible').toBeNull();
+  expect(resolved).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  expect(host.querySelector<HTMLElement>('[aria-hidden="false"]')?.inert).toBe(false);
+});
+
+it('falls back to the owner error panel if the Chat preview image itself fails to load', async () => {
+  api.mockImplementation(async (url: string) =>
+    url.startsWith('/api/workspace/file?')
+      ? response({ path: 'original.jpg', mime: 'image/jpeg' })
+      : new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 }),
+  );
+  await act(async () => root.render(<Journey entry={worktreeFile} />));
+  const previewImg = preview()?.querySelector('img');
+  expect(previewImg).not.toBeNull();
+  await act(async () => previewImg!.dispatchEvent(new Event('error')));
+  expect(preview()).toBeNull();
+  expect(host.querySelector<HTMLElement>('[aria-hidden="false"]')?.inert).toBe(false);
 });

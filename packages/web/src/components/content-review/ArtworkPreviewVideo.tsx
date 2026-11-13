@@ -9,10 +9,12 @@ export function ArtworkPreviewVideo({
   url,
   stageStyle,
   onSize,
+  onError,
 }: {
   url: string;
   stageStyle: CSSProperties;
   onSize: (size: { width: number; height: number }) => void;
+  onError?: () => void;
 }) {
   const player = useRef<HTMLDivElement>(null),
     video = useRef<HTMLVideoElement>(null);
@@ -28,6 +30,7 @@ export function ArtworkPreviewVideo({
             kind="video"
             src={url}
             videoRef={video}
+            onError={onError}
             className="absolute inset-0 h-full w-full object-contain"
             videoProps={{
               onLoadedMetadata: (event) => {

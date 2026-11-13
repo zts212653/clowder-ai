@@ -9,6 +9,7 @@
 
 // F046 / F314-17: the A2A line-start @mention grammar (API routing + chat direction display).
 export * from './a2a-mention-grammar.js';
+export * from './acp-pool-defaults.js';
 // F246 Phase I: shared Approval Hub producer metadata (API + Web single source).
 export * from './approval-producer-catalog.js';
 // Export avatar size limits (shared between API route bodyLimit and frontend size gate)
@@ -65,6 +66,7 @@ export * from './explicit-stop-intent.js';
 export * from './feature-demos.js';
 export * from './html-inline-event-handlers.js';
 export * from './ignored-item-preference.js';
+export * from './interactive-block-state.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
@@ -80,8 +82,10 @@ export type {
   MessageSearchResponse,
   MessageSearchResult,
 } from './message-search.js';
+export { DEFAULT_MESSAGE_SEARCH_SORT } from './message-search.js';
 export * from './message-search-answer.js';
 export * from './message-search-notice.js';
+export * from './message-search-selection.js';
 // First-party host-tool identities shared by onboarding discovery and catalog repair.
 export * from './native-tool-identities.js';
 export * from './plugin-archive-replacement.js';
@@ -106,6 +110,7 @@ export { richBlockSchema } from './schemas/rich-block.schema.js';
 export * from './shared-markdown-selection.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
+export * from './target-response.js';
 export * from './text-utils.js';
 export * from './thread-works.js';
 export * from './types/approval-decision-receipt.js';
@@ -164,6 +169,7 @@ export * from './types/content-modification-carrier.js';
 export * from './types/content-modification-control.js';
 export * from './types/content-modification-view.js';
 export * from './types/deployment-wait.js';
+export type { DshConnectionCheckFact, DshConnectionCheckView } from './types/dsh-connection-check.js';
 export * from './types/evolution-media-source.js';
 // F167 direct carriers expose only action identities backed by terminal producers.
 export * from './types/executable-action-successor.js';

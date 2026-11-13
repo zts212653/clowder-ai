@@ -6,6 +6,9 @@ export type ProfileKind = 'builtin' | 'api_key' | 'oauth';
 export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'acp';
 
 export interface ProfileItem {
+  agy?: { storage: 'cli_file'; credentialHome: string };
+  agyLoginStatus?: 'ready' | 'refreshable' | 'not_logged_in' | 'unreadable';
+  agyLoginCommand?: string;
   id: string;
   quota?: AccountQuotaObservation;
   /** Read-only canonical default-home readiness; this does not make the default managed. */
@@ -16,6 +19,8 @@ export interface ProfileItem {
     identity?: { email?: string; workspaceId: string; userId?: string };
   };
   claude?: { kind: 'long_lived_token' };
+  /** F317: Vertex AI through this machine's Google Cloud login, spending one project. */
+  googleCloud?: { credential: 'local_adc'; projectId: string };
   claudeTokenStatus?: 'saved' | 'missing' | 'expired';
   codex?: CodexManagedAccount & { status: 'not_prepared' | 'not_logged_in' | 'ready' | 'identity_changed' };
   provider?: string;

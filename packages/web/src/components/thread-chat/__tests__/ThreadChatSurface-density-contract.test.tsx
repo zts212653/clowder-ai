@@ -455,7 +455,11 @@ describe('ThreadChatSurface density contract', () => {
     expect(compact.querySelector('[data-chat-container]')?.className).toContain('[overflow-anchor:none]');
   });
 
-  it('routes an interactive rich action only through the surface that rendered it', async () => {
+  it.each([
+    true,
+    false,
+  ])('routes an interactive rich action and reports admission=%s to its own surface', async (sent) => {
+    handleSend.mockResolvedValue(sent);
     await act(async () => {
       root.render(
         <div>
@@ -474,16 +478,18 @@ describe('ThreadChatSurface density contract', () => {
       ?.getAttribute('data-send-context');
     expect(compactContext).toBeTruthy();
 
-    act(() => {
+    const onResult = vi.fn();
+    await act(async () => {
       window.dispatchEvent(
         new CustomEvent('cat-cafe:interactive-send', {
-          detail: { text: '确认', sendContext: compactContext },
+          detail: { text: '确认', sendContext: compactContext, onResult },
         }),
       );
     });
 
     expect(handleSend).toHaveBeenCalledOnce();
     expect(handleSend).toHaveBeenCalledWith('确认');
+    expect(onResult).toHaveBeenCalledExactlyOnceWith(sent);
   });
 
   it('admits a legacy unscoped command only through the matching full surface', async () => {

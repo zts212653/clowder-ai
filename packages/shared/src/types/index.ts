@@ -246,6 +246,7 @@ export type {
   McpSyncState,
   McpToolInfo,
   McpTransport,
+  PluginMcpToolIssue,
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';
@@ -1024,10 +1025,12 @@ export {
   subjectSeenOpportunityV1Schema,
   type ThreadOpenedOpportunityV1,
   threadOpenedOpportunityV1Schema,
+  workPreparationOpportunityV1Schema,
 } from './memory-cue.js';
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
+export * from './memory-read-usage.js';
 export {
   ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
   type AsrPersonMemoryDynamicSceneEntryV1,
@@ -1352,6 +1355,7 @@ export type {
   PluginManagerUninstallRequest,
   PluginManifest,
   PluginMarketplaceSelection,
+  PluginMentionTarget,
   PluginOperationRow,
   PluginOperationRowAction,
   PluginOperationRows,
@@ -1416,7 +1420,6 @@ export {
 } from './profile-update.js';
 export * from './profile-usage.js';
 export type {
-  ActiveParticipantInput,
   AssemblerInput,
   BootcampInput,
   CallableMentionsData,
@@ -1517,6 +1520,15 @@ export type {
   RefluxCategory,
   RefluxPattern,
 } from './reflux.js';
+export type {
+  RememberGroup,
+  RememberGroupRow,
+  RememberInput,
+  RememberItem,
+  RememberResult,
+  RememberRowResult,
+} from './remember.js';
+export { REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
 // F299 Phase D: transcript-owned provider request generations.
 export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
@@ -1636,7 +1648,7 @@ export type {
   UpdateSliceInput,
 } from './slice.js';
 // Socket.IO room membership convergence contract shared by API and Web.
-export type { RoomJoinAck } from './socket-room.js';
+export type { ResponseStreamReplay, RoomJoinAck } from './socket-room.js';
 // SOP definition generated truth source (#748)
 export {
   DEVELOPMENT_SOP_DEFINITION,
@@ -1716,6 +1728,8 @@ export type {
   TaskItem,
   TaskKind,
   TaskProbeSpec,
+  TaskRecoveryIncident,
+  TaskRecoveryProjection,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';

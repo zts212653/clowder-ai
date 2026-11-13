@@ -10,7 +10,7 @@ import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceSto
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
 import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
 
-async function fixture(t) {
+async function fixture(t, ready = true) {
   const root = mkdtempSync(join(tmpdir(), 'worker-projection-publication-'));
   const store = new SqliteEvidenceStore(join(root, 'evidence.sqlite'));
   await store.initialize();
@@ -23,6 +23,7 @@ async function fixture(t) {
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
   const vectors = new VectorStore(db, 4);
+  vectors.initMeta({ modelId: 'controlled', modelRev: '1', dim: 4 });
   const passages = new PassageVectorStore(db, 4);
   let embeddings = 0;
   store.setEmbedDeps({
@@ -32,7 +33,7 @@ async function fixture(t) {
     embedding: {
       load: async () => {},
       reprobeIfNeeded: async () => {},
-      isReady: () => true,
+      isReady: () => ready,
       getModelInfo: () => ({ modelId: 'controlled', modelRev: '1', dim: 4 }),
       embed: async (texts) => {
         embeddings++;
@@ -76,7 +77,90 @@ async function fixture(t) {
     ['thread-private', 'msg-hidden', [1, 0, 0, 0]],
   ])
     passages.upsert(passageVectorKey(thread, id), new Float32Array(vector));
-  return { store, db, embeddingCount: () => embeddings };
+  return { store, db, vectors, passages, embeddingCount: () => embeddings };
+}
+
+// Observe the real child's completed value before MemoryProcess publishes it.
+// Retirement alone changes vector ownership, not canonical source content.
+function beforeFirstPublication(t, retire) {
+  const results = [];
+  let vectorCalls = 0;
+  const originalEmit = ChildProcess.prototype.emit;
+  ChildProcess.prototype.emit = function (event, message, ...args) {
+    if (event === 'message') {
+      if (message?.type === 'embedding' && message.method === 'embed') vectorCalls++;
+      if (message?.type === 'result' && message.value !== undefined) {
+        results.push(structuredClone(message.value));
+        if (results.length === 1) retire();
+      }
+    }
+    return Reflect.apply(originalEmit, this, [event, message, ...args]);
+  };
+  t.after(() => {
+    ChildProcess.prototype.emit = originalEmit;
+  });
+  return { results, vectorCalls: () => vectorCalls };
+}
+
+for (const consumer of ['document', 'message']) {
+  test(`${consumer} hybrid publishes an already lexical worker result once after vector retirement`, async (t) => {
+    const f = await fixture(t, false);
+    const observed = beforeFirstPublication(t, () => {
+      f.store.invalidateVectorProjection();
+      f.vectors.clearAll();
+      f.passages.clearAll();
+    });
+    const result =
+      consumer === 'document'
+        ? await f.store.searchWithMeta('needle', { mode: 'hybrid', scope: 'docs', limit: 1 })
+        : await f.store.searchMessagePassages('needle', {
+            mode: 'hybrid',
+            visibleThreadIds: ['visible'],
+            sort: 'relevance',
+            candidateOrder: 'relevance',
+            candidateLimit: 1,
+            dateFrom: '2026-10-01',
+            dateTo: '2026-10-01',
+          });
+    const first = consumer === 'document' ? observed.results[0].result : observed.results[0];
+    assert.equal(first.meta.effectiveMode, 'lexical');
+    assert.equal(first.meta.degraded, true);
+    assert.equal(observed.vectorCalls(), 0, 'the real worker must not consume query vectors');
+    assert.equal(f.embeddingCount(), 0);
+    assert.deepEqual(result, first, 'keep the completed lexical set, order, source content and metadata');
+    assert.equal(observed.results.length, 1, 'retirement must not rerun an already completed lexical read');
+    if (consumer === 'document')
+      assert.deepEqual(
+        result.items.map((item) => item.anchor),
+        ['beta-doc'],
+      );
+    else
+      assert.deepEqual(
+        result.passages.map((passage) => passage.messageId),
+        ['lexical'],
+      );
+  });
+  for (const cancellation of ['deadline', 'abort']) {
+    test(`${consumer} already lexical publication preserves ${cancellation} after retirement`, async (t) => {
+      const f = await fixture(t, false);
+      const controller = new AbortController();
+      const deadlineAt = Date.now() + 10_000;
+      const observed = beforeFirstPublication(t, () => {
+        f.store.invalidateVectorProjection();
+        if (cancellation === 'deadline') t.mock.method(Date, 'now', () => deadlineAt + 1);
+        else controller.abort();
+      });
+      const options = { mode: 'hybrid', deadlineAt, signal: controller.signal };
+      await assert.rejects(
+        consumer === 'document'
+          ? f.store.searchWithMeta('needle', { ...options, scope: 'docs', limit: 1 })
+          : f.store.searchMessagePassages('needle', { ...options, visibleThreadIds: ['visible'], sort: 'relevance' }),
+        (error) => error.name === (cancellation === 'deadline' ? 'TimeoutError' : 'AbortError'),
+      );
+      assert.equal(observed.results.length, 1);
+      assert.equal(observed.vectorCalls(), 0);
+    });
+  }
 }
 
 // Test-local IPC boundary: the real RPC wrapper has already returned, serialized
@@ -175,4 +259,17 @@ test('retired worker cannot reset the original deadline to obtain a lexical resu
   );
   assert.equal(sent(), 1);
   assert.equal(f.embeddingCount(), 1);
+});
+
+test('an unknown legacy vector identity stays lexical in the real worker without reaching query RPC', async (t) => {
+  const f = await fixture(t);
+  f.db.prepare("DELETE FROM embedding_meta WHERE key IN ('embedding_model_id','embedding_dim')").run();
+  const result = await f.store.searchWithMeta('needle', { mode: 'hybrid', scope: 'docs', limit: 1 });
+  assert.equal(result.meta.effectiveMode, 'lexical');
+  assert.equal(result.meta.degraded, true);
+  assert.deepEqual(
+    result.items.map((x) => x.anchor),
+    ['beta-doc'],
+  );
+  assert.equal(f.embeddingCount(), 0);
 });

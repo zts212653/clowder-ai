@@ -714,7 +714,7 @@ export const a2aDispatchCount = lazy(() =>
  * Attributes (allowlist-filtered):
  *   - callback.reason: invalid_token | unknown_invocation | missing_creds | stale_invocation |
  *     completed | failed | interrupted | replaced | revoked | canceled
- *   - callback.tool: refresh-token | post-message | register-pr-tracking | retain-memory | ...
+ *   - callback.tool: refresh-token | post-message | register-pr-tracking | create-task | ...
  *   - agent.id: cat that experienced the failure (omitted when unknown)
  */
 export const callbackAuthFailures = lazy(() =>

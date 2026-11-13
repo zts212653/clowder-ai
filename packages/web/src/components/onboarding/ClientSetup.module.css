@@ -18,7 +18,7 @@
 
 .header h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--console-font-2xl);
   font-weight: 600;
   color: #211b18;
 }
@@ -28,7 +28,7 @@
   color: #855e16;
   padding: 6px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
 }
 
 .scene {
@@ -41,7 +41,7 @@
 
 .scene h2 {
   margin: 0 0 8px;
-  font-size: 21px;
+  font-size: var(--console-font-display-sm);
 }
 
 .lead {
@@ -61,7 +61,7 @@
 .error {
   margin-top: 12px;
   color: #c4223c;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
 }
 
 .stage {
@@ -148,19 +148,19 @@
 
 .clientInfo strong {
   display: block;
-  font-size: 15px;
+  font-size: var(--console-font-reading);
   margin-bottom: 4px;
 }
 
 .clientInfo small {
   display: block;
   color: #776d66;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
 }
 
 .state {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--console-font-xs);
   padding: 4px 8px;
   border-radius: 4px;
   white-space: nowrap;
@@ -183,7 +183,7 @@
   border: 1px solid #d7c9bf;
   border-radius: 6px;
   padding: 6px 12px;
-  font-size: 13px;
+  font-size: var(--console-font-compact);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -205,7 +205,7 @@
   border: 1px solid #d7c9bf;
   border-radius: 8px;
   padding: 12px 24px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   cursor: pointer;
 }
 
@@ -224,7 +224,7 @@
   border: none;
   border-radius: 8px;
   padding: 12px 24px;
-  font-size: 14px;
+  font-size: var(--console-font-sm);
   font-weight: 500;
   cursor: pointer;
 }

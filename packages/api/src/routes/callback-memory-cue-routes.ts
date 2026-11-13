@@ -34,6 +34,7 @@ import { catOwnedSeedDrillPayloadSchema } from '../domains/memory/cue/sources/Ca
 import { TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX } from '../domains/memory/cue/TasteTaskBundleCatalog.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { memoryCueOutcomeReadyOrReply } from './callback-memory-cue-outcome-response.js';
+import { registerCallbackWorkPreparation, type WorkPreparationCallback } from './callback-work-preparation.js';
 
 const drillBodySchema = z
   .object({
@@ -52,6 +53,7 @@ const outcomeBodySchema = z
   .strict();
 
 export interface CallbackMemoryCueDeps {
+  preparation?: WorkPreparationCallback;
   episodeStore: MemoryCueEpisodeStore;
   handles: MemoryCueDrillHandleService;
   sourceReader: MemoryCueSourceReader;
@@ -91,13 +93,17 @@ function eventBase(coordinate: MemoryCueDrillCoordinate, occurredAt: number) {
 }
 
 function appendInvalidation(
-  store: MemoryCueEpisodeStore,
+  deps: CallbackMemoryCueDeps,
   coordinate: MemoryCueDrillCoordinate,
   reason: MemoryCueInvalidationReason,
   occurredAt: number,
 ): void {
+  if (coordinate.opportunityId.startsWith('preparation-')) {
+    deps.preparation?.recordInvalidation(coordinate, reason, occurredAt);
+    return;
+  }
   const digest = eventHash('invalidation', coordinate.cueId, reason);
-  store.append({
+  deps.episodeStore.append({
     ...eventBase(coordinate, occurredAt),
     eventId: `memory-cue-invalidation-${digest}`,
     idempotencyKey: `memory-cue-invalidation-${digest}`,
@@ -174,11 +180,14 @@ function verifyCoordinate(
   catId: string,
   now: number,
   reply: FastifyReply,
+  explicitPreparationRead = false,
 ): MemoryCueDrillCoordinate | null {
-  const verified = deps.handles.verify(handle, scope, now, catId);
+  let verified = deps.handles.verify(handle, scope, now, catId);
+  if (!verified.ok && verified.reason === 'presentation_required' && explicitPreparationRead)
+    verified = deps.handles.verifyPreparationRead(handle, scope, now, catId);
   if (verified.ok) return verified.coordinate;
   if (verified.reason === 'expired') {
-    appendInvalidation(deps.episodeStore, verified.coordinate, 'expired', now);
+    appendInvalidation(deps, verified.coordinate, 'expired', now);
     reply.status(410).send({ error: 'expired' });
     return null;
   }
@@ -205,7 +214,7 @@ async function readCurrentSource(
   }
   if (source.status === 'ok') return source;
   if (source.invalidationReason) {
-    appendInvalidation(deps.episodeStore, coordinate, source.invalidationReason, now);
+    appendInvalidation(deps, coordinate, source.invalidationReason, now);
   }
   reply.status(404).send({ error: 'not_available' });
   return null;
@@ -280,13 +289,22 @@ async function verifyApplicationEvidence(input: {
 }
 
 export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: CallbackMemoryCueDeps): void {
+  registerCallbackWorkPreparation(app, deps.preparation, deps.now);
   app.post('/api/callbacks/memory-cues/drill', async (request, reply) => {
     const auth = requireCallbackAuth(request, reply);
     if (!auth) return;
     const body = drillBodySchema.safeParse(request.body);
     if (!body.success) return invalid(reply, body.error);
     const now = deps.now();
-    const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), auth.catId as string, now, reply);
+    const coordinate = verifyCoordinate(
+      deps,
+      body.data.handle,
+      serverScope(auth),
+      auth.catId as string,
+      now,
+      reply,
+      true,
+    );
     if (!coordinate) return;
     if (
       body.data.window &&
@@ -299,7 +317,16 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
     }
     const source = await readCurrentSource(deps, coordinate, auth.catId as string, now, reply, body.data.window);
     if (!source) return;
-    if (!appendConsumptionOrReply(deps, coordinate, 'drilled', body.data.requestId, now, reply)) return;
+    if (coordinate.opportunityId.startsWith('preparation-')) {
+      if (!deps.preparation) return reply.code(409).send({ error: 'preparation_read_not_available' });
+      try {
+        deps.preparation.recordRead(coordinate, body.data.requestId, deps.now());
+      } catch (error) {
+        if (replyLedgerConflict(reply, error)) return;
+        request.log.warn({ err: error, cueId: coordinate.cueId }, 'Preparation read receipt commit failed');
+        return reply.code(503).send({ error: 'read_commit_failed', retryable: true });
+      }
+    } else if (!appendConsumptionOrReply(deps, coordinate, 'drilled', body.data.requestId, now, reply)) return;
     return { status: 'ok', payload: source.payload };
   });
 
@@ -321,10 +348,17 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
       now,
     });
     const ready = memoryCueOutcomeReadyOrReply(resolution, reply, (coordinate, reason) =>
-      appendInvalidation(deps.episodeStore, coordinate, reason, now),
+      appendInvalidation(deps, coordinate, reason, now),
     );
     if (!ready) return;
     const { coordinate, currentSource } = ready;
+    if (coordinate.family === 'matter') return reply.code(409).send({ error: 'matter_outcome_not_supported' });
+    if (
+      coordinate.opportunityId.startsWith('preparation-') &&
+      !currentSource &&
+      !(await readCurrentSource(deps, coordinate, auth.catId as string, now, reply))
+    )
+      return;
     if (
       !(await verifyApplicationEvidence({
         deps,

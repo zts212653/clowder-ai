@@ -72,22 +72,41 @@ describe('createMemoryServices', () => {
     assert.equal(project.root, '/tmp/f186-test-docs');
   });
 
-  it('embedMode=on creates embedding service (HTTP client, fail-open)', async () => {
+  it('embedMode=on keeps SQLite usable without publishing an unready embedding service', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const root = mkdtempSync(join(tmpdir(), 'factory-unready-embedding-'));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error('synthetic unavailable embedding transport');
+    };
+    let services;
+    try {
+      services = await createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: ':memory:',
+        globalDbPath: ':memory:',
+        docsRoot: join(root, 'docs'),
+        markersDir: join(root, 'markers'),
+        skillsRoot: join(root, 'skills'),
+        memoryRoot: join(root, 'memory'),
+        dataDir: join(root, 'data'),
+        embed: { embedMode: 'on' },
+      });
 
-    // EmbeddingService is now an HTTP client (PR #608, LL-034).
-    // load() probes embed-api /health — may succeed if sidecar is running,
-    // or fail-open if not. Either way, factory should NOT throw.
-    const services = await createMemoryServices({
-      type: 'sqlite',
-      sqlitePath: ':memory:',
-      embed: { embedMode: 'on' },
-    });
-
-    // EmbeddingService should exist regardless of sidecar status
-    assert.ok(services.embeddingService, 'embeddingService should exist');
-    // isReady() depends on whether embed-api sidecar is running — both are valid
-    // The important thing is that factory didn't throw
+      assert.equal(services.embeddingLifecycle.getMode(), 'on');
+      assert.equal(services.embeddingLifecycle.getStatus(), 'configured');
+      assert.equal(services.embeddingLifecycle.getFailureReason(), 'service_not_ready');
+      assert.equal(services.embeddingService, undefined);
+      assert.equal(services.vectorStore, undefined);
+      assert.equal(services.passageVectorStore, undefined);
+      assert.equal(await services.evidenceStore.health(), true);
+      assert.equal(services.eventMemoryStore.health(), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      services?.store.close();
+      services?.globalStore?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('hydrates external collection stores with manifest root before rebuild', async () => {

@@ -181,13 +181,13 @@ skills:
     category: "引导与协作"
     description: >
       围绕具体材料陪人读懂、听懂、讨论与共同探索。
-      Use when: 一起读论文/访谈/文章/书中章节、重读旧材料、准备共读的阅读稿或口播稿、听完后继续挑战与发散。
+      Use when: 一起读论文/访谈/文章/书中章节、以审稿人视角精读单篇或系列论文、重读旧材料、准备共读的阅读稿或口播稿、听完后继续挑战与发散。
       Not for: 单次事实问答、只要摘要或翻译、产品操作引导、对外文章、替用户启动训练或能力进化项目。
       Output: 按需交付带来源的阅读稿/口播稿与共同讨论；需要保存时在约定位置更新材料，并同步读者正在消费的版本。
-    triggers: ["陪我学习", "一起读", "一起重读", "学习口播稿", "听完一起讨论"]
+    triggers: ["陪我学习", "一起读", "一起重读", "学习口播稿", "听完一起讨论", "审稿人视角读论文", "审稿人系列"]
     not_for: ["单次事实问答", "只要摘要或翻译", "产品操作引导", "对外文章", "启动训练或能力进化项目"]
     output: "带来源的阅读稿/口播稿、共同探索与按需同步的学习记录"
-    next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging"]
+    next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging", "video-forge"]
     sop_step: null
 
   # ── 计划编写 ──
@@ -333,11 +333,11 @@ skills:
   paw-feel-daily:
     category: "治理"
     description: >
-      每天把前一天全家报的爪感差按「该谁修」分类、合并成问题，挑出值得修的交给负责线程或开修复线程。
+      每天看前一天全家报的爪感差：哪里还在让猫做不成、做得费劲，错在哪一层，推动能让它不再发生的改变，并核实困难是否真的减少。
       Use when: 爪感差每日分拣的定时唤醒、You 要看最近猫猫用着哪里不顺。
       Not for: 当场撞到的单条摩擦（原 turn 自己处理）、F278 旧值班的逐条签字与 blocker（已停，不重启）、
-      已确认重复后的根因修复本身（修复线程用 code-as-harness / debugging）。
-      Output: 每日分拣日报一条 + 0–3 个修复去向（向已有负责线程投证据坐标，或提修复线程卡给 You 批）。
+      修复本身（修复线程用 debugging / code-as-harness）。
+      Output: 每日分拣日报一条 + 0–3 个修复去向（向负责线程投证据，或提修复 / 架构复查线程卡给 You 批）。
     triggers:
       - "爪感差分拣"
       - "爪感差日报"
@@ -1029,7 +1029,7 @@ skills:
     category: "创作与媒体"
     description: >
       家里用 Remotion 做视频要知道的事：工程在哪、本机配音和回听怎么调、You 定过的片子规矩、真踩过的坑、怎么在 Console 里交片。
-      Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
+      Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片（含论文讲解）、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
       或给片子配音、对时间轴、交片。
       Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
       目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
@@ -1043,12 +1043,14 @@ skills:
       - "教程视频"
       - "动态排版"
       - "录屏剪辑"
+      - "论文讲解视频"
+      - "审稿人系列视频"
     not_for:
       - "只查 Remotion API 用法"
       - "讲角色自己故事的动画短片"
       - "PPT"
     output: "Remotion project + retained video work + fixed-version card and original-feedback response"
-    next: ["rich-messaging", "anime-forge"]
+    next: ["rich-messaging", "anime-forge", "learning-companion"]
     sop_step: null
     merged_from: null
   anime-forge:
@@ -1170,7 +1172,10 @@ skills:
   # ── 富媒体消息 ──
   rich-messaging:
     category: "创作与媒体"
-    description: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。
+    description: >
+      Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
+      Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
+      Output: 消息内富块，或按用途保存 HTML 作品并把固定版本卡发回当前 Chat；续改保留同一作品的历史。
     triggers:
       - "发语音"
       - "说一句"
@@ -1185,6 +1190,8 @@ skills:
       - "screenshot"
       - "画个 HTML 展示"
       - "做个 demo 给我看"
+      - "保存 HTML 作品"
+      - "继续改这份图解"
       - "在 Chat 里展示"
       - "发个卡片"
       - "rich block"
@@ -1199,11 +1206,11 @@ skills:
       - "media_gallery"
     not_for:
       - "纯文字聊天"
-      - "讨论 HTML 技术"
-      - "修改 HTML 源文件"
+      - "仅讨论 HTML 原理"
+      - "修改仓库源码"
       - "复杂 localhost 页面用 browser-preview"
       - "日常回复"
-    output: "Rich block attached to message"
+    output: "消息内富块，或 HTML 作品的固定版本卡；续改沿同一作品保留历史"
     next: []
     sop_step: null
     merged_from: null
@@ -1405,8 +1412,8 @@ skills:
   image-generation:
     category: "创作与媒体"
     description: >
-      AI 图片生成：优先原生 tool call，其他后端按 image-generation 正文选择。
-      Use when: 需要生成概念图、解释型漫画、UI 参考图、像素画素材、完整 PPT 页面、架构图或信息图。
+      AI 图片生成：优先原生 tool call；没有原生能力的猫走家里 OpenAI 平台账号的图片接口（能出 GIF 动图），其他后端按 image-generation 正文选择。
+      Use when: 需要生成概念图、解释型漫画、UI 参考图、像素画素材、动图/GIF、完整 PPT 页面、架构图或信息图。
       Not for: 已有图片的展示、硬要求可编辑/native text 的 PPT/图表、Pencil .pen 内的简单布局。
       Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
     triggers:
@@ -1417,6 +1424,8 @@ skills:
       - "AI 画图"
       - "画头像"
       - "画个"
+      - "做个动图"
+      - "生成 GIF"
     not_for:
       - "Pencil 内部设计"
       - "简单形状布局"

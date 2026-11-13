@@ -1,3 +1,4 @@
+import { selectedMessageSourcesSchema } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -18,6 +19,7 @@ const bodySchema = z
     operationId: z.string().min(1).max(200),
     destinationThreadId: z.string().min(1).max(256).optional(),
     replyTo: z.string().min(1).max(256).optional(),
+    selections: selectedMessageSourcesSchema.optional(),
   })
   .and(messageSearchQuerySchema)
   .refine((value) => value.resultUnit === 'message', { message: 'Answer publication requires message search' });
@@ -64,9 +66,11 @@ export function registerCallbackMessageSearchAnswerRoutes(
         deps.service!.prepare(
           {
             operationId: parsed.data.operationId,
-            input: toMessageSearchInput(parsed.data),
+            // Saved answer retries hash these original arguments; ordinary recall's new default must not alter them.
+            input: toMessageSearchInput({ ...parsed.data, messageSort: parsed.data.messageSort ?? 'time' }),
             targetThreadId: scope.threadId,
             ...(cloud ? { acceptedUseRef: sourceId } : {}),
+            ...(parsed.data.selections ? { selections: parsed.data.selections } : {}),
             producer: {
               kind: principal.kind,
               id: principal.kind === 'invocation' ? principal.invocationId : principal.agentKeyId,

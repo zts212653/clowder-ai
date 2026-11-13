@@ -9,20 +9,27 @@ import { dshModelLabel } from './dsh-model-label';
 // Display metadata only. Names never replace stored ACP values or start extra probes.
 export const useMemberModelCatalogs = create<{
   catalogs: Record<string, MemberCatalog>;
+  // Successful discovery survives remounts; prepared evidence belongs only to the active draft.
   runtimes: readonly RuntimeChoice[];
-}>(() => ({ catalogs: {}, runtimes: [] }));
+  // Issued tickets are separate from accepted facts: failures/cancellation publish nothing.
+  runtimeRevision: number;
+  runtimeConfirmedRevision: number;
+  preparedRuntime?: RuntimeChoice;
+}>(() => ({ catalogs: {}, runtimes: [], runtimeRevision: 0, runtimeConfirmedRevision: 0, preparedRuntime: undefined }));
 
 export function memberModelCatalogKey(
-  cat: Pick<CatData, 'id' | 'clientId' | 'acp' | 'agentProvider' | 'accountRef' | 'cliConfigArgs'>,
+  cat: Pick<CatData, 'id' | 'clientId' | 'acp' | 'agentProvider' | 'accountRef' | 'cliConfigArgs' | 'env'>,
 ) {
   return JSON.stringify([
     cat.id,
     cat.clientId,
     cat.acp?.command,
     cat.acp?.startupArgs,
+    cat.acp?.transport ?? 'stdio',
     (cat.agentProvider !== undefined ? cat.agentProvider : cat.acp?.agentProvider) || '',
     cat.accountRef || '',
     cat.cliConfigArgs ?? [],
+    Object.entries(cat.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
   ]);
 }
 
@@ -48,7 +55,7 @@ export function isDshMember(
   runtimes: readonly RuntimeChoice[] = [],
 ) {
   const agentProvider = cat.agentProvider !== undefined ? cat.agentProvider : cat.acp?.agentProvider;
-  if (agentProvider || cat.clientId !== 'acp' || !cat.acp) return false;
+  if (agentProvider || cat.clientId !== 'acp' || !cat.acp || (cat.acp.transport ?? 'stdio') !== 'stdio') return false;
   const acp = cat.acp;
   if (isDshLauncher(acp.command, acp.startupArgs)) return true;
   // Both profile discovery and setup support are backend-verified, including supported --patch launches.
@@ -60,6 +67,7 @@ export function isDshMember(
           (runtime.discoveryStatus !== undefined || runtime.dshSetupSupported === true))) &&
       runtime.acp &&
       !runtime.acp.agentProvider &&
+      (runtime.acp.transport ?? 'stdio') === (acp.transport ?? 'stdio') &&
       runtime.acp.command === acp.command &&
       JSON.stringify(runtime.acp.startupArgs) === JSON.stringify(acp.startupArgs),
   );
@@ -67,7 +75,9 @@ export function isDshMember(
 
 export function useIsDshMember() {
   const runtimes = useMemberModelCatalogs((state) => state.runtimes);
-  return (cat: Pick<CatData, 'clientId' | 'acp' | 'agentProvider'>) => isDshMember(cat, runtimes);
+  const preparedRuntime = useMemberModelCatalogs((state) => state.preparedRuntime);
+  return (cat: Pick<CatData, 'clientId' | 'acp' | 'agentProvider'>) =>
+    isDshMember(cat, preparedRuntime ? [...runtimes, preparedRuntime] : runtimes);
 }
 
 export function useMemberModelLabel() {

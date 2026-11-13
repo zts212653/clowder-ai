@@ -468,6 +468,25 @@ describe('useSocket stale-invocation watchdog', () => {
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
+  it('reconciles a processing hint whose queue fetch failed before any invocation slot arrived', async () => {
+    mockStoreState.currentThreadId = 'busy-without-slot';
+    mockStoreState.hasActiveInvocation = true;
+    mockStoreState.activeInvocations = {};
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ activeInvocations: [] }) });
+    act(() =>
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'busy-without-slot',
+        }),
+      ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(31_000));
+    expect(queueProbeCalls()).toHaveLength(1);
+    expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('busy-without-slot');
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('busy-without-slot');
+  });
+
   it('respects cooldown: does not re-probe the same thread on subsequent watchdog ticks', async () => {
     // Server says no active invocations on first probe.
     mockApiFetch.mockResolvedValue({

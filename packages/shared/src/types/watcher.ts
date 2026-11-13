@@ -127,6 +127,13 @@ export const watcherSessionStateSchema = z
       .regex(/^[a-f0-9]{64}$/u)
       .optional(),
     notes: z.string().max(8000),
+    rawWindowTokens: z.number().int().min(128).max(2500).optional(),
+    skippedWindows: z.number().int().nonnegative().optional(),
+    /** Bounded read receipts for this wake only; not a second memory store. */
+    directoryReads: z
+      .array(z.object({ key: z.string(), hash: z.string(), callId: z.string(), page: z.string().max(12000) }).strict())
+      .max(6)
+      .optional(),
     consumedThrough: z.string().max(200).optional(),
     wakeInvocationId: z.string().min(1).optional(),
     /** Raw body window may end inside a large message, without fabricating a summary. */
@@ -155,6 +162,8 @@ export const watcherSessionStateSchema = z
         window: z
           .object({
             frontier: z.string().max(200),
+            tokenBudget: z.number().int().min(128).max(2500).optional(),
+            blockedMessageId: z.string().max(200).optional(),
             complete: z.boolean().optional(),
             resumeCursor: z
               .object({ messageId: z.string().min(1).max(200), offset: z.number().int().nonnegative() })
@@ -172,6 +181,24 @@ export const watcherSessionStateSchema = z
   .strict();
 
 export type WatcherSessionState = z.infer<typeof watcherSessionStateSchema>;
+/** Session-owner metadata, outside the strict watcherState grammar so older readers retain their cursor. */
+export const watcherSurfaceRetirementSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    wakeInvocationId: z.string().min(1),
+    sourceInvocationId: z.string().min(1),
+    sourceSequence: z.number().int().nonnegative(),
+    oldSchemaHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    nativeCliSessionId: z.string().min(1).optional(),
+    nativeTurnId: z.string().min(1).optional(),
+    phase: z.enum(['pending', 'idle', 'retired']),
+    probes: z.number().int().min(0).max(3),
+    retryAt: z.number().int().nonnegative().optional(),
+    lastFailure: z.string().max(500).optional(),
+    successorSessionId: z.string().min(1).optional(),
+  })
+  .strict();
+export type WatcherSurfaceRetirement = z.infer<typeof watcherSurfaceRetirementSchema>;
 export type WatcherCheckpoint = z.infer<typeof watcherCheckpointSchema>;
 export const watcherUsageSchema = z
   .object({

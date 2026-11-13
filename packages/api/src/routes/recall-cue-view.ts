@@ -30,6 +30,7 @@ const FAMILIES: Record<RecallResolverFamily, Parameters<MemoryCueSourceReader['r
   cat_owned_seed: 'owned_seed',
   thread_overview: 'thread_overview',
   matter: 'matter',
+  message_evidence: 'evidence',
 };
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -37,14 +38,20 @@ function record(value: unknown): Record<string, unknown> {
 function title(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 240) : undefined;
 }
+function vignetteTitle(payload: Record<string, unknown>): string | undefined {
+  return (
+    title(payload.takeaway) ??
+    title(Array.isArray(payload.quotes) ? payload.quotes[0] : undefined) ??
+    title(payload.when)
+  );
+}
 function tasteTitle(payload: Record<string, unknown>): string | undefined {
-  // Canonical explicit vignette, task-bundle item and dimension bundle are distinct payload contracts.
   if (Array.isArray(payload.vignettes)) {
-    const names = payload.vignettes.map((item) => title(record(record(item).payload).when)).filter(Boolean);
+    const names = payload.vignettes.map((item) => vignetteTitle(record(record(item).payload))).filter(Boolean);
     return names.length ? title(names.join('；')) : undefined;
   }
   const vignette = record(payload.vignette);
-  return title(vignette.when) ?? title(record(vignette.payload).when);
+  return vignetteTitle(vignette) ?? vignetteTitle(record(vignette.payload));
 }
 function payloadTitle(family: RecallResolverFamily, payload: unknown): string | undefined {
   const data = record(payload);
@@ -72,7 +79,7 @@ function openingProfileMetadata(cue: RecallCueCoordinate): RecallCandidateView |
   // This names a recorded delivery, not a fresh drill or a claim that the old body is current.
   // The profile lane owns the owner-facing current read/correction, including forgotten entries.
   if (cue.resolver_family === 'profile' && cue.source_anchor === 'profile:opening-capsule') {
-    return { kind: 'profile', title: '开场递送 · 开场简介', href: null, profileMemoryId: 'capsule' };
+    return { kind: 'profile', title: '关于你', href: null, profileMemoryId: 'capsule' };
   }
   if (cue.resolver_family === 'profile' && cue.source_anchor.startsWith('profile:opening-primer:')) {
     const coordinate = /^profile:opening-primer:([^:]+):([^:]+)$/.exec(cue.source_anchor);
@@ -81,7 +88,7 @@ function openingProfileMetadata(cue: RecallCueCoordinate): RecallCandidateView |
       if (relationshipKey && consumerCatId && decodeURIComponent(consumerCatId) === cue.consumer_cat_id) {
         return {
           kind: 'profile',
-          title: '开场递送 · 关系参考',
+          title: '关系画像',
           href: null,
           profileMemoryId: `primer:${decodeURIComponent(relationshipKey)}`,
         };
@@ -107,7 +114,7 @@ async function readCueMetadata(
   if (ownerProfile) return ownerProfile;
   const opening = openingProfileMetadata(cue);
   if (opening) return opening;
-  const ownerMessage = await readOwnerMessageView(cue, scope, readCandidate, sourceReader, ownerMessages);
+  const ownerMessage = await readOwnerMessageView(cue, scope, ownerMessages);
   if (ownerMessage) return ownerMessage;
   // A human-facing metadata read must not impersonate the producing cat to drill its private hypothesis.
   // Its delivery is already owner-readable in A1; retain that observation without opening the seed body.

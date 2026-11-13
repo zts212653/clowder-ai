@@ -1,7 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractBatonContext } from '../dist/domains/cats/services/agents/routing/navigation-context.js';
+import { projectInvocationSource } from '../dist/domains/cats/services/agents/routing/navigation-sources.js';
 import { formatMessage, getMessageSpeakerName } from '../dist/domains/cats/services/context/ContextAssembler.js';
 import { projectMessageSearchSpeaker } from '../dist/domains/memory/message-search-projection.js';
 
@@ -22,24 +22,14 @@ test('MCP speaker and prompt use the same canonical external identity', () => {
   assert.ok(!formatMessage(external).includes('co-creator'));
 });
 
-test('external handoff cannot supersede an operator hold through author confusion', () => {
-  const owner = {
-    ...external,
-    id: 'owner-stop',
-    from: { kind: 'user', userId: 'owner' },
-    source: undefined,
-    content: '请稍等，别动',
-    mentions: [],
-    timestamp: 1000,
-  };
-  const baton = extractBatonContext([owner, external], 'opus');
-  assert.equal(baton.staleHoldWarning, false);
-  assert.equal(baton.fromSpeaker, 'external:github-wait:');
+test('external input provenance carries no hold or custody instruction', () => {
+  const source = projectInvocationSource(external);
+  assert.deepEqual(source, { fromMessageId: external.id, fromSpeakerDisplay: 'GitHub Wait', timestamp: 2000 });
 });
 
 test('plugin without connector metadata retains plugin identity in navigation and reads', () => {
   const message = { ...external, source: undefined, from: { kind: 'plugin', instanceId: 'plugin-example' } };
-  assert.equal(extractBatonContext([message], 'opus').fromSpeaker, 'plugin:plugin-example');
+  assert.equal(projectInvocationSource(message).fromSpeakerDisplay, '插件');
   assert.equal(getMessageSpeakerName(message), '插件');
   assert.deepEqual(projectMessageSearchSpeaker(message), { speaker: 'connector', speakerLabel: '插件' });
 });
@@ -52,7 +42,7 @@ test('canonical actor overrides legacy catId and unrelated source metadata', () 
     source: { connector: 'wrong', label: 'co-creator', icon: 'github', sender: { id: 'owner', name: 'lang' } },
   };
   assert.equal(getMessageSpeakerName(message), 'Alice via feed');
-  assert.equal(extractBatonContext([message], 'opus').fromSpeaker, 'external:feed:actor-id');
+  assert.equal(projectInvocationSource(message).fromSpeakerDisplay, 'Alice via feed');
 });
 
 test('persisted plugin presentation supplies model context and export labels without raw IDs', async () => {

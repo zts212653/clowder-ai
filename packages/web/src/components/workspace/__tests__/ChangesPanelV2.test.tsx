@@ -166,6 +166,40 @@ describe('ChangesPanel v2', () => {
     expect(container.textContent).toContain('读取改动失败');
   });
 
+  it('shows the non-git empty state instead of no-changes in v2', async () => {
+    apiFetchMock.mockImplementation(async () => Response.json({ isGitRepository: false, changedFiles: [], diff: '' }));
+    await render();
+    expect(container.textContent).toContain('当前工作区不是 Git 仓库');
+    expect(container.textContent).not.toContain('没有未提交的改动');
+  });
+
+  it('shows the non-git empty state instead of no-changes in classic', async () => {
+    writeShellPresentation('classic');
+    apiFetchMock.mockImplementation(async () => Response.json({ isGitRepository: false, changedFiles: [], diff: '' }));
+    await render();
+    expect(container.textContent).toContain('Not a Git repository');
+    expect(container.textContent).not.toContain('No uncommitted changes');
+  });
+
+  it('shows the bare-worktree message instead of a generic fetch failure in v2', async () => {
+    apiFetchMock.mockImplementation(async () =>
+      Response.json({ error: 'Git worktree required', code: 'git_worktree_required' }, { status: 409 }),
+    );
+    await render();
+    expect(container.textContent).toContain('这是裸 Git 仓库；此视图需要工作树');
+    expect(container.textContent).not.toContain('读取改动失败');
+  });
+
+  it('shows the bare-worktree message instead of a generic fetch failure in classic', async () => {
+    writeShellPresentation('classic');
+    apiFetchMock.mockImplementation(async () =>
+      Response.json({ error: 'Git worktree required', code: 'git_worktree_required' }, { status: 409 }),
+    );
+    await render();
+    expect(container.textContent).toContain('This is a bare Git repository; this view requires a working tree');
+    expect(container.textContent).not.toContain('Failed to fetch changes');
+  });
+
   it('keeps the classic presentation untouched', async () => {
     writeShellPresentation('classic');
     await render();

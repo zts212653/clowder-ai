@@ -81,6 +81,7 @@ function setText(selector: string, value: string) {
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   apiFetch.mockImplementation(async (path: string) =>
     path === '/api/memory/taste'
       ? response({ readStatus: 'ready', entries: [taste], coverage: null })
@@ -95,7 +96,9 @@ beforeEach(() => {
               entries: [person],
               meta: { count: 1, limit: 20, offset: 0, hasMore: false },
             })
-          : response(detail),
+          : path.startsWith('/api/memory/people/deferred?')
+            ? response({ entries: [], nextCursor: null })
+            : response(detail),
   );
   host = document.createElement('div');
   document.body.append(host);
@@ -131,19 +134,21 @@ it('preserves loaded people when the next page fails and recovers without duplic
   apiFetch.mockImplementation(async (path: string) =>
     path === '/api/memory/taste'
       ? response({ readStatus: 'ready', entries: [], coverage: null })
-      : path.includes('offset=0')
-        ? response({
-            readStatus: 'ready',
-            entries: [person],
-            meta: { count: 1, limit: 20, offset: 0, hasMore: true, nextOffset: 1 },
-          })
-        : ++attempt === 1
-          ? response({ error: 'unavailable' }, 503)
-          : response({
+      : path.startsWith('/api/memory/people/deferred?')
+        ? response({ entries: [], nextCursor: null })
+        : path.includes('offset=0')
+          ? response({
               readStatus: 'ready',
-              entries: [person, { ...person, personId: 'person-b', displayName: '小周' }],
-              meta: { count: 2, limit: 20, offset: 1, hasMore: false },
-            }),
+              entries: [person],
+              meta: { count: 1, limit: 20, offset: 0, hasMore: true, nextOffset: 1 },
+            })
+          : ++attempt === 1
+            ? response({ error: 'unavailable' }, 503)
+            : response({
+                readStatus: 'ready',
+                entries: [person, { ...person, personId: 'person-b', displayName: '小周' }],
+                meta: { count: 2, limit: 20, offset: 1, hasMore: false },
+              }),
   );
   await act(async () => root.render(<MemoryTaste />));
   await click('人物');
@@ -175,9 +180,9 @@ it('amends an interaction using the exact revision and retains its recorded time
         : original?.(path),
   );
   await openPerson();
-  await click('修改经历');
+  await act(async () => host.querySelector<HTMLButtonElement>('section[aria-label="人物经历"] button')?.click());
   await act(async () => setText('textarea[aria-label="经历内容"]', '谈论新的合作方式'));
-  await click('保存经历');
+  await click('保存');
   const body = JSON.parse(apiFetch.mock.calls.find(([, init]) => init?.method === 'POST')?.[1].body);
   expect(body).toEqual(
     expect.objectContaining({
@@ -196,7 +201,7 @@ it('amends an interaction using the exact revision and retains its recorded time
 });
 it('keeps the server revision and reuses one request id when an uncertain correction is retried', async () => {
   await openPerson();
-  await click('修改判断');
+  await act(async () => host.querySelector<HTMLButtonElement>('section[aria-label="人物判断"] button')?.click());
   await act(async () => setText('textarea[aria-label="判断内容"]', '更愿意听取不同意见'));
   apiFetch.mockImplementation(async (path: string, init?: RequestInit) =>
     init?.method === 'POST'
@@ -205,7 +210,7 @@ it('keeps the server revision and reuses one request id when an uncertain correc
         ? response({ status: 'unavailable', sources: [] })
         : response(detail),
   );
-  await click('保存修改');
+  await click('保存');
   expect(host.textContent).toContain('暂时无法修改');
   await click('重试这次操作');
   const bodies = apiFetch.mock.calls
@@ -271,6 +276,8 @@ it('keeps the original forget command after a lost response even when the owner 
   });
   await click('确认永久遗忘');
   expect(host.textContent).toContain('暂时无法修改');
+  expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+  expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
   await click('确认永久遗忘');
   expect(apiFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   expect(button('确认永久遗忘')?.disabled).toBe(true);

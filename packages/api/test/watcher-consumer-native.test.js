@@ -69,7 +69,7 @@ test(
 );
 
 test(
-  'long reasoning and six escape-dense calls cannot cross 30k or acknowledge a rejected continuation',
+  'persistent budget pressure stays below 30k and records a skipped original instead of replaying it forever',
   { timeout: 40000, skip: !nativeWatcherAvailable },
   async () => {
     const w = await watcherWorld();
@@ -79,15 +79,37 @@ test(
       f.state.tools = 6;
       f.state.argumentPadding = '"\\\n'.repeat(180);
       f.state.reasoningPadding = 'long reasoning with concrete facts '.repeat(260);
-      await assert.rejects(f.run(source, AbortSignal.timeout(30000)), /context_budget_exceeded/);
-      assert.ok(f.requests.length > 1 && f.requests.length <= 7);
+      const events = [];
+      const append = f.owners.transcript.appendDurableEvent.bind(f.owners.transcript);
+      f.owners.transcript.appendDurableEvent = async (session, event, id) => {
+        await append(session, event, id);
+        events.push(event);
+      };
+      await f.run(source, AbortSignal.timeout(30000));
+      assert.ok(f.requests.length > 1 && f.requests.length <= 25);
       for (const request of f.requests)
         assert.ok(estimateTokens(request.wire) + request.body.max_output_tokens <= 30000);
       const { watcherSessionChainKey } = await import('../dist/domains/cats/services/session/session-scope.js');
       const session = await w.sessions.getByChainKey(watcherSessionChainKey('watcher-owner', 'codex', w.thread.id));
-      assert.equal(session.watcherState.afterSequence, 0);
-      assert.equal(session.watcherState.attempt.phase, 'failed');
-      assert.equal(session.watcherState.consumedThrough, undefined);
+      assert.equal(session.watcherState.afterSequence, source.settledSequence);
+      assert.equal(session.watcherState.attempt, undefined);
+      const skipped = events.find((e) => e.type === 'watcher_window_skipped');
+      assert.ok(skipped, 'the skipped input is explicit, not falsely acknowledged as read');
+      assert.ok(skipped.messageIds.includes(source.responseSettlement.messageId));
+      const [wake] = await w.executions.listByParent(`watcher-source:codex:${source.invocationId}`);
+      assert.equal(wake.status, 'failed');
+      assert.equal(wake.terminalReason, 'watcher_context_budget_skipped');
+      assert.equal(session.watcherState.rawWindowTokens, undefined);
+      f.state.tools = 0;
+      f.state.argumentPadding = '';
+      f.state.reasoningPadding = '';
+      const [nextSource] = await w.work('RAW_INCREMENT_14 ' + '無關新回話。'.repeat(40));
+      const { watcherWindow } = await import('../dist/domains/concierge/watcher/context/watcher-window.js');
+      const nextWindow = await watcherWindow(w.messages, nextSource, session.watcherState, '', []);
+      assert.equal(nextWindow.tokenBudget, 2500);
+      assert.equal(nextWindow.complete, true);
+      const nextSession = await f.run(nextSource, AbortSignal.timeout(10000));
+      assert.equal(nextSession.watcherState.afterSequence, nextSource.settledSequence);
     } finally {
       await f.close();
     }

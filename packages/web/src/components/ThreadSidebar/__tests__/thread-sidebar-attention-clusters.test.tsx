@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -61,6 +62,7 @@ describe('F277 production Sidebar attention clusters', () => {
   beforeEach(() => {
     installThreadSidebarGlobals();
     resetThreadSidebarMocks();
+    writeShellPresentation('classic');
     Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
     Object.assign(mockStore, {
       threads: [

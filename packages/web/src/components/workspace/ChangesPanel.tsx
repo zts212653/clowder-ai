@@ -4,6 +4,7 @@ import type { PullRequestChangesTarget } from '@cat-cafe/shared';
 import { useLayoutEffect, useState } from 'react';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import type { CommitChangesTarget } from '../workbench/commit-changes-surface';
 import { ChangesDiffPlaceholder } from './ChangesDiffPlaceholder';
 import { ChangesPanelV2 } from './ChangesPanelV2';
@@ -82,7 +83,11 @@ function ChangesPanelClassic({
         </div>
         {error && !pullRequestTarget && (
           <div className="px-3 py-1.5 text-micro text-conn-red-text">
-            {error === 'fetch_failed' ? 'Failed to fetch changes' : 'Network error'}
+            {isGitWorktreeRequired(error)
+              ? 'This is a bare Git repository; this view requires a working tree'
+              : error === 'fetch_failed'
+                ? 'Failed to fetch changes'
+                : 'Network error'}
           </div>
         )}
         {data?.changedFiles.map((f) => {
@@ -107,7 +112,13 @@ function ChangesPanelClassic({
         })}
         {data && data.changedFiles.length === 0 && (
           <div className="px-3 py-4 text-center text-cafe-muted text-xs">
-            {pullRequestTarget ? <PullRequestChangesEmpty /> : 'No uncommitted changes'}
+            {data.isGitRepository === false ? (
+              'Not a Git repository'
+            ) : pullRequestTarget ? (
+              <PullRequestChangesEmpty />
+            ) : (
+              'No uncommitted changes'
+            )}
           </div>
         )}
       </div>
