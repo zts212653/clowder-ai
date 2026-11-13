@@ -19,7 +19,10 @@ export async function request<T = Record<string, unknown>>(
   try {
     const response = await apiFetch(path, init, options);
     if (response.status === 204 && response.ok) return undefined as T;
-    const body = await response.json();
+    // A plugin route may answer with its own page (text/html); everything else is JSON.
+    const body = (response.headers.get('content-type') ?? '').startsWith('text/html')
+      ? await response.text()
+      : await response.json();
     const errorEnvelope =
       body &&
       typeof body === 'object' &&
