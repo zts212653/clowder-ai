@@ -347,7 +347,7 @@ button.avatar { border: 0; padding: 0; cursor: pointer; }
 .meta-btn > :is(.ic, .vw-ic) { display: inline-block; vertical-align: middle; margin-inline-start: var(--sp-xs); }
 .meta-btn > :is(.ic, .vw-ic):first-child { margin-inline-start: 0; margin-inline-end: var(--sp-xs); }
 .msg-meta .err { color: var(--warn); }
-.bubble { background: var(--bg-bubble); border-radius: var(--r-xl); padding: var(--sp-s) var(--sp-m); max-width: min(var(--span-8), 85%); }
+.bubble { background: var(--bg-bubble); border-radius: var(--r-xl); padding: var(--sp-s) var(--sp-m); max-width: min(var(--span-8), 85%); min-width: 0; overflow-wrap: anywhere; }   /* 长链接、长 hash 在字符间折行，不伸出气泡（和 .cat-bubble 一样） */
 .letter { grid-column: 2; background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-m) var(--sp-l); display: flex; flex-direction: column; gap: var(--sp-s); }
 .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .brief { align-self: center; width: var(--span-9); }
