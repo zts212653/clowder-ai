@@ -2011,6 +2011,7 @@ export async function* routeSerial(
         'Delivery route preparation timing',
       );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        toolEventLog: deps.toolEventLog,
         executionBinding,
         ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         onRemoteExecutionDispatched: remoteCancellation.onDispatched,

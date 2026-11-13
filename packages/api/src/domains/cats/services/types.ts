@@ -279,6 +279,7 @@ export type AgentMessageType =
   | 'session_init'
   | 'text'
   | 'tool_use'
+  | 'recall_input_update' // internal input observation for an existing recall tool call
   | 'tool_result'
   | 'error'
   | 'done'

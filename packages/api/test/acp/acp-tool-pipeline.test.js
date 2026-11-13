@@ -150,6 +150,10 @@ for (const terminal of ['timeout', 'cancelled', 'unobserved']) {
       mcpSupport: false,
     });
     const output = await Array.fromAsync(service.invoke('Deterministic recall transport fixture'));
+    const inputUpdates = output.filter((message) => message.type === 'recall_input_update');
+    assert.equal(inputUpdates.length, 1);
+    assert.equal(inputUpdates[0].toolUseId, 'pending');
+    assert.deepEqual(inputUpdates[0].toolInput, { query: 'late' });
     const results = output.filter((message) => message.type === 'tool_result');
     assert.deepEqual(
       results.map((message) => message.toolUseId),

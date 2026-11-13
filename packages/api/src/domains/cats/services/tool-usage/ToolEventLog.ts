@@ -9,6 +9,7 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { TOOL_EVENT_LOG_TTL_SECONDS, toolEventLogKey } from '../stores/redis-keys/tool-event-log-keys.js';
+import { isRecallLookupTool, recallToolInputSummary } from './derive-result-summary.js';
 import type { NudgeFollowupAnalysis, ToolEvent } from './event-log-types.js';
 
 const log = createModuleLogger('tool-event-log');
@@ -157,6 +158,8 @@ type ToolEventMatcher = {
   invocationId?: string;
   pendingOnly?: boolean;
 };
+
+type RecallInputMatcher = Required<Pick<ToolEventMatcher, 'toolUseId' | 'toolName' | 'catId' | 'invocationId'>>;
 
 export class ToolEventLog {
   // Preserve observation order across append and result merge, including when
@@ -335,24 +338,45 @@ export class ToolEventLog {
    * delayed/out-of-order results must not be traded for the fast path).
    */
   updateSummary(threadId: string, matcher: ToolEventMatcher, summaryPatch: Record<string, unknown>): Promise<boolean> {
-    return this.enqueueWrite(threadId, () => this._doUpdateSummary(threadId, matcher, summaryPatch));
+    return this.enqueueWrite(threadId, () => this._doUpdateSummary(threadId, matcher, summaryPatch, true));
+  }
+
+  /** Backfill input for a pending call without settling its result. */
+  async updateRecallInput(
+    threadId: string,
+    matcher: RecallInputMatcher,
+    input: Record<string, unknown> | undefined,
+  ): Promise<boolean> {
+    if (!isRecallLookupTool(matcher.toolName)) return false;
+    const summary = recallToolInputSummary(matcher.toolName, input);
+    if (Object.keys(summary).length === 0) return false;
+    return this.enqueueWrite(threadId, () =>
+      this._doUpdateSummary(threadId, { ...matcher, pendingOnly: true }, summary, false),
+    );
   }
 
   private async _doUpdateSummary(
     threadId: string,
     matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
+    resultMerged: boolean,
   ): Promise<boolean> {
     // Fast path: tail window. Merge targets are normally the current round's
     // own appends, which sit at the tail (PR #3613 residual fix).
-    const updated = await this._matchAndMerge(threadId, matcher, summaryPatch, -UPDATE_SUMMARY_TAIL_WINDOW);
+    const updated = await this._matchAndMerge(
+      threadId,
+      matcher,
+      summaryPatch,
+      -UPDATE_SUMMARY_TAIL_WINDOW,
+      resultMerged,
+    );
     if (updated || !matcher.toolUseId) return updated;
     // R1 (gpt52, #3629): `toolUseId` is the explicit unique-key contract for
     // delayed / out-of-order results — a slow tool on a busy multi-cat thread
     // can see 200+ events land before its result arrives. Only this rare
     // window-miss path pays the full scan; the fuzzy FIFO path stays bounded
     // (a fuzzy match that far back belongs to no live round).
-    return this._matchAndMerge(threadId, matcher, summaryPatch, 0);
+    return this._matchAndMerge(threadId, matcher, summaryPatch, 0, resultMerged);
   }
 
   private async _matchAndMerge(
@@ -360,6 +384,7 @@ export class ToolEventLog {
     matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
     start: number,
+    resultMerged: boolean,
   ): Promise<boolean> {
     const key = toolEventLogKey(threadId);
     // 砚砚 五审 P1-B: preserve original zset score (append uses INCR sequence,
@@ -401,20 +426,24 @@ export class ToolEventLog {
       if (!pair) continue;
       const event = JSON.parse(pair.member) as ToolEvent & { summary?: Record<string, unknown> };
       const summary = event.summary ?? {};
+      if (matcher.toolName && event.toolName !== matcher.toolName) continue;
       if (matcher.catId && event.catId !== matcher.catId) continue;
       if (matcher.invocationId && event.invocationId !== matcher.invocationId) continue;
       if (matcher.pendingOnly && summary['_resultMerged'] === true) continue;
       if (matcher.toolUseId) {
         if (summary['_toolUseId'] !== matcher.toolUseId) continue;
       } else {
-        if (matcher.toolName && event.toolName !== matcher.toolName) continue;
         // 砚砚 cloud P1: skip already-merged events so subsequent results don't
         // overwrite an earlier call's data — FIFO match to next unmatched call.
         if (summary['_resultMerged'] === true) continue;
       }
       // TD 2026-08-12: sanitize the merged result — result-side patches (e.g.
       // raw tool output) must not regrow a capped event past the budget.
-      const mergedSummary = sanitizeToolEventSummary({ ...summary, ...summaryPatch, _resultMerged: true });
+      const mergedSummary = sanitizeToolEventSummary({
+        ...summary,
+        ...summaryPatch,
+        ...(resultMerged ? { _resultMerged: true } : {}),
+      });
       const newEvent = { ...event, summary: mergedSummary };
       const newMember = JSON.stringify(newEvent);
       // 砚砚 cloud-4 P2: idempotent retry guard — when newMember bytes match

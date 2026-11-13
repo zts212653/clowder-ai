@@ -1146,6 +1146,7 @@ async function* routeParallelPrepared(
       const remoteCancellation = createRemoteCancellationObserver();
       catRemoteCancellation.set(catId, remoteCancellation);
       const invocationStream = invokeSingleCat(deps.invocationDeps, {
+        toolEventLog: deps.toolEventLog,
         executionBinding: executionBindings.get(catId),
         ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),

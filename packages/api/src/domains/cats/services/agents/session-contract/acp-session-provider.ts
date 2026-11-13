@@ -158,6 +158,8 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
           nativeSessionBinding: message.nativeSessionBinding,
           ephemeralSession: message.ephemeralSession,
         };
+      case 'recall_input_update':
+        return undefined; // Internal ledger observations are not part of the session wire contract.
       case 'text':
         return { ...base, type: 'output', text: message.content ?? '', textMode: message.textMode ?? 'append' };
       case 'tool_use':

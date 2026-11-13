@@ -17,6 +17,9 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { formatRecallMeta } from '@cat-cafe/shared';
+import Database from 'better-sqlite3';
+import { FakeRedis } from './helpers/fake-redis.js';
 
 function createMockService(catId, messages) {
   return {
@@ -228,6 +231,7 @@ for (const [name, moduleName, exportName] of [
       { opus: createMockService('opus', messages) },
       {
         append: async (event) => appends.push(event),
+        updateRecallInput: async () => true,
         updateSummary: async (_threadId, matcher, summary) => merges.push({ matcher, summary }),
       },
     );
@@ -245,4 +249,117 @@ for (const [name, moduleName, exportName] of [
     assert.equal(merges[0].summary.resultCount, null);
     assert.equal(Object.hasOwn(merges[0].summary, 'privateFixture'), false);
   });
+}
+
+class RecallTestRedis extends FakeRedis {
+  async expire() {}
+
+  async zrange(key, start, _stop, withScores) {
+    const rows = (this.sortedSets.get(key) ?? []).slice(start);
+    return withScores === 'WITHSCORES'
+      ? rows.flatMap(({ member, score }) => [member, String(score)])
+      : rows.map(({ member }) => member);
+  }
+}
+
+for (const [name, moduleName, exportName] of [
+  ['serial', 'route-serial', 'routeSerial'],
+  ['parallel', 'route-parallel', 'routeParallel'],
+]) {
+  for (const terminal of ['result_unmerged', 'cancelled', 'timeout']) {
+    it(`${name} persists late ACP input independently of the result (${terminal})`, async () => {
+      const { [exportName]: route } = await import(`../dist/domains/cats/services/agents/routing/${moduleName}.js`);
+      const { createAcpSessionState, transformAcpEvent } = await import(
+        '../dist/domains/cats/services/agents/providers/acp/acp-event-transformer.js'
+      );
+      const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+      const { SCHEMA_V1, applyMigrations } = await import('../dist/domains/memory/schema.js');
+      const { triggerRecallCorrelation } = await import('../dist/domains/memory/recall-correlation-hook.js');
+      const state = createAcpSessionState();
+      const observations = [
+        { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'cat_cafe_search_evidence', status: 'pending' },
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-1',
+          status: 'in_progress',
+          rawInput: { query: 'known late query', mode: 'lexical', privateFixture: 'do not copy' },
+        },
+        { sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'in_progress' },
+      ];
+      const controller = new AbortController();
+      const services = {
+        opus: {
+          async *invoke() {
+            for (const update of observations) {
+              const output = transformAcpEvent({ sessionId: 'test', update }, 'opus', {}, state);
+              if (output) yield* Array.isArray(output) ? output : [output];
+            }
+            if (terminal === 'cancelled') {
+              await new Promise(setImmediate);
+              controller.abort('user_cancel');
+            }
+            if (terminal === 'timeout') {
+              // Verify the input survives even if the terminal result itself supplies no input.
+              yield {
+                type: 'tool_result',
+                catId: 'opus',
+                toolUseId: 'call-1',
+                toolName: 'search_evidence',
+                toolResultStatus: 'error',
+                content: formatRecallMeta({ resultStatus: 'timeout', resultCount: null }),
+                timestamp: Date.now(),
+              };
+            }
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          },
+        },
+      };
+      const log = new ToolEventLog(new RecallTestRedis());
+      const unrelated = ['earlier-invocation', 'inner-inv-1'].map((invocationId, index) => ({
+        invocationId,
+        sessionId: invocationId,
+        threadId: 'thread1',
+        catId: index === 0 ? 'opus' : 'codex',
+        toolName: 'search_evidence',
+        timestamp: index + 1,
+        turnIndex: 0,
+        status: 'success',
+        summary: { _toolUseId: 'call-1', query: 'other call' },
+      }));
+      for (const event of unrelated) await log.append(event);
+      const deps = createMockDeps(services, log);
+      const forwarded = [];
+      for await (const message of route(deps, ['opus'], 'hello', 'user1', 'thread1', {
+        signalForCat: () => controller.signal,
+      }))
+        forwarded.push(message);
+
+      const events = await log.readRecentByThread('thread1', 10);
+      assert.equal(events.length, unrelated.length + 1);
+      assert.deepEqual(events.slice(0, unrelated.length), unrelated);
+      const own = events.at(-1);
+      assert.equal(own.summary.query, 'known late query');
+      assert.equal(own.summary.mode, 'lexical');
+      assert.equal(own.summary.privateFixture, undefined);
+      assert.equal(own.summary._resultMerged, terminal === 'result_unmerged' ? undefined : true);
+      assert.equal(forwarded.filter((message) => message.type === 'tool_use').length, 1);
+      assert.equal(
+        forwarded.some((message) => message.type === 'recall_input_update'),
+        false,
+      );
+
+      const db = new Database(':memory:');
+      try {
+        db.exec(SCHEMA_V1);
+        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
+        applyMigrations(db);
+        await triggerRecallCorrelation(db, events, 'inner-inv-1', 'opus');
+        assert.deepEqual(db.prepare('SELECT query, result_status, result_count FROM recall_events').all(), [
+          { query: 'known late query', result_status: terminal, result_count: null },
+        ]);
+      } finally {
+        db.close();
+      }
+    });
+  }
 }

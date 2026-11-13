@@ -647,6 +647,7 @@ import {
   type TurnExecutionKind,
   type TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
+import type { ToolEventLog } from '../../tool-usage/ToolEventLog.js';
 import type {
   AgentMessage,
   AgentRouteIntent,
@@ -1272,6 +1273,7 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  readonly toolEventLog?: ToolEventLog;
   /** Owner-admitted member context; only its declared native MCP and approved prompt are projected. */
   readonly scopedMemberLaunch?: AgentServiceOptions['pluginNativeLaunch'];
   readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
@@ -5995,6 +5997,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           await closeActiveServiceIterator();
           yield unconfirmedTeardownMessage();
           return;
+        }
+        if (msg.type === 'recall_input_update') {
+          // A ledger update is neither response output nor an invocation activity signal.
+          if (msg.toolUseId && msg.toolName) {
+            params.toolEventLog
+              ?.updateRecallInput(
+                threadId,
+                { catId, invocationId, toolUseId: msg.toolUseId, toolName: msg.toolName },
+                msg.toolInput,
+              )
+              .catch(() => {});
+          }
+          continue;
         }
         if (msg.nativeGoalObservation) {
           if (!threadStore || !deps.sessionChainStore) continue;

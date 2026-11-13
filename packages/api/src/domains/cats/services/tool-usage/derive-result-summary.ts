@@ -37,7 +37,6 @@ export function deriveToolEventResultSummary(
 ): ResultSummary {
   if (!isRecallLookupTool(normalizedName)) return deriveResultSummary(normalizedName, message.content);
   const input = recallToolInputSummary(normalizedName, message.toolInput);
-  const text = extractText(message.content);
   const result = deriveResultSummary(normalizedName, message.content);
   const status = result.resultStatus;
   if (message.toolResultStatus === 'error' && status !== 'overflow') {

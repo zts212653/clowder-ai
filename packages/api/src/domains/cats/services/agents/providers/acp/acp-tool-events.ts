@@ -1,7 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import { formatRecallMeta } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
-import { isRecallLookupTool } from '../../../tool-usage/derive-result-summary.js';
+import { isRecallLookupTool, recallToolInputSummary } from '../../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../../tool-usage/normalize-mcp-tool-name.js';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
 import type { AcpSessionState } from './acp-event-transformer.js';
@@ -43,7 +43,8 @@ export function transformAcpToolEvent(
 ): AgentMessage | AgentMessage[] | null {
   const id = typeof inner.toolCallId === 'string' && inner.toolCallId.length > 0 ? inner.toolCallId : undefined;
   if (state && id && state.finalEmittedByCallId.has(id)) return null;
-  const snapshot = mergeSnapshot(inner, id ? state?.toolCallsByCallId.get(id) : undefined);
+  const previous = id ? state?.toolCallsByCallId.get(id) : undefined;
+  const snapshot = mergeSnapshot(inner, previous);
   const known = Boolean(state && id && state.emittedToolUseByCallId.has(id));
   if (state && id) state.toolCallsByCallId.set(id, snapshot);
   if (!snapshot.name && !known && inner.sessionUpdate === 'tool_call') {
@@ -62,7 +63,14 @@ export function transformAcpToolEvent(
   const cancelled = inner.status === 'cancelled';
   const final = inner.status === 'completed' || inner.status === 'failed' || cancelled;
   if (!final) {
-    if (known) return null;
+    if (known && id) {
+      const name = normalizeMcpToolName(snapshot.name);
+      if (snapshot.input === previous?.input || !isRecallLookupTool(name)) return null;
+      const input = recallToolInputSummary(name, snapshot.input);
+      const priorInput = recallToolInputSummary(name, previous?.input);
+      if (!Object.keys(input).some((field) => input[field] !== priorInput[field])) return null;
+      return { type: 'recall_input_update', catId, timestamp, toolUseId: id, toolName: name, toolInput: input };
+    }
     if (state && id) state.emittedToolUseByCallId.add(id);
     return toolUse;
   }
