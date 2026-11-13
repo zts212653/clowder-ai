@@ -150,15 +150,29 @@ export function sanitizeToolEventSummary(
   return out;
 }
 
+type ToolEventMatcher = {
+  toolUseId?: string;
+  toolName?: string;
+  catId?: string;
+  invocationId?: string;
+  pendingOnly?: boolean;
+};
+
 export class ToolEventLog {
-  /**
-   * 砚砚 cloud-7 P1: per-thread serialization queue for updateSummary.
-   * Without it, two concurrent fire-and-forget updateSummary calls for the
-   * same thread both read the pre-merge zrange snapshot, both pick the same
-   * "oldest unmerged" event, and patch into the same slot — second result
-   * overwrites first, FIFO matching broken under parallel tool_result delivery.
-   */
-  private readonly updateChain = new Map<string, Promise<unknown>>();
+  // Preserve observation order across append and result merge, including when
+  // the route hands off to round-end correlation without awaiting either write.
+  private readonly writeChain = new Map<string, Promise<unknown>>();
+
+  private async enqueueWrite<T>(threadId: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.writeChain.get(threadId) ?? Promise.resolve();
+    const next = previous.then(write, write);
+    this.writeChain.set(threadId, next);
+    try {
+      return await next;
+    } finally {
+      if (this.writeChain.get(threadId) === next) this.writeChain.delete(threadId);
+    }
+  }
 
   private readonly maxEventsPerThread: number;
 
@@ -175,7 +189,11 @@ export class ToolEventLog {
    * with timestamp tie-breaker so same-ms multi-events keep insertion order.
    * Falls back to timestamp-only if INCR unavailable (e.g. fake Redis).
    */
-  async append(event: ToolEvent): Promise<void> {
+  append(event: ToolEvent): Promise<void> {
+    return this.enqueueWrite(event.threadId, () => this.writeEvent(event));
+  }
+
+  private async writeEvent(event: ToolEvent): Promise<void> {
     const key = toolEventLogKey(event.threadId);
     const seqKey = `${key}:seq`;
     let seq: number | null = null;
@@ -235,6 +253,7 @@ export class ToolEventLog {
    */
   async readRecentByThread(threadId: string, limit: number): Promise<ToolEvent[]> {
     if (limit <= 0) return [];
+    await this.writeChain.get(threadId)?.catch(noop);
     const key = toolEventLogKey(threadId);
     const members = await this.redis.zrange(key, -limit, -1);
     return members.map((m) => JSON.parse(m) as ToolEvent);
@@ -315,34 +334,13 @@ export class ToolEventLog {
    * one full scan on a window miss (R1 gpt52 #3629 — unique-key contract for
    * delayed/out-of-order results must not be traded for the fast path).
    */
-  async updateSummary(
-    threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
-    summaryPatch: Record<string, unknown>,
-  ): Promise<boolean> {
-    // 砚砚 cloud-7 P1: chain per-thread updates so concurrent fire-and-forget
-    // calls don't race on the same zrange snapshot. Even when callers do
-    // `.catch(() => {})` (no await), serialization happens inside ToolEventLog.
-    const prev = this.updateChain.get(threadId) ?? Promise.resolve();
-    const next = prev.then(
-      () => this._doUpdateSummary(threadId, matcher, summaryPatch),
-      () => this._doUpdateSummary(threadId, matcher, summaryPatch),
-    );
-    this.updateChain.set(threadId, next);
-    try {
-      return await next;
-    } finally {
-      // GC: only delete if our promise is still the tail (otherwise a later
-      // call has already chained behind us and is the new tail).
-      if (this.updateChain.get(threadId) === next) {
-        this.updateChain.delete(threadId);
-      }
-    }
+  updateSummary(threadId: string, matcher: ToolEventMatcher, summaryPatch: Record<string, unknown>): Promise<boolean> {
+    return this.enqueueWrite(threadId, () => this._doUpdateSummary(threadId, matcher, summaryPatch));
   }
 
   private async _doUpdateSummary(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
   ): Promise<boolean> {
     // Fast path: tail window. Merge targets are normally the current round's
@@ -359,7 +357,7 @@ export class ToolEventLog {
 
   private async _matchAndMerge(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
     start: number,
   ): Promise<boolean> {
@@ -403,12 +401,13 @@ export class ToolEventLog {
       if (!pair) continue;
       const event = JSON.parse(pair.member) as ToolEvent & { summary?: Record<string, unknown> };
       const summary = event.summary ?? {};
+      if (matcher.catId && event.catId !== matcher.catId) continue;
+      if (matcher.invocationId && event.invocationId !== matcher.invocationId) continue;
+      if (matcher.pendingOnly && summary['_resultMerged'] === true) continue;
       if (matcher.toolUseId) {
         if (summary['_toolUseId'] !== matcher.toolUseId) continue;
       } else {
         if (matcher.toolName && event.toolName !== matcher.toolName) continue;
-        // 砚砚 六审 P1-B: also require catId match when supplied (parallel-cat guard)
-        if (matcher.catId && event.catId !== matcher.catId) continue;
         // 砚砚 cloud P1: skip already-merged events so subsequent results don't
         // overwrite an earlier call's data — FIFO match to next unmatched call.
         if (summary['_resultMerged'] === true) continue;

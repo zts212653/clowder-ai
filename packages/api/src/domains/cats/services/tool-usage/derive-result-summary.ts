@@ -12,7 +12,49 @@
 
 import { parseRecallMetaFromText, stripAppendedRecallMetaBlock } from '@cat-cafe/shared';
 
+import type { AgentMessage } from '../types.js';
+
 export type ResultSummary = Record<string, unknown>;
+
+export function isRecallLookupTool(name: string): boolean {
+  return name === 'search_evidence' || name === 'graph_resolve' || name === 'list_recent';
+}
+
+/** Only the fields used by the recall ledger and its consumers belong in the summary. */
+export function recallToolInputSummary(name: string, input: AgentMessage['toolInput']): ResultSummary {
+  const fields = name === 'list_recent' ? ['since', 'scope'] : ['query', 'mode', 'scope'];
+  const summary: ResultSummary = {};
+  for (const field of fields) {
+    const value = input?.[field];
+    if (typeof value === 'string' && value.trim()) summary[field] = value;
+  }
+  return summary;
+}
+
+export function deriveToolEventResultSummary(
+  normalizedName: string,
+  message: Pick<AgentMessage, 'content' | 'toolInput' | 'toolResultStatus'>,
+): ResultSummary {
+  if (!isRecallLookupTool(normalizedName)) return deriveResultSummary(normalizedName, message.content);
+  const input = recallToolInputSummary(normalizedName, message.toolInput);
+  const text = extractText(message.content);
+  const result = deriveResultSummary(normalizedName, message.content);
+  const status = result.resultStatus;
+  if (message.toolResultStatus === 'error' && status !== 'overflow') {
+    const resultStatus = status === 'timeout' || status === 'cancelled' ? status : 'error';
+    return {
+      ...input,
+      resultStatus,
+      resultCount: null,
+      isError: true,
+      ...(result._f200HasPrivateHits === true ? { _f200HasPrivateHits: true } : {}),
+    };
+  }
+  return {
+    ...input,
+    ...(Object.keys(result).length ? result : { resultStatus: 'parser_miss' }),
+  };
+}
 
 /**
  * Parse tool_result content (string OR structured array). Returns the fields

@@ -3,7 +3,9 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
+import { parseRecallMetaFromText } from '@cat-cafe/shared';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
+import { AcpStreamIdleError } from '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { toStoredToolEvent } from '../../dist/domains/cats/services/agents/routing/route-helpers.js';
 import { TranscriptWriter } from '../../dist/domains/cats/services/session/TranscriptWriter.js';
 
@@ -103,3 +105,59 @@ it('passes DSH tool facts through the actual service, UI history projection, and
   assert.equal(persistedResult.event.toolResultStatus, 'error');
   // Retain this fresh fixture directory; never remove existing transcript storage.
 });
+
+for (const terminal of ['timeout', 'cancelled', 'unobserved']) {
+  it(`preserves late recall input and records only a known ACP terminal (${terminal})`, async () => {
+    const client = {
+      recentCapacitySignal: null,
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+      cancelSession() {},
+      async newSession() {
+        return { sessionId: 'recall-fixture', configOptions: [] };
+      },
+      async *promptStream(sessionId) {
+        for (const update of [
+          { sessionUpdate: 'tool_call', toolCallId: 'done', title: 'search_evidence', status: 'completed' },
+          { sessionUpdate: 'tool_call', toolCallId: 'pending', title: 'search_evidence', status: 'pending' },
+          {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'pending',
+            status: 'in_progress',
+            rawInput: { query: 'late' },
+          },
+          { sessionUpdate: 'tool_call', toolCallId: 'other', title: 'read_file', status: 'pending' },
+        ]) {
+          yield { sessionId, update };
+        }
+        if (terminal === 'timeout') throw new AcpStreamIdleError(sessionId, 25, 4, 25);
+        if (terminal === 'cancelled') return 'cancelled';
+        return 'end_turn';
+      },
+    };
+    const service = new AcpAgentService({
+      catId: 'dsh',
+      providerName: 'dsh',
+      modelName: 'fixture-profile',
+      projectRoot: process.cwd(),
+      poolKey: { projectPath: process.cwd(), providerProfile: 'recall-fixture' },
+      pool: {
+        async acquire() {
+          return { client, release() {} };
+        },
+      },
+      mcpSupport: false,
+    });
+    const output = await Array.fromAsync(service.invoke('Deterministic recall transport fixture'));
+    const results = output.filter((message) => message.type === 'tool_result');
+    assert.deepEqual(
+      results.map((message) => message.toolUseId),
+      terminal === 'unobserved' ? ['done'] : ['done', 'pending'],
+    );
+    if (terminal === 'unobserved') return;
+    assert.deepEqual(results[1].toolInput, { query: 'late' });
+    assert.equal(results[1].toolResultStatus, 'error');
+    assert.deepEqual(parseRecallMetaFromText(results[1].content), { resultStatus: terminal, resultCount: null });
+  });
+}

@@ -50,6 +50,7 @@ function createMockDeps(services, toolEventLog) {
         get: async () => null,
         getParticipantsWithActivity: async () => [],
         updateParticipantActivity: async () => {},
+        consumeMentionRoutingFeedback: async () => undefined,
       },
       apiUrl: 'http://127.0.0.1:3004',
     },
@@ -200,3 +201,48 @@ describe('F200 HW-4 根因①: route-parallel per-cat pending FIFO', () => {
     );
   });
 });
+
+for (const [name, moduleName, exportName] of [
+  ['serial', 'route-serial', 'routeSerial'],
+  ['parallel', 'route-parallel', 'routeParallel'],
+]) {
+  it(`${name} records finalized recall input and explicit failure on the original call`, async () => {
+    const { [exportName]: route } = await import(`../dist/domains/cats/services/agents/routing/${moduleName}.js`);
+    const { createAcpSessionState, transformAcpEvent } = await import(
+      '../dist/domains/cats/services/agents/providers/acp/acp-event-transformer.js'
+    );
+    const state = createAcpSessionState();
+    const messages = [
+      { sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'cat_cafe_search_evidence', status: 'pending' },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'call-1',
+        status: 'in_progress',
+        rawInput: { query: 'late query', privateFixture: 'do not copy' },
+      },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'failed' },
+    ].flatMap((update) => transformAcpEvent({ sessionId: 'test', update }, 'opus', {}, state) ?? []);
+    const appends = [];
+    const merges = [];
+    const deps = createMockDeps(
+      { opus: createMockService('opus', messages) },
+      {
+        append: async (event) => appends.push(event),
+        updateSummary: async (_threadId, matcher, summary) => merges.push({ matcher, summary }),
+      },
+    );
+
+    for await (const _ of route(deps, ['opus'], 'hello', 'user1', 'thread1', {})) {
+      // Drain the actual route.
+    }
+
+    assert.equal(appends.length, 1);
+    assert.equal(appends[0].summary._toolUseId, 'call-1');
+    assert.equal(merges.length, 1);
+    assert.equal(merges[0].matcher.toolUseId, 'call-1');
+    assert.equal(merges[0].summary.query, 'late query');
+    assert.equal(merges[0].summary.resultStatus, 'error');
+    assert.equal(merges[0].summary.resultCount, null);
+    assert.equal(Object.hasOwn(merges[0].summary, 'privateFixture'), false);
+  });
+}

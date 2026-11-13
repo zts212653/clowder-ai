@@ -73,7 +73,11 @@ import {
 } from '../../stores/ports/TurnExecutionStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
-import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import {
+  deriveToolEventResultSummary,
+  isRecallLookupTool,
+  recallToolInputSummary,
+} from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
@@ -123,7 +127,7 @@ import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-o
 import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
-import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
+import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -1552,7 +1556,9 @@ async function* routeParallelPrepared(
         // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
         // updateSummary can do exact match when provider emits it on tool_result.
         // Falls back to FIFO toolName+catId match when toolUseId absent.
-        const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+        const baseSummary = isRecallLookupTool(normalizedToolName)
+          ? recallToolInputSummary(normalizedToolName, msg.toolInput)
+          : (msg.toolInput ?? {});
         const summary: Record<string, unknown> = msg.toolUseId
           ? { ...baseSummary, _toolUseId: msg.toolUseId }
           : baseSummary;
@@ -1628,47 +1634,32 @@ async function* routeParallelPrepared(
             }
           }
         }
-        // F200 HW-4 根因①: per-cat pending FIFO. Nameless result-side
-        // (Claude/Opus parallel) → FIFO fallback (mirrors route-serial.ts:197-227
-        // pure-FIFO branch). Resolved name → splice its FIFO entry so a later
-        // nameless result can't mis-pair (砚砚 R1 review: queue-drift guard).
-        {
-          const resultMsg2 = effectiveMsg as { catId?: string; toolUseId?: string };
-          const cq = resultMsg2.catId ? pendingToolResultsByCat.get(resultMsg2.catId) : undefined;
-          if (toolNameCandidate) {
-            if (cq) {
-              // 砚砚 HW-4 R1-2: exact result → splice its OWN entry by
-              // toolUseId when present (precise); else first same-name.
-              // Prevents same-name drift (search→graph→search).
-              let si = -1;
-              if (resultMsg2.toolUseId) {
-                si = cq.findIndex((e) => e.toolUseId === resultMsg2.toolUseId);
-              }
-              if (si < 0) {
-                const nn = normalizeMcpToolName(toolNameCandidate);
-                si = cq.findIndex((e) => e.toolName === nn);
-              }
-              if (si >= 0) cq.splice(si, 1);
-            }
-          } else if (cq && cq.length > 0) {
-            toolNameCandidate = cq.shift()!.toolName;
-          }
+        const pending = pendingToolResultsByCat.get(effectiveMsg.catId);
+        if (pending?.length) {
+          // Native IDs take precedence, including on nameless out-of-order results.
+          const index = effectiveMsg.toolUseId
+            ? pending.findIndex((call) => call.toolUseId === effectiveMsg.toolUseId)
+            : toolNameCandidate
+              ? pending.findIndex((call) => call.toolName === normalizeMcpToolName(toolNameCandidate))
+              : 0;
+          if (index >= 0) toolNameCandidate ??= pending[index]!.toolName;
+          if (index >= 0) pending.splice(index, 1);
         }
         if (toolNameCandidate) {
           const normalizedName = normalizeMcpToolName(toolNameCandidate);
-          const resultSummary = deriveResultSummary(normalizedName, msg.content);
+          const resultSummary = deriveToolEventResultSummary(normalizedName, effectiveMsg);
           if (Object.keys(resultSummary).length > 0) {
-            // 砚砚 六审 P1-B: scope updateSummary match to specific cat (parallel
-            // route runs multiple cats concurrently; same tool name can collide).
-            // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
-            // otherwise FIFO toolName+catId match handles same-name parallel calls.
-            const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-            const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-              ? { toolUseId: resultMsg.toolUseId }
-              : resultMsg.catId
-                ? { toolName: normalizedName, catId: resultMsg.catId }
-                : { toolName: normalizedName };
-            deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+            deps.toolEventLog
+              .updateSummary(
+                threadId,
+                {
+                  catId: effectiveMsg.catId,
+                  invocationId: effectiveMsg.invocationId ?? catInvocationId.get(effectiveMsg.catId),
+                  ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : { toolName: normalizedName }),
+                },
+                resultSummary,
+              )
+              .catch(() => {});
           }
         }
       }
@@ -1792,7 +1783,17 @@ async function* routeParallelPrepared(
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const ownInvId = catInvocationId.get(msg.catId);
       let turnStoredMessageId: string | undefined;
-      if (ownInvId) completedCatInvocationIds.push([msg.catId, ownInvId]);
+      if (ownInvId) {
+        recordStoppedRecallCalls(
+          deps.toolEventLog,
+          threadId,
+          ownInvId,
+          msg.catId,
+          pendingToolResultsByCat.get(msg.catId) ?? [],
+          executionControls.get(msg.catId)?.signal,
+        );
+        completedCatInvocationIds.push([msg.catId, ownInvId]);
+      }
       // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
       // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
@@ -2752,6 +2753,21 @@ async function* routeParallelPrepared(
   if (options.routeSpan) {
     options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, completedCount);
     options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+  }
+
+  // An aborted stream may have no done event for the merge loop to consume.
+  for (const [catId, invocationId] of catInvocationId) {
+    const signal = executionControls.get(catId as CatId)?.signal;
+    if (!signal?.aborted) continue;
+    recordStoppedRecallCalls(
+      deps.toolEventLog,
+      threadId,
+      invocationId,
+      catId,
+      pendingToolResultsByCat.get(catId) ?? [],
+      signal,
+    );
+    completedCatInvocationIds.push([catId, invocationId]);
   }
 
   // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
