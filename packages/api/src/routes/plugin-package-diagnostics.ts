@@ -32,7 +32,7 @@ export function warnPluginPackageFailure(
   // the wrapped reason's code (e.g. the inventory's CONTRACT_VERSION_MISMATCH behind INVENTORY_REJECTED); never its text
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause : undefined;
   const causeCode = cause && (cause as { code?: unknown }).code;
-  const causeInfo = typeof causeCode === 'string' ? { cause: { code: causeCode } } : {};
+  const causeInfo = typeof causeCode === 'string' ? { cause: { code: causeCode, message: cause?.message } } : {};
   request.log.warn(
     { reqId: request.id, ...context, code, ...diagnostic, ...causeInfo },
     'Plugin package operation failed',
