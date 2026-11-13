@@ -58,6 +58,7 @@ import { configMessageDispositionRoutes } from './config-message-disposition.js'
 import { configOnboardingRoutes } from './config-onboarding.js';
 import { configProcessTalkRoutes } from './config-process-talk.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
+import { consoleThemePackageRoutes } from './console-theme-packages.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
@@ -219,6 +220,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
   await app.register(configConsoleThemeRoutes, { projectRoot });
+  await app.register(consoleThemePackageRoutes, { projectRoot });
   await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
   await app.register(configOnboardingRoutes, { projectRoot });
