@@ -1,0 +1,1521 @@
+{
+ "generated": "由 catalog-gen.js 生成，不要手改",
+ "theme": "default",
+ "contractVersion": "0.4.0",
+ "containers": [
+  {
+   "id": "window",
+   "parent": null,
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "rail",
+   "parent": "window",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "shell",
+   "parent": "window",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "nav",
+   "parent": "shell",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "body",
+   "parent": "shell",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "main",
+   "parent": "body",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "panel",
+   "parent": "body",
+   "accepts": null,
+   "display": null,
+   "scope": null
+  },
+  {
+   "id": "rail.mark",
+   "parent": "rail",
+   "accepts": "brand",
+   "display": "mark",
+   "scope": null
+  },
+  {
+   "id": "rail.top",
+   "parent": "rail",
+   "accepts": "*",
+   "display": "icon",
+   "scope": null
+  },
+  {
+   "id": "rail.bottom",
+   "parent": "rail",
+   "accepts": "*",
+   "display": "icon",
+   "scope": null
+  },
+  {
+   "id": "nav.cafe",
+   "parent": "nav",
+   "accepts": "*",
+   "display": "row",
+   "scope": null
+  },
+  {
+   "id": "nav.settings",
+   "parent": "nav",
+   "accepts": "*",
+   "display": "row",
+   "scope": null
+  },
+  {
+   "id": "panel.tools",
+   "parent": "panel",
+   "accepts": "page",
+   "display": "tool",
+   "scope": null
+  },
+  {
+   "id": "home.actions",
+   "parent": null,
+   "accepts": "page-item",
+   "display": "button",
+   "scope": "page"
+  },
+  {
+   "id": "members.actions",
+   "parent": null,
+   "accepts": "page-item",
+   "display": "button",
+   "scope": "page"
+  },
+  {
+   "id": "chat.composer.tools",
+   "parent": null,
+   "accepts": "page-item",
+   "display": "icon",
+   "scope": "page"
+  },
+  {
+   "id": "chat.message.actions",
+   "parent": null,
+   "accepts": "page-item",
+   "display": "icon",
+   "scope": "page"
+  },
+  {
+   "id": "chat.thread.more",
+   "parent": null,
+   "accepts": "page-item",
+   "display": "menu",
+   "scope": "page"
+  },
+  {
+   "id": "chat.node",
+   "parent": null,
+   "accepts": "*",
+   "display": null,
+   "scope": "page"
+  },
+  {
+   "id": "chat.tool.result",
+   "parent": null,
+   "accepts": "*",
+   "display": null,
+   "scope": "page"
+  },
+  {
+   "id": "chat.composer.notice",
+   "parent": null,
+   "accepts": "*",
+   "display": null,
+   "scope": "page"
+  },
+  {
+   "id": "ws.exec.cat",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.live.run",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.live.wait",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.eval.event",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.eval.report",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.tasks.task",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.works.work",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "pick.folder",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.files.file",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.changes.file",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "ws.git.commit",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.trash.item",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.mem.result",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.inbox.decide",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.inbox.at",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.inbox.other",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.ws.mem.item",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafe.ws.rec.item",
+   "parent": null,
+   "accepts": "row-action",
+   "display": "icon",
+   "scope": "row"
+  },
+  {
+   "id": "cafeMem",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "memory-sources",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "memory-usage",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "memory-proposals",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "memory-corrections",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "mem-logs",
+   "parent": "cafe.memory",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "ib-decide",
+   "parent": "cafe.inbox",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "ib-review",
+   "parent": "cafe.inbox",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "ib-at",
+   "parent": "cafe.inbox",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "ib-other",
+   "parent": "cafe.inbox",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "evo-baseline",
+   "parent": "cafe.ws.evolution",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "evo-observation",
+   "parent": "cafe.ws.evolution",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "evo-use",
+   "parent": "cafe.ws.evolution",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "obs-cfg",
+   "parent": "cafe.ws.ops",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "daemon-diag",
+   "parent": "cafe.ws.ops",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "chat.header.bar",
+   "parent": "chat.header",
+   "kind": "actions",
+   "scope": null
+  },
+  {
+   "id": "navToggle",
+   "parent": "chat.header",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "navExpand",
+   "parent": "chat.header",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "stack",
+   "parent": "chat.header",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "find",
+   "parent": "chat.header",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "more",
+   "parent": "chat.header",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "memory-matters",
+   "parent": "memory.matters",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "matter-entries",
+   "parent": "memory.matters",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "composer",
+   "parent": "chat.composer",
+   "kind": "container",
+   "scope": null
+  },
+  {
+   "id": "composer.lanes",
+   "parent": "chat.composer",
+   "kind": "container",
+   "scope": null
+  },
+  {
+   "id": "composer.bar",
+   "parent": "chat.composer",
+   "kind": "actions",
+   "scope": null
+  },
+  {
+   "id": "bar.plus",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.pin",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.proj",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.git",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.index",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.target",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.tools",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "bar.send",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "multi",
+   "parent": "chat.composer",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "main.chat",
+   "parent": "page.chat",
+   "kind": "container",
+   "scope": null
+  },
+  {
+   "id": "stream",
+   "parent": "page.chat",
+   "kind": "content",
+   "scope": null
+  },
+  {
+   "id": "stripe",
+   "parent": "page.chat",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "handle",
+   "parent": "page.chat",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "goal",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "runtime",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "cat",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "think",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "speed",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "strategy",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "tags",
+   "parent": "modal.tset",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "work-content",
+   "parent": "work.body",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "review-version",
+   "parent": "media.review",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "review-history",
+   "parent": "media.review",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "asset-canon",
+   "parent": "asset.canon",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "asset-canon-history",
+   "parent": "asset.canon",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "nav.cafe.bar",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "group",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "tag",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "tagClear",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "projOpen",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "projClose",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "locate",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "cafe.nav.trash",
+   "parent": "nav.cafe.shell",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "envedit",
+   "parent": "page.env",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "envall",
+   "parent": "page.env",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "acc-legacy",
+   "parent": "page.accounts",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "voice-dict",
+   "parent": "page.voice",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "cats",
+   "parent": "page.mcpItem",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "compiled-identity",
+   "parent": "dlg.compiled",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "works-panel",
+   "parent": "ws.works",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "works-page",
+   "parent": "page.works",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "preview",
+   "parent": "ws.preview",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "execDetail",
+   "parent": "ws.execDetail",
+   "kind": null,
+   "scope": null
+  },
+  {
+   "id": "exec-log",
+   "parent": "ws.execDetail",
+   "kind": null,
+   "scope": null
+  }
+ ],
+ "components": {
+  "app": {
+   "demo": "binding",
+   "name": [
+    "entry",
+    "stripe",
+    "handle"
+   ],
+   "region": "binding",
+   "when": "binding"
+  },
+  "back": {
+   "act": "binding",
+   "args": "binding",
+   "label": "binding",
+   "when": "binding"
+  },
+  "box": {
+   "blocks": "binding",
+   "faint": "binding",
+   "fill": "binding",
+   "follow": "binding",
+   "note": "binding",
+   "open": "binding",
+   "tone": [
+    "$",
+    "info",
+    "ok",
+    "warn",
+    "danger"
+   ],
+   "variant": [
+    "card",
+    "group",
+    "composer",
+    "log",
+    "scroll",
+    "expand",
+    "inline",
+    "columns",
+    "viewport",
+    "hero",
+    "dock"
+   ],
+   "when": "binding"
+  },
+  "jump": {
+   "act": "binding",
+   "args": "binding",
+   "icon": "binding",
+   "label": "binding",
+   "tip": "binding",
+   "when": "binding",
+   "hideWhileTyping": "binding"
+  },
+  "notices": {
+   "items": "binding",
+   "key": "binding",
+   "when": "binding",
+   "hideWhileTyping": "binding"
+  },
+  "stack": {
+   "items": "binding",
+   "when": "binding"
+  },
+  "button": {
+   "act": "binding",
+   "args": "binding",
+   "aria": "binding",
+   "busy": "binding",
+   "danger": "binding",
+   "disabled": "binding",
+   "expanded": "binding",
+   "items": "binding",
+   "icon": "binding",
+   "iconOnly": "binding",
+   "label": "binding",
+   "link": "binding",
+   "menu": "binding",
+   "note": "binding",
+   "open": "binding",
+   "parts": "binding",
+   "pressed": "binding",
+   "state": "binding",
+   "submit": "binding",
+   "tip": "binding",
+   "current": "binding",
+   "primary": "binding",
+   "size": [
+    "xs"
+   ],
+   "variant": [
+    "meta",
+    "nav",
+    "cycle",
+    "title",
+    "drawer",
+    "reveal"
+   ],
+   "when": "binding",
+   "who": "binding"
+  },
+  "capsules": {
+   "act": "binding",
+   "from": "binding",
+   "label": "binding"
+  },
+  "check": {
+   "act": "binding",
+   "args": "binding",
+   "label": "binding",
+   "tint": "binding",
+   "value": "binding",
+   "variant": [
+    "row"
+   ],
+   "when": "binding"
+  },
+  "chip": {
+   "act": "binding",
+   "args": "binding",
+   "check": "binding",
+   "ellip": "binding",
+   "faint": "binding",
+   "icon": "binding",
+   "kind": "binding",
+   "label": "binding",
+   "pressed": "binding",
+   "thumb": "binding",
+   "tint": "binding",
+   "tip": "binding",
+   "tone": "binding",
+   "when": "binding",
+   "x": "binding"
+  },
+  "choices": {
+   "act": "binding",
+   "args": "binding",
+   "from": "binding",
+   "group": "binding",
+   "value": "binding",
+   "variant": [
+    "multi"
+   ],
+   "when": "binding"
+  },
+  "component": {
+   "props": "binding",
+   "use": "binding",
+   "when": "binding"
+  },
+  "content": {
+   "annotations": "binding",
+   "fold": "binding",
+   "html": "binding",
+   "note": "binding",
+   "raw": "binding",
+   "when": "binding"
+  },
+  "result": {
+   "actions": "binding",
+   "blocks": "binding",
+   "key": "binding",
+   "label": "binding",
+   "status": [
+    "$",
+    "approved",
+    "rejected",
+    "expired",
+    "withdrawn",
+    "closed",
+    "unconfirmed"
+   ],
+   "when": "binding"
+  },
+  "tints": {
+   "act": "binding",
+   "args": "binding",
+   "value": "binding",
+   "label": "binding"
+  },
+  "toc": {
+   "note": "binding",
+   "when": "binding"
+  },
+  "disclosure": {
+   "act": "binding",
+   "args": "binding",
+   "blocks": "binding",
+   "count": "binding",
+   "key": "binding",
+   "note": "binding",
+   "open": "binding",
+   "sub": "binding",
+   "title": "binding",
+   "trail": "binding",
+   "when": "binding"
+  },
+  "each": {
+   "blocks": "binding",
+   "control": "binding",
+   "from": "binding",
+   "when": "binding"
+  },
+  "empty": {
+   "action": "binding",
+   "help": "binding",
+   "icon": "binding",
+   "text": "binding",
+   "when": "binding"
+  },
+  "fold": {
+   "blocks": "binding",
+   "height": [
+    "m",
+    "s"
+   ],
+   "key": "binding",
+   "shape": [
+    "$",
+    "bottom"
+   ],
+   "when": "binding"
+  },
+  "dialog": {
+   "pop": "binding",
+   "title": "binding",
+   "help": "binding",
+   "wide": "binding",
+   "layout": [
+    "viewport",
+    "fill"
+   ],
+   "span": [
+    "full"
+   ],
+   "form": "binding",
+   "error": "binding",
+   "actions": "binding",
+   "footer": "binding",
+   "blocks": "binding",
+   "when": "binding"
+  },
+  "form": {
+   "args": "binding",
+   "blocks": "binding",
+   "from": "binding",
+   "htmlId": "binding",
+   "id": "binding",
+   "note": "binding",
+   "when": "binding"
+  },
+  "frame": {
+   "html": "binding",
+   "src": "binding",
+   "message": "binding",
+   "on": "binding",
+   "icon": "binding",
+   "note": "binding",
+   "plugin": "binding",
+   "tall": "binding",
+   "title": "binding",
+   "what": "binding",
+   "when": "binding"
+  },
+  "grow": {
+   "when": "binding"
+  },
+  "head": {
+   "actNote": "binding",
+   "tools": "binding",
+   "descAction": "binding",
+   "actions": "binding",
+   "close": "binding",
+   "count": "binding",
+   "desc": "binding",
+   "eyebrow": "binding",
+   "help": "binding",
+   "label": "binding",
+   "lead": "binding",
+   "meta": "binding",
+   "note": "binding",
+   "sub": "binding",
+   "title": "binding",
+   "variant": [
+    "detail",
+    "hero"
+   ],
+   "when": "binding"
+  },
+  "input": {
+   "change": "binding",
+   "complete": "binding",
+   "grow": "binding",
+   "disabled": "binding",
+   "id": "binding",
+   "input": "binding",
+   "on": "binding",
+   "label": "binding",
+   "rows": "binding",
+   "code": "binding",
+   "lead": "binding",
+   "listFrom": "binding",
+   "reload": "binding",
+   "max": "binding",
+   "mono": "binding",
+   "num": "binding",
+   "placeholder": "binding",
+   "post": "binding",
+   "ro": "binding",
+   "invalid": "binding",
+   "secret": "binding",
+   "value": "binding",
+   "variant": [
+    "title"
+   ],
+   "when": "binding",
+   "go": "binding",
+   "args": "binding",
+   "icon": "binding",
+   "goLabel": "binding",
+   "cancel": "binding",
+   "more": "binding",
+   "tint": "binding",
+   "add": "binding"
+  },
+  "kv": {
+   "actions": "binding",
+   "from": "binding",
+   "when": "binding"
+  },
+  "label": {
+   "action": "binding",
+   "count": "binding",
+   "help": "binding",
+   "text": "binding",
+   "tip": "binding",
+   "when": "binding"
+  },
+  "lanes": {
+   "lanes": "binding",
+   "when": "binding"
+  },
+  "list": {
+   "actions": "binding",
+   "count": "binding",
+   "empty": "binding",
+   "emptyAction": "binding",
+   "expand": [
+    "many"
+   ],
+   "from": "binding",
+   "group": "binding",
+   "groups": "binding",
+   "id": "binding",
+   "inline": "binding",
+   "label": "binding",
+   "next": "binding",
+   "optional": [
+    "true"
+   ],
+   "order": "binding",
+   "partial": "binding",
+   "row": "binding",
+   "rows": "binding",
+   "scroll": "binding",
+   "searchable": [
+    "true"
+   ],
+   "when": "binding"
+  },
+  "markdown": {
+   "annotations": "binding",
+   "clamp": "binding",
+   "empty": "binding",
+   "from": "binding",
+   "more": "binding",
+   "text": "binding",
+   "when": "binding"
+  },
+  "more": {
+   "args": "binding",
+   "items": "binding",
+   "k": "binding",
+   "label": "binding",
+   "menu": "binding",
+   "size": [
+    "s",
+    "m"
+   ],
+   "variant": [
+    "row"
+   ],
+   "when": "binding"
+  },
+  "notice": {
+   "action": "binding",
+   "each": "binding",
+   "from": "binding",
+   "items": "binding",
+   "note": "binding",
+   "num": "binding",
+   "parts": "binding",
+   "strong": "binding",
+   "text": "binding",
+   "tone": [
+    "$",
+    "info",
+    "ok",
+    "warn",
+    "danger"
+   ],
+   "when": "binding"
+  },
+  "ordered": {
+   "blocks": "binding",
+   "order": "binding",
+   "when": "binding"
+  },
+  "picker": {
+   "act": "binding",
+   "args": "binding",
+   "items": "binding",
+   "auto": "binding",
+   "autoTip": "binding",
+   "check": "binding",
+   "disabled": "binding",
+   "icon": "binding",
+   "label": "binding",
+   "parts": "binding",
+   "prefix": "binding",
+   "tip": "binding",
+   "when": "binding",
+   "who": "binding"
+  },
+  "pre": {
+   "annotations": "binding",
+   "rows": "binding",
+   "text": "binding",
+   "when": "binding"
+  },
+  "pop": {
+   "blocks": "binding",
+   "page": "binding",
+   "pos": "binding",
+   "view": "binding",
+   "label": "binding",
+   "variant": [
+    "card"
+   ],
+   "when": "binding"
+  },
+  "opts": {
+   "empty": "binding",
+   "from": "binding",
+   "when": "binding"
+  },
+  "chatpage": {
+   "bar": "binding",
+   "body": "binding",
+   "dock": "binding",
+   "head": "binding",
+   "side": "binding",
+   "top": "binding"
+  },
+  "ticks": {
+   "from": "binding",
+   "older": "binding",
+   "when": "binding"
+  },
+  "threads": {
+   "from": "binding",
+   "groups": "binding",
+   "heads": "binding",
+   "move": "binding",
+   "note": "binding",
+   "other": "binding",
+   "rename": "binding",
+   "when": "binding"
+  },
+  "range": {
+   "args": "binding",
+   "change": "binding",
+   "id": "binding",
+   "input": "binding",
+   "label": "binding",
+   "max": "binding",
+   "min": "binding",
+   "step": "binding",
+   "unit": "binding",
+   "value": "binding",
+   "when": "binding"
+  },
+  "reply": {
+   "ref": "binding"
+  },
+  "search": {
+   "form": "binding",
+   "id": "binding",
+   "input": "binding",
+   "on": "binding",
+   "label": "binding",
+   "note": "binding",
+   "placeholder": "binding",
+   "value": "binding",
+   "when": "binding",
+   "wide": "binding"
+  },
+  "section": {
+   "actions": "binding",
+   "blocks": "binding",
+   "from": "binding",
+   "help": "binding",
+   "id": "binding",
+   "keep": "binding",
+   "key": "binding",
+   "label": "binding",
+   "note": "binding",
+   "open": "binding",
+   "row": "binding",
+   "rows": "binding",
+   "title": "binding",
+   "when": "binding"
+  },
+  "seg": {
+   "act": "binding",
+   "args": "binding",
+   "from": "binding",
+   "options": "binding",
+   "value": "binding",
+   "variant": [
+    "tabs"
+   ],
+   "when": "binding"
+  },
+  "select": {
+   "span": "binding",
+   "act": "binding",
+   "args": "binding",
+   "change": "binding",
+   "disabled": "binding",
+   "from": "binding",
+   "id": "binding",
+   "invalid": "binding",
+   "label": "binding",
+   "multi": "binding",
+   "none": "binding",
+   "options": "binding",
+   "prefix": "binding",
+   "tip": "binding",
+   "value": "binding",
+   "variant": [
+    "member"
+   ],
+   "when": "binding"
+  },
+  "send": {
+   "args": "binding",
+   "disabled": "binding",
+   "stop": "binding",
+   "stopping": "binding",
+   "tip": "binding"
+  },
+  "settings": {
+   "from": "binding",
+   "plain": "binding",
+   "row": "binding",
+   "rows": "binding",
+   "when": "binding"
+  },
+  "slot": {
+   "ctx": "binding",
+   "slot": "binding"
+  },
+  "split": {
+   "left": "binding",
+   "picked": "binding",
+   "right": "binding",
+   "scroll": [
+    "panes"
+   ],
+   "follow": [
+    "left",
+    "right",
+    "both"
+   ],
+   "variant": [
+    "aside",
+    "compare"
+   ],
+   "when": "binding"
+  },
+  "stats": {
+   "actions": "binding",
+   "from": "binding",
+   "items": "binding",
+   "variant": [
+    "counters"
+   ],
+   "when": "binding"
+  },
+  "status": {
+   "text": "binding",
+   "tone": [
+    "$",
+    "info",
+    "ok",
+    "warn",
+    "danger"
+   ],
+   "when": "binding"
+  },
+  "steps": {
+   "act": "binding",
+   "args": "binding",
+   "from": "binding",
+   "variant": [
+    "checks",
+    "flow",
+    "progress"
+   ],
+   "when": "binding"
+  },
+  "stream": {
+   "from": "binding",
+   "id": "binding"
+  },
+  "switch": {
+   "act": "binding",
+   "args": "binding",
+   "disabled": "binding",
+   "label": "binding",
+   "tip": "binding",
+   "value": "binding",
+   "when": "binding"
+  },
+  "tabs": {
+   "act": "binding",
+   "after": "binding",
+   "args": "binding",
+   "close": "binding",
+   "from": "binding",
+   "label": "binding",
+   "parts": "binding",
+   "selected": "binding",
+   "tip": "binding"
+  },
+  "text": {
+   "actions": "binding",
+   "count": "binding",
+   "faint": "binding",
+   "for": "binding",
+   "from": "binding",
+   "help": "binding",
+   "label": "binding",
+   "mono": "binding",
+   "num": "binding",
+   "parts": "binding",
+   "sep": "binding",
+   "text": "binding",
+   "tip": "binding",
+   "tone": [
+    "$",
+    "info",
+    "ok",
+    "warn",
+    "danger"
+   ],
+   "variant": [
+    "value",
+    "para",
+    "meta",
+    "title",
+    "list"
+   ],
+   "when": "binding"
+  },
+  "tiles": {
+   "act": "binding",
+   "from": "binding"
+  },
+  "tags": {
+   "add": "binding",
+   "empty": "binding",
+   "from": "binding",
+   "pick": "binding",
+   "remove": "binding",
+   "when": "binding",
+   "id": "binding",
+   "k": "binding",
+   "kind": "binding",
+   "label": "binding",
+   "lock": "binding",
+   "placeholder": "binding",
+   "values": "binding"
+  },
+  "toolbar": {
+   "args": "binding",
+   "form": "binding",
+   "hidden": "binding",
+   "id": "binding",
+   "items": "binding",
+   "left": "binding",
+   "note": "binding",
+   "parts": "binding",
+   "right": "binding",
+   "tone": [
+    "$",
+    "warn"
+   ],
+   "variant": [
+    "head",
+    "savebar",
+    "selection",
+    "embed",
+    "marker",
+    "float"
+   ],
+   "when": "binding"
+  },
+  "tree": {
+   "divider": "binding",
+   "fileAct": "binding",
+   "fileArgs": "binding",
+   "flat": "binding",
+   "id": "binding",
+   "nodes": "binding",
+   "ready": "binding",
+   "row": "binding",
+   "select": "binding",
+   "when": "binding"
+  },
+  "upload": {
+   "accept": "binding",
+   "hidden": "binding",
+   "multiple": "binding",
+   "icon": "binding",
+   "iconOnly": "binding",
+   "id": "binding",
+   "label": "binding",
+   "msg": "binding",
+   "args": "binding"
+  },
+  "copy": {
+   "label": "binding",
+   "mono": "binding",
+   "tail": "binding",
+   "tip": "binding",
+   "v": "binding",
+   "value": "binding",
+   "when": "binding"
+  },
+  "view": {
+   "id": "binding",
+   "data": "binding",
+   "when": "binding"
+  },
+  "typed": {
+   "slot": "binding",
+   "of": "binding",
+   "data": "binding",
+   "blocks": "binding",
+   "when": "binding"
+  },
+  "kvlist": {
+   "add": "binding",
+   "del": "binding",
+   "empty": "binding",
+   "eye": "binding",
+   "input": "binding",
+   "key": "binding",
+   "keyPh": "binding",
+   "path": "binding",
+   "ro": "binding",
+   "rows": "binding",
+   "single": "binding"
+  },
+  "avatar": {
+   "args": "binding",
+   "lead": "binding",
+   "size": [
+    "$",
+    "xs",
+    "s",
+    "m",
+    "l",
+    "xl"
+   ],
+   "upload": "binding"
+  },
+  "color": {
+   "id": "binding",
+   "input": "binding",
+   "label": "binding",
+   "preview": "binding",
+   "slots": [
+    "name"
+   ],
+   "value": "binding",
+   "when": "binding"
+  }
+ },
+ "acts": [
+  "bindRetry",
+  "close",
+  "copy",
+  "dialog",
+  "go",
+  "insert",
+  "open",
+  "openUrl",
+  "plugSet",
+  "plugin",
+  "thread",
+  "toast"
+ ],
+ "data": [
+  "currentThread",
+  "members",
+  "threads"
+ ]
+}
