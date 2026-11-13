@@ -331,7 +331,7 @@ function pdlFrameOf(b, sc, root) {
   pdlPluginNeed(pk);
   if (ENGINE_PARTS.pluginLoad && !PDL_PLUGIN_FRAGS[pk].loaded) return Object.assign({}, b, { src: null, html: null, load: 'loading' });
   const decl = PDL_VIEWS[node], frame = decl.type === 'frame' ? decl : b, data = node === PV.viewId ? root : pdlSourceOf(decl, sc), value = frame.html || frame.src;
-  const content = value && value.request ? VM.pluginFrame(pk, value, sc) : { src: pv(frame.src, data, data), html: pv(frame.html, data, data) };
+  const content = value && value.request ? VM.pluginFrame(pk, value, sc, node) : { src: pv(frame.src, data, data), html: pv(frame.html, data, data) };
   if (content.src) content.src = ioFile(content.src) || content.src;
   return Object.assign({}, b, content, { key: node, load: content.load || data.load || b.load, on: { message: 'pluginFrameMessage' } });
 }

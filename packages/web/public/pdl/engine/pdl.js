@@ -624,7 +624,10 @@ function spaceOpen(v) {
   navSwitchC(ctPages(), t.f, t.a, null, false, function () { S.space = v; });
 };
 /* 关掉一个打开的节点（close { node }）：在栈里就返回一层，在栈底就关掉它所在的覆盖 */
-function nodeClose(k) { const at = navFrameAt('node:' + k); if (at) { if (navDepth(at) > 1) navBack(at); else navClose(at); } }
+function nodeClose(k) {
+  const pop = (PDL_VIEWS[k] || {}).popup; if (pop && S.popOrder.indexOf(pop) >= 0) { popClose(pop); return; }   /* 浮着开的节点：关它所在的弹窗 */
+  const at = navFrameAt('node:' + k); if (at) { if (navDepth(at) > 1) navBack(at); else navClose(at); }
+}
 /* 固定到窄栏 / 从窄栏取下（显式添加副本；编辑布局拖动是移动）：在窄栏里（上方或下方）就取下，否则放进上方。k 是入口的规范键。窄栏立即变化就是反馈 */
 A.rail = function (d) {
   const id = d.k; if (!pdlEntry(id)) return;

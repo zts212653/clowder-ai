@@ -1001,6 +1001,8 @@ function bindPluginRequests() {
     }
     if (res && res.error) toast(res.error, null, 'danger');
     else if (res && res.message) toast(res.message);
+    // A write may hand back one public host action (e.g. insert into the input).
+    if (res && !res.error && res.act && PLUGIN_PUBLIC.acts.indexOf(res.act) >= 0) actFn(res.act)(res.args || {});
     if (r.method && r.method !== 'GET') await reread(pk);
     return res;
   }
@@ -1021,45 +1023,105 @@ function bindPluginRequests() {
   CHANGES.plugin = function (e) {
     return A.plugin(Object.assign({}, actionArgs(e.target), { v: e.target.value }));
   };
-  // A frame's page or address from a plugin request; the plugin's own html runs under the sandbox policy.
-  VM.pluginFrame = function (pk, decl, input) {
+  /*
+   * The bridge plugin pages already use (clowder-plugin-ui/v1): the frame's window.name is the node's nonce; http goes
+   * to the plugin's own routes, clipboard to the platform, close closes the node; close.guard makes the host send
+   * before-close when leaving and wait for close (go on) or close.cancel (stay).
+   */
+  const CHANNEL = 'clowder-plugin-ui/v1',
+    nonces = {},
+    guards = {};
+  VM.pluginFrame = function (pk, decl, input, node) {
     const data = VM.plugin(pk, { frame: decl.request }, input),
-      v = data.frame;
+      raw = data.frame,
+      v = typeof raw === 'string' ? { html: raw } : raw;
     if (!v) return { load: data.load };
+    nonces[node] = nonces[node] || crypto.randomUUID();
     return v.html != null
       ? {
+          name: nonces[node],
           html:
             '<meta http-equiv="Content-Security-Policy" content="' +
             CSP +
             '"><meta name="referrer" content="no-referrer">' +
             v.html,
         }
-      : { src: v.src };
+      : { name: nonces[node], src: v.src };
   };
+  function http(pk, req) {
+    const path = '/api/plugins/' + encodeURIComponent(pk) + '/' + String(req.path || '').replace(/^\//, ''),
+      method = (req.method || 'GET').toUpperCase();
+    return (method === 'GET' ? api.get(path, {}) : api.post(path, { method: method }, req.body)).then(
+      function (body) {
+        return { status: 200, body: body };
+      },
+      function (error) {
+        return { status: error.status || 500, body: { error: error.message } };
+      },
+    );
+  }
+  LEAVE_ASK.push(function (els) {
+    const nodes = Object.keys(guards).filter(function (k) {
+      return (
+        guards[k].on &&
+        els.some(function (e) {
+          return e.querySelector('iframe[data-frame-key="' + k + '"]');
+        })
+      );
+    });
+    if (!nodes.length) return null;
+    return Promise.all(
+      nodes.map(function (k) {
+        return new Promise(function (resolve, reject) {
+          guards[k].wait = { resolve: resolve, reject: reject };
+          ENGINE_PARTS.framePost(k, { channel: CHANNEL, nonce: nonces[k], type: 'before-close' });
+        });
+      }),
+    );
+  });
   A.pluginFrameMessage = function (m, el) {
-    if (!m || m.channel !== 'clowder-plugin-ui/v1') return;
     const node = el.dataset.frameKey,
       pk = PDL_VIEWS[node].plugin;
-    const run = function () {
-      if (m.type === 'invoke') return write(pk, m.request, m.input);
-      if (m.type === 'clipboard.text') return PLATFORM.clipboard(m.value);
-      if (m.type === 'clipboard.image') return PLATFORM.clipboardImage(m.value);
-      if (m.type === 'close') return true;
-      throw new Error('plugin frame message ' + m.type);
+    if (!m || m.channel !== CHANNEL || m.nonce !== nonces[node]) return;
+    const reply = function (r) {
+      ENGINE_PARTS.framePost(node, Object.assign({ channel: CHANNEL, nonce: m.nonce, requestId: m.requestId }, r));
     };
+    const g = (guards[node] = guards[node] || {});
+    if (m.type === 'close.guard') {
+      g.on = !!m.value;
+      reply({ result: true });
+      return;
+    }
+    if (m.type === 'close' || m.type === 'close.cancel') {
+      const w = g.wait;
+      g.wait = null;
+      if (w) (m.type === 'close' ? w.resolve : w.reject)();
+      else if (m.type === 'close') {
+        g.on = false;
+        actFn('close')({ node: node });
+      }
+      return;
+    }
     Promise.resolve()
-      .then(run)
+      .then(function () {
+        if (m.type === 'http') return http(pk, m.request);
+        if (m.type === 'clipboard.text') {
+          PLATFORM.clipboard(m.value);
+          return true;
+        }
+        if (m.type === 'clipboard.image')
+          return PLATFORM.clipboardImage(m.value).then(function () {
+            return true;
+          });
+        throw new Error('plugin frame message ' + m.type);
+      })
       .then(
         function (result) {
-          return { result: result };
+          reply({ result: result });
         },
         function (error) {
-          return { error: error.message };
+          reply({ error: error.message });
         },
-      )
-      .then(function (r) {
-        ENGINE_PARTS.framePost(node, Object.assign({ channel: m.channel, nonce: m.nonce, requestId: m.requestId }, r));
-        if (m.type === 'close') actFn('close')({ node: node });
-      });
+      );
   };
 }

@@ -633,7 +633,7 @@ Object.assign(PDL_BLOCKS, {
     if (html != null || src != null) {
       const message = pv(b.message, sc, root), receive = b.on && pv(b.on.message, sc, root), key = pv(b.key, sc, root);
       const content = src != null ? ' data-island="frame:' + h(key != null ? key : src) + '" src="' + h(src) + '" sandbox="allow-scripts allow-forms allow-same-origin"' : (b.tall ? '' : ' data-frame-size') + ' sandbox="allow-scripts" srcdoc="' + h(html + '<script>(' + frameSizeScript.toString() + ')();<\/script>') + '"';
-      return '<iframe class="vw-widget' + (b.tall ? ' tall' : '') + '"' + content + ' aria-label="' + pvText(b.title, sc, root) + '"' + (key != null ? ' data-frame-key="' + h(key) + '"' : '') + (receive ? ' data-frame-on-message="' + h(receive) + '"' : '') + (message != null ? ' data-frame-message="' + h(JSON.stringify(message)) + '"' : '') + '></iframe>';
+      return '<iframe class="vw-widget' + (b.tall ? ' tall' : '') + '"' + content + (b.name ? ' name="' + h(b.name) + '"' : '') + ' aria-label="' + pvText(b.title, sc, root) + '"' + (key != null ? ' data-frame-key="' + h(key) + '"' : '') + (receive ? ' data-frame-on-message="' + h(receive) + '"' : '') + (message != null ? ' data-frame-message="' + h(JSON.stringify(message)) + '"' : '') + '></iframe>';
     }
     if (b.plugin) return frame(pv(b.plugin, sc, root), pvText(b.what, sc, root), !!b.tall);
     const n = pvText(b.note, sc, root); return '<div class="frame">' + icon(pv(b.icon, sc, root), 28) + '<b>' + pvText(b.title, sc, root) + '</b>' + (n ? '<span>' + n + '</span>' : '') + '</div>';

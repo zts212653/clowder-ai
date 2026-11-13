@@ -223,9 +223,16 @@ function leaveDirty(el) {
   const hosts = el.matches(POP_SEL) ? [el] : Array.prototype.slice.call(el.querySelectorAll(POP_SEL));
   return DIRTY.filter(function (x) { return x.dirty() && el.querySelector('form[data-form="' + x.form + '"]'); }).length > 0 || hosts.some(function (h) { return h.dataset.pop in POP_SNAP && popVals(h) !== POP_SNAP[h.dataset.pop]; });
 }
+/* 离开前要问的（应用登记）：f(要离开的元素) → null 或 Promise（落定才离开，拒绝就留下）。比如框里的页面登记了关闭守卫：先让它存好 */
+const LEAVE_ASK = [];
 /* el：一个容器，或者一组（投影的几层一起离开：被盖住、出栈、换掉，见 proj.js） */
 function leave(el, then) {
   const els = !el ? [] : Array.isArray(el) ? el : [el];
+  const asks = LEAVE_ASK.map(function (f) { return f(els); }).filter(Boolean);
+  if (asks.length) { Promise.all(asks).then(function () { leaveForms(els, then); }, function () {}); return; }
+  leaveForms(els, then);
+}
+function leaveForms(els, then) {
   const drafts = DIRTY.filter(function (x) { return els.some(function (e) { return e.querySelector('form[data-form="' + x.form + '"]'); }); });
   const go2 = function () { drafts.forEach(function (x) { if (x.drop) x.drop(); }); then(); };
   if (!els.some(leaveDirty)) { go2(); return; }
