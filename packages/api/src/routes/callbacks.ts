@@ -430,7 +430,7 @@ function buildPostMessageRoutingMessage(
       parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
     } else if (w.kind === 'suppressed_by_terminal_ack') {
       parts.push(`${w.droppedMentions.map((id) => `@${id}`).join('、')} 因 terminal ACK 已记录但未触发新 invocation。`);
-    } else {
+    } else if (w.kind === 'cat_not_found') {
       parts.push(`${w.mention} 不存在，已跳过。`);
     }
   }
