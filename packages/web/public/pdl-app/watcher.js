@@ -149,6 +149,7 @@ VM.watcherThread = function () {
     };
   return Object.assign({}, value, {
     threadId: id,
+    pausedUntil: value.control.pausedUntil,
     selected: value.config.scope === 'all' ? value.control.enabled !== false : value.control.enabled === true,
     error: raw.errors[key] || '',
   });

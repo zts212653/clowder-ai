@@ -143,9 +143,7 @@ export function useSignalBindings(ui: SignalUi, needed: boolean | number = false
           ui.sigQ.trim()
             ? searchSignals(ui.sigQ, options).then((r) => r.items)
             : fetchSignalsInbox({ ...options, status: ui.sigSt as 'all' | 'inbox' | 'read' | 'starred' | 'archived' }),
-          ui.sigView === 'timeline'
-            ? fetchStudyTimeline(Number(ui.tlDays)).then((r) => r.entries)
-            : Promise.resolve([]),
+          ui.sigView === 'sources' ? Promise.resolve([]) : fetchStudyTimeline(Number(ui.tlDays)).then((r) => r.entries),
         ]);
         if (stamp === epoch.current) setRead({ load: '', sources, stats, articles, timeline });
       } catch {

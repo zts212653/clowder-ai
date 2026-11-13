@@ -1664,77 +1664,118 @@
       ui = S.ws,
       common = { load: read.load, view: ui.sigView },
       base = { signalArticles: read.articles, signalSources: read.sources, signalDiscussion: discussion };
+    let articleDetail = null;
     if (ui.sigDetail) {
       const a = detail.article,
         meta = detail.meta;
-      if (detail.id !== ui.sigDetail || !a || !meta || !detail.collections)
-        return { ...base, cafeWsSignals: { load: detail.id === ui.sigDetail ? detail.load : 'loading' } };
-      const pods = meta.artifacts.filter((p) => p.kind === 'podcast' && p.state === 'ready'),
-        pod = detail.podcast;
-      return {
-        ...base,
-        signalArticles: [a, ...read.articles.filter((x) => x.id !== a.id)],
-        cafeWsSignals: {
-          load: detail.load,
-          detail: {
-            id: a.id,
-            title: a.title,
-            source: read.sources.find((s) => s.id === a.source)?.name ?? a.source,
-            state: a.status,
-            tier: a.tier,
-            time: a.publishedAt,
-            year: new Date(a.publishedAt).getFullYear(),
-            sum: a.summary,
-            body: a.content,
-            tags: a.tags.map((t) => ({ id: t, name: t })),
-            note: a.note,
-            study: meta.threads.length + meta.artifacts.length,
-            lastStudyAt: meta.lastStudiedAt,
-            links: meta.threads.map((t) => ({ id: t.threadId, thread: t.threadId, stale: t.stale, at: t.linkedAt })),
-            notes: meta.artifacts
-              .filter((n) => n.kind === 'note' && n.state === 'ready')
-              .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-              .map((n) => ({ v: n.id, id: n.id, at: n.createdAt })),
-            noteKey: 'signal-note-' + a.id + '-' + (detail.note?.id ?? ''),
-            noteId: detail.note?.id ?? '',
-            noteDoneAt: detail.note?.at,
-            noteSum: detail.note?.content,
-            reports: meta.artifacts
-              .filter((r) => r.kind === 'research-report')
-              .map((r) => ({
-                id: r.id,
-                title: typeof r.metadata?.title === 'string' ? r.metadata.title : r.id,
-                state: r.state,
-                at: r.createdAt,
+      if (detail.id === ui.sigDetail && a && meta && detail.collections) {
+        const pods = meta.artifacts.filter((p) => p.kind === 'podcast' && p.state === 'ready'),
+          pod = detail.podcast;
+        articleDetail = {
+          ...base,
+          signalArticles: [a, ...read.articles.filter((x) => x.id !== a.id)],
+          cafeWsSignals: {
+            load: detail.load,
+            detail: {
+              id: a.id,
+              title: a.title,
+              url: a.url,
+              source: read.sources.find((s) => s.id === a.source)?.name ?? a.source,
+              state: a.status,
+              tier: a.tier,
+              time: a.publishedAt,
+              year: new Date(a.publishedAt).getFullYear(),
+              sum: a.summary,
+              body: a.content,
+              tags: a.tags.map((t) => ({ id: t, name: t })),
+              note: a.note,
+              study: meta.threads.length + meta.artifacts.length,
+              studyOpen: meta.threads.length + meta.artifacts.length > 0,
+              studyKey: 'st-' + a.id,
+              bodyKey: 'body-' + a.id,
+              noteEdKey: 'note-ed-' + a.id,
+              noteOpen: !!a.note,
+              discussing: discussion?.article === a.id,
+              lastStudyAt: meta.lastStudiedAt,
+              links: meta.threads.map((t) => ({
+                id: t.threadId,
+                thread: t.threadId,
+                stale: t.stale,
+                at: t.linkedAt,
+                linkedAt: t.linkedAt,
+                title: sidebarData().threads.find((r) => r.id === t.threadId)?.title || t.threadId,
               })),
-            pods: pods.map((p, i) => ({ v: i, id: p.id, on: i === (ui.pod ?? 0) })),
-            podGen: meta.artifacts.find((p) => p.kind === 'podcast' && p.state !== 'ready')?.state,
-            pod: pod
-              ? {
-                  kind: pod.mode,
-                  count: pod.segments.length,
-                  minutes: pod.totalDuration / 60,
-                  playing: ui.playAll,
-                  segs: pod.segments.map((s, i) => ({
-                    id: String(i),
-                    i,
-                    speaker: s.speaker,
-                    text: s.text,
-                    src: s.audioUrl ? api.file(s.audioUrl) : '',
-                    playing: playing.index === i && playing.state === 'playing',
-                  })),
-                }
-              : null,
-            sets: detail.collections.filter((c) => c.articleIds.includes(a.id)).map((c) => ({ chip: c.name })),
-            setOpts: detail.collections
-              .filter((c) => !c.articleIds.includes(a.id))
-              .map((c) => ({ v: c.id, label: c.name })),
+              notes: meta.artifacts
+                .filter((n) => n.kind === 'note' && n.state === 'ready')
+                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                .map((n) => ({ v: n.id, id: n.id, at: n.createdAt })),
+              noteKey: 'signal-note-' + a.id + '-' + (detail.note?.id ?? ''),
+              noteId: detail.note?.id ?? '',
+              noteDoneAt: detail.note?.at,
+              noteSum: detail.note?.content,
+              reports: meta.artifacts
+                .filter((r) => r.kind === 'research-report')
+                .map((r) => ({
+                  id: r.id,
+                  title: typeof r.metadata?.title === 'string' ? r.metadata.title : r.id,
+                  state: r.state,
+                  at: r.createdAt,
+                  createdAt: r.createdAt,
+                })),
+              pods: pods.map((p, i) => ({ v: i, id: p.id, on: i === (ui.pod ?? 0) })),
+              podGen: meta.artifacts.find((p) => p.kind === 'podcast' && p.state !== 'ready')?.state,
+              pod: pod
+                ? {
+                    kind: pod.mode,
+                    count: pod.segments.length,
+                    minutes: pod.totalDuration / 60,
+                    playing: ui.playAll,
+                    segs: pod.segments.map((s, i) => ({
+                      id: String(i),
+                      i,
+                      speaker: s.speaker,
+                      title: s.speaker,
+                      k: 'seg-' + i,
+                      text: s.text,
+                      src: s.audioUrl ? api.file(s.audioUrl) : '',
+                      playing: playing.index === i && playing.state === 'playing',
+                    })),
+                  }
+                : null,
+              sets: detail.collections.filter((c) => c.articleIds.includes(a.id)).map((c) => ({ chip: c.name })),
+              setOpts: detail.collections
+                .filter((c) => !c.articleIds.includes(a.id))
+                .map((c) => ({ v: c.id, label: c.name })),
+            },
           },
-        },
-      };
+        };
+      } else articleDetail = { ...base, cafeWsSignals: { load: detail.id === ui.sigDetail ? detail.load : 'loading' } };
     }
+    const groups = new Map();
+    for (const e of read.timeline) {
+      const day = e.lastStudiedAt.slice(0, 10);
+      groups.set(day, [...(groups.get(day) ?? []), e]);
+    }
+    const timeline = {
+      days: ui.tlDays,
+      empty: !read.timeline.length,
+      groups: [...groups].map(([day, rows]) => ({
+        day,
+        rows: rows.map((e) => ({
+          id: e.articleId,
+          title: e.articleTitle,
+          time: e.lastStudiedAt,
+          source: read.sources.find((s) => s.id === e.source)?.name ?? e.source,
+          acts: e.artifacts.map((a) => ({ kind: a.kind })),
+          thread: e.threads[0]?.threadId,
+          artifacts: e.artifacts,
+          threads: e.threads,
+        })),
+      })),
+    };
+    let inbox;
     if (ui.sigView === 'sources')
-      return {
+      inbox = {
         ...base,
         cafeWsSignals: {
           ...common,
@@ -1747,6 +1788,9 @@
               rows: g.sources.map((s) => ({
                 ...s,
                 busy: fetching === s.id,
+                on: s.enabled,
+                how: s.fetch.method,
+                freq: s.schedule.frequency,
                 method: s.fetch.method,
                 frequency: s.schedule.frequency,
               })),
@@ -1754,61 +1798,46 @@
           },
         },
       };
-    if (ui.sigView === 'timeline') {
-      const groups = new Map();
-      for (const e of read.timeline) {
-        const day = e.lastStudiedAt.slice(0, 10);
-        groups.set(day, [...(groups.get(day) ?? []), e]);
-      }
-      return {
+    else if (ui.sigView === 'timeline') inbox = { ...base, cafeWsSignals: { ...common, timeline } };
+    else
+      inbox = {
         ...base,
         cafeWsSignals: {
           ...common,
-          timeline: {
-            days: ui.tlDays,
-            empty: !read.timeline.length,
-            groups: [...groups].map(([day, rows]) => ({
-              day,
-              rows: rows.map((e) => ({
-                id: e.articleId,
-                title: e.articleTitle,
-                time: e.lastStudiedAt,
-                source: e.source,
-                artifacts: e.artifacts,
-                threads: e.threads,
-              })),
+          timeline,
+          list: {
+            q: ui.sigQ,
+            fst: ui.sigSt,
+            ftier: ui.sigTier,
+            fsrc: ui.sigSrc,
+            allStates: ui.sigSt === 'all',
+            srcs: read.sources.map((s) => ({ v: s.id, label: s.name })),
+            nSel: Object.values(ui.sigSel).filter(Boolean).length,
+            count: read.articles.length,
+            today: read.stats?.todayCount,
+            unread: read.stats?.unreadCount,
+            week: read.stats?.weekCount,
+            items: read.articles.map((a) => ({
+              ...a,
+              id: a.id,
+              checked: !!ui.sigSel[a.id],
+              selected: !!ui.sigSel[a.id],
+              sourceName: read.sources.find((s) => s.id === a.source)?.name ?? a.source,
+              starred: a.status === 'starred',
+              sum: a.summary,
+              st: a.status,
+              study: a.studyCount,
+              source: read.sources.find((s) => s.id === a.source)?.name ?? a.source,
+              time: a.publishedAt,
+              year: new Date(a.publishedAt).getFullYear(),
+              state: a.status,
             })),
           },
         },
       };
-    }
     return {
-      ...base,
-      cafeWsSignals: {
-        ...common,
-        list: {
-          q: ui.sigQ,
-          fst: ui.sigSt,
-          ftier: ui.sigTier,
-          fsrc: ui.sigSrc,
-          srcs: read.sources.map((s) => ({ v: s.id, label: s.name })),
-          nSel: Object.values(ui.sigSel).filter(Boolean).length,
-          count: read.articles.length,
-          today: read.stats?.todayCount,
-          unread: read.stats?.unreadCount,
-          week: read.stats?.weekCount,
-          items: read.articles.map((a) => ({
-            ...a,
-            id: a.id,
-            checked: !!ui.sigSel[a.id],
-            selected: !!ui.sigSel[a.id],
-            source: read.sources.find((s) => s.id === a.source)?.name ?? a.source,
-            time: a.publishedAt,
-            year: new Date(a.publishedAt).getFullYear(),
-            state: a.status,
-          })),
-        },
-      },
+      ...(articleDetail || inbox),
+      signalInbox: { ...inbox.cafeWsSignals, detail: articleDetail?.cafeWsSignals.detail || null },
     };
   }
   globalThis.projectSignals = projectSignals;
@@ -1956,6 +1985,7 @@
       return {
         cafeWsOps: {
           ...common,
+          facts: { repairCount: source.rescue.length },
           rescue: {
             scanning: read.load === 'loading',
             found: !!source.rescue.length,
@@ -2039,6 +2069,8 @@
                 ...s,
                 id: s.sessionId,
                 runtimeId: s.sessionId,
+                foldPath: 'folds.rt-id-' + s.sessionId,
+                open: !!S.folds['rt-id-' + s.sessionId],
                 status: s.lifecycle.state,
                 bind: s.binding,
                 cat: s.catId,
@@ -2061,7 +2093,17 @@
       return {
         cafeWsOps: {
           ...common,
-          facts: { refreshedAt: quota.fetchedAt, usage: usage.grandTotal },
+          facts: {
+            refreshedAt: quota.fetchedAt,
+            usage: {
+              ...usage.grandTotal,
+              calls: usage.grandTotal.invocations,
+              cost: usage.grandTotal.costUsd,
+              input: usage.grandTotal.inputTokens,
+              output: usage.grandTotal.outputTokens,
+              total: usage.grandTotal.inputTokens + usage.grandTotal.outputTokens,
+            },
+          },
           quota: {
             writing: raw.writing,
             pools: source.profiles.map((profile) => ({
@@ -2142,7 +2184,16 @@
             night: rows(lb.mentions.nightOwl, 'mentions'),
             chatty: rows(lb.mentions.chatty, 'chatty'),
             streak: rows(lb.mentions.streak, 'streak'),
-            cvo: lb.cvoLevel ? [lb.cvoLevel] : [],
+            cvo: lb.cvoLevel
+              ? [
+                  {
+                    ...lb.cvoLevel,
+                    next: lb.cvoLevel.nextTitle
+                      ? { title: lb.cvoLevel.nextTitle, achievementsNeeded: lb.cvoLevel.needed }
+                      : null,
+                  },
+                ]
+              : [],
             workStats: {
               commits: sum(lb.work.commits),
               reviews: sum(lb.work.reviews),
@@ -2538,7 +2589,8 @@
   function projectMemory(raw = chatDataSnapshot.project.memory) {
     const m = CS.m,
       // 会议 has no reader yet (the theme shows it as not connected): it reads as an empty category, not a failure.
-      read = raw.reads[m.cat] ?? {},
+      cat = raw.detail ? raw.detail.family : m.cat,
+      read = raw.reads[cat] ?? {},
       page = read.data,
       entries = page?.entries ?? page?.events ?? [],
       d = raw.detail,
@@ -2572,6 +2624,11 @@
             sources: d.family === 'person' ? null : sources(d.source),
             sourceStatus: d.source?.status,
             proposals: (e.proposals ?? []).map((r) => ({
+              ...r,
+              receipt: r.appliedRevision || r.rejectionReason || '',
+              correction: false,
+              sourceAnchor: r.approvalState === 'anchored' && r.approvalCardRef ? r.approvalCardRef : null,
+              canOpen: r.approvalState === 'anchored' && !!r.approvalCardRef,
               id: r.proposalId,
               title: r.rationale ?? r.displayName,
               state: r.status,
@@ -2583,6 +2640,9 @@
             })),
             corrections: (e.correctionProposals ?? []).map((r) => ({
               ...r,
+              receipt: r.appliedRevision || r.rejectionReason || '',
+              correction: true,
+              sourceAnchor: d.correctionCards[r.proposalId] || null,
               id: r.proposalId,
               state: r.status,
               title: r.suggestedPatch.summary ?? r.suggestedPatch.takeaway ?? r.reason,
@@ -2595,6 +2655,7 @@
                 : {},
             })),
             error: raw.error,
+            receipt: m.receipt || '',
           }
         : raw.load
           ? { unavailable: raw.load === 'error', error: raw.error }
@@ -2671,7 +2732,55 @@
         ];
       }
     }
+    const pages = Object.fromEntries(
+      Object.keys(paths).map((family) => {
+        const r = raw.reads[family],
+          p = r.data;
+        return [
+          family,
+          {
+            items: (p?.entries ?? p?.events ?? []).map((x) =>
+              family === 'profile' ? { ...x, subject: x.relationshipKey } : x,
+            ),
+            nextOffset: p?.meta?.nextOffset,
+            load: r.loading ? 'loading' : r.error ? 'error' : '',
+          },
+        ];
+      }),
+    );
+    const browse = {
+      cat: cat,
+      skyExpanded: m.skyExpanded !== false,
+      sort: m.sort,
+      load: read.loading ? 'loading' : read.error ? 'error' : '',
+      cats: Object.keys(paths).map((v) => ({
+        v,
+        active: cat === v,
+        count: (raw.reads[v]?.data?.entries ?? raw.reads[v]?.data?.events ?? []).length,
+      })),
+      items: entries
+        .filter((r) => !m.q || JSON.stringify(r).toLowerCase().includes(m.q.toLowerCase()))
+        .sort((a, b) =>
+          cat === 'taste' && m.sort === 'hits' ? (b.recall?.search?.hits ?? 0) - (a.recall?.search?.hits ?? 0) : 0,
+        )
+        .map((r) => ({
+          ...r,
+          record: r,
+          selected: !!d && d.family === cat && d.id === (r.personId ?? r.eventId ?? r.id),
+          owner: true,
+          key: r.personId ?? r.eventId ?? r.id,
+          title: r.displayName ?? r.canonicalName ?? r.title ?? r.summary ?? r.type,
+          state: r.status,
+          hits: r.recall?.search?.hits,
+          act: 'memOpen',
+          args: { family: cat, id: r.personId ?? r.eventId ?? r.id, revision: r.revision },
+        })),
+      more: !!page?.meta?.hasMore,
+      allLoaded: !page?.meta?.hasMore,
+      limitPath: 'cs.m.limits.' + cat,
+    };
     return {
+      memoryBrowse: browse,
       memoryState: m,
       memoryDetail: d,
       memoryEdit: CS.memoryEdit.current,
@@ -2682,35 +2791,17 @@
       cafeMemory: {
         navHidden: !!CS.navHidden,
         q: m.q,
+        people: pages.person,
+        profiles: { ...pages.profile, selected: d?.family === 'profile' ? d.id : null },
+        events: pages.event,
+        entities: pages.entity,
+        health: {
+          evidence: raw.explore.reads.index.data ?? {},
+          maintenance: raw.explore.reads.maintenance.data?.health ?? {},
+        },
         view: doc ? 'source' : m.view,
         ...exploration,
-        all:
-          m.view === 'all'
-            ? {
-                cat: m.cat,
-                sort: m.sort,
-                load: read.loading ? 'loading' : read.error ? 'error' : '',
-                cats: Object.keys(paths).map((v) => ({ v, active: m.cat === v })),
-                items: entries
-                  .filter((r) => !m.q || JSON.stringify(r).toLowerCase().includes(m.q.toLowerCase()))
-                  .sort((a, b) =>
-                    m.cat === 'taste' && m.sort === 'hits'
-                      ? (b.recall?.search?.hits ?? 0) - (a.recall?.search?.hits ?? 0)
-                      : 0,
-                  )
-                  .map((r) => ({
-                    ...r,
-                    key: r.personId ?? r.eventId ?? r.id,
-                    title: r.displayName ?? r.canonicalName ?? r.title ?? r.summary ?? r.type,
-                    state: r.status,
-                    hits: r.recall?.search?.hits,
-                    act: 'memOpen',
-                    args: { family: m.cat, id: r.personId ?? r.eventId ?? r.id, revision: r.revision },
-                  })),
-                more: !!page?.meta?.hasMore,
-                limitPath: 'cs.m.limits.' + m.cat,
-              }
-            : null,
+        all: m.view === 'all' && !d ? browse : null,
         sdoc: doc ? { title: doc.title, project: doc.collection, paras: [doc.content] } : null,
         detail: m.view === 'all' && !doc ? detail : null,
       },
@@ -2899,8 +2990,8 @@
         tab: ui.lib,
         candidateCount: pending.length,
         collectionCount: collections.length,
-        evidence: index.data,
-        maintenance: maintenance.data?.health ?? maintenance.data,
+        evidence: index.data ?? {},
+        maintenance: maintenance.data?.health ?? maintenance.data ?? {},
         error: libraryError,
         cands: pending.map((c) => {
           const id =
@@ -2948,6 +3039,14 @@
             k: c.id,
             id: c.id,
             name: c.name,
+            kind: c.kind,
+            sensitivity: c.visibility,
+            topKinds: last
+              ? last.groups
+                  .map((g) => ({ kind: g.kind, count: g.count }))
+                  .sort((a, b) => b.count - a.count)
+                  .slice(0, 3)
+              : [],
             type: c.kind,
             vis: c.visibility,
             docs: c.docCount,

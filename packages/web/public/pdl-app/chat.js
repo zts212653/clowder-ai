@@ -547,10 +547,26 @@ window.clowderChat = {
       };
     };
     VM.chatHeader = function () {
-      return Object.assign({}, chatRead('chatHeader'), { editing: !!S.renaming, panelOpen: !!S.panel });
+      return {
+        ...chatRead('chatHeader'),
+        editing: !!S.renaming,
+        panelOpen: !!S.panel,
+        get tasksOpen() {
+          const source = projectData('workbench');
+          return source && source.tasks
+            ? source.tasks.filter(function (t) {
+                return t.status !== 'done';
+              }).length
+            : undefined;
+        },
+        get worksCount() {
+          const source = projectData('reviews');
+          return source && source.artifacts.complete ? source.artifacts.total : undefined;
+        },
+      };
     };
     VM.chatComposer = function () {
-      return chatRead('chatComposer');
+      return Object.assign({}, chatRead('chatComposer'), { homePin: !!CS.homePin });
     };
     VM.chatPop = function () {
       return chatRead('chatPop');

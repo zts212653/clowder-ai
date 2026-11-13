@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GroupUndoReceipt } from '@/components/ThreadSidebar/search-group-types';
 import type { ThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
 import type { ThreadLabel } from '@/stores/label-store';
+import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { extractPendingLabelSuggestions, filterSuggestions, type PendingLabelSpec } from '@/utils/batch-apply-labels';
 import { invalidateSidebarProjection, refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
@@ -23,7 +24,7 @@ export interface SidebarSource {
     newLabels: PendingLabelSpec[];
     suggestions: { threadId: string; labels: string[]; accepted: boolean }[];
   };
-  attention: { id: string; unreadCount: number }[];
+  attention: (Pick<SidebarSnapshotRow, 'id' | 'unreadCount' | 'hasUserMention' | 'presence'> & { lastWho: string })[];
 }
 
 export function useSidebarBindings(data: ChatData, needed: boolean | number = false) {
@@ -37,7 +38,20 @@ export function useSidebarBindings(data: ChatData, needed: boolean | number = fa
     suggestions: { threadId: string; labels: string[]; accepted: boolean }[];
   }>({ phase: 'idle', error: '', newLabels: [], suggestions: [] });
   const source = useRef<SidebarSource>({ owner: null, classification: classification.current, attention: [] });
-  const attention = useMemo(() => projection.map(({ id, unreadCount }) => ({ id, unreadCount })), [projection]);
+  const attention = useMemo(
+    () =>
+      projection.map(({ id, unreadCount, hasUserMention, presence }) => ({
+        id,
+        unreadCount,
+        hasUserMention,
+        presence,
+        lastWho:
+          id === data.threadId
+            ? data.messages.findLast((m) => m.type === 'assistant' && m.catId && !m.isDraft)?.catId || ''
+            : '',
+      })),
+    [projection, data.threadId, data.messages],
+  );
   if (source.current.attention !== attention) source.current = { ...source.current, attention };
   const publish = () => {
     source.current = { ...source.current, owner: read.current.owner };

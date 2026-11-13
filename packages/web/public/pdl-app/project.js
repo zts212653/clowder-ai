@@ -811,14 +811,27 @@ function bindProject() {
       kind: 'hbSuggest',
       args: { title: item.title },
       on: function () {
-        if (dlgNeed(dd, ['dlg-cat', 'dlg-why', 'dlg-plan'])) return false;
-        return chatAction(
-          'hbSuggest',
-          Object.assign({}, d, { cat: val('dlg-cat'), why: val('dlg-why'), plan: val('dlg-plan') }),
-        );
+        return A.hbSuggestSave(Object.assign({}, d, { dialog: dd }));
       },
     });
     dd = S.dialog;
+  };
+  A.hbSuggestSave = function (d) {
+    const selected = val('dlg-cat'),
+      cat = chatRead('members').find(function (m) {
+        return selected === m.id || (m.handle && selected.indexOf(m.handle) >= 0);
+      });
+    if (!cat || !val('dlg-why').trim() || !val('dlg-plan').trim()) {
+      if (d.dialog) {
+        S.dialog = d.dialog;
+        dlgNeed(d.dialog, ['dlg-cat', 'dlg-why', 'dlg-plan']);
+      }
+      return false;
+    }
+    return chatAction('hbSuggest', Object.assign({}, d, { catId: cat.id, why: val('dlg-why'), plan: val('dlg-plan') }));
+  };
+  FORMS.hbSuggestSave = function (form) {
+    return A.hbSuggestSave(actionArgs(form));
   };
   A.hbApprove = function (d) {
     return chatAction('hbApprove', d);
@@ -1502,6 +1515,9 @@ function bindProject() {
   };
   VM.cafeWsSignals = function () {
     return projectSignals().cafeWsSignals;
+  };
+  VM.signalInbox = function () {
+    return projectSignals().signalInbox;
   };
   SET_AFTER['ws.pod'] = function () {
     return chatAction('signalPod');

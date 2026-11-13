@@ -77,6 +77,19 @@ it('writes real source booleans, preserves rejected owner state and merges selec
       }
       return response({ article: { ...article, ...body } });
     }
+    if (p.startsWith('/api/signals/timeline'))
+      return response({
+        entries: [
+          {
+            articleId: article.id,
+            articleTitle: article.title,
+            source: source.id,
+            lastStudiedAt: '2026-11-03T01:00:00Z',
+            artifacts: [{ id: 'note', kind: 'note', state: 'ready', createdAt: '2026-11-03T01:00:00Z' }],
+            threads: [{ threadId: 'study-thread', linkedAt: '2026-11-03T01:00:00Z' }],
+          },
+        ],
+      });
     if (p === '/api/signals/sources') return response({ sources: [source] });
     if (p === '/api/signals/stats')
       return response({ todayCount: 2, weekCount: 7, unreadCount: 1, byTier: {}, bySource: {} });
@@ -89,6 +102,21 @@ it('writes real source booleans, preserves rejected owner state and merges selec
     expect(projectOwner('signals', result.current, ui, undefined, undefined).cafeWsSignals.load).toBe(''),
   );
   expect(JSON.stringify(projectOwner('signals', result.current, ui, undefined, undefined))).toContain('Owner research');
+  expect(projectOwner('signals', result.current, ui).signalInbox).toMatchObject({
+    view: 'list',
+    detail: null,
+    timeline: {
+      days: '7',
+      empty: false,
+      groups: [
+        {
+          day: '2026-11-03',
+          rows: [{ id: article.id, source: 'Owner source', thread: 'study-thread', acts: [{ kind: 'note' }] }],
+        },
+      ],
+    },
+    list: { items: [{ sourceName: 'Owner source', st: 'inbox', starred: false }] },
+  });
   const args = { id: source.id, enabled: false as unknown as string };
   await act(async () => {
     await expect(result.current.action('signalSourceStatus', args)).rejects.toThrow('Owner rejected');

@@ -87,6 +87,7 @@ function mount() {
       writes.push({ path: p, body: JSON.parse(String(init.body)) });
       return response({ threadId: 'study-owner-thread' });
     }
+    if (p.startsWith('/api/signals/timeline')) return response({ entries: [] });
     if (p === '/api/signals/sources') return response({ sources: [] });
     if (p === '/api/signals/stats') return response({ todayCount: 2, unreadCount: 2, weekCount: 2 });
     if (p.includes('/inbox?')) return response({ items: [article('one'), article('two')] });

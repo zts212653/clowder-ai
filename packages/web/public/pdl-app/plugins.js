@@ -260,6 +260,7 @@ function bindPluginSpaces() {
     };
   };
   VM.ext = function () {
+    if (navArg('pluginId')) S.extSel = navArg('pluginId');
     if (!loaded) return null;
     const query = S.extQuery || '';
     const matches = pluginRows().filter(function (plugin) {

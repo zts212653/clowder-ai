@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { useSidebarBindings } from '../useSidebarBindings';
@@ -17,6 +18,7 @@ const preferences = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  useSidebarProjectionStore.setState({ rows: [] });
 });
 afterEach(cleanup);
 it('uses the real organize snapshot and keeps the canonical group until the owner acknowledges', async () => {
@@ -29,8 +31,38 @@ it('uses the real organize snapshot and keeps the canonical group until the owne
       });
     return Response.json(preferences);
   });
-  const hook = renderHook(() => useSidebarBindings(fixtureData(), true));
+  const data = fixtureData();
+  useSidebarProjectionStore.setState({
+    rows: [
+      {
+        id: data.threadId,
+        title: 'Owner thread',
+        participants: ['codex'],
+        pinned: false,
+        favorited: false,
+        labels: [],
+        preferredCats: [],
+        projectPath: '/project',
+        lastActiveAt: 1,
+        systemKind: null,
+        isHubThread: false,
+        unreadCount: 2,
+        hasUserMention: true,
+        presence: { status: 'working', cats: ['codex'] },
+      },
+    ],
+  });
+  const hook = renderHook(() => useSidebarBindings(data, true));
   await waitFor(() => expect(hook.result.current.data.owner?.preferences.groups).toHaveLength(1));
+  expect(hook.result.current.data.attention).toEqual([
+    {
+      id: data.threadId,
+      unreadCount: 2,
+      hasUserMention: true,
+      presence: { status: 'working', cats: ['codex'] },
+      lastWho: 'codex',
+    },
+  ]);
   const command = {
     action: 'organize',
     groupId: 'attention_owner',

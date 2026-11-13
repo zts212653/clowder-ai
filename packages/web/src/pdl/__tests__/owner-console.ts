@@ -127,7 +127,7 @@ export function createOwnerConsole(options: ProjectionOptions = {}) {
   Object.assign(ui, { ...ownerInput(), ...ui });
   const state = options.ws ?? fixtureWorkspace();
   const context = createContext({
-    S: { ws: state, pv: {}, popOn: {}, thread: chat.threadId, route: 'chat' },
+    S: { ws: state, pv: {}, popOn: {}, folds: {}, thread: chat.threadId, route: 'chat' },
     CS: ui,
     __ui: ui,
     __chat: fixtureInput(chat).chat,

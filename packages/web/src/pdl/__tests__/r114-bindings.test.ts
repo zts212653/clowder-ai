@@ -89,7 +89,13 @@ it('reads real study reports, preserves existing tags and collection members, an
     return vm.detail;
   };
   expect(read().reports).toEqual([
-    { id: 'owner-report', title: 'Owner research finding', state: 'ready', at: '2026-11-03T01:00:00Z' },
+    {
+      id: 'owner-report',
+      title: 'Owner research finding',
+      state: 'ready',
+      at: '2026-11-03T01:00:00Z',
+      createdAt: '2026-11-03T01:00:00Z',
+    },
   ]);
   expect(read().body).toBe('Owner full body');
   await act(() => result.current.action('signalTag', { k: article.id, v: 'added' }));

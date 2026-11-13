@@ -130,6 +130,7 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
     cat: 'taste' as Family,
     q: '',
     sort: 'recent',
+    receipt: '',
     win: 7,
     src: 'all',
     who: '',
@@ -305,6 +306,7 @@ export function useMemoryBindings(needed: (source: string) => boolean | number =
     if (receipt.action !== body.action || !['applied', 'replayed'].includes(receipt.outcome))
       throw new Error('记忆修改结果尚未确认');
     pending.current = undefined;
+    ui.current.receipt = receipt.outcome;
     reads[family].retry();
     if (String(body.action).startsWith('hard_forget')) {
       setDetail(null);

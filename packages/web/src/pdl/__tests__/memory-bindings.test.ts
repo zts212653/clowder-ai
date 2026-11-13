@@ -241,6 +241,7 @@ it.each([
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { family: _family, id: _id, kind: _kind, personId: _personId, ...body } = args as Record<string, unknown>;
   expect(writes[0]).toMatchObject({ action: operation, ...body, requestId: expect.any(String) });
+  expect(hook.result.current.state.receipt).toBe('applied');
   const family = name.startsWith('person')
     ? 'people/person'
     : name === 'profileSave'
@@ -440,8 +441,12 @@ it.each([
   expect(projectOwner('memory', hook.result.current, {}).cafeMemory.detail).toEqual(
     expect.objectContaining({
       proposals: [
-        {
+        expect.objectContaining({
           id: origin.proposalId,
+          canOpen: true,
+          sourceAnchor: { threadId: 'approval-thread', messageId: 'approval-mid' },
+          correction: false,
+          receipt: '',
           title:
             family === 'person'
               ? 'Person owner name'
@@ -449,7 +454,7 @@ it.each([
           state: proposals[family].status,
           act: 'msgJump',
           args: { t: 'approval-thread', mid: 'approval-mid' },
-        },
+        }),
       ],
     }),
   );
@@ -487,7 +492,19 @@ it.each([
   );
   expect(projectOwner('memory', hook.result.current, {}).cafeMemory.detail).toEqual(
     expect.objectContaining({
-      proposals: [{ id: 'proposal-owner', title: 'Owner rationale', state: 'pending', act: '', args: {} }],
+      proposals: [
+        expect.objectContaining({
+          id: 'proposal-owner',
+          title: 'Owner rationale',
+          state: 'pending',
+          act: '',
+          args: {},
+          sourceAnchor: null,
+          canOpen: false,
+          correction: false,
+          receipt: '',
+        }),
+      ],
     }),
   );
   expect(writes).toEqual([]);

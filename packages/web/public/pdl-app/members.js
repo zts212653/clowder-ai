@@ -162,10 +162,46 @@ function bindMembers() {
             ? 'agy'
             : c.carrier;
       },
-      prefs = projectTeam().teamPreferences;
+      prefs = projectTeam().teamPreferences.filter(function (p) {
+        return p.lifecycle === 'active';
+      });
     return {
       onOpts: on.map(function (c) {
         return c.id;
+      }),
+      load: meta ? '' : 'loading',
+      defaultCatOptions: on.map(function (c) {
+        return {
+          id: c.id,
+          name: c.nickname || c.displayName,
+          model: memberPreferences(c.form, meta ? runtimeCatalogState(c.form, c.id) : null).model,
+        };
+      }),
+      preferences: prefs.map(function (p) {
+        return {
+          prefer: p.prefer
+            .map(function (s) {
+              return s.catId || s.providerId || s.poolId;
+            })
+            .join(', '),
+          over: p.over
+            .map(function (s) {
+              return s.catId || s.providerId || s.poolId;
+            })
+            .join(', '),
+          intent: p.appliesWhen.intent || '',
+          eligibility: p.appliesWhen.requireEligible
+            ? p.appliesWhen.requireEligible
+                .map(function (s) {
+                  return s.catId || s.providerId || s.poolId;
+                })
+                .join(', ')
+            : '',
+          version: p.version,
+          reason: p.rationale,
+          evidence: p.evidenceRefs.join(', '),
+          stale: p.reviewAfter != null && p.reviewAfter <= Date.now(),
+        };
       }),
       defaultCat: (
         all.find(function (c) {
@@ -175,9 +211,11 @@ function bindMembers() {
       counts: { all: all.length, on: on.length, off: all.length - on.length },
       filter: S.memberFilter,
       owner: { name: source.owner.name, tags: source.owner.mentionPatterns },
-      prefsCount: prefs ? prefs.length : 0,
+      prefsCount: prefs.length,
       access: access,
-      stale: source.stale,
+      stale: prefs.filter(function (p) {
+        return p.reviewAfter != null && p.reviewAfter <= Date.now();
+      }).length,
       rows: all
         .filter(function (c) {
           return (
@@ -186,9 +224,18 @@ function bindMembers() {
           );
         })
         .map(function (c) {
-          const preferences = memberPreferences(c.form, meta ? runtimeCatalogState(c.form, c.id) : null);
+          const preferences = memberPreferences(c.form, meta ? runtimeCatalogState(c.form, c.id) : null),
+            account =
+              meta &&
+              meta.accounts.find(function (a) {
+                return a.id === c.accountRef;
+              });
           return {
             id: c.id,
+            breed: c.breedDisplayName,
+            client: c.clientId,
+            via: c.carrier,
+            accountName: account ? account.displayName : '',
             configurationSource: c.configurationSource,
             name: c.nickname || c.displayName,
             handle: c.mentionPatterns[0],
@@ -1157,6 +1204,56 @@ function bindMembers() {
       if (editor === state) render(true);
     }
   };
+  VM.ownerProfile = function () {
+    const owner = model().owner;
+    return {
+      name: owner.name,
+      avatar: owner.avatar,
+      mentions: owner.mentionPatterns.join('  '),
+      primary: (owner.color && owner.color.primary) || '',
+      secondary: (owner.color && owner.color.secondary) || '',
+    };
+  };
+  A.ownerSave = async function (data) {
+    const owner = model().owner,
+      d = data.dialog,
+      field = function (id) {
+        return d.fields.find(function (f) {
+          return f.id === id;
+        });
+      },
+      name = (d ? field('ow-name').value : val('ow-name')).trim(),
+      tags = d
+        ? field('ow-tags').chips.vals
+        : Array.from(
+            new Set(
+              val('ow-tags')
+                .split(/[\s,，]+/)
+                .filter(Boolean)
+                .map(function (t) {
+                  return t[0] === '@' ? t : '@' + t;
+                }),
+            ),
+          ),
+      primary = d ? field('c1').value : val('c1');
+    if (!name) throw new Error(tc('settings.notifications.emptyName'));
+    if (!tags.length) throw new Error(tc('settings.notifications.handleRequired'));
+    const body = {
+      name: name,
+      aliases: d ? field('ow-alias').chips.vals : owner.aliases || [],
+      mentionPatterns: tags,
+      avatar: (d ? field('ow-ava').value : val('ow-ava')) || owner.avatar || null,
+      color: primary
+        ? { primary: primary, secondary: d ? (owner.color ? owner.color.secondary : primary) : val('ow-secondary') }
+        : null,
+    };
+    if (d && field('ow-nickname').value.trim() !== d.args.nickname)
+      body.nickname = field('ow-nickname').value.trim() || null;
+    await act('ownerSave', { value: JSON.stringify(body) });
+  };
+  FORMS.ownerProfile = function () {
+    return A.ownerSave({});
+  };
   A.ownerOpen = function () {
     const owner = model().owner;
     let d = {
@@ -1170,24 +1267,7 @@ function bindMembers() {
         avatar: owner.avatar,
       },
       on: async function () {
-        const field = function (id) {
-            return d.fields.find(function (f) {
-              return f.id === id;
-            });
-          },
-          primary = field('c1').value;
-        if (!field('ow-name').value.trim()) throw new Error(tc('settings.notifications.emptyName'));
-        if (!field('ow-tags').chips.vals.length) throw new Error(tc('settings.notifications.handleRequired'));
-        const nickname = field('ow-nickname').value.trim();
-        const body = {
-          name: field('ow-name').value.trim(),
-          aliases: field('ow-alias').chips.vals,
-          mentionPatterns: field('ow-tags').chips.vals,
-          avatar: field('ow-ava').value || owner.avatar || null,
-          color: primary ? { primary: primary, secondary: owner.color ? owner.color.secondary : primary } : null,
-        };
-        if (nickname !== d.args.nickname) body.nickname = nickname || null;
-        await act('ownerSave', { value: JSON.stringify(body) });
+        return A.ownerSave({ dialog: d });
       },
     };
     dialog(d);

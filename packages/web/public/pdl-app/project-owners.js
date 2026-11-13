@@ -219,6 +219,9 @@ function bindOwnerProjections() {
   VM.cafeWsVoice = function () {
     return projectVoice().cafeWsVoice;
   };
+  VM.memoryBrowse = function () {
+    return projectMemory().memoryBrowse;
+  };
   VM.cafeMemory = function () {
     return projectMemory().cafeMemory;
   };

@@ -151,11 +151,20 @@ function boardModels() {
             ? {
                 name: identity(l.ownerCatId).name,
                 exp: l.expiresAt,
+                expiresAt: l.expiresAt,
+                state: l.state,
                 beat: l.lastHeartbeatAt,
                 beatTimestamp: typeof l.lastHeartbeatAt === 'number',
                 hasMinutes: false,
               }
             : null,
+          cats: data.cats
+            .filter(function (c) {
+              return !c.roster || c.roster.available;
+            })
+            .map(function (c) {
+              return identity(c.id);
+            }),
           canSuggest: it.status === 'open',
           canApprove: it.status === 'suggested',
           canRetry: it.status === 'approved',
@@ -291,6 +300,9 @@ function boardModels() {
           projectId: project.id,
           canTriage: true,
           title: c.goal,
+          actor: c.actor,
+          originalText: c.originalText,
+          sourceTag: c.sourceTag,
           sourceDetail: c.sourceDetail,
           triage: c.triage,
         };
@@ -359,6 +371,38 @@ function boardModels() {
     };
     ext = {
       projectId: project.id,
+      intentDetail:
+        detail.cards.find(function (c) {
+          return c.id === ui.extCard;
+        }) || null,
+      governance: {
+        total: detail.cards.length,
+        buildNow: detail.cards.filter(function (c) {
+          return c.triage && c.triage.bucket === 'build_now';
+        }).length,
+        unresolved: detail.cards.filter(function (c) {
+          return c.triage && ['clarify_first', 'validate_first'].includes(c.triage.bucket);
+        }).length,
+        triaged: detail.cards.filter(function (c) {
+          return c.triage;
+        }).length,
+        buckets: ['build_now', 'clarify_first', 'validate_first', 'challenge', 'later'].map(function (b) {
+          return {
+            label: b,
+            count: detail.cards.filter(function (c) {
+              return c.triage && c.triage.bucket === b;
+            }).length,
+          };
+        }),
+        sources: ['Q', 'O', 'D', 'R', 'A'].map(function (tag) {
+          return {
+            label: tag,
+            count: detail.cards.filter(function (c) {
+              return c.sourceTag === tag;
+            }).length,
+          };
+        }),
+      },
       canSlice: section === 'slice',
       canIntent: section === 'intent',
       canReflux: section === 'reflux',

@@ -836,7 +836,8 @@ describe('unmodified runtime and project chat bindings', () => {
       w.eval("ENGINE_PARTS.openTab('panel','tasks')");
       await w.__settled();
       const taskReads = port.needed.mock.calls.flatMap(([diff]) => diff.added);
-      expect(taskReads).toContain('project.workbench.tasks');
+      // The header's tasksOpen count already subscribes to this source.
+      expect(w.eval('[...heldNeeded]')).toContain('project.workbench.tasks');
       expect(taskReads.some((source) => source.startsWith('project.workbench.git'))).toBe(false);
       expect(taskReads.some((source) => source.startsWith('project.workbench.execution'))).toBe(false);
       expect(errors).not.toHaveBeenCalled();
@@ -2789,6 +2790,15 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(diff).toEqual({ added: [], changed: ['pdl-test'], removed: [], orderChanged: false, fields: [] });
       expect(w.eval('sidebarData().threads[1] === window.unchangedThread')).toBe(true);
       expect(w.eval('VM.navThreads().sections[0].rows[0].title')).toBe('New thread data');
+      expect(w.eval('VM.navThreads().sections[0].rows[0]')).toMatchObject({
+        who: '',
+        lastWho: '',
+        running: false,
+        failed: false,
+        unread: 0,
+        replied: false,
+        status: '',
+      });
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
@@ -2854,7 +2864,8 @@ describe('unmodified runtime and project chat bindings', () => {
       const model =
         "pcfModel('thread-pick',{plugin:'official.superagent',installed:true,fields:[{key:'threadIds',kind:'thread',multiple:true,label:'Threads',required:false,currentValue:'[\"t1\"]'}]}).rows[0]";
       const row = w.eval(
-        "sidebarData=function(){return {threads:[{id:'t1',title:'One'},{id:'t2',title:'Two'}]}};" + model,
+        "sidebarData=function(){return {attention:[],executions:[],threads:[{id:'t1',title:'One'},{id:'t2',title:'Two'}]}};" +
+          model,
       );
       expect(row.kind).toBe('thread');
       expect(row.multiple).toBe(true);
@@ -6729,6 +6740,22 @@ it('uses the r135 library form values and captured Mission Hub dialog fields thr
       },
       undefined,
     );
+    const suggest = w.document.createElement('form');
+    suggest.id = 'suggest-form';
+    suggest.dataset.k = 'owner-item';
+    suggest.innerHTML =
+      '<input id="dlg-cat"><input id="dlg-why" value="Owner reason"><input id="dlg-plan" value="Owner plan">';
+    w.document.body.append(suggest);
+    for (const selected of ['codex', 'Codex @codex']) {
+      w.document.getElementById('dlg-cat').value = selected;
+      await w.eval("FORMS.hbSuggestSave(document.getElementById('suggest-form'))");
+      expect(action).toHaveBeenCalledWith(
+        'hbSuggest',
+        { k: 'owner-item', catId: 'codex', why: 'Owner reason', plan: 'Owner plan' },
+        undefined,
+      );
+    }
+    suggest.remove();
     expect(errors).not.toHaveBeenCalled();
   } finally {
     dom.window.close();

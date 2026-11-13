@@ -52,6 +52,7 @@ it('projects package descriptions, documentation and provided capabilities witho
   };
   const starts: Record<string, (() => unknown)[]> = {};
   const context = createContext({
+    navArg: () => null,
     S: { route: 'extItem', param: plugin.pluginId },
     A: {},
     VM: {},

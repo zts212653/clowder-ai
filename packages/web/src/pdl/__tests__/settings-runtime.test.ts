@@ -441,7 +441,12 @@ it('projects the inherited member model and its source from the requested catalo
       modelLabel: 'GPT tool',
       modelSource: 'client_report',
       modelStatus: 'reported',
+      client: 'openai',
+      via: 'app_server',
+      accountName: '',
     });
+    expect(w.eval('VM.members().defaultCatOptions')).toEqual([{ id: 'codex', name: 'Codex', model: 'gpt-tool' }]);
+    expect(w.eval('VM.members().preferences')).toEqual([]);
     expect(w.document.querySelector('[data-view="page.members"]').textContent).toContain('gpt-tool');
     const reads = action.mock.calls.filter(([name]) => name === 'memberRuntimeModels');
     expect(reads).toHaveLength(1);
