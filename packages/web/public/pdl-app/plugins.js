@@ -999,7 +999,8 @@ function bindPluginRequests() {
       pending[pk]--;
       render(true);
     }
-    if (res && res.message) toast(res.message);
+    if (res && res.error) toast(res.error, null, 'danger');
+    else if (res && res.message) toast(res.message);
     if (r.method && r.method !== 'GET') await reread(pk);
     return res;
   }
