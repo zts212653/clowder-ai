@@ -34,17 +34,17 @@ const manifest = {
   name: 'Spaces',
   features: [{ id: 'messaging', name: 'Messaging', resources: [], capabilities: ['messaging.send'] }],
   runtime: { transport: 'builtin' },
-  pdl,
 };
+// A plugin's console is its package's console/pdl.json (read beside console/i18n and console/components).
+const consoleFiles = async (pluginId: string) => (pluginId === manifest.pluginId ? { pdl } : {});
 
-it('admits the PDL manifest extension without weakening base manifest or package identity checks', async () => {
+it('admits the package manifest without weakening base manifest or package identity checks', async () => {
   const accepted = validateHostPluginManifest(manifest);
   assert.equal(accepted.valid, true);
   assert.equal(
     validateHostPluginManifest({ ...manifest, runtime: { transport: 'stdio', entrypoint: '../outside.js' } }).valid,
     false,
   );
-  assert.equal(validateHostPluginManifest({ ...manifest, pdl: { id: 'bad', views: [] } }).valid, false);
   assert.equal(validateHostPluginManifest({ ...manifest, unexpected: true }).valid, false);
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory);
@@ -84,6 +84,7 @@ it('exposes only current admitted installed fragments through the authenticated 
   const manager = new PluginManagerService({
     inventory: { snapshot: async () => snapshot },
     catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 1 }) },
+    consoleFiles,
   });
   const app = Fastify();
   app.addHook('preHandler', async (request) => {
@@ -134,14 +135,17 @@ it('exposes only current admitted installed fragments through the authenticated 
   }
 });
 
-it('serves an installed plugin console: the manifest pdl section with the package console files beside it', async () => {
+it('serves an installed plugin console: the package console files (pdl.json, i18n, components)', async () => {
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory);
   const github = {
     ...manifest,
     pluginId: 'official.github-operations',
     name: 'GitHub Operations',
-    pdl: { ns: 'github', views: { 'github.community': { blocks: [{ type: 'text', text: 't:github.title' }] } } },
+  };
+  const githubPdl = {
+    ns: 'github',
+    views: { 'github.community': { blocks: [{ type: 'text', text: 't:github.title' }] } },
   };
   const digest = `sha512-${createHash('sha512').update('github-console').digest('base64')}`;
   await control.installPackage({
@@ -157,6 +161,7 @@ it('serves an installed plugin console: the manifest pdl section with the packag
     consoleFiles: async (pluginId) =>
       pluginId === github.pluginId
         ? {
+            pdl: githubPdl,
             components: { js: ["PDL_COMPONENTS['plugin:x/card'] = () => '';"], css: [] },
             i18n: { zh: { title: '社区' } },
           }

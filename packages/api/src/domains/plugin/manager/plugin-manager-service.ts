@@ -96,7 +96,9 @@ export interface PluginManagerConfigurationPort {
 export interface PluginManagerServiceOptions {
   readonly addressedTargets?: PluginAddressedTargets;
   /** An installed package's console files (app.js, i18n) beside its manifest's pdl section. */
-  readonly consoleFiles?: (pluginId: string) => Promise<Pick<PluginPdlFragment, 'components' | 'i18n'>>;
+  readonly consoleFiles?: (
+    pluginId: string,
+  ) => Promise<{ pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>>;
   readonly delivery?: { deliver(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> };
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
@@ -325,10 +327,9 @@ export class PluginManagerService {
         continue;
       const pkg = inventory.packages.find((item) => item.packageDigest === instance.packageDigest);
       if (!pkg || pkg.packageState !== 'installed' || !pkg.manifest) continue;
-      const manifest = pkg.manifest as typeof pkg.manifest & { pdl?: PluginPdlFragment };
-      if (!manifest.pdl) continue;
-      const files = (await this.options.consoleFiles?.(instance.pluginId)) ?? {};
-      out.set(instance.pluginId, { ...structuredClone(manifest.pdl), ...files });
+      const { pdl, ...files } = (await this.options.consoleFiles?.(instance.pluginId)) ?? {};
+      if (!pdl) continue;
+      out.set(instance.pluginId, { ...pdl, ...files });
     }
     return out;
   }

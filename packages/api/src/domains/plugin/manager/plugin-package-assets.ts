@@ -45,7 +45,7 @@ export interface PluginManagerPackageAssetServiceOptions {
   };
 }
 
-type PluginConsoleFiles = Pick<PluginPdlFragment, 'components' | 'i18n'>;
+type PluginConsoleFiles = { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>;
 
 export class PluginManagerPackageAssetService
   implements PluginManagerPackageAssetPort, PluginManagerPackageDocumentationPort

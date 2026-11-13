@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { PluginIconSpec, PluginPdlFragment } from '@cat-cafe/shared';
+import { type PluginIconSpec, type PluginPdlFragment, pluginPdlSchema } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
@@ -220,7 +220,7 @@ const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
 export async function readVerifiedConsole(
   located: VerifiedPluginPackage,
   expected: PackageIdentity,
-): Promise<Pick<PluginPdlFragment, 'components' | 'i18n'>> {
+): Promise<{ pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>> {
   if (!packageIdentityMatches(located.manifest, expected)) {
     throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
   }
@@ -235,7 +235,13 @@ export async function readVerifiedConsole(
     );
   };
   const names = await readdir(dir).catch(() => [] as string[]);
-  const out: Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
+  const out: { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
+  // The console is the host's: console/pdl.json, never the manifest the plugin's own runtime validates.
+  if (names.includes('pdl.json')) {
+    const parsed = pluginPdlSchema.safeParse(JSON.parse(await text('pdl.json')));
+    if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.json is invalid');
+    out.pdl = parsed.data;
+  }
   if (names.includes('components')) {
     const files = (await readdir(resolve(dir, 'components'))).sort();
     const of = (ext: string) =>
