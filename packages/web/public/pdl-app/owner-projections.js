@@ -2537,7 +2537,8 @@
   globalThis.projectGeneral = projectGeneral;
   function projectMemory(raw = chatDataSnapshot.project.memory) {
     const m = CS.m,
-      read = raw.reads[m.cat],
+      // 会议 has no reader yet (the theme shows it as not connected): it reads as an empty category, not a failure.
+      read = raw.reads[m.cat] ?? {},
       page = read.data,
       entries = page?.entries ?? page?.events ?? [],
       d = raw.detail,
