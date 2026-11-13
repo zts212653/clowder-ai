@@ -773,6 +773,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                 open: ui.execOpen[message.id] ?? !!ui.recordExpanded,
                 kind: replying(message) ? 'typing' : 'cat',
                 toolCount,
+                totalTools: toolCount,
                 errors: execution?.groups[2].items.filter((row) => row.status === 'error').length ?? 0,
                 subagents: execution?.groups[1].items.length ?? 0,
                 processCount: output?.processCount ?? 0,

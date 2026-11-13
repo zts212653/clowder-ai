@@ -190,6 +190,7 @@ function bindSidebar() {
         fav: !!t.favorited,
         draft: chatDataSnapshot.chat.drafts[t.id],
         time: t.lastActiveAt,
+        participants: t.participants,
         meta: [],
       };
     };

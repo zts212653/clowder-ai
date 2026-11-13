@@ -5,7 +5,7 @@ function bindHome() {
     return pdlView('cafe.home');
   };
   VM.cafeHome = function () {
-    return Object.assign({}, chatRead('cafeHome'), { preview: !!(CS.lb || S.ws.clipPreview) });
+    return Object.assign({}, chatRead('cafeHome'), { preview: !!(CS.lb || S.ws.clipPreview), panelOpen: !!S.panel });
   };
   VM.recentWorks = function () {
     return projectData('recentWorks') ? recentWorksModels().recentWorks : null;

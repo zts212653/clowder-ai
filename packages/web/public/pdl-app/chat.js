@@ -547,7 +547,7 @@ window.clowderChat = {
       };
     };
     VM.chatHeader = function () {
-      return Object.assign({}, chatRead('chatHeader'), { editing: !!S.renaming });
+      return Object.assign({}, chatRead('chatHeader'), { editing: !!S.renaming, panelOpen: !!S.panel });
     };
     VM.chatComposer = function () {
       return chatRead('chatComposer');
