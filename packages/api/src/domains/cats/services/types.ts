@@ -279,6 +279,7 @@ export type AgentMessageType =
   | 'session_init'
   | 'text'
   | 'tool_use'
+  | 'recall_input_update' // internal input observation for an existing recall tool call
   | 'tool_result'
   | 'error'
   | 'done'
@@ -1076,6 +1077,8 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host-only observer for recall arguments received before the tool result. */
+  onRecallInputUpdate?: (message: AgentMessage) => Promise<void>;
   /** Host-only bounded observer lifecycle, distinct from the ordinary work and Live roles. */
   boundedWatcher?: import('./agents/providers/BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   /** Host-selected external Claude program; never fall back to the SDK's bundled engine. */

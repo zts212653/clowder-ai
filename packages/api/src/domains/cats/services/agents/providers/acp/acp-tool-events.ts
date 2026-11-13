@@ -1,5 +1,8 @@
 import type { CatId } from '@cat-cafe/shared';
+import { formatRecallMeta } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { isRecallLookupTool, recallToolInputSummary } from '../../../tool-usage/derive-result-summary.js';
+import { normalizeMcpToolName } from '../../../tool-usage/normalize-mcp-tool-name.js';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
 import type { AcpSessionState } from './acp-event-transformer.js';
 import { isRecord, toolResultText } from './acp-tool-content.js';
@@ -40,7 +43,8 @@ export function transformAcpToolEvent(
 ): AgentMessage | AgentMessage[] | null {
   const id = typeof inner.toolCallId === 'string' && inner.toolCallId.length > 0 ? inner.toolCallId : undefined;
   if (state && id && state.finalEmittedByCallId.has(id)) return null;
-  const snapshot = mergeSnapshot(inner, id ? state?.toolCallsByCallId.get(id) : undefined);
+  const previous = id ? state?.toolCallsByCallId.get(id) : undefined;
+  const snapshot = mergeSnapshot(inner, previous);
   const known = Boolean(state && id && state.emittedToolUseByCallId.has(id));
   if (state && id) state.toolCallsByCallId.set(id, snapshot);
   if (!snapshot.name && !known && inner.sessionUpdate === 'tool_call') {
@@ -56,9 +60,17 @@ export function transformAcpToolEvent(
     ...(snapshot.input !== undefined ? { toolInput: snapshot.input } : {}),
     ...(Object.keys(snapshot.payload).length ? { toolRawPayload: snapshot.payload } : {}),
   };
-  const final = inner.status === 'completed' || inner.status === 'failed';
+  const cancelled = inner.status === 'cancelled';
+  const final = inner.status === 'completed' || inner.status === 'failed' || cancelled;
   if (!final) {
-    if (known) return null;
+    if (known && id) {
+      const name = normalizeMcpToolName(snapshot.name);
+      if (snapshot.input === previous?.input || !isRecallLookupTool(name)) return null;
+      const input = recallToolInputSummary(name, snapshot.input);
+      const priorInput = recallToolInputSummary(name, previous?.input);
+      if (!Object.keys(input).some((field) => input[field] !== priorInput[field])) return null;
+      return { type: 'recall_input_update', catId, timestamp, toolUseId: id, toolName: name, toolInput: input };
+    }
     if (state && id) state.emittedToolUseByCallId.add(id);
     return toolUse;
   }
@@ -70,8 +82,11 @@ export function transformAcpToolEvent(
     ...(id ? { toolUseId: id } : {}),
     ...(snapshot.name !== undefined ? { toolName: snapshot.name } : {}),
     ...(snapshot.input !== undefined ? { toolInput: snapshot.input } : {}),
-    content: toolResultText(snapshot.payload),
-    toolResultStatus: inner.status === 'failed' ? 'error' : 'ok',
+    content:
+      cancelled && snapshot.name && isRecallLookupTool(normalizeMcpToolName(snapshot.name))
+        ? formatRecallMeta({ resultStatus: 'cancelled', resultCount: null })
+        : toolResultText(snapshot.payload),
+    toolResultStatus: inner.status === 'failed' || cancelled ? 'error' : 'ok',
     ...(Object.keys(snapshot.payload).length ? { toolRawPayload: snapshot.payload } : {}),
   };
   if (state && id) {
@@ -81,4 +96,30 @@ export function transformAcpToolEvent(
   }
   // Orphan final observations still produce a pair, with no fabricated name or ID.
   return known ? result : [toolUse, result];
+}
+
+/** A known prompt termination ends the Host's wait for its still-open recall calls. */
+export function* settlePendingAcpRecalls(
+  state: AcpSessionState,
+  catId: CatId,
+  metadata: MessageMetadata,
+  resultStatus: 'timeout' | 'cancelled',
+): Iterable<AgentMessage> {
+  for (const [toolUseId, snapshot] of state.toolCallsByCallId) {
+    if (!snapshot.name || !isRecallLookupTool(normalizeMcpToolName(snapshot.name))) continue;
+    if (!state.emittedToolUseByCallId.has(toolUseId)) continue;
+    state.toolCallsByCallId.delete(toolUseId);
+    state.finalEmittedByCallId.add(toolUseId);
+    yield {
+      type: 'tool_result',
+      catId,
+      metadata,
+      timestamp: Date.now(),
+      toolUseId,
+      toolName: snapshot.name,
+      toolInput: snapshot.input,
+      toolResultStatus: 'error',
+      content: formatRecallMeta({ resultStatus, resultCount: null }),
+    };
+  }
 }

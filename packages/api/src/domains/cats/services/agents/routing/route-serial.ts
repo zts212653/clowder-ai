@@ -165,7 +165,11 @@ import {
 } from '../../stores/ports/TurnExecutionStore.js';
 import { isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
-import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import {
+  deriveToolEventResultSummary,
+  isRecallLookupTool,
+  recallToolInputSummary,
+} from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
@@ -223,7 +227,7 @@ import { requestOwnerAskCorrection } from './owner-ask-correction.js';
 import { detectUnaddressedOwnerAsk, opensOwnerDecision } from './owner-ask-detect.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
-import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
+import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -2007,6 +2011,7 @@ export async function* routeSerial(
         'Delivery route preparation timing',
       );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        toolEventLog: deps.toolEventLog,
         executionBinding,
         ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         onRemoteExecutionDispatched: remoteCancellation.onDispatched,
@@ -2274,15 +2279,21 @@ export async function* routeSerial(
             // otherwise FIFO toolName+catId match handles same-name parallel calls.
             if (deps.toolEventLog && completedToolName) {
               const normalizedName = normalizeMcpToolName(completedToolName.toolName);
-              const resultSummary = deriveResultSummary(normalizedName, effectiveMsg.content);
+              const resultSummary = deriveToolEventResultSummary(normalizedName, effectiveMsg);
               if (Object.keys(resultSummary).length > 0) {
-                const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-                const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-                  ? { toolUseId: resultMsg.toolUseId }
-                  : resultMsg.catId
-                    ? { toolName: normalizedName, catId: resultMsg.catId }
-                    : { toolName: normalizedName };
-                deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+                deps.toolEventLog
+                  .updateSummary(
+                    threadId,
+                    {
+                      catId: effectiveMsg.catId,
+                      invocationId: effectiveMsg.invocationId ?? ownInvocationId,
+                      ...(effectiveMsg.toolUseId
+                        ? { toolUseId: effectiveMsg.toolUseId }
+                        : { toolName: normalizedName }),
+                    },
+                    resultSummary,
+                  )
+                  .catch(() => {});
               }
             }
           }
@@ -2314,7 +2325,9 @@ export async function* routeSerial(
               classification.category === 'skill' ? classification.toolName : normalizeMcpToolName(rawToolName);
             // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
             // updateSummary can do exact match when provider emits it on tool_result.
-            const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+            const baseSummary = isRecallLookupTool(normalizedToolName)
+              ? recallToolInputSummary(normalizedToolName, msg.toolInput)
+              : (msg.toolInput ?? {});
             const summary: Record<string, unknown> = msg.toolUseId
               ? { ...baseSummary, _toolUseId: msg.toolUseId }
               : baseSummary;
@@ -2457,6 +2470,11 @@ export async function* routeSerial(
         }
       }
 
+      if (ownInvocationId && catSignal?.aborted) {
+        recordStoppedRecallCalls(deps.toolEventLog, threadId, ownInvocationId, catId, pendingToolResults, catSignal);
+        completedCatInvocationIds.push([catId, ownInvocationId]);
+        pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
+      }
       if (providerTeardownUnconfirmed) return;
       // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. The
       // events it produced after the stop were dropped above, so its failure text and diagnostics
@@ -4003,7 +4021,7 @@ export async function* routeSerial(
           isFinal,
         });
         if (isFinal) yieldedFinalDone = true;
-        if (ownInvocationId) {
+        if (ownInvocationId && !catSignal?.aborted) {
           completedCatInvocationIds.push([catId, ownInvocationId]);
           pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
         }

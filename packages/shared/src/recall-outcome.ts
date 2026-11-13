@@ -5,6 +5,8 @@ export const RECALL_RESULT_STATUSES = [
   'no_results',
   'overflow',
   'error',
+  'timeout',
+  'cancelled',
   'parser_miss',
   'result_unmerged',
   'legacy_unknown',
@@ -241,6 +243,8 @@ function isValidRecallMeta(meta: RecallResultMeta): boolean {
     case 'overflow':
       return Boolean(meta.artifactRef || (meta.previewItems && meta.previewItems.length > 0));
     case 'error':
+    case 'timeout':
+    case 'cancelled':
     case 'parser_miss':
     case 'result_unmerged':
     case 'legacy_unknown':
