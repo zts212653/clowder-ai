@@ -1216,10 +1216,10 @@ button.reply-ref:hover { color: var(--fg-strong); }
    | error               | danger   | error 2         | 满   |（出错是“到终态就停”的例外：没处理的错误要人看，直到下一回合开始或被处理）
    | done                | 无圈 |                                                                                */
 .avatar.run::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 1.5px var(--c, var(--identity-fallback)); opacity: 0; pointer-events: none; animation: var(--mo-hold, var(--mo-ring, mo-streaming)) var(--loop) ease-out infinite backwards; }
-.avatar.run[data-status="streaming"] { animation: mo-streaming var(--loop) ease-out infinite backwards; }   /* 回复中：整个头像（图、圈、柔光一起）呼吸——亮 → 半亮 → 亮，和原项目头像的 animate-pulse 一样；圈和柔光本身不动 */
+.avatar.run:is([data-status="pending"], [data-status="spawning"], [data-status="streaming"], [data-status="alive_but_silent"], [data-status="suspected_stall"]) { animation: mo-streaming var(--loop) ease-out infinite backwards; }   /* 这一回合没到终态（出队、启动、回复中、久没输出、疑似卡住）：整个头像（图、圈、柔光一起）呼吸——亮 → 半亮 → 亮；到终态（完成、出错）才停。圈和柔光本身不动（lang 2026-11-13） */
 [data-status="streaming"] { --mo-ring: mo-on; }   /* 圈常亮（还是一个预设：换状态时照样等这一圈放完） */
 @keyframes mo-on { 0%, 100% { opacity: 1; } }
-.avatar.run[data-status="streaming"][data-img]::before { filter: drop-shadow(0 0 6px var(--c, var(--identity-fallback))); }
+.avatar.run:is([data-status="pending"], [data-status="spawning"], [data-status="streaming"], [data-status="alive_but_silent"], [data-status="suspected_stall"])[data-img]::before { filter: drop-shadow(0 0 6px var(--c, var(--identity-fallback))); }
 /* 状态色调表（唯一的一份）：ok 绿、warn 琥珀、danger 深红、info 蓝。任何显示状态的组件都读它——状态光圈 / 圆点、告警卡片、行内提示、横幅、角标、投递状态、执行记录的失败数、轻提示。
    带 data-tone 的元素得到 --tone-c；状态光圈的 data-status 也落到同样的 --warn / --danger 上 */
 [data-tone="ok"] { --tone-c: var(--ok); } [data-tone="warn"] { --tone-c: var(--warn); } [data-tone="danger"] { --tone-c: var(--danger); } [data-tone="info"] { --tone-c: var(--info); }

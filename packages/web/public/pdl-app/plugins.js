@@ -890,8 +890,10 @@ function bindPluginRequests() {
   }
   function values(pk, q, input) {
     const out = {};
+    // A value not set yet (state never chosen) is left out, not sent as the string "undefined".
     Object.keys(q || {}).forEach(function (k) {
-      out[k] = value(pk, q[k], input);
+      const v = value(pk, q[k], input);
+      if (v !== undefined && v !== null) out[k] = v;
     });
     return out;
   }
