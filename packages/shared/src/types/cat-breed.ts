@@ -237,6 +237,8 @@ export type AccountProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'goo
  * Maps an accountRef to its LLM endpoint metadata (no secrets).
  */
 export interface AccountConfig {
+  /** AGY official personal OAuth file store; model/permissions remain member-owned. */
+  readonly agy?: { readonly storage: 'cli_file'; readonly credentialHome: string };
   /** Official CLI inference token, private in CredentialEntry.accessToken; no identity claim. */
   readonly claude?: { readonly kind: 'long_lived_token' };
   readonly codex?: CodexManagedAccount;

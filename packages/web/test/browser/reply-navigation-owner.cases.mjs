@@ -269,6 +269,143 @@ describe('reply navigation owner', () => {
     );
   }
 
+  // The jump session is browser-local and restored on load, so a neighbouring case that ended with its bar up leaves it
+  // on the next page. Dismiss it with the reader's own close control.
+  async function clearLeftoverReturnBar(page) {
+    const returnBtn = page.getByRole('button', { name: '回到刚才', exact: true });
+    if ((await returnBtn.count()) === 0) return;
+    await page.getByRole('button', { name: '关闭返回条', exact: true }).click();
+    await returnBtn.waitFor({ state: 'detached', timeout: 3000 });
+  }
+
+  // You 2026-11-11 (clowder-ai#1920 thread, screenshot with arrow): the whole
+  // strip under the header was dead — the return bar reserved a full-width row
+  // and cut the reading column by ~56-76px for as long as it stayed. After an
+  // in-thread jump the bar must float over the reading column's top edge and
+  // leave the reading column exactly as tall as before.
+  for (const [shell, width] of [
+    ['v2', 1440],
+    ['v2', 390],
+    ['classic', 1440],
+    ['classic', 390],
+  ]) {
+    test(
+      `${shell} ${width}: the 回到刚才 bar floats over the reading column and never reserves a strip`,
+      { timeout: 60000 },
+      async () => {
+        longReply = false;
+        pagedHistory = false;
+        const proof = await harness.openProof({ surface: true, sidebar: false, width });
+        const { page } = proof;
+        try {
+          if (shell === 'classic') await page.evaluate(() => window.__f322Chat.presentation('classic'));
+          const readingBox = () =>
+            page.evaluate(() => {
+              const rect = document.querySelector('[data-chat-container]').getBoundingClientRect();
+              return { top: rect.top, height: rect.height };
+            });
+          const returnBtn = page.getByRole('button', { name: '回到刚才', exact: true });
+          await clearLeftoverReturnBar(page);
+          assert.equal(await returnBtn.count(), 0, 'precondition: no return bar before the jump');
+          const before = await readingBox();
+          await page
+            .locator(`[data-message-viewport-id="${appendedId}"]`)
+            .getByRole('button', { name: /看.*的回复/ })
+            .click();
+          await returnBtn.waitFor();
+          await page.waitForTimeout(800);
+          const during = await readingBox();
+          assert.ok(
+            Math.abs(during.top - before.top) <= 1 && Math.abs(during.height - before.height) <= 1,
+            `the bar must not take reading space (before ${JSON.stringify(before)}, during ${JSON.stringify(during)})`,
+          );
+          const box = await returnBtn.boundingBox();
+          assert.ok(
+            box.y >= during.top - 1 && box.y + box.height <= during.top + 64,
+            `the bar floats over the reading column's top edge (button y=${box.y}, h=${box.height}, column top=${during.top})`,
+          );
+          assert.ok(
+            width - (box.x + box.width) >= 30,
+            `the bar clears the right-edge message navigator rail (${width - (box.x + box.width)}px from the edge)`,
+          );
+          if (evidence)
+            await page.screenshot({ path: path.join(evidence, `${shell}-${width}-return-bar-floating.png`) });
+          await returnBtn.click();
+          await page.waitForFunction(
+            () => !Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === '回到刚才'),
+          );
+          const after = await readingBox();
+          assert.ok(
+            Math.abs(after.top - before.top) <= 1 && Math.abs(after.height - before.height) <= 1,
+            `dismissing the bar must not resize the reading column either (${JSON.stringify(after)})`,
+          );
+        } catch (error) {
+          if (evidence) await harness.captureFailure(page, `${shell}-${width}-return-bar-floating`, error);
+          throw error;
+        } finally {
+          // The jump session is browser-local and survives reload; a failed run must not leak it into the next page.
+          await page.evaluate(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+          });
+          await harness.closeProof(proof);
+        }
+      },
+    );
+  }
+
+  // The bar stays until used. A bar whose return point is gone (restored as 定位已中断 / 暂不可用) used to be a dead end:
+  // 回到刚才 could not dismiss it. The reader can now say "I do not need to go back".
+  for (const [shell, width] of [
+    ['v2', 1440],
+    ['classic', 390],
+  ]) {
+    test(
+      `${shell} ${width}: the close control dismisses the return bar without moving the reader, and a reload does not bring it back`,
+      { timeout: 60000 },
+      async () => {
+        longReply = false;
+        pagedHistory = false;
+        const proof = await harness.openProof({ surface: true, sidebar: false, width });
+        const { page } = proof;
+        try {
+          if (shell === 'classic') await page.evaluate(() => window.__f322Chat.presentation('classic'));
+          await clearLeftoverReturnBar(page);
+          const returnBtn = page.getByRole('button', { name: '回到刚才', exact: true });
+          await page
+            .locator(`[data-message-viewport-id="${appendedId}"]`)
+            .getByRole('button', { name: /看.*的回复/ })
+            .click();
+          await returnBtn.waitFor();
+          await page.waitForTimeout(800);
+          const scrollTop = () => page.evaluate(() => document.querySelector('[data-chat-container]').scrollTop);
+          const atReply = await scrollTop();
+          await page.getByRole('button', { name: '关闭返回条', exact: true }).click();
+          await returnBtn.waitFor({ state: 'detached', timeout: 3000 });
+          await page.waitForTimeout(400);
+          assert.ok(
+            Math.abs((await scrollTop()) - atReply) <= 1,
+            'closing the bar must leave the reader where they are, not carry them back',
+          );
+          await page.reload();
+          await page.waitForSelector('[data-chat-container]');
+          await page.waitForTimeout(800);
+          assert.equal(await returnBtn.count(), 0, 'a dismissed return bar must not be restored by a reload');
+          assert.equal(proof.api.sent.length, 0);
+        } catch (error) {
+          if (evidence) await harness.captureFailure(page, `${shell}-${width}-return-bar-dismiss`, error);
+          throw error;
+        } finally {
+          await page.evaluate(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+          });
+          await harness.closeProof(proof);
+        }
+      },
+    );
+  }
+
   for (const shell of ['v2', 'classic']) {
     test(
       `${shell}: cross-page unloaded reply loads on 看回复 ↑, lands at top with ring, and 回到刚才 restores origin`,

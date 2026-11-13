@@ -60,7 +60,8 @@ export function boundGitDirectoryView(call, bindings) {
 
 /** New read semantics retain program identity and the original environment boundary. */
 export function observedReadProgram(command, cwd, namespaceStable) {
-  const call = completeDirectInvocation(executedInvocations(command, { cwd }));
+  const call = completeDirectInvocation(executedInvocations(command, { cwd, builtinContext: namespaceStable }));
+  if (call?.lookupOnly) return { unproved: !namespaceStable };
   if (!call || !['diff', 'gh'].includes(call.name)) return {};
   if (call.name === 'gh' && !call.program.includes('/')) return {};
   // A prior environment/namespace mutation invalidates this host observation.
@@ -89,8 +90,8 @@ export function observedReadProgram(command, cwd, namespaceStable) {
  * program's own location select code; neither is a file mutation operand.
  * Extra inline-application data masking still requires observed identity.
  */
-export function invocationTargetView(command, cwd) {
-  const reader = executedInvocations(command, { cwd });
+export function invocationTargetView(command, cwd, builtinContext = false) {
+  const reader = executedInvocations(command, { cwd, builtinContext });
   const call = completeDirectInvocation(reader, true);
   if (!call) return null;
   const operands = ['echo', 'printf'].includes(call.name) ? [] : call.programOperands;

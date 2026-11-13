@@ -35,7 +35,10 @@ const auth = {
   'x-cat-cafe-user': process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner-user',
 };
 
-async function harness(t, { enabled = false, digest = pin.digest, run, resumeFails = false, materialize } = {}) {
+async function harness(
+  t,
+  { enabled = false, digest = pin.digest, run, resumeFails = false, materialize, provenance } = {},
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'chrome-host-policy-')));
   const home = join(root, 'home');
   const packageRoot = join(root, 'package');
@@ -55,6 +58,7 @@ async function harness(t, { enabled = false, digest = pin.digest, run, resumeFai
     computedPackageDigest: digest,
     expectedPackageDigest: digest,
     packagePluginId: pluginId,
+    ...(provenance === undefined ? {} : { provenance }),
   });
   const events = [];
   let enabling = true;
@@ -198,6 +202,22 @@ test('wrong digest of the same id/version has neither UI nor execution authority
   assert.deepEqual(await h.configuration.fields(pluginId), []);
   assert.equal((await h.request()).statusCode, 403);
   assert.equal(h.counts().runs, 0);
+});
+
+test('trusted Chrome setup retains the dependency closure already admitted by the Host', async (t) => {
+  const h = await harness(t, {
+    provenance: {
+      kind: 'local-archive',
+      packageName: '@clowder-ai/personal-chrome-companion',
+      dependencyClosure: 'shipped',
+    },
+    materialize: async ({ input }) => {
+      assert.equal(input.dependencyClosure, 'shipped');
+    },
+  });
+  const result = await h.request();
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(h.counts().runs, 1);
 });
 
 test('dependency preparation cannot bypass a changed owner installation fence', async (t) => {

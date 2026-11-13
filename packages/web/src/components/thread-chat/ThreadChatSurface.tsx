@@ -175,7 +175,9 @@ export function ThreadChatSurface({
       if (!loaded && !options?.loadIfNeeded) {
         return false;
       }
-      if (onNavigateMessage?.(messageId, { refresh: Boolean(options?.loadIfNeeded && !loaded) })) {
+      // loadIfNeeded means "canonical refresh, then go" even when the target is already in the store: cloud/plugin
+      // replies can be late or replaced (f247-native-cloud-receipt). Same as the fallback branch below.
+      if (onNavigateMessage?.(messageId, { refresh: Boolean(options?.loadIfNeeded) })) {
         return true;
       }
       if (options?.loadIfNeeded) {

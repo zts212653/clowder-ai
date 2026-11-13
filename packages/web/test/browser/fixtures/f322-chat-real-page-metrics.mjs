@@ -81,12 +81,18 @@ export function measureChatProof() {
   };
 }
 
+/** Resize observers run after animation callbacks. Read the completed paint, not the event's intermediate DOM. */
+export async function readPaintedSidebarSignalLayout(signals) {
+  await signals.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  return signals.evaluate(measureSidebarSignalLayout);
+}
+
 /** Whole fixed facts, rather than intrinsic hidden text or a single horizontal row. */
 export function assertChatSignalGeometry(layout, expectedHeight) {
   assert.equal(layout.height, expectedHeight, '20px signal rows retain their 4px gap');
   assert.ok(layout.contained && layout.noOverlap, 'fixed facts are contained and do not overlap in either dimension');
   assert.ok(layout.avatarsContained, 'every 16px avatar stays inside its roster owner');
-  assert.ok(layout.namesWhole && layout.statusWhole, 'optional words are whole or hidden');
+  assert.ok(layout.namesWhole && layout.statusWhole, `optional words are whole or hidden: ${JSON.stringify(layout)}`);
   assert.ok(layout.rightAligned, 'each badge row ends at the right edge');
   assert.ok(
     layout.badgeHeights.every((height) => height === 20),
@@ -104,7 +110,7 @@ export async function assertChatSidebarSignals(page, busy, language, expectedHei
         .height === height,
     { id: await busy.getAttribute('data-thread-id'), height: expectedHeight },
   );
-  const layout = await signals.evaluate(measureSidebarSignalLayout);
+  const layout = await readPaintedSidebarSignalLayout(signals);
   assertChatSignalGeometry(layout, expectedHeight);
   assert.deepEqual(
     layout.badgeText,
@@ -221,7 +227,24 @@ export async function assertChatSignalNegatives(busy, expectedHeight) {
       original,
     );
   }
-  assertChatSignalGeometry(await signals.evaluate(measureSidebarSignalLayout), expectedHeight);
+  // A paint boundary must not hide a real persistent clipping defect.
+  const name = signals.getByTestId('thread-cat-name');
+  const savedVisibility = await name.evaluate((node) => node.style.visibility);
+  try {
+    await name.evaluate((node) => {
+      node.style.visibility = 'visible';
+      node.style.maxWidth = '0px';
+    });
+    const clipped = await readPaintedSidebarSignalLayout(signals);
+    assert.equal(clipped.namesWhole, false);
+    assert.throws(() => assertChatSignalGeometry(clipped, expectedHeight), /optional words/);
+  } finally {
+    await name.evaluate((node, visibility) => {
+      node.style.visibility = visibility;
+      node.style.removeProperty('max-width');
+    }, savedVisibility);
+  }
+  assertChatSignalGeometry(await readPaintedSidebarSignalLayout(signals), expectedHeight);
 }
 
 export async function assertCrowdedChatSidebar(harness, memberRows, groupToggle, memberMutations) {

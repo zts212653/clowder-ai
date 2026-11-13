@@ -57,6 +57,7 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
+import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import {
   findCrossPostTargetMessageId,
   peekPendingCrossPostScroll,
@@ -150,10 +151,7 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export interface ChatUserScrollGesture {
-  scrollTo(top: number): boolean;
-  end(): void;
-}
+export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -1836,6 +1834,7 @@ export function useChatHistory(threadId: string) {
         // wait immediately without cancelling that shared fetch or its hydration.
         void fetchHistory(undefined, {
           replace: true,
+          afterCurrentGet: true,
           retryTimeoutWhile: () =>
             readingRefreshRef.current === operation &&
             generation === restoreGenerationRef.current &&
@@ -3020,6 +3019,11 @@ export function useChatHistory(threadId: string) {
       },
     };
   }, [threadId, markScrollIntent, cancelPendingRestore, clearUserScrollIntent]);
+
+  useLayoutEffect(() => {
+    const viewport = scrollContainerRef.current;
+    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
+  }, [beginUserScroll]);
 
   return {
     captureReadingPosition,

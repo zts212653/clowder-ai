@@ -341,7 +341,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         };
       }),
     );
-    registerWorktrees(all);
+    registerWorktrees(entries);
     return { worktrees: all };
   });
 

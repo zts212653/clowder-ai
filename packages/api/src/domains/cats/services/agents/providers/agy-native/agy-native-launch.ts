@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
+import { inspectAgyLogin } from '../../../../../../config/agy-account.js';
 import { resolveCliCommand } from '../../../../../../utils/cli-resolve.js';
 import type { CliSpawnOptions } from '../../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
@@ -122,6 +123,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
   let disposeCredentials: (() => void) | undefined;
   let releaseSession: (() => Promise<void>) | undefined;
   let releaseStartup: (() => Promise<void>) | undefined;
+  let releaseAccountStartup: (() => Promise<void>) | undefined;
   let runProfile: ReturnType<typeof createAgyNativeRunProfile> | undefined;
   const dispose = async () => {
     try {
@@ -136,7 +138,11 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           try {
             await releaseStartup?.();
           } finally {
-            await releaseProfile();
+            try {
+              await releaseAccountStartup?.();
+            } finally {
+              await releaseProfile();
+            }
           }
         }
       }
@@ -145,7 +151,12 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
   try {
     validateAgyNativeAccountMcp(home, findMonorepoRoot(process.cwd()));
     // Transport overrides own their synthetic process/authentication boundary.
-    if (!options?.spawnCliOverride) await prepareAgyNativeKeychain({ profileHome: home });
+    const account = options?.agyAccount;
+    if (account) {
+      const status = inspectAgyLogin(account.credentialHome);
+      if (status !== 'ready' && status !== 'refreshable')
+        throw new Error('AGY 账号未登录或登录文件读不到，请先在账号页完成官方登录');
+    } else if (!options?.spawnCliOverride) await prepareAgyNativeKeychain({ profileHome: home });
     // Shared settings are an account baseline, never the current turn's policy.
     // CLI flags, the selected agent and this run's hook/MCP config own each turn.
     if (!member) {
@@ -157,8 +168,8 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       });
       retireAgyNativeLegacySkillAlias(home);
     }
+    runProfile = createAgyNativeRunProfile(home, account?.credentialHome);
     await releaseProfile();
-    runProfile = createAgyNativeRunProfile(home);
     const configHome = runProfile.home;
     let memberSettingsPath: string | undefined;
     if (member) {
@@ -176,6 +187,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     materializeAgyNativeEffectGuard({
       profileHome: configHome,
       accountHome: home,
+      ...(account ? { credentialHome: account.credentialHome } : {}),
       runtimeRoot: findMonorepoRoot(process.cwd()),
       workspaceRoot: policy.workspaceRoot,
       readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
@@ -247,6 +259,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...skillDirectories.flatMap((directory) => ['--add-dir', directory]),
       ...policy.cliArgs,
       ...(memberSettingsPath ? ['--disable-slash-commands', '--new-project', '--settings', memberSettingsPath] : []),
+      ...(account && !memberSettingsPath ? ['--settings', profile.settingsPath] : []),
       '--agent',
       agent.agentName,
       '--model',
@@ -276,6 +289,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       providerNativeVisibility: 'unknown',
     });
     const env = { ...isolatedOAuthEnv(home), ...executionOwnerEnv(options) };
+    if (account) env.SSH_TTY = 'cat-cafe-file-auth';
     const cliOptions: CliSpawnOptions & { readonly cwd: string } = {
       command,
       args,
@@ -298,6 +312,15 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     releaseStartup = await waitForAgyNativeProfileTurn(home, ownerInvocationId, options?.signal, {
       runHome: configHome,
     });
+    // Only authentication/startup is fenced across cats sharing an account.
+    // Different conversations remain concurrent after verified init. Run homes
+    // belong to the member profile; this account fence owns no run directory.
+    if (account)
+      releaseAccountStartup = await waitForAgyNativeProfileTurn(
+        account.credentialHome,
+        ownerInvocationId,
+        options?.signal,
+      );
     return {
       cliOptions,
       preparedRequest,
@@ -328,6 +351,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
           options?.signal,
         );
         await releaseStartup?.();
+        await releaseAccountStartup?.();
       },
       disposeCredentials: dispose,
     };

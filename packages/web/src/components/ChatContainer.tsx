@@ -1080,8 +1080,9 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
             />
           )}
 
-          {/* Reading controls occupy their own row so the existing history owner
-              measures a viewport whose beginning is actually readable. */}
+          {/* Find controls occupy their own row so the existing history owner measures a viewport whose
+              beginning is actually readable. The in-thread jump return bar is the exception: it floats over the
+              column's top-right corner (about 80x32px, left of the navigator rail) instead of costing a row. */}
           <MessageSearchOverlay
             threadId={threadId}
             host={messageSearch}

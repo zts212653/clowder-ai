@@ -89,6 +89,12 @@ export function settleMessageReadingTrip(
   return { ...trip, pending: null, status: 'completed' };
 }
 
+/** The reader says they no longer need to go back: end the trip without moving the reader. */
+export function dismissMessageReadingTrip(trip: MessageReadingTrip): MessageReadingTrip {
+  if (trip.status === 'completed') return trip;
+  return { ...trip, generation: trip.generation + 1, pending: null, status: 'completed' };
+}
+
 export function interruptMessageReadingTrip(trip: MessageReadingTrip): MessageReadingTrip {
   if (trip.status === 'completed') return trip;
   return { ...trip, generation: trip.generation + 1, pending: null, status: 'interrupted' };

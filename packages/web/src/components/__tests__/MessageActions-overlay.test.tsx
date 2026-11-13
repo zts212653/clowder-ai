@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import { MessageActionSlot } from '../MessageActionSlot';
 import { MessageActions } from '../MessageActions';
 import {
@@ -78,6 +79,41 @@ describe('reading-column action overlay', () => {
     expect(overlay.style.position).toBe('fixed');
     expect(overlay.style.left).toBe('240px');
     expect(overlay.querySelector('[data-testid="message-actions-compact-trigger"]')).not.toBeNull();
+  });
+
+  it('forwards floating-toolbar wheel to its own reader and leaves zoom, menus and retired owners alone', () => {
+    render();
+    const viewport = required('[data-chat-container]', h.container);
+    viewport.scrollTop = 80;
+    const scrollTo = vi.fn(() => true);
+    const end = vi.fn();
+    const begin = vi.fn(() => ({ scrollTo, end }));
+    const release = registerChatScrollOwner(viewport, begin);
+    const other = document.createElement('div');
+    const otherBegin = vi.fn(() => null);
+    const releaseOther = registerChatScrollOwner(other, otherBegin);
+    const control = required('[data-message-actions-owner] button');
+    const wheel = (ctrlKey = false) => {
+      const event = new WheelEvent('wheel', { deltaY: 120, ctrlKey, bubbles: true, cancelable: true });
+      act(() => control.dispatchEvent(event));
+      return event;
+    };
+    try {
+      expect(wheel().defaultPrevented).toBe(true);
+      expect(scrollTo).toHaveBeenCalledWith(200);
+      expect(end).toHaveBeenCalledOnce();
+      expect(otherBegin).not.toHaveBeenCalled();
+      expect(wheel(true).defaultPrevented).toBe(false);
+      control.setAttribute('role', 'menu');
+      expect(wheel().defaultPrevented).toBe(false);
+      control.removeAttribute('role');
+      release();
+      expect(wheel().defaultPrevented).toBe(false);
+      expect(begin).toHaveBeenCalledOnce();
+    } finally {
+      release();
+      releaseOther();
+    }
   });
 
   it('owns hover/focus visibility across the portal without summoning actions from body focus', () => {

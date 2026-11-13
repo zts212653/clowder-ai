@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import Fastify from 'fastify';
@@ -188,8 +189,7 @@ test('#1951 custom answer survives a thread switch, refresh, original replay and
     assert.equal(await page.getByRole('button', { name: '其他回答', exact: true }).isDisabled(), true);
     assert.equal(accepted.length, 1);
     assert.deepEqual(errors, []);
-    const dir = path.resolve(web, '../../artifacts/issue1951/browser');
-    fs.mkdirSync(dir, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(tmpdir(), 'cat-cafe-issue1951-'));
     await page.screenshot({ path: path.join(dir, 'answered-after-refresh.png') });
     fs.writeFileSync(
       path.join(dir, 'receipt.json'),
@@ -205,6 +205,7 @@ test('#1951 custom answer survives a thread switch, refresh, original replay and
         2,
       ),
     );
+    console.log(`#1951 browser evidence: ${dir}`);
   } finally {
     await context.close();
     await browser.close();

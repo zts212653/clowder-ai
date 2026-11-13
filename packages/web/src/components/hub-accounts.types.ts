@@ -6,6 +6,9 @@ export type ProfileKind = 'builtin' | 'api_key' | 'oauth';
 export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'acp';
 
 export interface ProfileItem {
+  agy?: { storage: 'cli_file'; credentialHome: string };
+  agyLoginStatus?: 'ready' | 'refreshable' | 'not_logged_in' | 'unreadable';
+  agyLoginCommand?: string;
   id: string;
   quota?: AccountQuotaObservation;
   /** Read-only canonical default-home readiness; this does not make the default managed. */
