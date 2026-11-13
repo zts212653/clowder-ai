@@ -262,9 +262,11 @@ class RecallTestRedis extends FakeRedis {
   }
 }
 
-for (const [name, moduleName, exportName] of [
-  ['serial', 'route-serial', 'routeSerial'],
-  ['parallel', 'route-parallel', 'routeParallel'],
+for (const [name, moduleName, exportName, bridged] of [
+  ['serial', 'route-serial', 'routeSerial', false],
+  ['parallel', 'route-parallel', 'routeParallel', false],
+  ['serial registered ACP', 'route-serial', 'routeSerial', true],
+  ['parallel registered ACP', 'route-parallel', 'routeParallel', true],
 ]) {
   for (const terminal of ['result_unmerged', 'cancelled', 'timeout']) {
     it(`${name} persists late ACP input independently of the result (${terminal})`, async () => {
@@ -327,6 +329,20 @@ for (const [name, moduleName, exportName] of [
         summary: { _toolUseId: 'call-1', query: 'other call' },
       }));
       for (const event of unrelated) await log.append(event);
+      if (bridged) {
+        const { AcpSessionProvider } = await import(
+          '../dist/domains/cats/services/agents/session-contract/acp-session-provider.js'
+        );
+        const { AgentSessionBridgeService } = await import(
+          '../dist/domains/cats/services/agents/session-contract/AgentSessionBridgeService.js'
+        );
+        services.opus = new AgentSessionBridgeService({
+          catId: 'opus',
+          provider: new AcpSessionProvider({ catId: 'opus', service: services.opus }),
+          resolveHostSession: () => ({ sessionId: 'test-session' }),
+          passHostOptions: true,
+        });
+      }
       const deps = createMockDeps(services, log);
       const forwarded = [];
       for await (const message of route(deps, ['opus'], 'hello', 'user1', 'thread1', {

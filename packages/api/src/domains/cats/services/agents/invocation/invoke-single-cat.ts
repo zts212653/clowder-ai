@@ -5686,10 +5686,26 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         yield continuityInfoMessage();
       }
       const generationRecorder = requestGenerationRecorder;
+      const toolEventLog = params.toolEventLog;
+      const onRecallInputUpdate = toolEventLog
+        ? async (message: AgentMessage): Promise<void> => {
+            const safe = await protectNativeProviderResult(message, options);
+            if (!safe.toolUseId || !safe.toolName) return;
+            // The ledger serializes this update with the original append and later result.
+            toolEventLog
+              .updateRecallInput(
+                threadId,
+                { catId, invocationId, toolUseId: safe.toolUseId, toolName: safe.toolName },
+                safe.toolInput,
+              )
+              .catch(() => {});
+          }
+        : undefined;
       const options: AgentServiceOptions = {
         hostSessionId: activeSessionRecordForResume?.id,
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
+        onRecallInputUpdate,
         ...(params.liveCompanion
           ? {
               onLiveInputOutcome: async (receipt: import('../../types.js').LiveProviderInputOutcome) => {
@@ -5991,25 +6007,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           unclosedServiceIterators.delete(serviceIter);
           break;
         }
+        if (iterResult.value.type === 'recall_input_update') {
+          await onRecallInputUpdate?.(iterResult.value);
+          continue;
+        }
         let msg = await protectNativeProviderResult(iterResult.value, options);
         if (msg.providerTeardown === 'unconfirmed') {
           providerTeardownUnconfirmed = true;
           await closeActiveServiceIterator();
           yield unconfirmedTeardownMessage();
           return;
-        }
-        if (msg.type === 'recall_input_update') {
-          // A ledger update is neither response output nor an invocation activity signal.
-          if (msg.toolUseId && msg.toolName) {
-            params.toolEventLog
-              ?.updateRecallInput(
-                threadId,
-                { catId, invocationId, toolUseId: msg.toolUseId, toolName: msg.toolName },
-                msg.toolInput,
-              )
-              .catch(() => {});
-          }
-          continue;
         }
         if (msg.nativeGoalObservation) {
           if (!threadStore || !deps.sessionChainStore) continue;
