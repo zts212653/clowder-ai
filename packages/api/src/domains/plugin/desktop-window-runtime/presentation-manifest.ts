@@ -18,7 +18,7 @@ const PUBLISHED_MANIFESTS: Partial<
   '0.3.3-candidate.0': { validate: validateDeskManifest, bridgeVersion: '1.7.0' },
 };
 
-/** The package manifest as the contract reads it; a plugin's console is its console/pdl.json, not the manifest.
+/** The package manifest as the contract reads it; a plugin's console is its console/pdl.yaml, not the manifest.
  * Existing companion bridge admission and exact archive SRI verification stay unchanged.
  */
 export function validateHostPluginManifest(value: unknown): ReturnType<typeof validateManifest> {

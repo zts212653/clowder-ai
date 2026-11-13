@@ -35,7 +35,7 @@ const manifest = {
   features: [{ id: 'messaging', name: 'Messaging', resources: [], capabilities: ['messaging.send'] }],
   runtime: { transport: 'builtin' },
 };
-// A plugin's console is its package's console/pdl.json (read beside console/i18n and console/components).
+// A plugin's console is its package's console/pdl.yaml (read beside console/i18n and console/components).
 const consoleFiles = async (pluginId: string) => (pluginId === manifest.pluginId ? { pdl } : {});
 
 it('admits the package manifest without weakening base manifest or package identity checks', async () => {

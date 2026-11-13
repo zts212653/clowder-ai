@@ -4,6 +4,7 @@ import { open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { type PluginIconSpec, type PluginPdlFragment, pluginPdlSchema } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { parse as parseYaml } from 'yaml';
 import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
 import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './contract.js';
@@ -216,7 +217,7 @@ export async function readVerifiedReadme(
 }
 
 const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
-/** A package's console files beside its manifest's pdl section: console/app.js and console/i18n/<language>.json. */
+/** A package's console: console/pdl.yaml, console/i18n/<language>.yaml and optional console/components (js, css). */
 export async function readVerifiedConsole(
   located: VerifiedPluginPackage,
   expected: PackageIdentity,
@@ -236,10 +237,10 @@ export async function readVerifiedConsole(
   };
   const names = await readdir(dir).catch(() => [] as string[]);
   const out: { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
-  // The console is the host's: console/pdl.json, never the manifest the plugin's own runtime validates.
-  if (names.includes('pdl.json')) {
-    const parsed = pluginPdlSchema.safeParse(JSON.parse(await text('pdl.json')));
-    if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.json is invalid');
+  // The console is the host's: console/pdl.yaml, never the manifest the plugin's own runtime validates.
+  if (names.includes('pdl.yaml')) {
+    const parsed = pluginPdlSchema.safeParse(parseYaml(await text('pdl.yaml')));
+    if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.yaml is invalid');
     out.pdl = parsed.data;
   }
   if (names.includes('components')) {
@@ -249,9 +250,9 @@ export async function readVerifiedConsole(
     out.components = { js: await of('.js'), css: await of('.css') };
   }
   if (names.includes('i18n')) {
-    const files = (await readdir(resolve(dir, 'i18n'))).filter((name) => name.endsWith('.json'));
+    const files = (await readdir(resolve(dir, 'i18n'))).filter((name) => name.endsWith('.yaml'));
     out.i18n = Object.fromEntries(
-      await Promise.all(files.map(async (name) => [name.slice(0, -5), JSON.parse(await text('i18n/' + name))])),
+      await Promise.all(files.map(async (name) => [name.slice(0, -5), parseYaml(await text('i18n/' + name))])),
     );
   }
   await located.verifyIntegrity();
