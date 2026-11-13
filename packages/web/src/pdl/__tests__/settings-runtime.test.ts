@@ -1636,7 +1636,7 @@ describe('r136 setting owners through copied views', () => {
         runtimeEditable: false,
       });
       expect(w.document.querySelectorAll('[data-act="pushToggle"]')).toHaveLength(1);
-      expect(w.eval('VM.system().notifyTypes')).toBeUndefined();
+      expect(w.eval('VM.system().notifyTypes')).toEqual([]);
       w.eval("A.dialog({kind:'push'})");
       await w.__settled();
       expect(w.document.querySelector('[data-view="dialog.push"]')).not.toBeNull();

@@ -1049,7 +1049,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         name: data.me.name,
         handle: data.me.mentionPatterns[0] ?? '',
         color: data.me.color,
-        avatarPath: data.me.avatar ?? '',
+        avatar: data.me.avatar ?? '',
       };
     },
     get chatStream() {

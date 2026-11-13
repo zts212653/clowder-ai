@@ -3792,7 +3792,7 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(action).toHaveBeenCalledWith('umOrder', { keys: ['codex'] }, undefined);
       expect(w.eval('WHO_DATA.me()')).toMatchObject({
         color: { primary: '#527b99', secondary: '#abcdef' },
-        avatarPath: '/avatars/owner.png',
+        avatar: '/avatars/owner.png',
       });
       expect(w.eval("whoInfo({kind:'user',userId:'owner'}).color")).toBe(
         w.eval("'oklch(from var(--name-1) l c ' + senderHue('#527b99') + ')'"),
