@@ -1,21 +1,11 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import { ExternalPluginRuntimeError } from './types.js';
 
-// Source-neutral security ceilings, counting raw members (including AppleDouble),
-// not just the platform tar listing. Directory closure readiness is a separate gate.
+// Archive metadata, path validity and operation deadline constraints.
 export const PLUGIN_ARCHIVE_BUDGET = Object.freeze({
-  compressedBytes: 32 * 1024 * 1024,
-  expandedBytes: 64 * 1024 * 1024,
-  // Bundled native CLIs can exceed 32MiB; the whole package still shares 64MiB.
-  singleFileBytes: 64 * 1024 * 1024,
-  regularFiles: 16_384,
-  headers: 32_768,
-  streamBytes: 96 * 1024 * 1024,
-  metadataBytes: 4 * 1024 * 1024,
   metadataRecordBytes: 64 * 1024,
   pathBytes: 4096,
   pathDepth: 64,
@@ -104,7 +94,7 @@ function parsePax(bytes: Buffer, global: boolean): Map<string, string> {
       invalid('unsupported PAX extension'); // Includes sparse maps, links and alternate path encodings.
     }
     // SCHILY xattrs carry binary values; decode only text-bearing keys. All bytes
-    // still count toward record/aggregate/stream budgets. These keys cannot override size/path.
+    // remain subject to the metadata record limit. These keys cannot override size/path.
     const value = binaryPaxKeys.has(key) ? '' : text(rawValue);
     if (key === 'path') pathBudget(value);
     if (key === 'size' && (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value)))) {
@@ -130,7 +120,7 @@ function readHeader(bytes: Buffer): { name: string; type: string; size: number }
   return { name, type: String.fromCharCode(bytes.readUInt8(156)), size: octal(bytes.subarray(124, 136)) };
 }
 
-class TarBudgetReader {
+class TarReader {
   private buffered = Buffer.alloc(0);
   private remaining = 0;
   private padding = 0;
@@ -139,15 +129,8 @@ class TarBudgetReader {
   private pendingPax: Map<string, string> | undefined;
   private pendingLongPath: string | undefined;
   private zeroBlocks = 0;
-  private totalStream = 0;
-  private totalHeaders = 0;
-  private totalMetadata = 0;
-  private totalFiles = 0;
-  private totalBytes = 0;
 
   accept(chunk: Buffer): void {
-    this.totalStream += chunk.length;
-    if (this.totalStream > PLUGIN_ARCHIVE_BUDGET.streamBytes) invalid('expanded stream work budget exceeded');
     this.buffered = Buffer.concat([this.buffered, chunk]);
     while (this.buffered.length) {
       if (this.remaining) {
@@ -197,7 +180,6 @@ class TarBudgetReader {
       return;
     }
     if (this.zeroBlocks) invalid('nonzero data after archive terminator');
-    if (++this.totalHeaders > PLUGIN_ARCHIVE_BUDGET.headers) invalid('header count budget exceeded');
     const { name, type, size } = readHeader(bytes);
     if (type === 'x' || type === 'g' || type === 'L') {
       this.beginMetadata(type, size);
@@ -207,12 +189,7 @@ class TarBudgetReader {
   }
 
   private beginMetadata(type: string, size: number): void {
-    this.totalMetadata += size;
-    if (
-      !size ||
-      size > PLUGIN_ARCHIVE_BUDGET.metadataRecordBytes ||
-      this.totalMetadata > PLUGIN_ARCHIVE_BUDGET.metadataBytes
-    ) {
+    if (!size || size > PLUGIN_ARCHIVE_BUDGET.metadataRecordBytes) {
       invalid('metadata budget exceeded');
     }
     this.metadataType = type;
@@ -227,16 +204,7 @@ class TarBudgetReader {
     pathBudget(effectivePath);
     this.pendingLongPath = undefined;
     this.pendingPax = undefined;
-    if (effectiveSize > PLUGIN_ARCHIVE_BUDGET.singleFileBytes || size > PLUGIN_ARCHIVE_BUDGET.singleFileBytes) {
-      invalid('single-file budget exceeded');
-    }
-    if (type === '5') {
-      if (size !== 0 || effectiveSize !== 0) invalid('directory with payload');
-    } else {
-      if (++this.totalFiles > PLUGIN_ARCHIVE_BUDGET.regularFiles) invalid('regular-file count budget exceeded');
-      this.totalBytes += effectiveSize;
-      if (this.totalBytes > PLUGIN_ARCHIVE_BUDGET.expandedBytes) invalid('expanded member budget exceeded');
-    }
+    if (type === '5' && (size !== 0 || effectiveSize !== 0)) invalid('directory with payload');
     this.remaining = effectiveSize;
     this.padding = (512 - (effectiveSize % 512)) % 512;
   }
@@ -255,11 +223,9 @@ class TarBudgetReader {
   }
 }
 
-/** Resource validation on the sealed archive, before invoking platform tar at all. */
+/** Validate archive format and member paths before invoking platform tar. */
 export async function preflightPluginArchive(archivePath: string, signal?: AbortSignal): Promise<void> {
-  if ((await stat(archivePath)).size > PLUGIN_ARCHIVE_BUDGET.compressedBytes)
-    invalid('compressed byte budget exceeded');
-  const reader = new TarBudgetReader();
+  const reader = new TarReader();
   const sink = new Writable({
     write(chunk: Buffer, _encoding, callback) {
       try {
