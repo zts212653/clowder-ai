@@ -296,8 +296,8 @@ A.pdlArchiveApply = function (d) {
   render(true);
 };
 ENT.archive = { coll: function () { return pdlArchive(); }, get: function (k) { return pdlArchive().find(function (a) { return a.key === k; }); }, remove: function (x) { store.set('pdl-archive-v1', pdlArchive().filter(function (a) { return a.key !== x.key; })); } };
-/* 升级结果的提示（不打断操作）：所有脚本加载完、第一屏画好之后说一次 */
-window.addEventListener('load', function () {
+/* 升级结果的提示（不打断操作）：主题文档升级完（doc 阶段，可能等异步读）之后、画第一屏时说一次 */
+onStart('boot', function () {
   if (S.pdlUpgradeFailed) toast(tc('pdlDoc.upgradeFailed'), { label: tc('pdlDoc.upgradeFailedGo'), act: 'open', data: argAttrs({ page: 'appearance' }) });
   else if (S.pdlUpgrade && S.pdlUpgrade.dropped) toast(tc('pdlDoc.upgraded', S.pdlUpgrade.dropped));
 });
