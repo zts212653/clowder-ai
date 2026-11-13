@@ -13,6 +13,8 @@ function formatRoutingWarning(warning: CatRoutingError): string {
       return `@${warning.catId} 不在当前 thread 的参与者列表中，已跳过。`;
     case 'suppressed_by_terminal_ack':
       return `${warning.droppedMentions.map((catId) => `@${catId}`).join('、')} 已有 terminal ACK，未触发新回复。`;
+    case 'handoff_blocked_by_failed_turn':
+      return `回合失败，正文中的接棒请求未发送给 ${warning.targetCats.map((catId) => `@${catId}`).join('、')}。若尚未交接，可引用这条回复并 @ 接棒成员。`;
     case 'cat_not_found':
       return `${warning.mention} 不存在，已跳过。`;
   }

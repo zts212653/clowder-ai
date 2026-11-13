@@ -2753,7 +2753,8 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
+        const bodyA2AMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
+        a2aMentions = bodyA2AMentions;
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -3159,6 +3160,12 @@ export async function* routeSerial(
             nativePhases:
               !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
           });
+          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+            aborted: catSignal?.aborted === true,
+            abortReason: catSignal?.reason,
+            failed: hadProviderError,
+            errorCode: doneMsg?.errorCode,
+          });
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
             userId,
@@ -3173,6 +3180,11 @@ export async function* routeSerial(
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
+              ...(lifecycleTerminalStatus === 'failed' && bodyA2AMentions.length > 0
+                ? {
+                    routingWarnings: [{ kind: 'handoff_blocked_by_failed_turn' as const, targetCats: bodyA2AMentions }],
+                  }
+                : {}),
               ...(outputProjection ? { outputLayout: outputProjection.snapshot(persistedContent).layout } : {}),
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(deliveryBoundary ? { deliveryBoundary } : {}),
@@ -3204,12 +3216,6 @@ export async function* routeSerial(
               ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
           };
-          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
-            aborted: catSignal?.aborted === true,
-            abortReason: catSignal?.reason,
-            failed: hadProviderError,
-            errorCode: doneMsg?.errorCode,
-          });
           const lifecycleResponse =
             lifecycleResponseMessageId && lifecyclePriorFrontierMessageId !== undefined && ownInvocationId
               ? {

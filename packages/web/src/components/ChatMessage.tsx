@@ -1188,6 +1188,7 @@ function ChatMessageContent({
           <AppendedInputReceipts response={message} timelineMessages={threadMessages} getCatById={getCatById} />
           <GenerationMessagesNotice response={message} threadId={renderThreadId} timelineMessages={threadMessages} />
           {dispatchLine}
+          <RoutingWarningNotice warnings={message.extra?.routingWarnings} />
           {shellPresentation === 'v2' ? cloudBindingCard : null}
         </>
       }
