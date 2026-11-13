@@ -1,4 +1,6 @@
 import type { CatRoutingError } from '@cat-cafe/shared';
+import { replyLayersCopy } from './reply-layers/reply-layers.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
 
 function formatRoutingWarning(warning: CatRoutingError): string {
   switch (warning.kind) {
@@ -23,8 +25,29 @@ function formatRoutingWarning(warning: CatRoutingError): string {
   return exhaustive;
 }
 
-export function RoutingWarningNotice({ warnings }: { warnings?: readonly CatRoutingError[] }) {
+export function FailedHandoffNotice({ warnings }: { warnings?: readonly CatRoutingError[] }) {
+  const t = useShellCopy(replyLayersCopy);
+  const warning = warnings?.find((candidate) => candidate.kind === 'handoff_blocked_by_failed_turn');
+  if (!warning) return null;
+  return (
+    <output data-testid="failed-handoff-notice" className="mt-1 block break-words text-xs text-cafe-muted">
+      {t.handoff.unsent(warning.targetCats.map((catId) => `@${catId}`).join(', '))}
+    </output>
+  );
+}
+
+export function RoutingWarningNotice({
+  warnings,
+  replyV2 = false,
+}: {
+  warnings?: readonly CatRoutingError[];
+  replyV2?: boolean;
+}) {
   if (!warnings?.length) return null;
+  const remaining = replyV2
+    ? warnings.filter((warning) => warning.kind !== 'handoff_blocked_by_failed_turn')
+    : warnings;
+  if (!remaining.length) return null;
 
   return (
     <div
@@ -32,7 +55,7 @@ export function RoutingWarningNotice({ warnings }: { warnings?: readonly CatRout
       data-testid="routing-warning"
       className="mt-1.5 rounded-md border border-conn-amber-ring bg-conn-amber-bg px-2 py-1.5 text-xs text-conn-amber-text"
     >
-      {warnings.map(formatRoutingWarning).join(' ')}
+      {remaining.map(formatRoutingWarning).join(' ')}
     </div>
   );
 }
