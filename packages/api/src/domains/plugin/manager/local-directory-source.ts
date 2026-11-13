@@ -267,8 +267,7 @@ export async function inspectLocalDirectorySource(
     const peers = record(manifest?.peerDependencies ?? {}, 'peer dependencies');
     const peerMeta = record(manifest?.peerDependenciesMeta ?? {}, 'peer metadata');
     const declarations = { ...peers, ...dependencies, ...optional };
-    operation.addEdges(Object.keys(declarations).length);
-    if (Object.keys(declarations).length > 512) invalid('DEPENDENCY_SOURCE_INVALID', 'runtime edge budget exceeded');
+    operation.step();
     if (Object.keys(declarations).length && !lock) lock = await findLock(root, reads);
     const importer =
       lock && !integrity

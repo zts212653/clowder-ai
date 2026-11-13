@@ -16,11 +16,9 @@ export class LocalDirectorySourceError extends Error {
   }
 }
 
-/** One lifetime and work budget, beginning before the first source read. */
+/** One lifetime (deadline and cancellation), beginning before the first source read. */
 export class LocalDirectoryOperation {
   readonly signal: AbortSignal;
-  private edges = 0;
-  private work = 0;
 
   constructor(signal?: AbortSignal) {
     const deadline = AbortSignal.timeout(DIRECTORY_PREPARATION_DEADLINE_MS);
@@ -32,19 +30,8 @@ export class LocalDirectoryOperation {
     this.signal.throwIfAborted();
   }
 
-  addEdges(count: number): void {
-    this.check();
-    this.edges += count;
-    if (this.edges > 4_096) this.limit('source dependency edge budget exceeded');
-  }
-
   step(): void {
     this.check();
-    if (++this.work > 262_144) this.limit('directory preparation work budget exceeded');
-  }
-
-  private limit(message: string): never {
-    throw new LocalDirectorySourceError('DEPENDENCY_PREPARATION_LIMIT', message);
   }
 
   async io<T>(action: () => Promise<T>): Promise<T> {
