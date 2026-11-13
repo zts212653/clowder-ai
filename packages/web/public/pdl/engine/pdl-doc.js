@@ -248,7 +248,7 @@ function pdlThemePack(id) {
     pdl: { palette: c ? c.palette : ro.palette, skin: c ? c.skin : ro.skin, doc: doc, base: c ? pdlClone(c.base) : pdlBaseNew() } };
 }
 A.pdlThemeExport = function (d) {   /* 文件落到下载文件夹，界面上看不到：保留提示（最近一次记在 S.lastExport） */
-  const pack = pdlThemePack(d.id), name = pack.name.replace(/\s+/g, '-') + '.theme.yaml';
+  const pack = pdlThemePack(d.id), name = pack.name.replace(/\s+/g, '-') + '.theme.zip';
   S.lastExport = { name: name, pack: pack };
   return Promise.resolve(PLATFORM.packSave(name, pack)).then(function () { toast(tc('pdlDoc.exported', name)); });
 };
@@ -281,7 +281,7 @@ function pdlThemeAdd(o) {
   t.customs.push(c); pdlThemesSave(t); return c;
 }
 A.pdlThemeImport = function () {
-  dialog({ title: tc('pdlDoc.importTitle'), fields: [{ id: 'theme-file', label: tc('pdlDoc.importFile'), file: { accept: '.yaml,.yml' } }], ok: tc('common.import'), on: function () {
+  dialog({ title: tc('pdlDoc.importTitle'), fields: [{ id: 'theme-file', label: tc('pdlDoc.importFile'), file: { accept: '.zip' } }], ok: tc('common.import'), on: function () {
     const el = document.getElementById('theme-file'), f = el && el.files && el.files[0];
     if (!f) return Promise.resolve({ error: tc('pdlDoc.importNoFile') });
     return PLATFORM.packRead(f).then(function (o) { const why = pdlThemePackWhy(o); if (why) return { error: why }; pdlThemeAdd(o); }, function () { return { error: tc('pdlDoc.importBad') }; });
