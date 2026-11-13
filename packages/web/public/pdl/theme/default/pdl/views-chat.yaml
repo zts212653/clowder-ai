@@ -5157,11 +5157,15 @@ nodes:
           map:
             "true": {shape: bottom, key: "@mid"}
             _:
-              of: "@bodyLength"
-              gte: 240
+              of: "@meta.kind"
               map:
-                "true": {shape: middle, key: "@mid"}
-                _: null
+                typing: null
+                _:
+                  of: "@bodyLength"
+                  gte: 240
+                  map:
+                    "true": {shape: middle, key: "@mid"}
+                    _: null
         note: "@notes.body"
       - type: each
         from: "@embeds"
