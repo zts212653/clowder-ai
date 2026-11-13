@@ -135,7 +135,7 @@ it('exposes only current admitted installed fragments through the authenticated 
   }
 });
 
-it('serves an installed plugin console: the package console files (pdl.json, i18n, components)', async () => {
+it('serves an installed plugin console: the package console files (pdl.yaml, i18n, components)', async () => {
   const inventory = new MemoryPluginInventoryStore();
   const control = new HostInventoryControlPlane(inventory);
   const github = {
