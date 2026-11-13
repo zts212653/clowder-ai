@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { open, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { PluginIconSpec } from '@cat-cafe/shared';
+import type { PluginIconSpec, PluginPdlFragment } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
@@ -220,7 +220,7 @@ const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
 export async function readVerifiedConsole(
   located: VerifiedPluginPackage,
   expected: PackageIdentity,
-): Promise<{ app?: string; i18n?: Record<string, Record<string, unknown>> }> {
+): Promise<Pick<PluginPdlFragment, 'components' | 'i18n'>> {
   if (!packageIdentityMatches(located.manifest, expected)) {
     throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
   }
@@ -235,8 +235,13 @@ export async function readVerifiedConsole(
     );
   };
   const names = await readdir(dir).catch(() => [] as string[]);
-  const out: { app?: string; i18n?: Record<string, Record<string, unknown>> } = {};
-  if (names.includes('app.js')) out.app = await text('app.js');
+  const out: Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
+  if (names.includes('components')) {
+    const files = (await readdir(resolve(dir, 'components'))).sort();
+    const of = (ext: string) =>
+      Promise.all(files.filter((name) => name.endsWith(ext)).map((name) => text('components/' + name)));
+    out.components = { js: await of('.js'), css: await of('.css') };
+  }
   if (names.includes('i18n')) {
     const files = (await readdir(resolve(dir, 'i18n'))).filter((name) => name.endsWith('.json'));
     out.i18n = Object.fromEntries(

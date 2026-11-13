@@ -839,3 +839,226 @@ function bindPluginSpaces() {
     },
   };
 }
+/*
+ * Plugin consoles are declarations only: a plugin's PDL names its requests (paths inside the plugin, forwarded by the
+ * host), the sources a node reads, and the generic acts that write. Reads follow the projection like every host read.
+ */
+function bindPluginRequests() {
+  const PLUGIN_PUBLIC = {
+    acts: [
+      'thread',
+      'go',
+      'insert',
+      'toast',
+      'copy',
+      'open',
+      'close',
+      'plugin',
+      'plugSet',
+      'bindRetry',
+      'openUrl',
+      'dialog',
+    ],
+    data: ['members', 'threads', 'currentThread'],
+  };
+  // The host data a plugin may read are existing view models (already in component shape).
+  const HOST_DATA = { members: 'members', threads: 'navThreads', currentThread: 'chatHeader' };
+  const CSP =
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
+  ENGINE_PARTS.pluginPublic = PLUGIN_PUBLIC;
+  S.plug = {};
+  const held = {},
+    pending = {};
+  let projected = new Set();
+  function request(pk, name) {
+    const r = (PDL_PLUGIN_REQ[pk] || {})[name];
+    if (!r) throw new Error('plugin request ' + pk + ':' + name);
+    return r;
+  }
+  function value(pk, v, input) {
+    if (typeof v !== 'string') return v;
+    if (v.indexOf('state.') === 0) return (S.plug[pk] || {})[v.slice(6)];
+    if (v === 'host.origin') return location.origin;
+    if (v[0] === '@')
+      return v
+        .slice(1)
+        .split('.')
+        .reduce(function (o, k) {
+          return o == null ? o : o[k];
+        }, input);
+    return v;
+  }
+  function values(pk, q, input) {
+    const out = {};
+    Object.keys(q || {}).forEach(function (k) {
+      out[k] = value(pk, q[k], input);
+    });
+    return out;
+  }
+  function call(pk, name, input) {
+    const r = request(pk, name),
+      path = '/api/plugins/' + encodeURIComponent(pk) + '/' + r.path,
+      q = values(pk, r.query, input);
+    if (r.method && r.method !== 'GET')
+      return api.post(path, Object.assign({}, q, { method: r.method }), r.body ? values(pk, r.body, input) : input);
+    return api.get(path, q);
+  }
+  // A full snapshot merges by id: unchanged items keep their identity.
+  function merge(old, next) {
+    if (old === next) return old;
+    if (Array.isArray(old) !== Array.isArray(next)) return next;
+    if (!old || !next || typeof old !== 'object' || typeof next !== 'object') return next;
+    const out = Array.isArray(next)
+      ? next.map(function (x, i) {
+          return merge(
+            x && x.id != null
+              ? old.find(function (y) {
+                  return y && y.id === x.id;
+                })
+              : old[i],
+            x,
+          );
+        })
+      : Object.keys(next).reduce(function (o, k) {
+          o[k] = merge(old[k], next[k]);
+          return o;
+        }, {});
+    const keys = Object.keys(out);
+    return keys.length === Object.keys(old).length &&
+      keys.every(function (k) {
+        return out[k] === old[k];
+      })
+      ? old
+      : out;
+  }
+  function read(key) {
+    const s = held[key];
+    pushProjectData({ [key]: Object.assign({}, projectData(key), { load: 'loading' }) });
+    return call(s.plugin, s.request, s.input).then(
+      function (v) {
+        const before = projectData(key) || {};
+        pushProjectData({ [key]: { load: '', value: merge(before.value, v) } });
+      },
+      function () {
+        pushProjectData({ [key]: { load: 'error' } });
+      },
+    );
+  }
+  function reread(pk) {
+    return Promise.all(
+      Array.from(projected)
+        .filter(function (k) {
+          return held[k] && held[k].plugin === pk;
+        })
+        .map(read),
+    );
+  }
+  api.on('sources:needed', function (diff) {
+    diff.removed.forEach(function (k) {
+      projected.delete(k);
+    });
+    diff.added.forEach(function (k) {
+      if (k.indexOf('plugin:') !== 0 || !held[k]) return;
+      projected.add(k);
+      settleHold(read(k));
+    });
+  });
+  VM.plugin = function (pk, sources, input) {
+    const out = { state: S.plug[pk] || {}, load: '', pending: !!pending[pk] };
+    Object.keys(sources).forEach(function (k) {
+      const name = sources[k];
+      if (name.indexOf('host:') === 0) {
+        out[k] = vmRead(HOST_DATA[name.slice(5)]);
+        return;
+      }
+      const r = request(pk, name),
+        row = {};
+      Object.values(Object.assign({}, r.query, r.body)).forEach(function (v) {
+        if (typeof v === 'string' && v[0] === '@') row[v] = value(pk, v, input);
+      });
+      const key = 'plugin:' + pk + '/' + k + (Object.keys(row).length ? '|' + JSON.stringify(row) : '');
+      if (!held[key]) held[key] = { plugin: pk, request: name, input: input };
+      if (projectionNeeded) projectionNeeded.add(key);
+      const s = projectData(key);
+      out[k] = s && s.value;
+      if (!s || s.load) out.load = s ? s.load : 'loading';
+    });
+    return out;
+  };
+  async function write(pk, name, input) {
+    const r = request(pk, name);
+    let res;
+    pending[pk] = (pending[pk] || 0) + 1;
+    render(true);
+    try {
+      res = await call(pk, name, input);
+    } catch (error) {
+      toast(error.message, null, 'danger');
+      throw error;
+    } finally {
+      pending[pk]--;
+      render(true);
+    }
+    if (res && res.message) toast(res.message);
+    if (r.method && r.method !== 'GET') await reread(pk);
+    return res;
+  }
+  A.plugin = function (d) {
+    return write(d.plugin, d.request, d);
+  };
+  A.plugSet = function (d) {
+    (S.plug[d.plugin] = S.plug[d.plugin] || {})[d.k] = d.v;
+    render(true);
+    return reread(d.plugin);
+  };
+  A.go = function (d) {
+    go(d.page);
+  };
+  CHANGES.plugSet = INPUTS.plugSet = function (e) {
+    return A.plugSet(Object.assign({}, actionArgs(e.target), { v: e.target.value }));
+  };
+  CHANGES.plugin = function (e) {
+    return A.plugin(Object.assign({}, actionArgs(e.target), { v: e.target.value }));
+  };
+  // A frame's page or address from a plugin request; the plugin's own html runs under the sandbox policy.
+  VM.pluginFrame = function (pk, decl, input) {
+    const data = VM.plugin(pk, { frame: decl.request }, input),
+      v = data.frame;
+    if (!v) return { load: data.load };
+    return v.html != null
+      ? {
+          html:
+            '<meta http-equiv="Content-Security-Policy" content="' +
+            CSP +
+            '"><meta name="referrer" content="no-referrer">' +
+            v.html,
+        }
+      : { src: v.src };
+  };
+  A.pluginFrameMessage = function (m, el) {
+    if (!m || m.channel !== 'clowder-plugin-ui/v1') return;
+    const node = el.dataset.frameKey,
+      pk = PDL_VIEWS[node].plugin;
+    const run = function () {
+      if (m.type === 'invoke') return write(pk, m.request, m.input);
+      if (m.type === 'clipboard.text') return PLATFORM.clipboard(m.value);
+      if (m.type === 'clipboard.image') return PLATFORM.clipboardImage(m.value);
+      if (m.type === 'close') return true;
+      throw new Error('plugin frame message ' + m.type);
+    };
+    Promise.resolve()
+      .then(run)
+      .then(
+        function (result) {
+          return { result: result };
+        },
+        function (error) {
+          return { error: error.message };
+        },
+      )
+      .then(function (r) {
+        ENGINE_PARTS.framePost(node, Object.assign({ channel: m.channel, nonce: m.nonce, requestId: m.requestId }, r));
+        if (m.type === 'close') actFn('close')({ node: node });
+      });
+  };
+}

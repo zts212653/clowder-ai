@@ -96,7 +96,7 @@ export interface PluginManagerConfigurationPort {
 export interface PluginManagerServiceOptions {
   readonly addressedTargets?: PluginAddressedTargets;
   /** An installed package's console files (app.js, i18n) beside its manifest's pdl section. */
-  readonly consoleFiles?: (pluginId: string) => Promise<Pick<PluginPdlFragment, 'app' | 'i18n'>>;
+  readonly consoleFiles?: (pluginId: string) => Promise<Pick<PluginPdlFragment, 'components' | 'i18n'>>;
   readonly delivery?: { deliver(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> };
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;

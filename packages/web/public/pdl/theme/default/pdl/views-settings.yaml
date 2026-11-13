@@ -1440,6 +1440,7 @@ views:
                       t: pdlDoc.sysSub
                       args: ["@source", "@version"]
                     pack: "@source"
+                    package: "@source"
                     custom:
                       t: settingsUi.theme.source.custom
                       args: ["@source", "@version"]
@@ -1456,6 +1457,7 @@ views:
                   icon: download
                   act: pdlThemeExport
                   args: {id: "@id"}
+                  when: "!@package"
                 - label: t:pdlDoc.dup
                   icon: copy
                   act: pdlThemeDup
@@ -1470,6 +1472,11 @@ views:
                   act: remove
                   args: {entity: theme, id: "@id"}
                   when: "@custom"
+                - label: t:common.uninstall
+                  icon: delete
+                  act: remove
+                  args: {entity: themePack, id: "@pack"}
+                  when: "@package"
             rows: 5
           - type: list
             id: pdl-archive

@@ -131,7 +131,7 @@ const PDL_SCHEMA = {
      其余是数据绑定。_rowNo：每种布局不接受的字段（单行没有副行，只有条目有竖排尾部，记录行不能再展开） */
   _row: { layout: ['line', 'two', 'item', 'record'], key: 1, lead: 1, title: 1, inline: 1, sub: 1, meta: 1, cols: 1, acts: 1, tone: 1, color: 1, bar: 1, act: 1, args: 1, note: 1, expand: 1, more: 1, moreWhen: 1, moreAfter: 1, cur: 1, aside: 1, subLines: 1, label: 1, help: 1, when: 1 },
   _rowNo: { line: ['sub', 'meta', 'aside', 'subLines'], two: ['aside', 'subLines'], item: [], record: ['sub', 'meta', 'aside', 'subLines', 'expand'] },
-  _node: { item: 1, load: 1, loading: 1, error: 1, stale: 1, empty: 1, retry: 1, stay: 1, focus: 1, key: 1, kind: ['region', 'container', 'actions', 'entry', 'action', 'content'], essential: 1, move: 1, locked: 1, ordered: 1, span: ['s', 'm', 'l'] },
+  _node: { sources: 1, item: 1, load: 1, loading: 1, error: 1, stale: 1, empty: 1, retry: 1, stay: 1, focus: 1, key: 1, kind: ['region', 'container', 'actions', 'entry', 'action', 'content'], essential: 1, move: 1, locked: 1, ordered: 1, span: ['s', 'm', 'l'] },
   app: { demo: 1, name: ['entry', 'stripe', 'handle'], region: 1, when: 1 },
   back: { act: 1, args: 1, label: 1, when: 1 },   /* 返回放在这里（引擎的返回）；act / args 是没有返回可回时的去处 */
   box: { blocks: 1, faint: 1, fill: 1, follow: 1, note: 1, open: 1, tone: ['$', 'info', 'ok', 'warn', 'danger'], variant: R('box'), when: 1 },
@@ -299,12 +299,15 @@ function pvItemize(b, sc, root) {
   const o = Object.assign({}, b); o[key] = pvList(b[key], sc, root).map(function (x) { return Object.assign({}, x, pvDeep(b.item, root, x)); }); return o;
 }
 function pvBlocks(blocks, sc, root) {
-  return (pdlLoc(blocks) || []).filter(function (b) { return pvOk(b.when, sc, root) && !(b.key && pdlNodeHidden(b.key)); }).map(function (b) {
+  return (pdlLoc(blocks) || []).filter(function (b) { return !(b.key && pdlNodeHidden(b.key)); }).map(function (b) {
+    if (b.sources) { const data = pdlSourceOf(b, sc); return pvBlocks([Object.assign({}, b, { sources: null })], data, data); }
+    if (!pvOk(b.when, sc, root)) return '';
     if (b.plugin) pdlPluginNeed(b.plugin);   /* 插件插进来的块画出来了：取回它的子树（延迟加载） */
+    if (b.type === 'frame') b = pdlFrameOf(b, sc, root);
     const st = b.load ? pv(b.load, sc, root) : '';   /* 块的读取状态（load 绑定到数据层的状态）：加载中 / 出错 / 空都由组件库画，块只声明文字 */
     if (st && st !== 'stale') return PV_DRAW.load(b, st, sc, root);
     if (!PV.units[b.type]) b = pvItemize(b, sc, root);   /* 按单元画的块（组件库登记）自己逐项映射：只有要重画的那一项才映射 */
-    const f = PDL_BLOCKS[b.type] || (PDL_SCHEMA[b.type] ? function (c) { return PV_DRAW.control(c, sc, root); } : null); if (!f) console.error(tc('engine.block.error', b.type)); const x0 = f ? f(b, sc, root) : '',   /* 控件也可以直接放在块的位置上（比如容器的固定件） */ x = st ? PV_DRAW.load(b, st, sc, root) + x0 : x0;
+    const f = pdlReplaced(b.type) || PDL_BLOCKS[b.type] || (PDL_SCHEMA[b.type] ? function (c) { return PV_DRAW.control(c, sc, root); } : null); if (!f) console.error(tc('engine.block.error', b.type)); const x0 = f ? f(b, sc, root) : '',   /* 控件也可以直接放在块的位置上（比如容器的固定件） */ x = st ? PV_DRAW.load(b, st, sc, root) + x0 : x0;
     const y0 = x && pv(b.focus, sc, root) ? '<div class="vw-focus-slot"><div class="vw-focus" data-focus>' + x + '</div></div>' : x, y = b.key ? pvProjected(b.key, y0) : y0; return y && b.stay ? pvStay(y) : y;
   }).join('');   /* focus / stay：包一层标记（遮罩和层级、弹窗的 pick 由引擎推导） */
 }
@@ -315,7 +318,29 @@ function pvProjected(key, html) {
   return (top ? PV_DRAW.opened(top, key, true) : html) + on.map(function (f) { return PV_DRAW.opened({ f: f, a: {} }, key, false); }).join('');
 }
 /* 用给定的视图模型画一个视图的内容（模态窗、对话框的正文：壳由调用方给） */
-function pdlViewOf(id, root) { const v = pdlLoc(PDL_VIEWS[id]); return v && root ? pvBlocks(v.blocks, root, root) : ''; }
+function pdlSourceOf(node, input) {
+  if (!node.sources) return input;
+  const pk = node.plugin || (PDL_VIEWS[PV.viewId] || {}).plugin;
+  pdlPluginNeed(pk);
+  if (ENGINE_PARTS.pluginLoad && !PDL_PLUGIN_FRAGS[pk].loaded) return { load: 'loading' };
+  return VM.plugin(pk, node.sources, input);
+}
+function pdlFrameOf(b, sc, root) {
+  const owner = PDL_VIEWS[PV.viewId] || {}, pk = pv(b.plugin, sc, root) || owner.plugin, node = owner.plugin ? PV.viewId : root.node;
+  if (!pk || !node) return b;
+  pdlPluginNeed(pk);
+  if (ENGINE_PARTS.pluginLoad && !PDL_PLUGIN_FRAGS[pk].loaded) return Object.assign({}, b, { src: null, html: null, load: 'loading' });
+  const decl = PDL_VIEWS[node], frame = decl.type === 'frame' ? decl : b, data = node === PV.viewId ? root : pdlSourceOf(decl, sc), value = frame.html || frame.src;
+  const content = value && value.request ? VM.pluginFrame(pk, value, sc) : { src: pv(frame.src, data, data), html: pv(frame.html, data, data) };
+  if (content.src) content.src = ioFile(content.src) || content.src;
+  return Object.assign({}, b, content, { key: node, load: content.load || data.load || b.load, on: { message: 'pluginFrameMessage' } });
+}
+function pdlViewOf(id, root) {
+  const v = pdlLoc(PDL_VIEWS[id]); if (!v || !root) return '';
+  root = pdlSourceOf(v, root);
+  const prev = PV.viewId; PV.viewId = id;
+  try { return pvBlocks(v.type === 'frame' ? [Object.assign({}, v, { sources: null })] : v.blocks, root, root); } finally { PV.viewId = prev; }
+}
 /* 视图里的下钻（列表 → 详情盖住了列表）：视图只声明“什么时候是下钻、回去执行哪个动作”（drill），返回由引擎放进返回槽（detail），
    详情自己的头把它画出来——和区域的通用返回是同一个组件。来源的名字默认是这个容器的名字（视图声明的 title，或者工作台标签的标题）；
    来源本身是数据时（弹出层的上一页）才写 label。页面里不手写返回按钮 */
@@ -339,9 +364,10 @@ function pvSaidInHead(strong, text) { const msg = pvSay(pvSay(strong) + (text ||
 /* 画一个视图：视图描述 + 视图模型 */
 function pdlView(id) {
   const v = pdlLoc(PDL_VIEWS[id]); if (!v) return '';
-  if (v.plugin) { pdlPluginNeed(v.plugin); if (!v.blocks) return ''; }   /* 插件的视图：第一次画时取回它的子树（延迟加载）；还没取回时只有节点声明，先画空 */
-  const root = v.sources ? (VM.plugin ? VM.plugin(v.plugin, v.sources) : null) : vmRead(v.vm);   /* 插件视图：数据来自它登记的请求（应用的通用 VM.plugin 去读） */
+  if (v.plugin) { pdlPluginNeed(v.plugin); if (!v.blocks && v.type !== 'frame') return ''; }   /* 插件的视图：第一次画时取回它的子树（延迟加载）；还没取回时只有节点声明，先画空 */
+  const root = v.sources ? pdlSourceOf(v, NAV_CTX ? NAV_CTX.a : {}) : v.plugin && !v.vm ? {} : vmRead(v.vm);   /* 插件视图：数据来自它登记的请求（应用的通用 VM.plugin 去读） */
   if (!root) return v.empty ? PV_DRAW.state('empty', { text: pvText(v.empty, {}, {}) }) : '';
+  if (v.type === 'frame') { const prev = PV.viewId; PV.viewId = id; try { return pvBlocks([Object.assign({}, v, { sources: null })], root, root); } finally { PV.viewId = prev; } }
   const placed = backPlaced(v.blocks, root);   /* 视图自己声明了返回放在哪（back 控件）：标题行不取返回 */
   const prevId = PV.viewId, load = root.load || PV.load || '', prevSaid = PV.said;   /* 视图的读取状态：视图模型给的（数据层），或者所在工作台标签的 */
   PV.viewId = id; PV.load = ''; PV.said = pvHeadStatuses(v.blocks, root);

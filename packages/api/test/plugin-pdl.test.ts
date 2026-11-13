@@ -155,13 +155,18 @@ it('serves an installed plugin console: the manifest pdl section with the packag
     inventory: { snapshot: async () => snapshot },
     catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 1 }) },
     consoleFiles: async (pluginId) =>
-      pluginId === github.pluginId ? { app: 'VM.githubCommunity = () => ({});', i18n: { zh: { title: '社区' } } } : {},
+      pluginId === github.pluginId
+        ? {
+            components: { js: ["PDL_COMPONENTS['plugin:x/card'] = () => '';"], css: [] },
+            i18n: { zh: { title: '社区' } },
+          }
+        : {},
   });
   const fragment = (await manager.pdl()).fragments[github.pluginId]!;
   assert.equal(fragment.ns, 'github');
   assert.equal((fragment.i18n!.zh as { title: unknown }).title, '社区');
-  assert.equal(fragment.app, undefined);
+  assert.equal(fragment.components, undefined);
   const subtree = await manager.pdlSubtree(github.pluginId);
   assert.ok(subtree.views!['github.community']!.blocks);
-  assert.match(subtree.app!, /VM\.githubCommunity/);
+  assert.match(subtree.components!.js[0]!, /plugin:x\/card/);
 });

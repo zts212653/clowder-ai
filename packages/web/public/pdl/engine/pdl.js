@@ -84,11 +84,36 @@ function pdlSingle(slot) { return pdlSlotItems(slot)[0] || null; }
 /* 片段里给人看的名字（入口标题、面板标签）：t:键 在登记时取文案（插件的文案先登记）；别的原样 */
 function pdlText(x) { return typeof x === 'string' && x.indexOf('t:') === 0 ? tc(x.slice(2)) : x; }
 /* 插件的视图带上它是谁的：有 sources 的视图向应用的通用 VM.plugin 要数据；视图里用通用插件动作（plugin）的参数补上插件 id */
-function pdlTagActs(x, pk) { if (Array.isArray(x)) { x.forEach(function (y) { pdlTagActs(y, pk); }); return; } if (!x || typeof x !== 'object') return; if (x.act === 'plugin') x.args = Object.assign({}, x.args, { plugin: pk }); Object.keys(x).forEach(function (k) { pdlTagActs(x[k], pk); }); }
+const PDL_ACT_KEYS = ['act', 'action', 'change', 'input', 'go'];   /* 写动作名的属性（插件的通用动作补上插件 id；公开边界按它们查） */
+function pdlTagActs(x, pk) {
+  if (Array.isArray(x)) { x.forEach(function (y) { pdlTagActs(y, pk); }); return; } if (!x || typeof x !== 'object') return;
+  if (PDL_ACT_KEYS.some(function (k) { return x[k] === 'plugin' || x[k] === 'plugSet'; })) x.args = Object.assign({}, x.args, { plugin: pk });
+  if (x.okAct === 'plugin') x.okArgs = Object.assign({}, x.okArgs, { plugin: pk });
+  Object.keys(x).forEach(function (k) { pdlTagActs(x[k], pk); });
+}
+/* 公开目录由应用登记；整个片段（包括延迟子树）在写入任何登记表前校验。 */
+function pdlPluginRejects(frag) {
+  const out = [], pub = ENGINE_PARTS.pluginPublic;
+  function act(v, path) {
+    if (typeof v === 'string') { if (pub.acts.indexOf(v) < 0 && v !== '') out.push({ key: v, slot: path, reason: 'private action' }); }
+    else if (v && v.map) Object.keys(v.map).forEach(function (k) { act(v.map[k], path); });
+  }
+  function walk(x, path) {
+    if (!x || typeof x !== 'object') return;
+    if (x.vm) out.push({ key: x.vm, slot: path + '.vm', reason: 'private source' });
+    Object.keys(x.sources || {}).forEach(function (k) { const s = x.sources[k]; if (s.indexOf('host:') === 0 && pub.data.indexOf(s.slice(5)) < 0) out.push({ key: s, slot: path, reason: 'private source' }); });
+    Object.keys(x).forEach(function (k) {
+      if (PDL_ACT_KEYS.concat(['itemAct', 'okAct']).indexOf(k) >= 0) { if (x[k] && typeof x[k] === 'object' && !x[k].map) walk(x[k], path + '.' + k); else act(x[k], path + '.' + k); }
+      else if (k === 'on') Object.keys(x[k]).forEach(function (ev) { if (typeof x[k][ev] === 'string') act(x[k][ev], path + '.on.' + ev); else walk(x[k][ev], path + '.on.' + ev); });
+      else if (k !== 'requests' && k !== 'i18n') walk(x[k], path + '.' + k);
+    });
+  }
+  walk(frag, 'pdl'); return out;
+}
 /* 片段里的节点（视图、独立页面）、请求、弹窗：登记时一次，延迟加载的插件取回子树时再一次（inserts 是它登记过的插入，找弹窗归哪个入口） */
 function pdlRegisterNodes(frag, pk, inserts) {
   const owner = pk ? { plugin: pk } : {};
-  Object.keys(frag.views || {}).forEach(function (id) { const v = frag.views[id]; if (pk) { v.plugin = pk; pdlTagActs(v.blocks, pk); } if (v.panel) v.panel = v.panel.map(pdlText); PDL_VIEWS[id] = v; });
+  Object.keys(frag.views || {}).forEach(function (id) { const v = frag.views[id]; if (pk) { v.plugin = pk; pdlTagActs(v, pk); } if (v.panel) v.panel = v.panel.map(pdlText); PDL_VIEWS[id] = v; });
   if (pk && frag.requests) PDL_PLUGIN_REQ[pk] = frag.requests;
   Object.keys(frag.popups || {}).forEach(function (k) {
     const d = frag.popups[k], f = Object.keys(PDL_VIEWS).find(function (id) { return PDL_VIEWS[id].popup === k; });
@@ -99,13 +124,15 @@ function pdlRegisterNodes(frag, pk, inserts) {
   });
 }
 /* 延迟加载：宿主给了加载口 ENGINE_PARTS.pluginLoad(插件) → Promise<子树> 时，插件登记的是索引（插入、模板、行、图标、文案、节点的声明）；
-   子树（视图的内容、弹窗、请求、app.js）在它第一次投影时取回：画到它插进来的节点、它的模板，或者打开它的节点。取回后登记、再画。
+   子树（视图的内容、弹窗、请求）在它第一次投影时取回：画到它插进来的节点、它的模板，或者打开它的节点。取回后登记、再画。
    没有加载口时登记的就是整个片段。插件撤掉时一起忘掉 */
 const PDL_PLUGIN_LOADED = {};
 function pdlPluginNeed(pk) {
   if (!ENGINE_PARTS.pluginLoad || !PDL_PLUGIN_FRAGS[pk] || PDL_PLUGIN_LOADED[pk]) return;
   const at = PDL_PLUGIN_LOADED[pk] = ENGINE_PARTS.pluginLoad(pk).then(function (sub) {
     const frag = PDL_PLUGIN_FRAGS[pk]; if (PDL_PLUGIN_LOADED[pk] !== at || !frag) return;
+    const rejects = pdlPluginRejects(sub); if (rejects.length) { PDL_SLOT_REJECTS[pk] = rejects; render(true); return; }
+    const cw = sub.components ? pdlComponentsLoad(sub.components, pk) : ''; if (cw) { PDL_SLOT_REJECTS[pk] = [{ key: pk, slot: 'components', reason: cw }]; render(true); return; }
     pdlRegisterNodes(sub, pk, frag.inserts);
     PDL_PLUGIN_FRAGS[pk] = Object.assign({}, frag, { views: Object.assign({}, frag.views, sub.views), popups: sub.popups, requests: sub.requests, loaded: true });
     if (frag.inserts) pdlTreeChanged(); else renderForget();   /* 插入可能锚在刚取回的子树里：从头再插一遍 */
@@ -113,8 +140,46 @@ function pdlPluginNeed(pk) {
   });
 }
 treeMatch('[data-entry^="plugin:"]', function (el) { const id = el.dataset.entry; pdlPluginNeed(id.slice(7, id.indexOf('/'))); });   /* 插件插进来的节点进了文档（进树通知） */
+/* 插件组件：片段的 components { js, css } 只画（组件库同一种写法），新增的名字在 plugin:<插件>/ 下；replaces { 块类型: { use, props } } 全局替换宿主的这个块，
+   props 要和 PDL_SCHEMA 里这个块的属性一样。同一个块同一时间只有一个启用中的替换者：启用时应用查 pdlReplaceConflict，冲突就不启用。
+   有 replaces 的插件随索引加载组件（替换从第一屏起就要生效），其余随子树。脚本收不回：组件变了的更新整页重新载入 */
+const PDL_REPLACES = {}, PDL_COMP_LOADED = {};   /* 块类型 → [{ pk, use }]；插件 → 已运行的组件（原文） */
+function pdlComponentsLoad(c, pk) {
+  const sig = JSON.stringify(c); if (PDL_COMP_LOADED[pk] === sig) return '';
+  if (PDL_COMP_LOADED[pk]) { location.reload(); return ''; }
+  Object.keys(PDL_COMPONENTS).forEach(function (k) { Object.defineProperty(PDL_COMPONENTS, k, { writable: false, configurable: false }); });   /* 已有的组件插件改不了 */
+  const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
+  c.css.forEach(function (x) { add('style', x); }); c.js.forEach(function (x) { add('script', x); });
+  PDL_COMP_LOADED[pk] = sig;
+  const bad = Object.keys(PDL_COMPONENTS).filter(function (k) { return Object.getOwnPropertyDescriptor(PDL_COMPONENTS, k).writable && k.indexOf('plugin:' + pk + '/') !== 0; });
+  bad.forEach(function (k) { delete PDL_COMPONENTS[k]; });   /* 只能在自己的命名空间里新增 */
+  return bad.length ? 'component ' + bad.join(', ') : '';
+}
+function pdlReplacesWhy(frag, pk) {
+  return Object.keys(frag.replaces || {}).map(function (t) {
+    const r = frag.replaces[t], want = Object.keys(PDL_SCHEMA[t] || {}).sort().join(), have = (r.props || []).slice().sort().join();
+    return !PDL_SCHEMA[t] ? 'replaces ' + t + ': not a block' : r.use.indexOf('plugin:' + pk + '/') !== 0 || !PDL_COMPONENTS[r.use] ? 'replaces ' + t + ': ' + r.use : want !== have ? 'replaces ' + t + ': props differ' : '';
+  }).filter(Boolean);
+}
+function pdlReplacesSet(frag, pk) {
+  Object.keys(frag.replaces || {}).forEach(function (t) { (PDL_REPLACES[t] = PDL_REPLACES[t] || []).push({ pk: pk, use: frag.replaces[t].use }); });
+}
+/* 启用前：这个插件要替换的块，已经被另一个启用中的插件替换了 → { type, by } */
+function pdlReplaced(t) { const r = (PDL_REPLACES[t] || []).find(function (x) { return plugOn(x.pk); }); return r ? PDL_COMPONENTS[r.use] : null; }   /* 画块时：启用中的插件替换了它就用插件的 */
+function pdlReplaceConflict(pk) {
+  const own = (PDL_PLUGIN_FRAGS[pk] || {}).replaces || {};
+  for (const t of Object.keys(own)) { const by = (PDL_REPLACES[t] || []).find(function (x) { return x.pk !== pk && plugOn(x.pk); }); if (by) return { type: t, by: by.pk }; }
+  return null;
+}
 function pdlRegister(frag, pk, plug) {
-  const big = pk && pdlLimitWhy(frag); if (big) { PDL_SLOT_REJECTS[pk] = [{ key: pk, slot: '', reason: big }]; return; }   /* 上限（主题文档）：插件片段登记时校验一次，超了整个不登记 */
+  if (pk) delete PDL_SLOT_REJECTS[pk];
+  if (pk) { const rejects = pdlPluginRejects(frag); if (rejects.length) { PDL_SLOT_REJECTS[pk] = rejects; return; } }
+  const big = pk && pdlLimitWhy(frag); if (big) { PDL_SLOT_REJECTS[pk] = [{ key: pk, slot: '', reason: big }]; return; }
+  if (pk && frag.components && (frag.replaces || !ENGINE_PARTS.pluginLoad)) {
+    const why = [pdlComponentsLoad(frag.components, pk)].concat(pdlReplacesWhy(frag, pk)).filter(Boolean);
+    if (why.length) { PDL_SLOT_REJECTS[pk] = why.map(function (w) { return { key: pk, slot: 'components', reason: w }; }); return; }
+    pdlReplacesSet(frag, pk);
+  }   /* 上限（主题文档）：插件片段登记时校验一次，超了整个不登记 */
   const owner = pk ? { plugin: pk } : {}, cond = pk ? 'plugin.' + pk : null;
   const ns = function (ic) { return ic && frag.icons && frag.icons[ic] && pk ? 'plugin:' + pk + '/' + ic : ic; };
   Object.keys(frag.icons || {}).forEach(function (n) { const one = {}; one[ns(n)] = frag.icons[n]; ENGINE_PARTS.icons(one); });
@@ -125,11 +190,22 @@ function pdlRegister(frag, pk, plug) {
   pdlRegisterNodes(frag, pk, frag.inserts);
   (frag.templates || []).forEach(function (x) {   /* 模板登记（按类型画，不是摆放） */
     const item = Object.assign({}, x, owner, { icon: ns(x.icon), id: pk ? 'plugin:' + pk + '/' + x.id : x.id });
+    if (pk && item.node) { item.node.plugin = pk; pdlTagActs(item.node, pk); }
     if (cond) item.when = x.when ? [cond, x.when] : cond;
     pdlContribute(x.slot, item);
   });
   /* 插进来的节点：名字是文案键的换成文字，图标是自己带的加上前缀（和模板一样） */
-  const inserts = (frag.inserts || []).map(function (x) { return x.node ? Object.assign({}, x, { node: Object.assign({}, x.node, { title: pdlText(x.node.title), icon: ns(x.node.icon) }) }) : x; });
+  const inserts = (frag.inserts || []).map(function (x) {
+    if (!x.node) return x;
+    const node = Object.assign({}, x.node, { title: pdlText(x.node.title), icon: ns(x.node.icon) });
+    if (pk) pdlTagActs(node, pk);
+    if (pk && node.sources && !node.type) {
+      const key = 'plugin:' + pk + '/' + x.id;
+      BADGES[key] = function () { const root = pdlSourceOf(Object.assign({ plugin: pk }, x.node)); return x.node.badge ? pv(x.node.badge, root, root) : null; };
+      node.badge = key;
+    }
+    return Object.assign({}, x, { node: node });
+  });
   /* 内置模块的插入就是主题的一部分：登记时直接放进主题声明（不带 ins，不随插件重算） */
   if (!pk) inserts.forEach(function (x) { if (!pdlInsertOne(pdlTreeIndex(), x, Object.assign({ id: x.id }, x.node))) throw new Error('builtin insert ' + x.id + ' found no anchor'); });
   if (pk) {
@@ -144,6 +220,8 @@ function pdlUnregister(pk) {
   const frag = PDL_PLUGIN_FRAGS[pk]; if (!frag) return;
   Object.keys(frag.views || {}).forEach(function (id) { if (PDL_VIEWS[id] && PDL_VIEWS[id].plugin === pk) delete PDL_VIEWS[id]; });
   Object.keys(frag.rows || {}).forEach(function (id) { delete PDL_ROWS[id]; });
+  (frag.inserts || []).forEach(function (x) { if (x.node && x.node.sources) delete BADGES['plugin:' + pk + '/' + x.id]; });
+  Object.keys(PDL_REPLACES).forEach(function (t) { PDL_REPLACES[t] = PDL_REPLACES[t].filter(function (x) { return x.pk !== pk; }); });
   Object.keys(frag.popups || {}).forEach(function (k) { delete PDL_POPUPS[k]; delete POPUPS[k]; delete S.popOn[k]; });
   Object.keys(PDL_SLOT_ITEMS).forEach(function (slot) { PDL_SLOT_ITEMS[slot] = PDL_SLOT_ITEMS[slot].filter(function (x) { return x.plugin !== pk; }); });
   [PDL_PLUGIN_REQ, PDL_PLUGIN_FRAGS, PDL_SLOT_REJECTS].forEach(function (m) { delete m[pk]; });
@@ -428,9 +506,10 @@ function pdlOpenTarget(spec, el) {
   const c = chain[Math.min(spec.depth || 0, chain.length - 1)];
   return pdlSlotDef(c) ? pdlSlotBox(c) || ctPages() : c;   /* 内容容器自己没有叠：开进放它的布局容器 */
 }
-function pdlOpenOf(id, el) {
+function pdlOpenOf(id, el, read) {
   const e = pdlEntry(id); if (!e || !e.open) return null;
-  let o = Object.assign({}, e.open), owner = id;
+  const data = read && e.sources ? VM.plugin(e.plugin, e.sources) : {};
+  let o = read ? pvDeep(e.open, data, data) : Object.assign({}, e.open), owner = id;
   if (o.ref) { const t = pdlEntry(o.ref); if (!t || !t.open) return null; owner = o.ref; o = Object.assign({}, t.open, o.args ? { args: Object.assign({}, t.open.args, o.args) } : {}); }   /* 引用：照真声明打开，参数可以覆盖 */
   if (o.action || o.space) return o;
   const slot = pdlSlotOf(owner), box = slot && pdlSlotBox(slot), rule = ((slot && pdlSlotDef(slot)) || {}).opens || (box && (pdlNode(box) || {}).opens) || null;
@@ -499,7 +578,7 @@ const OPEN_KEYS = { ref: 1, page: 1, node: 1, backLabel: 1, action: 1, space: 1,
 function pdlOpenSpec(d, el) {
   if (el === undefined) el = ACT_FROM;   /* 程序里的打开：按正在处理的那次操作的触发者算 */
   const args = {}; Object.keys(d).forEach(function (k) { if (!OPEN_KEYS[k]) args[k] = d[k]; });
-  if (d.ref) { const o = pdlOpenOf(d.ref, el); if (!o) return; if (o.space) { spaceOpen(o.space); return; } if (o.action) { actFn(o.action)(Object.assign({}, o.args, args), null); return; } pdlOpenNode(Object.assign({}, o, { args: Object.assign({}, o.args, args) }), el, d.ref); return; }   /* 引用：照真声明打开，参数覆盖同名的 */
+  if (d.ref) { const o = pdlOpenOf(d.ref, el, true); if (!o) return; if (o.space) { spaceOpen(o.space); return; } if (o.action) { actFn(o.action)(Object.assign({}, o.args, args), null); return; } pdlOpenNode(Object.assign({}, o, { args: Object.assign({}, o.args, args) }), el, d.ref); return; }   /* 引用：照真声明打开，参数覆盖同名的 */
   const m = d.page && !PAGES[d.page] && /^([a-zA-Z]+)-(.+)$/.exec(d.page);   /* 页名-参数（地址的写法）：拆开 */
   if (m && PAGES[m[1]]) { d = Object.assign({}, d, { page: m[1] }); args.p = m[2]; }
   if (d.page && !d.anchor) { pagesOpen(d.page, args, el, { ask: true, exit: d.exit ? String(d.exit).split(',') : null }); return; }   /* 页面，没写开在哪：开到页面容器（从内容里开别的空间的页面时盖在原处，见 pagesOpen） */

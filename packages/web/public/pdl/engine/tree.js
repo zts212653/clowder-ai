@@ -12,7 +12,8 @@ function pdlNodeId(x) { return x.type ? x.key || null : x.id || x.key || x.ref |
 /* 生效的登记表：PDL_SLOTS / PDL_VIEWS 始终是生效的那份——主题声明的原件（PDL_BASE，加载完、插件登记之前记下），
    被当前自定义主题改过的按 id 换成文档里的那份；换完重新套一遍插件的插入。读的地方不用分辨。 */
 const PDL_BASE = {};
-onStart('data', function () { Object.keys(PDL_ROOTS).forEach(function (kind) { PDL_BASE[kind] = Object.assign({}, PDL_ROOTS[kind]()); }); });
+function pdlBaseTake() { Object.keys(PDL_ROOTS).forEach(function (kind) { PDL_BASE[kind] = Object.assign({}, PDL_ROOTS[kind]()); }); }
+onStart('data', pdlBaseTake);
 function pdlEffectiveSync() {
   const full = S.pdlDoc && S.pdlDoc.full;
   Object.keys(PDL_BASE).forEach(function (kind) {

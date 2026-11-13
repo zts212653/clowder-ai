@@ -179,6 +179,5 @@ function themeTokens(t) {
   (t.queries || []).forEach(function (q) { css += '@media ' + q.media + ' { ' + block(':root', q.vars) + '}\n'; });
   css += dark(':root', t.dark);
   Object.keys(t.skins || {}).forEach(function (s) { const sel = ':root[data-skin="' + s + '"]'; css += block(sel, t.skins[s].light) + dark(sel, t.skins[s].dark); });
-  let el = document.querySelector('style[data-theme-tokens]'); if (!el) { el = document.createElement('style'); el.setAttribute('data-theme-tokens', ''); document.head.appendChild(el); }
-  el.textContent = css;
+  const el = document.createElement('style'); el.setAttribute('data-theme-tokens', ''); el.textContent = css; document.head.appendChild(el);   /* 每次加载一张：主题包的在默认主题之后，同名的盖过默认的 */
 }

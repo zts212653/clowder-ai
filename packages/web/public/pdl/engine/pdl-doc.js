@@ -107,12 +107,29 @@ function pdlLimitWhy(x) {
 const PDL_SYS_THEMES = [];   /* 系统主题描述由当前主题的数据登记。 */
 function pdlPackThemes() { return THEME_SRC.packs().map(function (t) { return { id: 'pack:' + t.id, name: t.name, src: t.src, skin: 'default', palette: t.id }; }); }
 /* 主题文档放在哪：应用登记 THEME_DOCS = { read() → Promise<主题|null>, write(主题) }（宿主保存，清缓存也还在）；没登记时存在浏览器里。启动时先读回来（early 阶段：同一阶段的函数一起开始，主题文档在下一阶段） */
-let THEME_DOCS = null, THEMES_HELD = null;
+let THEME_DOCS = null, THEMES_HELD = null, THEMES_WRITE = Promise.resolve();
 function pdlThemes() { return (THEME_DOCS ? THEMES_HELD && pdlClone(THEMES_HELD) : store.get('pdl-themes-v1', null)) || { active: PDL_SYS_THEMES[0].id, customs: [] }; }   /* 每次给一份副本（和读存储一样）：改了要 pdlThemesSave 才算数 */
-function pdlThemesSave(t) { if (THEME_DOCS) { const j = JSON.stringify(t); if (j === JSON.stringify(pdlThemes())) return; THEMES_HELD = JSON.parse(j); THEME_DOCS.write(t); }   /* 没变就不写宿主（启动时的整理多半什么都没改） */ else store.set('pdl-themes-v1', t); }
-onStart('early', function () { if (THEME_DOCS) return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; }); });
+function pdlThemesSave(t) { if (THEME_DOCS) { const j = JSON.stringify(t); if (j === JSON.stringify(pdlThemes())) return; THEMES_HELD = JSON.parse(j); THEMES_WRITE = Promise.resolve(THEME_DOCS.write(t)); }   /* 没变就不写宿主（启动时的整理多半什么都没改） */ else store.set('pdl-themes-v1', t); }
+/* 主题包：内置主题和别的主题都是主题包——theme.yaml（身份、pdl、uses：用到的组件包；可选 i18n、assets）。组件包（css、js，和 library/ 同一种写法：
+   同名的画法换掉默认的，新的画法经组件库的登记点注册）按 id 存一份（components），装好的主题包存在 packs（只记引用，不含组件代码）。
+   一次只渲染一套主题：启动时加载当前主题的包——默认组件库与文案之后，依次是它用到的组件包、文案、素材、pdl（同 id 盖过默认，缺的回落默认）。
+   切换主题 = 存完后整页重新载入（pdlThemeGo）；在包上做的自定义主题记着它基于的包（theme） */
+let PACK_LOADED = null;
+function pdlThemePacks() { return (pdlThemes().packs || []).map(function (p) { return { id: 'pkg:' + p.id, name: p.name, src: p.version, skin: 'default', palette: themeDefault(), theme: p.id }; }); }
+function pdlActivePack(t) { const x = t.customs.find(function (c) { return c.id === t.active; }) || pdlSysTheme(t.active) || {}; return (t.packs || []).some(function (p) { return p.id === x.theme; }) ? x.theme : null; }
+function pdlPackBoot() {
+  const t = pdlThemes(), id = pdlActivePack(t), p = id && t.packs.find(function (x) { return x.id === id; }); if (!p) return;
+  const add = function (tag, text) { const el = document.createElement(tag); el.textContent = text; document.head.appendChild(el); };
+  (p.uses || []).forEach(function (u) { const c = t.components[u]; c.css.forEach(function (x) { add('style', x); }); c.js.forEach(function (x) { add('script', x); }); });
+  Object.keys(p.i18n || {}).forEach(function (l) { defineI18n(l, p.i18n[l]); });
+  Object.assign(ASSETS, p.assets || {});
+  pdlThemeLoad(p.pdl, { id: p.id, name: p.name, version: p.version, contractVersion: p.contractVersion }); pdlBaseTake();
+  PACK_LOADED = id;
+}
+function pdlThemeGo(t) { pdlThemesSave(t); THEMES_WRITE.then(function () { location.reload(); }); }
+onStart('early', function () { if (!THEME_DOCS) { pdlPackBoot(); return; } return THEME_DOCS.read().then(function (t) { THEMES_HELD = t; pdlPackBoot(); }); });
 function pdlThemeActive() { const t = pdlThemes(); return t.customs.find(function (c) { return c.id === t.active; }) || null; }
-function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes()).find(function (x) { return x.id === id; }) || null; }   /* 只读主题：系统主题 + 主题插件带来的主题 */
+function pdlSysTheme(id) { return PDL_SYS_THEMES.concat(pdlPackThemes(), pdlThemePacks()).find(function (x) { return x.id === id; }) || null; }   /* 只读主题：系统主题 + 主题插件带来的主题 + 装好的主题包 */
 /* 当前主题的名字（主题页、主题计算器标题都用它） */
 function pdlRoName(d) { return d.name || tc('pdlDoc.sysName', d.n); }
 function pdlThemeName() { const t = pdlThemes(), c = pdlThemeActive(); return c ? c.name : pdlRoName(pdlSysTheme(t.active) || PDL_SYS_THEMES[0]); }
@@ -145,6 +162,7 @@ function pdlDocBoot() {
 /* 生效：当前主题是自定义主题时，它的文档按 id 覆盖主题声明的那几个根（tree.js pdlEffectiveSync）；系统主题就是基线 */
 function pdlThemeSync() {
   const t = pdlThemes(), c = pdlThemeActive();
+  if (pdlActivePack(t) !== PACK_LOADED) { THEMES_WRITE.then(function () { location.reload(); }); return; }   /* 换包：存完再整页载入 */
   S.pdlDoc = c ? { full: c.full, base: c.base } : null;
   const ro = pdlSysTheme(t.active) || PDL_SYS_THEMES[0];
   S.pdlSkin = c ? (c.skin || 'default') : ro.skin;
@@ -164,7 +182,7 @@ function pdlDocEdit(fn) {
   /* 一份自定义主题一直被改下去；只有当前主题是只读主题（系统主题）时改它才复制出新的一份，或者用户明确“复制为新主题” */
   if (!c) {
     const from = t.active, ro = pdlSysTheme(from) || PDL_SYS_THEMES[0];
-    c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: ro.skin, palette: ro.palette, full: {}, base: pdlBaseNew(), from: from };
+    c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: ro.skin, palette: ro.palette, theme: ro.theme, full: {}, base: pdlBaseNew(), from: from };
     t.customs.push(c); t.active = c.id;
     S.pdlCopied = { id: c.id, from: from, name: c.name };
   }
@@ -179,10 +197,10 @@ function pdlThemeUndoCopy(id) {
   const t = pdlThemes(), c = t.customs.find(function (x) { return x.id === id; }); if (!c) return;
   t.customs = t.customs.filter(function (x) { return x.id !== id; }); t.active = c.from || PDL_SYS_THEMES[0].id; pdlThemesSave(t); S.pdlCopied = null; pdlThemeSync(); render(true);
 }
-A.pdlThemeUse = function (d) { const t = pdlThemes(); t.active = d.id; pdlThemesSave(t); S.pdlCopied = null; pdlThemeSync(); render(true); };
+A.pdlThemeUse = function (d) { const t = pdlThemes(); if (t.active === d.id) return; t.active = d.id; pdlThemeGo(t); };
 A.pdlThemeDup = function (d) {   /* 复制为新主题（系统主题也能复制） */
   const t = pdlThemes(), src = t.customs.find(function (x) { return x.id === d.id; }), sys = pdlSysTheme(d.id);
-  const c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: src ? src.skin : sys ? sys.skin : 'default', palette: src ? src.palette : sys ? sys.palette : themeDefault(), full: src ? pdlClone(src.full) : {}, base: src ? pdlClone(src.base) : pdlBaseNew() };
+  const c = { id: 'c' + Date.now(), name: pdlCustomName(t), skin: src ? src.skin : sys ? sys.skin : 'default', palette: src ? src.palette : sys ? sys.palette : themeDefault(), theme: (src || sys || {}).theme, full: src ? pdlClone(src.full) : {}, base: src ? pdlClone(src.base) : pdlBaseNew() };
   t.customs.push(c); t.active = c.id; pdlThemesSave(t); pdlThemeSync(); render(true);
 };
 /* 自定义主题：改名（只有自定义主题能改名）、删除（能撤回：回到列表里原来的位置，正在用的话再用回它） */
@@ -192,8 +210,17 @@ ENT.theme = {
   undo: true, undoText: function (op, c) { return tc('pdlDoc.themeDropped', c.name); },
   remove: function (c) {
     const t = pdlThemes(), i = t.customs.findIndex(function (x) { return x.id === c.id; }), was = t.active;
-    t.customs.splice(i, 1); if (t.active === c.id) t.active = PDL_SYS_THEMES[0].id; pdlThemesSave(t); pdlThemeSync();
+    t.customs.splice(i, 1); if (t.active === c.id) { t.active = PDL_SYS_THEMES[0].id; pdlThemeGo(t); return function () {}; } pdlThemesSave(t); pdlThemeSync();
     return function () { const t2 = pdlThemes(); t2.customs.splice(Math.min(i, t2.customs.length), 0, c); t2.active = was; pdlThemesSave(t2); pdlThemeSync(); };
+  }
+};
+ENT.themePack = {   /* 卸载主题包：正在用它就回到系统主题 1；没有主题包再用的组件包一起删 */
+  coll: function () { return pdlThemes().packs || []; },
+  remove: function (p) {
+    const t = pdlThemes(), on = pdlActivePack(t) === p.id;
+    t.packs = t.packs.filter(function (x) { return x.id !== p.id; });
+    Object.keys(t.components).forEach(function (u) { if (!t.packs.some(function (x) { return (x.uses || []).indexOf(u) >= 0; })) delete t.components[u]; });
+    if (on) { t.active = PDL_SYS_THEMES[0].id; pdlThemeGo(t); } else pdlThemesSave(t);
   }
 };
 /* ───────── 导入 / 导出─────────
@@ -209,11 +236,15 @@ function pdlDropPluginRefs(doc) {
   };
   strip(doc);
 }
+/* 一个装好的主题包，连同它用到的组件包（导出、自定义主题导出时附带）*/
+function pdlPackFile(t, pid) { const p = pdlClone(t.packs.find(function (x) { return x.id === pid; })); p.components = {}; (p.uses || []).forEach(function (u) { p.components[u] = t.components[u]; }); return p; }
 function pdlThemePack(id) {
   const t = pdlThemes(), c = t.customs.find(function (x) { return x.id === id; }), ro = c ? null : pdlSysTheme(id) || PDL_SYS_THEMES[0];
+  if (ro && ro.theme) return pdlPackFile(t, ro.theme);
+  const base = (c || ro).theme;
   const doc = c ? pdlClone(c.full) : {};
   pdlDropPluginRefs(doc);
-  return { id: c ? c.id : ro.id, name: c ? c.name : pdlRoName(ro), version: '1', contractVersion: PDL_THEME.contractVersion, extends: PDL_THEME.id,
+  return { id: c ? c.id : ro.id, name: c ? c.name : pdlRoName(ro), version: '1', contractVersion: PDL_THEME.contractVersion, extends: base || PDL_THEME.id, bundle: base ? pdlPackFile(t, base) : undefined,
     pdl: { palette: c ? c.palette : ro.palette, skin: c ? c.skin : ro.skin, doc: doc, base: c ? pdlClone(c.base) : pdlBaseNew() } };
 }
 A.pdlThemeExport = function (d) {   /* 文件落到下载文件夹，界面上看不到：保留提示（最近一次记在 S.lastExport） */
@@ -221,17 +252,32 @@ A.pdlThemeExport = function (d) {   /* 文件落到下载文件夹，界面上�
   S.lastExport = { name: name, pack: pack };
   return Promise.resolve(PLATFORM.packSave(name, pack)).then(function () { toast(tc('pdlDoc.exported', name)); });
 };
-/* 校验一个主题包：返回错误文案，或者 '' */
+/* 导入（一个入口）：自定义主题（pdl.doc：文档 + 基线快照，bundle 是它基于的主题包）或主题包（pdl 是主题数据，components 是附带的组件包）。
+   主题包同 id 的换成新的，组件包按 id 存一份；用到的组件包既没附带也没装过 → 报缺哪个。校验不过：对话框留着，显示错误 */
+function pdlPackWhy(t, p) {
+  if (!p || !p.id || !p.pdl || typeof p.pdl !== 'object' || p.pdl.doc) return tc('pdlDoc.importBad');
+  const miss = (p.uses || []).filter(function (u) { return !(p.components || {})[u] && !t.components[u]; });
+  return miss.length ? tc('pdlDoc.importMissing', miss.join(', ')) : '';
+}
+function pdlPackAdd(t, p) {
+  Object.keys(p.components || {}).forEach(function (u) { t.components[u] = p.components[u]; });
+  const x = { id: String(p.id), name: String(p.name || p.id), version: p.version, contractVersion: p.contractVersion, uses: p.uses || [], pdl: p.pdl, i18n: p.i18n, assets: p.assets };
+  t.packs = t.packs.filter(function (y) { return y.id !== x.id; }).concat(x);
+}
 function pdlThemePackWhy(o) {
   const x = o && typeof o === 'object' && o.pdl;
   if (!x || typeof x !== 'object') return tc('pdlDoc.importBad');
-  if (!x.doc || typeof x.doc !== 'object' || x.doc.place || !x.base || typeof x.base !== 'object' || !x.palette) return tc('pdlDoc.importIncomplete');
+  if (!x.doc) return pdlPackWhy(pdlThemes(), o);
+  if (typeof x.doc !== 'object' || x.doc.place || !x.base || typeof x.base !== 'object' || !x.palette) return tc('pdlDoc.importIncomplete');
   const big = pdlLimitWhy(x.doc); if (big) return tc('pdlDoc.importTooLarge.' + big);   /* 上限只在这里校验一次 */
-  return '';
+  return o.bundle ? pdlPackWhy(pdlThemes(), o.bundle) : '';
 }
 function pdlThemeAdd(o) {
-  const t = pdlThemes(), taken = t.customs.some(function (c) { return c.name === o.name; }) || PDL_SYS_THEMES.some(function (x) { return pdlRoName(x) === o.name; });
-  const c = { id: 'c' + Date.now(), name: o.name && !taken ? String(o.name) : pdlCustomName(t), skin: o.pdl.skin || 'default', palette: o.pdl.palette, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
+  const t = pdlThemes(); t.packs = t.packs || []; t.components = t.components || {};
+  if (!o.pdl.doc) { pdlPackAdd(t, o); if (PACK_LOADED === String(o.id)) pdlThemeGo(t); else pdlThemesSave(t); return; }   /* 正在用的包换了新版：重新载入 */
+  if (o.bundle) pdlPackAdd(t, o.bundle);
+  const taken = t.customs.some(function (c) { return c.name === o.name; }) || PDL_SYS_THEMES.some(function (x) { return pdlRoName(x) === o.name; });
+  const c = { id: 'c' + Date.now(), name: o.name && !taken ? String(o.name) : pdlCustomName(t), skin: o.pdl.skin || 'default', palette: o.pdl.palette, theme: o.bundle ? String(o.bundle.id) : undefined, full: pdlClone(o.pdl.doc), base: pdlClone(o.pdl.base) };
   t.customs.push(c); pdlThemesSave(t); return c;
 }
 A.pdlThemeImport = function () {
@@ -242,7 +288,7 @@ A.pdlThemeImport = function () {
   } });
 };
 /* 恢复默认 = 切回系统主题 1（自定义主题留在列表里） */
-function pdlDocReset() { const t = pdlThemes(); t.active = PDL_SYS_THEMES[0].id; pdlThemesSave(t); pdlThemeSync(); }
+function pdlDocReset() { const t = pdlThemes(); if (t.active === PDL_SYS_THEMES[0].id) return; t.active = PDL_SYS_THEMES[0].id; pdlThemeGo(t); }
 onStart('doc', pdlDocBoot);
 
 /* 存档的布局：选中就用当前基线重新合并一次；成功就成为当前布局，仍失败就留在列表里并标出原因 */

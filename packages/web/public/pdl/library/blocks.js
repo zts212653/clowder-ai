@@ -701,7 +701,7 @@ Object.assign(PDL_BLOCKS, {
   typed: function (b, sc, root) {
     const it = pv(b.data, sc, root), node = pdlTyped(b.slot, pv(b.of, sc, root));
     if (!node) return pvBlocks(b.blocks, sc, root);
-    const r = node.vm ? vmRead(node.vm, it) : it;
+    const r = node.sources ? pdlSourceOf(node, it) : node.vm ? vmRead(node.vm, it) : it;
     return r ? pvBlocks(node.blocks, r, r) : '';
   },
   component: function (b, sc, root) { const f = PDL_COMPONENTS[b.use]; return f ? f(pv(b.props, sc, root), sc, root) : ''; },
@@ -945,7 +945,7 @@ Object.assign(PV.units, { stream: 1, ticks: 1 });
 /* 开进一个容器的东西：frame 节点（有视图画视图，只有地址画框）、页面；盖住容器时最前面是通用返回 */
 function pvOpened(l, key, cover) {
   const f = String(l.f), fr = navNodeOf(l), fk = fr ? f.slice(5) : null;
-  const body = fr ? (fr.type !== 'frame' ? pdlView(fk) : pvBlocks([{ type: 'frame', key: fk, src: fr.src, title: fr.title || '' }], {}, {})) : PAGES[f] ? PAGES[f]() : '';
+  const body = fr ? pdlView(fk) : PAGES[f] ? PAGES[f]() : '';
   return '<div class="opened" data-opened="' + h(key) + '">' + (cover ? engineBack({ act: 'back', data: ' data-c="' + h(key) + '"' }) : '') + body + '</div>';
 }
 Object.assign(PV_DRAW, { node: pvNode, control: pvControl, load: pvLoad, toc: pvWithToc, viewLoad: pvViewLoad, state: viewState, opened: pvOpened });

@@ -167,7 +167,7 @@ function dialogOf(d) {
   if (v.blocks) out.body = v.vm ? { type: 'view', id: 'dlg.' + d.kind } : { type: 'view', id: 'dlg.' + d.kind, data: '$.args' };   /* 没有自己的 VM 的对话框视图：数据就是打开时的参数 */
   /* okAct / okArgs：确定就执行这个动作（打开时没给 on 的时候），返回值照 on 处理（false 留着、promise 等着）；
      打开时给了 on 而主题声明了 okArgs（默认名字这类）：确定时把解析好的 okArgs 交给 on */
-  const okArgs = function () { return pvArgsObj(v.okArgs || {}, root, root); }, given = d.on;
+  const okArgs = function () { const o = pvArgsObj(v.okArgs || {}, root, root); (out.fields || []).forEach(function (f) { if (f.arg) o[f.arg] = val(f.id); }); return o; }, given = d.on;   /* 字段写了 arg 的：确定时按这个名字带上它的值（字段每次打开都是新的） */
   if (v.okAct && !given) out.on = function () { return A[v.okAct](okArgs()); };
   else if (v.okArgs && given) out.on = function () { return given(okArgs()); };
   return out;

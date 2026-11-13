@@ -3891,7 +3891,8 @@ describe('unmodified runtime and project chat bindings', () => {
           },
           'spaces.body': {
             route: 'plugin-view',
-            vm: 'chatHeader',
+            // Plugins read host data only through the public host sources (E22), never a host view model.
+            sources: { header: 'host:currentThread' },
             blocks: [{ type: 'text', text: 'Plugin-owned declaration' }],
           },
         },

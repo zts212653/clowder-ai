@@ -1,3 +1,4 @@
+import type { PluginPdlFragment } from '@cat-cafe/shared';
 import { fetchOfficialPackageArchive } from '../bundled-package-source.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
@@ -44,7 +45,7 @@ export interface PluginManagerPackageAssetServiceOptions {
   };
 }
 
-type PluginConsoleFiles = { app?: string; i18n?: Record<string, Record<string, unknown>> };
+type PluginConsoleFiles = Pick<PluginPdlFragment, 'components' | 'i18n'>;
 
 export class PluginManagerPackageAssetService
   implements PluginManagerPackageAssetPort, PluginManagerPackageDocumentationPort

@@ -824,7 +824,7 @@ function copyFlash(el) {
 /* 引擎经组件库画的部件（ENGINE_PARTS，见 engine/core.js） */
 Object.assign(ENGINE_PARTS, { float: floatHtml, modal: modalHtml, menu: menuHtml, dialog: dialogHtml, dialogSync: dialogSync, toast: toastHtml, undo: undoBar, copied: copyFlash, back: engineBack, md: mdLite,
   icons: function (map) { Object.assign(ICONS, map); },
-  framePopup: function (k, pk, d) { return d.view ? pdlView(d.view) : floatPanel({ cls: 'plugin-float', title: d.title, pop: k, body: frame(pk, d.title) }); } });
+  framePopup: function (k, pk, d) { return d.view ? pdlView(d.view) : floatPanel({ cls: 'plugin-float', title: d.title, pop: k, body: pdlView(Object.keys(PDL_VIEWS).find(function (id) { return PDL_VIEWS[id].popup === k; })) }); } });
 PAINT_SYNC.push(selSync);
 const cafeCheck = checkBox;
 /* 没有绑定值的输入：草稿在应用的表单草稿里（状态路径 cs.f，按输入框 id） */

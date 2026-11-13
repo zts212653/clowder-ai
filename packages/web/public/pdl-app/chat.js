@@ -1336,6 +1336,7 @@ window.clowderChat = {
     });
     bindAppearance();
     bindPluginSpaces();
+    bindPluginRequests();
     bindOwnerProjections();
     bindProject();
     bindHome();

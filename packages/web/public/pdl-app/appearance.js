@@ -8,7 +8,7 @@ THEME_DOCS = {
     });
   },
   write: function (themes) {
-    api.post('/api/config/console-themes', {}, { themes: themes });
+    return api.post('/api/config/console-themes', {}, { themes: themes });
   },
 };
 function bindAppearance() {
@@ -81,6 +81,8 @@ function bindAppearance() {
         accent: themeAccent(theme),
         active: current.active === theme.id,
         custom: kind === 'custom',
+        package: kind === 'package',
+        pack: theme.theme,
       };
     };
     return {
@@ -90,6 +92,11 @@ function bindAppearance() {
         .concat(
           pdlPackThemes().map(function (theme) {
             return row(theme, 'pack');
+          }),
+        )
+        .concat(
+          pdlThemePacks().map(function (theme) {
+            return row(theme, 'package');
           }),
         )
         .concat(

@@ -32,13 +32,10 @@ it('keeps every plugin declaration as admitted and calls no plugin endpoint of i
   expect(await readPluginSpaces()).toEqual({ fragments });
   expect(apiFetch).toHaveBeenCalledTimes(1);
 });
-it('reads a subtree when it is first projected, runs its app script once and passes on the rest', async () => {
-  const subtree = { views: {}, app: 'window.pluginAppRuns = (window.pluginAppRuns || 0) + 1;' };
+it('reads a subtree when it is first projected and passes it on as is (components load in the engine)', async () => {
+  const subtree = { views: {}, components: { js: ["PDL_COMPONENTS['plugin:x/card'] = () => '';"], css: [] } };
   vi.mocked(apiFetch).mockImplementation(async () => Response.json(structuredClone(subtree)));
-  expect(await readPluginSubtree('official.github-operations')).toEqual({ views: {} });
+  expect(await readPluginSubtree('official.github-operations')).toEqual(subtree);
   expect(vi.mocked(apiFetch).mock.calls[0]![0]).toBe('/api/plugin-manager/pdl/official.github-operations');
-  await readPluginSubtree('official.github-operations');
-  expect(
-    [...document.body.querySelectorAll('script')].filter((script) => script.text.includes('pluginAppRuns')),
-  ).toHaveLength(1);
+  expect(document.body.querySelectorAll('script')).toHaveLength(0);
 });

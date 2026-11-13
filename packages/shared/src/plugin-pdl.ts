@@ -13,28 +13,35 @@ export const pluginPdlSchema = z
     templates: z.array(declaration).optional(),
     popups: z.record(declaration).optional(),
     icons: z.record(z.string()).optional(),
-    // Console package parts: text namespace and texts by language, row templates, plugin-relative reads, app script.
+    // Console package parts: text namespace and texts by language, row templates, plugin-relative requests, the
+    // plugin's own drawings (components: draw only) and host blocks they replace (same contract).
     ns: z.string().optional(),
     i18n: z.record(z.record(z.unknown())).optional(),
     rows: z.record(declaration).optional(),
     requests: z.record(declaration).optional(),
-    app: z.string().optional(),
+    components: z
+      .object({ js: z.array(z.string()), css: z.array(z.string()) })
+      .strict()
+      .optional(),
+    replaces: z.record(declaration).optional(),
     // Served index only: revision of the subtree that is fetched on first projection.
     subtree: z.string().optional(),
   })
   .strict();
 export type PluginPdlFragment = z.infer<typeof pluginPdlSchema>;
-/** What registers at start: everything but view content, popups, requests and the app script. */
+/** What registers at start: everything but view content, popups, requests and components (kept when it replaces). */
 export interface PluginPdlResponse {
   fragments: Record<string, PluginPdlFragment>;
 }
 /** A plugin's subtree, fetched the first time one of its nodes is projected (E22). */
-export type PluginPdlSubtree = Pick<PluginPdlFragment, 'views' | 'popups' | 'requests' | 'app'>;
+export type PluginPdlSubtree = Pick<PluginPdlFragment, 'views' | 'popups' | 'requests' | 'components'>;
 
 // Keys of a node declaration (where it opens, its route, its page); everything else in a view is its content.
 const NODE_KEYS = new Set(['type', 'route', 'src', 'bridge', 'focus', 'popup', 'panel', 'open', 'exit']);
 export function pluginPdlSplit(fragment: PluginPdlFragment): { index: PluginPdlFragment; subtree: PluginPdlSubtree } {
-  const { views, popups, requests, app, ...rest } = fragment;
+  const { views, popups, requests, components, ...rest } = fragment;
+  // A plugin that replaces host blocks loads its components with the index: the replacement holds from the first screen.
+  if (rest.replaces) Object.assign(rest, { components });
   const index: PluginPdlFragment = views
     ? {
         ...rest,
@@ -46,5 +53,5 @@ export function pluginPdlSplit(fragment: PluginPdlFragment): { index: PluginPdlF
         ),
       }
     : rest;
-  return { index, subtree: { views, popups, requests, app } };
+  return { index, subtree: rest.replaces ? { views, popups, requests } : { views, popups, requests, components } };
 }
