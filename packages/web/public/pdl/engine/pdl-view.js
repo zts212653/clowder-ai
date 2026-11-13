@@ -24,7 +24,9 @@ const PDL_BLOCKS = {};
    toc(fn) 画一段并把小节目录换成目录；state(种类, o) 读取状态 / 空状态 */
 const PV_DRAW = {};
 const PDL_ROWS = {};             /* 行模板：按名字引用 */
-const PDL_COMPONENTS = {};       /* 组件库里有名字的复合组件：块 component / 片段 use 只能引用这里的 */
+const PDL_COMPONENTS = {};
+const PDL_REPLACES = {};   /* 插件替换的块：块类型 → [{ pk, use }]（登记在 pdl.js 的 pdlReplacesSet） */
+function pdlReplaced(t) { const r = (PDL_REPLACES[t] || []).find(function (x) { return plugOn(x.pk); }); return r ? PDL_COMPONENTS[r.use] : null; }   /* 画块时：启用中的插件替换了它就用插件的 */       /* 组件库里有名字的复合组件：块 component / 片段 use 只能引用这里的 */
 const VM = pdlReads('vm');       /* 绑定层：视图模型 */
 const REGION_TABS = {};          /* 标签式区域的绑定（状态的读写由区域的拥有方提供，见 pdl.js 的 rt*） */
 function rtBind(r, b) { REGION_TABS[r] = b; }

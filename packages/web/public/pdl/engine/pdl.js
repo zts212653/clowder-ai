@@ -143,7 +143,7 @@ treeMatch('[data-entry^="plugin:"]', function (el) { const id = el.dataset.entry
 /* 插件组件：片段的 components { js, css } 只画（组件库同一种写法），新增的名字在 plugin:<插件>/ 下；replaces { 块类型: { use, props } } 全局替换宿主的这个块，
    props 要和 PDL_SCHEMA 里这个块的属性一样。同一个块同一时间只有一个启用中的替换者：启用时应用查 pdlReplaceConflict，冲突就不启用。
    有 replaces 的插件随索引加载组件（替换从第一屏起就要生效），其余随子树。脚本收不回：组件变了的更新整页重新载入 */
-const PDL_REPLACES = {}, PDL_COMP_LOADED = {};   /* 块类型 → [{ pk, use }]；插件 → 已运行的组件（原文） */
+const PDL_COMP_LOADED = {};   /* 插件 → 已运行的组件（原文）；替换表 PDL_REPLACES 在 pdl-view.js（画块的地方） */
 function pdlComponentsLoad(c, pk) {
   const sig = JSON.stringify(c); if (PDL_COMP_LOADED[pk] === sig) return '';
   if (PDL_COMP_LOADED[pk]) { location.reload(); return ''; }
@@ -165,7 +165,6 @@ function pdlReplacesSet(frag, pk) {
   Object.keys(frag.replaces || {}).forEach(function (t) { (PDL_REPLACES[t] = PDL_REPLACES[t] || []).push({ pk: pk, use: frag.replaces[t].use }); });
 }
 /* 启用前：这个插件要替换的块，已经被另一个启用中的插件替换了 → { type, by } */
-function pdlReplaced(t) { const r = (PDL_REPLACES[t] || []).find(function (x) { return plugOn(x.pk); }); return r ? PDL_COMPONENTS[r.use] : null; }   /* 画块时：启用中的插件替换了它就用插件的 */
 function pdlReplaceConflict(pk) {
   const own = (PDL_PLUGIN_FRAGS[pk] || {}).replaces || {};
   for (const t of Object.keys(own)) { const by = (PDL_REPLACES[t] || []).find(function (x) { return x.pk !== pk && plugOn(x.pk); }); if (by) return { type: t, by: by.pk }; }
