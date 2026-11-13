@@ -4002,6 +4002,9 @@ export const callbackTools = [
     description:
       'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
       'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'When resuming, reconcile Task status, saved why and closure evidence with the current request; done records an ended Task, not proof that every artifact is complete. ' +
+      'If the intended work or its authority remains unclear, clarify before writing: name the candidate works, or state the recorded result and the specific conflict and ask the one missing question. ' +
+      'Otherwise carry out the clearly authorized request through the existing Task lifecycle without asking again or silently reopening an ended Task. ' +
       'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
       'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
       'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
