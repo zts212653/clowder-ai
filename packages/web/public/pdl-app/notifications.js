@@ -15,6 +15,17 @@ function bindNotifications() {
     if (!settings || !settings.env) return null;
     const env = settings.env;
     return {
+      paths: env.paths,
+      summaryGroups: [...new Set(env.variables.filter((v) => v.category !== 'connector').map((v) => v.category))].map(
+        (key) => ({ label: env.categories[key], variables: env.variables.filter((v) => v.category === key) }),
+      ),
+      dataDirectories:
+        env.paths &&
+        Object.entries(env.paths.dataDirs).map(([name, path]) => ({
+          name,
+          path,
+          protected: !path.startsWith(env.paths.projectRoot + '/'),
+        })),
       help: {},
       pending: settings.envPending.length,
       editable: env.variables
@@ -216,6 +227,7 @@ function bindNotifications() {
       d = snapshot.delivery,
       canSubscribe = client.isSupported && client.permission !== 'denied' && c.enabled && !client.isSubscribed;
     return {
+      supported: client.isSupported,
       capability: c,
       delivery: d,
       subscriptions: snapshot.subscription,

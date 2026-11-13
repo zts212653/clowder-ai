@@ -232,11 +232,14 @@ export function useOpsBindings(data: ChatData, ui: OpsUi, needed: boolean | numb
               );
             }
           }
-        } else if (opsView === 'gov')
-          value.governance = await discoverUnsynced(
-            (await request<{ projects: GovernanceHealthSummary[] }>('/api/governance/health')).projects,
-          );
-        else if (opsView === 'brake') value.brake = await request<BrakeSettings>('/api/brake/settings');
+        } else if (opsView === 'gov') {
+          const [governance, brake] = await Promise.all([
+            request<{ projects: GovernanceHealthSummary[] }>('/api/governance/health'),
+            request<BrakeSettings>('/api/brake/settings'),
+          ]);
+          value.governance = await discoverUnsynced(governance.projects);
+          value.brake = brake;
+        } else if (opsView === 'brake') value.brake = await request<BrakeSettings>('/api/brake/settings');
         else if (opsView === 'rescue') {
           value.rescue = (
             await request<{ sessions: ClaudeRescueSessionItem[] }>('/api/claude-rescue/sessions')

@@ -7036,6 +7036,20 @@ it.each([
     await w.__settled();
     expect(w.document.body.textContent).toContain('Owner skill');
     expect(w.eval('VM.market().sources')).toEqual([]);
+    expect(w.eval('VM.market()')).toMatchObject({
+      readState: '',
+      ecoFilters: [],
+      trustFilters: [],
+      items: [{ loc: item.sourceLocator, trust: 'community' }, { loc: item.sourceLocator }],
+    });
+    await w.eval("A.pick({path:'s.mkEcos',id:'codex'});A.pick({path:'s.mkTrusts',id:'community'})");
+    await w.__settled();
+    expect(calls.filter((c) => c.path === '/api/marketplace/search').at(-1)?.params).toMatchObject({
+      ecosystems: 'codex',
+      trustLevels: 'community',
+    });
+    await w.eval("A.pick({path:'s.mkEcos',none:true});A.pick({path:'s.mkTrusts',none:true})");
+    await w.__settled();
     expect(
       w.eval(
         'VM.market().groups.map(function(g){return {kind:g.kind, names:g.items.map(function(i){return i.name})}})',

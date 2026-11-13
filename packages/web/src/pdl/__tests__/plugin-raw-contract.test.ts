@@ -37,7 +37,9 @@ it('projects package descriptions, documentation and provided capabilities witho
     artifact: 'installed',
     intent: 'enabled',
     live: 'running',
-    actions: { install: false, setEnabled: true, uninstall: true },
+    config: 'ready',
+    auth: 'connected',
+    actions: { install: false, setEnabled: true, uninstall: true, blockingReasons: [] },
     configFields: [{ key: 'url', label: 'Endpoint', kind: 'url', currentValue: null }],
     capabilities: [],
     contributions: [{ id: 'fixture.mcp', kind: 'mcp', name: 'Fixture MCP', description: 'Capability body' }],
@@ -61,6 +63,7 @@ it('projects package descriptions, documentation and provided capabilities witho
     TITLES: {},
     INPUTS: {},
     CHANGES: {},
+    SET_AFTER: {},
     ENT: {},
     MENU_FNS: {},
     api: { on: vi.fn() },
@@ -91,4 +94,37 @@ it('projects package descriptions, documentation and provided capabilities witho
     { kind: 'mcps', items: [{ title: 'Fixture MCP', sub: 'Capability body', tools: ['fixture_tool'] }] },
   ]);
   expect(model.sel.config.save.dirty).toBe(false);
+  expect(model).toMatchObject({
+    scope: 'all',
+    counts: { all: 1, attention: 0, installed: 1, available: 0 },
+    browserGroups: [
+      { kind: 'attention', items: [] },
+      { kind: 'installed', items: [{ artifact: 'installed', trust: 'official' }] },
+      { kind: 'available', items: [] },
+    ],
+  });
+  expect(model.sel.docs.capabilities).toMatchObject([{ kind: 'mcps', items: [{ title: 'Fixture MCP' }] }]);
+  plugin.availableVersion = '2.0';
+  const updated = runInContext('VM.ext()', context);
+  expect(updated.sel).toMatchObject({ hasUpdate: true, availableVersion: '2.0', canUninstall: true });
+  expect(updated.counts.attention).toBe(1);
+  expect(updated.browserGroups[0].items).toHaveLength(1);
+  expect(updated.browserGroups[1].items).toHaveLength(0);
+  const companion = { ...plugin, pluginId: 'official.companion', artifact: 'absent' };
+  owner.plugins.plugins = [companion];
+  owner.pluginDetails[companion.pluginId] = companion;
+  context.navArg = () => 'companion';
+  context.chatRead = () => ({ cats: [{ id: 'codex', nickname: 'Owner member', roster: { available: true } }] });
+  context.pcfModel = (id: string, form: { installed: boolean; fields: unknown[] }) => ({
+    p: id,
+    installed: form.installed,
+    rows: form.fields,
+  });
+  const concierge = runInContext('VM.ext()', context);
+  expect(concierge.sel.key).toBe('official.companion');
+  expect(concierge.companion).toMatchObject({
+    p: 'official.companion',
+    installed: false,
+    partners: [{ id: 'codex', name: 'Owner member', on: true }],
+  });
 });

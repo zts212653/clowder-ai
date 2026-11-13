@@ -628,3 +628,10 @@ it('diffs a full unified inbox receipt by its real decisionRef and retains uncha
   expect(console.read('__diff')).toMatchObject({ added: ['added'], removed: ['removed'], changed: ['changing'] });
   expect(console.read('__held')[0]).toBe(held[0]);
 });
+
+it('uses the memory status owners from the ops memory tab without changing memory navigation', () => {
+  const console = createOwnerConsole({ sources: ownerData(), ws: { ...ui, opsView: 'memory' } });
+  const previous = console.read('CS.m.view');
+  expect(console.read('projectOps().cafeWsOps')).toMatchObject({ cur: 'memory', status: { svc: [], flags: [] } });
+  expect(console.read('CS.m.view')).toBe(previous);
+});

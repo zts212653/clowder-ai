@@ -48,6 +48,8 @@ function bindProfiles() {
               ev = ACCOUNT_STATE.evOpen[cat.catId];
             return {
               id: cat.catId,
+              name: member.name,
+              handle: member.handle,
               breed: member.breed,
               client: cat.runtime,
               availability: projectMemberAvailability(cat.catId),

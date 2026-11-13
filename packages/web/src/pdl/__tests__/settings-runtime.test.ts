@@ -101,7 +101,10 @@ async function boot(
     throw new Error('Unexpected read: ' + name);
   });
   const post = vi.fn<(name: string, params: Record<string, unknown>, body: unknown) => Promise<unknown>>(
-    async () => ({}),
+    async (name, _params, body) =>
+      name === '/api/drift/check'
+        ? { projectRoot: (body as { projectPath?: string }).projectPath || '/workspace/global', result: { issues: [] } }
+        : {},
   );
   const action = vi.fn<(name: string, args: Record<string, string>, element?: HTMLElement) => Promise<unknown>>(
     async (name) =>
@@ -624,6 +627,9 @@ describe('r8 missing settings binding families', () => {
       get.mockClear();
       post.mockClear();
       models.mockClear();
+      expect(w.eval('VM.env().paths')).toBeUndefined();
+      expect(w.eval('VM.env().dataDirectories')).toBeUndefined();
+      expect(w.eval('VM.env().summaryGroups.map(g=>g.label)')).toEqual(['Server', 'Auth']);
       expect(w.eval('VM.env().editable.map(function(v){return v.key})')).toEqual(['PUBLIC_PORT', 'SECRET_KEY']);
       expect(w.eval('VM.env().editable[1].secret')).toBe(true);
       expect(w.eval('VM.env().cats[0].count')).toBe(2);
@@ -1213,9 +1219,11 @@ describe('r136 setting owners through copied views', () => {
             : original(name, params),
     );
     post.mockImplementation(async (name) =>
-      name.endsWith('/tools')
-        ? { connectionStatus: 'connected', tools: [{ name: 'owner-tool', description: 'Actual tool' }] }
-        : { entry: { id: 'new-mcp' } },
+      name === '/api/drift/check'
+        ? { projectRoot: '/workspace/global', result: { issues: [] } }
+        : name.endsWith('/tools')
+          ? { connectionStatus: 'connected', tools: [{ name: 'owner-tool', description: 'Actual tool' }] }
+          : { entry: { id: 'new-mcp' } },
     );
     try {
       w.eval("go('mcpItem-0')");
@@ -1234,7 +1242,7 @@ describe('r136 setting owners through copied views', () => {
       await w.eval('A.mcpPreview()');
       expect(post.mock.calls.at(-1)![0]).toBe('/api/capabilities/mcp/preview');
       await w.eval('FORMS.mcp()');
-      expect(post.mock.calls.at(-1)![0]).toBe('/api/capabilities/mcp/install');
+      expect(post.mock.calls.filter(([path]) => path === '/api/capabilities/mcp/install')).toHaveLength(1);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       await w.__settled();
@@ -1628,7 +1636,7 @@ describe('r136 setting owners through copied views', () => {
         runtimeEditable: false,
       });
       expect(w.document.querySelectorAll('[data-act="pushToggle"]')).toHaveLength(1);
-      expect(w.eval('VM.system().notifyTypes')).toEqual([]);
+      expect(w.eval('VM.system().notifyTypes')).toBeUndefined();
       w.eval("A.dialog({kind:'push'})");
       await w.__settled();
       expect(w.document.querySelector('[data-view="dialog.push"]')).not.toBeNull();
@@ -2395,4 +2403,156 @@ describe('r144 settings menu and dialog registrations', () => {
       dom.window.close();
     }
   });
+});
+
+it('projects E/F capability health, mounts, drift and managed MCP access from owner receipts', async () => {
+  const { dom, w, get, post, action, errors } = await boot();
+  const original = get.getMockImplementation()!,
+    board = capabilityData();
+  Object.assign(board, { skillHealth: { allMounted: false, registrationConsistent: true } });
+  Object.assign(board.items[0], { mountHealth: { mountedCount: 0, requiredCount: 1 }, mounts: { codex: false } });
+  Object.assign(board.items[1], { pluginId: 'owner.plugin', accessManagedByPlugin: true });
+  get.mockImplementation(async (name, params) =>
+    name === '/api/capabilities'
+      ? board
+      : name === '/api/skills'
+        ? { skills: [] }
+        : name === '/api/mount-rules'
+          ? { rules: mountRules }
+          : original(name, params),
+  );
+  post.mockImplementation(async (_name, _params, body) => ({
+    projectRoot: (body as { projectPath?: string }).projectPath || '/workspace/global',
+    result: {
+      issues:
+        (body as { projectPath?: string; type: string }).projectPath && (body as { type: string }).type === 'skill'
+          ? [{ id: 'skill-one', issueType: 'mount_missing', message: 'Owner drift' }]
+          : [],
+    },
+  }));
+  try {
+    w.eval("go('skills')");
+    await w.__settled();
+    expect(w.eval('VM.skills()')).toMatchObject({
+      global: true,
+      total: 1,
+      totalProjects: 1,
+      batchEnabled: true,
+      readState: '',
+      summary: { allMounted: false, registrationConsistent: true },
+      sync: { projectCount: 1 },
+      items: [
+        {
+          category: 'Development',
+          mountCount: 0,
+          mountTotal: 1,
+          projectSync: { same: 0, total: 1 },
+          mounts: [
+            { name: 'codex', on: true, broken: true },
+            { name: 'custom', on: false },
+          ],
+        },
+      ],
+    });
+    const before = post.mock.calls.length;
+    w.eval('VM.skills();VM.skills()');
+    expect(post).toHaveBeenCalledTimes(before);
+    w.eval("go('mcpItem-0')");
+    await w.__settled();
+    expect(w.eval('VM.mcp()')).toMatchObject({
+      total: 1,
+      sync: { projectCount: 0 },
+      items: [
+        {
+          index: 0,
+          editable: false,
+          managed: true,
+          pluginId: 'owner.plugin',
+          cats: [{ key: 'mcp-one|codex', on: true }],
+        },
+      ],
+    });
+    expect(w.eval('VM.mcpItem().form.readOnly')).toBe(true);
+    Object.assign(board.items[0], {
+      mountPaths: undefined,
+      mountHealth: { enabledMountPoints: ['codex'], mountedCount: 0, requiredCount: 1 },
+    });
+    await w.eval("CHANGES.capProject({target:{value:'/workspace/fixture'}})");
+    await w.__settled();
+    expect(w.eval('VM.skills().items[0].mounts[0]')).toMatchObject({ name: 'codex', on: true, broken: true });
+    expect(action.mock.calls.some(([name]) => name === 'capabilitySave')).toBe(false);
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await w.__settled();
+    dom.window.close();
+  }
+});
+
+it('projects E/F account directories and active followers without counting unavailable members', async () => {
+  const { dom, w, get, errors } = await boot();
+  const original = get.getMockImplementation()!;
+  get.mockImplementation(async (name, params) =>
+    name === '/api/accounts'
+      ? {
+          providers: [
+            { id: 'b', clientId: 'openai', displayName: 'B', authType: 'oauth' },
+            { id: 'a', clientId: 'anthropic', displayName: 'A', authType: 'oauth' },
+          ],
+        }
+      : name.endsWith('/members')
+        ? {
+            selection: {
+              accountRef: 'b',
+              members: name.includes('codex')
+                ? [
+                    { id: 'one', name: 'One', accountRef: 'b', available: true, avatar: '/one.png' },
+                    { id: 'two', name: 'Two', accountRef: 'b', available: false },
+                  ]
+                : [],
+            },
+          }
+        : original(name, params),
+  );
+  try {
+    w.eval("go('accounts')");
+    await w.__settled();
+    expect(w.eval('VM.accounts().directory[0].items.map((a)=>a.id)')).toEqual(['b', 'a']);
+    expect(w.eval('VM.accounts().directory[0].items[0]')).toMatchObject({
+      activeUsers: 1,
+      usersCount: 2,
+      users: [
+        { id: 'one', avatar: '/one.png', available: true },
+        { id: 'two', available: false },
+      ],
+    });
+    w.eval("S.accountFilter='key'");
+    expect(w.eval('VM.accounts().directory[0].items')).toEqual([]);
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await w.__settled();
+    dom.window.close();
+  }
+});
+
+it('projects E/F appearance preferences and environment paths from their held owners', async () => {
+  const { dom, w, errors } = await boot();
+  try {
+    w.eval("go('appearance')");
+    await w.__settled();
+    expect(w.eval('VM.theme()')).toMatchObject({ language: 'zh', processTalk: { mode: 'whole', load: '' } });
+    expect(w.eval('VM.themeThemes().activeId')).toBe(w.eval('pdlThemes().active'));
+    expect(w.eval('VM.themeThemes().mode')).toBe(w.eval('S.tweaks.theme'));
+    w.eval("go('env')");
+    await w.__settled();
+    expect(w.eval('VM.env().paths.projectRoot')).toBe('/fixture/project');
+    expect(w.eval('VM.env().dataDirectories[0]')).toMatchObject({
+      name: 'auditLogs',
+      path: '/fixture/audit',
+      protected: true,
+    });
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await w.__settled();
+    dom.window.close();
+  }
 });

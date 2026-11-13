@@ -7,6 +7,7 @@ function bindCapabilities() {
     skillDoc = null,
     preview = null,
     original = null;
+  const syncReads = {};
   S.project = 'default';
   S.skillCat = 'all';
   S.skillQuery = '';
@@ -46,6 +47,11 @@ function bindCapabilities() {
       rules = values[2].rules;
       load = '';
       dataOk('capabilities');
+      await Promise.all(
+        Object.keys(syncReads)
+          .filter((key) => heldNeeded.has(key))
+          .map((key) => readSync(key)),
+      );
     } catch (error) {
       load = 'error';
       dataError('capabilities', error);
@@ -54,6 +60,7 @@ function bindCapabilities() {
   }
   api.on('sources:needed', function (diff) {
     if (diff.added.indexOf('capabilities:' + S.project) >= 0) settleHold(read());
+    diff.added.filter((key) => key.startsWith('capDrift:')).forEach((key) => settleHold(readSync(key)));
     diff.added.forEach(function (name) {
       if (name.indexOf('skillDoc:') !== 0) return;
       skillDoc = null;
@@ -78,6 +85,9 @@ function bindCapabilities() {
   function scopeVM() {
     if (projectionNeeded) projectionNeeded.add('capabilities:' + S.project);
     return {
+      global: isDef(),
+      readState: load,
+      projectScope: isDef() ? board && (board.knownProjectPaths || [])[0] : S.project,
       scopeV: S.project,
       projects: (board ? board.knownProjectPaths : []).map(function (path) {
         return { id: path, path: path, name: new Map(sidebarData().projectNames).get(path) || path };
@@ -108,6 +118,24 @@ function bindCapabilities() {
       .map(function (item) {
         const index = all.indexOf(item);
         return {
+          category: item.category,
+          issue: issues(item)[0],
+          foldKey: 'v2-' + type + '-' + item.id,
+          expanded: !!S.folds['v2-' + type + '-' + item.id],
+          ...(type === 'skill'
+            ? skillFields(item)
+            : {
+                index: index,
+                editable: item.source === 'external' && !item.pluginId,
+                managed: !!item.accessManagedByPlugin,
+                pluginId: item.pluginId,
+                transport: item.mcpServer && (item.mcpServer.transport || 'stdio'),
+                cats: Object.entries(item.cats).map(([id, on]) => ({
+                  name: WHO_DATA.member(id).name,
+                  on,
+                  key: item.id + '|' + id,
+                })),
+              }),
           skill: type === 'skill',
           mcp: type === 'mcp',
           on: item.enabled,
@@ -121,8 +149,93 @@ function bindCapabilities() {
         };
       });
   }
+  function syncKey(kind) {
+    return 'capDrift:' + kind + ':' + S.project;
+  }
+  async function checkDrift(kind, scope) {
+    const scopes = scope === 'default' ? ['default'].concat(board.knownProjectPaths || []) : [scope];
+    const results = await Promise.all(
+      scopes.map(async (path) => {
+        const params = Object.assign({ type: kind }, path === 'default' ? {} : { projectPath: path });
+        return { scope: path, params, result: await api.post('/api/drift/check', {}, params) };
+      }),
+    );
+    return results.filter(
+      (row, i) => results.findLastIndex((r) => r.result.projectRoot === row.result.projectRoot) === i,
+    );
+  }
+  function driftModel(kind, scope, results) {
+    const projects = results.filter((r) => r.result.result.issues.length),
+      nodes = { '': [] };
+    projects.forEach((row) => {
+      const children = row.result.result.issues.map((i) => ({ name: i.id, issue: i.issueType, text: i.message }));
+      nodes[''].push({
+        id: row.scope,
+        name: row.scope,
+        path: row.result.projectRoot,
+        home: row.scope === 'default',
+        children,
+      });
+      nodes[row.result.projectRoot] = children;
+    });
+    return {
+      k: kind,
+      tree: 'capDrift-' + kind,
+      scoped: scope !== 'default',
+      project: { home: scope === 'default', name: scope },
+      projectCount: projects.length,
+      nodes,
+    };
+  }
+  async function readSync(key) {
+    const [, kind, ...parts] = key.split(':'),
+      scope = parts.join(':');
+    syncReads[key] = { load: 'loading' };
+    try {
+      const results = await checkDrift(kind, scope);
+      syncReads[key] = { load: '', results, model: driftModel(kind, scope, results) };
+      dataOk(key);
+    } catch (error) {
+      syncReads[key] = { load: 'error' };
+      dataError(key, error);
+    }
+    await chatDataRender();
+  }
+  function syncVM(kind) {
+    const key = syncKey(kind);
+    if (board && projectionNeeded) projectionNeeded.add(key);
+    const read = syncReads[key];
+    return read && read.model;
+  }
+  function skillFields(item) {
+    const mounts = skillMountRows(item),
+      read = syncReads[syncKey('skill')];
+    const fields = {
+      mounts,
+      mountCount: item.mountHealth && item.mountHealth.mountedCount,
+      mountTotal: item.mountHealth && item.mountHealth.requiredCount,
+    };
+    if (read && read.results) {
+      const projects = read.results.filter((r) => r.scope !== 'default');
+      const different = projects.filter((r) => r.result.result.issues.some((i) => i.id === item.id));
+      fields.projectSync = different.length
+        ? { same: projects.length - different.length, total: projects.length }
+        : null;
+    }
+    return fields;
+  }
   VM.skills = function () {
-    return Object.assign(scopeVM(), {
+    const scope = scopeVM(),
+      sync = syncVM('skill'),
+      rows = list('skill');
+    return Object.assign(scope, {
+      totalProjects: board && (board.knownProjectPaths || []).length,
+      total: items('skill').length,
+      batchEnabled: rows.filter((r) => r.on).length > rows.length / 2,
+      summary: board && board.skillHealth,
+      mountRules: rules && VM.mountRules(),
+      sync: sync,
+      readState: load || (syncReads[syncKey('skill')] ? syncReads[syncKey('skill')].load : 'loading'),
       picked: S.route === 'skill',
       q: S.skillQuery,
       cat: S.skillCat,
@@ -149,6 +262,9 @@ function bindCapabilities() {
   };
   VM.mcp = function () {
     return Object.assign(scopeVM(), {
+      total: items('mcp').length,
+      sync: syncVM('mcp'),
+      readState: load || (syncReads[syncKey('mcp')] ? syncReads[syncKey('mcp')].load : 'loading'),
       picked: S.route === 'mcpItem' || S.route === 'mcpNew',
       isNew: S.route === 'mcpNew',
       q: S.mcpQuery,
@@ -271,19 +387,19 @@ function bindCapabilities() {
     }
     if (d.entity === 'skillMount') {
       const item = selected('skill');
-      return toggle(item, d.v == null ? !item.mountPaths.includes(d.id) : String(d.v) === 'true', d.id);
+      return toggle(item, d.v == null ? !mountTargets(item).includes(d.id) : String(d.v) === 'true', d.id);
     }
     return statusAction(d);
   };
-  A.capSkill = function () {
-    const item = selected('skill');
+  A.capSkill = function (d) {
+    const item = d && d.n ? items('skill').find((item) => item.id === d.n) : selected('skill');
     return toggle(item, !item.enabled);
   };
   A.capSkillMount = function (d) {
     const item = items('skill').find(function (item) {
       return item.id === d.n;
     });
-    return toggle(item, !item.mountPaths.includes(d.m), d.m);
+    return toggle(item, !mountTargets(item).includes(d.m), d.m);
   };
   A.capBulk = async function (d) {
     const names = list('skill').map(function (r) {
@@ -314,7 +430,7 @@ function bindCapabilities() {
       on: !!rule.enabled,
       pointOff: !!rule.disabled,
       rule: entity === 'mountPoint',
-      skill: entity === 'skillMount' ? selected('skill').id : null,
+      skill: null,
     };
   }
   VM.mountRules = function () {
@@ -335,33 +451,34 @@ function bindCapabilities() {
         : [],
     };
   };
+  function mountTargets(item) {
+    return item.mountPaths || (item.mountHealth && item.mountHealth.enabledMountPoints);
+  }
+  function skillMountRows(item) {
+    if (!rules) return undefined;
+    const targets = mountTargets(item);
+    if (!targets) return undefined;
+    return Object.entries(rules.mountPoints)
+      .map(([name, rule]) => {
+        const on = rule.enabled && targets.includes(name);
+        return {
+          ...mountRow(name, { path: rule.path + '/' + item.id, enabled: on, disabled: !rule.enabled }, 'skillMount'),
+          skill: item.id,
+          broken: on && item.mounts && item.mounts[name] === false,
+        };
+      })
+      .concat(
+        rules.customPaths.map((r) => ({
+          ...mountRow(r.alias, { path: r.path + '/' + item.id, enabled: targets.includes(r.alias) }, 'skillMount'),
+          skill: item.id,
+          broken: targets.includes(r.alias) && item.mounts && item.mounts[r.alias] === false,
+        })),
+      );
+  }
   VM.skillMounts = function () {
     if (projectionNeeded) projectionNeeded.add('capabilities:' + S.project);
     const item = selected('skill');
-    return {
-      name: item.id,
-      mounts: Object.entries(rules.mountPoints)
-        .map(function (r) {
-          return mountRow(
-            r[0],
-            {
-              path: r[1].path + '/' + item.id,
-              enabled: r[1].enabled && item.mountPaths.includes(r[0]),
-              disabled: !r[1].enabled,
-            },
-            'skillMount',
-          );
-        })
-        .concat(
-          rules.customPaths.map(function (r) {
-            return mountRow(
-              r.alias,
-              { path: r.path + '/' + item.id, enabled: item.mountPaths.includes(r.alias) },
-              'skillMount',
-            );
-          }),
-        ),
-    };
+    return { name: item.id, mounts: skillMountRows(item) };
   };
 
   ENT.mountCustom = {
@@ -404,48 +521,11 @@ function bindCapabilities() {
     render(true);
   };
   async function drift(d) {
-    const scopes = d.all ? ['default'].concat(board.knownProjectPaths) : [d.s || S.project];
-    const results = await Promise.all(
-      scopes.map(async function (scope) {
-        const params = Object.assign({ type: d.k }, scope === 'default' ? {} : { projectPath: scope });
-        return { scope: scope, params: params, result: await api.post('/api/drift/check', {}, params) };
-      }),
-    );
-    const projects = results.filter(function (row, i) {
-      return (
-        results.findIndex(function (r) {
-          return r.result.projectRoot === row.result.projectRoot;
-        }) === i
-      );
-    });
-    const nodes = {
-      '': projects
-        .filter(function (row) {
-          return row.result.result.issues.length;
-        })
-        .map(function (row) {
-          const children = row.result.result.issues.map(function (i) {
-            return { name: i.id, issue: i.issueType, text: i.message };
-          });
-          return {
-            id: row.scope,
-            name: row.scope,
-            path: row.result.projectRoot,
-            home: row.scope === 'default',
-            children: children,
-          };
-        }),
-    };
+    const scope = d.all ? 'default' : d.s || S.project,
+      projects = await checkDrift(d.k, scope);
     dialog({
       kind: 'drift',
-      args: {
-        scoped: !d.all,
-        k: d.k,
-        project: { home: isDef(), name: S.project },
-        tree: 'capDrift-' + d.k,
-        projectCount: nodes[''].length,
-        nodes: nodes,
-      },
+      args: driftModel(d.k, scope, projects),
       on: async function () {
         for (const row of projects)
           await api.post(
@@ -492,9 +572,11 @@ function bindCapabilities() {
   };
   ENT.mcpServer = {
     get: function (id) {
-      return items('mcp').find(function (i) {
-        return i.id === id;
-      });
+      return (
+        items('mcp').find(function (i) {
+          return i.id === id;
+        }) || items('mcp')[id]
+      );
     },
     confirm: function (m) {
       return { kind: 'mcpUninstall' };
@@ -573,6 +655,9 @@ function bindCapabilities() {
         });
       };
     return {
+      readOnly:
+        ro ||
+        (!isNew && items('mcp').some((item) => item.id === m.name && (item.pluginId || item.source !== 'external'))),
       err: S.mcpErr,
       d: d,
       ro: ro,
@@ -642,11 +727,11 @@ function bindCapabilities() {
       on: item.enabled,
       scope: isDef() ? 'default' : 'project',
       ov: ov,
-      cfgOv: !!item.configurationOverride,
+      cfgOv: !!item.hasOverride,
       src: { [src]: true, external: src === 'external' },
       srcTo: src === 'plugin' ? 'extItem-' + item.pluginId : '',
       resetScope: ov ? 'mcp.' + item.id : '',
-      cfgResetScope: item.configurationOverride ? 'cfg.' + item.id : '',
+      cfgResetScope: item.hasOverride ? 'cfg.' + item.id : '',
       command: m.t === 'http' ? m.url : m.cmd,
       json: JSON.stringify({ mcpServers: { [item.id]: item.mcpServer } }, null, 2),
       tags: [{ k: src, v: item.pluginId || '' }],

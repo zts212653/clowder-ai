@@ -80,6 +80,8 @@ function bindAppearance() {
   });
   VM.theme = function () {
     return {
+      language: i18nLang(),
+      processTalk: chatRead('system').processTalk,
       mode: S.tweaks.theme,
       palette: S.tweaks.skin,
       style: S.style,
@@ -119,6 +121,8 @@ function bindAppearance() {
       };
     };
     return {
+      activeId: current.active,
+      mode: S.tweaks.theme,
       items: PDL_SYS_THEMES.map(function (theme) {
         return row(theme, 'system');
       })

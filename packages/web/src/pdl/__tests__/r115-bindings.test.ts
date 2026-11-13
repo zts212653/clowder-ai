@@ -225,6 +225,7 @@ it('treats a generic 503 telemetry error as unavailable instead of a HealthData 
 it('applies only the exact governance preview checksum and requires reconfirmation after a conflict', async () => {
   const writes: Record<string, unknown>[] = [];
   vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/brake/settings') return response({ enabled: true, mode: 'gentle', thresholdMinutes: 90 });
     if (path === '/api/governance/health')
       return response({
         projects: [
@@ -262,6 +263,11 @@ it('applies only the exact governance preview checksum and requires reconfirmati
   await waitFor(() =>
     expect(projectOwner('ops', result.current, ui, fixtureData(), undefined).cafeWsOps.load).toBe(''),
   );
+  expect(projectOwner('ops', result.current, ui, fixtureData(), undefined).cafeWsOps.settingsBrake).toMatchObject({
+    on: true,
+    minutes: 90,
+    mode: 'gentle',
+  });
   await act(() => result.current.action('wsGovPrev', { v: 'add' }));
   await act(async () => {
     await expect(result.current.action('wsGovApply', {})).rejects.toThrow('重新确认');

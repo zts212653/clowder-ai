@@ -3,6 +3,7 @@
 function bindPluginSpaces() {
   let fragments = {},
     loaded = false,
+    load = 'loading',
     started = false;
   // plugin id → the fragment it is registered with: install, update and uninstall re-register only what changed
   const registered = {};
@@ -52,8 +53,11 @@ function bindPluginSpaces() {
     }
     await chatDataRender();
   }
+  function ownerPluginId(id) {
+    return id === 'companion' ? 'official.companion' : id;
+  }
   function choose(matches) {
-    const selected = S.route === 'extItem' ? S.param : S.extSel;
+    const selected = ownerPluginId(S.route === 'extItem' ? S.param : S.extSel);
     return (
       matches.find(function (plugin) {
         return plugin.pluginId === selected;
@@ -155,12 +159,14 @@ function bindPluginSpaces() {
       receivePlugins(placementData().plugins.plugins);
       fragments = placementData().pluginFragments;
       loaded = true;
+      load = '';
       if (started && register()) render();
       dataOk('plugins');
     } catch (error) {
       fragments = {};
       S.plugins = {};
       loaded = false;
+      load = 'error';
       dataError('plugins', error);
     }
   }
@@ -260,15 +266,45 @@ function bindPluginSpaces() {
     };
   };
   VM.ext = function () {
-    if (navArg('pluginId')) S.extSel = navArg('pluginId');
-    if (!loaded) return null;
+    if (navArg('pluginId')) S.extSel = ownerPluginId(navArg('pluginId'));
+    if (!loaded) return { load: load, q: S.extQuery || '', scope: S.extScope || 'all', browserGroups: [] };
     const query = S.extQuery || '';
     const matches = pluginRows().filter(function (plugin) {
       return (plugin.displayName + ' ' + plugin.pluginId).toLowerCase().indexOf(query.toLowerCase()) >= 0;
     });
     const chosen = choose(matches),
       selected = chosen && row(chosen);
+    const scope = S.extScope || 'all',
+      catalog = pluginRows().map(row),
+      rows = matches.map(row);
+    const groups = [
+      { kind: 'attention', items: rows.filter((p) => p.attentionReason || p.hasUpdate) },
+      { kind: 'installed', items: rows.filter((p) => p.installed && !p.attentionReason && !p.hasUpdate) },
+      { kind: 'available', items: rows.filter((p) => p.artifact === 'absent') },
+    ];
+    const companionPlugin =
+      ownerPluginId(navArg('pluginId')) === 'official.companion'
+        ? pluginRows().find((p) => p.pluginId === 'official.companion')
+        : null;
+    const companionConfig = companionPlugin && config(companionPlugin);
+    const companionForm = companionConfig && companionConfig.form;
+    if (companionForm)
+      companionForm.partners = chatRead('memberSettings').cats.map((m) => ({
+        id: m.id,
+        name: m.nickname || m.displayName,
+        on: !m.roster || m.roster.available,
+      }));
     return {
+      companion: companionForm,
+      load: load,
+      scope: scope,
+      counts: {
+        all: catalog.length,
+        attention: catalog.filter((p) => p.attentionReason || p.hasUpdate).length,
+        installed: catalog.filter((p) => p.installed).length,
+        available: catalog.filter((p) => p.artifact === 'absent').length,
+      },
+      browserGroups: groups.map((g) => ({ kind: g.kind, items: scope === 'all' || scope === g.kind ? g.items : [] })),
       q: query,
       picked: S.route === 'extItem',
       groups: [
@@ -290,7 +326,7 @@ function bindPluginSpaces() {
         },
       ],
       sel: chosen
-        ? {
+        ? Object.assign({}, selected, {
             key: chosen.pluginId,
             name: chosen.displayName,
             icon: chosen.icon,
@@ -335,7 +371,7 @@ function bindPluginSpaces() {
               chosen.artifact === 'installed' && placementData().pluginDetails[chosen.pluginId]?.permissions
                 ? pluginPermissionsVM(chosen.pluginId, placementData().pluginDetails[chosen.pluginId].permissions.label)
                 : null,
-          }
+          })
         : null,
     };
   };
@@ -443,6 +479,9 @@ function bindPluginSpaces() {
         ? owner.pluginDocumentation[plugin.pluginId].readmeMarkdown
         : '',
       docsUrl: detail.docsUrl,
+      capabilities: Array.from(groups.values()).filter((g) =>
+        ['skills', 'mcps', 'scheduler', 'limb', 'entries'].includes(g.kind),
+      ),
       provides: groups.size ? Array.from(groups.values()) : null,
     };
   }
@@ -459,7 +498,40 @@ function bindPluginSpaces() {
               : plugin.live === 'crashed' || plugin.live === 'degraded'
                 ? plugin.live
                 : '';
+    const attention =
+      plugin.artifact === 'absent'
+        ? ''
+        : plugin.artifact !== 'installed'
+          ? plugin.artifact
+          : plugin.actions.blockingReasons?.includes('package-incompatible')
+            ? 'incompatible'
+            : plugin.activationFailed
+              ? 'failed'
+              : plugin.config !== 'ready'
+                ? plugin.config
+                : plugin.auth === 'expired'
+                  ? 'expired'
+                  : plugin.auth === 'error'
+                    ? 'authError'
+                    : plugin.live === 'degraded'
+                      ? 'degraded'
+                      : plugin.live === 'crashed'
+                        ? 'failed'
+                        : plugin.intent !== 'enabled'
+                          ? ''
+                          : ['disconnected', 'pending'].includes(plugin.auth)
+                            ? plugin.auth
+                            : plugin.live === 'stopped'
+                              ? 'stopped'
+                              : '';
     return {
+      canRestart: !!plugin.actions.repair,
+      canUninstall: !!plugin.actions.uninstall,
+      attentionReason: attention,
+      artifact: plugin.artifact,
+      availableVersion: plugin.availableVersion,
+      hasUpdate: installed && !!plugin.availableVersion && plugin.availableVersion !== plugin.installedVersion,
+      trust: plugin.source.trust,
       need: need,
       update: need === 'update',
       needStatus: !!need && need !== 'update',
@@ -474,7 +546,7 @@ function bindPluginSpaces() {
       canInstall: !installed && plugin.actions.install,
       installing: opOf(plugin) === 'install',
       updating: opOf(plugin) === 'update',
-      selected: (S.route === 'extItem' ? S.param : S.extSel) === plugin.pluginId,
+      selected: ownerPluginId(S.route === 'extItem' ? S.param : S.extSel) === plugin.pluginId,
       to: 'extItem-' + plugin.pluginId,
     };
   }
@@ -630,8 +702,12 @@ function bindPluginSpaces() {
     chatDataRender();
     const params = { q: market.q };
     if (market.kind !== 'all') params.artifactKinds = market.kind;
-    if (market.eco !== 'all') params.ecosystems = market.eco;
-    if (market.trust !== 'all') params.trustLevels = market.trust;
+    const ecos = Object.keys(S.mkEcos || {}),
+      trusts = Object.keys(S.mkTrusts || {});
+    if (ecos.length) params.ecosystems = ecos.join(',');
+    else if (market.eco !== 'all') params.ecosystems = market.eco;
+    if (trusts.length) params.trustLevels = trusts.join(',');
+    else if (market.trust !== 'all') params.trustLevels = market.trust;
     try {
       const result = await api.get('/api/marketplace/search', params);
       market.results = result.results;
@@ -697,6 +773,26 @@ function bindPluginSpaces() {
     const p = market.plan;
     return copyText(p.mode === 'delegated_cli' ? p.delegatedCommand : JSON.stringify(p.mcpEntry, null, 2));
   };
+  ['s.mkEcos', 's.mkTrusts'].forEach((path) => {
+    SET_AFTER[path] = marketRead;
+  });
+  function marketRow(r) {
+    return {
+      market: true,
+      key: marketKey(r),
+      name: r.displayName,
+      kind: r.artifactKind,
+      kindIs: { [r.artifactKind]: true },
+      trust: r.trustLevel,
+      trustIs: { [r.trustLevel]: true },
+      desc: r.componentSummary,
+      eco: r.ecosystem,
+      pub: r.publisherIdentity,
+      loc: r.sourceLocator,
+      selected: market.selected === marketKey(r),
+      to: 'marketItem-' + marketKey(r),
+    };
+  }
   VM.market = function () {
     if (projectionNeeded) {
       projectionNeeded.add('market');
@@ -707,6 +803,11 @@ function bindPluginSpaces() {
       }),
       p = market.plan;
     return {
+      readState: market.load,
+      ecoFilters: Object.keys(S.mkEcos || {}),
+      trustFilters: Object.keys(S.mkTrusts || {}),
+      items: market.results.map(marketRow),
+      error: market.error,
       q: market.q,
       kind: market.kind,
       eco: market.eco,
@@ -736,19 +837,7 @@ function bindPluginSpaces() {
             .filter(function (r) {
               return !!(r.lifecycle && r.lifecycle.installed) === installed;
             })
-            .map(function (r) {
-              return {
-                key: marketKey(r),
-                name: r.displayName,
-                kind: r.artifactKind,
-                kindIs: { [r.artifactKind]: true },
-                trustIs: { [r.trustLevel]: true },
-                desc: r.componentSummary,
-                eco: r.ecosystem,
-                pub: r.publisherIdentity,
-                to: 'marketItem-' + marketKey(r),
-              };
-            }),
+            .map(marketRow),
         };
       }),
       sel: result

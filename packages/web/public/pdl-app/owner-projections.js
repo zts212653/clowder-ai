@@ -1916,6 +1916,10 @@
   }
   globalThis.projectEvolution = projectEvolution;
   function projectOps(raw = chatDataSnapshot.project.ops) {
+    if (S.ws.opsView === 'memory') {
+      const memory = projectMemoryExplore(chatDataSnapshot.project.memory.explore, { ...CS.m, view: 'status' });
+      return { cafeWsOps: { cur: 'memory', status: memory.status, load: memory.load } };
+    }
     const read = raw.read,
       data = { ...chatDataSnapshot.chat, threads: sidebarSnapshot.threads },
       ui = S.ws,
@@ -1968,7 +1972,7 @@
           })),
         },
       };
-    if (source.brake)
+    if (source.brake && opsView === 'brake')
       return {
         opsBrakeSettings: source.brake,
         cafeWsOps: {
@@ -2001,8 +2005,19 @@
         g = ui.gov || {},
         prev = raw.governance?.path === ui.govPath ? raw.governance : null;
       return {
+        opsBrakeSettings: source.brake,
         cafeWsOps: {
           ...common,
+          ...(source.brake
+            ? {
+                settingsBrake: {
+                  on: source.brake.enabled,
+                  minutes: source.brake.thresholdMinutes,
+                  mode: source.brake.mode,
+                  hard: source.brake.mode === 'hardcore',
+                },
+              }
+            : {}),
           gov: selected
             ? {
                 d: {
@@ -2011,6 +2026,24 @@
                   status: selected.status,
                   uninstalled: selected.status === 'never-synced',
                   install: g,
+                  skillIds: g.sk,
+                  rows: [
+                    {
+                      key: 'guide',
+                      checked: !!g.guide,
+                      providers: ['claude', 'gemini'].map((id) => ({ id, key: id, checked: !!g[id] })),
+                    },
+                    {
+                      key: 'sk',
+                      checked: !!g.skills,
+                      providers: ['claude', 'codex', 'gemini', 'kimi'].map((id) => ({
+                        id,
+                        key: 'pv-' + id,
+                        checked: !!g['pv-' + id],
+                      })),
+                    },
+                    { key: 'docs', checked: !!g.docs },
+                  ],
                   noneChecked: !g.guide && !g.skills && !g.docs,
                   prev: prev
                     ? {
@@ -2045,7 +2078,7 @@
               id: session.runtimeSessionId,
               member: member(session.catId),
               model: session.model,
-              bind: session.binding,
+              bind: session.binding.mode === 'thread' ? session.binding.threadId : session.binding.anchorThreadId,
               view: rtTab,
               ...runtimeBody(page),
               page: rtPage,
@@ -2072,11 +2105,16 @@
                 foldPath: 'folds.rt-id-' + s.sessionId,
                 open: !!S.folds['rt-id-' + s.sessionId],
                 status: s.lifecycle.state,
-                bind: s.binding,
+                origin: s.surface,
+                reason: s.lifecycle.sealReason,
+                convId: s.runtimeConversationId,
+                seen: s.lastObservedAt,
+                policy: s.sessionPolicy?.config.strategy,
+                bind: s.binding.mode === 'thread' ? s.binding.threadId : s.binding.anchorThreadId,
                 cat: s.catId,
                 at: s.lastObservedAt,
                 conflict: s.lifecycle.state === 'conflict',
-                hasReason: !!s.lifecycle.reason,
+                hasReason: !!s.lifecycle.sealReason,
               })),
           },
         },
@@ -2105,6 +2143,7 @@
             },
           },
           quota: {
+            readState: common.load,
             writing: raw.writing,
             pools: source.profiles.map((profile) => ({
               id: profile.id,
@@ -2133,6 +2172,7 @@
                 invocations: d.total.invocations,
                 items: Object.entries(d.cats).map(([who, c]) => ({
                   who,
+                  currentModel: data.cats.find((cat) => cat.id === who)?.defaultModel,
                   input: c.inputTokens,
                   output: c.outputTokens,
                   count: c.participations,
@@ -2177,7 +2217,15 @@
       return {
         cafeWsOps: {
           ...common,
+          facts: { refreshedAt: lb.fetchedAt },
           lb: {
+            workLeaders: {
+              commits: lb.work.commits[0] || null,
+              reviews: lb.work.reviews[0] || null,
+              bugFixes: lb.work.bugFixes[0] || null,
+            },
+            ...(lb.silly ? { silly: lb.silly.entries } : {}),
+            ...(lb.achievements ? { achievements: lb.achievements } : {}),
             range: lbRange,
             hasRange: !!lbRange,
             favorite: rows(lb.mentions.favoriteCat, 'mentions'),
@@ -2808,7 +2856,7 @@
     };
   }
   globalThis.projectMemory = projectMemory;
-  function projectMemoryExplore(raw = chatDataSnapshot.project.memory.explore) {
+  function projectMemoryExplore(raw = chatDataSnapshot.project.memory.explore, ui = CS.m) {
     const {
         catalog,
         feed,
@@ -2839,7 +2887,6 @@
         rebuild,
         rebuildError,
       } = raw,
-      ui = CS.m,
       collections = catalog.data?.collections ?? [],
       pending = feed.data?.pending ?? [],
       events = recall.events;

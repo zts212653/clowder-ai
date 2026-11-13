@@ -60,14 +60,24 @@ function bindAccounts() {
     return pdlView('page.accounts');
   };
 
+  function accountUsers(p) {
+    const tool = p.clientId === 'anthropic' ? 'claude' : 'codex';
+    return (
+      p.clientId === 'openai' || p.clientId === 'anthropic'
+        ? selections[tool].members
+        : chatRead('memberSettings').cats.map((m) => ({
+            id: m.id,
+            name: m.nickname || m.displayName,
+            accountRef: m.accountRef,
+            avatar: m.avatar,
+            available: !m.roster || m.roster.available,
+          }))
+    ).filter((m) => m.accountRef === p.id);
+  }
   function row(p) {
     const tool = p.clientId === 'anthropic' ? 'claude' : 'codex',
       selection = selections[tool],
-      users = (
-        p.clientId === 'openai' || p.clientId === 'anthropic' ? selection.members : chatRead('memberSettings').cats
-      ).filter(function (m) {
-        return m.accountRef === p.id;
-      });
+      users = accountUsers(p);
     const attempt = p.codex && p.codex.attempt,
       state =
         p.authType === 'api_key'
@@ -93,10 +103,11 @@ function bindAccounts() {
       managed: !!p.managed,
       renaming: S.renaming && S.renaming.entity === 'account' && S.renaming.id === p.id,
       state: state,
+      activeUsers: users.filter((m) => m.available).length,
       usersCount: users.length,
       hasUsers: !!users.length,
       users: users.map(function (m) {
-        return { id: m.id, name: m.name, handle: m.handle };
+        return { id: m.id, name: m.name, avatar: m.avatar, available: m.available };
       }),
       email: p.codex && p.codex.identity && p.codex.identity.email,
       url: p.baseUrl,
@@ -118,6 +129,18 @@ function bindAccounts() {
       filtered = providers.filter(function (p) {
         return (p.displayName + vendor(p)).toLowerCase().indexOf(q) >= 0;
       });
+    const providerCounts = {};
+    providers.forEach((p) => {
+      providerCounts[p.clientId] =
+        (providerCounts[p.clientId] || 0) + accountUsers(p).filter((m) => m.available).length;
+    });
+    filtered.sort(
+      (a, b) =>
+        providerCounts[b.clientId] - providerCounts[a.clientId] ||
+        a.clientId.localeCompare(b.clientId) ||
+        Number(row(b).using) - Number(row(a).using) ||
+        a.displayName.localeCompare(b.displayName),
+    );
     const group = function (key) {
       const list = filtered.filter(function (p) {
         return (p.authType === 'api_key') === (key === 'key');
@@ -140,6 +163,10 @@ function bindAccounts() {
       });
     });
     return {
+      directory: ['oauth', 'key'].map((kind) => ({
+        kind,
+        items: S.accountFilter === 'all' || S.accountFilter === kind ? group(kind).items : [],
+      })),
       load: load,
       q: st.accQ,
       filter: S.accountFilter,
