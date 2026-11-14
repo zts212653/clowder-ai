@@ -2,6 +2,23 @@
   "version": 2,
   "entries": [
     {
+      "id": "issue1973-redis-correlation",
+      "match": "^test/send-attempt-correlation-redis\\.test\\.js$",
+      "category": "source_only",
+      "reason": "Requires a real, explicitly isolated Redis to verify atomic admission and reopening an actual legacy ledger row; run with test:redis. Public shards deliberately deny Redis access. Portable receipt and admission tests remain in public CI.",
+      "owner": "@whutzefengxie-ops",
+      "introducedBy": "b6c06d3fb1cdb670dbc7fa7afcf65897e6e4c6cd",
+      "expiresOn": "2027-01-31",
+      "audit": {
+        "reviewedOn": "2026-11-14",
+        "sourceHead": "3aafd28639187f539bdb82094699d418632bfa40",
+        "publicHead": "3aafd28639187f539bdb82094699d418632bfa40",
+        "status": "resource_contract",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "6e12f5559681b1b5875910cfa911a6fbc1b413f08ab7ca76256271fe007e86d7"
+      }
+    },
+    {
       "id": "redis",
       "match": "^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$",
       "category": "source_only",
@@ -320,17 +337,27 @@
       "match": "^test/f306-native-home-provider-hooks\\.test\\.js$",
       "category": "source_only",
       "reason": "Only the extracted real-provider integration requires the unexported home Claude runtime-sanctuary hook and a clean-loader process. Portable output-role and observation tests, including the shared CLI under public isolation, remain selected.",
-      "owner": "@codex-astra",
+      "owner": "@codex61-sol",
       "introducedBy": "Task606 public CI 38355110794",
-      "expiresOn": "2026-11-13",
+      "expiresOn": "2026-12-14",
       "audit": {
-        "reviewedOn": "2026-10-13",
-        "sourceHead": "fcad23f52b25d20777d377c9ceedcc06df35ceab",
-        "publicHead": "18a76aac38b686bb19d3211aed4268f565e9b416",
+        "reviewedOn": "2026-11-14",
+        "sourceHead": "e998aae57590116dde4e81b10e788a502fa97372",
+        "publicHead": "15a11a536547af8ba103263e1bff5597c245ed28",
         "status": "source_dependency_failure",
         "matchedFileCount": 1,
         "matchedFilesHash": "2a15edf12af91760ca24a3c5c95c08b9d099bc69bcceb49ea2d3a497a01bfc90"
-      }
+      },
+      "auditHistory": [
+        {
+          "reviewedOn": "2026-10-13",
+          "sourceHead": "fcad23f52b25d20777d377c9ceedcc06df35ceab",
+          "publicHead": "18a76aac38b686bb19d3211aed4268f565e9b416",
+          "status": "source_dependency_failure",
+          "matchedFileCount": 1,
+          "matchedFilesHash": "2a15edf12af91760ca24a3c5c95c08b9d099bc69bcceb49ea2d3a497a01bfc90"
+        }
+      ]
     },
     {
       "id": "alpha-managed-home-integration",

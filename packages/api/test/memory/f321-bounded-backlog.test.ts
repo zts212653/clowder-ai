@@ -20,7 +20,10 @@ for (const scenario of ['read_failure', 'write_failure', 'filtered_prefix', 'exa
       store.append({
         threadId: 'source',
         userId: scenario === 'filtered_prefix' && i < 200 ? 'scheduler' : 'owner',
-        catId: null,
+        from:
+          scenario === 'filtered_prefix' && i < 200
+            ? { kind: 'system', service: 'scheduler' }
+            : { kind: 'user', userId: 'owner' },
         content: `idea ${i}`,
         timestamp: i,
       }),

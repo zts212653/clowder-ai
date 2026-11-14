@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
@@ -22,10 +23,11 @@ test(
   'a real delivered film enters the original Works, seeks a sourced paragraph and queues an original-composer mark',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_C_REAL_FILM_MANIFEST) return t.skip('dedicated F326 film manifest required');
     assert.equal(process.env.F326_C_BROWSER_ALLOW_MUTATIONS, 'isolated-feature');
     const manifest = JSON.parse(await readFile(process.env.F326_C_REAL_FILM_MANIFEST, 'utf8'));
     assert.equal(await digestFile(manifest.film), manifest.digest);
-    const evidence = await mkdtemp('/tmp/f326-c-real-works-');
+    const evidence = await mkdtemp(path.join(tmpdir(), 'f326-c-real-works-'));
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();

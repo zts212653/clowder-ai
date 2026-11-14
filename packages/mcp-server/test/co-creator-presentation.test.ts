@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createCollabServer } from '../src/collab.js';
+import { createMemoryServer } from '../src/memory.js';
 
 function withoutDescriptions(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutDescriptions);
@@ -88,10 +89,15 @@ for (const principal of ['invocation', 'agent-key'] as const) {
       await Promise.all([server.connect(st), client.connect(ct)]);
       await assertHoldGuard('@m.(a+b)'); // A call must work before the host first lists tools.
       const first = (await client.listTools()).tools;
-      const taste = first.find((tool) => tool.name === 'cat_cafe_propose_taste');
-      assert.ok(taste);
-      assert.match(taste.description ?? '', /what Mina prefers/);
-      assert.match(JSON.stringify(taste.inputSchema), /Mina/);
+      const memoryClient = new Client({ name: 'identity-consumer-memory', version: '1' });
+      const [memoryClientTransport, memoryServerTransport] = InMemoryTransport.createLinkedPair();
+      const memoryServer = createMemoryServer();
+      await Promise.all([memoryServer.connect(memoryServerTransport), memoryClient.connect(memoryClientTransport)]);
+      const rememberSchema = async () =>
+        JSON.stringify(
+          (await memoryClient.listTools()).tools.find((tool) => tool.name === 'cat_cafe_remember')?.inputSchema ?? {},
+        );
+      assert.match(await rememberSchema(), /what Mina prefers/);
       const hold = first.find((tool) => tool.name === 'cat_cafe_hold_ball');
       assert.ok(hold);
       assert.ok(hold.description?.includes('@m.(a+b)'));
@@ -119,10 +125,9 @@ for (const principal of ['invocation', 'agent-key'] as const) {
         withoutDescriptions(first),
         'configuration changes no validation or policy fields',
       );
-      assert.match(
-        second.find((tool) => tool.name === 'cat_cafe_propose_taste')?.description ?? '',
-        /what Nora prefers/,
-      );
+      assert.match(await rememberSchema(), /what Nora prefers/);
+      await memoryClient.close();
+      await memoryServer.close();
       assert.doesNotMatch(JSON.stringify(second), /Mina|Captain|@m\.\(a\+b\)/);
       assert.ok(reads >= 3, 'each tools/list reads the API-owned current configuration');
       coCreator.mentionPatterns = [`@${'x'.repeat(5_000)}`];

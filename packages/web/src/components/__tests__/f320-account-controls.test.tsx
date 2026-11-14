@@ -6,6 +6,7 @@ import { AccountDirectoryRow } from '../accounts/AccountDirectoryRow';
 import { CodexQuotaControl } from '../codex-accounts/CodexQuotaControl';
 import { MemberCodexAccount } from '../codex-accounts/MemberCodexAccount';
 import type { ProfileItem } from '../hub-accounts.types';
+import { writeShellLanguage } from '../shell/shell-language';
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock('../codex-accounts/account-request', () => ({ accountRequest: request }));
@@ -50,6 +51,7 @@ const cat: CatData = {
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  writeShellLanguage('zh');
   request.mockReset();
   request.mockResolvedValue({});
   host = document.createElement('div');
@@ -59,6 +61,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
 async function click(label: string) {
@@ -166,9 +169,14 @@ it('row retry uses immediate mutation state while GET never settles', async () =
   request.mockResolvedValue({ profiles: [waiting] });
   await act(async () => root.render(<Row profile={profile} />));
   await click('重试');
-  expect(host.textContent).toContain('终端已打开');
+  expect(host.textContent).toContain('等待浏览器授权');
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === '取消' && !b.disabled)).toBe(true);
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(false);
+  await click('打开登录终端');
+  expect(request).toHaveBeenLastCalledWith('/api/accounts/backup/codex/login/start', {
+    attemptId: 'a',
+    terminal: true,
+  });
 });
 it('relogin failure keeps ready identity and offers retry without destroying the used login', async () => {
   const profile = managed(true);
@@ -191,6 +199,44 @@ it('relogin failure keeps ready identity and offers retry without destroying the
   expect(host.textContent).toContain('已登录');
   expect(host.textContent).toContain('上次重新登录没成功');
   expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true);
+});
+it.each([
+  ['zh', 'waiting', '打开登录终端', '取消'],
+  ['en', 'waiting', 'Open login terminal', 'Cancel'],
+  ['zh', 'failed', '打开登录终端', '重试'],
+  ['en', 'failed', 'Open login terminal', 'Retry'],
+] as const)('%s %s keeps terminal recovery beside status and one primary action', async (language, state, recovery, primary) => {
+  writeShellLanguage(language);
+  const profile = managed(true);
+  profile.codex = {
+    ...profile.codex!,
+    attempt: {
+      id: 'recovery-attempt',
+      revision: 1,
+      ownerBootId: 'b',
+      ownerPid: 1,
+      ownerStartedAt: 'fixture',
+      credentialHome: '/fixture/attempt',
+      createdAt: 1,
+      updatedAt: 1,
+      state,
+      ...(state === 'failed' ? { error: 'fixture login failed' } : {}),
+    },
+  };
+  request.mockResolvedValue({ profiles: [profile] });
+  await act(async () => root.render(<Row profile={profile} />));
+  const statusCell = host.querySelectorAll('td')[2];
+  const terminal = [...statusCell.querySelectorAll('button')].find((button) => button.textContent === recovery);
+  expect(terminal, 'terminal recovery is directly reachable beside the current status').toBeTruthy();
+  expect(terminal?.disabled).toBe(false);
+  expect(
+    [...host.querySelectorAll('.account-row-actions > .account-button')].map((button) => button.textContent),
+  ).toEqual([primary]);
+  await click(recovery);
+  expect(request).toHaveBeenLastCalledWith('/api/accounts/backup/codex/login/start', {
+    attemptId: 'recovery-attempt',
+    terminal: true,
+  });
 });
 it('bound active deletion stays disabled and never cancels the login', async () => {
   const profile = managed();

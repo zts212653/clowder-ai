@@ -71,7 +71,7 @@ describe('SummaryCompactionTaskSpec', () => {
     assert.equal(ledger.query(task.id, 1)[0].outcome, 'SKIP_SELF_ECHO');
   });
 
-  it('finishes candidate derivation after the canonical summary commit boundary', async () => {
+  it('finishes the backlog refresh after the canonical summary commit boundary', async () => {
     const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
     db.prepare(
       `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
@@ -82,13 +82,15 @@ describe('SummaryCompactionTaskSpec', () => {
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run('thread-test-thread', 'thread', 'active', 'Test', 'old', new Date().toISOString());
     const controller = new AbortController();
-    const candidates = [];
+    const reads = [];
     const spec = createSummaryCompactionTaskSpec({
       db,
       enabled: () => true,
       getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
-      getMessagesAfterWatermark: async (_threadId, watermark) =>
-        watermark ? [] : [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      getMessagesAfterWatermark: async (_threadId, watermark) => {
+        reads.push({ watermark, aborted: controller.signal.aborted });
+        return watermark ? [] : [{ id: 'm1', content: 'hello', timestamp: Date.now() }];
+      },
       generateAbstractive: async () => ({
         segments: [
           {
@@ -100,14 +102,12 @@ describe('SummaryCompactionTaskSpec', () => {
             fromMessageId: 'm1',
             toMessageId: 'm1',
             messageCount: 1,
-            candidates: [{ kind: 'lesson', title: 'Keep obligations atomic', claim: 'finish committed effects' }],
           },
         ],
       }),
       reEmbed: async () => {
         controller.abort(new Error('scheduler timeout'));
       },
-      submitCandidate: async (candidate) => candidates.push(candidate),
       logger: { info() {}, error() {} },
     });
     const gate = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
@@ -119,8 +119,9 @@ describe('SummaryCompactionTaskSpec', () => {
       })
       .catch(() => {});
 
-    assert.equal(candidates.length, 1);
-    assert.equal(candidates[0].title, 'Keep obligations atomic');
+    // The scheduler signal aborted during re-embedding; the committed watermark still
+    // gets its backlog read because the next tick cannot tell that it was skipped.
+    assert.ok(reads.some((read) => read.watermark === 'm1' && read.aborted));
   });
 
   it('gate returns run:true with per-thread workItems when eligible threads exist', async () => {

@@ -4,7 +4,7 @@ related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-10-22
+updated: 2026-11-13
 tips_exempt: "Owner read APIs are a backend contract; user discovery belongs to the separate F321 memory-page integration."
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model

@@ -122,3 +122,41 @@ test('single-item redaction and deferred owner cleanup have complete page replac
     assert.equal(name in tools, false, `${name} should not remain as a callable barrel export`);
   assert.ok(CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === 'cat_cafe_dispose_deferred_person_memory'));
 });
+
+// 第三刀收尾：You 2026-11-13「要删除老的记忆工具，然后再各种 skill 系统提示词 l0 以及 query 注入里改成新的」。
+// 八个旧写工具都撤掉，普通猫和守望猫均经 cat_cafe_remember 调用原领域路由。
+test('the old memory write tools are gone from the cat surface', () => {
+  for (const name of [
+    'cat_cafe_propose_profile_update', // mcp-cutover-negative-reference: absence
+    'cat_cafe_propose_taste', // mcp-cutover-negative-reference: absence
+    'cat_cafe_write_memory_matter', // mcp-cutover-negative-reference: absence
+    'cat_cafe_propose_person_memory', // mcp-cutover-negative-reference: absence
+    'cat_cafe_defer_person_memory_delta', // mcp-cutover-negative-reference: absence
+    'cat_cafe_record_proactive_memory_abstention', // mcp-cutover-negative-reference: absence
+    'cat_cafe_propose_entity', // mcp-cutover-negative-reference: absence
+    'cat_cafe_propose_event_memory_correction', // mcp-cutover-negative-reference: absence
+  ])
+    assert.equal(
+      CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === name),
+      false,
+      `${name} should be retired`,
+    );
+  for (const name of [
+    'handleProposeProfileUpdate',
+    'handleProposeTaste',
+    'handleWriteMemoryMatter',
+    'handleProposePersonMemory',
+    'handleDeferPersonMemoryDelta',
+    'handleRecordProactiveMemoryAbstention',
+    'handleProposeEntity',
+    'handleProposeEventMemoryCorrection',
+  ])
+    assert.equal(name in tools, false, `${name} should not remain as a callable barrel export`);
+  const fullProfile = CANONICAL_TOOL_REGISTRY.filter((tool) => tool.policy.runtimeProfiles.includes('full'));
+  const memoryWrites = fullProfile.filter((tool) =>
+    ['identity-proposal', 'person-memory', 'memory-write', 'memory-matter', 'memory'].includes(
+      tool.policy.resourceFamily,
+    ),
+  );
+  assert.ok(memoryWrites.some((tool) => tool.name === 'cat_cafe_remember'));
+});

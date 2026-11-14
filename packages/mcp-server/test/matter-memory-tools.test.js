@@ -29,7 +29,7 @@ afterEach(() => {
   }
 });
 test('matter tools carry source selections and exact retries through the shared callback routes', async () => {
-  const { matterMemoryTools, handleListMemoryMatters, handleReadMemoryMatter, handleWriteMemoryMatter } = await import(
+  const { matterMemoryTools, handleListMemoryMatters, handleReadMemoryMatter } = await import(
     '../dist/tools/matter-memory-tools.js'
   );
   await handleListMemoryMatters({ query: '设置入口', cursor: 'next-page', limit: 2 });
@@ -41,19 +41,19 @@ test('matter tools carry source selections and exact retries through the shared 
     description: '',
     sources: [{ threadId: 'a', messageId: 'm', segment: 'body', start: 0, end: 4, quote: 'text' }],
   };
-  await handleWriteMemoryMatter({ change });
+  const { handleRemember, rememberTools } = await import('../dist/tools/remember-tool.js');
+  await handleRemember({ items: [{ itemId: 'matter', target: 'matter', payload: change }] });
   assert.equal(new URL(requests[0].url).searchParams.get('query'), '设置入口');
   assert.equal(new URL(requests[0].url).searchParams.get('cursor'), 'next-page');
   assert.match(requests[1].url, /memory-matters\/matter%2Fone\?/);
   assert.equal(new URL(requests[1].url).searchParams.get('history'), 'true');
-  assert.deepEqual(requests[2].body, change);
-  const write = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_write_memory_matter');
-  assert.equal(z.object(write.inputSchema).safeParse({ change: { ...change, ownerUserId: 'foreign' } }).success, false);
+  assert.deepEqual(requests[2].body.items[0].payload, change);
+  const payload = z
+    .object(rememberTools[0].inputSchema)
+    .shape.items.element.options.find((item) => item.shape.target.value === 'matter').shape.payload;
+  assert.equal(payload.safeParse({ ...change, ownerUserId: 'foreign' }).success, false);
   assert.equal(
-    z
-      .object(write.inputSchema)
-      .safeParse({ change: { operation: 'forget', requestId: 'forget', matterId: 'one', expectedRevision: 1 } })
-      .success,
+    payload.safeParse({ operation: 'forget', requestId: 'forget', matterId: 'one', expectedRevision: 1 }).success,
     false,
   );
 });
@@ -61,13 +61,15 @@ test('matter tools carry source selections and exact retries through the shared 
 test('canonical matter descriptions distinguish contextual interpretation, exact speech and a real read', async () => {
   const { matterMemoryTools } = await import('../dist/tools/matter-memory-tools.js');
   const read = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_read_memory_matter');
-  const write = matterMemoryTools.find((tool) => tool.name === 'cat_cafe_write_memory_matter');
+  const { rememberTools } = await import('../dist/tools/remember-tool.js');
+  const description = z
+    .object(rememberTools[0].inputSchema)
+    .shape.items.element.options.find((item) => item.shape.target.value === 'matter').shape.payload.description;
   assert.match(read.description, /description.*contextual interpretation/i);
   assert.match(read.description, /raw quotes/i);
   assert.match(read.description, /changed.*interpretation.*unverified/i);
   assert.match(read.description, /Directory.*do not count/i);
-  assert.match(write.description, /description.*background.*scope/i);
-  assert.match(write.description, /sources.*exact original/i);
-  assert.match(write.description, /optional.*simple facts/i);
-  assert.match(write.description, /current.*instruction.*precedence/i);
+  assert.match(description, /description is optional cat-written context and applicability/i);
+  assert.match(description, /exact original/i);
+  assert.match(description, /raw UTF-16/i);
 });

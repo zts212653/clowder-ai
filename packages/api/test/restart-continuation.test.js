@@ -211,6 +211,7 @@ describe('F048 Phase C restart continuation', () => {
         if (invocationId === 'opus-a') throw new Error('redis read failed');
         return home.turns.get(invocationId);
       },
+      hasMemberTurnStartedAfter: (query) => home.turns.hasMemberTurnStartedAfter(query),
     };
 
     const result = await continueRestartInterruptedCats({ ...home.deps, turns }, interrupted);

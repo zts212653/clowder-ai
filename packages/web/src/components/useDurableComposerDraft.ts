@@ -2,14 +2,16 @@
 
 import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
 import { type Dispatch, type RefObject, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import type { OwnerComposerDraft } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
 import {
   type ComposerAdmissionReply,
   type ComposerAdmissionSnapshot,
   durableDraftForAdmission,
 } from './composer-draft-admission';
-import { useComposerDraftConsumption } from './composer-draft-consumption';
+import { registerComposerDraftRecovery, useComposerDraftConsumption } from './composer-draft-consumption';
 import { composerAttachments, queuedServerAckBlocks } from './composer-queue';
 import {
   type PendingComposerAdmissionDraft,
@@ -35,6 +37,7 @@ import { type PendingComposerSelection, usePendingComposerSelection } from './us
 import { useThreadDraftSelection } from './use-thread-draft-selection';
 
 interface UseDurableComposerDraftOptions {
+  isDraftHandedOff?: (threadId: string, draft: OwnerComposerDraft, revision: number) => Promise<boolean>;
   threadId?: string;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
@@ -48,6 +51,7 @@ interface UseDurableComposerDraftOptions {
 }
 
 export function useDurableComposerDraft({
+  isDraftHandedOff,
   threadId,
   input,
   setInput,
@@ -96,6 +100,7 @@ export function useDurableComposerDraft({
   } = useDurableComposerDraftImageState({
     threadId,
     ownerIdRef,
+    preservedBlocksRef,
     setImages,
     setIsPreparingImages,
     saveCurrentDraftRef: saveCurrentDraftForImagesRef,
@@ -140,20 +145,27 @@ export function useDurableComposerDraft({
     resetImageRecovery();
     const hydration = waitForComposerDraftSaves(threadId)
       .then(() => loadOwnerComposerDraft(threadId))
-      .then(async ({ draft, revision }) => {
+      .then(async ({ draft: storedDraft, revision }) => {
         if (hydrationGenerationRef.current !== generation) return;
+        const transferred =
+          storedDraft && isDraftHandedOff ? await isDraftHandedOff(threadId, storedDraft, revision) : false;
+        if (hydrationGenerationRef.current !== generation) return;
+        // Keep the server revision as the write boundary, but do not refill a
+        // draft already transferred to an account/thread-bound durable attempt.
+        const draft = transferred ? null : storedDraft;
         const serverText = draft?.text ?? '';
         const imageUrls = imageUrlsFromDraft(draft);
         const serverContextAttachments = contextAttachmentsFromDraft(draft);
         preservedBlocksRef.current = preservedBlocksFromDraft(draft);
-        canonicalDraftRef.current = durableDraftSnapshotFromOwner(draft);
+        const storedSnapshot = durableDraftSnapshotFromOwner(storedDraft);
+        canonicalDraftRef.current = storedSnapshot;
         revisionRef.current = revision;
         const recoveredSignature = composerDraftSignature(
-          serverText,
-          imageUrls,
-          serverContextAttachments,
-          preservedBlocksRef.current,
-          draft?.replyTo,
+          storedSnapshot.text,
+          storedSnapshot.imageUrls,
+          storedSnapshot.contextAttachments,
+          storedSnapshot.preservedBlocks,
+          storedSnapshot.replyTo,
         );
         // P1 R10: Capture current signature BEFORE projection, not after
         // Reading inputRef.current after setInput may see the projected value
@@ -195,7 +207,16 @@ export function useDurableComposerDraft({
     return () => {
       if (hydrationGenerationRef.current === generation) hydrationGenerationRef.current += 1;
     };
-  }, [imageUrlsRef, resetImageRecovery, restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId]);
+  }, [
+    imageUrlsRef,
+    isDraftHandedOff,
+    resetImageRecovery,
+    restoreDraftImages,
+    setContextAttachments,
+    setInput,
+    setReplyTo,
+    threadId,
+  ]);
 
   const restoreAdmissionFallback = useCallback(() => {
     const fallback = clearFallbackRef.current;
@@ -234,7 +255,7 @@ export function useDurableComposerDraft({
         draft.draft?.replyTo,
       );
       lastSavedSignatureRef.current = conflictSignature;
-      void restoreDraftImages(currentImages, threadId ?? '', false);
+      const imageRestoration = restoreDraftImages(currentImages, threadId ?? '', false);
       if (!shouldClear) {
         // Mark as pending recovery - not yet displayed
         if (canonicalDraftRef.current) {
@@ -244,7 +265,7 @@ export function useDurableComposerDraft({
             source: 'conflict',
           };
         }
-        return;
+        return imageRestoration;
       }
       setInput((localText) => mergeHydratedDraft(draft.draft?.text ?? '', localText));
       setContextAttachments((local) => mergeContextAttachments(currentContextAttachments, local));
@@ -267,6 +288,7 @@ export function useDurableComposerDraft({
         };
       }
       clearFallbackRef.current = null;
+      return imageRestoration;
     },
     [restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId],
   );
@@ -285,6 +307,43 @@ export function useDurableComposerDraft({
     }),
     [imageUrlsRef, threadId],
   );
+
+  useEffect(() => {
+    if (!threadId) return;
+    let active = true;
+    const unregister = registerComposerDraftRecovery(threadId, async (draft) => {
+      const owner = apiSessionIdentity.getSnapshot().ownerUserId;
+      const ownerGeneration = ownerIdRef.current;
+      await hydrationSettledRef.current;
+      if (
+        !active ||
+        owner !== draft.ownerUserId ||
+        apiSessionIdentity.getSnapshot().ownerUserId !== owner ||
+        ownerGeneration !== ownerIdRef.current ||
+        draft.threadId !== threadId ||
+        admissionsPendingRef.current > 0
+      )
+        return false;
+      const imageUrls = imageUrlsFromDraft(draft);
+      const stillOwned = () =>
+        active && ownerGeneration === ownerIdRef.current && apiSessionIdentity.getSnapshot().ownerUserId === owner;
+      if (hydratedRef.current && revisionRef.current >= draft.revision) {
+        if (admissionImagesReady([], imageUrls)) return true;
+        const restored = await restoreDraftImages(imageUrls, threadId, false);
+        return stillOwned() && restored.complete && admissionImagesReady([], imageUrls);
+      }
+      const pending = useChatStore.getState().pendingChatInsert;
+      if (pending?.threadId === threadId && (pending.serverRevision ?? -1) > draft.revision) return false;
+      const restoration = reconcileConflict({ draft, revision: draft.revision }, true);
+      hydratedRef.current = true;
+      const restored = await restoration;
+      return stillOwned() && restored?.complete === true && admissionImagesReady([], imageUrls);
+    });
+    return () => {
+      active = false;
+      unregister();
+    };
+  }, [admissionImagesReady, reconcileConflict, restoreDraftImages, threadId]);
 
   const persistDraftSnapshot = useCallback(
     async (
@@ -442,7 +501,7 @@ export function useDurableComposerDraft({
       };
       pendingAdmissionDraftRef.current = pendingAdmission;
       admissionsPendingRef.current += 1;
-      return (accepted: boolean | undefined) => {
+      return (accepted: boolean | undefined, options?: { localDurableAttempt: boolean }) => {
         // P1-2 R8: Check stable owner ID, not hydration generation
         if (ownerId !== ownerIdRef.current || pendingAdmission.threadId !== threadId) {
           return;
@@ -479,7 +538,9 @@ export function useDurableComposerDraft({
             }
           }
         } else {
-          clearFallbackRef.current = durableSnapshot;
+          // A durable send attempt owns this snapshot now. A remote draft-save
+          // failure must not turn the same content into a new composer send.
+          clearFallbackRef.current = options?.localDurableAttempt ? null : durableSnapshot;
           persistSettledDraft(hydrationGeneration);
         }
         setAdmissionEpoch((current) => current + 1);
@@ -489,6 +550,10 @@ export function useDurableComposerDraft({
   );
 
   const markOptimisticallyCleared = useCallback(() => {
+    const sentBlocks = pendingAdmissionDraftRef.current?.snapshot.preservedBlocks ?? [];
+    preservedBlocksRef.current = preservedBlocksRef.current.filter(
+      (block) => block.type !== 'file' || !sentBlocks.some((sent) => JSON.stringify(sent) === JSON.stringify(block)),
+    );
     inputRef.current = '';
     imageUrlsRef.current = [];
     contextAttachmentsRef.current = [];

@@ -11,6 +11,7 @@ import { messageFrom } from '../../cats/services/stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDelivered } from '../../cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../../cats/services/stores/visibility.js';
+import { hasHistoricalBodyApproval, type SourceMaterializationHistory } from './historical-body-source-proof.js';
 import {
   normalizeOwnerMessageText,
   ownerMessageTextDigestMaterial,
@@ -82,6 +83,19 @@ export function digestPersonMemoryResolvedBundle(bundle: PersonMemoryResolvedSou
     })),
     assertionBindings: bundle.assertionBindings,
   });
+}
+
+/** Only a stored proof may select the historical body format, and only by exact digest equality. */
+function digestWithStoredBodyProof(
+  currentMaterial: unknown,
+  bodyMaterial: unknown,
+  storedDigest: string | undefined,
+  bodyEvidence: boolean,
+): string {
+  const currentDigest = digestPersonMemorySourceMaterial(currentMaterial);
+  if (!storedDigest || !bodyEvidence || storedDigest === currentDigest) return currentDigest;
+  const bodyDigest = digestPersonMemorySourceMaterial(bodyMaterial);
+  return storedDigest === bodyDigest ? bodyDigest : currentDigest;
 }
 
 export function eligibleOwnerMessage(
@@ -208,11 +222,13 @@ export class PersonMemorySourceBundleResolver {
   async revalidateResolvedBundle(
     bundle: PersonMemoryResolvedSourceBundle,
     auth: PersonMemorySourceAuth,
+    history?: SourceMaterializationHistory,
   ): Promise<PersonMemoryResolvedSourceRevalidation> {
+    const historicalBodyProof = hasHistoricalBodyApproval(history, auth.ownerUserId);
     const sources: ResolvedPersonMemorySource[] = [];
     for (const source of bundle.sources) {
       if (source.ownerUserId !== auth.ownerUserId) return invalid('invalid_source_owner');
-      const current = await this.revalidateResolvedSource(source, auth);
+      const current = await this.revalidateResolvedSource(source, auth, historicalBodyProof);
       if (current.status === 'invalid') return current;
       if (stableJson(current.source) !== stableJson(source)) return invalid('source_drift');
       sources.push(current.source);
@@ -226,6 +242,7 @@ export class PersonMemorySourceBundleResolver {
   private async revalidateResolvedSource(
     source: ResolvedPersonMemorySource,
     auth: PersonMemorySourceAuth,
+    historicalBodyProof: boolean,
   ): Promise<{ status: 'resolved'; source: ResolvedPersonMemorySource } | { status: 'invalid'; error: string }> {
     if (source.kind === 'message_text') {
       return this.resolveMessageText(
@@ -237,6 +254,7 @@ export class PersonMemorySourceBundleResolver {
           excerpt: source.excerpt,
         },
         auth,
+        historicalBodyProof ? { storedBodyProof: true } : {},
       );
     }
     if (source.kind === 'message_attachment') {
@@ -263,6 +281,7 @@ export class PersonMemorySourceBundleResolver {
           confirmationScope: source.confirmationScope,
         },
         auth,
+        historicalBodyProof ? { storedDigest: source.resolvedDigest } : {},
       );
     }
     const confirmation = await this.deps.messageStore.getById(source.confirmationSourceRef.messageId);
@@ -281,10 +300,12 @@ export class PersonMemorySourceBundleResolver {
     ) {
       return invalid('invalid_private_artifact');
     }
-    const resolvedDigest = digestPersonMemorySourceMaterial({
-      artifactDigest: artifact.digest,
-      confirmation: ownerMessageTextDigestMaterial(confirmation),
-    });
+    const resolvedDigest = digestWithStoredBodyProof(
+      { artifactDigest: artifact.digest, confirmation: ownerMessageTextDigestMaterial(confirmation) },
+      { artifactDigest: artifact.digest, confirmation: normalizePersonMemorySourceText(confirmation.content) },
+      historicalBodyProof ? source.resolvedDigest : undefined,
+      explicitlyConfirmsAccuracy({ ...confirmation, contentBlocks: [] }),
+    );
     if (resolvedDigest !== source.resolvedDigest) return invalid('source_drift');
     return {
       status: 'resolved',
@@ -309,14 +330,22 @@ export class PersonMemorySourceBundleResolver {
   private async resolveMessageText(
     input: Extract<PersonMemorySourceInput, { kind: 'message_text' }>,
     auth: PersonMemorySourceAuth,
+    options: { storedBodyProof?: true } = {},
   ) {
     const message = await this.deps.messageStore.getById(input.messageId);
     if (!eligibleOwnerMessage(message, auth))
       return this.rejectIneligibleMessage(message, auth, 'invalid_message_source');
-    if (!resolveOwnerMessageExcerptSegment(message, input.excerpt)) {
+    const segment = resolveOwnerMessageExcerptSegment(message, input.excerpt);
+    if (!segment) {
       return { status: 'invalid' as const, error: 'source_excerpt_mismatch' };
     }
-    const resolvedDigest = digestPersonMemorySourceMaterial(ownerMessageTextDigestMaterial(message));
+    // Old proofs bound only the body. They cannot authenticate quote comments or quoted text.
+    const resolvedDigest = digestWithStoredBodyProof(
+      ownerMessageTextDigestMaterial(message),
+      message.content,
+      options.storedBodyProof ? input.expectedDigest : undefined,
+      segment.kind === 'message_body',
+    );
     if (input.expectedDigest && input.expectedDigest !== resolvedDigest) {
       return { status: 'invalid' as const, error: 'source_digest_mismatch' };
     }
@@ -370,6 +399,7 @@ export class PersonMemorySourceBundleResolver {
   private async resolveConfirmedTranscript(
     input: Extract<PersonMemorySourceInput, { kind: 'owner_confirmed_transcript' }>,
     auth: PersonMemorySourceAuth,
+    options: { storedDigest?: string } = {},
   ) {
     if (digestPersonMemorySourceMaterial(input.transcript) !== input.transcriptDigest) {
       return { status: 'invalid' as const, error: 'source_digest_mismatch' };
@@ -381,10 +411,18 @@ export class PersonMemorySourceBundleResolver {
     if (!explicitlyConfirmsAccuracy(confirmation)) {
       return { status: 'invalid' as const, error: 'invalid_transcript_confirmation' };
     }
-    const resolvedDigest = digestPersonMemorySourceMaterial({
-      transcript: normalizePersonMemorySourceText(input.transcript),
-      confirmation: ownerMessageTextDigestMaterial(confirmation),
-    });
+    const resolvedDigest = digestWithStoredBodyProof(
+      {
+        transcript: normalizePersonMemorySourceText(input.transcript),
+        confirmation: ownerMessageTextDigestMaterial(confirmation),
+      },
+      {
+        transcript: normalizePersonMemorySourceText(input.transcript),
+        confirmation: normalizePersonMemorySourceText(confirmation.content),
+      },
+      options.storedDigest,
+      explicitlyConfirmsAccuracy({ ...confirmation, contentBlocks: [] }),
+    );
     return {
       status: 'resolved' as const,
       source: {

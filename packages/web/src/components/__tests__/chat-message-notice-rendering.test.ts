@@ -356,10 +356,13 @@ describe('ChatMessage notice rendering', () => {
       );
     });
 
-    expect(container.querySelector('[data-testid="response-lifecycle-tip"]')).not.toBeNull();
+    const frame = container.querySelector('[data-testid="response-lifecycle-tip"]');
+    expect(frame?.getAttribute('data-message-id')).toBe('response-processing');
+    expect(frame?.getAttribute('data-reply-placeholder')).toBe('processing');
+    expect(container.querySelectorAll('[data-testid="response-lifecycle-tip"]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="message-bubble"]')).toBeNull();
-    expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
-    expect(container.textContent).not.toContain('正在回复');
+    expect(frame?.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
+    expect(frame?.textContent).toContain('正在回复');
     expect(container.textContent).toContain('布偶猫');
   });
 

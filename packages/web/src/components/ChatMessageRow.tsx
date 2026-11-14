@@ -74,7 +74,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
 }: ChatMessageRowProps) {
   return (
     <MessageViewportBoundary
-      messageId={message.id}
+      messageId={message.sendAttempt ? undefined : message.id}
       eager={eager}
       backgroundMountDelayMs={backgroundMountDelayMs}
       navigationError={message.variant === 'error'}
@@ -97,6 +97,9 @@ export const ChatMessageRow = memo(function ChatMessageRow({
             message={message}
             threadId={threadId}
             cat={message.catId ? getCatById(message.catId) : undefined}
+            getCatById={getCatById}
+            timelineMessages={timelineMessages}
+            activeRuns={activeRuns}
           />
         ) : (
           <ChatMessage

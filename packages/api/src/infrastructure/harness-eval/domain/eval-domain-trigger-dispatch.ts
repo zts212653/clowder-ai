@@ -31,6 +31,7 @@ export interface EvalDomainThresholdEvent {
 
 export type EvalDomainTriggerDispatchOutcome =
   | 'dispatched'
+  | 'automation_retired'
   | 'deduped'
   | 'overlap'
   | 'cooldown'
@@ -103,6 +104,15 @@ function mapClaimOutcome(
 }
 
 export async function dispatchEvalDomainTrigger(input: DispatchInput): Promise<EvalDomainTriggerDispatchResult> {
+  if (input.channel === 'threshold_event') {
+    const window = deriveEvalDomainTriggerWindow(input.domain.frequency, input.nowMs ?? Date.now());
+    return result(
+      'automation_retired',
+      window.windowKey,
+      `eval-domain-trigger:${input.domain.domainId}:${window.windowKey}`,
+    );
+  }
+  // The time channel remains only for the explicitly requested F311 round bridge.
   return new EvalDomainTriggerDispatchRun(input).execute();
 }
 
@@ -205,7 +215,7 @@ class EvalDomainTriggerDispatchRun {
 
   private async deliverAndWake(): Promise<EvalDomainTriggerDispatchResult> {
     try {
-      const { messageId, wakeOutcome } = await this.deliverMessage();
+      const { wakeOutcome } = await this.deliverMessage();
       if (wakeOutcome !== 'dispatched') {
         await this.releaseClaims();
         return this.outcome(wakeOutcome);

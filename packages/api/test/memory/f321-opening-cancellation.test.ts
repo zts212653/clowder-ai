@@ -21,7 +21,7 @@ function fixture() {
   const opening = messages.append({
     threadId: thread.id,
     userId: 'owner',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content: 'new idea',
     timestamp: 1,
   });

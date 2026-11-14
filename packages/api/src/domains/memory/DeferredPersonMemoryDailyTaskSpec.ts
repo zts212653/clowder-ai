@@ -30,6 +30,7 @@ export interface DeferredPersonMemoryDailyTaskSpecDeps {
   writeOpportunityTerminalLedger?: WriteOpportunityTerminalLedger;
   writeOpportunityDeliveryStore?: WriteOpportunityDeliveryStore;
   ownerUserId: string;
+  isActorEligible: (catId: string) => boolean;
   householdTimeZone?: string;
   now?: () => number;
   randomId?: () => string;
@@ -124,6 +125,7 @@ export function createDeferredPersonMemoryDailyTaskSpec(
       timezone: resolveHouseholdTimeZone(deps.householdTimeZone),
     },
     actor: { role: 'memory-curator', costTier: 'cheap' },
+    actorEligibility: (catId) => deps.isActorEligible?.(catId) === true,
     admission: {
       async gate() {
         const ready = await observePersonMemoryStage(
@@ -167,13 +169,18 @@ export function createDeferredPersonMemoryDailyTaskSpec(
       timeoutMs: 120_000,
       async execute(signal, _subjectKey, context) {
         const processorCatId = context.assignedCatId as CatId | undefined;
-        if (!processorCatId) return;
+        if (!processorCatId || !deps.isActorEligible?.(processorCatId)) {
+          throw new Error('memory clerk carrier unavailable for unscoped execution');
+        }
         const routing = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
           ownerId: signal.ownerUserId,
           targetCatIds: [processorCatId],
         });
         if (routing.targets[0]?.disposition !== 'allowed') return;
         const processingThreadId = await deps.ensureSystemThread();
+        if (!deps.isActorEligible?.(processorCatId)) {
+          throw new Error('memory clerk carrier became unavailable before claim');
+        }
         const items: DeferredPersonMemoryDailyItem[] = [];
         try {
           if (!context.deliver) {

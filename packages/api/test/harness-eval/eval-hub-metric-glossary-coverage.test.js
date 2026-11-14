@@ -2,15 +2,21 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { metricRefKeyCandidates } from '@cat-cafe/shared';
-import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
+import { loadDomains, loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 
 const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+// Availability of transitional on-demand domains is independent of retired scheduling.
+const availableDomains = new Set(
+  [...loadDomains(repoHarnessFeedbackRoot).values()]
+    .filter((domain) => domain.enabled)
+    .map((domain) => domain.domainId),
+);
 
 describe('F248 B3 production metric glossary coverage', () => {
   it('requires every enabled production domain to expose a metric glossary', () => {
     const summary = loadEvalHubSummary({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
     const missing = summary.domains
-      .filter((domain) => domain.enabled && !domain.metricGlossary)
+      .filter((domain) => availableDomains.has(domain.domainId) && !domain.metricGlossary)
       .map((domain) => domain.domainId);
 
     assert.deepEqual(missing, [], `enabled production domains need a metric glossary:\n${missing.join('\n')}`);
@@ -21,7 +27,7 @@ describe('F248 B3 production metric glossary coverage', () => {
     const missing = [];
 
     for (const domain of summary.domains) {
-      if (!domain.enabled || !domain.latestVerdictId) continue;
+      if (!availableDomains.has(domain.domainId) || !domain.latestVerdictId) continue;
       const latest = summary.items.find((item) => item.id === domain.latestVerdictId);
       assert.ok(latest, `${domain.domainId} latest verdict must be present in summary.items`);
       for (const ref of latest.evidence.metricRefs) {

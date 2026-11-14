@@ -1,7 +1,7 @@
-import { type MatterWriteInput, matterWriteInputSchema } from '@cat-cafe/shared';
+import { matterWriteInputSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
-import { callbackGet, callbackPost } from './callback-tools.js';
+import { callbackGet } from './callback-tools.js';
 
 const defineTool = defineMcpCanonicalFactory('matter-memory-tools.ts', undefined, {
   resourceFamily: 'memory-matter',
@@ -10,7 +10,7 @@ const defineTool = defineMcpCanonicalFactory('matter-memory-tools.ts', undefined
 const cursor = z.string().max(2000).optional().describe('Opaque nextCursor returned by the same catalogue or page.');
 const limit = z.number().int().min(1).max(30).optional().describe('Maximum entries per page; default 12, maximum 30.');
 const operations = matterWriteInputSchema.options;
-const agentChange = z.discriminatedUnion('operation', [
+export const matterAgentChangeSchema = z.discriminatedUnion('operation', [
   operations[0],
   operations[1],
   operations[2],
@@ -38,9 +38,7 @@ export function handleReadMemoryMatter(input: {
     ...(input.history ? { history: 'true' } : {}),
   });
 }
-export function handleWriteMemoryMatter(input: { change: MatterWriteInput }) {
-  return callbackPost('/api/callbacks/memory-matters/write', input.change);
-}
+
 export const matterMemoryTools = [
   defineTool({
     name: 'cat_cafe_list_memory_matters',
@@ -82,28 +80,6 @@ export const matterMemoryTools = [
       implementationExport: 'handleReadMemoryMatter',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full'],
-      standaloneReason: {
-        disposition: 'accepted-boundary',
-        kind: 'resource-entry',
-        admissionRef: 'file:docs/architecture/f332-matter-memory-contract.md',
-      },
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_write_memory_matter',
-    description:
-      'Create, append to, correct or retire a shared matter page using exact original message selections. Use when related statements/decisions across threads should remain findable together, or a sourced correction replaces an entry. NOT for personal profiles, people or tastes (use their proposal tools), editing source messages, or authorizing work. Output: durable matterId/revision receipt. description is cat-written contextual interpretation: background, the core issue, subsequent action, and applicable/inapplicable scope; it is optional for simple facts, not a mandatory four-part template. When useful, include one brief, source-grounded way this matter might be asked about in the interpretation; it is only a retrieval clue, not a new fact, applicability rule or instruction. sources retain exact original speech coordinates, never reconstructed speech or hidden reasoning. Reuse requestId only for the exact change; updates need expectedRevision from a fresh read. Selections use raw UTF-16 start/end (end exclusive), body/quote_comment/quote_text; quote attachments need contentBlockIndex and attachmentId. Recheck the interpretation after source correction; current user instructions take precedence within their scope. Owner forgetting is in the memory UI.',
-    inputSchema: {
-      change: agentChange.describe(
-        'One exact change. description is optional cat-written context and applicability; sources preserve exact original threadId/messageId, segment, raw start/end and selected quote.',
-      ),
-    },
-    handler: handleWriteMemoryMatter,
-    governance: {
-      implementationExport: 'handleWriteMemoryMatter',
-      action: 'write',
-      risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],
       standaloneReason: {
         disposition: 'accepted-boundary',

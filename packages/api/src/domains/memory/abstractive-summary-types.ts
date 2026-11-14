@@ -43,17 +43,6 @@ export interface TopicSegment {
   toMessageId: string;
   messageCount: number;
   relatedSegmentIds?: string[];
-  candidates?: DurableCandidate[];
-}
-
-export interface DurableCandidate {
-  kind: 'decision' | 'lesson' | 'method';
-  title: string;
-  claim: string;
-  why_durable: string;
-  evidence: Array<{ threadId: string; messageId: string; span: string }>;
-  relatedAnchors: string[];
-  confidence: 'explicit' | 'inferred';
 }
 
 export interface AbstractiveResult {

@@ -12,7 +12,6 @@ import {
 import { loadEvalHubFrictionProjection } from './eval-hub-friction-projection.js';
 import { synthesizeEvalHubNextCheck, synthesizeEvalHubOperatorNarrative } from './eval-hub-operator-narrative.js';
 import {
-  computeNextCronFire,
   computeStale,
   extractBullet,
   extractEvidenceRefs,
@@ -90,11 +89,7 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
   const domainSummaries: EvalDomainSummary[] = [...domains.values()].map((domain) => {
     const domainVerdicts = items.filter((item) => item.domainId === domain.domainId);
     const latest = domainVerdicts[0]; // items already sorted by date desc
-    // Sunset 2026-06-06 (F192 silent-fire fix): when domain.enabled === false the
-    // scheduled cron silently skips it, so we must NOT publish a future
-    // nextCronFireAt — that would mirror silent-fire on the operator-facing surface
-    // (Hub UI would say "next fire Sunday" while cron actually never fires).
-    const isEnabled = domain.enabled !== false;
+    // Registry enabled is retained for transitional on-demand callers, not automation.
     return {
       domainId: domain.domainId,
       displayName: domain.displayName,
@@ -102,14 +97,14 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
       frequency: domain.frequency,
       evalCatId: domain.evalCat.catId,
       evalCatHandle: domain.evalCat.handle,
-      enabled: isEnabled,
+      enabled: false,
+      automaticStatus: 'retired',
       hasVerdict: domainVerdicts.length > 0,
       // F248 Phase A — conditional spread keeps the optional display field out
       // of the summary when a domain omits it (exactOptional-safe), matching
       // how nextCronFireAt / latestVerdict are handled below.
       ...(domain.descriptionForHuman ? { descriptionForHuman: domain.descriptionForHuman } : {}),
       ...(domain.metricGlossary ? { metricGlossary: domain.metricGlossary } : {}),
-      ...(isEnabled ? { nextCronFireAt: computeNextCronFire(domain.frequency, now).toISOString() } : {}),
       ...(latest
         ? {
             latestVerdictId: latest.id,

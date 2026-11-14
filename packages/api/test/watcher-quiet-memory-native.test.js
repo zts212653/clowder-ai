@@ -10,6 +10,7 @@ import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemor
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { registerCallbackProposeProfileUpdateRoutes } from '../dist/routes/callback-propose-profile-update-routes.js';
 import { callbackProposeTasteRoutes } from '../dist/routes/callback-propose-taste-routes.js';
+import { registerCallbackRememberRoutes } from '../dist/routes/callback-remember-routes.js';
 import { registerCallbackMatterMemoryRoutes } from '../dist/routes/memory-matter-routes.js';
 import { nativeWatcherAvailable, watcherNativeFixture } from './helpers/watcher-native-fixture.js';
 import { watcherWorld } from './helpers/watcher-world.js';
@@ -45,6 +46,11 @@ test(
         await app.register(async (scope) => {
           registerCallbackAuthHook(scope, w.registry);
           registerCallbackMatterMemoryRoutes(scope, matter);
+          registerCallbackRememberRoutes(scope, {
+            registry: w.registry,
+            messageStore: w.messages,
+            socketManager: sockets,
+          });
           registerCallbackProposeProfileUpdateRoutes(scope, {
             registry: w.registry,
             proposalStore: profile,
@@ -77,23 +83,53 @@ test(
       f.state.codeMode = true;
       f.state.toolPlan = [
         {
-          name: 'cat_cafe_write_memory_matter',
+          name: 'cat_cafe_remember',
           args: {
-            change: {
-              operation: 'create',
-              requestId: 'quiet-memory-matter',
-              title: '守望测试原话',
-              sources: [
-                {
-                  threadId: original.threadId,
-                  messageId: original.id,
-                  segment: 'body',
-                  start: 0,
-                  end: original.content.length,
-                  quote: original.content,
+            clientRequestId: 'quiet-memory-batch',
+            items: [
+              {
+                itemId: 'matter',
+                target: 'matter',
+                payload: {
+                  operation: 'create',
+                  requestId: 'quiet-memory-matter',
+                  title: '守望测试原话',
+                  sources: [
+                    {
+                      threadId: original.threadId,
+                      messageId: original.id,
+                      segment: 'body',
+                      start: 0,
+                      end: original.content.length,
+                      quote: original.content,
+                    },
+                  ],
                 },
-              ],
-            },
+              },
+              {
+                itemId: 'profile',
+                target: 'profile',
+                payload: {
+                  afterContent: '测试人物线索，待 owner 批准。',
+                  rationale: '原话中的稳定线索',
+                  signalKind: 'cat-declared',
+                  targetLayer: 'corpus',
+                  clientRequestId: 'quiet-profile',
+                },
+              },
+              {
+                itemId: 'taste',
+                target: 'taste',
+                payload: {
+                  scene: '守望测试',
+                  quote: '界面用词要像家人',
+                  tags: ['测试'],
+                  dimension: 'authentic-expression',
+                  privacy: 'sensitive',
+                  clientRequestId: 'quiet-taste',
+                },
+              },
+            ],
           },
         },
         { name: 'cat_cafe_list_memory_matters', args: {} },
@@ -104,27 +140,6 @@ test(
               (await matter.catalog({ userId: 'watcher-owner', viewer: { type: 'cat', catId: 'codex' } })).items[0]
                 ?.matterId ?? 'unavailable-test-matter',
           }),
-        },
-        {
-          name: 'cat_cafe_propose_profile_update',
-          args: {
-            afterContent: '测试人物线索，待 owner 批准。',
-            rationale: '原话中的稳定线索',
-            signalKind: 'cat-declared',
-            targetLayer: 'corpus',
-            clientRequestId: 'quiet-profile',
-          },
-        },
-        {
-          name: 'cat_cafe_propose_taste',
-          args: {
-            scene: '守望测试',
-            quote: '界面用词要像家人',
-            tags: ['测试'],
-            dimension: 'authentic-expression',
-            privacy: 'sensitive',
-            clientRequestId: 'quiet-taste',
-          },
         },
       ];
       const session = await f.run(source, AbortSignal.timeout(30000));

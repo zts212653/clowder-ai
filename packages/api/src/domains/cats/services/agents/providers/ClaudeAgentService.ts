@@ -22,7 +22,7 @@ import {
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, type CliEffortPreset, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import {
@@ -623,6 +623,7 @@ export class ClaudeAgentService implements AgentService {
     let l0Path: string | undefined;
     let appendPromptPath: string | undefined;
     let preCompactSettingsPath: string | undefined;
+    let claudeCommand: string | undefined;
     try {
       l0Path = await this.compileL0ToTempFile(
         options?.callbackEnv?.CAT_CAFE_USER_ID,
@@ -715,7 +716,7 @@ export class ClaudeAgentService implements AgentService {
       );
       args.push('--settings', preCompactSettingsPath);
 
-      const claudeCommand = resolveCliCommand('claude');
+      claudeCommand = resolveCliCommand('claude') ?? undefined;
       log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
         log.warn({ catId: this.catId }, 'Claude CLI not found');
@@ -1149,6 +1150,29 @@ export class ClaudeAgentService implements AgentService {
       }
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
+      // Node can throw synchronously on Windows (UNKNOWN), before a CLI exit event exists.
+      if (
+        err instanceof Error &&
+        'code' in err &&
+        typeof err.code === 'string' &&
+        /^(ENOENT|EACCES|EPERM|UNKNOWN|ENOEXEC)$/.test(err.code) &&
+        'syscall' in err &&
+        typeof err.syscall === 'string' &&
+        /^spawn(?:Sync)?(?:\s|$)/.test(err.syscall)
+      ) {
+        const command = basename(claudeCommand ?? 'claude');
+        metadata.cliDiagnostics = buildCliDiagnostics({
+          rawText: [
+            `spawn ${err.code}`,
+            `syscall: ${err.syscall.startsWith('spawnSync') ? 'spawnSync' : 'spawn'}`,
+            ...('errno' in err && typeof err.errno === 'number' && Number.isFinite(err.errno)
+              ? [`errno: ${err.errno}`]
+              : []),
+            `entry: ${command}`,
+          ].join('\n'),
+          debugRef: { command, signal: null, ...(options?.invocationId ? { invocationId: options.invocationId } : {}) },
+        });
+      }
       yield {
         type: 'error',
         catId: this.catId,

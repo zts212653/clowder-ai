@@ -64,14 +64,16 @@ export function useAccountQuota({
   };
   const [state, setState] = useState({ context, observation: supplied });
   const [pending, setPending] = useState<{ context: string; automatic: boolean } | null>(null);
+  const [conflictGeneration, setConflictGeneration] = useState<number | null>(null);
   const inFlight = useRef<{ ticket: symbol; context: string } | null>(null);
   const suppliedValid = !(managed || identity) || accountQuotaOwnerMatches(supplied, accountRef, identity);
+  const identityChanged = conflictGeneration === generation.current || (!!supplied?.owner && !suppliedValid);
   const local =
     state.context === context &&
     (!(managed || identity) || accountQuotaOwnerMatches(state.observation, accountRef, identity))
       ? state.observation
       : undefined;
-  const observation = mergeObservation(suppliedValid ? supplied : undefined, local);
+  const observation = identityChanged ? undefined : mergeObservation(suppliedValid ? supplied : undefined, local);
   current.current.observation = observation;
   useEffect(() => {
     setState((previous) => ({
@@ -101,8 +103,11 @@ export function useAccountQuota({
       if (
         (requested.managed || requested.identity) &&
         !accountQuotaOwnerMatches(result.quota, requested.accountRef, current.current.identity)
-      )
+      ) {
+        setConflictGeneration(requested.generation);
+        void current.current.reload();
         return;
+      }
       setState((previous) => ({
         context: requested.context,
         observation: mergeObservation(
@@ -110,10 +115,12 @@ export function useAccountQuota({
           result.quota,
         ),
       }));
+      setConflictGeneration(null);
       void current.current.reload();
     } catch (error) {
       if (!mounted.current || generation.current !== requested.generation) return;
       if (error instanceof Error && 'status' in error && error.status === 409) {
+        setConflictGeneration(requested.generation);
         void current.current.reload();
         return;
       }
@@ -149,6 +156,7 @@ export function useAccountQuota({
     if (
       !version ||
       !suppliedValid ||
+      identityChanged ||
       supplied?.status !== 'unavailable' ||
       pending ||
       (local &&
@@ -160,11 +168,11 @@ export function useAccountQuota({
       return;
     automaticAttempts.set(context, version);
     void query(true);
-  }, [supplied, context, pending, query, suppliedValid, local]);
+  }, [supplied, context, pending, query, suppliedValid, identityChanged, local]);
   const reading = allowReading ? (observation?.status === 'ok' ? observation : observation?.lastSuccess) : undefined;
   return {
     observation,
-    identityChanged: !!supplied?.owner && !suppliedValid,
+    identityChanged,
     reading,
     busy: pending?.context === context,
     automatic: pending?.context === context && pending.automatic,

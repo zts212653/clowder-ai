@@ -200,6 +200,7 @@ export interface EvalDomainSummary {
   evalCatId: string;
   evalCatHandle: string;
   enabled: boolean;
+  automaticStatus?: 'retired';
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];
@@ -231,12 +232,14 @@ export type DomainScheduleLine =
 export function deriveDomainScheduleLine(
   domain: {
     enabled: boolean;
+    automaticStatus?: 'retired';
     nextCronFireAt?: string;
     frequency?: string;
   },
   language: 'zh' | 'en' = 'zh',
 ): DomainScheduleLine {
   const t = evalWorkspaceCopy[language];
+  if (domain.automaticStatus === 'retired') return { kind: 'sunset', text: t.automaticRetiredDetail };
   if (domain.enabled === false) {
     return { kind: 'sunset', text: t.sunset };
   }
@@ -252,10 +255,11 @@ export function deriveDomainScheduleLine(
 }
 
 export function deriveDomainStateBadge(
-  domain: { enabled: boolean; hasVerdict: boolean },
+  domain: { enabled: boolean; automaticStatus?: 'retired'; hasVerdict: boolean },
   language: 'zh' | 'en' = 'zh',
 ): string {
   const t = evalWorkspaceCopy[language];
+  if (domain.automaticStatus === 'retired') return t.automaticRetired;
   if (domain.enabled === false) return 'Sunset';
   if (domain.hasVerdict) return t.active;
   return t.firstEval;

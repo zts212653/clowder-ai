@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 
 // Live author preview: real AppShell, real media and isolated API. No model invocation.
 test('F331 real waiting entry, continuous playback, closing and explicit draft', async () => {
   const browser = await chromium.launch({ headless: true });
-  const evidence = '/tmp/cat-cafe-evidence/f331-demos';
+  const evidence = join(tmpdir(), 'cat-cafe-evidence/f331-demos');
   await mkdir(evidence, { recursive: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

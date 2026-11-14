@@ -9,7 +9,7 @@ export async function protectNativeProviderResult(
   message: AgentMessage,
   options: AgentServiceOptions,
 ): Promise<AgentMessage> {
-  if (message.type !== 'tool_result') return message;
+  if (message.type !== 'tool_result' && message.type !== 'recall_input_update') return message;
   const inspectionOptions = {
     knownCredentials: configuredCredentialValues({ ...process.env, ...options.callbackEnv }),
   };
@@ -18,6 +18,7 @@ export async function protectNativeProviderResult(
     // ACP retains the rejected input and an input-derived title on its final
     // event. Redact those fields too, but only output is evidence of exposure.
     const safe = inspectSecretValue(message, inspectionOptions);
+    if (message.type === 'recall_input_update') return safe.value;
     const output = inspectSecretValue(
       {
         content: message.content,
@@ -28,7 +29,7 @@ export async function protectNativeProviderResult(
     );
     inspected = { value: safe.value, rules: output.rules };
   } catch {
-    return message;
+    return message.type === 'recall_input_update' ? { ...message, toolInput: undefined } : message;
   }
   if (!inspected.rules.length) return inspected.value;
   let recorded = false;

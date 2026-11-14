@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, open, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,7 @@ describe('authorized workspace raw media byte ranges', () => {
       }
     }
     await writeFile(join(base, 'large.txt'), 'a'.repeat(1024 * 1024 + 64));
-    outside = await mkdtemp('/tmp/f322-raw-range-outside-');
+    outside = await mkdtemp(join(tmpdir(), 'f322-raw-range-outside-'));
     await writeFile(join(outside, 'outside.mp4'), bytes);
     await symlink(join(outside, 'outside.mp4'), join(base, 'escape.mp4'));
     app = Fastify();

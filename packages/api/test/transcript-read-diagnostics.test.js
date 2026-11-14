@@ -25,7 +25,7 @@ test('real indexed read exposes numeric work without retaining transcript coordi
     event: { type: 'text', content: 'private-body-canary'.repeat(1000) },
   };
   await writeFile(join(directory, 'events.jsonl'), `${JSON.stringify(event)}\n`);
-  const reader = new TranscriptInvocationReader({ getSessionDir: () => directory });
+  const reader = new TranscriptInvocationReader({ getSessionDir: () => directory, hasTranscript: async () => true });
   const reads = [];
   const workers = [];
   const observed = await reader.readInvocation([session], 'private-invocation', {}, undefined, {

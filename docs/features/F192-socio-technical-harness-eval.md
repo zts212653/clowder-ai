@@ -4,13 +4,39 @@ related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275, F299]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
-tips_exempt: "2026-11-12 每日文档守护补记 #6770 publish-verdict worktree 稀疏检出优化；Dual-trigger dispatch、F299 bounded transcript repair、generic-permission sunset 与 publish-verdict 内部检出均为 harness 控制面实现，无新增终端用户操作入口。"
+tips_exempt: "Re-audited 2026-11-14: Phase S PR1/PR2 stop automatic eval dispatch and detach eval-design from the platform, while retaining historical records and required on-demand paths. This retirement record adds no new discovery action or replacement UI and does not claim PR3-PR5 or the entire platform retired."
 user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + Phase I dual-trigger control plane) | **Owner**: Ragdoll | **Truth sync**: 2026-08-25
+> **Status**: in-progress (Phase S PR1/PR2 已正式生效并验收；路线图 PR3–PR5 尚未实施) | **Owner**: Ragdoll | **Truth sync**: 2026-11-13
+
+## Phase S: 退役首批 — 路线图 PR1/PR2
+
+You 已认可“保留 `eval-design` 方法、退役常驻 Eval 平台”的方向，并在看到五个 PR 的路线图后明确要求：“我感觉我们先新建thread 让sol去干 pr1 和pr2？”本节登记这次已接受的首批工作；原有 Phase 的实现历史保留，整个 F192 尚未退役或关闭。
+
+- **授权原文**：`[thread-id]#private-source-id`；方向来源同线程 `private-source-id`，路线图回件 `private-source-id`。
+- **原任务**：`task:work:private-source-id`；Astra 在原线程持有本批结果责任，实施者为 `codex61-sol`。
+- **执行现场**：获批提案 `proposal_mwf4qgmdgkm84jot` 创建 `[thread-id]`，工作包为 `private-source-id`；整批完成后一次回流。
+- **路线图原件**：HTML 作品 `work:8fcc18d889495606db8bba247ca6a2c090b76cbf0dd4757b2ecc023eb68bdbb3` 第 1 版；文字原件 `.cat-cafe/evidence/2026-11-13-eval-sunset-roadmap/roadmap.md`。
+
+**PR1：停自动运行。** 停止 F192 定期及事件触发、F266 自动对账的新增派发；核清已排队、在跑及待接续对象，保留已有实际任务的负责人和继续路径。迁接期间保留现有项目必要的按需接口，停用状态须与“没有发现问题”区分。
+
+**PR2：让方法独立。** 保留 `eval-design` 的测量、样本、对照、校准、成本与独立验收方法；解除注册 F192、发布 verdict 和自动复评结案的强制绑定，同步现行 L0、skill 及能力导航。F267 仍需的证据与有效性检查保留，历史材料不改写。
+
+**本批验收**：
+
+- [x] 两个 PR 分别完成实现、风险匹配验证、非作者审查与合入。
+- [x] 到期、事件、重复/迟到触发和重启不再新增旧自动评估；原任务/按需及收尾路径保留（行为检查、Alpha 和正式加载交叉验证；历史旧事项未冒称处置完成）。
+- [x] 一个具体比较问题能用保留的 skill 在原任务形成评估设计；确定性 bug 仍走测试与 debugging，现行指引不再强制旧平台。
+- [x] Alpha 与正式加载版本已核；原 Task 部署等待命中，Astra 在 boot 88 完成实际停用、历史阅读、按需状态及当前编译指引续验。
+
+PR3 项目迁接、PR4 全量旧事项处置/历史阅读、PR5 删除平台及整个 Feature 关闭不在本批实施范围。F153、普通测试、通用审批与原始爪感采集继续保留；本批不授权生产数据删除、production data boundary操作或 runtime 停启，也不新建替代常驻评估系统。
+
+### 整体退役的社区依赖征集
+
+按 You 2026-11-13 的直接要求（同源线程 `private-source-id`），已发布 [clowder-ai #1983](https://github.com/zts212653/clowder-ai/issues/1983)：公开五步计划、保留/移除能力、UI 入口与剩余整批切换安排，征集 F311/F313 等实际使用和在途分支依赖。已关联公开 #1137、#1337、#1417、#1486；未变更这些对象的状态或负责人。公开正文不含家内任务/消息/部署坐标，也未把家内 PR1/PR2 完成冒充公开版本已退役。后续拆除前须消费该 issue 的反馈并核代码消费者；无回复不等于无依赖。本次发布未启动 PR3–PR5 实现或重启 runtime。
 
 ## Architecture Ownership
 

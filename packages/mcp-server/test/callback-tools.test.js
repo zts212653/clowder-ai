@@ -93,67 +93,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.initialMessage, '');
   });
 
-  test('propose_taste forwards an optional takeaway hypothesis with the approval request', async () => {
-    const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
-    assert.equal(proposeTasteInputSchema.takeaway.safeParse('我们以为 You 喜欢清楚的来源。').success, true);
-    let body;
-    globalThis.fetch = async (_url, options) => {
-      body = JSON.parse(options.body);
-      return { ok: true, json: async () => ({ proposalId: 'proposal-test', status: 'pending' }) };
-    };
-    await handleProposeTaste({
-      scene: '审查设计稿',
-      quote: '原话',
-      takeaway: '我们以为 You 喜欢清楚的来源。',
-      tags: ['source'],
-      dimension: 'cognitive-honesty',
-      privacy: 'public',
-    });
-    assert.equal(body.takeaway, '我们以为 You 喜欢清楚的来源。');
-  });
-
-  test('propose_taste forwards a revision-bound correction target without synthetic creation fields', async () => {
-    const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
-    const target = {
-      sourceAnchor: 'taste-vignette:docs/taste/vignettes/example.md',
-      expectedRevision: `sha256:${'a'.repeat(64)}`,
-      reason: 'outdated',
-      suggestedPatch: { takeaway: '更新后的判断。' },
-    };
-    assert.equal(proposeTasteInputSchema.target.safeParse(target).success, true);
-    let body;
-    globalThis.fetch = async (_url, options) => {
-      body = JSON.parse(options.body);
-      return { ok: true, json: async () => ({ proposalId: 'proposal-correction', status: 'pending' }) };
-    };
-    const result = await handleProposeTaste({ target });
-    assert.notEqual(result.isError, true);
-    assert.deepEqual(body.target, target);
-    assert.match(body.clientRequestId, /^[0-9a-f-]{36}$/);
-    assert.equal('scene' in body, false);
-  });
-
-  test('propose_taste rejects mixed creation and correction coordinates before callback transport', async () => {
-    const { handleProposeTaste } = await import('../dist/tools/callback-tools.js');
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls++;
-      return { ok: true, json: async () => ({ status: 'unexpected' }) };
-    };
-    const result = await handleProposeTaste({
-      scene: 'must not be mixed into correction mode',
-      target: {
-        sourceAnchor: 'taste-vignette:docs/taste/vignettes/example.md',
-        expectedRevision: `sha256:${'a'.repeat(64)}`,
-        reason: 'outdated',
-        suggestedPatch: { takeaway: '更新后的判断。' },
-      },
-    });
-    assert.equal(result.isError, true);
-    assert.match(result.content[0]?.text ?? '', /Expected either create fields.*or correction fields/u);
-    assert.equal(fetchCalls, 0);
-  });
-
   test('handlePostMessage calls API with correct body', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 

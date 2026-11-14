@@ -78,7 +78,7 @@ test('Host work snapshot keeps exact task IDs across polls and classifies only n
       id: 'proposal',
       type: 'mcpToolCall',
       server: 'cat-cafe-memory',
-      tool: 'cat_cafe_propose_person_memory',
+      tool: 'cat_cafe_remember',
     }),
   );
   assert.equal(work.snapshot().active[0]?.kind, 'tool', 'a memory write is not a workspace fetch');

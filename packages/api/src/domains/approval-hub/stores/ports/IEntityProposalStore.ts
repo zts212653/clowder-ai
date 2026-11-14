@@ -3,7 +3,7 @@ import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../
 /**
  * F260 Phase A: Entity proposal store port.
  *
- * Stores propose_entity proposals pending operator approval.
+ * Stores entity proposals (cat_cafe_remember target entity) pending operator approval.
  * Lifecycle:
  *   pending → approved   (CAS claim → upsert entity → done)
  *   pending → rejected   (one-shot: audit trail only)

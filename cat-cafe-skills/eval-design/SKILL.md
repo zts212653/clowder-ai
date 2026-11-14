@@ -1,10 +1,10 @@
 ---
 name: eval-design
 tips_exempt: "2026-10-22 refines existing judge calibration and method-comparison guidance with bounded controls and cost accounting; no new product action or surface."
-description: "Use when: 要判断 Agent 是否专业、省心或真正改善，需设计判断依据、指标、校准，或修改/审计 eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 测量与校准草案或指标出生证（纵向eval含触发契约），或病名+处置。"
+description: "Use when: 要判断 Agent 是否专业、省心或真正改善，需设计判断依据、指标、校准，或修改/审计 eval。Not for: 确定性 bug(debugging/tdd)、单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 测量与校准草案或指标出生证（仅明确需要多轮时设计接续），或病名+处置。"
 ---
 
-# Eval Design — E0 资格门 · 出生证契约 · 运行拓扑 · 设计自检 · 五病体检 · 干预证
+# Eval Design — 具体问题的测量、比较、校准与干预设计
 
 > **版本定位**（2026-08-23 v2.2 修正轮）：v0.3 = v0.2 + E5 自评回灌禁区 +
 > runway 记账成本 + 纵向 Eval 运行拓扑 + 裁决角色分权。上位宪法：
@@ -15,12 +15,22 @@ description: "Use when: 要判断 Agent 是否专业、省心或真正改善，�
 ## Why This Is a Skill（价值门禁）
 
 模型的训练先验里有"怎么算 accuracy"，没有猫咖的 eval 宪法。本 skill 是 2026-07
-Eval 宪法（七公理 E0–E6）+ Alden 三日思辨的操作化——未来任何猫给任何 harness 域
-配 eval 时，用同一套流程，防止家里的 eval 资产继续长成划水/污染/归因停滞/
+Eval 宪法（七公理 E0–E6）+ Alden 三日思辨的操作化——未来的猫为具体效用问题
+设计量尺、比较和干预时，防止家里的 eval 资产继续长成划水/污染/归因停滞/
 干预失证/摸鱼五病混合物。
 来源：docs/architecture/eval-philosophy.md（宪法 v2.2，七公理）+
 feature-discussions/2026-07-17-eval-charter-draft.md（v1 历史草案，已演进归档）+
 2026-07-16-alden-dialogue-distillation.md（思辨蒸馏）。
+
+## 方法独立于平台
+
+具体效用比较、量尺校准、诊断或干预设计可以直接在原 Task / 项目中完成。使用本 skill **不要求注册 F192 领域、调用 publish_verdict、另开归档 PR、创建 Program 或进入自动复评结案**。把设计、样本来源、结果、成本、独立验收与采用决定留在原责任对象；设计不是已经改善的证明，也不授予生产操作或退役 Feature 的权限。
+
+先交付本次能用的判断依据：谁要依据结果做什么决定、比较什么对象/版本、真实样本从哪里来、怎样判断、哪些条件可比、成本和独立验收如何承担。单次问题按这些要素写清即可，不强迫填写长期指标的整张出生证。确定性 bug / 规约回归走 debugging / tdd；测试绿不能单独证明开放效用改善。
+
+F192 常驻评估与 F266 自动追结案正在按 F192 Phase S 分批退役。本 skill 不新建替代调度器，也不把按需设计自动升级成周期任务。确有多轮比较需要时，在原项目说明下一轮的证据条件、发起方式与负责人；持续自动观察另需已有明确授权。下面的纵向触发设计只适用于该已选范围，不是使用评估方法的前提。
+
+现有 F311 Program 的正式开轮、证明与结果写入仍消费它当前实际需要的 F267/owner refs 和权限契约，沿原项目续办，不能因本方法解绑就伪造证书或绕过原有边界；接口迁接由 F192 Phase S 的后续项目迁接完成。
 
 ## 与能力进化项目的往返
 
@@ -65,8 +75,8 @@ E0 划的是**自治上限**：外部新 bit 缺位，不得宣称开放价值 c
 
 ## 一、指标出生证契约（适用字段缺一不发牌照）
 
-任何新指标上线前填齐基础字段；使用 judge 或其他会折旧、存在额度的裁判时，
-再填额度字段；只有累计证据、持续运行的纵向 Eval 才填运行拓扑字段：
+要上线或持续依赖一个指标时，先填齐基础字段；使用 judge 或其他会折旧、存在额度的裁判时，
+再填额度字段；只有明确选择且获准持续自动观察时才填触发拓扑。多轮按需工作沿原任务接续，不要求该块：
 
 ```yaml
 metric_birth_certificate:
@@ -100,7 +110,7 @@ metric_birth_certificate:
                            # shadow / 转人工复核 / 回退简单基线。分级停止判据：决策
                            # 分歧率越过预注册阈值=单独硬停（锚级）；输出多样性坍缩=
                            # gaming 调查（统计级）；打不赢最低充分替代物=经济退场。
-  # 以下块只对累计证据、持续运行的纵向 Eval 适用；单次交付检查不填。
+  # 以下块只对明确获准的持续自动观察适用；单次或按需比较不填。
   longitudinal_trigger_contract:
     trigger_policy:        # event_plus_time | time_only；不把长期 Eval 配成无兜底 event_only
     evidence_ingestion:    # canonical episode 如何进入；入库成功不等于已经运行 Eval
@@ -114,8 +124,7 @@ metric_birth_certificate:
 
 纵向 Eval 有四个时刻，禁止压成一个布尔值：**证据进入**只是有了原料；**唤醒**只是
 开始运行；**成熟**才允许形成有效测量；**可行动**才允许 verdict 驱动 keep/tune/sunset。
-有可靠事件源时，优先“事件早触发 + 时间防沉默”；没有可靠事件源可以诚实选择
-`time_only`，同时写明最大检测延迟。单次交付型检查不挂这套长期机制。
+这四个时刻用于辨清证据与结论，不要求每个问题建一条执行链。原任务按需接续即可；只有明确选择并获准持续自动观察时，才设计事件/时间、去重与沉默上限。单次比较和交付型检查不挂这套长期机制。
 
 ## 二、设计自检（七公理速查——每条能一票否决）
 
@@ -125,7 +134,7 @@ metric_birth_certificate:
 | E1 单位 | 度量的是 episode（机会×行为×后果）吗？沉默入分母了吗？ | per-猫总分；无沉默采样的主动性指标 |
 | E2 形状 | 非对称代价显式了吗？多维保留向量/约束了吗？ | 单一 accuracy；跨量纲加权总分 |
 | E3 对抗 | observer/domain owner/consumer/calibrator 分权了吗？有外生锚吗？观测面体检过了吗？ | 机制作者兼 observer 后又独自校准开放价值 claim；带毒管线上装仪表 |
-| E4 代谢 | 有孵化-退役机制吗？纵向 Eval 的进入/唤醒/成熟/可行动分开了吗？多久不能不醒？ | 把 maturity 当 scheduler trigger；只有事件触发、沉默时永久不复评 |
+| E4 代谢 | 比较结果由谁消费、何时停止？需要多轮时，接续责任是否明确；已授权自动观察的进入/唤醒/成熟/可行动是否分开？ | 没有 consumer 仍持续运行；把 maturity 当 scheduler trigger；自动观察没有沉默上限 |
 | E5 回灌 | 未验证自评会以事实身份进被测者上下文吗？叙事反馈的案例抽样冻结了吗？ | 把 expected outcome 写成 outcome 回灌；报告人自选案例 |
 | E6 环节 | 发现/归因/验收/改进的性质分开了吗？ | 同批 fixture 既挑改动又验收；仅以聚合分参与选版/回退的模拟考（宪法 E6 三阀门之二）充当独立 holdout；归因直接当梯度 |
 
@@ -136,7 +145,7 @@ E5 禁止的是**事实化回灌**：明确保留为 `hypothesis/expectation`，
 
 对每个现存 eval 资产（telemetry、verdict 管线、守护测试、bench、fixture）按
 举证链（规约→测量→归因→干预→外推）定位病灶。**资产病**=存量资产的慢性病，
-体检尺周期查；**流程病**=单轮举证链的急性病，当轮牌照拦、不等慢性化（宪法附 E）：
+按具体问题体检；**流程病**=单轮举证链的急性病，当轮牌照拦、不等慢性化（宪法附 E）：
 
 | 病名 | 类型 / 链位 | 判据 | 检法 | 处置 |
 |---|---|---|---|---|
@@ -144,7 +153,7 @@ E5 禁止的是**事实化回灌**：明确保留为 `hypothesis/expectation`，
 | **污染** | 资产病 / 测量 | 输出错误且自信：观测面带毒/judge 共振/被磨熟 | 抽样人工复核；proxy 与人工裁决相关性；判"分数涨效用不涨"散度；更强模型/更高 effort 反而不升分→先查题目歧义与判分（只作排查信号，单调不证明量尺正确） | **先修观测面再谈其他**（E3） |
 | **归因停滞** | 流程病 / 归因 | 竞争解释未被区分，下一轮没有新增证据 | 当轮审。"≥3 轮同型 finding"只是报警器——须先排除干预未落地 / 环境重复触发 / 风险已显式接受三种替代解释，方可确诊 | 停点修，回归因补关键区分实验 |
 | **干预失证** | 流程病 / 干预 | 无因果理由 / 预期 Δ / 证伪条件 / 独立验收 | 当轮拦：干预证牌照检查，一轮即拒 | 补齐干预证再动手 |
-| **摸鱼** | 资产病 / 外推 | 无 consumer：输出不驱动任何决策 | 查最近 N 期输出 → 驱动过什么改动？零 = 摸鱼 | sunset（走 F192 verdict） |
+| **摸鱼** | 资产病 / 外推 | 无 consumer：输出不驱动任何决策 | 查最近 N 期输出 → 驱动过什么改动？零 = 摸鱼 | 建议停用或缩减，由原对象 owner 按权限处置并留证 |
 
 **"能产生 loss 吗"的判据（v0.1 修正——Sol 刀①）**：`原始信号 → metric → loss →
 verdict` 是四级台阶，utility_claim + estimator 只走到 metric（候选指标）。升级为
@@ -248,7 +257,8 @@ F311 项目选好试验后回到[实际学习循环](../capability-evolution/ref
 ## 下一步
 
 - 当前工作属于 F311 Program → 返回 [capability-evolution](../capability-evolution/SKILL.md) 的当前阶段，兑现设计对应的 owner 产物与下一动作；设计完成不等于评估或采用完成
-- 新指标设计完成 → 出生证入 feature doc / spec；纵向 Eval 另把触发契约与四角色写进 AC
-- 存量体检完成 → 体检报告（病名+处置）走 F192 verdict 管线（fix/keep_observe/sunset）
+- 具体比较/校准/干预设计完成 → 回原 Task / 项目执行，保留真实样本、对照、成本和独立验收；单次设计不建立常驻运行链
+- 决定上线或持续依赖指标 → 在原 spec 保存适用的出生证；明确需要多轮时再写接续条件与角色
+- 存量体检完成 → 病名、证据边界与处置建议回原 owner；采用、调整或停用按原权限决定，不以发布旧平台 verdict 为前提
 - 摸出宪法级问题 → 回 docs/architecture/eval-philosophy.md 提修正案（v1 草案
   已演进归档，勿再引用）

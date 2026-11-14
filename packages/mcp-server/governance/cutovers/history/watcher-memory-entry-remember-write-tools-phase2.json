@@ -1,0 +1,65 @@
+{
+  "resource": {
+    "kind": "tightly-coupled-group",
+    "groupName": "watcher-memory-write-entry",
+    "resourceFamilies": ["identity-proposal", "memory-matter"],
+    "evidenceRef": "file:docs/architecture/memory/remember-entry.md"
+  },
+  "retiredNames": ["cat_cafe_propose_profile_update", "cat_cafe_propose_taste", "cat_cafe_write_memory_matter"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "7689ad71aeeb9c1951dc4da48204598ce219dd69",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/remember-tool.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tools/matter-memory-tools.ts",
+        "packages/mcp-server/src/tool-governance-types.ts",
+        "packages/mcp-server/src/canonical-tool-registry.ts",
+        "packages/api/src/domains/cats/services/agents/invocation/WatcherToolTicket.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/governance/mcp-surface-baseline.json",
+        "packages/api/src/domains/concierge/watcher/watcher-surface.ts"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/concierge/watcher/watcher-prompt.ts"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "Skills and L0 already use remember after PR7028. Fixed-root scan guards the three remaining retired names.",
+      "absenceEvidence": ["cat_cafe_propose_profile_update", "cat_cafe_propose_taste", "cat_cafe_write_memory_matter"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/remember-tool.test.js",
+        "packages/mcp-server/test/matter-memory-tools.test.js",
+        "packages/mcp-server/test/proposal-memory-routing-description.test.js",
+        "packages/api/test/watcher-remember.test.js",
+        "packages/api/test/watcher-remember-redis.test.js",
+        "packages/api/test/watcher-quiet-memory-native.test.js",
+        "packages/api/test/f296-b3b3-post-compact-hook.test.js",
+        "packages/web/test/browser/reference-quote-forward.test.mjs"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "This changes deterministic ticket/auth and tool exposure, not an uncertain-utility evaluation. No current eval invokes these three legacy tools.",
+      "absenceEvidence": ["cat_cafe_propose_profile_update", "cat_cafe_propose_taste", "cat_cafe_write_memory_matter"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "Existing callback ticket receipts keep the outer remember result. No telemetry producer consumes the retired tool names.",
+      "absenceEvidence": ["cat_cafe_propose_profile_update", "cat_cafe_propose_taste", "cat_cafe_write_memory_matter"]
+    }
+  }
+}

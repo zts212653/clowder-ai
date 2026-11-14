@@ -85,6 +85,7 @@ export function callbackPost(msg: AgentEventFields, timestamp: number): ChatMess
   if (!msg.messageId) return undefined;
   const turn = msg.turnInvocationId && msg.turnInvocationId !== msg.invocationId ? msg.turnInvocationId : undefined;
   const extra: NonNullable<ChatMessage['extra']> = {
+    ...(msg.extra?.watcher ? { watcher: msg.extra.watcher } : {}),
     ...(isCloudBridgeReturnV1(msg.extra?.cloudBridgeReturn) ? { cloudBridgeReturn: msg.extra.cloudBridgeReturn } : {}),
     ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
     ...(msg.extra?.isExplicitPost ? { isExplicitPost: true } : {}),

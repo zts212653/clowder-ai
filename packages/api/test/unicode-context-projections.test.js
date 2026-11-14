@@ -7,7 +7,6 @@ import { extractDecisionSignals } from '../dist/domains/cats/services/session/ex
 import { projectInvocationTrajectories } from '../dist/domains/cats/services/session/InvocationTrajectoryProjector.js';
 import { formatEventsHandoff } from '../dist/domains/cats/services/session/TranscriptFormatter.js';
 import { compactTranscriptEvent } from '../dist/domains/cats/services/session/transcript-index/transcript-invocation-compact-event.js';
-import { parseNaturalLanguageOutput } from '../dist/domains/memory/abstractive-summary-output.js';
 import { projectThreadMessageSummary } from '../dist/domains/memory/thread-summary-projection.js';
 
 function assertValidText(text) {
@@ -38,16 +37,6 @@ test('thread summaries stay well formed at their 3000-unit cap', () => {
   assertValidText(summary);
   assert.ok(summary.length <= 3000);
   assert.ok(summary.endsWith('...'));
-});
-
-test('fallback summary titles preserve Unicode at unit 80', () => {
-  const result = parseNaturalLanguageOutput(`${'a'.repeat(79)}😼title\nSummary text here.`, {
-    threadId: 'thread-1',
-    messages: [{ id: 'm' }],
-  });
-  assert.ok(result);
-  assertValidText(result.segments[0].topicLabel);
-  assert.equal(result.segments[0].topicLabel, 'a'.repeat(79));
 });
 
 test('decision signals do not persist half an emoji into thread memory', () => {

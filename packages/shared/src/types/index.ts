@@ -1528,7 +1528,7 @@ export type {
   RememberResult,
   RememberRowResult,
 } from './remember.js';
-export { REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
+export { REMEMBER_QUIET_TARGETS, REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
 // F299 Phase D: transcript-owned provider request generations.
 export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)

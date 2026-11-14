@@ -69,6 +69,8 @@ interface RuntimeAuthority {
 }
 
 interface ActiveBundled {
+  readonly onRuntimeExit?: () => Promise<void> | void;
+  executionFailure?: ReturnType<typeof startFailureRecord>;
   readonly runtime: BundledPluginRuntime;
   readonly admission: RuntimeAuthority;
   readonly closed: Promise<void>;
@@ -105,7 +107,11 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     return (runtime === undefined || runtime.transport === 'builtin') && this.#runtimeFor(packageRecord) !== undefined;
   }
 
-  async start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown> {
+  async start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown> {
     const epoch = this.#startEpoch.get(pluginInstanceId) ?? 0;
     const authority = await this.authority(pluginInstanceId);
     if (epoch !== (this.#startEpoch.get(pluginInstanceId) ?? 0)) {
@@ -133,6 +139,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       settleStart = resolve;
     });
     const active: ActiveBundled = {
+      ...(onRuntimeExit ? { onRuntimeExit } : {}),
       runtime,
       admission: structuredClone(authority),
       closed,
@@ -199,9 +206,11 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         // Retain the invalid activation and unresolved closed handle for an explicit stop retry.
         throw new AggregateError([error, cleanupError], 'builtin start and cleanup failed');
       }
-      await this.setBundledRuntimeState(authority, 'stopped', packageFailed ? this.#startFailure() : undefined).catch(
-        () => undefined,
-      );
+      await this.setBundledRuntimeState(
+        authority,
+        active.executionFailure ? 'crashed' : 'stopped',
+        active.executionFailure ?? (packageFailed ? this.#startFailure() : undefined),
+      ).catch(() => undefined);
       if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
     }
     active.resolveClosed();
@@ -220,11 +229,18 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   private async runtimeExited(pluginInstanceId: string, active: ActiveBundled): Promise<void> {
     if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
     active.valid = false;
-    await active.startSettled;
-    if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
-    active.stopping = true;
-    this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);
-    await this.finishStop(pluginInstanceId, 'execution_worker_exited', 'crashed');
+    active.executionFailure = this.#startFailure();
+    // Revoke Host publications before joining startup or package cleanup.
+    try {
+      await active.onRuntimeExit?.();
+    } finally {
+      await active.startSettled;
+      if (this.#active.get(pluginInstanceId) === active && !active.stopping) {
+        active.stopping = true;
+        this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);
+        await this.finishStop(pluginInstanceId, 'execution_worker_exited', 'crashed');
+      }
+    }
   }
 
   private async finishStop(
@@ -245,7 +261,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       try {
         const state =
           terminalState === 'crashed' && this.#startEpoch.get(pluginInstanceId) !== epoch ? 'stopped' : terminalState;
-        await this.setBundledRuntimeState(authority, state);
+        await this.setBundledRuntimeState(authority, state, state === 'crashed' ? active.executionFailure : undefined);
       } finally {
         if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
         active.resolveClosed();

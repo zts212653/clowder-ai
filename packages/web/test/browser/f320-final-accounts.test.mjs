@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
@@ -28,7 +28,12 @@ async function addCodexAccount(page, note) {
   await page.getByRole('button', { name: '+ 添加账号', exact: true }).click();
   await page.getByRole('button', { name: 'Codex · 登录另一个账号', exact: true }).click();
   await page.getByRole('textbox', { name: '账号备注' }).fill(note);
+  const loginStarted = page.waitForResponse(
+    (response) => response.url().endsWith('/codex/login/start') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: '创建并开始登录' }).click();
+  const response = await loginStarted;
+  assert.equal(response.status(), 200, await response.text());
 }
 async function readCodexAccount(page, accountRef) {
   const response = await page.request.get(`${preview.url}/api/accounts`, { headers: { 'x-cat-cafe-user': 'fixture' } });
@@ -37,6 +42,95 @@ async function readCodexAccount(page, accountRef) {
   assert.ok(account?.codex);
   return account.codex;
 }
+test(
+  'terminal recovery stays beside status with one primary action in both languages and narrow layouts',
+  { timeout: 240000 },
+  async () => {
+    for (const language of ['zh', 'en']) {
+      for (const width of [1440, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: 1050 } });
+        const errors = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        try {
+          await page.goto(`${preview.url}/settings?s=accounts&shell=v2`, { waitUntil: 'domcontentloaded' });
+          const note = `recovery-${language}-${width}`;
+          await addCodexAccount(page, note);
+          await page.evaluate((value) => localStorage.setItem('cat-cafe:shell-language', value), language);
+          await page.reload();
+          const row = page
+            .locator('[data-account-id]')
+            .filter({ has: page.getByRole('button', { name: note, exact: true }) });
+          for (const state of ['waiting', 'failed']) {
+            const primary =
+              language === 'zh' ? (state === 'waiting' ? '取消' : '重试') : state === 'waiting' ? 'Cancel' : 'Retry';
+            await row.getByRole('button', { name: primary, exact: true }).waitFor();
+            if (state === 'failed') {
+              assert.equal(
+                (await readCodexAccount(page, await row.getAttribute('data-account-id'))).attempt.state,
+                'failed',
+              );
+            }
+            const recovery = row
+              .locator('td')
+              .nth(2)
+              .getByRole('button', {
+                name: language === 'zh' ? '打开登录终端' : 'Open login terminal',
+                exact: true,
+              });
+            await recovery.scrollIntoViewIfNeeded();
+            assert.equal(await recovery.isVisible(), true);
+            assert.deepEqual(await row.locator('.account-row-actions > .account-button').allTextContents(), [primary]);
+            assert.equal(await recovery.evaluate((button) => getComputedStyle(button).borderTopWidth), '0px');
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+            const bounds = await recovery.boundingBox();
+            assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.height >= 24);
+            if (process.env.F320_EVIDENCE_DIR) {
+              await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+              await page.screenshot({
+                path: join(process.env.F320_EVIDENCE_DIR, `terminal-recovery-${language}-${state}-${width}.png`),
+                fullPage: true,
+              });
+            }
+            const previous = preview.captureLoginAttempt();
+            await recovery.focus();
+            await Promise.all([
+              page.waitForResponse(
+                (response) => response.url().endsWith('/codex/login/start') && response.request().method() === 'POST',
+              ),
+              recovery.press('Enter'),
+            ]);
+            assert.equal(preview.captureLoginAttempt().terminal, true);
+            if (state === 'waiting') {
+              assert.equal(previous.wasAborted(), true);
+              preview.captureLoginAttempt().fail('fixture browser did not open');
+            }
+          }
+          await row.getByRole('button', { name: language === 'zh' ? '取消' : 'Cancel', exact: true }).click();
+          assert.deepEqual(errors, []);
+        } catch (error) {
+          if (process.env.F320_EVIDENCE_DIR) {
+            await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+            await page.screenshot({
+              path: join(process.env.F320_EVIDENCE_DIR, `terminal-recovery-failure-${language}-${width}.png`),
+              fullPage: true,
+            });
+          }
+          console.log('terminal recovery fixture failure:', {
+            language,
+            width,
+            errors,
+            body: (await page.locator('body').innerText()).slice(-2200),
+            server: preview.output.slice(-8),
+          });
+          throw error;
+        } finally {
+          await page.close();
+        }
+      }
+    }
+  },
+);
+
 test(
   'accepted v2 entry keeps native default, adds an independent row, confirms full-local swap, and updates members',
   { timeout: 120000 },
@@ -66,8 +160,25 @@ test(
       const row = list
         .locator('[data-account-id]')
         .filter({ has: page.getByRole('button', { name: '主号', exact: true }) });
-      await row.getByText(/终端已打开/).waitFor();
+      await row.getByText(/等待浏览器授权/).waitFor();
       assert.equal(await row.getByText('正在用', { exact: true }).count(), 0);
+      if (process.env.F320_EVIDENCE_DIR) {
+        await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.F320_EVIDENCE_DIR, 'login-background-fallback.png'),
+          fullPage: true,
+        });
+      }
+      const backgroundLogin = preview.captureLoginAttempt();
+      assert.equal(backgroundLogin.terminal, false);
+      await Promise.all([
+        page.waitForResponse(
+          (response) => response.url().endsWith('/codex/login/start') && response.request().method() === 'POST',
+        ),
+        row.getByRole('button', { name: '打开登录终端', exact: true }).click(),
+      ]);
+      assert.equal(backgroundLogin.wasAborted(), true);
+      assert.equal(preview.captureLoginAttempt().terminal, true);
       const companyLogin = preview.captureLoginAttempt();
       const failedList = async (route) => {
         const request = route.request();
@@ -84,7 +195,7 @@ test(
       await row.getByText('已取消这次登录', { exact: true }).waitFor();
       assert.equal(companyLogin.wasAborted(), true);
       await row.getByRole('button', { name: '重试', exact: true }).click();
-      await row.getByText(/终端已打开/).waitFor();
+      await row.getByText(/等待浏览器授权/).waitFor();
       await page.unroute('**/api/accounts**', failedList);
       companyIdentity = await preview.captureLoginAttempt().complete();
       await row.getByText('已登录', { exact: true }).waitFor();
@@ -210,7 +321,7 @@ test(
       const row = page
         .locator('[data-account-id]')
         .filter({ has: page.getByRole('button', { name: '私人', exact: true }) });
-      await row.getByText(/终端已打开/).waitFor();
+      await row.getByText(/等待浏览器授权/).waitFor();
       const cancelledLogin = preview.captureLoginAttempt();
       cancelledLogin.keepPendingAfterAbort();
       const ref = await row.getAttribute('data-account-id');
@@ -219,13 +330,13 @@ test(
       await row.getByText('已取消这次登录', { exact: true }).waitFor();
       assert.equal(cancelledLogin.wasAborted(), true);
       await row.getByRole('button', { name: '重试', exact: true }).click();
-      await row.getByText('正在准备官方终端登录', { exact: true }).waitFor();
+      await row.getByText('正在准备官方登录', { exact: true }).waitFor();
       const queued = await readCodexAccount(page, ref);
       assert.equal(queued.attempt.state, 'queued');
       assert.notEqual(queued.attempt.id, original.attempt.id);
       assert.equal(queued.attempt.identity, undefined);
       const lateIdentity = await cancelledLogin.complete();
-      await row.getByText(/终端已打开/).waitFor();
+      await row.getByText(/等待浏览器授权/).waitFor();
       const retry = preview.captureLoginAttempt();
       const waiting = await readCodexAccount(page, ref);
       assert.equal(waiting.attempt.id, queued.attempt.id);
@@ -268,7 +379,7 @@ test(
       const row = page
         .locator('[data-account-id]')
         .filter({ has: page.getByRole('button', { name: '重复主号', exact: true }) });
-      await row.getByText(/终端已打开/).waitFor();
+      await row.getByText(/等待浏览器授权/).waitFor();
       assert.ok(companyIdentity);
       await preview.captureLoginAttempt().complete(companyIdentity);
       await row.getByRole('button', { name: '去处理', exact: true }).click();
@@ -282,6 +393,75 @@ test(
       assert.equal(await page.getByRole('button', { name: '重复主号', exact: true }).count(), 0);
       await existing.getByText('已登录', { exact: true }).waitFor();
       assert.equal((await preview.reply('fixture after explicit duplicate removal')).accountRef, ref);
+    } finally {
+      await page.close();
+    }
+  },
+);
+
+test(
+  'native default quota survives reload and refreshes identity after an external sign-in change on the same page',
+  { timeout: 60000 },
+  async () => {
+    const accountsPath = join(preview.root, '.cat-cafe/accounts.json');
+    const accounts = JSON.parse(await readFile(accountsPath, 'utf8'));
+    delete accounts.codex;
+    await writeFile(accountsPath, JSON.stringify(accounts));
+    const nativeHome = join(preview.root, '.codex');
+    await mkdir(nativeHome, { recursive: true });
+    const signIn = async (suffix) => {
+      const claims = Buffer.from(
+        JSON.stringify({
+          'https://api.openai.com/auth': {
+            chatgpt_user_id: `fixture-${suffix}`,
+            chatgpt_account_id: `fixture-workspace-${suffix}`,
+          },
+        }),
+      ).toString('base64url');
+      await writeFile(
+        join(nativeHome, 'auth.json'),
+        JSON.stringify({
+          tokens: {
+            id_token: `x.${claims}.x`,
+            account_id: `fixture-workspace-${suffix}`,
+            access_token: 'fixture-access',
+          },
+        }),
+      );
+    };
+    await signIn('one');
+    preview.setQuota('body');
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+    try {
+      await page.goto(`${preview.url}/settings?s=accounts&shell=v2`, { waitUntil: 'domcontentloaded' });
+      const row = page.locator('[data-account-id="codex"]');
+      await row.getByRole('button', { name: '查额度', exact: true }).click();
+      await row.getByText('剩 70%', { exact: true }).waitFor();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await row.getByText('剩 70%', { exact: true }).waitFor();
+      assert.equal(JSON.parse(await readFile(accountsPath, 'utf8')).codex, undefined);
+      if (process.env.F320_EVIDENCE_DIR) {
+        await mkdir(process.env.F320_EVIDENCE_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.F320_EVIDENCE_DIR, 'native-default-quota.png'),
+          fullPage: true,
+        });
+      }
+      await signIn('two');
+      preview.setQuota('headers');
+      const refreshed = page.waitForResponse(
+        (response) =>
+          response.url().endsWith('/api/accounts/codex/codex/quota') && response.request().method() === 'POST',
+      );
+      await row.getByRole('button', { name: '刷新额度', exact: true }).click();
+      const result = await (await refreshed).json();
+      assert.equal(result.quota.owner.userId, 'fixture-two');
+      assert.equal(result.quota.items[0].usedPercent, 40);
+      await row.getByText('剩 60%', { exact: true }).waitFor();
+      assert.equal(await row.getByText('剩 70%', { exact: true }).count(), 0);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await row.getByText('剩 60%', { exact: true }).waitFor();
+      assert.equal(await row.getByText('剩 70%', { exact: true }).count(), 0);
     } finally {
       await page.close();
     }

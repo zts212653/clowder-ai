@@ -55,7 +55,7 @@ test('real ACP Host preserves a Pi load failure instead of silently starting a r
       workingDirectory: root,
       sessionId: 'old-native-id',
     });
-    assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'prompt_failure');
+    assert.equal(messages.find((m) => m.type === 'error')?.errorCode, 'init_failure');
     assert.equal(
       messages.some((m) => m.type === 'session_init'),
       false,
@@ -202,10 +202,13 @@ test('a native writer without bridge state blocks recovery until the actual writ
         assert.match(error.cause.data.diagnostics, /writer|写者|占用/i);
         return true;
       });
-      const failure = (
-        await collect(serviceFor(second, root), 'normal', { workingDirectory: root, sessionId: id })
-      ).find((message) => message.type === 'error');
-      assert.equal(failure?.errorCode, 'prompt_failure');
+      const messages = await collect(serviceFor(second, root), 'normal', { workingDirectory: root, sessionId: id });
+      const failure = messages.find((message) => message.type === 'error');
+      assert.equal(failure?.errorCode, 'init_failure');
+      assert.equal(
+        messages.some((message) => message.type === 'session_init'),
+        false,
+      );
       assert.match(failure.metadata.cliDiagnostics.safeExcerpt, /writer|写者|占用/i);
       await native.close();
       assert.equal((await second.loadSession(id, root, [])).sessionId, id);

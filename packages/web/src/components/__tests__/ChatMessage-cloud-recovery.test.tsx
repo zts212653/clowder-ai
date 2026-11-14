@@ -7,6 +7,11 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ChatMessage } from '../ChatMessage';
 
+// The shared plugin directory is independent of exact cloud recovery reads.
+vi.mock('@/hooks/usePluginMentionTargets', () => ({
+  usePluginTargets: () => ({ targets: [], knownTargets: [] }),
+}));
+
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://api.test',
   apiFetch: vi.fn(async () => new Response('{}', { status: 200 })),

@@ -175,6 +175,13 @@ export type MessagePublicationOrigin = Pick<
 
 export interface ChatMessage {
   id: string;
+  /** Owner-private browser correlation; not a canonical History id or model-read receipt. */
+  clientMessageId?: string;
+  /** View-only local attempt. Never written to chatStore.messages or offline History snapshots. */
+  sendAttempt?: Pick<
+    import('@/utils/send-attempt-db').SendAttempt,
+    'id' | 'status' | 'error' | 'persistenceError' | 'retryable'
+  >;
   /** View-only Queue projection; never persisted as a second History record. */
   queuedEntryId?: string;
   /** RFC #1356 canonical sender identity for persisted messages. */
@@ -725,6 +732,7 @@ export type CatStatusType =
 /** F39: Queue entry from backend InvocationQueue */
 export interface QueueEntry {
   id: string;
+  clientMessageId?: string;
   threadId: string;
   userId: string;
   content: string;
@@ -777,6 +785,8 @@ export interface ComposerDraftInsert {
   threadId: string;
   text: string;
   imageUrls?: string[];
+  /** Server-owned non-image blocks, including recoverable file descriptors. */
+  preservedBlocks?: MessageContent[];
   contextAttachments?: ContextAttachment[];
   /** Draft-only edit operation; never enters the durable message contract. */
   removeContextAttachmentIds?: string[];

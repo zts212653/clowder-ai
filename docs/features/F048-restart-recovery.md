@@ -8,10 +8,10 @@ created: 2026-02-28
 
 # F048: Restart Recovery — 重启自愈（Invocation/Queue 恢复）
 
-> **Status**: Phase A done / Phase A+ done / Phase B idea / Phase C in progress | **Owner**: Ragdoll → 金渐层（Phase A+）→ Ragdoll（@opus55，Phase C）
+> **Status**: done | **Completed**: 2026-11-13 | **Owner**: Ragdoll → 金渐层（Phase A+）→ Ragdoll（@opus55，Phase C）
 > **Created**: 2026-02-28
 > **Priority**: P1（Phase A+A+ 已交付）
-> **Phase**: A ✅ / A+ ✅ / B idle / C 🚧（代码已合入 #6873，等首次重启实测 AC-C7）
+> **Phase**: A ✅ / A+ ✅ / B ✅（由 F117 Phase D / ADR-043 交付）/ C ✅（#6873 + #6957；2026-11-13 boot 87 真实重启验收通过）
 
 ---
 
@@ -32,8 +32,8 @@ created: 2026-02-28
 先查看原对话的实际状态，再明确请原负责人继续。
 
 主动停止、仍有进程保护、已在等待或处理队列、守望猫，以及连续被重启打断的自动续做，
-不会再次自动叫回。续做不会复活上一轮已退役的会话授权。本阶段仍保留 AC-C7 的首次
-实际重启验收缺口，不能把源码合入说成当前运行版本已经完成恢复验证。
+不会再次自动叫回。续做不会复活上一轮已退役的会话授权。2026-11-13 第一次在真实重启里看到
+猫被打断后自动叫回并接着干（boot 87），手动停掉的不叫回在 boot 82 验过。
 
 分两段交付（2026-03-06 三猫讨论决策）：
 
@@ -57,6 +57,8 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 - `InvocationQueue` 迁到 Redis
 - 重启后恢复排队条目并继续消费
 - `processing` 条目回滚语义
+
+> **2026-11-13 核对（Ragdoll/opus55）**：这三件事已由 F117 Phase D 做完，现行设计见 ADR-043（2026-10-15 #5576 起在 main）。`InvocationQueue` 的真相在 `queue-ledger/RedisQueueLedgerStore.ts`，入队即持久化，重启直接从 Redis 读回；启动时 `StartupReconciler.ts` 逐个线程恢复排队、继续消费；领取、提交、放回由 Lua/CAS 原子完成。F048 不再单独做 Phase B。You 同意按「已由别的改动做完」处理（`[thread-id]` 消息 `private-source-id`），Siamese（gemini-argon）独立核对放行（消息 `private-source-id`）。
 
 ### Phase C — 重启后自动叫回被打断的猫
 
@@ -89,9 +91,9 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 
 ## Acceptance Criteria — Phase B（后续）
 
-- [ ] 重启后：队列不丢（queued 条目可恢复）
-- [ ] 不出现”双执行”（at-least-once + 去重）
-- [ ] 前端清晰可见：哪些因重启被中断、哪些仍在队列
+- [x] AC-B1: 重启后：队列不丢（queued 条目可恢复）——F117 Phase D：`RedisQueueLedgerStore` 入队即持久化，`StartupReconciler` 启动时 `resumeQueue`（ADR-043「按 thread 建持久队列」）
+- [x] AC-B2: 不出现”双执行”（at-least-once + 去重）——ADR-043：enqueue/claim/commit/restore 为 Lua/CAS 原子转换，已实际 dispatch 的 target 按 History `dispatchRef` 幂等收敛、不再唤起
+- [x] AC-B3: 前端清晰可见：哪些因重启被中断、哪些仍在队列——源消息回执显示「收到，回复中断」、回复保留正文并标「已停止」、下方是「🔁 重启接续」；排队在 QueuePanel「排队等待中」（F117 AC-B5）。Siamese 11-13 在真实 Hub `[thread-id]` 看过
 
 ## Acceptance Criteria — Phase C（重启后自动叫回被打断的猫）
 
@@ -101,7 +103,7 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 - [x] AC-C4: 防循环：如果被打断的那一轮本身就是由续做消息触发的（同一只猫连续两次被重启打断），不再自动叫回，只记日志。这是为了避免「猫的操作把 runtime 弄崩 → 自动叫回 → 又弄崩」的死循环。
 - [x] AC-C5: 尽力而为：某一条投递失败只记日志，不影响启动，也不影响其他猫。
 - [x] AC-C6: 续做那一轮的权限是 `ownerAuthProvenance: 'unknown'`、不带工具限制，不复活已退役的授权。
-- [ ] AC-C7: 真实验收：合入后第一次 runtime 重启（激活本改动那次）时，当时在跑的猫都在原线程收到续做消息并接着干，You 不需要做任何事；被手动停掉的猫不被叫回。
+- [x] AC-C7: 真实验收：合入后第一次 runtime 重启（激活本改动那次）时，当时在跑的猫都在原线程收到续做消息并接着干，You 不需要做任何事；被手动停掉的猫不被叫回。（前半条 boot 87、后半条 boot 82，见 Timeline）
 
 ## Key Decisions
 
@@ -119,7 +121,7 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 | 启动无 reconcile | `index.ts:~467` | 启动流程只有 audit log + CLI config regen |
 | retry 拒绝 `running` | `invocations.ts:76` | 只允许 `failed\|queued`，running → 409 |
 | TaskProgress 也持久化 | `RedisTaskProgressStore.ts` | 前端恢复时会显示”幽灵进度” |
-| InvocationQueue 是内存态 | `InvocationQueue.ts:38` | `private queues = new Map()`，重启丢失 |
+| InvocationQueue 是内存态 | `InvocationQueue.ts:38` | `private queues = new Map()`，重启丢失（2026-02 当时如此；2026-10-15 #5576 起已是 Redis 持久账本，见 ADR-043） |
 
 ## Ghost Branch Audit（2026-02-28 幽灵分支盘点）
 
@@ -153,3 +155,54 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 | Phase A+ R3 | codex（本地） | 放行（云审 P2 补丁确认） | 2026-03-17 |
 | Phase A+ Cloud R1 | codex（云端） | 1 P2（已修） | 2026-03-17 |
 | Phase A+ Cloud R2 | codex（云端） | 👍 通过 | 2026-03-17 |
+| Phase C #6873 | codex61-sol（本地） | 放行 `cc353f07f7` | 2026-11-09 |
+| Phase C #6957 | codex61-sol（本地） | 放行 `e2caaf60e4` | 2026-11-10 |
+| Close 愿景守护 | gemini-argon | 放行（真实 Hub + 日志 + 代码） | 2026-11-13 |
+
+## Completion Gate（2026-11-13）
+
+**愿景对照**：原始诉求是重启后在跑的不卡死、排队的不丢、前端看得清（2026-02-28），以及 You 不用再记谁在跑、重启后挨个喊继续（2026-11-09）。现在：旧进程的执行在启动时收尾；排队在 Redis 持久账本里，启动时恢复消费；被打断的猫在原线程收到「🔁 重启接续」并接着干；手动停掉的不叫回。没得到的：续做轮不带原来的会话授权（AC-C6，按 ADR-042 有意如此）；同一只猫连续两次被重启打断时，第二次不自动叫回（AC-C4，防死循环）；「重启时排着的私有输入不被清」在真实重启里还没有样本（boot 87 时 `queued=0`），由 #6957 的测试覆盖。
+
+**愿景守护**：Siamese（gemini-argon，非作者、非 reviewer）放行，消息 `private-source-id`。他读了日志和代码，并在真实 Hub 打开 `[thread-id]`，看到源消息回执「收到，回复中断」、被打断的回复保留正文并标「已停止」、紧接着的「🔁 重启接续」，以及小太阳带引用头的续做回复。截图在 `.playwright-mcp/[thread-id]/f048-interrupted-and-continuation.png`。他另记了一处：有正文的回复，状态行把「取消」和「中断」都显示成「已停止」，要靠上方回执和下方续做消息区分；他判断读起来没有歧义，不挡关闭。
+
+harness_feedback: none | reason: 纯运行时恢复能力，没有改猫的技能或流程；Phase C 中途暴露的读取修复抢跑已在 #6957 修掉并记入 Timeline。
+
+```yaml
+close_gate_report:
+  feature_id: F048
+  spec_path: docs/features/F048-restart-recovery.md
+  head_sha: ea199f65d7
+  report_date: 2026-11-13
+  ac_matrix:
+    - ac_id: Phase A（6 项，未编号）
+      status: met
+      evidence:
+        - {kind: doc, ref: "Review Gate R1→R5 / Timeline 2026-03-06", description: "启动收尸与 retry 可用，2026-03 交付"}
+      resolution: null
+    - ac_id: AC-A+1..AC-A+6
+      status: met
+      evidence:
+        - {kind: doc, ref: "Review Gate Phase A+ / Timeline 2026-03-17", description: "2026-03 交付；2026-10-15 #5576 起线程提示改由回复自身的中断状态替代（见 Phase A+ 段核对注）"}
+      resolution: null
+    - ac_id: AC-B1..AC-B3
+      status: met
+      evidence:
+        - {kind: doc, ref: "docs/decisions/043-queue-durable-single-ledger.md", description: "持久单账本、原子 claim/commit/restore"}
+        - {kind: pr, ref: "#5576", description: "RedisQueueLedgerStore 引入（2026-10-15）"}
+        - {kind: message, ref: "private-source-id", description: "You 同意按已由别的改动做完处理"}
+        - {kind: message, ref: "private-source-id", description: "Siamese核对代码与真实 Hub 后放行"}
+      resolution: null
+    - ac_id: AC-C1..AC-C6
+      status: met
+      evidence:
+        - {kind: pr, ref: "#6873", description: "9a80b457a9，codex61-sol 放行 cc353f07f7"}
+        - {kind: test, ref: "packages/api/test/restart-continuation.test.js"}
+      resolution: null
+    - ac_id: AC-C7
+      status: met
+      evidence:
+        - {kind: pr, ref: "#6957", description: "35b33a5310，读取修复等启动恢复完成"}
+        - {kind: message, ref: "private-source-id", description: "boot 87 续做消息，小太阳接着干"}
+        - {kind: commit, ref: "2d9a1ee19c", description: "boot 87 与 boot 82 真实重启记录"}
+      resolution: null
+```

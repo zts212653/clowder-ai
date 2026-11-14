@@ -103,6 +103,8 @@ test('a watcher nudge uses one ordinary message and exact target; quiet retries 
     assert.equal(next.json().messageId, first.json().messageId);
     const message = await f.messages.getById(first.json().messageId);
     assert.ok(message.content.startsWith('@codex\n'));
+    assert.ok(message.content.includes(`?message=${f.source.responseSettlement.messageId})`));
+    assert.deepEqual(message.extra.targetCats, ['codex']);
     assert.deepEqual(f.queued[0].input.targetCats, ['codex']);
     assert.equal(f.queued[0].input.exactTargets, true);
     assert.equal(

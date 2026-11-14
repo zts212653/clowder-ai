@@ -10,7 +10,7 @@ related_features: [F128, F192, F201, F210, F211, F212, F186, F188, F311]
 
 > **L0 §8** = Tier 1（高频日常反射，15 条直接进 native L0 注入）
 > **本文档** = Tier 1 完整 fallback + Tier 2（场景专项，低频但 trigger 明确）
-> **数据驱动 iterate**: F192 Phase F `eval:capability-wakeup` per-cat per-scenario miss rate verdict → L0 §8 v2
+> **维护依据**：真实使用中的可达性、误触发、漏用与具体结果；有明确比较问题时在原任务用 eval-design，不依赖旧平台周报。
 
 ## 分类轴：先过 reachability gate，再分 enforcement tier
 
@@ -25,7 +25,7 @@ L0 §8 trigger 写了 ≠ 猫真用。判断"为什么 miss + 怎么修"必须�
 - **Tier B · habit-resistant**：有零摩擦默认（纯文字 / 报路径）抢活，赶活时偷懒默认必赢。L0 advisory 必输，需 forcing function（hook：偷懒瞬间主动拦）。例：`rich-messaging` / `browser-preview` / `workspace-navigator`（补完可达性后仍是 B）
   - hook 守 KD-8：只给数据（"你提了 3 个路径 workspace 开了 0"），不替猫判断开哪个
 
-> **为什么先 reachability**：把 reachability 误判当 Tier B 去开 hook = 开错药——给一个"以为自己没这工具"的猫弹"要不要打开？"，他回"我没这工具"。hook 治不了误判。F192 Phase F eval 只测**过了筛子 0 的真 Tier B**。
+> **为什么先 reachability**：把 reachability 误判当 Tier B 去开 hook = 开错药——给一个"以为自己没这工具"的猫弹"要不要打开？"，他回"我没这工具"。hook 治不了误判。效用比较只纳入**过了筛子 0 的真 Tier B**，不把调不到工具算成行为失败。
 
 ### 实战：原"一刀切 Tier B"三能力过筛后分化（opus-48 catch，每条带实测凭证）
 
@@ -102,7 +102,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：先 `pnpm convention-graph:index -- --repo .`，再 `pnpm convention-graph:code-consumers -- --repo . --domain <domain> --kind <kind> --name <name>`；`freshness.stale=true` 先 reindex
 **Hard guard**：`sop-definitions/development.yaml` 的 `impl-convention-graph-before-convention-edit` 对约定面 changedFiles 要求成功 `code-consumers` 命令
-**Eval**：`eval:capability-wakeup` 规则 `convention-graph-before-convention-surface-edit` 统计 changedFiles → convention graph usage/miss
+**历史 Eval 规则（自动评估已停用）**：`eval:capability-wakeup` 的 `convention-graph-before-convention-surface-edit` 曾统计 changedFiles → convention graph usage/miss
 **边界**：普通函数调用继续用 LSP/grep；约定图看的是 repo-specific convention edge，不替代类型系统
 
 ### 6. `pencil-design` — .pen 设计文件 + React 代码导出
@@ -170,16 +170,11 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **Tools**：读 `cliDiagnostics` / safe excerpt / `debugRef`
 **Fallback**：直接 ssh 到 runtime worktree 看 stderr log（operator ops only）
 
-### 12. F192 Eval Hub / Verdict Handoff
+### 12. eval-design 具体效用比较
 
-**坏直觉**：口头说"修了" / "已优化"
-**场景 trigger**：
-- SOP / harness / tool 改完不知道是 fix / build / sunset / keep_observe
-- 需要 acted-on 闭环证据
-- harness 漂移检测
-
-**Tools**：`eval:a2a` / `eval:memory` / `eval:sop` domain registry + verdict bundles + re-eval closure
-**边界**：本 PR 触发 `eval:capability-wakeup` 新 domain（Phase F）—— L0 §8 trigger reflex 自己也需要 eval
+**场景 trigger**：有明确 consumer，需要判断某个候选是否更有效、校准量尺，或设计干预与独立验收。
+**用法**：加载 `eval-design`，在原任务写清对象/版本、真实样本与对照、判断和校准、成本、独立验收及采用条件，交回原 owner。
+**边界**：确定性 bug 走 debugging / tdd；单次交付走 quality-gate。使用方法不要求注册 F192、publish_verdict、创建 Program 或自动复评；既有 Program 的正式证据仍走当前 owner 契约。
 
 ### 13. `search_evidence` + drilldown（F209 evidence recall 优化）
 
@@ -221,10 +216,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **用法**：加载 `context-self-management` skill → 三问（线/树? 干净断点? 压几轮?）+ 2×2 矩阵 → handoff / 续 / 冲刺；handoff 走 `cat_cafe_propose_session_handoff` 写五件套（人来 gate）
 **vs `cross-cat-handoff`**：那个是把活交给**别的猫**；这个是封印**自己** spawn 干净的自己
 **enforcement tier**：候选 Tier A（系统信号显式到达 = 自带 forcing function），但有"无视/反射"两种偷懒默认 → 由 eval 定夺
-**eval（F192 `eval:capability-wakeup`）**：
-- activation：warn + 干净断点时 `propose_session_handoff` 调用率；脏/中途时是否正确**不** handoff（避免过度触发）
-- friction：续接 session 第一个 invocation 是否引用五件套
-- sunset：连续 N 周 0 调用 → 唤醒路径无效，重评（demote / 改写 trigger）
+**验证**：遇到具体续接问题时，在原任务看实际 handoff、续接材料与结果；有明确效用判断再用 eval-design 设计比较，不新建周期评估。
 
 ---
 
@@ -289,7 +281,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **边界**：重复错误/SOP/知识沉淀走 `self-evolution`；确定性 bug 走 test/guard；运行健康走 F153 logs/metrics/traces；未知 owner 不猜投，用 F311 admission identity + typed blocker 保持诚实
 
-**Eval**：`eval:capability-wakeup` 的机械规则只统计它能确定判别的显式具体目标；语义型直接目标留给 rubric judge，不能靠扩写 regex 偷渡进机械分母。连续 miss 再决定是否晋升 Tier 1
+**历史 Eval 规则（自动评估已停用）**：`eval:capability-wakeup` 的机械规则只统计它能确定判别的显式具体目标；语义型直接目标留给 rubric judge，不能靠扩写 regex 偷渡进机械分母。当前 Tier 调整沿下方维护协议。
 
 ---
 
@@ -303,9 +295,9 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 | 一个个 @ 召集猫开会 | `cat_cafe_multi_mention` | 一次性 @ 多猫进同 thread（L0 §7 quick index 有，但 trigger 易忘） |
 | 讨论纪要 / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
 | 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
-| 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_propose_profile_update` | 提议更新 relationship primer（F231）；回答”operator是谁 / 咱们怎样相处”，不是通用质量判断；owner-wide 共享事实加 `targetLayer:'corpus'`；工具在 deferred list 需先 `tool_search` |
-| operator表达可复用的审美/品味/质量/设计或工程判断（正向“这就对了”或负向“太客服了”） | `cat_cafe_propose_taste` | 提议 taste vignette（F221）；回答“什么样的输出/系统才算好”，不是个人事实或重复流程规则；误投 profile 时有 `routing_advisory` |
-| 当轮确认了稳定人名↔workspace handle/别名，或人物私域事实/关系/互动，却当成一次性上下文放过 | `cat_cafe_propose_entity` / `cat_cafe_propose_person_memory` | 已查证、带 provenance 的 workspace 定位别名走 entity；owner-private 人物事实/关系/互动走 person-memory；两类同时成立则分别提案、分别审批。禁止裸名字猜身份或静默写入；工具在 deferred list 需先 `tool_search` |
+| 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_remember`（target `profile`） | 提议更新 relationship primer（F231）；回答”operator是谁 / 咱们怎样相处”，不是通用质量判断；owner-wide 共享事实加 `targetLayer:'corpus'`；各 target 的 payload 字段写在 `remember` 的 schema 里；工具在 deferred list 需先 `tool_search` |
+| operator表达可复用的审美/品味/质量/设计或工程判断（正向“这就对了”或负向“太客服了”） | `cat_cafe_remember`（target `taste`） | 提议 taste vignette（F221）；回答“什么样的输出/系统才算好”，不是个人事实或重复流程规则；误投 profile 时有 `routing_advisory` |
+| 当轮确认了稳定人名↔workspace handle/别名，或人物私域事实/关系/互动，却当成一次性上下文放过 | `cat_cafe_remember`（target `entity` / `person`） | 已查证、带 provenance 的 workspace 定位别名走 entity；owner-private 人物事实/关系/互动走 person；两类同时成立就放进同一次 `remember` 的两条，各自审批。禁止裸名字猜身份或静默写入；工具在 deferred list 需先 `tool_search` |
 | 一看到纠正、表扬或 Magic Word 就默认改关系档案 | 按语义选择 Profile / Taste / `code-as-harness` | 事件形式不决定存储：关于人/关系 → Profile；关于好坏标准 → Taste；重复工具/流程规则 → Harness |
 
 > **MCP 完整速查**：L0 §7 是 quick index（记忆 / 协作 / 任务 / Rich block / Drill-down 5 类）；本表补"能力类但易忘"的。完整工具集 `tool_search` 精确搜或读 `packages/mcp-server/src/tools/`。
@@ -314,14 +306,14 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 ## 维护协议
 
-- **新增 capability**：当家里 ship 一个独有 feature/skill 且operator观察到"做了但猫不知道用" → 加进本文档 Tier 2；连续 N 周 eval verdict miss rate > 30% → promote Tier 1（进 L0 §8）
-- **降级 capability**：F192 `eval:capability-wakeup` verdict 显示某条 Tier 1 miss rate < 5% 持续 4 周 → demote Tier 2（出 L0 §8）
-- **删除 capability**：feature sunset / skill 退役 → 同步删本文档对应条目
-- **数据源**：F192 Phase F `eval:capability-wakeup` weekly verdict bundle（依赖 #748 后 ship）
+- 新增或调整入口：依据真实使用中的漏用/误触发、能力可达性与用户成本，在原任务或维护改动中决定；必要时用 eval-design 比较候选。
+- 升降 Tier：写清具体证据和适用条件，不等待固定周报，不把旧 miss-rate 阈值当自动晋升规则。
+- 能力退役：同步删除当前路标和提示；历史讨论与原始证据保留。
+- 不创建替代 F192 的常驻调度、按猫评分或自动追结案流程。
 
 ## 编辑边界
 
 - L0 §8 是 Tier 1 真相源，本文档是配套 fallback + Tier 2 仓库
 - L0 §8 改 → 必须更新本文档对应条目
 - 本文档 Tier 2 加新条目无需改 L0 §8
-- L0 token budget 触顶时 → eval verdict 数据驱动 demote Tier 1 → Tier 2，不靠手感
+- L0 token budget 触顶时 → 依据真实使用中的漏用、误触发与可达性写明证据，提出 Tier 1 → Tier 2 候选；按 ADR-038 原 review / operator signoff 边界审查后执行，不靠手感，也不等待旧平台 verdict

@@ -4,9 +4,9 @@ related_features: [F039, F047, F086, F122, F167, F173, F183, F233, F254, F264, F
 topics: [message, queue, delivery, lifecycle, context]
 doc_kind: spec
 created: 2026-03-14
-tips_exempt: "2026-11-04: this specification describes the reviewed History append recovery through existing original-message receipt actions; current F117/F047 tips cover that entry, with no separate discovery surface."
+tips_exempt: "2026-11-14: History append and sender-local recovery use existing message receipt/draft actions covered by F117/F047 tips; immediate feedback is automatic and has no separate discovery surface."
 related_decisions: [043]
-updated: 2026-11-04
+updated: 2026-11-14
 ---
 
 # F117: Message Delivery Lifecycle — 消息投递生命周期真相源
@@ -25,6 +25,18 @@ Why: pending delivery, accepted inputs, response outcomes and optional read evid
 本特性把消息形成、持久准入、出队、执行与可见反馈连接起来。详细投递协议见 [RFC](../architecture/message-delivery-handling-handoff-audit.md)，存储与转换决策见 [ADR-043](../decisions/043-queue-durable-single-ledger.md)。
 
 ## User Journey
+
+### 普通聊天的本地发送尝试（2026-11-14，公开 #1988）
+
+普通 ThreadChatSurface 的本人发送先在下一次绘制显示本地尝试；正文、真实附件 Blob、引用和发送选项按用户/thread 写入 IndexedDB，事务成功后才清原生草稿。持久化失败保留输入且不发网络。本地副本默认 TTL=0，不作为服务端已接纳、History、投递、已读或 invocation 的证据。
+
+HTTP、Socket、Queue 和 History 按同一可选 clientMessageId 原位收敛。该字段只是呈现关联，不改变既有 admission 幂等身份、旧行重放或成功目标的终局；本地行不进入选择、引用、导航、阅读检查点及作品来源。
+
+明确拒绝与结果未知分开：未知结果只提供用户触发的只读核对，不自动重发。核对按当前身份与 thread 查询原 key，失败或过期回执不当作“未发送”；Queue 消失后核对失败仍保留恢复入口。取消后不能复用旧 key 重发；撤回正文在交给已挂载的原生草稿 owner 前保留本地副本。切号及迟到响应不得污染另一个身份。
+
+此范围覆盖普通聊天的群聊和单猫视图。新会话首条、领域、interactive 和独立 split 入口保留原准入 owner；#1968/#1970 的高负载性能诊断仍属原线。
+
+### 已准入输入
 
 1. 用户、成员、IM、邮件、插件或通知提交内容、来源、目标、幂等身份与可选发送策略；入口完成自身协议解析和鉴权后调用共同 `send`。
 2. 共同准入解析目标与发送策略，原子提交 source Message 和一条 Queue entry，再通知唯一 drain。未投递的用户／外部输入显示在 Queue Panel。

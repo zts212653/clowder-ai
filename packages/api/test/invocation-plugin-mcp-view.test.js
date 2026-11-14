@@ -2,7 +2,10 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { resolveServersForCat } from '../dist/config/capabilities/capability-orchestrator.js';
-import { bindInvocationPluginMcpView } from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
+import {
+  bindInvocationPluginMcpView,
+  invocationPluginMcpIssues,
+} from '../dist/config/capabilities/invocation-plugin-mcp-view.js';
 import {
   resolveAcpMcpServers,
   resolveDisabledServerIds,
@@ -59,6 +62,21 @@ const read = async (selected, policy = config(), cat = 'codex', options = {}) =>
   );
   return (await iterator.next()).value;
 };
+
+test('unavailable activation is filtered by the provider-neutral consumer and explains the missing capability', async () => {
+  const iterator = bindInvocationPluginMcpView(
+    () =>
+      (async function* () {
+        const servers = resolveServersForCat(config(), 'codex');
+        yield { servers, issues: invocationPluginMcpIssues() };
+      })(),
+    view('alpha', { isCurrent: () => false }),
+  );
+  const { servers, issues } = (await iterator.next()).value;
+  assert.equal(servers.find(({ name }) => name === capabilityId.replaceAll(':', '__')).enabled, false);
+  assert.equal(servers.find(({ name }) => name === 'external').enabled, true);
+  assert.deepEqual(issues, [{ pluginId, capabilityId, reasonCode: 'plugin_activation_unavailable' }]);
+});
 
 test('local activation changes only a registered plugin launch while preserving canonical access decisions', async () => {
   const policy = config({ blockedCats: ['codex'] });

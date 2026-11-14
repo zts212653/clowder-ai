@@ -14,7 +14,7 @@
  */
 
 import { createHmac, randomBytes } from 'node:crypto';
-import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { createTranscriptReadDiagnostics } from '../../../../infrastructure/transcript-read-diagnostics.js';
@@ -488,7 +488,14 @@ export class TranscriptWriter {
       byteOffset += Buffer.byteLength(line, 'utf-8') + 1; // +1 for newline
     }
 
-    await writeFile(join(sessionDir, 'events.jsonl'), `${jsonlLines.join('\n')}\n`, 'utf-8');
+    // Logical Session sealing may already have happened. Publish only a complete archive to readers.
+    const pendingPath = join(sessionDir, `.events.${randomBytes(8).toString('hex')}.tmp`);
+    try {
+      await writeFile(pendingPath, `${jsonlLines.join('\n')}\n`, 'utf-8');
+      await rename(pendingPath, join(sessionDir, 'events.jsonl'));
+    } finally {
+      await unlink(pendingPath).catch(() => {});
+    }
 
     // 2. Write index.json
     const index = {

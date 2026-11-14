@@ -196,7 +196,7 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
 /**
  * F260 Phase A INV-5: Check if an entity has proposal provenance.
  *
- * Entities created via the propose_entity approval flow carry
+ * Entities created via the entity-proposal approval flow carry
  * provenance with source='proposal'. These must be skipped during
  * seed reload to prevent approved proposals from being overwritten
  * by default seed data on server restart.

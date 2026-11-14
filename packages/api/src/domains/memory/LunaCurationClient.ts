@@ -170,7 +170,6 @@ export function createLunaCurationClient(deps: LunaClientDeps) {
             fromMessageId: prepared.input.messages[0].id,
             toMessageId: prepared.input.messages.at(-1)!.id,
             messageCount: prepared.input.messages.length,
-            candidates: [],
           },
         ],
         curationState: {

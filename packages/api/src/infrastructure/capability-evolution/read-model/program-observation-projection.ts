@@ -5,13 +5,14 @@ export interface EvolutionTriggerRegistrationProjection {
   status: 'registered';
   registrationRef: OwnerTruthRefV1;
   domainId: string;
-  channels: readonly ['event', 'quota', 'time'];
+  channels: readonly ('event' | 'quota' | 'time' | 'on_demand')[];
+  automaticStatus?: 'retired';
   policy: {
     mode: 'threshold_or_time';
     eventSource: string;
     threshold: { counter: string; crossingAt: number };
   };
-  nextEvaluationAt: string;
+  nextEvaluationAt?: string;
 }
 
 export interface EvolutionObservationGap {
@@ -110,7 +111,8 @@ export function projectEvolutionObservation(
     return {
       status: 'insufficient',
       connectedEyes: [],
-      ...(registration ? { trigger: registration, nextEvaluationAt: registration.nextEvaluationAt } : {}),
+      ...(registration ? { trigger: registration } : {}),
+      ...(registration?.nextEvaluationAt ? { nextEvaluationAt: registration.nextEvaluationAt } : {}),
       gaps,
     };
   }
@@ -126,7 +128,8 @@ export function projectEvolutionObservation(
       ownerHref: ownerHref(binding.ownerSurfaceRef.ownerFeatureId, binding.joinKey),
     })),
     evidenceProofRefs: setup.evidenceProofRefs,
-    ...(registration ? { trigger: registration, nextEvaluationAt: registration.nextEvaluationAt } : {}),
+    ...(registration ? { trigger: registration } : {}),
+    ...(registration?.nextEvaluationAt ? { nextEvaluationAt: registration.nextEvaluationAt } : {}),
     gaps: registration ? [] : [gap('trigger_registration_missing', 'F192')],
   };
 }

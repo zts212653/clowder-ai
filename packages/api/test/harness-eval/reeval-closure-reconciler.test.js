@@ -5,10 +5,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID } from '../../dist/infrastructure/harness-eval/capability-wakeup-closure-import.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
-import {
-  createReevalClosureTaskSpec,
-  loadReevalClosureSubjects,
-} from '../../dist/infrastructure/harness-eval/reeval-closure-task-spec.js';
+import { loadReevalClosureSubjects } from '../../dist/infrastructure/harness-eval/reeval-closure-task-spec.js';
 
 const availableRef = (kind, value) => ({ kind, availability: 'available', value });
 
@@ -251,30 +248,6 @@ fixtures: []
     assert.throws(
       () => planReevalClosureEvents(subject({ root: v3 }), '2026-07-18T01:00:00.000Z'),
       /schema-v1 roots only/,
-    );
-  });
-
-  it('TaskRunner wrapper remains idempotent across repeated gates and a new instance', async () => {
-    const eventLog = new MemoryEventLog();
-    const template = subject({ acknowledgeHours: 24 });
-    const loadSubjects = async () => [{ ...template, events: await eventLog.read(template.root.verdictId) }];
-    const options = {
-      eventLog,
-      loadSubjects,
-      now: () => '2026-07-20T00:00:00.000Z',
-      log: { info() {}, warn() {} },
-    };
-    const firstTask = createReevalClosureTaskSpec(options);
-    const firstGate = await firstTask.admission.gate({ taskId: firstTask.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(firstGate.run, true);
-    await firstTask.run.execute(firstGate.workItems[0].signal, firstGate.workItems[0].subjectKey, {});
-    assert.equal((await eventLog.read(template.root.verdictId)).length, 2);
-    assert.equal((await firstTask.admission.gate({ taskId: firstTask.id, lastRunAt: null, tickCount: 2 })).run, false);
-
-    const restartedTask = createReevalClosureTaskSpec(options);
-    assert.equal(
-      (await restartedTask.admission.gate({ taskId: restartedTask.id, lastRunAt: null, tickCount: 1 })).run,
-      false,
     );
   });
 });

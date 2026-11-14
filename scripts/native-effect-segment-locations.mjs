@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { expandPositionalParameters, parameterFrame } from './lib/shell-code-inputs.mjs';
+import { expandPositionalParameters, forkParameterFrame, parameterFrame } from './lib/shell-code-inputs.mjs';
 import { cdReadings, kernelPath } from './lib/shell-directory.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
@@ -53,8 +53,8 @@ export function segmentLocations(segments, cwd, env = process.env) {
  * an operand's value, read with `expandWordValues`). `bindings` is the path's own map; a
  * forgotten map (too many paths) makes every variable unreadable.
  */
-export function segmentContexts(segments, cwd, env = process.env, builtinContexts = []) {
-  return judgedPaths(segments, cwd, env, builtinContexts).map((judged) => {
+export function segmentContexts(segments, cwd, env = process.env, builtinContexts = [], initialScope = {}) {
+  return judgedPaths(segments, cwd, env, builtinContexts, initialScope).map((judged) => {
     const seen = new Map();
     for (const path of judged) {
       for (const directory of directoriesOf(path.location)) {
@@ -66,10 +66,17 @@ export function segmentContexts(segments, cwd, env = process.env, builtinContext
   });
 }
 
-function judgedPaths(segments, cwd, env, builtinContexts = []) {
+function judgedPaths(segments, cwd, env, builtinContexts = [], initialScope = {}) {
   const start = cwd === undefined ? UNKNOWN : { logical: cwd, physical: kernelPath(cwd) ?? cwd };
   let paths = [
-    { location: start, bindings: new Map(), parameters: parameterFrame(), status: 'ok', frames: [], skipped: [] },
+    {
+      location: start,
+      bindings: new Map(initialScope.bindings),
+      parameters: forkParameterFrame(initialScope.parameters ?? parameterFrame()),
+      status: 'ok',
+      frames: [],
+      skipped: [],
+    },
   ];
   return segments.map((segment, index) => {
     const shape = segmentShape(segment.text);

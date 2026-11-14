@@ -285,7 +285,7 @@
     {
       "id": "F048",
       "name": "Restart Recovery — 重启自愈（Invocation/Queue 恢复）",
-      "status": "Phase A done / Phase A+ done / Phase B idea / Phase C in progress | **Owner**: Ragdoll → 金渐层（Phase A+）→ Ragdoll（@opus55，Phase C）",
+      "status": "done | **Completed**: 2026-11-13 | **Owner**: Ragdoll → 金渐层（Phase A+）→ Ragdoll（@opus55，Phase C）",
       "file": "F048-restart-recovery.md"
     },
     {
@@ -1173,7 +1173,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + Phase I dual-trigger control plane) | **Owner**: Ragdoll | **Truth sync**: 2026-08-25",
+      "status": "in-progress (Phase S PR1/PR2 已正式生效并验收；路线图 PR3–PR5 尚未实施) | **Owner**: Ragdoll | **Truth sync**: 2026-11-13",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1967,6 +1967,12 @@
       "name": "守望猫（别每次都靠你来想起来）",
       "status": "in-progress | **Owner**: Ragdoll (@fable-5) 判断席 · 架构稿 小星星 (@codex-astra) · 北极星稿与施工指挥 Ragdoll (@opus55) · 施工：交付一 小太阳 6.1 (@codex61-sol)，交付二、三 Ragdoll (@opus55) | **Priority**: P1",
       "file": "F335-watcher-cat.md"
+    },
+    {
+      "id": "F337",
+      "name": "停止原因感知 — 合盖接续、派活前看见怎么停的",
+      "status": "in-progress | **Owner**: Ragdoll (@opus55) | **Priority**: P1",
+      "file": "F337-stop-reason-awareness.md"
     }
   ]
 }

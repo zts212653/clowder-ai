@@ -255,6 +255,21 @@ To add team members (cats) that use specific providers:
 
 ![Member bound to Bailian provider](docs/setup/setup-member-binding.png)
 
+#### OpenCode connection (CLI / ACP)
+
+For OpenCode-backed members such as the Qwen example above, open **Advanced connection → Adapter** in the current member editor to choose CLI or ACP. Older versions may label this CLI/ACP selector **Transport**. It selects the runtime carrier only; it does not change provider authentication or the API key:
+
+- **CLI (default)**: launches `opencode run` with the bound account's API key / base URL. Prefer this for OpenCode-backed OpenAI-compatible providers.
+- **ACP**: launches a separate `opencode acp` subprocess. It requires a locally working OpenCode ACP setup; it does not repair provider/key configuration by itself.
+
+When ACP is selected, the separate **Transport** field chooses **stdio / HTTP stream** for ACP. It does not switch the member between CLI and ACP; use **Adapter** for that.
+
+Start with CLI to verify connectivity. If ACP reports `ACP process exited: code=1`, set **Adapter** back to **CLI**, then run `opencode --version` and `opencode acp` in the same project directory and capture the full subprocess exit output.
+
+Use the OpenAI-compatible **root** base URL (usually ending at `/v1`), not the final `/chat/completions` endpoint. If one model fails under CLI while another model succeeds, treat model/provider availability or compatibility as a troubleshooting direction; a single observation is not enough to diagnose the cause, and this is not evidence that the CLI/ACP selector is missing.
+
+> Other clients have their own carriers and authentication requirements; do not apply these OpenCode commands to them. The tutorial screenshot may show older field names; use the current installed member editor.
+
 ## Optional Features
 
 Clowder works out of the box with model access and Redis (or `--memory` mode). Everything below is opt-in.

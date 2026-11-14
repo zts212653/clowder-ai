@@ -131,7 +131,7 @@ it('retry and cancel publish mutation results and polling before a list refresh 
   await click('fixture create');
   expect(host.textContent).toContain('网络请求超时');
   await click('重试');
-  expect(host.textContent).toContain('终端已打开');
+  expect(host.textContent).toContain('等待浏览器授权');
   expect(host.textContent).not.toContain('网络请求超时');
   expect(polling).toHaveBeenCalledWith(expect.any(Function), 2000);
   await click('取消');
@@ -164,7 +164,7 @@ for (const failure of ['reject', '503'])
     await click('重试');
     await act(async () => failOld());
     expect(host.textContent).not.toContain('stale list failed');
-    expect(host.textContent).toContain('终端已打开');
+    expect(host.textContent).toContain('等待浏览器授权');
     const polling = interval.mock.calls.findLast((call) => call[1] === 2000)?.[0];
     expect(typeof polling).toBe('function');
     currentFails = true;

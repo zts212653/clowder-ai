@@ -172,6 +172,16 @@ cited_by:
 
 # Harness Eval Control Plane
 
+## Automatic retirement (F192 Phase S, 2026-11-13)
+
+PR1 retires daily/weekly/N-day domain production, threshold-event dispatch and the F266 periodic
+closure reconciler. Scheduler identities remain explicitly disabled; startup no longer composes
+an automatic repair/reevaluation dispatcher or source-map observer. Existing Task/case/Approval
+truth and authenticated closure interfaces stay with their current owners. F311 temporarily keeps
+its explicit on-demand round bridge and F267 checks until the separately scoped project migration.
+This changes execution availability, not canonical ownership. The in-flight snapshot and deployment
+boundary are in *(internal reference removed)*; source presence is not runtime activation.
+
 ## Canonical Owner
 
 F192 owns the socio-technical harness evaluation contract: harnesses declare expected behavior, runtime eval observes actual behavior, attribution explains gaps, verdict packets hand off evidence to feature owners, and later eval verifies closure. F313 Phase B extends the friction publisher without activating action custody: each actionable candidate receives one immutable finding artifact, deterministic child packet/bundle and schema-v3 root, while the server derives a separate repair target from canonical feature/thread-owner truth. Schema v3 is known but quarantined until Phase C can cut over atomically, so it creates no F266 case, Approval proposal/card, Task or F167 lease. F266 owns the durable lifecycle control plane after an actionable verdict is admitted: the immutable bundle seeds identity, an append-only Redis event log records authenticated state transitions, a reconciler resurfaces overdue work, and F248 surfaces project canonical state for humans. Its operational acceptance layer also migrates audited legacy v1 roots into stable in-memory cases without rewriting artifacts, binds repair and cadence work to separate TaskStore + F167 responsibilities, and turns `nextEvalAt` into executable re-evaluation work. F254 extends this control plane with one domain adapter: `freshness-closure-replay` resolves only server-owned fixtures or durable closure identity, normalizes raw/snapshot/attribution/provenance evidence, and generates an `eval:freshness` verdict without moving control-plane ownership out of F192/F266. F278 owns the distinct pre-verdict responsibility object for each canonical cat-authored paw-feel signal: MessageStore remains body truth, F245 remains read-only analysis truth, and one append-only source-ref ledger projects duty into `thread_eval_friction`, Workspace「评估」live view, Settings Eval Hub history and the original message without copying marker prose. All four surfaces read the same F278 event projection; none owns a second disposition writer.

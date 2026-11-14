@@ -94,6 +94,26 @@ export function matchesTurnExecutionSource(record: TurnExecutionRecord, query: T
 export type TurnExecutionSourceReadPort = Pick<ITurnExecutionStore, 'get'> &
   Partial<Pick<ITurnExecutionStore, 'listBySource'>>;
 
+/** F337: terminal reason of a turn a machine sleep cut off; its continuation is owed until settled. */
+export const HOST_SLEEP_TERMINAL_REASON = 'host_sleep';
+
+export interface MemberTurnStartedAfterQuery {
+  readonly userId: string;
+  readonly threadId: string;
+  readonly catId: string;
+  readonly startedAfter: number;
+}
+
+export interface RecentSettledTurnQuery {
+  readonly userId: string;
+  readonly threadId?: string;
+  readonly limit: number;
+}
+
+export function assertRecentSettledLimit(limit: number): void {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('invalid recent settled turn page size');
+}
+
 export interface ITurnExecutionStore {
   recordWatcherModelAttempt(
     invocationId: string,
@@ -144,6 +164,14 @@ export interface ITurnExecutionStore {
     settlement: TurnResponseSettlement,
   ): SettleTurnResponseResult | Promise<SettleTurnResponseResult>;
   listSettled(query: SettledTurnQuery): SettledTurnPage | Promise<SettledTurnPage>;
+  /** F337: the newest settled turns first (optionally of one thread); one bounded page, 1–200. */
+  listRecentSettled(query: RecentSettledTurnQuery): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  /** F337: exact — did this member start any non-watcher turn in this thread after `startedAfter`? */
+  hasMemberTurnStartedAfter(query: MemberTurnStartedAfterQuery): boolean | Promise<boolean>;
+  /** F337: failed `host_sleep` turns whose continuation is still owed (recorded atomically at terminal). */
+  listOwedSleepContinuations(): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  /** F337: the continuation was delivered or is no longer owed (the member ran again). */
+  settleOwedSleepContinuations(invocationIds: readonly string[]): void | Promise<void>;
   /**
    * F117 KD-21: records the action fence's verdict on a gated child's output, so every later
    * settlement reads it instead of a process-local decision. The fence only moves forward

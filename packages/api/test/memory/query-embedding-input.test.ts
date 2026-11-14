@@ -40,6 +40,8 @@ async function fixture(t: TestContext, modelId: string) {
   ensurePassageVectorTable(db, 4);
   const passages = new PassageVectorStore(db, 4);
   const vectors = new VectorStore(db, 4);
+  const model = { modelId, modelRev: '1', dim: 4 };
+  vectors.initMeta(model);
   db.prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES(?,?,?,?)').run(
     'thread-visible',
     'msg-source',
@@ -53,7 +55,7 @@ async function fixture(t: TestContext, modelId: string) {
     load: async () => {},
     reprobeIfNeeded: async () => {},
     isReady: () => true,
-    getModelInfo: () => ({ modelId, modelRev: '1', dim: 4 }),
+    getModelInfo: () => model,
     embed: async (texts: string[]) => {
       calls.push([...texts]);
       return texts.map(() => new Float32Array([1, 0, 0, 0]));

@@ -4,7 +4,7 @@ related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F266, F
 topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
-updated: 2026-11-11
+updated: 2026-11-13
 tips_exempt: 本批活 run 审批回执自动追加，不增加用户操作或配置；原审批入口与闲置猫下轮可见保持不变。
 ---
 
@@ -25,7 +25,6 @@ Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点�
 - 同一次`cat_cafe_remember`接1–4项，经原提交入口得到原提案或直接结果；用现有消息的`meta.memoryGroup`归组，刷新重读同组。
 - UI按原引用找到原卡，把内容、权限、所见版本和逐行批/拒交回原控制器；“修改建议”沿原对话草稿与重提，直接结果按原语义显示。
 - #6937重型批次实现停用；清单、分段、发布状态机、持久command/lease协调、unknown对账和逐项效果证明均不作为当前前置。以后补恢复先有真实失败证据。
-- 正式环境加载归原Task58的g7等待（API与Web包含`ec4c8e03`）；旧八工具仍保留，W4与完整替代的撤旧条件不变，F332整体不关闭。
 
 ### 决议结果回写原线程（2026-10-24）
 

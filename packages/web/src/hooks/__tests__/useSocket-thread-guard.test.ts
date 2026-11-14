@@ -1286,7 +1286,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockThreadQueues.get('thread-B')).toEqual([]);
   });
 
-  it('forwards true recall and late receipt events with their source thread intact', () => {
+  it('forwards true recall and late receipt events with their source thread intact', async () => {
     const onMessageRecalled = vi.fn();
     const onMessageReceiptUpdated = vi.fn();
     const callbacks: SocketCallbacks = {
@@ -1301,7 +1301,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
 
     const recall = { messageId: 'm-recalled', threadId: 'thread-A', verdict: 'exposed' as const };
     const receipt = { messageId: 'm-recalled', threadId: 'thread-A' };
-    act(() => {
+    await act(async () => {
       simulateServerEvent('message_recalled', recall);
       simulateServerEvent('message_receipt_updated', receipt);
     });

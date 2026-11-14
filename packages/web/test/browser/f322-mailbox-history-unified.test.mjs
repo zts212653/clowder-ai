@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const web = fileURLToPath(new URL('../..', import.meta.url)),
   tree = path.resolve(web, '../..');
-const evidence = process.env.F322_HISTORY_EVIDENCE ?? '/tmp/f322-mailbox-history/native';
+const evidence = process.env.F322_HISTORY_EVIDENCE ?? path.join(tmpdir(), 'f322-mailbox-history/native');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function boundedBody(response) {
   let timer;

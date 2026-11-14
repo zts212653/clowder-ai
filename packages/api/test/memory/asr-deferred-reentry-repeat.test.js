@@ -95,6 +95,7 @@ describe('F276 repeated deferred write-opportunity re-entry', () => {
       updatedAt: 500,
     };
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];

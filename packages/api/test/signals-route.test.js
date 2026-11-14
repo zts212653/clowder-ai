@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
@@ -54,7 +56,7 @@ describe('signals routes', () => {
   let today;
 
   beforeEach(async () => {
-    tempRoot = mkdtempSync('/tmp/cat-cafe-signals-route-');
+    tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-signals-route-'));
     prevSignalsRoot = process.env.SIGNALS_ROOT_DIR;
     process.env.SIGNALS_ROOT_DIR = tempRoot;
 

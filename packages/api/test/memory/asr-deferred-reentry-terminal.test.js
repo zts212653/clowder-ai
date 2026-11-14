@@ -59,6 +59,7 @@ describe('F276 deferred re-entry terminal fencing', () => {
     };
     const calls = { released: [], forgotten: [], purged: [], terminals: [] };
     const spec = createDeferredPersonMemoryDailyTaskSpec({
+      isActorEligible: () => true,
       receiptStore: {
         async listReady() {
           return [receipt];
