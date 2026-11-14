@@ -51,6 +51,7 @@ function fileBytes(file: File) {
 }
 export async function saveSendAttempt(attempt: SendAttempt) {
   const { files, previewUrls: _previewUrls, ...record } = attempt;
+  void _previewUrls;
   const stored = await Promise.all(
     files.map(async (file) => ({
       name: file.name,
@@ -63,6 +64,8 @@ export async function saveSendAttempt(attempt: SendAttempt) {
 }
 export async function updateStoredSendAttempt(attempt: SendAttempt) {
   const { files: _files, previewUrls: _previewUrls, ...metadata } = attempt;
+  void _files;
+  void _previewUrls;
   const transaction = (await db()).transaction('attempts', 'readwrite');
   const prior = await transaction.store.get([attempt.ownerUserId, attempt.threadId, attempt.id]);
   if (prior) await transaction.store.put({ ...prior, ...metadata });

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { Redis } from 'ioredis';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { createQueueLedgerAdmission } from '../dist/domains/cats/services/agents/invocation/queue-ledger/QueueLedgerAdmission.js';
 import { RedisQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { projectPublicQueueEntry } from '../dist/utils/queue-enrichment.js';
@@ -56,7 +57,30 @@ test(
       assert.equal((await reopened.getById(restored.id)).clientMessageId, source.idempotencyKey);
 
       const { clientMessageId: _correlation, ...legacySource } = { ...source, idempotencyKey: 'legacy-key' };
-      const legacy = await queue.send(messages, legacySource, { ...input, idempotencyKey: 'legacy-key' });
+      const legacy = await messages.appendWithQueueLedgerAdmission(
+        legacySource,
+        (sourceId) =>
+          createQueueLedgerAdmission({
+            sourceId,
+            messageId: sourceId,
+            threadId: source.threadId,
+            owner: { kind: 'user', userId: 'owner' },
+            kind: 'conversation_input',
+            from,
+            targetCatIds: ['opus'],
+            requestedTargetCats: ['opus'],
+            content: source.content,
+            intent: 'execute',
+            ownerAuthProvenance: 'strict',
+            enqueuedAt: 100,
+          }),
+        ledger,
+      );
+      assert.equal(
+        (await ledger.list('thread')).find((row) => row.payload.messageId === legacy.message.id)?.payload
+          .clientMessageId,
+        undefined,
+      );
       const replay = await queue.send(
         reopened,
         { ...legacySource, clientMessageId: 'legacy-key' },
