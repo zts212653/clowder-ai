@@ -14,6 +14,7 @@ import type {
 } from '@cat-cafe/shared';
 import { backgroundImageUrlSchema, createCatId } from '@cat-cafe/shared';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
+import { planAgyAccountBinding } from './agy-account-binding.js';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import type { AcpVariantConfig } from './cat-config-loader.js';
@@ -404,6 +405,14 @@ export function readRuntimeAccountMembers(projectRoot: string): CatCafeConfig {
 }
 
 /** One synchronous catalog commit for the complete confirmed selection, never a per-member PATCH loop. */
+export function bindRuntimeAgyAccounts(
+  projectRoot: string,
+  selection: CodexBindingSelection,
+  previewToken: string,
+  accountProjectRoot = projectRoot,
+): CatCafeConfig {
+  return bindRuntimeLocalAccounts(projectRoot, selection, previewToken, accountProjectRoot, 'google');
+}
 export function bindRuntimeClaudeAccounts(
   projectRoot: string,
   selection: CodexBindingSelection,
@@ -425,13 +434,15 @@ function bindRuntimeLocalAccounts(
   selection: CodexBindingSelection,
   previewToken: string,
   accountProjectRoot: string,
-  client: 'openai' | 'anthropic',
+  client: 'openai' | 'anthropic' | 'google',
 ): CatCafeConfig {
   const current = readRuntimeAccountMembers(projectRoot);
   const plan =
     client === 'openai'
       ? planCodexAccountBinding(accountProjectRoot, current, selection)
-      : planClaudeAccountBinding(accountProjectRoot, current, selection);
+      : client === 'google'
+        ? planAgyAccountBinding(accountProjectRoot, current, selection)
+        : planClaudeAccountBinding(accountProjectRoot, current, selection);
   if (plan.previewToken !== previewToken) throw new Error('Binding preview changed; please review it again');
   const targets = new Set(plan.targets.map((target) => target.catId));
   const previous = readLocalAccountSelection(current, client);

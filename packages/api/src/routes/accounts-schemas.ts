@@ -62,6 +62,8 @@ export const createBodySchema = z
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
     claudeToken: claudeTokenSchema,
+    agyOAuth: z.boolean().optional(),
+    agy: z.never().optional(),
     /** F317: a Google Cloud (Vertex AI) account that uses this machine's Google Cloud login for one project. */
     googleCloudProjectId: z.string().trim().regex(GOOGLE_CLOUD_PROJECT_ID, 'google_cloud_project_invalid').optional(),
     modelOverride: z.string().optional(),
@@ -80,6 +82,17 @@ export const createBodySchema = z
     envVars: z.record(envKeySchema, z.string()).optional(),
   })
   .superRefine((value, ctx) => {
+    if (
+      value.agyOAuth &&
+      (value.authType !== 'oauth' ||
+        value.clientId !== 'google' ||
+        value.apiKey !== undefined ||
+        value.baseUrl !== undefined ||
+        value.envVars !== undefined ||
+        value.claudeToken !== undefined ||
+        value.googleCloudProjectId !== undefined)
+    )
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'agy_account_fields_owned' });
     if (value.authType === 'oauth' && value.clientId === 'openai') {
       for (const field of ['apiKey', 'baseUrl', 'envVars'] as const) {
         if (value[field] !== undefined)

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { useShellPresentation } from '@/components/shell/shell-presentation';
 import { apiFetch } from '@/utils/api-client';
+import {
+  canStillReadWorkspaceFile,
+  resolveSourceFailure,
+  type SourceResolutionFailure,
+} from './artifact-file-source-failure';
 import { ContentLandingHeader } from './content-review/ContentLandingHeader';
 import { createFilePreviewSurface, createFileSurface } from './real-surface-adapters';
 import { WorkspaceRootConnectionPanel } from './WorkspaceRootConnectionPanel';
@@ -18,12 +23,6 @@ const targetSchema = z.object({
   worktreeId: z.string().min(1).max(256),
   path: z.string().min(1).max(4096),
   kind: z.literal('file'),
-});
-const inventoryErrorSchema = z.object({
-  error: z.object({
-    code: z.literal('directory_inventory_unavailable'),
-    locations: z.array(z.object({ label: z.string() })),
-  }),
 });
 
 /** F232 is an entrance, never a second writable file host or an authorization source. */
@@ -50,7 +49,7 @@ export function ArtifactFileSourceResolver({
   const presentation = useShellPresentation();
   const usePerFileIdentity = perFileIdentity ?? presentation === 'v2';
   const [attempt, setAttempt] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SourceResolutionFailure | null>(null);
   const [connection, setConnection] = useState<{ scope: string; value: WorkspaceRootConnection } | null>(null);
   const scope = JSON.stringify([path, worktreeId, rootSelection?.root, rootSelection?.expectedEpoch]);
   const callback = useRef(onResolved);
@@ -71,16 +70,16 @@ export function ArtifactFileSourceResolver({
           signal: controller.signal,
         });
         if (!response.ok) {
-          const inventoryError = inventoryErrorSchema.safeParse(await response.json().catch(() => null));
-          if (inventoryError.success) {
-            const names = inventoryError.data.error.locations.map((location) => location.label).join('、');
-            throw new Error(
-              names
-                ? `已登记目录暂时无法核验：${names}。请在 Workspace 文件树核对这些连接后重试。`
-                : '暂时无法核验已登记目录，请核对 Workspace 的目录状态后重试。',
-            );
-          }
-          throw new Error('原位置的文件暂时不可用，请核对文件是否仍在、访问权限是否有效。');
+          const payload = await response.json().catch(() => null);
+          const resolvedFailure = await resolveSourceFailure(
+            response.status,
+            payload,
+            worktreeId,
+            path,
+            controller.signal,
+          );
+          if (!controller.signal.aborted) setError(resolvedFailure);
+          return;
         }
         const body = await response.json();
         if (controller.signal.aborted) return;
@@ -94,8 +93,13 @@ export function ArtifactFileSourceResolver({
             (usePerFileIdentity ? createFilePreviewSurface : createFileSurface)({ ...target, scrollToLine }),
           );
       } catch (cause) {
+        if (controller.signal.aborted) return;
+        const currentRead = await canStillReadWorkspaceFile(worktreeId, path, controller.signal);
         if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : '暂时无法核验原位置，请重试。');
+          setError({
+            kind: currentRead.readable ? 'preview-fallback' : 'blocked',
+            message: cause instanceof Error && cause.message ? cause.message : '暂时无法核验原位置，请重试。',
+          });
       }
     })();
     return () => controller.abort();
@@ -115,11 +119,15 @@ export function ArtifactFileSourceResolver({
           }}
         />
       ) : error ? (
-        <div data-content-opening-state="blocked" className="space-y-3 p-4">
+        <div data-content-opening-state={error.kind} className="space-y-3 p-4">
           <p role="alert" className="text-sm text-cafe-error">
-            {error}
+            {error.message}
           </p>
-          <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+          <button
+            type="button"
+            className="rounded-md border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe hover:bg-cafe-surface-sunken"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
             重试
           </button>
         </div>

@@ -647,6 +647,7 @@ import {
   type TurnExecutionKind,
   type TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
+import type { ToolEventLog } from '../../tool-usage/ToolEventLog.js';
 import type {
   AgentMessage,
   AgentRouteIntent,
@@ -1272,6 +1273,7 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  readonly toolEventLog?: ToolEventLog;
   /** Owner-admitted member context; only its declared native MCP and approved prompt are projected. */
   readonly scopedMemberLaunch?: AgentServiceOptions['pluginNativeLaunch'];
   readonly routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
@@ -4197,6 +4199,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(requestedServiceTier ? { requestedServiceTier } : {}),
       ...(accountEnv ? { accountEnv } : {}),
       ...(resolvedAccount?.claude ? { claudeTokenAccount: true } : {}),
+      ...(resolvedAccount?.agy ? { agyAccount: resolvedAccount.agy } : {}),
       ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
       auditContext: {
         invocationId,
@@ -5683,10 +5686,26 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         yield continuityInfoMessage();
       }
       const generationRecorder = requestGenerationRecorder;
+      const toolEventLog = params.toolEventLog;
+      const onRecallInputUpdate = toolEventLog
+        ? async (message: AgentMessage): Promise<void> => {
+            const safe = await protectNativeProviderResult(message, options);
+            if (!safe.toolUseId || !safe.toolName) return;
+            // The ledger serializes this update with the original append and later result.
+            toolEventLog
+              .updateRecallInput(
+                threadId,
+                { catId, invocationId, toolUseId: safe.toolUseId, toolName: safe.toolName },
+                safe.toolInput,
+              )
+              .catch(() => {});
+          }
+        : undefined;
       const options: AgentServiceOptions = {
         hostSessionId: activeSessionRecordForResume?.id,
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
+        onRecallInputUpdate,
         ...(params.liveCompanion
           ? {
               onLiveInputOutcome: async (receipt: import('../../types.js').LiveProviderInputOutcome) => {
@@ -5987,6 +6006,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           activeServiceIterator = null;
           unclosedServiceIterators.delete(serviceIter);
           break;
+        }
+        if (iterResult.value.type === 'recall_input_update') {
+          await onRecallInputUpdate?.(iterResult.value);
+          continue;
         }
         let msg = await protectNativeProviderResult(iterResult.value, options);
         if (msg.providerTeardown === 'unconfirmed') {

@@ -1,4 +1,6 @@
 /** Shared pure format boundary for read-only account snapshots and explicit legacy migration. */
+
+import { isAbsolute } from 'node:path';
 import type { AccountConfig, CredentialEntry } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { codexManagedAccountSchema } from './codex-account-schema.js';
@@ -33,6 +35,10 @@ const accountSchema = z
     modelAliases: stringRecord.optional(),
     envVars: stringRecord.optional(),
     codex: codexManagedAccountSchema.optional(),
+    agy: z
+      .object({ storage: z.literal('cli_file'), credentialHome: z.string().refine(isAbsolute) })
+      .strict()
+      .optional(),
     claude: z
       .object({ kind: z.literal('long_lived_token') })
       .strict()
@@ -85,6 +91,17 @@ export function parseStoredAccount(value: unknown, source: string): AccountConfi
   const parsed = accountSchema.safeParse({ ...raw, authType: normalizeLegacyAuthType(raw.authType) });
   if (!parsed.success) malformedAccountStore(source);
   if (
+    parsed.data.agy &&
+    (parsed.data.authType !== 'oauth' ||
+      parsed.data.clientId !== 'google' ||
+      parsed.data.codex ||
+      parsed.data.claude ||
+      parsed.data.googleCloud ||
+      parsed.data.baseUrl ||
+      parsed.data.envVars)
+  )
+    malformedAccountStore(source);
+  if (
     parsed.data.claude &&
     (parsed.data.authType !== 'oauth' ||
       parsed.data.clientId !== 'anthropic' ||
@@ -126,6 +143,7 @@ export function canonicalizeAccount(account: AccountConfig) {
     ...(Object.keys(aliases).length ? { modelAliases: aliases } : {}),
     ...(Object.keys(account.envVars ?? {}).length ? { envVars: account.envVars } : {}),
     ...(account.codex ? { codex: account.codex } : {}),
+    ...(account.agy ? { agy: account.agy } : {}),
     ...(account.claude ? { claude: account.claude } : {}),
     ...(account.quota ? { quota: account.quota } : {}),
   };

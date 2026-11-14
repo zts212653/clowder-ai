@@ -45,6 +45,7 @@ import {
   type AcpClient,
   type AcpPermissionHandler,
   AcpProtocolError,
+  AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
@@ -64,6 +65,7 @@ import {
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
+import { settlePendingAcpRecalls } from './acp-tool-events.js';
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
@@ -436,6 +438,7 @@ export class AcpAgentService implements AgentService {
           while (true) {
             const next = await stream.next();
             if (next.done) {
+              if (next.value === 'cancelled' && !signal?.aborted) throw new AcpPromptCancelledError();
               if (this.antigravity && next.value !== 'end_turn')
                 throw new Error(`AGY ACP prompt stopped: ${String(next.value)}`);
               if (!signal?.aborted && typeof next.value === 'string' && next.value !== 'end_turn')
@@ -556,7 +559,7 @@ export class AcpAgentService implements AgentService {
     const ctx = { catId: this.catId, threadId, invocationId };
     // F197 KD-5: per-invocation transformer state for toolCallId dedup + lifecycle tracking.
     // Lifecycle = ACP session/invocation (this generator) — GC'd when invoke() returns.
-    const acpState = createAcpSessionState();
+    let acpState = createAcpSessionState();
 
     // Window 1: pre-aborted signal short-circuits immediately
     if (options?.signal?.aborted) {
@@ -1343,7 +1346,8 @@ export class AcpAgentService implements AgentService {
               ? `${options.resumeFallbackSystemPrompt}\n\n${prompt}`
               : prompt;
 
-          const retryState = createAcpSessionState();
+          acpState = createAcpSessionState();
+          const retryState = acpState;
           let retryEventCount = 0;
           let retryHasResponseOutput = false;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
@@ -1413,6 +1417,11 @@ export class AcpAgentService implements AgentService {
           if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
             sealActivePromptSession(sessionId);
           }
+          if (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+          } else if (retryErr instanceof AcpSessionCancelledError || retryErr instanceof AcpPromptCancelledError) {
+            yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
+          }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
           const terminalFailure = retryErr instanceof AcpTerminalFailureError;
@@ -1456,6 +1465,11 @@ export class AcpAgentService implements AgentService {
       if (this.antigravity && sessionId) sealActivePromptSession(sessionId);
       if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
         sealActivePromptSession(sessionId);
+      }
+      if (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'timeout');
+      } else if (err instanceof AcpSessionCancelledError || err instanceof AcpPromptCancelledError) {
+        yield* settlePendingAcpRecalls(acpState, this.catId, metadata, 'cancelled');
       }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
@@ -1661,6 +1675,12 @@ function hasAcpResponseOutput(message: AgentMessage): boolean {
 }
 
 /** Some providers resolve failed turns as end_turn without forwarding a cause. */
+class AcpPromptCancelledError extends Error {
+  constructor() {
+    super('ACP prompt stopped: cancelled');
+  }
+}
+
 class AcpEmptyResponseError extends Error {
   constructor(providerName: string) {
     super(

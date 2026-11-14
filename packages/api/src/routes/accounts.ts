@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import type { AccountConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { inspectAccountCatalog, readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
+import { prepareAgyAccount } from '../config/agy-account.js';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { deleteCatalogAccount, writeCatalogAccount } from '../config/catalog-accounts.js';
@@ -148,29 +149,33 @@ export const accountsRoutes: FastifyPluginAsync<{
         ...(body.envVars && Object.keys(body.envVars).length > 0 ? { envVars: body.envVars } : {}),
       };
       const managedClaude = body.claudeToken !== undefined;
+      const managedAgy = body.agyOAuth === true;
       if (managedClaude) account = { ...account, claude: { kind: 'long_lived_token' } };
       const googleCloud = body.googleCloudProjectId !== undefined;
       if (body.googleCloudProjectId)
         account = { ...account, googleCloud: { credential: 'local_adc', projectId: body.googleCloudProjectId } };
       const managed = account.authType === 'oauth' && account.clientId === 'openai';
       // Generated IDs never collide with the well-known IDs that native CLI logins resolve by.
-      const profileId = managedClaude
-        ? `claude-${randomUUID()}`
-        : googleCloud
-          ? `google-cloud-${randomUUID()}`
-          : managed
-            ? `codex-${randomUUID()}`
-            : deriveAccountId(
-                body.displayName ?? body.name ?? body.provider ?? 'custom',
-                new Set(readAccountStoreSnapshot(projectRoot).refs),
-                account.authType === 'api_key',
-              );
+      const profileId = managedAgy
+        ? `agy-${randomUUID()}`
+        : managedClaude
+          ? `claude-${randomUUID()}`
+          : googleCloud
+            ? `google-cloud-${randomUUID()}`
+            : managed
+              ? `codex-${randomUUID()}`
+              : deriveAccountId(
+                  body.displayName ?? body.name ?? body.provider ?? 'custom',
+                  new Set(readAccountStoreSnapshot(projectRoot).refs),
+                  account.authType === 'api_key',
+                );
       if (managed)
         account = {
           ...account,
           displayName: account.displayName || 'Codex 账号',
           codex: describeCodexManagedLayout(projectRoot, profileId),
         };
+      if (managedAgy) account = { ...account, agy: prepareAgyAccount(projectRoot, profileId) };
       writeCatalogAccount(projectRoot, profileId, account);
       if (account.codex) {
         account = { ...account, codex: prepareCodexManagedLayout(account.codex, projectRoot) };
@@ -248,9 +253,17 @@ export const accountsRoutes: FastifyPluginAsync<{
       )
         throw new Error('google_cloud_account_fields_owned');
       if (parsed.data.claudeToken && !existing.claude) throw new Error('claude_token_account_required');
+      if (
+        existing.agy &&
+        ((parsed.data.authType && parsed.data.authType !== 'oauth') ||
+          (parsed.data.clientId && parsed.data.clientId !== 'google') ||
+          ['apiKey', 'baseUrl', 'envVars', 'claudeToken'].some((key) => key in parsed.data))
+      )
+        throw new Error('agy_account_fields_owned');
       // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
       const account: AccountConfig = {
         ...(existing.claude ? { claude: existing.claude } : {}),
+        ...(existing.agy ? { agy: existing.agy } : {}),
         ...(existing.codex ? { codex: existing.codex } : {}),
         ...(existing.googleCloud ? { googleCloud: existing.googleCloud } : {}),
         ...(existing.quota ? { quota: existing.quota } : {}),

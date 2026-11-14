@@ -90,7 +90,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
       cleanup();
       throw error;
     }
-    const events = this.events(sessionId, session, source, active, cleanup);
+    const events = this.events(sessionId, session, source, active, cleanup, input.hostOptions?.onRecallInputUpdate);
     let consumed = false;
     return {
       ok: true,
@@ -158,6 +158,8 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
           nativeSessionBinding: message.nativeSessionBinding,
           ephemeralSession: message.ephemeralSession,
         };
+      case 'recall_input_update':
+        return undefined; // Internal ledger observations are not part of the session wire contract.
       case 'text':
         return { ...base, type: 'output', text: message.content ?? '', textMode: message.textMode ?? 'append' };
       case 'tool_use':
@@ -224,6 +226,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
     source: AsyncIterable<AgentMessage>,
     active: ActiveTurn,
     cleanup: () => void,
+    onRecallInputUpdate: AgentServiceOptions['onRecallInputUpdate'],
   ): AsyncGenerator<Contract.AgentSessionEvent> {
     let metadata: Pick<MessageMetadata, 'model'> | undefined;
     let seq = 0;
@@ -237,6 +240,10 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
         const next = await iterator.next();
         sourceReadCompleted = true;
         if (next.done) break;
+        if (next.value.type === 'recall_input_update') {
+          await onRecallInputUpdate?.(next.value);
+          continue;
+        }
         const current = next.value.metadata;
         if (current && !isDeepStrictEqual(metadata, { model: current.model })) {
           metadata = structuredClone({ model: current.model });

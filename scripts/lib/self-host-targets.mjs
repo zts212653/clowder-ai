@@ -231,8 +231,8 @@ function resolveStopTargets(pipelines, observations) {
  */
 export function analyseCommands(raw, cwd, observations = {}) {
   raw = String(raw ?? '');
-  const observed = executedInvocations(raw, { cwd });
-  const chained = executionChainInvocations(raw, { cwd });
+  const observed = executedInvocations(raw, { cwd, builtinContext: true });
+  const chained = executionChainInvocations(raw, { cwd, builtinContext: true });
   observed.pipelines.push(...chained.pipelines);
   const quiet = { stopClass: false, unresolved: false, pids: [], ports: [], deployments: [], text: raw };
   const deployments = stoppedDeploymentsIn(observed.pipelines.flat(), cwd);
@@ -246,7 +246,7 @@ export function analyseCommands(raw, cwd, observations = {}) {
 }
 
 export function hasPatternKiller(raw, cwd) {
-  return executedInvocations(raw, { cwd })
+  return executedInvocations(raw, { cwd, builtinContext: true })
     .pipelines.flat()
     .some(({ name }) => PATTERN_KILLERS.has(name));
 }

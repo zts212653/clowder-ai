@@ -35,11 +35,16 @@ export async function runF322BExecutionLocationJourney({
   viewport,
   language,
   coldStart = false,
+  olderResponse = false,
 }) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
-  const fixture = createF322BControlledFixture(threadId);
+  const fixture = createF322BControlledFixture(threadId, { olderResponse });
+  let allowOlderReads;
+  const olderReadsReady = new Promise((resolve) => {
+    allowOlderReads = resolve;
+  });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((language) => {
@@ -50,6 +55,13 @@ export async function runF322BExecutionLocationJourney({
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === '/api/messages') fixture.calls.push(`history-read:${url.search}`);
+    if (url.pathname === '/api/messages' && url.searchParams.has('before')) {
+      // Hold eager top pagination until activation, so the fast fixture cannot
+      // preload the exact target before we exercise the unloaded-message path.
+      if (olderResponse) await olderReadsReady;
+      fixture.calls.push('older-page-read');
+    }
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(fixture.response(url, request.method()) ?? fixtureForApi(url)),
@@ -108,15 +120,25 @@ export async function runF322BExecutionLocationJourney({
     assert.match(await location.innerText(), language === 'zh' ? /处理中/ : /working/i);
     if (viewport.width === 390) await assertCompactVerbVisible(page, language === 'zh' ? '处理中' : 'Working');
     const bubble = page.locator(`[data-message-id="${fixture.message.id}"]`);
-    await bubble.waitFor();
-    const record = bubble.getByTestId('reply-record-toggle');
-    assert.equal(await record.getAttribute('aria-expanded'), 'false');
+    if (olderResponse)
+      assert.equal(
+        await bubble.count(),
+        0,
+        `Long-running response starts outside the loaded page: ${fixture.calls.filter((call) => call.startsWith('history-read:')).join(', ')}`,
+      );
+    else {
+      await bubble.waitFor();
+      assert.equal(await bubble.getByTestId('reply-record-toggle').getAttribute('aria-expanded'), 'false');
+    }
     const composer = page.locator('[data-testid="chat-input-composer-row"] textarea');
     await composer.fill('这份草稿和选择不能被定位动作改掉');
     await composer.evaluate((input) => input.setSelectionRange(3, 8));
     await location.focus();
     await page.keyboard.press('Enter');
+    allowOlderReads();
+    const record = bubble.getByTestId('reply-record-toggle');
     await bubble.getByTestId('reply-record').waitFor();
+    if (olderResponse) assert.ok(fixture.calls.includes('older-page-read'), 'Original reader loads the older page');
     assert.equal(await record.getAttribute('aria-expanded'), 'true');
     await bubble.locator('xpath=self::*[@data-message-jump-focus="true"]').waitFor();
     assert.equal(await bubble.getAttribute('data-message-jump-focus'), 'true');
@@ -214,6 +236,7 @@ export async function runF322BExecutionLocationJourney({
     await page.screenshot({ path: join(tmpdir(), `f322-b-native-failure-${viewport.width}-${language}.png`) });
     throw error;
   } finally {
+    allowOlderReads();
     await context.close();
   }
 }

@@ -37,7 +37,7 @@ export function segmentView(segment, location, roleSource = segment, namespaceSt
   const targetCwd = actsOnlyOnAbsoluteOperands(command) ? undefined : context.location;
   // Read the original code/argv evidence before the legacy source mask. A mask
   // must not turn generated interpreter source into a literal execution fact.
-  const roles = invocationTargetView(roleSource, location);
+  const roles = invocationTargetView(roleSource, location, namespaceStable);
   const roleContext = roles ? gitDirectoryContext(roles.text, roles.call.cwd) : { command, location: context.location };
   const redirectedRead = namespaceStable ? readOutputTargets(roles, command) : null;
   return {

@@ -3,14 +3,21 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
+import { registerAgyAccountJourney } from './f320-agy-accounts.journey.mjs';
 import { runClaudeAccountJourney } from './f320-claude-accounts.journey.mjs';
 import { startFinalAccountPreview } from './f320-final-runtime.fixture.mjs';
 import { registerCodexStartupJourney } from './f320-startup-recovery.journey.mjs';
 
 let preview, browser, companyIdentity;
+registerAgyAccountJourney({ preview: () => preview, browser: () => browser });
 registerCodexStartupJourney({ preview: () => preview, browser: () => browser });
 before(async () => {
-  preview = await startFinalAccountPreview({ withOverrides: true, withClaude: true, withStartupRecovery: true });
+  preview = await startFinalAccountPreview({
+    withOverrides: true,
+    withClaude: true,
+    withAgy: true,
+    withStartupRecovery: true,
+  });
   browser = await chromium.launch({ headless: true });
 });
 after(async () => {

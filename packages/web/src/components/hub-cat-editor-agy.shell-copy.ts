@@ -2,6 +2,7 @@ import { defineShellCopy } from './shell/shell-copy';
 
 export const agyNativeCopy = defineShellCopy({
   zh: {
+    managedLogin: '在账号页登录，再从上方选择账号。此 Profile 管理这只猫的会话、模型与权限。保存设置不会启动模型。',
     acpEnabled: '启用 ACP',
     acpLogin: '使用此 Profile 内 ACP 独立登录的个人订阅。旧 Native 身份和历史保留；保存不会调用模型。',
     acpRestricted: '可读取文件并调用获准的 MCP 工具；文件写入和命令会被拒绝。需要这些操作时请选择自动批准。',
@@ -17,6 +18,8 @@ export const agyNativeCopy = defineShellCopy({
     bindingChange: '设置变更后会重新核验会话；无法续接时新建会话，已有历史消息保留。',
   },
   en: {
+    managedLogin:
+      'Sign in from Accounts and select the account above. This Profile keeps the member’s conversations, model and permissions. Saving does not start a model call.',
     acpEnabled: 'Enable ACP',
     acpLogin:
       'Use the personal subscription signed in separately for ACP in this Profile. Existing Native identity and history are kept. Saving does not call a model.',

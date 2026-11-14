@@ -1,5 +1,6 @@
 import { type AccountConfig, accountQuotaOwnerMatches, builtinAccountFamilyForRef } from '@cat-cafe/shared';
 import { readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
+import { agyLoginCommand, inspectAgyLogin } from '../config/agy-account.js';
 import { claudeTokenStatus } from '../config/claude-token-account.js';
 import { codexManagedStatus } from '../config/codex-account-identity.js';
 import { nativeCodexAccountView } from './accounts-native-view.js';
@@ -52,6 +53,13 @@ export function accountToView(id: string, account: AccountConfig, apiKeyPresent:
       : {}),
     kind: isBuiltin ? 'builtin' : account.authType,
     ...(account.googleCloud ? { googleCloud: account.googleCloud } : {}),
+    ...(account.agy
+      ? {
+          agy: account.agy,
+          agyLoginStatus: inspectAgyLogin(account.agy.credentialHome),
+          agyLoginCommand: agyLoginCommand(account.agy.credentialHome),
+        }
+      : {}),
     ...(account.claude
       ? {
           claude: account.claude,

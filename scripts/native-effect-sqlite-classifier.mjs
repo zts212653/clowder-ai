@@ -34,6 +34,14 @@ function readonlyUri(database) {
 }
 
 function readonlyStatement(statement) {
+  // Observing or tightening a connection's write restriction is not a DB-file
+  // mutation. It does not certify any subsequent statement or CLI dot-command.
+  if (
+    /^pragma\s+(?:(?:main|temp)\s*\.\s*)?query_only\s*(?:=\s*(?:on|true|yes|1)|\(\s*(?:on|true|yes|1)\s*\))?$/i.test(
+      statement,
+    )
+  )
+    return true;
   if (
     /^pragma\s+(?:(?:main|temp)\s*\.\s*)?(?:table_info|table_xinfo|index_info|index_xinfo|index_list|foreign_key_list)\s*\(\s*[\w.]+\s*\)$/i.test(
       statement,

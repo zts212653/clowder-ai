@@ -5,7 +5,7 @@ topics: [plugin-framework, plugin-manager, host-inventory, capability-registry, 
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "Renewed 2026-10-27: Contract 0.3 removes duplicate capability/grant declarations while keeping the existing Plugin Manager discovery, installation, configuration and activation journey. Existing Manager and package-source tips remain applicable; this migration introduces no separate user action or new management entry point."
+tips_exempt: "Renewed 2026-11-12: 每日文档守护补记 #6685 生成文档响应身份恢复 warranty 修复；Contract 0.3 与 C1 home warranty 修复保持既有 Plugin Manager 发现、安装、配置与激活旅程不变，无新增独立用户操作入口。"
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F202-plugin-framework.md"
 mcp_admission_claims:
@@ -63,6 +63,8 @@ description_confirmed_by: codex-astra
 > **Status**: in-progress (Train B direction accepted in
 > [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478); formal review and
 > published-package integration verified; Train B home intake merged, runtime activation separate) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
+
+> **2026-11-12 warranty**: [#7018](https://github.com/zts212653/clowder-ai/pull/7018) merged the admitted dependency-closure consumer repair and public archive guard correction. The API runtime has not loaded this repair; package recovery and adoption remain with the original Task1532 site.
 
 ## Outcome and Scope
 
@@ -488,6 +490,44 @@ an already-merged execution Worker and cannot intercept the provider request the
 bytes. This does not certify music, other Dot deltas or a production migration. This intake neither
 closes the whole F202 feature nor reopens Task 778, and does not install, enable or restart the
 owner's live runtime.
+
+## PR #6929 warranty: admitted dependency closure (2026-11-12)
+
+The Dot intake made shipped dependency reuse explicit in the materializer and module carrier,
+but omitted that admitted provenance field from declared MCP staging. A legitimate owner archive
+with both a publisher lock and shipped dependencies was therefore installed again into a second
+tree; stable MCP staging then failed with `ERR_FS_CP_EEXIST`. Trusted Chrome setup had the same
+consumer omission. Both consumers now retain the Host-admitted `dependencyClosure`; admission,
+package integrity, exact Chrome delivery/owner fences and no-overwrite staging remain unchanged.
+No consumer infers shipped authority merely from archive contents or a catalog tag.
+
+Regression coverage exercises real local archive admission, materializer, stable MCP staging and
+an executable launch descriptor: shipped dependencies require zero installs; publisher-locked
+unbundled dependencies require one. The actual GitHub alpha.43 self-contained and canonical
+archives both passed isolated staging with those counts; this did not install or activate either
+archive in the owner's running instance. The original Task1532 site retains production recovery
+and candidate selection. Original completed Tasks and the original Dot intake are not reopened.
+
+The same intake left the public bundled-package test expecting inline Dot0.1.2 metadata. That
+fixture now follows the JSON producer, retains sanitizer-to-generic-build assertions, and separately
+checks the exact frozen prebuilt archive reaches native output unchanged. `check:outbound-sanitizer`
+passed197/197; the affected plugin admission/materializer/MCP/Chrome suites passed73/73. This is
+bounded delivery repair under the original accepted scope, not a new shared-grant or runtime
+maintenance product. Main/live adoption is reported separately from candidate verification.
+
+### Warranty delivery timeline
+
+| Date | Actual delivery state |
+| --- | --- |
+| 2026-11-12 | [#7018](https://github.com/zts212653/clowder-ai/pull/7018) merged as `c5fc39ad72097180321c320fbb4dda62db160b54`. Argon's exact-HEAD approval and unchanged authored-patch continuity are preserved in [the mechanical review mirror](https://github.com/zts212653/clowder-ai/pull/7018#issuecomment-6829197257). Source verification passed; API runtime activation remains pending. |
+
+`main=landed:c5fc39ad72097180321c320fbb4dda62db160b54`;
+`live=dormant`: the runtime checkout remains at `605bd477d3b9a8075454bbf3be48751cca5a4d8b`,
+and its compiled declared MCP and Personal Chrome consumers still omit the admitted closure field.
+No core restart or plugin installation was performed by this repair. Task1532 independently restored
+the canonical alpha.43 package; that restoration does not prove this Host repair has loaded.
+The actual landed revision is returned to its original execution site for adoption/verification
+within that site's existing authority; no duplicate Task or deployment wait is created here.
 
 ## Agent Tool Admission
 

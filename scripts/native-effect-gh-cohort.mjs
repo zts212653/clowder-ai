@@ -74,6 +74,9 @@ const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // Source and deterministic stage normalize to the same digest. This permits
 // the existing deployed wrapper in a delegation chain, never a mixed cohort.
 const PREVIOUS_COHORT = 'e8ad0622c739c0b902a22f973659aafa811430da55c474b8959b814661c8d0fb';
+// Reviewed #6899, merged as 0f473c7f36: existing deployments may still delegate
+// through this exact 50-module source/stage cohort during a guard upgrade.
+const PUBLISHED_6899_COHORT = '7bfcffb3257286345761350b492b776f7c97fed0301e26aa3248460b853e2e93';
 const LEGACY_FILES = [
   ...GH_COHORT_FILES.filter((file) => file !== 'scripts/native-effect-gh-cohort.mjs'),
   'scripts/native-effect-invocation-targets.mjs',
@@ -133,8 +136,15 @@ export function verifiedGhCohort(entry, stage) {
   const current = existsSync(resolve(root, 'scripts/native-effect-gh-cohort.mjs'));
   const selected = cohort(root, stage, current ? GH_COHORT_FILES : LEGACY_FILES);
   if (!selected) return false;
-  if (current) return GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file));
+  if (current) {
+    if (GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file))) return true;
+    return cohortDigest(selected, GH_COHORT_FILES) === PUBLISHED_6899_COHORT;
+  }
+  return cohortDigest(selected, LEGACY_FILES) === PREVIOUS_COHORT;
+}
+
+function cohortDigest(selected, files) {
   const hash = createHash('sha256');
-  for (const file of LEGACY_FILES) hash.update(file + '\0' + selected.get(file) + '\0');
-  return hash.digest('hex') === PREVIOUS_COHORT;
+  for (const file of files) hash.update(file + '\0' + selected.get(file) + '\0');
+  return hash.digest('hex');
 }
