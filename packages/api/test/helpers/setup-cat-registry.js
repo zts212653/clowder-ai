@@ -29,8 +29,15 @@ const TEMPLATE_PATH = resolve(__dirname, '../../../../cat-template.json');
 // `cat-cafe-test-template-${process.pid}` name was not unique across time → pid reuse
 // leaked an empty roster into unrelated tests. See isolated-template-root.js for the
 // full F211 #2013 follow-up rationale.
-const { templatePath, cleanup } = createIsolatedTemplateRoot(process.env.TMPDIR ?? '/tmp', TEMPLATE_PATH);
-process.on('exit', cleanup);
+const { templatePath, cleanup } = createIsolatedTemplateRoot(TEMPLATE_PATH);
+process.on('exit', () => {
+  try {
+    cleanup();
+  } catch (error) {
+    console.error(`[template-root] cleanup failed: ${error.message}`);
+    process.exitCode ||= 1;
+  }
+});
 process.env.CAT_TEMPLATE_PATH = templatePath;
 
 async function registerAllCats() {

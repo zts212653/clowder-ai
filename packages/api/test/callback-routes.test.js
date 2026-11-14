@@ -3942,7 +3942,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST retain-memory submits to marker queue', async () => {
+  test('POST retain-memory is gone (2026-11-09 memory entry subtraction)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const submitCalls = [];
@@ -3955,57 +3955,11 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/retain-memory',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'When storage is unavailable, fail-closed and surface explicit errors.',
-      },
+      payload: { content: 'should not be written' },
     });
 
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'ok');
-    assert.equal(submitCalls.length, 1);
-    assert.equal(submitCalls[0].content, 'When storage is unavailable, fail-closed and surface explicit errors.');
-    assert.equal(submitCalls[0].status, 'captured');
-    assert.ok(submitCalls[0].source.includes('codex'));
-    assert.ok(submitCalls[0].source.includes(invocationId));
-  });
-
-  test('POST retain-memory returns 401 for invalid callback token', async () => {
-    const app = await createApp();
-    const { invocationId } = await registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
-      payload: {
-        content: 'memory',
-      },
-    });
-
-    assert.equal(response.statusCode, 401);
-  });
-
-  test('POST retain-memory degrades when marker queue throws', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
-    markerQueue.submit = async () => {
-      throw new Error('queue error');
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        content: 'memory item',
-      },
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.status, 'degraded');
-    assert.equal(body.degradeReason, 'marker_queue_error');
+    assert.equal(response.statusCode, 404);
+    assert.equal(submitCalls.length, 0, 'retired route must not write markers');
   });
 
   // --- Exact-attempt callback lifecycle guard ---
@@ -5208,6 +5162,93 @@ describe('Callback Routes', () => {
     const richMsg = socketManager.getMessages().find((m) => m.type === 'system_info');
     assert.ok(richMsg, 'rich_block broadcast should exist');
     assert.equal(richMsg.messageId, response.id, 'the block must land in the turn response by id');
+  });
+
+  test('#1951 callback questions are durable before their direct broadcast', async (t) => {
+    const threadId = 'thread-1951-callback';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const { response, invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
+    const app = await createApp({ invocationTracker });
+    const { messageActionsRoutes } = await import('../dist/routes/message-actions.js');
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    t.after(() => app.close());
+    const block = {
+      id: 'callback-question',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'a', label: 'A' }],
+    };
+    let atBroadcast;
+    const broadcast = socketManager.broadcastAgentMessage.bind(socketManager);
+    socketManager.broadcastAgentMessage = (event) => {
+      atBroadcast = structuredClone(messageStore.getById(response.id).extra?.rich?.blocks);
+      broadcast(event);
+    };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { block },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    assert.deepEqual(atBroadcast, [block]);
+    const saved = await app.inject({
+      method: 'PATCH',
+      url: `/api/messages/${response.id}/block-state`,
+      payload: { userId: 'user-1', blockId: block.id, disabled: true, selectedIds: ['a'] },
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.equal(messageStore.getById(response.id).lifecycle.status, 'processing');
+    assert.equal(messageStore.getById(response.id).extra.rich.blocks[0].disabled, true);
+  });
+
+  test('#1951 callback write failures retain the buffered question without an early actionable broadcast', async (t) => {
+    const threadId = 'thread-1951-callback-failure';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const { response, invocationTracker } = await createQueuedReadProcessor({ threadId, invocationId });
+    const app = await createApp({ invocationTracker });
+    t.after(() => app.close());
+    messageStore.augmentStreamMetadata = async () => {
+      throw new Error('Question storage unavailable');
+    };
+    const block = {
+      id: 'buffered-question',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'a', label: 'A' }],
+    };
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { block },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    assert.equal(socketManager.getMessages().length, 0);
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffered = await getRichBlockBuffer().consume(threadId, 'opus', invocationId);
+    assert.deepEqual(buffered, [block]);
+    const { commitLifecycleResponseFromAppendInput } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    await commitLifecycleResponseFromAppendInput(
+      messageStore,
+      response.id,
+      invocationId,
+      { status: 'completed', completedAt: Date.now() },
+      {
+        from: { kind: 'agent', catId: 'opus' },
+        userId: 'user-1',
+        threadId,
+        content: 'Finished',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: { rich: { v: 1, blocks: buffered } },
+      },
+    );
+    assert.deepEqual(messageStore.getById(response.id).extra.rich.blocks, [block]);
   });
 
   test('rich blocks remain writable after an interim post and reject callbacks after final consume', async () => {

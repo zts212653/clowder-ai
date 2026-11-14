@@ -10,6 +10,8 @@ const registryPath = resolve(packageRoot, 'config/public-test-exclusions.json');
 const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-public-test-files.mjs')).href;
 
 const RECONCILED_EXCLUSIONS = [
+  '^test/send-attempt-correlation-redis\\.test\\.js$',
+  '^test/(?:person-memory-owner-(?:deferred-invalidation|maintenance)|remember-(?:group-retry|original-entrypoints))\\.test\\.js$',
   '^test/alpha-managed-(?:lifecycle|materialization|scheduler|sleep)-integration\\.test\\.js$',
   '^test/alpha-browser-template-source\\.test\\.js$',
   '^test/scheduler/schedule-parameter-callback-journey\\.test\\.js$',
@@ -393,4 +395,35 @@ test('canonical fixture conversions stay selected by the native public manifest'
     assert.ok(selection.selectedFiles.includes(file), `${file} must remain selected`);
     assert.ok(!selection.excludedFiles.includes(file));
   }
+});
+
+test('owner maintenance and remember persistence retain an exact isolated-Redis inventory', async () => {
+  const { loadPublicTestExclusions, publicTestExclusionMatchHash, resolvePublicTestFiles } = await import(
+    resolverModuleUrl
+  );
+  const registry = await loadPublicTestExclusions({ configPath: registryPath });
+  const entry = registry.entries.find((row) => row.id === 'owner-memory-redis-resource-contracts');
+  assert.ok(entry, 'Redis persistence consumers must be explicitly accounted for');
+  const expected = [
+    'test/person-memory-owner-deferred-invalidation.test.js',
+    'test/person-memory-owner-maintenance.test.js',
+    'test/remember-group-retry.test.js',
+    'test/remember-original-entrypoints.test.js',
+  ];
+  const allFiles = await listTestFiles(resolve(packageRoot, 'test'));
+  assert.deepEqual(
+    allFiles.filter((file) => new RegExp(entry.match).test(file)),
+    expected,
+  );
+  assert.equal(entry.audit.status, 'resource_contract');
+  assert.equal(entry.audit.matchedFilesHash, publicTestExclusionMatchHash(expected));
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  assert(expected.every((file) => resolved.excludedFiles.includes(file)));
+  for (const file of [
+    'test/callback-remember-routes.test.js',
+    'test/deferred-person-memory-owner-page.test.js',
+    'test/f321-person-read-caller-scope.test.js',
+    'test/person-memory-claim-display.test.js',
+  ])
+    assert(resolved.selectedFiles.includes(file), `${file} remains a portable public contract`);
 });

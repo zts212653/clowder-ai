@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path';
-import type { CapabilitiesConfig } from '@cat-cafe/shared';
+import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
 import type { InvocationPluginMcpEntry, InvocationPluginMcpView } from './invocation-plugin-mcp-view.js';
 import { isSameCapabilityRoot } from './invoke-capability-root.js';
 
@@ -12,6 +12,7 @@ export interface LocalPluginMcpProjection {
   readonly config: CapabilitiesConfig;
   readonly localCapabilityIds: ReadonlySet<string>;
   readonly sourceRefs: readonly string[];
+  readonly unavailablePolicies?: readonly Omit<CapabilityEntry, 'mcpServer' | 'mcpServerOverride'>[];
 }
 
 /** Preserve the canonical ThreadStore project even if native workspace recovery used a fallback. */
@@ -54,6 +55,7 @@ export function projectLocalPluginMcpCapabilities(
   const known = new Set(config.capabilities.map((entry) => entry.id));
   const knownNames = new Set(config.capabilities.map((entry) => entry.id.replaceAll(':', '__')));
   const additions: CapabilitiesConfig['capabilities'] = [];
+  const unavailablePolicies: Omit<CapabilityEntry, 'mcpServer' | 'mcpServerOverride'>[] = [];
   for (const entry of view.entries) {
     const policy = entry.installationPolicy;
     if (
@@ -67,10 +69,13 @@ export function projectLocalPluginMcpCapabilities(
       policy.type !== 'mcp' ||
       policy.source !== 'plugin' ||
       policy.pluginId !== entry.pluginId ||
-      !entry.policySourceRef ||
-      !entry.isCurrent()
+      !entry.policySourceRef
     )
       continue;
+    if (!entry.isCurrent()) {
+      unavailablePolicies.push(policy);
+      continue;
+    }
     additions.push({
       ...structuredClone(policy),
       mcpServer: { ...entry.server, args: [...entry.server.args], env: { ...entry.server.env } },
@@ -78,7 +83,10 @@ export function projectLocalPluginMcpCapabilities(
     localCapabilityIds.add(entry.capabilityId);
     sourceRefs.push(entry.policySourceRef);
   }
-  return additions.length
-    ? { config: { ...config, capabilities: [...config.capabilities, ...additions] }, localCapabilityIds, sourceRefs }
-    : unchanged;
+  return {
+    config: additions.length ? { ...config, capabilities: [...config.capabilities, ...additions] } : config,
+    localCapabilityIds,
+    sourceRefs,
+    ...(unavailablePolicies.length ? { unavailablePolicies } : {}),
+  };
 }

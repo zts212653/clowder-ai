@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { THREAD_ID } from './f309-ordinary-workspace-journey-fixture.mjs';
 import { routeThroughRealOwner, startRealWorkspaceOwner } from './f309-ordinary-workspace-real-owner.mjs';
 import { startWorkspaceNetworkProxy } from './f309-workspace-network-proxy.mjs';
 
-const evidence = process.env.F309_LONG_IMAGE_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f309-studio297-long';
+const evidence =
+  process.env.F309_LONG_IMAGE_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f309-studio297-long');
 const sha = '43bd6445884b1825c75f417e8437334f52776dc8606b950826bd71c2cd93563c';
 // Same bytes as Studio Human035's first image, explicitly supplied for this private viewport test.
 // The original message/upload and parent's owners are never touched; this is a separate authentic F063 file owner.
@@ -21,7 +23,7 @@ export function registerStudio297LongImageJourneys(suite) {
       { timeout: 90_000 },
       async () => {
         await mkdir(evidence, { recursive: true });
-        const data = await mkdtemp('/tmp/f309-long-owner-');
+        const data = await mkdtemp(path.join(tmpdir(), 'f309-long-owner-'));
         const owner = await startRealWorkspaceOwner(data);
         const dir = await mkdtemp(path.join(owner.root, 'f309-long-private-'));
         const context = await suite().browser.newContext({ viewport: presentation.viewport });

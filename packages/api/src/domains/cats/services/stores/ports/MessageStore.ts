@@ -35,6 +35,7 @@ import type {
   ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   ReplyPreview,
+  RichInteractiveBlock,
   RichMessageExtra,
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
@@ -46,6 +47,7 @@ import {
   isLifecycleInputReadReceipt,
   isLifecycleStoredMessageMetadata,
   isMessageFrom,
+  preserveInteractiveBlockStates,
 } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import { InMemoryQueueLedgerStore } from '../../agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
@@ -299,6 +301,8 @@ export interface StoredToolEvent {
  */
 export interface StoredMessage {
   id: string;
+  /** Browser correlation metadata. Project only into the owning user's browser DTOs. */
+  clientMessageId?: string;
   /** Thread this message belongs to (always set after append) */
   threadId: string;
   userId: string;
@@ -331,6 +335,16 @@ export interface StoredMessage {
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     /** Retain malformed/revoked legacy provenance so hydration can never revive it. */
     collectiveAuthorizationInvalid?: true;
+    /** Durable reply outcome, distinct from the transport receipt below. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    /** Host receipt: input acceptance only, never a model response. */
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     /** Optional references into this message's one normalized full body. */
     outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
     startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
@@ -1946,6 +1960,21 @@ export interface StreamMetadataAugmentInput {
   extra?: HostMessageExtra;
 }
 
+export type InteractiveBlockState = Pick<RichInteractiveBlock, 'disabled' | 'selectedIds'>;
+
+export function applyInteractiveBlockState(
+  message: StoredMessage,
+  blockId: string,
+  state: InteractiveBlockState,
+): StoredMessage | null {
+  if (message.recall || message._tombstone) return null;
+  const block = message.extra?.rich?.blocks.find((candidate) => candidate.id === blockId);
+  if (block?.kind !== 'interactive') return null;
+  if (state.disabled !== undefined) block.disabled = state.disabled;
+  if (state.selectedIds !== undefined) block.selectedIds = [...state.selectedIds];
+  return message;
+}
+
 function richBlockDedupeKey(block: unknown, index: number): string {
   if (block && typeof block === 'object' && 'id' in block) {
     const id = (block as { id?: unknown }).id;
@@ -2306,8 +2335,20 @@ export interface IMessageStore {
     input: CompanionDeliveryAcceptance,
   ): StoredMessage | null | Promise<StoredMessage | null>;
 
-  /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
+  /** Atomically advance the existing target carrier without racing generic metadata writers. */
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F096: Update generic extra data; protected outcome fields keep their dedicated authority. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Persist only the selected block's state against the latest rich block collection. */
+  setInteractiveBlockState(
+    id: string,
+    blockId: string,
+    state: InteractiveBlockState,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F310: atomically fence source body and prior custody state before changing the source-owned carrier. */
   compareAndTransitionCustodyOffer(
     id: string,
@@ -2525,6 +2566,18 @@ function applyLifecycleResponseTerminalPatch(
   replaceOptionalField(next, 'toolEvents', patch.toolEvents);
   replaceOptionalField(next, 'metadata', patch.metadata);
   replaceOptionalField(next, 'extra', patch.extra);
+  const rich = mergeRichExtra(patch.extra?.rich, current.extra?.rich);
+  if (rich) {
+    next.extra = {
+      ...next.extra,
+      rich: {
+        ...rich,
+        blocks: preserveInteractiveBlockStates(rich.blocks, current.extra?.rich?.blocks ?? [], {
+          preferSavedSelection: true,
+        }),
+      },
+    };
+  }
   replaceOptionalField(next, 'thinking', patch.thinking);
   replaceOptionalField(next, 'origin', patch.origin);
   replaceOptionalField(next, 'mentionsUser', patch.mentionsUser);
@@ -3827,10 +3880,40 @@ export class MessageStore {
     return structuredClone(msg);
   }
 
+  compareAndSetTargetResponse(
+    id: string,
+    expectedRevision: number,
+    next: import('@cat-cafe/shared').TargetResponseRecord,
+  ): StoredMessage | null {
+    const message = this.messages.find((row) => row.id === id);
+    if (!message || message.recall || message._tombstone) return null;
+    const prior = message.extra?.targetResponse;
+    if (!prior) {
+      const receipt = message.extra?.pluginAddressedReceipt;
+      if (
+        expectedRevision !== 0 ||
+        next.revision !== 1 ||
+        receipt?.targetId !== next.targetId ||
+        receipt.inputMessageId !== next.inputMessageId
+      )
+        return null;
+    } else if (
+      prior.revision !== expectedRevision ||
+      next.revision !== expectedRevision + 1 ||
+      next.targetId !== prior.targetId ||
+      next.inputMessageId !== prior.inputMessageId ||
+      next.execution.id !== prior.execution.id
+    )
+      return null;
+    message.extra = { ...message.extra, targetResponse: structuredClone(next) };
+    return structuredClone(message);
+  }
+
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg || msg.recall || msg._tombstone) return null;
     const {
+      targetResponse: _stripTargetResponse,
       messageSearchAnswer: _stripAnswer,
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
@@ -3849,6 +3932,15 @@ export class MessageStore {
     if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
+  }
+
+  setInteractiveBlockState(id: string, blockId: string, state: InteractiveBlockState): StoredMessage | null {
+    const message = this.messages.find((candidate) => candidate.id === id);
+    if (!message) return null;
+    const previousRich = JSON.stringify(message.extra?.rich);
+    const updated = applyInteractiveBlockState(message, blockId, state);
+    if (updated && previousRich !== JSON.stringify(updated.extra?.rich)) notifyMessageTimelineChange(this, updated);
+    return updated;
   }
 
   compareAndTransitionCustodyOffer(id: string, input: CustodyOfferTransitionInput): CustodyOfferTransitionResult {

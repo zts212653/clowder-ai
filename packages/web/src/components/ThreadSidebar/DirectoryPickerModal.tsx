@@ -5,6 +5,8 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { CatSelector } from './CatSelector';
 import { DirectoryBrowser } from './DirectoryBrowser';
+import { defaultDirectoryBrowserCopy } from './directory-browser-copy';
+import type { BrowseResult } from './directory-segments';
 import { ProjectOption } from './ProjectOption';
 
 /** F33: Session binding passed alongside thread creation */
@@ -56,8 +58,10 @@ export function DirectoryPickerModal({
   // Null can mean "no concrete directory is selectable right now" (virtual root),
   // so async default initializers need a separate guard for explicit selection.
   const selectionTouchedRef = useRef(false);
+  const selectionVersion = useRef(0);
   // P2 fix: clear stale pathError whenever user selects a project
   const handleSelectPath = useCallback((path: string | 'lobby') => {
+    selectionVersion.current += 1;
     selectionTouchedRef.current = true;
     setPathError(null);
     setSelectedPath(path);
@@ -118,15 +122,8 @@ export function DirectoryPickerModal({
     selectWithOptions(selectedPath === 'lobby' ? undefined : selectedPath);
   }, [selectedPath, selectWithOptions]);
 
-  // F113: Handle directory selection from the web-based browser
-  const handleBrowserCurrentPathChange = useCallback(
-    (path: string) => {
-      handleSelectPath(path);
-    },
-    [handleSelectPath],
-  );
-
-  const handleBrowserVirtualLocationChange = useCallback(() => {
+  const clearSelection = useCallback(() => {
+    selectionVersion.current += 1;
     selectionTouchedRef.current = true;
     setPathError(null);
     setSelectedPath(null);
@@ -136,21 +133,26 @@ export function DirectoryPickerModal({
   const handlePathSubmit = useCallback(async () => {
     const trimmed = pathInput.trim();
     if (!trimmed) return;
-    setPathError(null);
+    clearSelection();
+    setShowBrowser(false);
+    const version = selectionVersion.current;
     try {
       const res = await apiFetch(`/api/projects/browse?path=${encodeURIComponent(trimmed)}`);
+      const data: BrowseResult & { error?: string } = await res.json();
+      if (version !== selectionVersion.current) return;
       if (!res.ok) {
-        const data = await res.json();
         setPathError(data.error || '路径无效');
         return;
       }
-      // Valid directory — select the canonicalized path
-      const data = await res.json();
-      handleSelectPath(data.current);
+      if (data.projectRestriction) {
+        setPathError(defaultDirectoryBrowserCopy.projectRestrictions[data.projectRestriction]);
+      } else {
+        handleSelectPath(data.current);
+      }
     } catch {
-      setPathError('无法连接到服务器');
+      if (version === selectionVersion.current) setPathError('无法连接到服务器');
     }
-  }, [pathInput, handleSelectPath]);
+  }, [pathInput, clearSelection, handleSelectPath]);
 
   // Fetch cwd for "推荐" badge + auto-select as default project.
   // cwdPath is the true default; existingProjects[0] is fallback only when cwd fails.
@@ -398,8 +400,9 @@ export function DirectoryPickerModal({
             <DirectoryBrowser
               initialPath={browserInitialPathRef.current}
               activeProjectPath={cwdPath ?? undefined}
-              onCurrentPathChange={handleBrowserCurrentPathChange}
-              onVirtualLocationChange={handleBrowserVirtualLocationChange}
+              onSelectablePathChange={handleSelectPath}
+              onNavigationStart={clearSelection}
+              onVirtualLocationChange={clearSelection}
               onCancel={() => setBrowserOpen(false)}
             />
           </div>
@@ -423,7 +426,10 @@ export function DirectoryPickerModal({
             <input
               type="text"
               value={pathInput}
-              onChange={(e) => setPathInput(e.target.value)}
+              onChange={(e) => {
+                selectionVersion.current += 1;
+                setPathInput(e.target.value);
+              }}
               onCompositionStart={ime.onCompositionStart}
               onCompositionEnd={ime.onCompositionEnd}
               onKeyDown={(e) => {

@@ -187,7 +187,8 @@ export function registerInformationJourneys(evidenceRoot) {
           const row = card.locator('xpath=ancestor::li');
           assert.equal(await row.getAttribute('data-expanded'), 'false');
           const disclosure = card.locator('details').first();
-          assert.equal(await disclosure.getAttribute('open'), null);
+          const originalLongContentOpen = record.kind === 'F221';
+          assert.equal((await disclosure.getAttribute('open')) !== null, originalLongContentOpen);
           const before = await card.innerText(),
             box = await card.boundingBox();
           const actionGeometry = await card.evaluate((element) => {
@@ -223,11 +224,13 @@ export function registerInformationJourneys(evidenceRoot) {
             before,
             box,
             actionGeometry,
-            originalLongContentClosed: true,
+            originalLongContentClosed: !originalLongContentOpen,
           });
-          await page.screenshot({ path: path.join(evidence, `inbox-${record.kind}-closed.png`), fullPage: true });
-          await disclosure.locator('summary').focus();
-          await page.keyboard.press('Enter');
+          await page.screenshot({ path: path.join(evidence, `inbox-${record.kind}-before.png`), fullPage: true });
+          if (!originalLongContentOpen) {
+            await disclosure.locator('summary').focus();
+            await page.keyboard.press('Enter');
+          }
           const section = disclosure.locator('section');
           assert.equal(await section.isVisible(), true);
           assert.ok((await section.boundingBox()).height <= 257);

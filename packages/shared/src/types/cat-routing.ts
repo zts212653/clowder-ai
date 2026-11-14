@@ -12,6 +12,7 @@ export type CatRoutingError =
   | { kind: 'cat_not_found'; mention: string; alternatives: CatAlternative[] }
   | { kind: 'cat_disabled'; catId: CatId; displayName: string; alternatives: CatAlternative[] }
   | { kind: 'target_not_in_thread'; catId: CatId; threadId: string }
+  | { kind: 'handoff_blocked_by_failed_turn'; targetCats: CatId[] }
   | { kind: 'suppressed_by_terminal_ack'; droppedMentions: CatId[] };
 
 const NonEmptyStringSchema = z.string().min(1);
@@ -48,6 +49,12 @@ export const CatRoutingErrorSchema: z.ZodType<CatRoutingError, z.ZodTypeDef, unk
       kind: z.literal('target_not_in_thread'),
       catId: CatIdSchema,
       threadId: NonEmptyStringSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('handoff_blocked_by_failed_turn'),
+      targetCats: z.array(CatIdSchema).nonempty(),
     })
     .strict(),
   z

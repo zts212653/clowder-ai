@@ -9,6 +9,7 @@ import type {
 import { resolveThreadAccess } from '../cats/services/session/thread-access-policy.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../cats/services/stores/ports/ThreadStore.js';
+import { isReadableSchedulerWork } from '../cats/services/stores/readable-scheduler-work.js';
 import {
   canQuoteInPublicReply,
   canViewMessage,
@@ -23,7 +24,7 @@ import type { IEvidenceStore } from './interfaces.js';
 import { runMessageAnswerSelection } from './message-answer-selection-run.js';
 import { GitMessageDecisionIndex, type MessageDecisionIndex } from './message-decision-index.js';
 import type { CanonicalSearchCandidate } from './message-discovery-source.js';
-import { messageDiscoverySource } from './message-discovery-source.js';
+import { messageNativeDiscovery } from './message-native-discovery.js';
 import type { MessagePassageCandidate } from './message-passage-search-types.js';
 import { readMessageSearchAnswerSnapshot } from './message-search-answer-snapshot.js';
 import { type CanonicalWaveSources, readCanonicalSearchWave } from './message-search-canonical-wave.js';
@@ -31,6 +32,7 @@ import { buildSearchableMessageContent } from './message-search-content.js';
 import type { MessageSearchDiagnostics } from './message-search-diagnostics.js';
 import {
   checkSearchExecution,
+  type MessageReadObservation,
   type MessageSearchExecutionContext,
   readBeforeSearchCutoff,
 } from './message-search-lifetime.js';
@@ -159,10 +161,21 @@ export class MessageSearchService {
     return diagnostics ? diagnostics.sync('projection', projectBody) : projectBody();
   }
 
-  private async requireSource(input: MessageSearchInput, principal: MessageSearchPrincipal): Promise<void> {
-    if (!principal.source) return;
+  private async requireSource(
+    input: MessageSearchInput,
+    principal: MessageSearchPrincipal,
+    execution: MessageSearchExecutionContext = {},
+    observation?: MessageReadObservation,
+  ): Promise<void> {
+    checkSearchExecution(execution);
+    const sourceRef = principal.source;
+    if (!sourceRef) return;
+    let sourceThread: Thread | undefined;
     try {
-      await this.readableThreads({ query: input.query, threadId: principal.source.threadId }, principal);
+      const read = () =>
+        this.readableThreads({ query: input.query, threadId: sourceRef.threadId }, principal, execution);
+      sourceThread = (await (observation ? observation.run('source-thread', read) : read())).get(sourceRef.threadId);
+      checkSearchExecution(execution);
     } catch (error) {
       if (error instanceof MessageSearchAccessError)
         throw new MessageSearchAccessError('Invocation source thread is not accessible');
@@ -170,15 +183,23 @@ export class MessageSearchService {
     }
     // The authenticated question may still be in flight. Source admission only
     // validates its identity/owner; it does not grant publication of queued bodies.
-    const source = await this.deps.messageStore.getById(principal.source.messageId);
+    const read = () => this.deps.messageStore.getById(sourceRef.messageId);
+    const source = await (observation ? observation.run('source-message', read) : read());
+    checkSearchExecution(execution);
     if (
       !source ||
-      source.id !== principal.source.messageId ||
-      source.threadId !== principal.source.threadId ||
+      source.id !== sourceRef.messageId ||
+      source.threadId !== sourceRef.threadId ||
       source.deletedAt ||
       source._tombstone ||
       source.deliveryStatus === 'canceled' ||
-      isInternalNonQuotableParent(source) ||
+      (isInternalNonQuotableParent(source) &&
+        !isReadableSchedulerWork(
+          source,
+          principal.userId,
+          sourceThread,
+          principal.viewer.type === 'cat' ? principal.viewer.catId : undefined,
+        )) ||
       !canViewMessage(source, principal.viewer) ||
       (source.userId !== principal.userId && !isSystemUserMessage(source)) ||
       !passesManagedHoldViewerBoundary(source, principal.userId)
@@ -363,51 +384,12 @@ export class MessageSearchService {
   ) {
     if (!principal.userId) throw new MessageSearchAccessError('Search identity is not accessible');
     if (!input.query.trim() || input.query.length > 2000) throw new Error('Invalid message search query');
-    const threadIds = new Set<string>();
-    let lifetime = context;
-    const source = messageDiscoverySource({
-      search: input,
-      threadIds,
-      source: principal.source,
-      read: async (request) => {
-        lifetime = {
-          ...context,
-          signal: request.signal ?? context.signal,
-          deadlineAt: Math.min(request.deadlineAt ?? Infinity, context.deadlineAt ?? Infinity, Date.now() + 15_000),
-        };
-        checkSearchExecution(lifetime);
-        const threads = await this.readableThreads(input, principal, lifetime);
-        for (const id of threads.keys()) threadIds.add(id);
-        await this.requireSource(input, principal);
-        const reader = this.deps.evidenceStore.searchMessagePassages;
-        if (!reader || !this.deps.evidenceStore.readMessagePassageState)
-          throw new Error('Message passage retrieval unavailable');
-        const result = await reader.call(this.deps.evidenceStore, input.query, {
-          signal: lifetime.signal,
-          deadlineAt: lifetime.deadlineAt,
-          visibleThreadIds: [...threadIds],
-          threadId: input.threadId,
-          excludeSource: principal.source,
-          mode: input.mode ?? 'hybrid',
-          sort: 'relevance',
-          candidateOrder: 'relevance',
-          candidateLimit: Math.min(2000, request.limit),
-          dateFrom: input.dateFrom,
-          dateTo: input.dateTo,
-        });
-        return { candidates: result.passages, truncated: result.meta.truncated };
-      },
+    return messageNativeDiscovery(input, principal, context, {
+      visible: (execution) => this.readableThreads(input, principal, execution),
+      requireSource: (execution, observation) => this.requireSource(input, principal, execution, observation),
       project: (candidate) => this.project(candidate, principal, input.query),
+      evidence: this.deps.evidenceStore,
     });
-    return {
-      ...source,
-      revalidate: async (row: CanonicalSearchCandidate) => {
-        checkSearchExecution(lifetime);
-        await this.requireSource(input, principal);
-        const current = await this.project(row.candidate, principal, input.query);
-        return current?.contentRevision === row.contentRevision ? current : null;
-      },
-    };
   }
 
   async search(

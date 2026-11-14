@@ -1,3 +1,4 @@
+import type { PluginDeliveryInput, PluginDeliveryReceipt } from '@clowder-ai/plugin-contract';
 import {
   attemptPluginAction,
   invocationNotStarted,
@@ -35,6 +36,13 @@ export interface BundledPluginRuntime {
     reference: string,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<Uint8Array>;
+  deliver?(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt>;
+  handle?(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown>;
+  handleWebhook?(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   configRefresh?(pluginInstanceId: string): Promise<void>;
   uninstall?(pluginInstanceId: string, packageRecord: ExecutablePluginPackageRecord): Promise<void>;
@@ -61,6 +69,8 @@ interface RuntimeAuthority {
 }
 
 interface ActiveBundled {
+  readonly onRuntimeExit?: () => Promise<void> | void;
+  executionFailure?: ReturnType<typeof startFailureRecord>;
   readonly runtime: BundledPluginRuntime;
   readonly admission: RuntimeAuthority;
   readonly closed: Promise<void>;
@@ -97,7 +107,11 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     return (runtime === undefined || runtime.transport === 'builtin') && this.#runtimeFor(packageRecord) !== undefined;
   }
 
-  async start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown> {
+  async start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown> {
     const epoch = this.#startEpoch.get(pluginInstanceId) ?? 0;
     const authority = await this.authority(pluginInstanceId);
     if (epoch !== (this.#startEpoch.get(pluginInstanceId) ?? 0)) {
@@ -125,6 +139,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       settleStart = resolve;
     });
     const active: ActiveBundled = {
+      ...(onRuntimeExit ? { onRuntimeExit } : {}),
       runtime,
       admission: structuredClone(authority),
       closed,
@@ -191,9 +206,11 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         // Retain the invalid activation and unresolved closed handle for an explicit stop retry.
         throw new AggregateError([error, cleanupError], 'builtin start and cleanup failed');
       }
-      await this.setBundledRuntimeState(authority, 'stopped', packageFailed ? this.#startFailure() : undefined).catch(
-        () => undefined,
-      );
+      await this.setBundledRuntimeState(
+        authority,
+        active.executionFailure ? 'crashed' : 'stopped',
+        active.executionFailure ?? (packageFailed ? this.#startFailure() : undefined),
+      ).catch(() => undefined);
       if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
     }
     active.resolveClosed();
@@ -212,11 +229,18 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
   private async runtimeExited(pluginInstanceId: string, active: ActiveBundled): Promise<void> {
     if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
     active.valid = false;
-    await active.startSettled;
-    if (this.#active.get(pluginInstanceId) !== active || active.stopping) return;
-    active.stopping = true;
-    this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);
-    await this.finishStop(pluginInstanceId, 'execution_worker_exited', 'crashed');
+    active.executionFailure = this.#startFailure();
+    // Revoke Host publications before joining startup or package cleanup.
+    try {
+      await active.onRuntimeExit?.();
+    } finally {
+      await active.startSettled;
+      if (this.#active.get(pluginInstanceId) === active && !active.stopping) {
+        active.stopping = true;
+        this.#startEpoch.set(pluginInstanceId, (this.#startEpoch.get(pluginInstanceId) ?? 0) + 1);
+        await this.finishStop(pluginInstanceId, 'execution_worker_exited', 'crashed');
+      }
+    }
   }
 
   private async finishStop(
@@ -237,7 +261,7 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       try {
         const state =
           terminalState === 'crashed' && this.#startEpoch.get(pluginInstanceId) !== epoch ? 'stopped' : terminalState;
-        await this.setBundledRuntimeState(authority, state);
+        await this.setBundledRuntimeState(authority, state, state === 'crashed' ? active.executionFailure : undefined);
       } finally {
         if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
         active.resolveClosed();
@@ -280,6 +304,43 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       await this.stop(pluginInstanceId, 'configuration_refresh_failed');
       throw error;
     }
+  }
+
+  async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.deliver) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active call delivery surface');
+    }
+    const receipt = await active.runtime.deliver(pluginInstanceId, input);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin call was stopped');
+    return receipt;
+  }
+
+  async handle(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.handle) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active request handler');
+    }
+    const result = await active.runtime.handle(pluginInstanceId, request);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin request handler was stopped');
+    return result;
+  }
+
+  async handleWebhook(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || !active.runtime.handleWebhook) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin has no active webhook surface');
+    }
+    const result = await active.runtime.handleWebhook(pluginInstanceId, contributionId, request);
+    if (!active.valid) throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'Plugin webhook was stopped');
+    return result;
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {

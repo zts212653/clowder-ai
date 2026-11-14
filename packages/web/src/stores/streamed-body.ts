@@ -1,3 +1,4 @@
+import { preserveInteractiveBlockStates } from '@cat-cafe/shared';
 import type { ChatMessage } from './chat-types';
 
 /**
@@ -9,6 +10,9 @@ import type { ChatMessage } from './chat-types';
  */
 export function withStreamedBodyOf(target: ChatMessage, source: ChatMessage): ChatMessage {
   const extra = target.extra || source.extra?.rich ? { ...target.extra, rich: source.extra?.rich } : undefined;
+  if (extra?.rich && target.extra?.rich) {
+    extra.rich = { ...extra.rich, blocks: preserveInteractiveBlockStates(extra.rich.blocks, target.extra.rich.blocks) };
+  }
   return {
     ...target,
     content: source.content,

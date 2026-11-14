@@ -216,6 +216,45 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it.each([
+    'sending',
+    'failed',
+    'unknown',
+    'canceled',
+    'accepted',
+    'recalled',
+  ] as const)('keeps a local %s bubble visible in a proven single-cat view without inventing a receipt', async (status) => {
+    fixture.extraMessages = [
+      {
+        id: 'local-attempt',
+        type: 'user',
+        content: '@codex my visible attempt for another member',
+        ...(status === 'accepted' ? { queuedEntryId: 'queue:other-member' } : {}),
+        timestamp: 6,
+        sendAttempt: { id: 'local-key', status },
+      },
+    ];
+    const view = { mode: 'cat' as const, catId: 'opus55' };
+    const controller: ConversationViewPreferenceController = {
+      snapshot: { stored: view, effective: view, source: 'thread' },
+      loading: false,
+      saving: false,
+      error: null,
+      save: async () => true,
+      subscribeBeforeCommit: () => () => {},
+    };
+    writeShellPresentation('v2');
+    await act(async () =>
+      root.render(
+        <ThreadChatSurface threadId="thread-parity" density="full" conversationViewController={controller} />,
+      ),
+    );
+    const local = container.querySelectorAll('[data-thread-chat-message-id="local-attempt"]');
+    expect(local).toHaveLength(1);
+    expect(local[0]?.closest('[data-conversation-input-evidence]')).toBeNull();
+    expect(local[0]?.closest('[data-conversation-execution]')).toBeNull();
+    expect(container.querySelector('[data-single-cat-conversation-timeline]')).not.toBeNull();
+  });
   it('opens the same member settings page from a chat nameplate', async () => {
     await act(async () => root.render(<ThreadChatSurface threadId="thread-parity" density="full" />));
     const button = container.querySelector<HTMLButtonElement>('button[aria-label="编辑伙伴"]')!;
@@ -455,7 +494,11 @@ describe('ThreadChatSurface density contract', () => {
     expect(compact.querySelector('[data-chat-container]')?.className).toContain('[overflow-anchor:none]');
   });
 
-  it('routes an interactive rich action only through the surface that rendered it', async () => {
+  it.each([
+    true,
+    false,
+  ])('routes an interactive rich action and reports admission=%s to its own surface', async (sent) => {
+    handleSend.mockResolvedValue(sent);
     await act(async () => {
       root.render(
         <div>
@@ -474,16 +517,18 @@ describe('ThreadChatSurface density contract', () => {
       ?.getAttribute('data-send-context');
     expect(compactContext).toBeTruthy();
 
-    act(() => {
+    const onResult = vi.fn();
+    await act(async () => {
       window.dispatchEvent(
         new CustomEvent('cat-cafe:interactive-send', {
-          detail: { text: '确认', sendContext: compactContext },
+          detail: { text: '确认', sendContext: compactContext, onResult },
         }),
       );
     });
 
     expect(handleSend).toHaveBeenCalledOnce();
     expect(handleSend).toHaveBeenCalledWith('确认');
+    expect(onResult).toHaveBeenCalledExactlyOnceWith(sent);
   });
 
   it('admits a legacy unscoped command only through the matching full surface', async () => {

@@ -9,6 +9,7 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { TOOL_EVENT_LOG_TTL_SECONDS, toolEventLogKey } from '../stores/redis-keys/tool-event-log-keys.js';
+import { isRecallLookupTool, recallToolInputSummary } from './derive-result-summary.js';
 import type { NudgeFollowupAnalysis, ToolEvent } from './event-log-types.js';
 
 const log = createModuleLogger('tool-event-log');
@@ -150,15 +151,31 @@ export function sanitizeToolEventSummary(
   return out;
 }
 
+type ToolEventMatcher = {
+  toolUseId?: string;
+  toolName?: string;
+  catId?: string;
+  invocationId?: string;
+  pendingOnly?: boolean;
+};
+
+type RecallInputMatcher = Required<Pick<ToolEventMatcher, 'toolUseId' | 'toolName' | 'catId' | 'invocationId'>>;
+
 export class ToolEventLog {
-  /**
-   * 砚砚 cloud-7 P1: per-thread serialization queue for updateSummary.
-   * Without it, two concurrent fire-and-forget updateSummary calls for the
-   * same thread both read the pre-merge zrange snapshot, both pick the same
-   * "oldest unmerged" event, and patch into the same slot — second result
-   * overwrites first, FIFO matching broken under parallel tool_result delivery.
-   */
-  private readonly updateChain = new Map<string, Promise<unknown>>();
+  // Preserve observation order across append and result merge, including when
+  // the route hands off to round-end correlation without awaiting either write.
+  private readonly writeChain = new Map<string, Promise<unknown>>();
+
+  private async enqueueWrite<T>(threadId: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.writeChain.get(threadId) ?? Promise.resolve();
+    const next = previous.then(write, write);
+    this.writeChain.set(threadId, next);
+    try {
+      return await next;
+    } finally {
+      if (this.writeChain.get(threadId) === next) this.writeChain.delete(threadId);
+    }
+  }
 
   private readonly maxEventsPerThread: number;
 
@@ -175,7 +192,11 @@ export class ToolEventLog {
    * with timestamp tie-breaker so same-ms multi-events keep insertion order.
    * Falls back to timestamp-only if INCR unavailable (e.g. fake Redis).
    */
-  async append(event: ToolEvent): Promise<void> {
+  append(event: ToolEvent): Promise<void> {
+    return this.enqueueWrite(event.threadId, () => this.writeEvent(event));
+  }
+
+  private async writeEvent(event: ToolEvent): Promise<void> {
     const key = toolEventLogKey(event.threadId);
     const seqKey = `${key}:seq`;
     let seq: number | null = null;
@@ -235,6 +256,7 @@ export class ToolEventLog {
    */
   async readRecentByThread(threadId: string, limit: number): Promise<ToolEvent[]> {
     if (limit <= 0) return [];
+    await this.writeChain.get(threadId)?.catch(noop);
     const key = toolEventLogKey(threadId);
     const members = await this.redis.zrange(key, -limit, -1);
     return members.map((m) => JSON.parse(m) as ToolEvent);
@@ -315,53 +337,54 @@ export class ToolEventLog {
    * one full scan on a window miss (R1 gpt52 #3629 — unique-key contract for
    * delayed/out-of-order results must not be traded for the fast path).
    */
-  async updateSummary(
+  updateSummary(threadId: string, matcher: ToolEventMatcher, summaryPatch: Record<string, unknown>): Promise<boolean> {
+    return this.enqueueWrite(threadId, () => this._doUpdateSummary(threadId, matcher, summaryPatch, true));
+  }
+
+  /** Backfill input for a pending call without settling its result. */
+  async updateRecallInput(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
-    summaryPatch: Record<string, unknown>,
+    matcher: RecallInputMatcher,
+    input: Record<string, unknown> | undefined,
   ): Promise<boolean> {
-    // 砚砚 cloud-7 P1: chain per-thread updates so concurrent fire-and-forget
-    // calls don't race on the same zrange snapshot. Even when callers do
-    // `.catch(() => {})` (no await), serialization happens inside ToolEventLog.
-    const prev = this.updateChain.get(threadId) ?? Promise.resolve();
-    const next = prev.then(
-      () => this._doUpdateSummary(threadId, matcher, summaryPatch),
-      () => this._doUpdateSummary(threadId, matcher, summaryPatch),
+    if (!isRecallLookupTool(matcher.toolName)) return false;
+    const summary = recallToolInputSummary(matcher.toolName, input);
+    if (Object.keys(summary).length === 0) return false;
+    return this.enqueueWrite(threadId, () =>
+      this._doUpdateSummary(threadId, { ...matcher, pendingOnly: true }, summary, false),
     );
-    this.updateChain.set(threadId, next);
-    try {
-      return await next;
-    } finally {
-      // GC: only delete if our promise is still the tail (otherwise a later
-      // call has already chained behind us and is the new tail).
-      if (this.updateChain.get(threadId) === next) {
-        this.updateChain.delete(threadId);
-      }
-    }
   }
 
   private async _doUpdateSummary(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
+    resultMerged: boolean,
   ): Promise<boolean> {
     // Fast path: tail window. Merge targets are normally the current round's
     // own appends, which sit at the tail (PR #3613 residual fix).
-    const updated = await this._matchAndMerge(threadId, matcher, summaryPatch, -UPDATE_SUMMARY_TAIL_WINDOW);
+    const updated = await this._matchAndMerge(
+      threadId,
+      matcher,
+      summaryPatch,
+      -UPDATE_SUMMARY_TAIL_WINDOW,
+      resultMerged,
+    );
     if (updated || !matcher.toolUseId) return updated;
     // R1 (gpt52, #3629): `toolUseId` is the explicit unique-key contract for
     // delayed / out-of-order results — a slow tool on a busy multi-cat thread
     // can see 200+ events land before its result arrives. Only this rare
     // window-miss path pays the full scan; the fuzzy FIFO path stays bounded
     // (a fuzzy match that far back belongs to no live round).
-    return this._matchAndMerge(threadId, matcher, summaryPatch, 0);
+    return this._matchAndMerge(threadId, matcher, summaryPatch, 0, resultMerged);
   }
 
   private async _matchAndMerge(
     threadId: string,
-    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    matcher: ToolEventMatcher,
     summaryPatch: Record<string, unknown>,
     start: number,
+    resultMerged: boolean,
   ): Promise<boolean> {
     const key = toolEventLogKey(threadId);
     // 砚砚 五审 P1-B: preserve original zset score (append uses INCR sequence,
@@ -403,19 +426,24 @@ export class ToolEventLog {
       if (!pair) continue;
       const event = JSON.parse(pair.member) as ToolEvent & { summary?: Record<string, unknown> };
       const summary = event.summary ?? {};
+      if (matcher.toolName && event.toolName !== matcher.toolName) continue;
+      if (matcher.catId && event.catId !== matcher.catId) continue;
+      if (matcher.invocationId && event.invocationId !== matcher.invocationId) continue;
+      if (matcher.pendingOnly && summary['_resultMerged'] === true) continue;
       if (matcher.toolUseId) {
         if (summary['_toolUseId'] !== matcher.toolUseId) continue;
       } else {
-        if (matcher.toolName && event.toolName !== matcher.toolName) continue;
-        // 砚砚 六审 P1-B: also require catId match when supplied (parallel-cat guard)
-        if (matcher.catId && event.catId !== matcher.catId) continue;
         // 砚砚 cloud P1: skip already-merged events so subsequent results don't
         // overwrite an earlier call's data — FIFO match to next unmatched call.
         if (summary['_resultMerged'] === true) continue;
       }
       // TD 2026-08-12: sanitize the merged result — result-side patches (e.g.
       // raw tool output) must not regrow a capped event past the budget.
-      const mergedSummary = sanitizeToolEventSummary({ ...summary, ...summaryPatch, _resultMerged: true });
+      const mergedSummary = sanitizeToolEventSummary({
+        ...summary,
+        ...summaryPatch,
+        ...(resultMerged ? { _resultMerged: true } : {}),
+      });
       const newEvent = { ...event, summary: mergedSummary };
       const newMember = JSON.stringify(newEvent);
       // 砚砚 cloud-4 P2: idempotent retry guard — when newMember bytes match

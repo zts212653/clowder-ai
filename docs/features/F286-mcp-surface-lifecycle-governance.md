@@ -16,12 +16,12 @@ mcp_admission_claims:
     resourceFamily: schedule
     boundaryKind: mode-matrix-boundary
     decision: accepted
-tips_exempt: "Renewed 2026-11-05 for Task512: this F286 delta records the schedule.update mode-matrix admission, while the actual parameter-update action is taught by the F139 capability tip and schedule skill. It adds no separate F286 user workflow. AC-B4/KD-12 bootstrap lineage, public baselines, evidence stubs, and negative-test references remain maintainer-facing governance."
+tips_exempt: "Renewed 2026-11-11 for Task743: the Phase D pause records a maintainer governance decision before the Signals pilot; the landed foundation and tool availability stay unchanged, and no new user workflow is introduced. The schedule.update mode-matrix action remains covered by the F139 capability tip and schedule skill. AC-B4/KD-12 bootstrap lineage, public baselines, evidence stubs, and negative-test references remain maintainer-facing governance."
 ---
 
 # F286: MCP Surface Lifecycle Governance
 
-> **Status**: in-progress（Phase A–C complete；Phase D incremental Design Gate accepted and implementation assigned to Sol；live=dormant） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: frozen（Phase A–C complete；Phase D 停在 Signals 试点之前：底座 #4148 已合入并保留，试点与任何 `discoverable` 迁移暂停；You 2026-11-10 定暂停，见 Phase D「2026-11-10 暂停」；非全部完成） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **Gate**: Architecture Design Gate accepted by operator (`private-source-id`). Phase B planning and one separately tested/reviewed reversible pilot are authorized; no candidate migration is authorized without its own plan and gates.
 
@@ -127,6 +127,15 @@ That pilot landed atomically in PR #3947: final HEAD `e9184caf4065ba3de3883e820f
 - Treat the current 111 `migration-candidate` definitions the same way: they are hypotheses, not Phase D scope or a completion denominator.
 - No semantic deletion occurs from top-20 absence alone.
 - Treat `gh` as the canonical local GitHub execution path and the Clowder AI-managed external GitHub MCP catalog/runtime surface as an explicit sunset outside the 124 semantic rows; its code/config removal remains owned by the source thread.
+
+#### 2026-11-10 暂停
+
+You 2026-11-10 在Ragdoll的终端会话里定：Phase D 暂停，不为记忆减法重启试点（通知原 owner 的消息：`[thread-id]#private-source-id`）。
+
+- **做到哪了**：可用性和工具说明下发分开、六个 server instructions、请求记录和探针，已随 #4148（`bcd23fc01e`，2026-09-02）合入，保留不回滚。Signals 试点从 2026-08-29 起一直是「prepared, not yet run」，之后两个多月 Phase D 没有新进展，BACKLOG 却一直写着实施中。
+- **为什么停**：记忆减法第二刀想把 6 个低频工具改成需要时才出现，查下来发现做了也省不下东西。原 owner 小太阳 5.6 核过（`[thread-id]#private-source-id`）：现行代码里 `discoverable` 和 `host-default` 注册行为相同；Claude 和当前这版 Codex（0.167.0）本来就是用到才去取工具说明，只改标签，这两家都省不出东西。可能受益的只有仍然一次性加载全部说明的运行时，目前没有实测证据。本节上面写过：试点证明不了明显收益，停在已合入的底座就是合理结局。
+- **不变的**：Phase A–C 的结果、已合入的底座、57 个 candidate 标记（仍只是假设），都原样保留；工具的可用范围不变。
+- **什么情况下重开**：某个具体运行时被实测确认仍一次性加载全部工具说明，并且确实造成了负担（比如 AGY、Kimi），再由 owner 重开 Signals 试点。
 
 F324 Phase A 的既有读取工具入参增加 `charOffset` 或 `offset` 后，`cat_cafe_read_file_slice`、`cat_cafe_list_events` 与四个 session 读工具按 F286 admission 从 protected-base `migration-candidate` 晋为 canonical；同名工具继续保留原 read authority/risk/runtime profiles，无新顶层身份。`governance:write` 只更新规范快照，`governance:check` 验证新增/删除身份与 resource action/profile/schema delivery delta。输出字节预算由源 reader 和 `server-toolsets.ts` 的最终负例保护共同验证，写回执及已记正文曝光的读回执不被末端改报失败。
 
@@ -272,7 +281,7 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 - Phase A: census/reviews complete and operator Architecture Design Gate accepted.
 - Phase B: complete. The canonical 130-tool registry, protected-base parity witness, admission/cutover guards, non-author review, full merge gate, and PR #3424 merge evidence are landed on `main`.
 - Phase C: complete. The generic `permission` family sunset is landed through PR #3947 with an exact seven-layer manifest, independent review, full gate plus mechanical rebase continuity, and no replacement/dual surface. Live runtime remains dormant.
-- Phase D: incremental Design Gate accepted and implementation assigned to Sol; provider rollout remains bounded by the approved probe/parity/pilot stop conditions. The close line preserves all authorized capabilities and explicitly excludes the 57 historical / 111 current migration candidates from the work queue.
+- Phase D: incremental Design Gate accepted and implementation assigned to Sol; foundation landed in #4148. **Paused 2026-11-10 by You before the Signals pilot** (see Phase D「2026-11-10 暂停」). Provider rollout remains bounded by the approved probe/parity/pilot stop conditions. The close line preserves all authorized capabilities and explicitly excludes the 57 historical / 111 current migration candidates from the work queue.
 
 ## Tips Contribution（F244）
 

@@ -4,10 +4,10 @@ import { deny } from './native-effect-policy.mjs';
 import { classifyNativeTarget } from './native-effect-target-classifier.mjs';
 
 /** Preview grammar supplies attribution, not a second permission whitelist. */
-export function protectedManagedPreviewBoundary(decisions, segments, cwd, source) {
+export function protectedManagedPreviewBoundary(decisions, segments, cwd, source, builtinContexts = []) {
   for (const [index, decision] of decisions.entries()) {
     const segment = segments[index];
-    const selection = previewSelection(segment);
+    const selection = previewSelection(segment, builtinContexts[index] ?? false);
     const port = selection.port;
     if (!decision && !selection.claimed) continue;
     const literalTarget = classifyNativeTarget(segment, cwd, 'unknown');
@@ -24,9 +24,9 @@ export function protectedManagedPreviewBoundary(decisions, segments, cwd, source
   return null;
 }
 
-function previewSelection(segment) {
+function previewSelection(segment, builtinContext) {
   let claimed = false;
-  for (const call of executedInvocations(segment).pipelines.flat()) {
+  for (const call of executedInvocations(segment, { builtinContext }).pipelines.flat()) {
     if (packageManagerInvocation(call.name, call.operands).script !== 'preview:process') continue;
     claimed = true;
     const index = call.operands.indexOf('preview:process');

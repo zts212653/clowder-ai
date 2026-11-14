@@ -3,6 +3,7 @@ import type { MemberText } from './MemberRuntimeFields';
 import type { MemberDraft } from './member-editor-state';
 
 const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
+  env: ['Desktop 接入配置', 'Desktop connection settings'],
   banner: ['横幅', 'Banner'],
   accountBindingMode: ['账号跟随方式', 'Account binding mode'],
   agyNativeEnabled: ['Antigravity 原生运行', 'Native Antigravity'],
@@ -67,6 +68,7 @@ function display(key: keyof HubCatEditorFormState, value: unknown, t: MemberText
     return t('未指定 / 跟随默认', 'Default');
   // Arguments may contain credentials; the summary describes their change without echoing them.
   if (/Args$/.test(key)) return t('已设置（高级接入中查看）', 'Configured (see Advanced connection)');
+  if (key === 'env') return t('Desktop 连接配置', 'Desktop connection settings');
   return String(value);
 }
 

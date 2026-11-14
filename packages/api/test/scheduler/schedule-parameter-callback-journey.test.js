@@ -44,7 +44,7 @@ it('MCP callback → owner approval keeps Alpha identity/cursor and applies mana
     id: 'dyn-existing-alpha-subscription',
     templateId: 'alpha-browser',
     trigger: { type: 'cron', expression: '*/5 * * * *' },
-    params: { baselineSha: oid(1), guardianCatId: catId },
+    params: { baselineSha: oid(1), guardianCatId: catId, targetCatId: 'codex-astra' },
     display: { label: 'Alpha 浏览器回归', category: 'repo' },
     deliveryThreadId: thread.id,
     enabled: true,
@@ -161,7 +161,7 @@ it('MCP callback → owner approval keeps Alpha identity/cursor and applies mana
   assert.equal(denied.isError, true);
   assert.match(denied.content[0].text, /403/);
   assert.equal(proposals.listPending(owner).length, 0);
-  const result = await invoke('{"executionCarrier":"managed"}');
+  const result = await invoke(JSON.stringify({ executionCarrier: 'managed', failureTriageCatId: catId }));
   assert.notEqual(result.isError, true, JSON.stringify(result));
   const { proposalId } = JSON.parse(result.content[0].text);
   const pending = proposals.getById(proposalId);
@@ -178,7 +178,7 @@ it('MCP callback → owner approval keeps Alpha identity/cursor and applies mana
   assert.equal(decision.status, 200, await decision.text());
   assert.deepEqual(tasks.getById(original.id), {
     ...original,
-    params: { ...original.params, executionCarrier: 'managed' },
+    params: { ...original.params, executionCarrier: 'managed', failureTriageCatId: catId },
   });
   assert.equal(subscription.cursor(), oid(3));
   assert.deepEqual(subscription.list(), revisionsBefore, 'configuration must not rewrite any enrolled revision');

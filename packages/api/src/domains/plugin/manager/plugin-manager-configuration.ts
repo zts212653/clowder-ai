@@ -78,6 +78,7 @@ export class HostPluginConfigurationService implements PluginManagerConfiguratio
               readPluginOperationState(this.options.projectRoot, pluginId, field.key),
               fields,
               stored,
+              configurationVariants,
             )
           : configFieldProjection(field, fields, stored, configurationVariants),
       ),

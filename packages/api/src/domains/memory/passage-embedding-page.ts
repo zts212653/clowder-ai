@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { PassageEmbeddingRow } from './embed-utils.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
+import { capturePassageVectorSource } from './vector-source-binding.js';
 
 /** Inspect a bounded metadata page; only missing vectors require passage bodies. */
 export function readPassageEmbeddingPage(
@@ -30,5 +31,6 @@ export function readPassageEmbeddingPage(
           WHERE id IN (${missing.map(() => '?').join(',')}) ORDER BY id`)
         .all(...missing.map(({ id }) => id)) as PassageEmbeddingRow[])
     : [];
+  for (const passage of passages) passage.sourceSnapshot = capturePassageVectorSource(db, passage);
   return { lastId: last.id, metadataRows: rows.length, passages };
 }

@@ -8,7 +8,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import { resolveCodexAccountLaunch } from '../dist/config/codex-account-launch.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { writeAgentCommandFile } from '../dist/domains/terminal/tmux-command-file.js';
-import { installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
+import { ALTERNATIVE_CODEX_AUTH_INPUTS, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 function isolateProxyExceptions(t) {
@@ -67,8 +67,10 @@ class Wire {
   }
 }
 
-for (const carrierMode of ['exec_json', 'app_server']) {
-  test(`final account/callback environment reaches ${carrierMode} on first call and resume`, async (t) => {
+for (const [carrierMode, baseUrl] of ['exec_json', 'app_server'].flatMap((carrier) =>
+  [undefined, 'https://gateway.fixture.invalid/v1'].map((endpoint) => [carrier, endpoint]),
+)) {
+  test(`final account/callback environment reaches ${carrierMode} on first call and resume (endpoint=${baseUrl ? 'gateway' : 'official'})`, async (t) => {
     installAmbientCodexAccount(t);
     isolateProxyExceptions(t);
     const root = await realpath(await mkdtemp(join(tmpdir(), 'issue1666-provider-')));
@@ -77,6 +79,7 @@ for (const carrierMode of ['exec_json', 'app_server']) {
       id: 'issue1666-api',
       authType: 'api_key',
       apiKey: 'selected-fixture',
+      ...(baseUrl ? { baseUrl } : {}),
       envVars: { HOME: root, NO_PROXY: 'account.fixture' },
     };
     const launch = resolveCodexAccountLaunch(account, { cwd: root, env: { HOME: root } });
@@ -90,11 +93,12 @@ for (const carrierMode of ['exec_json', 'app_server']) {
     const inspect = async (options) => {
       observed++;
       assert.equal(options.inheritParentEnv, false);
-      assert.equal(
-        options.env.CODEX_API_KEY,
-        undefined,
-        'ambient alternative credentials removed by account finalizer',
-      );
+      for (const key of ALTERNATIVE_CODEX_AUTH_INPUTS)
+        assert.equal(
+          options.env[key],
+          !baseUrl && key === 'CODEX_API_KEY' ? account.apiKey : undefined,
+          `${key} must not select the ambient account; only the official endpoint carries the selected native key`,
+        );
       assert.equal(options.env.OPENAI_API_KEY, account.apiKey);
       assert.equal(options.env.HTTP_PROXY, 'http://proxy.fixture.invalid:3128');
       assert.equal(options.env.CAT_CAFE_INVOCATION_ID, 'issue1666-turn');
@@ -104,7 +108,7 @@ for (const carrierMode of ['exec_json', 'app_server']) {
         const dir = await mkdtemp(join(root, 'writer-'));
         const argv = await writeAgentCommandFile(dir, options, ':');
         const script = await readFile(argv.at(-1), 'utf8');
-        assert.equal(script.includes('export CODEX_API_KEY='), false);
+        assert.equal(script.includes("export CODEX_API_KEY='selected-fixture'"), !baseUrl);
         assert.equal(script.includes("export NO_PROXY='account.fixture,localhost,127.0.0.1,::1'"), true);
       }
     };
@@ -118,6 +122,7 @@ for (const carrierMode of ['exec_json', 'app_server']) {
         callbackEnv: {
           CODEX_AUTH_MODE: 'api_key',
           OPENAI_API_KEY: account.apiKey,
+          ...(baseUrl ? { OPENAI_BASE_URL: baseUrl } : {}),
           NO_PROXY: 'callback.fixture',
           HTTP_PROXY: 'http://proxy.fixture.invalid:3128',
           CAT_CAFE_INVOCATION_ID: 'issue1666-turn',

@@ -12,6 +12,7 @@ const bodySchema = z
     projectPath: z.string().optional(),
     attemptId: z.string().uuid().optional(),
     displayName: z.string().max(200).optional(),
+    terminal: z.boolean().optional(),
   })
   .strict();
 /** Same identity/project boundary as account management. No callback endpoint accepts browser tokens. */
@@ -26,7 +27,7 @@ export function registerCodexLoginRoutes(app: FastifyInstance, manager: CodexLog
       const { profileId } = request.params as { profileId: string };
       try {
         let resultRef = profileId;
-        if (action === 'start') manager.start(root, profileId);
+        if (action === 'start') manager.start(root, profileId, parsed.data.terminal);
         else {
           if (!parsed.data.attemptId) return reply.code(400).send({ error: 'Login attempt required' });
           if (action === 'create-new')

@@ -4,6 +4,7 @@ import type { CapabilityTipContext, LifecycleActiveRun } from '@cat-cafe/shared'
 import { useRouter } from 'next/navigation';
 import type { ReactNode, Ref } from 'react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { InteractiveSendDetail } from '@/components/rich/interactive-block-client';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -113,6 +114,7 @@ export interface ThreadChatSurfaceProps {
   onActivity?: (activity: ThreadChatActivity) => void;
   onRealMessageSent?: () => void;
   onReadingPort?: RegisterChatReadingPort;
+  onNavigateMessage?: (messageId: string, options?: { refresh?: boolean }) => boolean;
   conversationViewController?: ConversationViewPreferenceController;
   conversationViewQueue?: readonly QueueEntry[];
 }
@@ -135,6 +137,7 @@ export function ThreadChatSurface({
   onActivity,
   onRealMessageSent,
   onReadingPort,
+  onNavigateMessage,
   conversationViewController,
   conversationViewQueue = [],
 }: ThreadChatSurfaceProps) {
@@ -165,13 +168,25 @@ export function ThreadChatSurface({
   } = history;
   const navigateMessage = useCallback(
     (messageId: string, options?: MessageNavigationOptions): boolean => {
+      const loaded = useChatStore
+        .getState()
+        .getThreadState(threadId)
+        .messages.some((message) => message.id === messageId);
+      if (!loaded && !options?.loadIfNeeded) {
+        return false;
+      }
+      // loadIfNeeded means "canonical refresh, then go" even when the target is already in the store: cloud/plugin
+      // replies can be late or replaced (f247-native-cloud-receipt). Same as the fallback branch below.
+      if (onNavigateMessage?.(messageId, { refresh: Boolean(options?.loadIfNeeded) })) {
+        return true;
+      }
       if (options?.loadIfNeeded) {
         void navigateToMessage(messageId, undefined, { refresh: true });
         return true;
       }
       return jumpToMessage(messageId);
     },
-    [jumpToMessage, navigateToMessage],
+    [jumpToMessage, navigateToMessage, onNavigateMessage, threadId],
   );
   useThreadChatReadingPort(threadId, presentation, onReadingPort, history);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
@@ -218,9 +233,19 @@ export function ThreadChatSurface({
     conversationViewQueue,
     messages,
   ]);
+  const singleCatLocalAttempts = useMemo(() => {
+    if (!singleCatProjection) return [];
+    // Own sends belong to the thread even while viewing another member. They
+    // remain outside member execution evidence until the existing projection owns them.
+    const projectedIds = new Set(flattenConversationProjection(singleCatProjection).map((message) => message.id));
+    return messages.filter((message) => message.sendAttempt && !projectedIds.has(message.id));
+  }, [messages, singleCatProjection]);
   const visibleMessages = useMemo(
-    () => (singleCatProjection ? flattenConversationProjection(singleCatProjection) : messages),
-    [messages, singleCatProjection],
+    () =>
+      singleCatProjection
+        ? [...flattenConversationProjection(singleCatProjection), ...singleCatLocalAttempts]
+        : messages,
+    [messages, singleCatProjection, singleCatLocalAttempts],
   );
   // Read the history owner's existing anchor. Its row must exist on the first
   // paint of a returning thread, before an observer can mount deferred content.
@@ -257,7 +282,7 @@ export function ThreadChatSurface({
       (!selection.selectionMode || selected || selection.selectedMessageIds.size < MAX_SELECTED_MESSAGES);
     return (
       <ChatMessageRow
-        key={message.id}
+        key={message.clientMessageId ? `send-attempt:${message.clientMessageId}` : message.id}
         message={message}
         compact={compact}
         threadId={threadId}
@@ -293,20 +318,24 @@ export function ThreadChatSurface({
 
   useEffect(() => {
     const handleInteractiveSend = (event: Event) => {
-      const detail = (event as CustomEvent<{ text?: string; sendContext?: string; targetThreadId?: string }>).detail;
+      const detail = (event as CustomEvent<InteractiveSendDetail>).detail;
       const ownsContext = detail.sendContext === interactiveSendContext;
       const ownsUnscoped =
         acceptUnscopedInteractiveSend &&
         !detail.sendContext &&
         (!detail.targetThreadId || detail.targetThreadId === threadId);
       if ((!ownsContext && !ownsUnscoped) || !detail.text) return;
-      void handleSend(detail.text).then((sent) => {
-        if (sent) onRealMessageSent?.();
-      });
+      void handleSend(detail.text).then(
+        (sent) => {
+          detail.onResult?.(sent === true);
+          if (sent) onRealMessageSent?.();
+        },
+        () => detail.onResult?.(false),
+      );
     };
     window.addEventListener('cat-cafe:interactive-send', handleInteractiveSend);
     return () => window.removeEventListener('cat-cafe:interactive-send', handleInteractiveSend);
-  }, [acceptUnscopedInteractiveSend, handleSend, interactiveSendContext, threadId]);
+  }, [acceptUnscopedInteractiveSend, handleSend, interactiveSendContext, threadId, onRealMessageSent]);
 
   const surface = (
     <section
@@ -375,7 +404,19 @@ export function ThreadChatSurface({
               {visibleMessages.length === 0 && !isLoadingHistory ? (
                 projectedEmptyState
               ) : singleCatProjection ? (
-                <SingleCatConversationTimeline projection={singleCatProjection} renderMessage={renderTimelineMessage} />
+                <>
+                  <SingleCatConversationTimeline
+                    projection={singleCatProjection}
+                    renderMessage={renderTimelineMessage}
+                  />
+                  {singleCatLocalAttempts.map((message, index) =>
+                    renderTimelineMessage(
+                      message,
+                      visibleMessages.length - singleCatLocalAttempts.length + index,
+                      visibleMessages.length,
+                    ),
+                  )}
+                </>
               ) : (
                 messages.map((message, index) => renderTimelineMessage(message, index, messages.length))
               )}
@@ -434,6 +475,7 @@ export function ThreadChatSurface({
           ) : (
             <div className={composerClassName}>
               <ChatInput
+                localSendFeedback
                 key={threadId}
                 presentation={composerPresentation}
                 composerContext={
@@ -448,6 +490,7 @@ export function ThreadChatSurface({
                   contextAttachments,
                   explicitTargetCats,
                   messageDisposition,
+                  onPrepared,
                 ) => {
                   const sent = await handleSend(
                     content,
@@ -459,6 +502,8 @@ export function ThreadChatSurface({
                     explicitTargetCats,
                     {
                       consumeComposerDraft: true,
+                      localAttempt: true,
+                      ...(onPrepared ? { onPrepared } : {}),
                       ...(messageDisposition ? { messageDisposition } : {}),
                     },
                   );

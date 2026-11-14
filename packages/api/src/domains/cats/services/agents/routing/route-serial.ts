@@ -165,7 +165,11 @@ import {
 } from '../../stores/ports/TurnExecutionStore.js';
 import { isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
-import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import {
+  deriveToolEventResultSummary,
+  isRecallLookupTool,
+  recallToolInputSummary,
+} from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
@@ -210,17 +214,20 @@ import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions 
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
-import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
+import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { readDurableA2ALineage } from './durable-a2a-lineage.js';
-import { validateRoutingSyntax } from './final-routing-slot.js';
+import { finalRoutingSlot, validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { resolveEventBackedRoutingExit } from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { requestOwnerAskCorrection } from './owner-ask-correction.js';
+import { detectUnaddressedOwnerAsk, opensOwnerDecision } from './owner-ask-detect.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
-import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
+import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -966,7 +973,6 @@ export async function* routeSerial(
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
       const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
-      const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
@@ -1669,6 +1675,8 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      // Set when this turn put a decision in front of the owner (approval card, decision card, …).
+      let openedOwnerDecision = false;
       const pendingToolResults: PendingToolResult[] = [];
       const recordPersistedOutputMessageId = (messageId: string): void => {
         sameRouteOutputMessageIds.add(messageId);
@@ -1770,7 +1778,6 @@ export async function* routeSerial(
         message: AppendMessageInput,
         terminal: { status: 'completed'; completedAt: number },
         targets: readonly CatId[],
-        allowDotReturn: boolean,
       ): Promise<StoredMessage> => {
         if (!ownInvocationId || !lifecycleResponseMessageId) throw new Error('canonical response identity missing');
         return commitCompletedRouteResponse(deps, {
@@ -1779,8 +1786,6 @@ export async function* routeSerial(
           message,
           terminal,
           targetCats: [...targets],
-          allowDotReturn,
-          triggerMessageId: turnTriggerMessageId,
           admitWake: commitCompletedA2AWake,
           userId,
           ownerAuthProvenance,
@@ -2006,6 +2011,7 @@ export async function* routeSerial(
         'Delivery route preparation timing',
       );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        toolEventLog: deps.toolEventLog,
         executionBinding,
         ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
         onRemoteExecutionDispatched: remoteCancellation.onDispatched,
@@ -2234,6 +2240,7 @@ export async function* routeSerial(
           // F148 OQ-2: Collect tool names for context eval
           if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
             collectedToolNames.push(effectiveMsg.toolName);
+            if (opensOwnerDecision(effectiveMsg.toolName, effectiveMsg.toolInput)) openedOwnerDecision = true;
             pendingToolResults.push({
               toolName: effectiveMsg.toolName,
               ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
@@ -2272,15 +2279,21 @@ export async function* routeSerial(
             // otherwise FIFO toolName+catId match handles same-name parallel calls.
             if (deps.toolEventLog && completedToolName) {
               const normalizedName = normalizeMcpToolName(completedToolName.toolName);
-              const resultSummary = deriveResultSummary(normalizedName, effectiveMsg.content);
+              const resultSummary = deriveToolEventResultSummary(normalizedName, effectiveMsg);
               if (Object.keys(resultSummary).length > 0) {
-                const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
-                const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
-                  ? { toolUseId: resultMsg.toolUseId }
-                  : resultMsg.catId
-                    ? { toolName: normalizedName, catId: resultMsg.catId }
-                    : { toolName: normalizedName };
-                deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
+                deps.toolEventLog
+                  .updateSummary(
+                    threadId,
+                    {
+                      catId: effectiveMsg.catId,
+                      invocationId: effectiveMsg.invocationId ?? ownInvocationId,
+                      ...(effectiveMsg.toolUseId
+                        ? { toolUseId: effectiveMsg.toolUseId }
+                        : { toolName: normalizedName }),
+                    },
+                    resultSummary,
+                  )
+                  .catch(() => {});
               }
             }
           }
@@ -2312,7 +2325,9 @@ export async function* routeSerial(
               classification.category === 'skill' ? classification.toolName : normalizeMcpToolName(rawToolName);
             // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
             // updateSummary can do exact match when provider emits it on tool_result.
-            const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+            const baseSummary = isRecallLookupTool(normalizedToolName)
+              ? recallToolInputSummary(normalizedToolName, msg.toolInput)
+              : (msg.toolInput ?? {});
             const summary: Record<string, unknown> = msg.toolUseId
               ? { ...baseSummary, _toolUseId: msg.toolUseId }
               : baseSummary;
@@ -2455,6 +2470,11 @@ export async function* routeSerial(
         }
       }
 
+      if (ownInvocationId && catSignal?.aborted) {
+        recordStoppedRecallCalls(deps.toolEventLog, threadId, ownInvocationId, catId, pendingToolResults, catSignal);
+        completedCatInvocationIds.push([catId, ownInvocationId]);
+        pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
+      }
       if (providerTeardownUnconfirmed) return;
       // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. The
       // events it produced after the stop were dropped above, so its failure text and diagnostics
@@ -2751,7 +2771,8 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId);
+        const bodyA2AMentions = parseA2AMentions(storedContent, catId, await deps.addressedPlugins?.list());
+        a2aMentions = bodyA2AMentions;
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -2939,6 +2960,26 @@ export async function* routeSerial(
           pendingRoutingFeedback.push({ targetCatId: catId, reason: 'void_hold' });
           // F192 Phase D — capture trigger for deferred sample event emission.
           pendingC2VoidHoldSampleTrigger = voidHoldFireAttr[TRIGGER] as string;
+        }
+
+        // 2026-11-09 dropped-ball census: replies that wait for the owner without a line-start
+        // mention never reach the mailbox. Remind the cat next turn; after storage, wake it once
+        // to decide or mention the owner when he is away (see owner-ask-correction.ts).
+        const unaddressedOwnerAsk =
+          localCvoHasCoCreatorLineStartMention || detectUserMention(storedContent)
+            ? null
+            : detectUnaddressedOwnerAsk({
+                text: storedContent,
+                routedToCat: routingExitLineStartMentions.length > 0 || structuredTargetCats.size > 0,
+                blocks: allRichBlocks,
+                openedOwnerDecision,
+              });
+        if (unaddressedOwnerAsk) {
+          pendingRoutingFeedback.push({ targetCatId: catId, reason: 'owner_ask_unaddressed' });
+          log.info(
+            { catId: catId as string, threadId, kind: unaddressedOwnerAsk },
+            'Owner ask without a line-start mention',
+          );
         }
 
         // One write preserves both inline-routing and wait facts instead of overwriting either.
@@ -3137,6 +3178,12 @@ export async function* routeSerial(
             nativePhases:
               !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
           });
+          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+            aborted: catSignal?.aborted === true,
+            abortReason: catSignal?.reason,
+            failed: hadProviderError,
+            errorCode: doneMsg?.errorCode,
+          });
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId },
             userId,
@@ -3151,6 +3198,11 @@ export async function* routeSerial(
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
+              ...(lifecycleTerminalStatus === 'failed' && bodyA2AMentions.length > 0
+                ? {
+                    routingWarnings: [{ kind: 'handoff_blocked_by_failed_turn' as const, targetCats: bodyA2AMentions }],
+                  }
+                : {}),
               ...(outputProjection ? { outputLayout: outputProjection.snapshot(persistedContent).layout } : {}),
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(deliveryBoundary ? { deliveryBoundary } : {}),
@@ -3182,12 +3234,6 @@ export async function* routeSerial(
               ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
           };
-          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
-            aborted: catSignal?.aborted === true,
-            abortReason: catSignal?.reason,
-            failed: hadProviderError,
-            errorCode: doneMsg?.errorCode,
-          });
           const lifecycleResponse =
             lifecycleResponseMessageId && lifecyclePriorFrontierMessageId !== undefined && ownInvocationId
               ? {
@@ -3199,14 +3245,12 @@ export async function* routeSerial(
                 }
               : undefined;
           const completedA2AWakeCommit =
-            lifecycleResponse?.status === 'completed' &&
-            (a2aMentions.length > 0 || (!collectiveBoundTurn && deps.dotReplyTarget))
+            lifecycleResponse?.status === 'completed' && a2aMentions.length > 0
               ? (message: AppendMessageInput) =>
                   commitCompletedResponse(
                     message,
                     { status: 'completed', completedAt: lifecycleResponse.completedAt },
                     a2aMentions,
-                    !collectiveBoundTurn,
                   )
               : undefined;
           const failedA2AReportCommit =
@@ -3288,6 +3332,26 @@ export async function* routeSerial(
           storedMsgId = storedMsg?.id;
           turnStoredMessageId = storedMsgId;
           if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
+          const ownerAskCorrectionDeliver = deps.invocationDeps.ownerAskCorrectionDeliver;
+          if (unaddressedOwnerAsk && storedMsg && ownerAskCorrectionDeliver) {
+            try {
+              const correction = await requestOwnerAskCorrection(
+                { messages: deps.messageStore, deliver: ownerAskCorrectionDeliver },
+                {
+                  userId,
+                  threadId,
+                  catId: catId as string,
+                  askMessageId: storedMsg.id,
+                  answeredAt: Date.now(),
+                  ...(currentUserMessageId ? { triggerMessageId: currentUserMessageId } : {}),
+                  excerpt: finalRoutingSlot(stripTrailingCatSignatures(storedContent)),
+                },
+              );
+              log.info({ catId: catId as string, threadId, outcome: correction.outcome }, 'Owner ask correction');
+            } catch (err) {
+              log.warn({ catId: catId as string, threadId, err }, 'Owner ask correction was not delivered');
+            }
+          }
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
           if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
             try {
@@ -3502,19 +3566,6 @@ export async function* routeSerial(
                 : undefined;
             const answerBearingNoText =
               hasRichBlocks || Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
-            const completedNoTextCommit =
-              answerBearingNoText &&
-              lifecycleResponse?.status === 'completed' &&
-              !collectiveBoundTurn &&
-              deps.dotReplyTarget
-                ? (message: AppendMessageInput) =>
-                    commitCompletedResponse(
-                      message,
-                      { status: 'completed', completedAt: lifecycleResponse.completedAt },
-                      [],
-                      true,
-                    )
-                : undefined;
             if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvocationId) {
               const decision = await deps.freshnessOutputCommitCoordinator.commit({
                 userId,
@@ -3525,7 +3576,6 @@ export async function* routeSerial(
                 originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
                 message: noTextMessageInput,
                 ...(lifecycleResponse ? { lifecycleResponse } : {}),
-                ...(completedNoTextCommit ? { commitLifecycleResponse: completedNoTextCommit } : {}),
               });
               outputCommitDecision = decision;
               if (options.persistenceContext) {
@@ -3536,15 +3586,13 @@ export async function* routeSerial(
               }
               storedNoText = await deps.messageStore.getById(decision.messageId);
             } else if (lifecycleResponse && ownInvocationId) {
-              storedNoText = completedNoTextCommit
-                ? await completedNoTextCommit(noTextMessageInput)
-                : await commitLifecycleResponseFromAppendInput(
-                    deps.messageStore,
-                    lifecycleResponse.messageId,
-                    ownInvocationId,
-                    lifecycleResponse,
-                    noTextMessageInput,
-                  );
+              storedNoText = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponse.messageId,
+                ownInvocationId,
+                lifecycleResponse,
+                noTextMessageInput,
+              );
             } else {
               // A tool-only record is audit output, not answer content: no frontier-annotated
               // commit, because there is no bubble whose position anyone reads. The replay-unsafe
@@ -3979,7 +4027,7 @@ export async function* routeSerial(
           isFinal,
         });
         if (isFinal) yieldedFinalDone = true;
-        if (ownInvocationId) {
+        if (ownInvocationId && !catSignal?.aborted) {
           completedCatInvocationIds.push([catId, ownInvocationId]);
           pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
         }

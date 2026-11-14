@@ -543,6 +543,66 @@ describe('cat-catalog-store', () => {
     assert.equal(customBreed?.variants[0]?.accountRef, undefined);
   });
 
+  it('retires the persisted legacy gpt-dot runtime identity without losing its historical presentation', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-retired-gpt-dot-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
+
+    const runtimeConfig = validConfig();
+    runtimeConfig.breeds[0].variants.push({
+      id: 'gpt-dot-default',
+      catId: 'gpt-dot',
+      name: '砚砚',
+      displayName: '砚砚 · dot',
+      nickname: '云端砚砚',
+      avatar: '/avatars/gpt-pro.png',
+      color: { primary: '#D4835A', secondary: '#F4E6DD' },
+      mentionPatterns: ['@dot'],
+      roleDescription: '在原对话相处与协作的长期云端家猫。',
+      clientId: 'openai',
+      carrier: 'app_server',
+      defaultModel: 'ChatGPT dot',
+      provider: 'openai-chatgpt-pro',
+      mcpSupport: true,
+    });
+    runtimeConfig.roster['gpt-dot'] = {
+      family: 'ragdoll',
+      roles: ['assistant'],
+      lead: false,
+      available: true,
+      evaluation: '砚砚 · dot',
+    };
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(runtimeConfig, null, 2));
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const retired = hydrated.breeds[0].variants.find((variant) => variant.catId === 'gpt-dot');
+
+    assert.ok(retired, 'historical messages still need the persisted member presentation');
+    assert.equal(retired.displayName, '砚砚 · dot');
+    assert.equal(retired.avatar, '/avatars/gpt-pro.png');
+    assert.equal(retired.provider, undefined, 'the retired identity must not compete for the cloud provider');
+    assert.equal(retired.carrier, undefined, 'the retired identity must not retain an executable carrier');
+    assert.equal(retired.mcpSupport, false);
+    assert.deepEqual(retired.mentionPatterns, ['@gpt-dot'], 'the plugin can claim the legacy @dot alias');
+    assert.equal(hydrated.roster['gpt-dot'].available, false, 'the historical identity must not be routable');
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+    assert.deepEqual(JSON.parse(readFileSync(catalogPath, 'utf-8')), hydrated, 'retirement is idempotent');
+
+    retired.provider = 'custom-provider';
+    retired.mentionPatterns = ['@custom-dot'];
+    hydrated.roster['gpt-dot'] = { ...hydrated.roster['gpt-dot'], available: true };
+    writeFileSync(catalogPath, JSON.stringify(hydrated, null, 2));
+    bootstrapCatCatalog(projectRoot, templatePath);
+    const repurposed = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const custom = repurposed.breeds[0].variants.find((variant) => variant.catId === 'gpt-dot');
+    assert.equal(custom.provider, 'custom-provider', 'later owner edits are not mistaken for legacy bytes');
+    assert.deepEqual(custom.mentionPatterns, ['@custom-dot']);
+    assert.equal(repurposed.roster['gpt-dot'].available, true);
+  });
+
   it('persists new template variants into matching existing runtime breeds during bootstrap', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-'));
     const templatePath = writeRepoTemplateWithStaleAgyOpusCatalog(projectRoot);

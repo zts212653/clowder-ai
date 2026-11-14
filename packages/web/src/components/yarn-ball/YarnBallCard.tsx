@@ -23,6 +23,51 @@ const DOT: Record<TaskItem['status'], string> = {
   done: 'var(--semantic-success)',
 };
 
+function RecoveryNotice({
+  incidents,
+  expanded,
+}: {
+  incidents: NonNullable<TaskItem['recovery']>['incidents'];
+  expanded: boolean;
+}) {
+  const t = useShellCopy(yarnBallCopy);
+  if (!incidents.length) return null;
+  if (expanded)
+    return incidents.map((incident) => (
+      <p
+        key={`${incident.source}:${incident.lane}:${incident.executionRef}`}
+        className="w-full break-all text-xs text-[var(--shell-muted)]"
+      >
+        {t.recoveryExecution(incident.executionRef)}
+      </p>
+    ));
+  return (
+    <div
+      data-testid="yarn-ball-recovery"
+      className="mt-3 rounded-lg border p-2 text-xs"
+      style={{ borderColor: 'color-mix(in srgb, var(--cafe-accent) 40%, transparent)' }}
+    >
+      <p className="font-medium text-[var(--shell-body)]">{t.recoveryTitle}</p>
+      {incidents.map((incident) => (
+        <p
+          key={`${incident.source}:${incident.lane}:${incident.executionRef}`}
+          className="mt-1 text-[var(--shell-muted)]"
+        >
+          {t.recoveryState[incident.disposition]} · {incident.reasonCode}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function formatTaskAge(updatedAt: number, t: (typeof yarnBallCopy)['zh']): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - updatedAt) / 60000));
+  if (minutes === 0) return t.justNow;
+  if (minutes < 60) return t.minutes(minutes);
+  if (minutes < 1440) return t.hours(Math.floor(minutes / 60));
+  return t.days(Math.floor(minutes / 1440));
+}
+
 export function YarnBallCard({ task }: { task: TaskItem }) {
   const t = useShellCopy(yarnBallCopy);
   const { getCatById } = useCatData();
@@ -30,16 +75,9 @@ export function YarnBallCard({ task }: { task: TaskItem }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
   const detailsId = useId();
+  const recovery = task.recovery?.incidents ?? [];
   const name = task.ownerCatId ? resolveCatDisplayName(task.ownerCatId, getCatById) : t.unassigned;
-  const minutes = Math.max(0, Math.floor((Date.now() - task.updatedAt) / 60000));
-  const time =
-    minutes === 0
-      ? t.justNow
-      : minutes < 60
-        ? t.minutes(minutes)
-        : minutes < 1440
-          ? t.hours(Math.floor(minutes / 60))
-          : t.days(Math.floor(minutes / 1440));
+  const time = formatTaskAge(task.updatedAt, t);
   const goToSource = () => {
     if (!task.sourceMessageId) return;
     const chat = useChatStore.getState();
@@ -128,6 +166,7 @@ export function YarnBallCard({ task }: { task: TaskItem }) {
           {expanded ? t.collapse : t.expand} {expanded ? '⌃' : '⌄'}
         </button>
       </div>
+      <RecoveryNotice incidents={recovery} expanded={false} />
       {expanded && (
         <div
           id={detailsId}
@@ -144,6 +183,7 @@ export function YarnBallCard({ task }: { task: TaskItem }) {
               {t.origin}
             </button>
           )}
+          <RecoveryNotice incidents={recovery} expanded />
           <div className="ml-auto">
             <ProposalChoice
               label={`${t.changeStatus}: ${task.title}`}

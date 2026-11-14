@@ -161,6 +161,7 @@ import {
   responseOutcomeForEndedTurn,
   settleResponseFromDraft,
 } from './domains/cats/services/agents/invocation/response-draft-settlement.js';
+import { continueRestartInterruptedCats } from './domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
 import { sharedMcpDeploymentId } from './domains/cats/services/agents/invocation/shared-mcp-launch.js';
@@ -299,6 +300,7 @@ import { ProactiveMemoryCandidateDetector } from './domains/memory/ProactiveMemo
 import { ProactiveMemoryNudgeService } from './domains/memory/ProactiveMemoryNudgeService.js';
 import { PersonMemoryDispositionProofResolver } from './domains/memory/people/PersonMemoryDispositionProofResolver.js';
 import { PersonMemoryDispositionSubjectProofResolver } from './domains/memory/people/PersonMemoryDispositionSubjectProofResolver.js';
+import { PersonMemoryOwnerReadService } from './domains/memory/people/PersonMemoryOwnerReadService.js';
 import { PersonMemoryProposalStatusContextResolver } from './domains/memory/people/PersonMemoryProposalStatusContextResolver.js';
 import { PersonMemoryRecallService } from './domains/memory/people/PersonMemoryRecallService.js';
 import { RedisPersonMemoryStore } from './domains/memory/people/RedisPersonMemoryStore.js';
@@ -1145,6 +1147,7 @@ async function main(): Promise<void> {
 
   const queueLedgerStore = redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore();
   const invocationQueue = new InvocationQueue(queueLedgerStore, {
+    resolveTargetKinds: (requested) => router.resolveQueueTargetKinds(requested),
     resolvePreResolvedTargets: (requested, implicit) => router.resolveAdmissionTargets(requested, implicit),
     projectRoot: resolveActiveProjectRoot(),
     invocationTracker,
@@ -1255,10 +1258,6 @@ async function main(): Promise<void> {
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
-  const { createActionRecoveryNotification } = await import(
-    './domains/ball-custody/action-successor-recovery-notification.js'
-  );
-  const notifyActionRecovery = createActionRecoveryNotification({ messages: messageStore, threads: threadStore });
   let taskActionSuccessorLifecycle:
     | import('./domains/ball-custody/TaskActionSuccessorLifecycle.js').TaskActionSuccessorLifecycle
     | undefined;
@@ -1335,7 +1334,6 @@ async function main(): Promise<void> {
     actionSuccessorCompletionService = completionService;
     taskActionSuccessorLifecycle = new taskActionLifecycleMod.TaskActionSuccessorLifecycle({
       leaseStore: actionSuccessorLeaseStore,
-      notifyRecovery: notifyActionRecovery,
       completionService: actionSuccessorCompletionService,
     });
     taskActionSuccessorOrphanRecovery = new orphanRecoveryMod.TaskActionSuccessorOrphanRecovery({
@@ -1389,6 +1387,11 @@ async function main(): Promise<void> {
       taskActionSuccessorLifecycle,
     );
   }
+  const { TaskRecoveryReadModel } = await import('./domains/ball-custody/TaskRecoveryReadModel.js');
+  const taskRecoveryReadModel = new TaskRecoveryReadModel({
+    ...(taskActionSuccessorLifecycle ? { action: taskActionSuccessorLifecycle } : {}),
+    ...(ballCustodyProjectionStore ? { ball: ballCustodyProjectionStore } : {}),
+  });
 
   // F153 Phase F AC-F4: Hydrate trace store from Redis messages on cold start
   if (telemetryHandle.traceStore && redis) {
@@ -2415,8 +2418,20 @@ async function main(): Promise<void> {
           const service = memoryServices.embeddingLifecycle.getService();
           const vectors = memoryServices.embeddingLifecycle.getVectorStore();
           if (!service?.isReady() || !vectors) return;
+          const { captureVectorSource, commitVectorSource } = await import('./domains/memory/vector-source-binding.js');
+          const source = captureVectorSource(memoryServices.store.getDb(), 'documents', anchor);
+          if (!source || source.text !== text) return;
+          const model = structuredClone(service.getModelInfo());
           const [vector] = await service.embed([text]);
-          vectors.upsert(anchor, vector);
+          await memoryServices.store.runExclusive(() => {
+            if (
+              memoryServices.embeddingLifecycle.getService() !== service ||
+              memoryServices.embeddingLifecycle.getVectorStore() !== vectors ||
+              JSON.stringify(service.getModelInfo()) !== JSON.stringify(model)
+            )
+              return;
+            commitVectorSource(memoryServices.store.getDb(), vectors, source, vector, model);
+          });
         },
       });
     } catch (error) {
@@ -2644,16 +2659,7 @@ async function main(): Promise<void> {
   });
   cloudConversations.start();
   app.addHook('onClose', async () => cloudConversations.stop());
-  let dotEventsBridge:
-    | import('./domains/cats/services/cloud-bridge/dot/DotEventsBridge.js').DotEventsBridge
-    | undefined;
-  let dotReturnService:
-    | import('./domains/cats/services/cloud-bridge/dot/DotReturnService.js').DotReturnService
-    | undefined;
-  let dotAskService: import('./domains/cats/services/cloud-bridge/dot/DotAskService.js').DotAskService | undefined;
   const cloudInvokeBridge = new CloudInvokeBridge({
-    dispatchDot: async (params) =>
-      dotEventsBridge?.dispatch(params) ?? { kind: 'fallback', reason: 'no-adapter', detail: 'dot 连接尚未就绪。' },
     hostAdapter: cloudConversations.adapter,
     emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason }) => {
       // invokeSingleCat owns the one user-visible status so route persistence,
@@ -2925,6 +2931,7 @@ async function main(): Promise<void> {
     : undefined;
   router = new AgentRouter({
     ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
+    ownerAskCorrectionDeliver: schedulerDeliver,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -2974,7 +2981,6 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
-    dotReplyTarget: (source) => dotAskService?.replyTarget(source) ?? Promise.resolve(false),
     cloudReturnGrantStore,
     turnExecutionStore,
     ...(freshnessStateStore ? { freshnessStateStore } : {}),
@@ -3247,7 +3253,6 @@ async function main(): Promise<void> {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     await actionSuccessorLeaseStore.initializeRecovery();
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
-      notifyRecovery: notifyActionRecovery,
       tasks: taskStore,
       leaseStore: actionSuccessorLeaseStore,
       deliverReturnCarrier: async (carrier) => {
@@ -3297,7 +3302,6 @@ async function main(): Promise<void> {
         return recoveryStatus === 'terminal' ? { outcome: 'unavailable' as const } : { outcome: 'enqueued' as const };
       },
       dispatch: {
-        notifyRecovery: notifyActionRecovery,
         tasks: taskStore,
         leaseStore: actionSuccessorLeaseStore,
         truthResolver: actionSubjectTruthResolver,
@@ -3543,6 +3547,8 @@ async function main(): Promise<void> {
     dynamicTaskStore, // F295: canonical managed-command execution read projection
     activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
     cliExecutionOwnerService,
+    // F048 Phase C: prior-process executions belong to startup recovery until it finishes.
+    isStartupRecoveryComplete: () => registry.isStartupRecoveryComplete(),
     // #1838: Stop proves a dead API's provider gone only through the kernel job it was linked to.
     ...(process.platform === 'win32'
       ? {
@@ -3579,7 +3585,10 @@ async function main(): Promise<void> {
     | import('./domains/collaborative-content/asset-canon/member-service.js').MemberCanonService
     | undefined;
   await app.register(catsRoutes, {
+    ...(redis ? { connectionCheckRedis: redis } : {}),
+    resolvePluginMcpView: () => pluginRuntime.supervisor.resolveMemberMcpView(),
     memberAssets: () => memberCanonService,
+    addressedPlugins: () => router.addressedPlugins,
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
   });
@@ -3653,7 +3662,13 @@ async function main(): Promise<void> {
     });
   }
   // F200 Phase B: Recall metrics API
+  const personOwnerReadService = personMemoryStore
+    ? new PersonMemoryOwnerReadService({ store: personMemoryStore, messageStore, threadStore })
+    : null;
   const recallOwnerMessageSources = {
+    ...(personOwnerReadService
+      ? { personDeliveryReader: personOwnerReadService.readDelivery.bind(personOwnerReadService) }
+      : {}),
     tasteSources: {
       ownerUserId: privateUserId,
       repository: tasteRepository,
@@ -3717,9 +3732,13 @@ async function main(): Promise<void> {
   });
   await app.register(personMemoryOwnerReadRoutes, {
     ownerUserId: privateUserId,
+    readEvidenceDb: memoryServices.store.getDb(),
     store: personMemoryStore,
     messageStore,
     threadStore,
+    ...(deferredPersonMemoryReceiptStore ? { deferredReceiptStore: deferredPersonMemoryReceiptStore } : {}),
+    ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
+    ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
   await app.register(entityMemoryOwnerRoutes, {
     ownerUserId: privateUserId,
@@ -4157,7 +4176,7 @@ async function main(): Promise<void> {
       taskOutcomeStore,
       frustrationIssueStore,
       harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
-      ...(memoryServices.embeddingService ? { embeddingService: memoryServices.embeddingService } : {}),
+      getLegacyEmbeddingService: () => memoryServices.legacyEmbeddingService,
     });
     verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(
       frictionProvider,
@@ -4998,6 +5017,7 @@ async function main(): Promise<void> {
 
   const callbackOpts = {
     ordinaryTaskHandoffs,
+    taskRecovery: taskRecoveryReadModel,
     ...(routingContextRuntime ? { routingSelection: routingContextRuntime.selectionService } : {}),
     proposalProjectRoot: resolveActiveProjectRoot(),
     companionCollectiveAccountability: readCollectiveAttention,
@@ -5039,22 +5059,6 @@ async function main(): Promise<void> {
     agentKeyRegistry,
     cloudReturnBindingSigner,
     cloudReturnGrantStore,
-    admitDotAsk: async (input) => {
-      if (!dotAskService) throw new Error('dot_ask_unavailable');
-      return dotAskService.admit(input);
-    },
-    dotReplyTarget: (source) => dotAskService?.replyTarget(source) ?? Promise.resolve(false),
-    admitDotReturn: async (input: {
-      agentKeyId: string;
-      userId: string;
-      threadId: string;
-      sourceMessageId: string;
-      eventId: string;
-      content: string;
-    }) => {
-      if (!dotReturnService) throw new Error('dot_connection_unavailable');
-      return dotReturnService.admitReturn(input);
-    },
     messageStore,
     threadExecutionSituationSource,
     socketManager,
@@ -5125,7 +5129,6 @@ async function main(): Promise<void> {
     messageSearchAnswerService,
     messageSearchService,
     evidenceStore: memoryServices.evidenceStore,
-    markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,
@@ -5398,10 +5401,6 @@ async function main(): Promise<void> {
     desktopRoot: companionDesktopRoot,
     cacheRoot: join(resolveActiveProjectRoot(), '.cat-cafe', 'components', 'desktop-window'),
   });
-  const { DotConnectionService } = await import('./domains/cats/services/cloud-bridge/dot/DotConnectionService.js');
-  const { DotConnectionRuntime } = await import('./domains/cats/services/cloud-bridge/dot/DotConnectionRuntime.js');
-  let dotConnectionService: InstanceType<typeof DotConnectionService> | undefined;
-  let dotRoundTripVerified = async () => false;
   const preparedArtifactReader = new F232PreparedArtifactReader({
     messages: messageStore,
   });
@@ -5446,18 +5445,14 @@ async function main(): Promise<void> {
       registerPostStart: (task) => taskRunnerV2.registerPostStart(task),
       unregister: (taskId) => taskRunnerV2.unregister(taskId),
     },
-    builtinRuntimes: new Map([
-      [
-        'official.chatgpt-dot',
-        new DotConnectionRuntime(
-          () => dotConnectionService,
-          () => dotRoundTripVerified(),
-        ),
-      ],
-    ]),
     projectRoot: pluginProjectRoot,
     capabilityProjectRoot: pluginCapabilityRoot,
     binaryProjectRoot: runtimeEntrypointRoot,
+    externalRequestLoopbackOrigin: `http://127.0.0.1:${PORT}`,
+    sharedPublicEndpoint: process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL?.trim()
+      ? new URL('/mcp', process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL).href
+      : '/mcp',
+    sharedAgentKeys: agentKeyRegistry,
     editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
     desktopExecutor: {
       prepare: async () => {
@@ -5660,6 +5655,10 @@ async function main(): Promise<void> {
       },
     },
   });
+  if (pluginRuntime.sharedExtension) {
+    const { pluginSharedExtensionRoutes } = await import('./routes/plugin/plugin-shared-extension-routes.js');
+    await app.register(pluginSharedExtensionRoutes, { service: pluginRuntime.sharedExtension });
+  }
   trustedImagePathResolver = (hmrId) => pluginRuntime.mediaLedger.resolveTrustedBlobPath(hmrId);
   await app.register(mediaRoutes, { ledger: pluginRuntime.mediaLedger, ownerUserId: privateUserId });
   subscriptionDrainScheduler.attach(pluginRuntime.subscriptionDelivery);
@@ -5697,17 +5696,46 @@ async function main(): Promise<void> {
     environment: process.env.PLUGIN_GIT_MARKETPLACE,
   });
   const pluginManagerCatalog = createHostOfficialPluginCatalog();
+  const { DotLegacySourceReader, dotLegacySourcePaths } = await import(
+    './domains/plugin/migration/dot-legacy-source-reader.js'
+  );
+  const { PluginMigrationInvoker } = await import('./domains/plugin/migration/plugin-migration-invoker.js');
+  const { DotLegacyMigrationCoordinator } = await import(
+    './domains/plugin/migration/dot-legacy-migration-coordinator.js'
+  );
+  const { DotLegacyMigrationJourney } = await import('./domains/plugin/migration/dot-legacy-migration-journey.js');
+  const { FileDotLegacyMigrationAuditStore } = await import(
+    './domains/plugin/migration/dot-legacy-migration-audit-store.js'
+  );
+  const dotLegacySource = new DotLegacySourceReader(dotLegacySourcePaths(pluginProjectRoot));
+  const dotMigrationAudit = new FileDotLegacyMigrationAuditStore(
+    resolve(pluginHostRoot(pluginProjectRoot), PLUGIN_HOST_ENTRIES.dotMigrationAudit),
+  );
+  const dotMigrationCoordinator = new DotLegacyMigrationCoordinator({
+    source: dotLegacySource,
+    keys: agentKeyRegistry,
+    invoker: new PluginMigrationInvoker({
+      inventory: pluginRuntime.inventoryStore,
+      packages: pluginRuntime.packages,
+      configuration: pluginRuntime.configuration,
+      projectRoot: pluginRuntime.projectRoot,
+      ...(pluginRuntime.privateStorage ? { storage: pluginRuntime.privateStorage } : {}),
+      log: (level, message, fields) => app.log[level]({ ...fields }, message),
+    }),
+    media: pluginRuntime.mediaLedger,
+    audit: dotMigrationAudit,
+    externalAccess: pluginRuntime.externalAccess,
+    ...(pluginRuntime.sharedExtension ? { sharedExtension: pluginRuntime.sharedExtension } : {}),
+  });
+  const dotMigrationJourney = new DotLegacyMigrationJourney({
+    source: dotLegacySource,
+    coordinator: dotMigrationCoordinator,
+    audit: dotMigrationAudit,
+  });
   const { FilesystemBuiltinPluginPackageMaterializer } = await import(
     './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
-  const { DotPluginStateProjection } = await import(
-    './domains/cats/services/cloud-bridge/dot/DotPluginStateProjection.js'
-  );
   const pluginManagerRuntime = createPluginManagerRuntimeComposition({
-    additionalStateProjection: new DotPluginStateProjection(
-      () => dotConnectionService,
-      () => dotRoundTripVerified(),
-    ),
     runtime: pluginRuntime,
     catalogProvider: pluginManagerCatalog,
     marketplaces: { sources: marketplaceSources, repository: marketplaceRepository },
@@ -5716,6 +5744,17 @@ async function main(): Promise<void> {
       await companionDesktopComponent.prepare();
     },
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
+  });
+  router.addressedPlugins = pluginManagerRuntime.addressedTargets;
+  const { AddressedPluginQueueDelivery } = await import(
+    './domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+  );
+  queueProcessor.addressedDelivery = new AddressedPluginQueueDelivery({
+    targets: pluginManagerRuntime.addressedTargets,
+    manager: pluginManagerRuntime.manager,
+    queue: invocationQueue,
+    messageStore,
+    entitlements: pluginRuntime.mediaEntitlements,
   });
   const { InstalledPluginOperations, pluginOperationRoutes } = await import(
     './domains/plugin/operations/plugin-operation-routes.js'
@@ -5787,6 +5826,16 @@ async function main(): Promise<void> {
     apiBaseUrl: `http://127.0.0.1:${PORT}`,
     deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
   });
+  // F333: one shared, thread-scoped browser instead of a Playwright process per cat session.
+  const { registerBrowserMcpRoutes } = await import('./routes/browser-mcp.js');
+  const { BrowserProcess } = await import('./domains/browser/BrowserProcess.js');
+  const sharedBrowser = new BrowserProcess();
+  app.addHook('onClose', async () => sharedBrowser.stop());
+  registerBrowserMcpRoutes(app, {
+    registry,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
+    browser: sharedBrowser,
+  });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
   // Discovery/downloads are optional startup work. Like desktop window
   // recovery, they must wait for listening rather than hold HTTP readiness.
@@ -5822,6 +5871,8 @@ async function main(): Promise<void> {
   await app.register(async (managerApp) => {
     registerPluginManagerRoutes(managerApp, {
       manager: pluginManagerRuntime.manager,
+      installedMigration: dotMigrationJourney,
+      addressedTargets: pluginManagerRuntime.addressedTargets,
       bindings: new PluginManagerBindings(connectorBindingStore, threadStore),
       contributions: pluginRuntime.supervisor,
       asset: pluginManagerRuntime.assets,
@@ -5893,157 +5944,19 @@ async function main(): Promise<void> {
     fileQuotes: { source: workspaceContentReviews.source, messages: messageStore, threads: threadStore },
     changed: (ownerUserId, reviewId) => socketManager?.emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
   });
-  const { DotConnectionStore } = await import('./domains/cats/services/cloud-bridge/dot/DotConnectionStore.js');
-  const { ensureDotIdentity } = await import('./domains/cats/services/cloud-bridge/dot/dot-identity.js');
-  const { registerDotConnectionRoutes } = await import('./routes/chatgpt-dot-connection-routes.js');
-  const { createDotWebhookSender } = await import('./domains/cats/services/cloud-bridge/dot/dot-webhook.js');
-  const dotWebhookSender = createDotWebhookSender(process.env.CAT_CAFE_DOT_WEBHOOK_PROXY_URL);
-  dotConnectionService = new DotConnectionService({
-    sendWebhook: dotWebhookSender,
-    store: new DotConnectionStore(resolve(pluginHostRoot(pluginProjectRoot), PLUGIN_HOST_ENTRIES.dotConnection)),
-    keys: agentKeyRegistry,
-    ensureIdentity: async () => {
-      if (ensureDotIdentity(pluginProjectRoot)) {
-        await syncAgentRegistry(reconcileCatRegistry(pluginProjectRoot, new Set()));
-        await configEventBus.emitChangeAsync({
-          source: 'cat-config',
-          scope: 'domain',
-          changedKeys: ['gpt-dot'],
-          changeSetId: `dot-identity:${Date.now()}`,
-          timestamp: Date.now(),
-        });
-      }
-    },
-    authority: async () => {
-      const instance = await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot');
-      return instance ? { ownerUserId: privateUserId, pluginInstanceId: instance.pluginInstanceId } : null;
-    },
-  });
-  registerDotConnectionRoutes(app, {
-    connection: dotConnectionService,
-    publicBaseUrl: () => process.env.CAT_CAFE_REMOTE_PUBLIC_BASE_URL,
-  });
-  const { DotDispatchStore } = await import('./domains/cats/services/cloud-bridge/dot/DotDispatchStore.js');
-  const { DotEventsBridge } = await import('./domains/cats/services/cloud-bridge/dot/DotEventsBridge.js');
-  const { DotReturnService } = await import('./domains/cats/services/cloud-bridge/dot/DotReturnService.js');
-  const { DotImageService } = await import('./domains/cats/services/cloud-bridge/dot/DotImageService.js');
-  const dotDispatches = new DotDispatchStore(
-    resolve(pluginHostRoot(pluginProjectRoot), PLUGIN_HOST_ENTRIES.dotDispatches),
-  );
-  dotRoundTripVerified = async () => {
-    const state = await dotConnectionService?.current();
-    if (!state || state.testEventIds.length !== 2) return false;
-    const records = await Promise.all(state.testEventIds.map((id) => dotDispatches.read(id)));
-    return records.every(
-      (record) =>
-        record?.attemptId === state.attemptId &&
-        record.agentKeyId === state.agentKeyId &&
-        record.connectionTest &&
-        !!record.sourceReadAt &&
-        !!record.replyMessageId,
-    );
-  };
-  const dotEnabled = async () =>
-    (await pluginRuntime.inventoryStore.read.instances.getCurrent('official.chatgpt-dot'))?.activationState ===
-    'enabled';
-  const { DotAskService } = await import('./domains/cats/services/cloud-bridge/dot/DotAskService.js');
-  dotAskService = new DotAskService({
-    connection: dotConnectionService,
-    messages: messageStore,
-    threads: threadStore,
-    enabled: dotEnabled,
-    post: async (secret, payload) => {
-      const result = await app.inject({
-        method: 'POST',
-        url: '/api/callbacks/post-message',
-        headers: { 'x-agent-key-secret': secret },
-        payload,
-      });
-      const body = result.json() as { messageId?: string; kind?: string };
-      if (result.statusCode !== 200 || !body.messageId)
-        throw new Error(
-          body.kind === 'dot_ask_idempotency_conflict' || body.kind === 'dot_ask_delivery_pending'
-            ? body.kind
-            : 'dot_ask_not_persisted',
-        );
-      return body;
-    },
-  });
-  dotEventsBridge = new DotEventsBridge({
-    sendWebhook: dotWebhookSender,
-    connection: dotConnectionService,
-    dispatches: dotDispatches,
-    messageStore,
-    threadStore,
-    enabled: dotEnabled,
-  });
-  dotReturnService = new DotReturnService({
-    connection: dotConnectionService,
-    dispatches: dotDispatches,
-    messages: messageStore,
-    threads: threadStore,
-    enabled: dotEnabled,
-    postReply: async ({ secret, eventId, threadId, sourceMessageId, content }) => {
-      const result = await app.inject({
-        method: 'POST',
-        url: '/api/callbacks/post-message',
-        headers: { 'x-agent-key-secret': secret, 'x-cat-cafe-dot-event-id': eventId },
-        payload: { threadId, replyTo: sourceMessageId, content },
-      });
-      const body = result.json() as { messageId?: string };
-      if (result.statusCode !== 200 || !body.messageId) throw new Error('dot_reply_not_persisted');
-      return { messageId: body.messageId };
-    },
-  });
-  const dotImages = new DotImageService({
-    directory: resolve(pluginHostRoot(pluginProjectRoot), PLUGIN_HOST_ENTRIES.dotImages),
-    returns: dotReturnService,
-    connection: dotConnectionService,
-    dispatches: dotDispatches,
-    messages: messageStore,
-    threads: threadStore,
-    emit: ({ threadId, messageId, block }) => {
-      socketManager?.broadcastAgentMessage(
-        {
-          type: 'system_info',
-          catId: createCatId('gpt-dot'),
-          content: JSON.stringify({ type: 'rich_block', block, messageId }),
-          invocationId: messageId,
-          timestamp: Date.now(),
-        },
-        threadId,
-      );
-    },
-  });
-  const { registerDotMcpRoutes } = await import('./routes/chatgpt-dot-mcp-routes.js');
+  const { DotLegacyImageReader } = await import('./domains/plugin/migration/dot-legacy-image-reader.js');
+  const { pluginExternalRequestRoutes } = await import('./routes/plugin/plugin-external-request-routes.js');
   const { registerDotImageRoutes } = await import('./routes/chatgpt-dot-image-routes.js');
-  registerDotMcpRoutes(app, {
-    connection: dotConnectionService,
-    returns: dotReturnService,
-    ask: (secret, input) => dotAskService!.ask(secret, input),
-    publishImage: (secret, input) => dotImages.publish(secret, input),
-  });
-  registerDotImageRoutes(app, dotImages);
-  const { registerDotTestRoutes } = await import('./routes/chatgpt-dot-test-routes.js');
-  const { DotConnectionTestService } = await import(
-    './domains/cats/services/cloud-bridge/dot/DotConnectionTestService.js'
-  );
-  const dotConnectionTests = new DotConnectionTestService({
-    connection: dotConnectionService,
-    dispatches: dotDispatches,
-    bridge: dotEventsBridge,
+  const migratedDotImages = new DotLegacyImageReader({
+    audit: dotMigrationAudit,
+    ledger: pluginRuntime.mediaLedger,
     messages: messageStore,
     threads: threadStore,
-    grants: cloudReturnGrantStore,
-    projectPath: pluginProjectRoot,
+    source: dotLegacySource,
   });
-  registerDotTestRoutes(app, {
-    connection: dotConnectionService,
-    dispatches: dotDispatches,
-    threads: threadStore,
-    startTest: (ownerUserId) => dotConnectionTests.run(ownerUserId),
-  });
-  // Dot resume consumes its persisted connection and source proofs, composed above.
+  registerDotImageRoutes(app, migratedDotImages);
+  await app.register(pluginExternalRequestRoutes, { external: pluginRuntime.externalAccess });
+  // Package runtimes resume only after migration and compatibility readers are composed.
   const externalPluginRecovery = await pluginRuntime.recoverAfterRestart({ desktopWindowsAfter: hostListening });
   app.log.info(
     `[api] K-2 plugin runtime recovered ` +
@@ -6189,7 +6102,13 @@ async function main(): Promise<void> {
   const artifactReview = createArtifactReviewIntegration({
     dataDir: process.env.CAT_CAFE_DATA_DIR ?? join(resolveActiveProjectRoot(), '.cat-cafe'),
     uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
-    readPrivateMessageImage: async (id, principal) => (await dotImages.read(id, principal.userId)).bytes,
+    readPrivateMessageImage: async (id, principal) => {
+      const image = await migratedDotImages.read(id, principal.userId);
+      if ('bytes' in image) return image.bytes;
+      const chunks: Buffer[] = [];
+      for await (const chunk of image.stream) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks);
+    },
     owner: collaborativeContent.owner,
     projects: collaborativeContent.projects,
     screenings: collaborativeContent.screenings,
@@ -6862,6 +6781,7 @@ async function main(): Promise<void> {
   // F221 Phase B: taste proposal approve/reject (user-auth; two-phase CAS approve)
   registerTasteProposalDecisionRoutes(app, {
     tasteProposalStore,
+    messageStore,
     socketManager,
     writeVignette: tasteProposalWriter,
     getIndexProjection: () => memoryServices.publishedDocuments?.getStatus(),
@@ -7009,6 +6929,7 @@ async function main(): Promise<void> {
     socketManager,
     deploymentWaitLifecycleHolder,
     humanTerminal: entrustedWorkHumanTerminal,
+    taskRecovery: taskRecoveryReadModel,
   });
   registerDeploymentWaitProjectionRoutes(app, {
     threadStore,
@@ -7205,10 +7126,12 @@ async function main(): Promise<void> {
   await app.register(servicesRoutes, {
     lifecycle: {
       autoStartEnabled: true,
-      onServiceReady: async ({ service, operator, reason }) => {
+      onServiceReady: async ({ service, operator, reason, configuredModel }) => {
         if (service.id !== 'embedding-model' || !memoryServices.indexBuilder) return;
         const activationMode = resolvedEmbedMode === 'shadow' ? 'shadow' : 'on';
-        const activation = await memoryServices.embeddingLifecycle.activate(activationMode);
+        const activation = await memoryServices.embeddingLifecycle.activate(activationMode, {
+          rebuildLegacyModel: configuredModel,
+        });
         if (!activation.ok) {
           const detail = activation.reason ?? activation.status;
           appendServiceLog(service.id, `[start] memory embedding activation degraded: ${detail}\n`);
@@ -7241,7 +7164,7 @@ async function main(): Promise<void> {
       },
       onServiceUnavailable: ({ service, operator, reason }) => {
         if (service.id !== 'embedding-model') return;
-        memoryServices.embeddingLifecycle.deactivate();
+        memoryServices.embeddingLifecycle.deactivate({ retainLegacy: true });
         appendServiceLog(service.id, `[${reason}] memory embedding dependencies deactivated\n`);
         app.log.info(
           { serviceId: service.id, operator, reason },
@@ -7592,6 +7515,7 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
     getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
+    getEmbeddingGenerationStatus: () => memoryServices.embeddingLifecycle.getGenerationStatus(),
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
     rebuildJobTracker,
@@ -7601,6 +7525,7 @@ async function main(): Promise<void> {
   // F227: Event Memory query route (GET /api/memory/events)
   await app.register(eventsRoutes, {
     eventMemoryStore: memoryServices.eventMemoryStore,
+    readEvidenceDb: memoryServices.store.getDb(),
     lifecycleService: eventMemoryLifecycleService,
     correctionProposalStore: eventMemoryCorrectionProposalStore,
     socketEmit: (event, data, room) => {
@@ -8012,11 +7937,23 @@ async function main(): Promise<void> {
             );
           }
         }
+        // F048 Phase C: after the Queue resumed, wake each cat this restart cut off, once, in its thread.
+        const restartContinuation = await continueRestartInterruptedCats(
+          {
+            turns: turnExecutionStore,
+            messages: messageStore,
+            queue: invocationQueue,
+            deliver: schedulerDeliver,
+            log: app.log,
+          },
+          childRecovery.invocationIds,
+        );
         app.log.info(
           {
             authRecovery,
             childRecovery,
             startupRecovery,
+            restartContinuation,
             windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
           },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
@@ -8776,7 +8713,7 @@ async function main(): Promise<void> {
   // F233 PR4: realtime blocked-task probe. Side effects live here, not in projector/rebuild.
   if (ballCustodyIngest && ballCustodyProjectionStore) {
     const [
-      { BallCustodyProbeScheduler, createBallProbeRecoveryNotification },
+      { BallCustodyProbeScheduler },
       { DefaultBallCustodyProbeEvaluator },
       { SchedulerBallCustodyWakeSender },
       { createBallCustodyProbeTaskSpec },
@@ -8791,7 +8728,6 @@ async function main(): Promise<void> {
       projectionStore: ballCustodyProjectionStore,
       taskStore,
       ballCustody: ballCustodyIngest,
-      notifyRecovery: createBallProbeRecoveryNotification({ messages: messageStore, threads: threadStore }),
       probeEvaluator: new DefaultBallCustodyProbeEvaluator({ redis }),
       wakeSender: new SchedulerBallCustodyWakeSender({
         deliver: schedulerDeliver,

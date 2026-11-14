@@ -12,6 +12,21 @@ import {
 const NEGATIVE_REFERENCE_PATTERN = new RegExp(
   `(?:^|\\s)// ${CUTOVER_NEGATIVE_REFERENCE_MARKER} (${CUTOVER_NEGATIVE_REFERENCE_KINDS.join('|')})\\s*$`,
 );
+const TOOL_IDENTIFIER_CHARACTER = /[A-Za-z0-9_]/;
+
+function containsCompleteToolIdentifier(line: string, name: string): boolean {
+  let index = line.indexOf(name);
+  while (index >= 0) {
+    const before = line[index - 1];
+    const after = line[index + name.length];
+    const startsAtBoundary =
+      before === undefined || !TOOL_IDENTIFIER_CHARACTER.test(before) || line.slice(index - 2, index) === '__';
+    const endsAtBoundary = after === undefined || !TOOL_IDENTIFIER_CHARACTER.test(after);
+    if (startsAtBoundary && endsAtBoundary) return true;
+    index = line.indexOf(name, index + 1);
+  }
+  return false;
+}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -42,7 +57,7 @@ export async function scanRetiredNames(repoRoot: string, names: readonly string[
         for (const path of paths) {
           const content = await readFile(path, 'utf8').catch(() => '');
           content.split(/\r?\n/).forEach((line, index) => {
-            if (!line.includes(retiredName)) return;
+            if (!containsCompleteToolIdentifier(line, retiredName)) return;
             const match = { root, path: repoRelative(repoRoot, path), line: index + 1 };
             matches.push(match);
             const marker = line.match(NEGATIVE_REFERENCE_PATTERN);

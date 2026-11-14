@@ -45,6 +45,16 @@ import { repackPassageVectors, type VectorRepackResult } from './repack-passage-
 import { applyMigrations } from './schema.js';
 import { createSearchEmbeddingCapability, type SearchEmbeddingCapability } from './search-embedding-capability.js';
 import type { VectorStore } from './VectorStore.js';
+import {
+  generationInvalidationCurrent,
+  generationInvalidationState,
+  prepareGenerationInvalidationConnection,
+} from './vector-generation-invalidation.js';
+import {
+  type VectorGenerationId,
+  type VectorGenerationTables,
+  vectorGenerationTables,
+} from './vector-generation-tables.js';
 import { createVectorInvalidator } from './vector-invalidation.js';
 import { writeEvidenceItems } from './write-evidence-items.js';
 
@@ -204,10 +214,24 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private searchEmbedding(): SearchEmbeddingCapability | undefined {
     const deps = this.embedDeps;
     const projection = this.vectorProjection;
+    const invalidation = deps
+      ? generationInvalidationState(this.getDb(), deps.vectorStore.tables ?? vectorGenerationTables())
+      : undefined;
     return deps
       ? createSearchEmbeddingCapability(
           deps.embedding,
-          () => this.embedDeps === deps && this.vectorProjection === projection && projection.ready,
+          () =>
+            this.embedDeps === deps &&
+            this.vectorProjection === projection &&
+            projection.ready &&
+            Boolean(
+              invalidation &&
+                generationInvalidationCurrent(
+                  this.getDb(),
+                  deps.vectorStore.tables ?? vectorGenerationTables(),
+                  invalidation,
+                ),
+            ),
         )
       : undefined;
   }
@@ -239,7 +263,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.db.pragma('busy_timeout = 5000');
 
     if (!this.workerMode) {
+      // Existing source triggers can run during schema repair itself.
+      prepareGenerationInvalidationConnection(this.db);
       applyMigrations(this.db);
+      prepareGenerationInvalidationConnection(this.db);
       try {
         this.detachReadDiagnostics = this.readDiagnostics?.(this.db);
       } catch {
@@ -1816,8 +1843,22 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   async deleteByPackId(packId: string): Promise<number> {
     return this.writeQueue.enqueue(() => {
       this.ensureOpen();
-      const result = this.db?.prepare('DELETE FROM evidence_docs WHERE pack_id = ?').run(packId);
-      return result?.changes ?? 0;
+      const db = this.getDb();
+      const removeDocument = createVectorInvalidator(db, 'evidence_vectors');
+      const removePassage = createVectorInvalidator(db, 'passage_vectors');
+      return db.transaction(() => {
+        const rows = db.prepare('SELECT anchor FROM evidence_docs WHERE pack_id=?').all(packId) as Array<{
+          anchor: string;
+        }>;
+        for (const { anchor } of rows) {
+          removeDocument(anchor);
+          const passages = db
+            .prepare('SELECT passage_id AS id FROM evidence_passages WHERE doc_anchor=?')
+            .all(anchor) as Array<{ id: string }>;
+          for (const passage of passages) removePassage(passageVectorKey(anchor, passage.id));
+        }
+        return db.prepare('DELETE FROM evidence_docs WHERE pack_id=?').run(packId).changes;
+      })();
     });
   }
 
@@ -1873,7 +1914,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.ensureOpen();
     const row = this.db
       ?.prepare(`SELECT d.source_hash AS sourceHash, v.source_hash AS vectorSourceHash
-      FROM evidence_docs d LEFT JOIN document_vector_sources v ON v.anchor=d.anchor
+      FROM evidence_docs d LEFT JOIN ${this.getVectorGenerationTables().documentSources} v ON v.anchor=d.anchor
       WHERE d.anchor=? COLLATE NOCASE`)
       .get(anchor) as { sourceHash: string | null; vectorSourceHash: string | null } | undefined;
     return row?.sourceHash ? { sourceHash: row.sourceHash, vectorSourceHash: row.vectorSourceHash } : null;
@@ -1891,7 +1932,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   private processEmbeddingSnapshot(): EmbeddingSnapshot | undefined {
     const deps = this.embedDeps;
-    return deps && this.vectorProjection.ready
+    return deps &&
+      this.vectorProjection.ready &&
+      !generationInvalidationState(this.getDb(), deps.vectorStore.tables ?? vectorGenerationTables()).quarantined
       ? {
           ready: deps.embedding.isReady(),
           model: deps.embedding.getModelInfo(),
@@ -1904,6 +1947,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   /** File-backed runtime stores isolate native work; :memory: retains the same algorithm locally. */
   usesIsolatedProcesses(): boolean {
     return this.dbPath !== ':memory:' && !this.workerMode;
+  }
+
+  getVectorGenerationTables(): VectorGenerationTables {
+    return this.embedDeps?.vectorStore.tables ?? vectorGenerationTables();
   }
 
   /** Expose db for IndexBuilder and other internal consumers */
@@ -1932,13 +1979,23 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   /** Retain the canonical writer queue until maintenance commits or its child closes. */
-  repackPassageVectors(options?: { signal?: AbortSignal; deadlineAt?: number }): Promise<VectorRepackResult> {
+  repackPassageVectors(options?: {
+    signal?: AbortSignal;
+    deadlineAt?: number;
+    generationId?: VectorGenerationId;
+  }): Promise<VectorRepackResult> {
     return this.runExclusive(() => {
       if (this.workerMode === 'read') throw new Error('Read-only memory worker cannot repack vectors');
       options?.signal?.throwIfAborted();
       return this.usesIsolatedProcesses()
-        ? runMemoryVectorRepack(this.dbPath, options)
-        : repackPassageVectors(this.getDb());
+        ? runMemoryVectorRepack(this.dbPath, {
+            ...options,
+            generationId: options?.generationId ?? this.embedDeps?.vectorStore.tables.generationId,
+          })
+        : repackPassageVectors(
+            this.getDb(),
+            vectorGenerationTables(options?.generationId ?? this.embedDeps?.vectorStore.tables.generationId),
+          );
     });
   }
 

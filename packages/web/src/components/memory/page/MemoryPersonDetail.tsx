@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { MemoryDeliveryUsage } from './MemoryDeliveryUsage';
 import { MemoryPersonProposals } from './MemoryOriginalProposals';
 import { MemoryPersonClaim } from './MemoryPersonClaim';
 import { MemoryPersonInteraction } from './MemoryPersonInteraction';
+import { MemoryPersonMaintenanceRecovery } from './MemoryPersonMaintenance';
 import { MemoryPersonSource } from './MemoryPersonSource';
 import { MemoryReadState } from './MemoryReadState';
 import { isPersonDetail, type PersonDetail } from './people-types';
+import { usePendingPersonMaintenance } from './person-maintenance-recovery';
 import { formatMemoryDate, useMemoryRead } from './use-memory-read';
 import { usePersonAction } from './use-person-action';
 
@@ -12,21 +15,41 @@ export function MemoryPersonDetail({
   personId,
   close,
   changed,
+  deliveryRevision,
+  onApplied,
+  showMaintenanceRecovery = true,
 }: {
   personId: string;
   close: () => void;
   changed: () => void;
+  deliveryRevision?: string;
+  onApplied?: (kind: string) => void;
+  showMaintenanceRecovery?: boolean;
 }) {
-  const detail = useMemoryRead<PersonDetail>(`/api/memory/people/${encodeURIComponent(personId)}`, isPersonDetail);
+  const detail = useMemoryRead<PersonDetail>(
+    `/api/memory/people/${encodeURIComponent(personId)}${deliveryRevision ? `?deliveryRevision=${encodeURIComponent(deliveryRevision)}` : ''}`,
+    isPersonDetail,
+  );
   const [forgetting, setForgetting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const action = usePersonAction(personId, (kind) => {
+    if (onApplied) {
+      onApplied(kind);
+      return;
+    }
     changed();
     if (kind === 'hard_forget_person') close();
     else detail.retry();
   });
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!action.error || action.busy) return;
+    errorRef.current?.scrollIntoView({ block: 'nearest' });
+    errorRef.current?.focus({ preventScroll: true });
+  }, [action.error, action.busy]);
   const data = detail.data;
-  const mutationBlocked = action.busy || !!action.error;
+  const maintenance = usePendingPersonMaintenance();
+  const mutationBlocked = action.busy || !!action.error || maintenance.busy || !!maintenance.pending;
   return (
     <aside
       aria-label="人物详情"
@@ -38,6 +61,7 @@ export function MemoryPersonDetail({
           返回人物
         </button>
       </div>
+      {showMaintenanceRecovery && <MemoryPersonMaintenanceRecovery changed={detail.retry} applied={onApplied} />}
       <MemoryReadState
         loading={detail.loading}
         error={detail.error}
@@ -46,7 +70,7 @@ export function MemoryPersonDetail({
         retry={detail.retry}
       />
       {action.error && (
-        <div role="alert" className="space-y-2 text-compact">
+        <div ref={errorRef} role="alert" tabIndex={-1} className="space-y-2 text-compact">
           <p>{action.error}</p>
           {action.retryable ? (
             <button type="button" disabled={action.busy} onClick={action.retry} className="text-cafe-accent underline">
@@ -73,8 +97,10 @@ export function MemoryPersonDetail({
             只给你看 · 记录于 {formatMemoryDate(data.createdAt)}
             {data.aliases.length > 0 ? ` · 也叫 ${data.aliases.join('、')}` : ''}
           </p>
-          <MemoryPersonSource personId={personId} />
-          <MemoryPersonProposals proposals={data.proposals} />
+          <p className="text-compact text-cafe-muted">
+            ● 生效中 · {data.claims.filter((item) => item.status === 'current').length} 条当前判断 ·{' '}
+            {data.interactions.filter((item) => item.status === 'active').length} 段共同经历
+          </p>
           <section className="space-y-3" aria-label="人物判断">
             <h4 className="text-sm font-medium">关于这个人的判断</h4>
             {data.claims.length ? (
@@ -85,6 +111,7 @@ export function MemoryPersonDetail({
                   claim={claim}
                   busy={mutationBlocked}
                   submit={action.submit}
+                  onRedacted={() => onApplied?.('redact_item')}
                 />
               ))
             ) : (
@@ -101,12 +128,27 @@ export function MemoryPersonDetail({
                   item={item}
                   busy={mutationBlocked}
                   submit={action.submit}
+                  onRedacted={() => onApplied?.('redact_item')}
                 />
               ))
             ) : (
               <p className="text-compact text-cafe-muted">还没有共同经历</p>
             )}
           </section>
+          <section className="space-y-2 border-t border-cafe-subtle pt-4">
+            <h4 className="text-compact text-cafe-muted">来源</h4>
+            <MemoryPersonSource personId={personId} />
+          </section>
+          <section className="space-y-2 border-t border-cafe-subtle pt-4">
+            <h4 className="text-compact text-cafe-muted">什么时候会想起</h4>
+            <p className="text-sm">对话里提到已关联的名字时，可能递送。</p>
+          </section>
+          <MemoryDeliveryUsage
+            family="person_entity"
+            anchor={`person-memory:${personId}`}
+            usageEndpoint={`/api/memory/people/${encodeURIComponent(personId)}/usage?revision=${encodeURIComponent(data.personRevision)}`}
+          />
+          <MemoryPersonProposals proposals={data.proposals} />
           {Object.values(data.truncation).some(Boolean) && (
             <output className="block text-compact text-cafe-muted">
               记录较多，这里只展示最近的一部分；遗忘作用于这个人的全部人物记忆。
@@ -119,7 +161,7 @@ export function MemoryPersonDetail({
               setForgetting(!forgetting);
               setConfirmed(false);
             }}
-            className="text-compact text-cafe-accent underline"
+            className="shell-focusable text-compact text-cafe-muted"
           >
             忘掉这个人
           </button>

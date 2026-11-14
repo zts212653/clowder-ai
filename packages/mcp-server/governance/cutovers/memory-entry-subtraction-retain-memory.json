@@ -1,0 +1,58 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "memory-write"
+  },
+  "retiredNames": ["cat_cafe_retain_memory_callback"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "dd67783d18a4e38d80077415d5a3d2f3752fe50e",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/callback-memory-tools.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/tools/index.ts",
+        "packages/api/src/routes/callback-memory-routes.ts",
+        "packages/api/src/routes/callbacks.ts",
+        "packages/api/src/index.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/c1-mcp-callback.md"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-subtraction.test.js",
+        "packages/mcp-server/test/callback-tools.test.js",
+        "packages/mcp-server/test/degradation-tools-integration.test.js",
+        "packages/api/test/callback-routes.test.js",
+        "packages/api/test/memory/callback-memory-di.test.js",
+        "packages/api/test/mcp-prompt-injector.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval consumes retain; the fixed-root scan verifies retirement. Existing marker files stay readable through MarkerQueue; only the callback write route is removed.",
+      "absenceEvidence": ["cat_cafe_retain_memory_callback"]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/infrastructure/telemetry/instruments.ts",
+        "packages/api/src/routes/callback-auth-system-message.ts"
+      ]
+    }
+  }
+}

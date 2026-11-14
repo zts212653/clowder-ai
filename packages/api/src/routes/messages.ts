@@ -64,6 +64,7 @@ import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { registerGenerationMessagesRoute } from './generation-messages.js';
+import { registerMessageAttemptReceipt } from './message-attempt-receipt.js';
 import { observeMessageSend } from './message-send-diagnostics.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
 import { captureSentComposerDraftConsumption } from './sent-composer-draft-consumption.js';
@@ -298,6 +299,7 @@ const MAX_FILES = 5;
 
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
   registerGenerationMessagesRoute(app, opts.messageStore);
+  registerMessageAttemptReceipt(app, opts.messageStore);
   const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // Register multipart parser for image uploads
@@ -556,9 +558,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
     if (!replayedSource && whisperVisibility && whisperRecipients?.length) {
-      const validRecipients = await router.resolveExplicitTargets(whisperRecipients, resolvedThreadId, {
-        persist: false,
-      });
+      // Whispers are a member-only visibility boundary. Addressable plugin
+      // instances may receive ordinary conversation work, but they are not
+      // principals in the private member audience model.
+      const validRecipients = router.resolveAdmissionTargets(whisperRecipients);
       if (validRecipients.length !== whisperRecipients.length) {
         return reply
           .code(400)
@@ -655,6 +658,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       timestamp: Date.now(),
       threadId: resolvedThreadId,
       idempotencyKey: resolvedIdempotencyKey,
+      clientMessageId: resolvedIdempotencyKey,
       deliveryStatus: 'queued',
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(whisperVisibility && whisperRecipients
@@ -1191,6 +1195,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
       return {
         id: m.id,
+        ...(m.userId === userId && from.kind === 'user' && m.clientMessageId
+          ? { clientMessageId: m.clientMessageId }
+          : {}),
         type,
         from,
         catId: m.catId,
@@ -1205,6 +1212,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
+        m.extra?.pluginAddressedReceipt ||
+        m.extra?.targetResponse ||
+        m.extra?.targetResponseResult ||
         m.extra?.contentModificationReceiptV1 ||
         m.extra?.semanticEvent ||
         m.extra?.liveCompanion ||
@@ -1233,6 +1243,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
+                ...(m.extra?.pluginAddressedReceipt ? { pluginAddressedReceipt: m.extra.pluginAddressedReceipt } : {}),
+                ...(m.extra?.targetResponse ? { targetResponse: m.extra.targetResponse } : {}),
+                ...(m.extra?.targetResponseResult ? { targetResponseResult: m.extra.targetResponseResult } : {}),
                 ...(m.extra?.contentModificationReceiptV1
                   ? { contentModificationReceiptV1: m.extra.contentModificationReceiptV1 }
                   : {}),

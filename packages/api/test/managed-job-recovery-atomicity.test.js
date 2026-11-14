@@ -102,9 +102,8 @@ test('waiting and stale observations preserve the budget; parked responsibility 
     );
   assert.equal(recovery.disposition, 'parked');
   assert.equal(recovery.attempts, 5);
-  assert.ok(recovery.notification.key);
-  // A delivered notification retires automatic work, never the original execution or its concurrency slot.
-  recovery = { ...recovery, nextAttemptAt: null, notification: { ...recovery.notification, deliveredAt: 6 } };
+  // The original recovery disposition retires automatic work, never the execution or its concurrency slot.
+  recovery = { ...recovery, nextAttemptAt: null };
   assert.equal(updateManagedJobRecovery(job, readManagedJobRecovery(job).revision, recovery), true);
   db.exec(`DROP INDEX managed_jobs_recovery_due; CREATE INDEX managed_jobs_recovery_due
     ON managed_jobs(json_extract(recovery_json,'$.nextAttemptAt'),job_id)

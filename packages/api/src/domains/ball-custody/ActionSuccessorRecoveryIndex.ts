@@ -7,7 +7,6 @@ import {
   type ActionRecoveryFact,
   type ActionRecoveryLane,
   type ActionRecoverySnapshot,
-  actionRecoveryIncident,
   initialActionRecovery,
   validActionRecovery,
 } from './action-successor-recovery-state.js';
@@ -91,17 +90,19 @@ export class ActionSuccessorRecoveryIndex {
           const invalid = invalidContainer || (stored !== undefined && !validActionRecovery(stored, lease.generation));
           const reason = mismatch ? 'identity_index_mismatch' : 'malformed_recovery_fact';
           const fact = validActionRecovery(stored, lease.generation) ? stored : initialActionRecovery(lease.generation);
+          const { notification: _legacyNotification, ...ownerFact } = fact as ActionRecoveryFact & {
+            notification?: unknown;
+          };
           return [
             lane,
             mismatch || invalid
               ? {
-                  ...fact,
-                  nextAttemptAt: 0,
+                  ...ownerFact,
+                  nextAttemptAt: null,
                   disposition: 'needs_attention',
                   reasonCode: reason,
-                  notification: fact.notification ?? actionRecoveryIncident(lease, lane, reason),
                 }
-              : fact,
+              : ownerFact,
           ];
         }),
       );
@@ -161,7 +162,6 @@ export class ActionSuccessorRecoveryIndex {
             ...initialActionRecovery(lease.generation),
             disposition: 'needs_attention',
             reasonCode: 'malformed_recovery_fact',
-            notification: actionRecoveryIncident(lease, lane, 'malformed_recovery_fact'),
           },
       needsRepair:
         !validActionRecovery(envelope._recovery?.[lane], lease.generation) ||

@@ -141,7 +141,7 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       'signal_summarize',
       'cat_cafe_generate_document',
       'cat_cafe_bootcamp_env_check',
-      'cat_cafe_review_distillation',
+      // review_distillation was retired 2026-11-09 (memory entry subtraction).
     ];
 
     for (const name of mutatingToolsMisclassifiedBefore) {
@@ -157,18 +157,13 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       });
     }
 
-    it('library_dry_run is read-only (non-persisting per its contract)', () => {
-      const ann = EXPLICIT_TOOL_ANNOTATIONS.cat_cafe_library_dry_run;
-      assert.ok(ann);
-      assert.equal(ann.readOnlyHint, true, 'library_dry_run does not persist');
-      assert.equal(ann.destructiveHint, false, 'library_dry_run is not destructive');
-    });
+    // library_dry_run moved into the owner library page's create flow on 2026-11-10.
   });
 
   describe('destructive tool flagging (must require user confirm in ChatGPT)', () => {
     const destructiveTools = [
       'cat_cafe_shell_exec',
-      'cat_cafe_library_archive',
+      // library_archive moved to the owner library page on 2026-11-09.
       'cat_cafe_library_rebuild',
       'signal_delete_article',
       // R8.2 砚砚 finding: unregister/unlink tools must be destructive

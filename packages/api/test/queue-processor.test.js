@@ -153,6 +153,66 @@ function createHarness({
   return { ...deps, processor, routeCalls };
 }
 
+it('dispatches plugin queue recipients through Manager, leaving ordinary member adapters unchanged', async () => {
+  const { AddressedPluginQueueDelivery } = await import(
+    '../dist/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+  );
+  const harness = createHarness({ autoDrain: true });
+  const deliveries = [];
+  harness.processor.addressedDelivery = new AddressedPluginQueueDelivery({
+    targets: { isInstanceId: async (id) => id === 'pi_test' },
+    manager: {
+      deliverAddressed: async (id, input) => {
+        deliveries.push([id, input]);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+    queue: harness.queue,
+    messageStore: harness.messageStore,
+  });
+  const admitted = await admitMessage(harness, { targetCats: ['pi_test'], content: '@helper do work' });
+  await waitFor(() => deliveries.length === 1 && harness.queue.list('thread-1', 'user-1').length === 0);
+  assert.equal(harness.router.routeExecution.mock.callCount(), 0);
+  assert.equal(harness.invocationRecordStore.create.mock.callCount(), 0, 'plugin receipt creates no member invocation');
+  assert.equal(deliveries[0][1].envelope.messageId, admitted.message.id);
+  const receiptEvents = harness.socketManager.emitToUser.mock.calls
+    .filter(
+      ({ arguments: args }) => args[1] === 'message_snapshot_updated' && args[2].message.extra?.pluginAddressedReceipt,
+    )
+    .map(({ arguments: args }) => args[2].message);
+  assert.equal(receiptEvents[0].extra.pluginAddressedReceipt.phase, 'sending');
+  assert.equal(receiptEvents.at(-1).extra.pluginAddressedReceipt.phase, 'accepted');
+  assert.equal(receiptEvents[0].id, receiptEvents.at(-1).id);
+  assert.equal(receiptEvents[0].lifecycle, undefined);
+
+  await admitMessage(harness, { targetCats: ['opus'], content: 'ordinary member input' });
+  await waitFor(() => harness.router.routeExecution.mock.callCount() === 1);
+  assert.deepEqual(harness.router.routeExecution.mock.calls[0].arguments[4], ['opus']);
+});
+
+it('mixed plugin/member queue recipients each take their own execution path', async () => {
+  const { AddressedPluginQueueDelivery } = await import(
+    '../dist/domains/plugin/manager/addressing/addressed-plugin-queue-delivery.js'
+  );
+  const harness = createHarness({ autoDrain: true });
+  const deliveries = [];
+  harness.processor.addressedDelivery = new AddressedPluginQueueDelivery({
+    targets: { isInstanceId: async (id) => id === 'pi_test' },
+    manager: {
+      deliverAddressed: async (id, input) => {
+        deliveries.push(id);
+        return { deliveryId: input.deliveryId };
+      },
+    },
+    queue: harness.queue,
+    messageStore: harness.messageStore,
+  });
+  await admitMessage(harness, { targetCats: ['pi_test', 'opus'], content: '@helper @opus do work' });
+  await waitFor(() => deliveries.length === 1 && harness.router.routeExecution.mock.callCount() === 1);
+  assert.deepEqual(harness.router.routeExecution.mock.calls[0].arguments[4], ['opus']);
+  assert.deepEqual(deliveries, ['pi_test']);
+});
+
 /** Records and ends the child turn the way invoke-single-cat does, entering the response-pending ledger. */
 async function endChildTurn(turns, args, invocationId, terminal, catId = args[4][0]) {
   const [userId, , threadId, , , , options] = args;

@@ -37,6 +37,11 @@ import type { MessageSearchService } from '../domains/memory/MessageSearchServic
 import type { PublishedDocumentIndex, PublishedIndexStatus } from '../domains/memory/PublishedDocumentIndex.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
 import { relevanceEvidence } from '../domains/memory/relevance-evidence.js';
+import {
+  type VectorGenerationTables,
+  validateVectorGenerationTables,
+  vectorGenerationTables,
+} from '../domains/memory/vector-generation-tables.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -146,6 +151,7 @@ export interface EvidenceRoutesOptions {
   evidenceStore: IEvidenceStore;
   embeddingService?: Pick<IEmbeddingService, 'isReady'>;
   getEmbeddingService?: () => Pick<IEmbeddingService, 'isReady'> | undefined;
+  getEmbeddingGenerationStatus?: () => { desired: string; effective?: string; building: boolean };
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
   rebuildJobTracker?: RebuildJobTracker;
@@ -603,6 +609,16 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         | undefined;
       if (!db) return fatalShape('no_db');
 
+      const bound = opts.evidenceStore as { getVectorGenerationTables?: () => VectorGenerationTables };
+      const tables = validateVectorGenerationTables(bound.getVectorGenerationTables?.() ?? vectorGenerationTables());
+      let generationQuarantined = false;
+      try {
+        generationQuarantined =
+          db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()
+            ?.value === '1';
+      } catch {
+        /* A pre-vector database has no quarantine fact. */
+      }
       const docCount = (db.prepare('SELECT count(*) AS c FROM evidence_docs').get() as { c: number }).c;
       const threadCount = (
         db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
@@ -617,7 +633,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // Preserve the legacy field for existing consumers, including manually stamped databases.
       let lastUpdated: string | null = null;
       try {
-        const stampRow = db.prepare("SELECT value FROM embedding_meta WHERE key = 'last_rebuild_at'").get() as
+        const stampRow = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'last_rebuild_at'`).get() as
           | { value: string }
           | undefined;
         lastUpdated = stampRow?.value ?? null;
@@ -643,16 +659,17 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       const passageEmbeddingReady = (opts.getEmbeddingService?.() ?? opts.embeddingService)?.isReady() === true;
       const passageVectors = readPersistedVectorCount(
         db,
-        'SELECT count(*) AS c FROM passage_vectors',
-        'SELECT count(*) AS c FROM passage_vectors_rowids',
+        `SELECT count(*) AS c FROM ${tables.passages}`,
+        `SELECT count(*) AS c FROM ${tables.passages}_rowids`,
       );
       const passageVectorCount = passageVectors.count;
-      const passageVectorsSupported = passageVectors.virtualTableReadable && passageEmbeddingReady;
+      const passageVectorsSupported =
+        passageVectors.virtualTableReadable && passageEmbeddingReady && !generationQuarantined;
 
       // Embedding model from embedding_meta (VectorStore.initMeta writes embedding_model_id)
       let embeddingModel: string | null = null;
       try {
-        const row = db.prepare("SELECT value FROM embedding_meta WHERE key = 'embedding_model_id'").get() as
+        const row = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'embedding_model_id'`).get() as
           | { value: string }
           | undefined;
         embeddingModel = row?.value ?? null;
@@ -662,8 +679,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
 
       const vectorsCount = readPersistedVectorCount(
         db,
-        'SELECT count(*) AS c FROM evidence_vectors',
-        'SELECT count(*) AS c FROM evidence_vectors_rowids',
+        `SELECT count(*) AS c FROM ${tables.documents}`,
+        `SELECT count(*) AS c FROM ${tables.documents}_rowids`,
       ).count;
 
       // F188 Phase K (AC-K2): build signals → evaluate config warnings →
@@ -706,6 +723,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         last_rebuild_at: lastUpdated,
         last_document_updated_at: lastDocumentUpdated,
         embedding_model: embeddingModel,
+        ...(opts.getEmbeddingGenerationStatus ? { embedding_generation: opts.getEmbeddingGenerationStatus() } : {}),
         // F188 Phase K (AC-K1/K3): config health surface.
         functionalStatus,
         configWarnings,

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import { createF322BControlledFixture } from './f322-b-controlled-fixture.mjs';
 
@@ -33,11 +35,16 @@ export async function runF322BExecutionLocationJourney({
   viewport,
   language,
   coldStart = false,
+  olderResponse = false,
 }) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
-  const fixture = createF322BControlledFixture(threadId);
+  const fixture = createF322BControlledFixture(threadId, { olderResponse });
+  let allowOlderReads;
+  const olderReadsReady = new Promise((resolve) => {
+    allowOlderReads = resolve;
+  });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((language) => {
@@ -48,6 +55,13 @@ export async function runF322BExecutionLocationJourney({
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === '/api/messages') fixture.calls.push(`history-read:${url.search}`);
+    if (url.pathname === '/api/messages' && url.searchParams.has('before')) {
+      // Hold eager top pagination until activation, so the fast fixture cannot
+      // preload the exact target before we exercise the unloaded-message path.
+      if (olderResponse) await olderReadsReady;
+      fixture.calls.push('older-page-read');
+    }
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(fixture.response(url, request.method()) ?? fixtureForApi(url)),
@@ -106,21 +120,31 @@ export async function runF322BExecutionLocationJourney({
     assert.match(await location.innerText(), language === 'zh' ? /处理中/ : /working/i);
     if (viewport.width === 390) await assertCompactVerbVisible(page, language === 'zh' ? '处理中' : 'Working');
     const bubble = page.locator(`[data-message-id="${fixture.message.id}"]`);
-    await bubble.waitFor();
-    const record = bubble.getByTestId('reply-record-toggle');
-    assert.equal(await record.getAttribute('aria-expanded'), 'false');
+    if (olderResponse)
+      assert.equal(
+        await bubble.count(),
+        0,
+        `Long-running response starts outside the loaded page: ${fixture.calls.filter((call) => call.startsWith('history-read:')).join(', ')}`,
+      );
+    else {
+      await bubble.waitFor();
+      assert.equal(await bubble.getByTestId('reply-record-toggle').getAttribute('aria-expanded'), 'false');
+    }
     const composer = page.locator('[data-testid="chat-input-composer-row"] textarea');
     await composer.fill('这份草稿和选择不能被定位动作改掉');
     await composer.evaluate((input) => input.setSelectionRange(3, 8));
     await location.focus();
     await page.keyboard.press('Enter');
+    allowOlderReads();
+    const record = bubble.getByTestId('reply-record-toggle');
     await bubble.getByTestId('reply-record').waitFor();
+    if (olderResponse) assert.ok(fixture.calls.includes('older-page-read'), 'Original reader loads the older page');
     assert.equal(await record.getAttribute('aria-expanded'), 'true');
     await bubble.locator('xpath=self::*[@data-message-jump-focus="true"]').waitFor();
     assert.equal(await bubble.getAttribute('data-message-jump-focus'), 'true');
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
     assert.deepEqual(await composer.evaluate((input) => [input.selectionStart, input.selectionEnd]), [3, 8]);
-    await page.screenshot({ path: `/tmp/f322-b-native-live-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-live-${viewport.width}-${language}.png`) });
     fixture.setExecutions([fixture.managed]);
     await location.filter({ hasText: language === 'zh' ? '在跑' : 'running' }).waitFor({ timeout: 10_000 });
     if (viewport.width === 390)
@@ -147,7 +171,7 @@ export async function runF322BExecutionLocationJourney({
     );
     assert.equal(await detail.getByRole('link').getAttribute('href'), `/thread/${threadId}`);
     assert.equal(await composer.inputValue(), '这份草稿和选择不能被定位动作改掉');
-    await page.screenshot({ path: `/tmp/f322-b-native-command-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-command-${viewport.width}-${language}.png`) });
     await homeRow.locator('.home-execution-stop button').click();
     const confirmation = page.getByRole('dialog', {
       name: language === 'zh' ? '停止小太阳·砚砚的这次执行？' : 'Stop this execution by 小太阳·砚砚?',
@@ -190,7 +214,7 @@ export async function runF322BExecutionLocationJourney({
     );
     fixture.setExecutions([fixture.managed]);
     await homeRow.locator('.home-execution-stop button').click();
-    await page.screenshot({ path: `/tmp/f322-b-native-stop-confirm-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-stop-confirm-${viewport.width}-${language}.png`) });
     await confirm.click();
     await detail
       .getByText(language === 'zh' ? '读不到这次执行的位置' : 'Cannot read the location of this execution', {
@@ -206,12 +230,13 @@ export async function runF322BExecutionLocationJourney({
       fixture.calls.filter((call) => call.startsWith('DELETE ')),
       ['DELETE /api/callbacks/hold-ball/sample-hold-exact'],
     );
-    await page.screenshot({ path: `/tmp/f322-b-native-execution-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-execution-${viewport.width}-${language}.png`) });
     assert.deepEqual(errors, []);
   } catch (error) {
-    await page.screenshot({ path: `/tmp/f322-b-native-failure-${viewport.width}-${language}.png` });
+    await page.screenshot({ path: join(tmpdir(), `f322-b-native-failure-${viewport.width}-${language}.png`) });
     throw error;
   } finally {
+    allowOlderReads();
     await context.close();
   }
 }

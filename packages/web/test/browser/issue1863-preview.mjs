@@ -53,9 +53,12 @@ const server = await createServer({
           }
           if (req.url?.split('?')[0] === '/') {
             res.setHeader('content-type', 'text/html; charset=utf-8');
-            res.end(
-              '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/test/browser/fixtures/issue1863-composer.tsx"></script></html>',
-            );
+            const html =
+              '<!doctype html><html lang="zh-CN" data-cat-cafe-api-origin="http://127.0.0.1:4174"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/test/browser/fixtures/issue1863-composer.tsx"></script></html>';
+            vite
+              .transformIndexHtml(req.url, html)
+              .then((transformed) => res.end(transformed))
+              .catch(next);
             return;
           }
           next();

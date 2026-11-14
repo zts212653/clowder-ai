@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 import { accessSync, closeSync, constants, openSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { verifiedGhCohort } from './native-effect-gh-cohort.mjs';
 import { commandName } from './native-effect-shell-tokenizer.mjs';
 import { classifyNativeTarget } from './native-effect-target-classifier.mjs';
 
 // Exact reviewed repository wrapper, not a name-based exemption for runtime code.
-const GH_WRAPPER_SHA256 = '9ad0a60faa0a433f7af63e73ee71d3dff39ecfae23ebcda9882dccfbf4ac5d47';
+const GH_WRAPPER_SHA256 = new Set([
+  '9ad0a60faa0a433f7af63e73ee71d3dff39ecfae23ebcda9882dccfbf4ac5d47',
+  // prepare-secret-runtime rewrites the reviewed deployment-defaults import .ts -> .mjs.
+  '3e1b5ba041c712c4f194e10525b950179352557ee7d26e86f629c1629105a93b',
+]);
 const ordinary = (path) => classifyNativeTarget(path, undefined, 'unknown').kind === 'ordinary';
 const literal = (value) => typeof value === 'string' && !/[$`*?[\]{}\n\r]/.test(value);
 
@@ -90,10 +95,21 @@ function ordinaryExecutableChain(selected, path, cwd, seen = new Set()) {
   }
 }
 
-function verifiedGhWrapper(selected, call, path) {
-  if (commandName(call.program) !== 'gh') return null;
+function verifiedGhWrapper(selected, call, path, seen = new Set()) {
+  if (!selected || commandName(call.program) !== 'gh') return null;
+  if (seen.size >= 4 || seen.has(selected.realpath)) return null;
+  seen.add(selected.realpath);
   try {
-    if (createHash('sha256').update(readFileSync(selected.realpath)).digest('hex') !== GH_WRAPPER_SHA256) return null;
+    if (statSync(selected.realpath).size > 64 * 1024) return null;
+    const wrapperHash = createHash('sha256').update(readFileSync(selected.realpath)).digest('hex');
+    if (!GH_WRAPPER_SHA256.has(wrapperHash)) return null;
+    if (
+      !verifiedGhCohort(
+        selected.realpath,
+        wrapperHash === '3e1b5ba041c712c4f194e10525b950179352557ee7d26e86f629c1629105a93b',
+      )
+    )
+      return null;
     const node = selectedExecutable('node', path, call.cwd);
     if (!ordinaryExecutableChain(node, path, call.cwd)) return null;
     const delegatePath = path
@@ -102,7 +118,8 @@ function verifiedGhWrapper(selected, call, path) {
       .join(delimiter);
     const delegate = environmentValue(call.environment, 'CAT_CAFE_REAL_GH_PATH') ?? 'gh';
     const gh = selectedExecutable(delegate, delegatePath, call.cwd);
-    if (!ordinaryExecutableChain(gh, delegatePath, call.cwd)) return null;
+    if (!ordinaryExecutableChain(gh, delegatePath, call.cwd) && !verifiedGhWrapper(gh, call, delegatePath, seen))
+      return null;
     // The pinned wrapper may inspect git metadata before delegating PR creation.
     const git = selectedExecutable('git', path, call.cwd);
     if (!ordinaryExecutableChain(git, path, call.cwd)) return null;
@@ -110,6 +127,24 @@ function verifiedGhWrapper(selected, call, path) {
   } catch {
     return null;
   }
+}
+
+/** Match the reviewed wrapper and its real delegation chain, never its directory name. */
+export function provedManagedGhInvocation(call) {
+  if (call.delegated || call.environment?.length || call.wrappers?.length) return false;
+  const loaders = [
+    'NODE_OPTIONS',
+    'NODE_PATH',
+    'LD_PRELOAD',
+    'LD_LIBRARY_PATH',
+    'DYLD_INSERT_LIBRARIES',
+    'DYLD_LIBRARY_PATH',
+    'DYLD_FRAMEWORK_PATH',
+    'BASH_ENV',
+    'ENV',
+  ];
+  if (loaders.some((name) => environmentValue(call.environment, name))) return false;
+  return proveProgramSelection(call)?.kind === 'repository_gh_wrapper';
 }
 
 /** PATH can leave target text only after its actual program selection is observed.
@@ -125,7 +160,9 @@ export function proveProgramSelection(call) {
   const path = environmentValue(call.environment, 'PATH');
   const selected = selectedExecutable(call.program, path, call.cwd);
   if (!selected) return null;
-  return ordinaryExecutableChain(selected, path, call.cwd)
-    ? { kind: 'ordinary_executable', executable: selected }
-    : verifiedGhWrapper(selected, call, path);
+  const managed = commandName(call.program) === 'gh' ? verifiedGhWrapper(selected, call, path) : null;
+  return (
+    managed ??
+    (ordinaryExecutableChain(selected, path, call.cwd) ? { kind: 'ordinary_executable', executable: selected } : null)
+  );
 }

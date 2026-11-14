@@ -1,3 +1,7 @@
+import type { RecallResultStatus } from '@cat-cafe/shared';
+import { isRecallLookupTool } from '../../tool-usage/derive-result-summary.js';
+import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
+import type { ToolEventLog } from '../../tool-usage/ToolEventLog.js';
 import { MEMBER_TIMEOUT_REASON } from '../invocation/member-output-timeout.js';
 
 export type ResponseTerminalStatus = 'completed' | 'failed' | 'canceled' | 'interrupted';
@@ -43,4 +47,32 @@ export function resolveResponseTerminal(input: {
 /** Whether a member's run was stopped by its output timeout rather than by a person. */
 export function stoppedByMemberTimeout(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true && signal.reason === MEMBER_TIMEOUT_REASON;
+}
+
+/** A route may stop consuming its provider before the provider can emit a result. */
+export function recordStoppedRecallCalls(
+  log: ToolEventLog | undefined,
+  threadId: string,
+  invocationId: string,
+  catId: string,
+  pending: ReadonlyArray<{ toolName: string; toolUseId?: string }>,
+  signal: AbortSignal | undefined,
+): void {
+  if (!log || !signal?.aborted) return;
+  const resultStatus: RecallResultStatus | undefined = stoppedByMemberTimeout(signal)
+    ? 'timeout'
+    : signal.reason === 'user_cancel' || signal.reason === 'cancel_all'
+      ? 'cancelled'
+      : undefined;
+  if (!resultStatus) return;
+  for (const { toolName, toolUseId } of pending) {
+    if (!toolUseId || !isRecallLookupTool(normalizeMcpToolName(toolName))) continue;
+    log
+      .updateSummary(
+        threadId,
+        { catId, invocationId, toolUseId, pendingOnly: true },
+        { resultStatus, resultCount: null, isError: true },
+      )
+      .catch(() => {});
+  }
 }

@@ -128,7 +128,10 @@ test('an off-at-boot refresh cannot preserve a stale vec0 row until later activa
 
   const restarted = new SqliteEvidenceStore(dbPath);
   await restarted.initialize();
-  assert.equal(restarted.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name='vec0'").get(), undefined);
+  assert.ok(
+    restarted.getDb().prepare("SELECT 1 FROM pragma_module_list WHERE name='vec0'").get(),
+    'existing vector invalidation is prepared before off-at-boot refresh',
+  );
   const restartedBuilder = new IndexBuilder(
     restarted,
     docs,

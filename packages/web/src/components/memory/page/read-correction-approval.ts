@@ -1,5 +1,6 @@
 import type { ApprovalHubItem, EventMemoryCorrectionProposalView, RichCardBlock } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { mailboxSourcesReadable } from '@/components/shell/mailbox/source-read-eligibility';
 import { parseUnifiedAttentionRead } from '@/components/shell/parse-unified-attention';
 import { apiFetch } from '@/utils/api-client';
 import { isEventCorrection } from './event-correction-read';
@@ -133,8 +134,7 @@ export async function readPublishedCorrection(
     if (
       !read ||
       read.identity.ownerUserId !== owner ||
-      read.status !== 'available' ||
-      read.consistency.state !== 'verified' ||
+      !mailboxSourcesReadable(read, 'approvals') ||
       read.personalView ||
       read.page.offset !== offset ||
       read.page.limit !== 20

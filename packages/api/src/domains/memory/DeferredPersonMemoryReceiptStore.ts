@@ -49,10 +49,25 @@ export type RearmDeferredPersonMemoryReceiptResult =
 
 export type WithdrawDeferredPersonMemoryReceiptResult =
   | { outcome: 'withdrawn' | 'replayed'; receipt: DeferredPersonMemoryReceipt }
-  | { outcome: 'conflict' | 'not_available' };
+  | { outcome: 'conflict' | 'not_available' | 'stale_revision' };
 
 export type HardForgetDeferredPersonMemoryReceiptResult =
   | { outcome: 'purged' | 'already_absent' }
+  | { outcome: 'proposal_bound'; proposalId: string }
+  | { outcome: 'stale_revision' };
+
+export interface PrepareOwnerDeferredForgetInput {
+  ownerUserId: string;
+  receiptId: string;
+  requestId: string;
+  expectedRevision: string;
+  requestedAt: number;
+  lineageInvalidationAvailable: boolean;
+}
+
+export type PrepareOwnerDeferredForgetResult =
+  | { outcome: 'prepared' | 'replayed'; receipt: DeferredPersonMemoryReceipt }
+  | { outcome: 'already_absent' | 'stale_revision' | 'idempotency_conflict' | 'conflict' | 'invalidation_unavailable' }
   | { outcome: 'proposal_bound'; proposalId: string };
 
 export type DisposeDeferredPersonMemoryReceiptResult =
@@ -64,6 +79,11 @@ export type DisposeDeferredPersonMemoryReceiptResult =
 export interface DeferredPersonMemoryReceiptStore {
   stage(input: StageDeferredPersonMemoryReceiptInput): Promise<StageDeferredPersonMemoryReceiptResult>;
   get(ownerUserId: string, receiptId: string): Promise<DeferredPersonMemoryReceipt | null>;
+  prepareOwnerForget(input: PrepareOwnerDeferredForgetInput): Promise<PrepareOwnerDeferredForgetResult>;
+  listOwnerPage(
+    ownerUserId: string,
+    options: { cursor?: string; limit?: number },
+  ): Promise<{ entries: DeferredPersonMemoryReceipt[]; nextCursor: string | null }>;
   listReady(ownerUserId: string, limit: number, now?: number): Promise<DeferredPersonMemoryReceipt[]>;
   claim(input: {
     ownerUserId: string;
@@ -126,6 +146,12 @@ export interface DeferredPersonMemoryReceiptStore {
     ownerUserId: string,
     receiptId: string,
     decidedAt: number,
+    expectedRevision?: string,
   ): Promise<WithdrawDeferredPersonMemoryReceiptResult>;
-  hardForget(ownerUserId: string, receiptId: string): Promise<HardForgetDeferredPersonMemoryReceiptResult>;
+  hardForget(
+    ownerUserId: string,
+    receiptId: string,
+    expectedRevision?: string,
+    ownerForgetRequestId?: string,
+  ): Promise<HardForgetDeferredPersonMemoryReceiptResult>;
 }
