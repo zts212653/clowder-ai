@@ -16,9 +16,9 @@ import { MessageStore } from '../../../../api/dist/domains/cats/services/stores/
 import { ResponseStreamRecords } from '../../../../api/dist/infrastructure/websocket/ResponseStreamRecords.js';
 import { handleActiveAgentMessage } from '../agent-messages/active-handler';
 import { writeStoredSnapshot } from '../named-message-writer';
-import { isRunningResponse, type StreamReplay } from '../response-stream-replay';
+import { applyResponseStreamReplay, isRunningResponse, type StreamReplay } from '../response-stream-replay';
 import { issueReplaceRead, mergeReplaceHydrationMessages } from '../useChatHistory';
-import { createStreamReplayRelay, dispatchAgentQueueItem } from '../useSocket-stream-replay';
+import { createStreamReplayRelay } from '../useSocket-stream-replay';
 
 const T = 'pr3b-running-bg';
 const ROOM = `thread:${T}`;
@@ -102,7 +102,7 @@ function pageRelay() {
           .messages.filter(isRunningResponse)
           .map((message) => message.id),
       ),
-    enqueue: (item) => dispatchAgentQueueItem(item, () => {}),
+    enqueue: (item) => applyResponseStreamReplay(item.replay, undefined, item.runningAtConfirmation),
     beginRecovery: (threadId) => beginThreadRecovery(threadId),
     requestCatchUp: () => {},
   });

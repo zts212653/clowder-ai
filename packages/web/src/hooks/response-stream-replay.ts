@@ -3,6 +3,7 @@ import { createStore } from 'zustand/vanilla';
 import { type ChatMessage, DEFAULT_THREAD_STATE } from '@/stores/chat-types';
 import { type ChatState, chatStoreCreator, useChatStore } from '@/stores/chatStore';
 import { nextLocalWriteSeq } from '@/stores/local-write-clock';
+import { withStreamedBodyOf } from '@/stores/streamed-body';
 import { namedTarget, streamTextWrite, touchStreamActivity } from './agent-messages/named-target';
 import { applySemanticEvent, projectBodySystemInfo } from './agent-messages/system-info';
 import type { SystemInfoPort } from './agent-messages/system-info-port';
@@ -148,22 +149,23 @@ function projectReplayedEvent(event: AgentMsg, threadId: string, index: number, 
 }
 
 /** Rebuild one response from its replayed events, starting from the page's copy without its body. */
-function rebuildResponse(
+function* rebuildResponse(
   threadId: string,
   messageId: string,
   base: ChatMessage | undefined,
   events: readonly AgentMsg[],
-): ChatMessage | undefined {
+): Generator<void, ChatMessage | undefined, unknown> {
   const detached = createStore<ChatState>()(chatStoreCreator);
   detached.setState({
     currentThreadId: DETACHED_CURRENT_THREAD,
     threadStates: { [threadId]: { ...DEFAULT_THREAD_STATE, messages: base ? [withoutStreamedBody(base)] : [] } },
   });
   const store = () => detached.getState();
-  events.forEach((event, index) => {
+  for (const [index, event] of events.entries()) {
     // The record is contiguous from the response's first broadcast; its next position is the server's.
     projectReplayedEvent({ ...event, threadId, messageId }, threadId, index, store);
-  });
+    yield;
+  }
   const rebuilt = store()
     .getThreadState(threadId)
     .messages.find((message) => message.id === messageId);
@@ -198,16 +200,15 @@ function incompletePlaceholder(entry: StreamReplay['responses'][number]): ChatMe
  * vouch for, and a response this page shows as processing that the replay does not carry (e.g. one
  * still running across a server restart), are marked incomplete.
  */
-export function applyResponseStreamReplay(
+export function* iterateResponseStreamReplay(
   replay: StreamReplay,
   live: () => ChatState = useChatStore.getState,
   runningAtConfirmation?: ReadonlySet<string>,
-): void {
+): Generator<void, void, unknown> {
   const { threadId } = replay;
   const current = live().getThreadState(threadId).messages;
   const byId = new Map(current.map((message) => [message.id, message]));
   const next = new Map<string, ChatMessage>();
-  const added: ChatMessage[] = [];
   const replayed = new Set<string>();
 
   for (const entry of replay.responses) {
@@ -218,21 +219,65 @@ export function applyResponseStreamReplay(
       if (local) next.set(local.id, { ...local, streamPrefix: 'incomplete' });
       else {
         const placeholder = incompletePlaceholder(entry);
-        if (placeholder) added.push(placeholder);
+        if (placeholder) next.set(entry.messageId, placeholder);
       }
       continue;
     }
-    const rebuilt = rebuildResponse(threadId, entry.messageId, local, entry.events);
+    const rebuilt = yield* rebuildResponse(threadId, entry.messageId, local, entry.events);
     if (!rebuilt) continue;
-    if (local) next.set(local.id, rebuiltCopy(rebuilt, entry.nextIndex));
-    else added.push(rebuiltCopy(rebuilt, entry.nextIndex));
+    next.set(entry.messageId, rebuilt);
   }
-  for (const message of current) {
-    if (replayed.has(message.id) || !isRunningResponse(message) || message.streamPrefix === 'incomplete') continue;
-    if (runningAtConfirmation && !runningAtConfirmation.has(message.id)) continue;
-    next.set(message.id, { ...message, streamPrefix: 'incomplete' });
+
+  // History and lifecycle snapshots can land while the detached rebuild yields. Recheck and commit
+  // together: terminal snapshots win, newly arrived rows survive, and a deleted row stays deleted.
+  const latest = live().getThreadState(threadId).messages;
+  const entries = new Map(replay.responses.map((entry) => [entry.messageId, entry]));
+  const present = new Set(latest.map((message) => message.id));
+  let changed = false;
+  const messages = latest.map((message) => {
+    if (isCommittedResponse(message)) return message;
+    const replacement = next.get(message.id);
+    if (replacement) {
+      changed = true;
+      const entry = entries.get(message.id)!;
+      if (!entry.complete) return { ...message, streamPrefix: 'incomplete' as const };
+      const rebased =
+        message === byId.get(message.id)
+          ? replacement
+          : withStreamedBodyOf(
+              {
+                ...replacement,
+                ...message,
+                extra: { ...replacement.extra, ...message.extra },
+                metadata: message.metadata ?? replacement.metadata,
+              },
+              replacement,
+            );
+      return rebuiltCopy(rebased, entry.nextIndex);
+    }
+    if (replayed.has(message.id) || !isRunningResponse(message) || message.streamPrefix === 'incomplete')
+      return message;
+    if (runningAtConfirmation && !runningAtConfirmation.has(message.id)) return message;
+    changed = true;
+    return { ...message, streamPrefix: 'incomplete' as const };
+  });
+  for (const [id, replacement] of next) {
+    if (present.has(id) || byId.has(id)) continue;
+    changed = true;
+    const entry = entries.get(id)!;
+    messages.push(entry.complete ? rebuiltCopy(replacement, entry.nextIndex) : replacement);
   }
-  if (next.size === 0 && added.length === 0) return;
-  const messages = current.map((message) => next.get(message.id) ?? message);
-  live().replaceThreadMessages(threadId, [...messages, ...added]);
+  if (changed) live().replaceThreadMessages(threadId, messages);
+}
+
+/** Synchronous compatibility projection. The socket hot path must use the queued iterator. */
+export function applyResponseStreamReplay(
+  replay: StreamReplay,
+  live: () => ChatState = useChatStore.getState,
+  runningAtConfirmation?: ReadonlySet<string>,
+): void {
+  const steps = iterateResponseStreamReplay(replay, live, runningAtConfirmation);
+  while (!steps.next().done) {
+    // Non-interactive callers explicitly drain the same projection without browser scheduling.
+  }
 }
