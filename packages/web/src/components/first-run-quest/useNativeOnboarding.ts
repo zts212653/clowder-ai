@@ -4,7 +4,7 @@ import { type CatData, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { initialState, splitCommandArgs } from '../hub-cat-editor.model';
 import type { RuntimeChoice } from '../settings/members/member-runtime-draft';
-import { matchesRuntime } from '../settings/members/member-runtime-draft';
+import { matchesRuntime, rememberedRuntimes } from '../settings/members/member-runtime-draft';
 import { needsDshPreparation, prepareNativeMember } from '../settings/members/prepare-native-member';
 import { syncDraftToStorage } from '../thread-drafts';
 import { legacyCreationKey, legacySharedKey } from './legacy-creation-key';
@@ -144,30 +144,36 @@ export function useNativeOnboarding(
         const runtimes = savedDesktop
           ? [{ ...savedDesktop.runtime, installed: true }, ...discovered.runtimes]
           : discovered.runtimes;
+        // Keep the frozen discovery source separate from edits to the connection.
+        // Desktop selection can switch installations while retaining that source ID.
+        const findDraftSource = (partner: NativePartner) =>
+          saved?.partners.find((p) => p.form && p.id === partner.id && !partner.runtime.dshDesktop) ??
+          saved?.partners.find(
+            (p) =>
+              p.form &&
+              (matchesRuntime(p.form, partner.runtime) ||
+                (partner.runtime.dshDesktop &&
+                  p.runtime?.id === partner.runtime.id &&
+                  p.runtime.acp?.command === partner.runtime.acp?.command)),
+          );
         const partners = recommendNativePartners(runtimes, templates.templates, currentCats, journeyId).map(
           (partner) => {
-            const previous = saved?.partners.find(
-              (p) =>
-                p.form &&
-                (matchesRuntime(p.form, partner.runtime) ||
-                  (partner.runtime.dshDesktop &&
-                    p.runtime?.id === partner.runtime.id &&
-                    p.runtime.acp?.command === partner.runtime.acp?.command)),
-            );
+            const previous = findDraftSource(partner);
             if (!previous?.form) return partner;
             // A prepared Desktop keeps its private HOME/patch across reopening this saved draft.
             const runtime =
               partner.runtime.dshDesktop && previous.runtime
                 ? { ...previous.runtime, installed: partner.runtime.installed }
                 : partner.runtime;
+            const draftRuntime = rememberedRuntimes({ saved: previous.form })[0];
             const savedMember = currentCats.find(
-              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), runtime),
+              (cat) => cat.id === previous.form.catId && matchesRuntime(initialState(cat), draftRuntime),
             );
             const acknowledged = saved?.created[partner.id] ?? saved?.created[previous.id];
             const confirmed = Boolean(previous.existingId || (acknowledged && savedMember?.id === acknowledged.id));
             const receiptMismatch =
               acknowledged &&
-              currentCats.some((cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), runtime));
+              currentCats.some((cat) => cat.id === acknowledged.id && !matchesRuntime(initialState(cat), draftRuntime));
             const restoredForm = confirmed && savedMember ? initialState(savedMember) : previous.form;
             // Repair a pre-identity default even when the draft is not confirmed:
             // a draft whose member is no longer in the roster (for example, a
@@ -214,16 +220,18 @@ export function useNativeOnboarding(
           lead:
             partners.find((p) => {
               const previousLead = saved?.partners.find((old) => old.id === saved.lead);
-              return previousLead?.form && matchesRuntime(previousLead.form, p.runtime);
+              return previousLead?.form && findDraftSource(p) === previousLead;
             })?.id ??
             partners.find((p) => p.selected)?.id ??
             '',
           created: Object.fromEntries(
             partners.flatMap((partner) => {
-              const previous = saved?.partners.find((p) => p.form && matchesRuntime(p.form, partner.runtime));
+              const previous = findDraftSource(partner);
               const member = saved?.created[partner.id] ?? (previous && saved?.created[previous.id]);
+              // partner.form is already restored here, including its custom connection.
+              const draftRuntime = rememberedRuntimes({ saved: partner.form })[0];
               return member &&
-                roster.cats.some((cat) => cat.id === member.id && matchesRuntime(initialState(cat), partner.runtime))
+                roster.cats.some((cat) => cat.id === member.id && matchesRuntime(initialState(cat), draftRuntime))
                 ? [[partner.id, member] as const]
                 : [];
             }),
