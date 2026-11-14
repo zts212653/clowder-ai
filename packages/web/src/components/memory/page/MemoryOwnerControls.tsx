@@ -1,16 +1,26 @@
 import type { MemoryOwnerSourceResponse } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ExternalLinkIcon } from '@/components/HubConfigIcons';
 import { handleTeleportEvent } from '@/hooks/useTeleport';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { isOwnerSource } from './owner-memory-read';
 import type { MemoryOwnerActionState } from './use-memory-owner-action';
-import { useMemoryRead } from './use-memory-read';
+import { formatMemoryDate, useMemoryRead } from './use-memory-read';
 
-export function MemoryOwnerSource({ endpoint }: { endpoint: string }) {
+export function MemoryOwnerSource({
+  endpoint,
+  onReadState,
+}: {
+  endpoint: string;
+  onReadState?: (state: 'loading' | 'ready' | 'unavailable') => void;
+}) {
   const source = useMemoryRead<MemoryOwnerSourceResponse>(endpoint, isOwnerSource);
   const router = useRouter();
+  const state = source.loading ? 'loading' : !source.error && source.data?.status === 'ready' ? 'ready' : 'unavailable';
+  useEffect(() => {
+    onReadState?.(state);
+  }, [state, onReadState]);
   if (source.loading) return <p className="text-xs text-cafe-muted">正在读取来源…</p>;
   if (source.error || source.data?.status === 'unavailable')
     return (
@@ -26,7 +36,11 @@ export function MemoryOwnerSource({ endpoint }: { endpoint: string }) {
     <div className="space-y-1 text-xs text-cafe-muted">
       {source.data?.sources.map((item, index) => (
         <div key={`${index}:${item.label}`}>
-          <span>{item.label}</span>
+          <span>
+            {item.label}
+            {item.speaker ? ` · ${item.speaker}` : ''}
+            {item.occurredAt !== null ? ` · ${formatMemoryDate(item.occurredAt)}` : ''}
+          </span>
           {item.canOpen && item.threadId && item.messageId && (
             <button
               type="button"

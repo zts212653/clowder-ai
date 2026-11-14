@@ -6,7 +6,7 @@ const source = 'pr:fixture/repo#42';
 const head = 'a'.repeat(40);
 const old = 'b'.repeat(40);
 const metadata = {
-  base: { repo: { full_name: 'fixture/repo' } },
+  base: { ref: 'main', repo: { full_name: 'fixture/repo' } },
   state: 'closed',
   merged: true,
   head: { sha: head },

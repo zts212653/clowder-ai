@@ -7,7 +7,7 @@ import type { InvocationQueue } from '../../../domains/cats/services/agents/invo
 import type { IMessageStore } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../../domains/cats/services/stores/ports/TaskStore.js';
 import type { EngagementPolicyReader } from '../../../domains/routing-context/ScarceSeatNotificationPolicy.js';
-import { reportAlphaFailures } from './alpha-browser-reporting.js';
+import { reportAlphaFailures, resolveAlphaFailureTriageCat } from './alpha-browser-reporting.js';
 import { createAlphaManagedControl } from './alpha-managed-control.js';
 import type { TaskTemplate } from './types.js';
 
@@ -139,6 +139,11 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
         description: '订阅起点的精确 commit；其后每个 main revision 均须处置',
       },
       guardianCatId: { type: 'string', required: true, description: '归属不明或执行环境异常时负责核验的现有猫' },
+      failureTriageCatId: {
+        type: 'string',
+        required: false,
+        description: '可选值守猫 stable ID；负责新修复任务的调查与推进，保留产品原归属和既有任务',
+      },
       executionCarrier: {
         type: 'string',
         required: false,
@@ -152,6 +157,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
         typeof params.params.guardianCatId === 'string' ? options.resolveCat(params.params.guardianCatId) : null;
       const threadId = params.deliveryThreadId;
       const executionCarrier = params.params.executionCarrier ?? 'fork';
+      const failureTriageCatId = params.params.failureTriageCatId;
       return {
         id,
         profile: 'poller',
@@ -162,6 +168,11 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
               return { run: false, reason: 'exact baseline, delivery thread and verified guardian required' };
             if (!['fork', 'managed'].includes(String(executionCarrier)))
               return { run: false, reason: 'Alpha executionCarrier must be fork or managed' };
+            try {
+              resolveAlphaFailureTriageCat(options, failureTriageCatId);
+            } catch (error) {
+              return { run: false, reason: error instanceof Error ? error.message : String(error) };
+            }
             return { run: true, workItems: [{ signal: id, subjectKey: `repo:alpha-browser:${id}` }] };
           },
         },
@@ -170,6 +181,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
           timeoutMs: 3 * 60 * 60_000 + 60_000,
           async execute(_signal, _subject, ctx) {
             if (!threadId || !guardian) throw new Error('Alpha subscription is not admitted');
+            resolveAlphaFailureTriageCat(options, failureTriageCatId);
             const runtime = await (options.loadRuntime?.() ?? loadRuntime(options.repoRoot));
             const main = await (options.inspectMain?.(ctx.signal) ?? inspectMain(options.repoRoot, ctx.signal));
             const result = await runtime
@@ -188,7 +200,7 @@ export function createAlphaBrowserTemplate(options: AlphaBrowserOptions): TaskTe
                   principal: { userId: options.ownerUserId, threadId, catId: guardian },
                 }),
                 reportFailure: (failure: Record<string, unknown>) =>
-                  reportAlphaFailures(options, runtime, id, threadId, guardian, ctx, failure),
+                  reportAlphaFailures(options, runtime, id, threadId, guardian, ctx, failure, failureTriageCatId),
               })
               .catch((error: unknown) => rethrowWithDiscoveryContext(error, main.discoveryError, ctx.signal));
             if (!['idle', 'green', 'red'].includes(result.status)) {

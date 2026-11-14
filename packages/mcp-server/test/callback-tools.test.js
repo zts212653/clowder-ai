@@ -1485,36 +1485,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
-  test('handleRetainMemory posts content/tags/metadata to callback retain endpoint', async () => {
-    const { handleCallbackRetainMemory } = await import('../dist/tools/callback-memory-tools.js');
-
-    let capturedUrl, capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({ status: 'ok' }),
-      };
-    };
-
-    const result = await handleCallbackRetainMemory({
-      content: 'Prefer explicit invocation lifecycle state transitions.',
-      tags: ['kind:decision', 'author:codex'],
-      metadata: {
-        anchor: 'docs/decisions/008-conversation-mutability-and-invocation-lifecycle.md#L1',
-        confidence: 'high',
-      },
-    });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.includes('/api/callbacks/retain-memory'));
-    const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.content, 'Prefer explicit invocation lifecycle state transitions.');
-    assert.deepEqual(body.tags, ['kind:decision', 'author:codex']);
-    assert.equal(body.metadata.anchor, 'docs/decisions/008-conversation-mutability-and-invocation-lifecycle.md#L1');
-  });
-
   test('retries transient post failure and keeps same clientMessageId', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 

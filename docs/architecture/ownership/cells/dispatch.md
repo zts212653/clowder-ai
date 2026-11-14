@@ -4,8 +4,6 @@ title: Dispatch / Queue
 summary: 按 thread 持久化的 source Queue Entry、未投递 targets 集合、有序 active index、短时 claim、原子 admission/target 更新、逐成员 Steer、外部 wake 执行，以及 durable child/execution 投影。
 canonical_features: [F047, F117, F167, F175, F177, F185, F247, F254, F264, F280, F295]
 code_anchors:
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotEventsBridge.ts
-  - packages/api/src/domains/cats/services/cloud-bridge/dot/DotDispatchStore.ts
   - packages/shared/src/types/active-execution.ts
   - packages/shared/src/types/turn-execution.ts
   - packages/api/src/domains/cats/services/stores/ports/TurnExecutionStore.ts

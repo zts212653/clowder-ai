@@ -1,12 +1,19 @@
+import { expandPositionalParameters } from './lib/shell-code-inputs.mjs';
 import { executedInvocations, executionChainInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
 import { SUBSTITUTION } from './lib/shell-text.mjs';
 import { codexAuthenticationEffect } from './native-auth-effect.mjs';
-import { copyNamespaceStability, shellTextPreservesCopyNamespace } from './native-effect-copy-namespace.mjs';
+import {
+  copyNamespaceStability,
+  programNamespaceStability,
+  shellTextPreservesCopyNamespace,
+} from './native-effect-copy-namespace.mjs';
 import { contextualGitMutationCandidates } from './native-effect-git-context.mjs';
 import { constrainedGhApiOperation } from './native-effect-github-classifier.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
+import { httpOutputTargets } from './native-effect-http-classifier.mjs';
 import { withoutInterpreterSource } from './native-effect-interpreter-source.mjs';
+import { boundGitDirectoryView, withoutPathTargets } from './native-effect-invocation-targets.mjs';
 import {
   explicitCopyRoles,
   isConstrainedLocalMediaObservation,
@@ -36,7 +43,14 @@ import { worktreeRemovalDecision } from './native-effect-worktree-removal.mjs';
 // Provenance: F306 AC-C7 -- how a shell command becomes candidates (per segment, per
 // directory it can run in), moved out of native-effect-target-guard.mjs (slice 2b, pure move).
 
-export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopyNamespaceStable = true) {
+export function decideShellHookPayload(
+  view,
+  cwd,
+  source,
+  depth = 0,
+  initialCopyNamespaceStable = true,
+  initialProgramNamespaceStable = true,
+) {
   const lexical = scanShellText(view.judged);
   const raw = lexical.text;
   if (depth > 8) return decideNativeEffect({ effect: 'unknown', target: classifyTarget(raw, cwd, 'unknown'), source });
@@ -55,25 +69,17 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   }
   // Each segment is judged in every directory it can run in (after its preceding `cd`s),
   // against its own target only. Nothing else in the text is its target (2026-09-27).
-  const contexts = segmentContexts(parts, cwd);
-  const executionBoundary = codeInputBoundary(raw, parts, contexts, cwd, source);
-  const units = (parts.length > 0 ? parts : [{ text: '', separator: null }]).map((part, index) => ({
-    segment: isShellStructure(part.text) ? '' : segmentCommandText(part.text),
-    contexts: contexts[index] ?? [{ directory: cwd, bindings: new Map() }],
-  }));
+  const unitTexts = (parts.length > 0 ? parts : [{ text: '', separator: null }]).map((part) =>
+    isShellStructure(part.text) ? '' : segmentCommandText(part.text),
+  );
   // Concurrent segments have no text-order happens-before relation: a later alias
   // creator can run before an earlier delayed copy, so no snapshot in this shell is stable.
-  const copyNamespaceStable = copyNamespaceStability(
-    units,
-    initialCopyNamespaceStable && !hasConcurrentShellExecution(lexical, raw),
-  );
   // A separate pipeline does not run concurrently with its sequential predecessor.
   const sequentialRead =
-    !hasConcurrentShellExecution(lexical, raw, true) &&
-    parts.every((part, index) => part.text === units[index].segment);
-  const readProgramNamespaceStable = copyNamespaceStability(
-    units,
-    initialCopyNamespaceStable && (!hasConcurrentShellExecution(lexical, raw) || sequentialRead),
+    !hasConcurrentShellExecution(lexical, raw, true) && parts.every((part, index) => part.text === unitTexts[index]);
+  const readProgramNamespaceStable = programNamespaceStability(
+    parts.map((part) => ({ segment: part.text })),
+    initialProgramNamespaceStable && (!hasConcurrentShellExecution(lexical, raw) || sequentialRead),
   );
   for (let index = 0; index < parts.length; index++) {
     if (!['|', '|&'].includes(parts[index + 1]?.separator)) continue;
@@ -83,23 +89,52 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
     readProgramNamespaceStable.fill(false, start, end + 1);
     index = end;
   }
+  const contexts = segmentContexts(parts, cwd, process.env, readProgramNamespaceStable);
+  const units = unitTexts.map((segment, index) => ({
+    segment,
+    contexts: contexts[index] ?? [{ directory: cwd, bindings: new Map() }],
+  }));
+  const copyNamespaceStable = copyNamespaceStability(
+    units,
+    initialCopyNamespaceStable && !hasConcurrentShellExecution(lexical, raw),
+    readProgramNamespaceStable,
+  );
+  const executionBoundary = codeInputBoundary(raw, parts, contexts, cwd, source, readProgramNamespaceStable);
   const previewDecisions = units.map(({ segment, contexts }) =>
     segmentPreviewDecision(
       segment,
       contexts.map(({ directory }) => directory),
     ),
   );
-  const previewBoundary = protectedManagedPreviewBoundary(previewDecisions, segments, cwd, source);
+  const previewBoundary = protectedManagedPreviewBoundary(
+    previewDecisions,
+    segments,
+    cwd,
+    source,
+    readProgramNamespaceStable,
+  );
   if (previewBoundary) return previewBoundary;
-  const expanded = units.map(({ segment, contexts }) =>
-    contexts.flatMap(({ directory, bindings }) =>
-      expandSegmentBindings(withoutInterpreterSource(segment), bindings).map((variant) => ({ ...variant, directory })),
+  const expanded = units.map(({ segment, contexts }, index) =>
+    contexts.flatMap(({ directory, bindings, parameters }) =>
+      expandSegmentBindings(
+        withoutInterpreterSource(
+          readProgramNamespaceStable[index] && parameters ? expandPositionalParameters(segment, parameters) : segment,
+        ),
+        bindings,
+      ).map((variant) => ({ ...variant, directory })),
     ),
   );
   const candidates = expanded.flatMap((variants, index) =>
     variants.flatMap(({ text, argvPreserved, unresolvedBindings = [], directory }) => {
       const execution = shellSubstitutions(text, SUBSTITUTION);
-      const nested = nestedSubstitutionDecisions(execution.inner, directory, source, depth, copyNamespaceStable[index]);
+      const nested = nestedSubstitutionDecisions(
+        execution.inner,
+        directory,
+        source,
+        depth,
+        copyNamespaceStable[index],
+        readProgramNamespaceStable[index],
+      );
       // The substitution executes in a child shell; only its output is an outer operand.
       // Echo/printf consume data. Other programs cannot certify generated argv as literal.
       const dataConsumer = /^\s*(?:echo|printf)\b/.test(execution.text);
@@ -107,18 +142,21 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
       const targetEvidence = dataConsumer ? text : [text, ...unresolvedBindings].join(' ').replace(/\r?\n/g, ' ');
       return [
         ...nested,
-        segmentCandidate(
-          isShellBinding(execution.text) ? '' : execution.text,
-          directory,
-          previewDecisions[index]?.operation,
-          source,
-          preserved,
-          targetEvidence,
-          !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
-          units[index].segment,
-          copyNamespaceStable[index],
-          readProgramNamespaceStable[index],
-        ),
+        {
+          ...segmentCandidate(
+            isShellBinding(execution.text) ? '' : execution.text,
+            directory,
+            previewDecisions[index]?.operation,
+            source,
+            preserved,
+            targetEvidence,
+            !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
+            units[index].segment,
+            copyNamespaceStable[index],
+            readProgramNamespaceStable[index],
+          ),
+          offendingClause: units[index].segment,
+        },
       ];
     }),
   );
@@ -127,7 +165,12 @@ export function decideShellHookPayload(view, cwd, source, depth = 0, initialCopy
   if (pipelineBoundary) candidates.push(pipelineBoundary);
   // Child policy decisions may deny an otherwise ordinary target (for example
   // an unbounded managed-preview operation). Do not reinterpret them as candidates.
-  const decisions = candidates.map((candidate) => (candidate.decision ? candidate : decideNativeEffect(candidate)));
+  const decisions = candidates.map((candidate) => {
+    const decision = candidate.decision ? candidate : decideNativeEffect(candidate);
+    return decision.decision === 'deny' && candidate.offendingClause
+      ? { ...decision, offendingClause: candidate.offendingClause }
+      : decision;
+  });
   const rank = (candidate) => SHELL_EFFECT_PRIORITY.get(candidate.effect) ?? -1;
   const denials = decisions.filter((decision) => decision.decision === 'deny');
   if (denials.length) return denials.reduce((best, candidate) => (rank(candidate) > rank(best) ? candidate : best));
@@ -146,21 +189,36 @@ function dataDrivenPipelineDecision(raw, cwd, source) {
   return decideNativeEffect({ effect, target: classifyTarget(raw, cwd, effect), source });
 }
 
-function nestedSubstitutionDecisions(innerCommands, directory, source, depth, initialCopyNamespaceStable) {
+function nestedSubstitutionDecisions(
+  innerCommands,
+  directory,
+  source,
+  depth,
+  initialCopyNamespaceStable,
+  programNamespaceStable,
+) {
   let stable = initialCopyNamespaceStable;
   return innerCommands.map((inner) => {
-    const decision = decideShellHookPayload(hereDocumentView(inner), directory, source, depth + 1, stable);
-    stable &&= shellTextPreservesCopyNamespace(inner);
+    const decision = decideShellHookPayload(
+      hereDocumentView(inner),
+      directory,
+      source,
+      depth + 1,
+      stable,
+      programNamespaceStable,
+    );
+    stable &&= shellTextPreservesCopyNamespace(inner, programNamespaceStable);
     return decision;
   });
 }
 
 /** Original-source roles precede env/path expansion; evidence stays on its execution chain. */
-function codeInputBoundary(raw, parts, contexts, cwd, source) {
-  const root = executedInvocations(withoutInterpreterSource(raw), { cwd });
+function codeInputBoundary(raw, parts, contexts, cwd, source, builtinContexts) {
+  const rootContext = builtinContexts[0] ?? false;
+  const root = executedInvocations(withoutInterpreterSource(raw), { cwd, builtinContext: rootContext });
   if (codexAuthenticationEffect(root.pipelines.flat()) === 'auth_mutation')
     return decideNativeEffect({ effect: 'auth_mutation', target: classifyTarget(raw, cwd, 'auth_mutation'), source });
-  const original = protectedBranchBoundary(root, cwd, source);
+  const original = protectedBranchBoundary(root, cwd, source, { deferDirectories: true, builtinContext: rootContext });
   if (original) return original;
   for (let index = 0; index < parts.length; index++) {
     const start = pipelineChainStart(parts, index);
@@ -168,8 +226,13 @@ function codeInputBoundary(raw, parts, contexts, cwd, source) {
     while (['|', '|&'].includes(parts[end + 1]?.separator)) end++;
     const chain = raw.slice(parts[start].start, parts[end].end);
     for (const { directory, bindings } of contexts[start] ?? [{ directory: cwd }]) {
-      const reader = executionChainInvocations(withoutInterpreterSource(chain), { cwd: directory, bindings });
-      const branch = protectedBranchBoundary(reader, directory, source);
+      const builtinContext = builtinContexts.slice(start, end + 1).every(Boolean);
+      const reader = executionChainInvocations(withoutInterpreterSource(chain), {
+        cwd: directory,
+        bindings,
+        builtinContext,
+      });
+      const branch = protectedBranchBoundary(reader, directory, source, { bindings, builtinContext });
       if (branch) return branch;
       const unproved = reader.pipelines.flat().find((call) => call.generatedCode && insideMainCheckout(call.cwd));
       if (unproved)
@@ -183,9 +246,21 @@ function codeInputBoundary(raw, parts, contexts, cwd, source) {
   return null;
 }
 
-function protectedBranchBoundary(reader, cwd, source) {
+function protectedBranchBoundary(
+  reader,
+  cwd,
+  source,
+  { deferDirectories = false, bindings, builtinContext = false } = {},
+) {
   const evidence = [
-    ...reader.pipelines.flat().flatMap((call) => shellExecutionEvidence(call, cwd)),
+    ...reader.pipelines.flat().flatMap((call) => {
+      const directory = boundGitDirectoryView(call, bindings);
+      if (deferDirectories && directory?.defer) return [];
+      const calls = directory?.text
+        ? executedInvocations(directory.text, { cwd: call.cwd ?? cwd, builtinContext }).pipelines.flat()
+        : [call];
+      return calls.flatMap((entry) => shellExecutionEvidence(entry, cwd));
+    }),
     ...(reader.unresolvedEvidence ?? []).map((text) => ({ text, cwd })),
   ];
   for (const item of evidence) {
@@ -223,7 +298,7 @@ function segmentCandidate(
 ) {
   // Pure shell structure (`fi`, `done`, `}`) runs nothing of its own.
   if (!segment.trim()) return { effect: 'read', target: { kind: 'ordinary', value: cwd ?? '' }, source };
-  const removal = worktreeRemovalDecision(segment, cwd, source, argvPreserved);
+  const removal = worktreeRemovalDecision(segment, cwd, source, argvPreserved, readProgramNamespaceStable);
   if (removal) return removal;
   // A benign prefix can prevent the whole command from being a pure Git chain.
   // Its mutation segment still needs the same checkout/ancestor protection.
@@ -232,13 +307,14 @@ function segmentCandidate(
   const { command, location, targetCwd, targetText, roles, unprovedReadProgram } = argvPreserved
     ? segmentView(segment, cwd, roleSource, readProgramNamespaceStable)
     : { command: segment, location: cwd, targetCwd: cwd };
-  const observedEffect = bindingViewEffect(command, managedPreview, argvPreserved);
+  const observedEffect = bindingViewEffect(command, managedPreview, argvPreserved, readProgramNamespaceStable);
   const effect = observedEffect === 'read' && unprovedReadProgram ? 'unknown' : observedEffect;
   const remoteOperation =
     argvPreserved &&
     !unprovedReadProgram &&
     (constrainedGhApiOperation(command) ?? constrainedGhPullRequestOperation(command));
-  const copy = argvPreserved ? explicitCopyRoles(command) : null;
+  const copy = argvPreserved ? explicitCopyRoles(command, location ?? cwd) : null;
+  const http = argvPreserved && copyNamespaceStable ? httpOutputTargets(command, location ?? cwd) : null;
   const explicitTarget = argvPreserved ? (explicitTemporaryWorktreeTarget(command) ?? copy?.destination) : undefined;
   const locatedSource = location ? { ...source, cwd: location } : source;
   if (copy && (!copy.complete || !copyNamespaceStable)) {
@@ -247,15 +323,24 @@ function segmentCandidate(
       'protected_target_unparsed',
     );
   }
+  if (http && !http.complete)
+    return deny(
+      { effect: 'unknown', target: { kind: 'ordinary', value: http.targetText }, source: locatedSource },
+      'protected_target_unparsed',
+    );
   if (managedPreview)
     return { effect, target: { kind: 'ordinary', value: managedPreview.target }, source: locatedSource };
   if (remoteOperation)
     return { effect, target: { kind: 'remote_repository', value: remoteOperation.target }, source: locatedSource };
   const target = classifyTarget(
-    copy?.targetText ??
-      explicitTarget ??
-      observedSegmentTarget(segment, unresolvedText, targetText ?? command, roles, effect),
-    explicitTarget ? undefined : targetCwd,
+    withoutPathTargets(
+      http?.targetText ??
+        copy?.targetText ??
+        explicitTarget ??
+        observedSegmentTarget(segment, unresolvedText, targetText ?? command, roles, effect),
+      location ?? cwd,
+    ),
+    explicitTarget || http ? undefined : targetCwd,
     effect,
     explicitTarget,
   );
@@ -263,20 +348,25 @@ function segmentCandidate(
   // Target evidence does not certify generated argv. Main-checkout conservatism
   // applies to unknown executable/control positions, not every generated operand.
   if (target.kind === 'protected_branch') {
-    const boundary = protectedBranchBoundary(executedInvocations(command, { cwd }), cwd, source);
+    const boundary = protectedBranchBoundary(
+      executedInvocations(command, { cwd, builtinContext: readProgramNamespaceStable }),
+      cwd,
+      source,
+      { builtinContext: readProgramNamespaceStable },
+    );
     if (boundary) return boundary;
   }
   if (
     ['unknown', 'repository_rewrite'].includes(effect) &&
     insideMainCheckout(targetCwd) &&
-    unprovedExecutionControl(command, generatedExecution)
+    unprovedExecutionControl(command, generatedExecution, readProgramNamespaceStable)
   )
     return deny({ ...candidate, target: { kind: 'broad_root', value: targetCwd } }, 'protected_target_unparsed');
   return candidate;
 }
 
-function bindingViewEffect(command, managedPreview, argvPreserved) {
-  const observed = managedPreview?.effect ?? classifyShellSegment(command);
+function bindingViewEffect(command, managedPreview, argvPreserved, builtinContext) {
+  const observed = managedPreview?.effect ?? classifyShellSegment(command, { builtinContext });
   // A target-only view cannot prove a read, refresh or remote-only operation.
   // Keep recognised destructive effects so uncertain argv never downgrades a root denial.
   return !argvPreserved && ['read', 'repository_refresh', 'remote_mutation'].includes(observed) ? 'unknown' : observed;
@@ -305,8 +395,8 @@ const GIT_CONTROL_COMMANDS = new Set([
 const generatedWord = (word) => word.includes(SUBSTITUTION) || /\$\w|\$\{/.test(word);
 
 /** Read actual execution roles; generated positionals do not invent a main rewrite. */
-function unprovedExecutionControl(command, generatedExecution) {
-  const parsed = executedInvocations(command);
+function unprovedExecutionControl(command, generatedExecution, builtinContext) {
+  const parsed = executedInvocations(command, { builtinContext });
   const calls = parsed.pipelines.flat();
   if (calls.some(({ generatedCode }) => generatedCode)) return true;
   if (!generatedExecution) return false;

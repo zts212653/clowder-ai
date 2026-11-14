@@ -112,6 +112,51 @@ it('a bound directory must be scanned; changing the path discards the previous s
   expect(button('创建').disabled).toBe(true);
 });
 
+const exclusions = async (value: string) => {
+  const element = container.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+const bodyOf = (path: string) => JSON.parse(request.mock.calls.find(([called]) => called === path)![1].body);
+
+it('exclusions reach both the scan and the registration, and editing them discards the previous scan', async () => {
+  const scanned = { totalFiles: 5, markdownFiles: 3, excludedDirs: 2, excludedFiles: 4, secretFindings: 0, safe: true };
+  request.mockImplementation((path: string) =>
+    response(
+      path === '/api/library/bind-dry-run'
+        ? scanned
+        : path === '/api/library/register'
+          ? { manifest: { id: 'domain:notes' } }
+          : { indexed: 0, skipped: 0, blocked: false },
+    ),
+  );
+  await render();
+  await fill();
+  await input(2, '/isolated/docs');
+  await exclusions('drafts\n\n  **/*.tmp  \n');
+  await click('预览扫描');
+  expect(bodyOf('/api/library/bind-dry-run')).toEqual({ root: '/isolated/docs', exclude: ['drafts', '**/*.tmp'] });
+  expect(container.textContent).toContain('跳过 2 个目录、4 个文件');
+
+  await exclusions('drafts');
+  expect(container.querySelector('[data-testid="dry-run-preview"]')).toBeNull();
+  expect(button('创建').disabled).toBe(true);
+  await click('预览扫描');
+  await click('创建');
+  expect(bodyOf('/api/library/register')).toMatchObject({ root: '/isolated/docs', exclude: ['drafts'] });
+  expect(created).toHaveBeenCalledOnce();
+});
+
+it('leaving exclusions empty sends no exclude list', async () => {
+  await render();
+  await fill();
+  await exclusions(' \n ');
+  await click('创建');
+  expect(bodyOf('/api/library/register')).not.toHaveProperty('exclude');
+});
+
 it('Escape closes idle dialogs, and writer errors never expose server paths', async () => {
   await render();
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));

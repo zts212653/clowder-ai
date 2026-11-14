@@ -59,7 +59,7 @@ export interface CliSpawnOptions {
   rawArchivePath?: string;
   /**
    * Issue #116: Provider signals CLI semantic completion (e.g. turn.completed).
-   * When aborted, spawnCli skips `await exitPromise` — decouples done from process exit.
+   * When aborted, spawnCli wakes its NDJSON read and drains trailing output before cleanup.
    */
   semanticCompletionSignal?: AbortSignal;
   /** F153 Phase B: Parent OTel span for creating CLI session child span */

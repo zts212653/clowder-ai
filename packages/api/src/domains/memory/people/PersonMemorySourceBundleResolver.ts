@@ -17,6 +17,7 @@ import {
   ownerMessageTextSegments,
   resolveOwnerMessageExcerptSegment,
 } from './owner-message-text-projection.js';
+import { ownerMessageRejectionReason } from './person-memory-source-diagnostics.js';
 
 export interface PersonMemorySourceAuth {
   ownerUserId: string;
@@ -48,6 +49,7 @@ export type PersonMemoryResolvedSourceRevalidation =
 interface ResolverDeps {
   messageStore: Pick<IMessageStore, 'getById'>;
   ownerPrivateArtifactResolver?: OwnerPrivateArtifactResolver;
+  onMessageRejected?: (reason: string) => void;
 }
 
 export function normalizePersonMemorySourceText(value: string): string {
@@ -264,11 +266,10 @@ export class PersonMemorySourceBundleResolver {
       );
     }
     const confirmation = await this.deps.messageStore.getById(source.confirmationSourceRef.messageId);
-    if (
-      !eligibleOwnerMessage(confirmation, auth) ||
-      confirmation.threadId !== source.confirmationSourceRef.threadId ||
-      !explicitlyConfirmsAccuracy(confirmation)
-    ) {
+    if (!eligibleOwnerMessage(confirmation, auth)) {
+      return this.rejectIneligibleMessage(confirmation, auth, 'invalid_artifact_confirmation');
+    }
+    if (confirmation.threadId !== source.confirmationSourceRef.threadId || !explicitlyConfirmsAccuracy(confirmation)) {
       return invalid('invalid_artifact_confirmation');
     }
     const artifact = await this.deps.ownerPrivateArtifactResolver?.resolve(auth.ownerUserId, source.artifactLocator);
@@ -310,7 +311,8 @@ export class PersonMemorySourceBundleResolver {
     auth: PersonMemorySourceAuth,
   ) {
     const message = await this.deps.messageStore.getById(input.messageId);
-    if (!eligibleOwnerMessage(message, auth)) return { status: 'invalid' as const, error: 'invalid_message_source' };
+    if (!eligibleOwnerMessage(message, auth))
+      return this.rejectIneligibleMessage(message, auth, 'invalid_message_source');
     if (!resolveOwnerMessageExcerptSegment(message, input.excerpt)) {
       return { status: 'invalid' as const, error: 'source_excerpt_mismatch' };
     }
@@ -337,7 +339,7 @@ export class PersonMemorySourceBundleResolver {
   ) {
     const message = await this.deps.messageStore.getById(input.messageId);
     if (!eligibleOwnerMessage(message, auth)) {
-      return { status: 'invalid' as const, error: 'invalid_attachment_source' };
+      return this.rejectIneligibleMessage(message, auth, 'invalid_attachment_source');
     }
     const block = ownerMessageAttachmentBlock(message, input);
     const transcript = ownerMessageAttachmentTranscript(block);
@@ -373,7 +375,10 @@ export class PersonMemorySourceBundleResolver {
       return { status: 'invalid' as const, error: 'source_digest_mismatch' };
     }
     const confirmation = await this.deps.messageStore.getById(input.confirmationMessageId);
-    if (!eligibleOwnerMessage(confirmation, auth) || !explicitlyConfirmsAccuracy(confirmation)) {
+    if (!eligibleOwnerMessage(confirmation, auth)) {
+      return this.rejectIneligibleMessage(confirmation, auth, 'invalid_transcript_confirmation');
+    }
+    if (!explicitlyConfirmsAccuracy(confirmation)) {
       return { status: 'invalid' as const, error: 'invalid_transcript_confirmation' };
     }
     const resolvedDigest = digestPersonMemorySourceMaterial({
@@ -394,12 +399,20 @@ export class PersonMemorySourceBundleResolver {
     };
   }
 
+  private rejectIneligibleMessage(message: StoredMessage | null, auth: PersonMemorySourceAuth, error: string) {
+    this.deps.onMessageRejected?.(ownerMessageRejectionReason(message, auth.ownerUserId));
+    return { status: 'invalid' as const, error };
+  }
+
   private async resolvePrivateArtifact(
     input: Extract<PersonMemorySourceInput, { kind: 'owner_private_artifact' }>,
     auth: PersonMemorySourceAuth,
   ) {
     const confirmation = await this.deps.messageStore.getById(input.confirmationMessageId);
-    if (!eligibleOwnerMessage(confirmation, auth) || !explicitlyConfirmsAccuracy(confirmation)) {
+    if (!eligibleOwnerMessage(confirmation, auth)) {
+      return this.rejectIneligibleMessage(confirmation, auth, 'invalid_artifact_confirmation');
+    }
+    if (!explicitlyConfirmsAccuracy(confirmation)) {
       return { status: 'invalid' as const, error: 'invalid_artifact_confirmation' };
     }
     const artifact = await this.deps.ownerPrivateArtifactResolver?.resolve(auth.ownerUserId, input.artifactLocator);

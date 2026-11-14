@@ -12,6 +12,16 @@ export const managedJobCopy = defineShellCopy(
       stop: '停止任务',
       stopping: '正在停止…',
       trace: '执行记录',
+      recoveryTitle: '自动恢复已暂停',
+      recoveryPending: '正在核验原任务的恢复责任…',
+      recoveryState: {
+        parked: '已停放',
+        interrupted: '已中断',
+        needs_attention: '需要检查',
+      },
+      recoveryReason: (reason: string) => `原因：${reason}`,
+      recheck: '重新检查原任务',
+      rechecking: '正在检查…',
       state: {
         queued: '待启动',
         running: '正在运行',
@@ -35,6 +45,16 @@ export const managedJobCopy = defineShellCopy(
       stop: 'Stop task',
       stopping: 'Stopping…',
       trace: 'Execution history',
+      recoveryTitle: 'Automatic recovery paused',
+      recoveryPending: 'Checking recovery responsibility on the original task…',
+      recoveryState: {
+        parked: 'Parked',
+        interrupted: 'Interrupted',
+        needs_attention: 'Needs attention',
+      },
+      recoveryReason: (reason: string) => `Reason: ${reason}`,
+      recheck: 'Recheck original task',
+      rechecking: 'Rechecking…',
       state: {
         queued: 'Queued',
         running: 'Running',
@@ -49,5 +69,11 @@ export const managedJobCopy = defineShellCopy(
       exit: (code: number) => `Exit code ${code}`,
     },
   },
-  { samples: { elapsed: [[0], [120]], exit: [[0], [7]] } },
+  {
+    samples: {
+      elapsed: [[0], [120]],
+      exit: [[0], [7]],
+      recoveryReason: [['cleanup_unproven'], ['wake_admission_failed']],
+    },
+  },
 );

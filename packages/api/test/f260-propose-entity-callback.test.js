@@ -50,6 +50,10 @@ describe('F260 propose-entity callback route', () => {
 
   /** Mock ingress that succeeds — commits envelope so publication becomes anchored. */
   const mockIngress = () => ({
+    async validateOrigin(draft) {
+      // These schema/auth fixtures use an invocation event, with no message reader.
+      assert.equal(draft.originRef.kind, 'event');
+    },
     async publish(draft, store) {
       const envelope = {
         canonicalProposalId: draft.canonicalProposalId,
@@ -130,6 +134,7 @@ describe('F260 propose-entity callback route', () => {
       releasePublish = resolve;
     });
     const ingress = {
+      validateOrigin: mockIngress().validateOrigin,
       async publish(draft, publicationStore) {
         publishStarted();
         await canPublish;

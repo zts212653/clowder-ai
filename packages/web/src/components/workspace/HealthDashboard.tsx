@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ExpandableProse } from '@/components/content-overflow';
+import { isGitWorktreeRequired } from '@/utils/git-response-error';
 import type { RuntimeDrift, StaleBranch, WorktreeHealth } from '../../hooks/useGitHealth';
 import { useGitHealth } from '../../hooks/useGitHealth';
 
@@ -130,7 +131,13 @@ export function HealthDashboard() {
       {!collapsed && (
         <div className="px-3 pb-2 space-y-2">
           {loading && <div className="text-micro text-cafe-interactive/40">Loading...</div>}
-          {error && <div className="text-xs text-conn-red-text">{error}</div>}
+          {error && (
+            <div className="text-xs text-conn-red-text">
+              {isGitWorktreeRequired(error)
+                ? 'This is a bare Git repository; this view requires a working tree'
+                : error}
+            </div>
+          )}
 
           {health?.isGitRepository === false && (
             <div className="text-xs text-cafe-interactive/60">Not a Git repository</div>

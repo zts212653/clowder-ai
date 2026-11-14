@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -13,7 +14,7 @@ export function registerOrdinaryVideoJourney(suite) {
     'ordinary MP4 owner endpoint lets Chromium seek to an actually presented frame',
     { timeout: 90_000 },
     async () => {
-      const root = await mkdtemp('/tmp/f309-real-video-seek-');
+      const root = await mkdtemp(path.join(tmpdir(), 'f309-real-video-seek-'));
       const owner = await startRealWorkspaceOwner(path.join(root, 'data'));
       const fixtureDir = await mkdtemp(path.join(owner.root, 'f309-real-video-seek-'));
       const context = await suite().browser.newContext();

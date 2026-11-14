@@ -1,25 +1,39 @@
 import { useSyncExternalStore } from 'react';
-import { MATTER_MEMORY_CHANGED } from './matter-memory-events';
+import { MEMORY_CHANGED, MEMORY_CHANGED_STORAGE_KEY } from './memory-changed';
 
-let generation = 0;
+const initial = { generation: 0, sourceGeneration: 0 };
+let state = initial;
 const listeners = new Set<() => void>();
-const events = ['focus', MATTER_MEMORY_CHANGED];
-function refresh() {
-  generation++;
+const events = ['focus', MEMORY_CHANGED];
+function storageChanged(event: StorageEvent) {
+  if (event.key === MEMORY_CHANGED_STORAGE_KEY) refresh();
+}
+function refresh(event?: Event) {
+  state = {
+    generation: state.generation + 1,
+    sourceGeneration: state.sourceGeneration + (event?.type === 'focus' ? 0 : 1),
+  };
   for (const listener of listeners) listener();
 }
+const retry = () => refresh();
 function subscribe(listener: () => void) {
-  if (!listeners.size) for (const event of events) window.addEventListener(event, refresh);
+  if (!listeners.size) {
+    for (const event of events) window.addEventListener(event, refresh);
+    window.addEventListener('storage', storageChanged);
+  }
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
-    if (!listeners.size) for (const event of events) window.removeEventListener(event, refresh);
+    if (!listeners.size) {
+      for (const event of events) window.removeEventListener(event, refresh);
+      window.removeEventListener('storage', storageChanged);
+    }
   };
 }
-const snapshot = () => generation;
-const serverSnapshot = () => 0;
+const snapshot = () => state;
+const serverSnapshot = () => initial;
 
-/** One browser refresh names the same generation across all mounted consumers. */
+/** Focus revalidates; a known mutation also withdraws the old destinations immediately. */
 export function useRecallRefresh() {
-  return { generation: useSyncExternalStore(subscribe, snapshot, serverSnapshot), retry: refresh };
+  return { ...useSyncExternalStore(subscribe, snapshot, serverSnapshot), retry };
 }

@@ -669,3 +669,24 @@ test('explicit retry creates a new fenced epoch with immutable parent and princi
     /not_found/,
   );
 });
+
+// Ordinary wakeWhen commands (renders, engine builds, whole-repo sync) shared the API's CPU and disk at
+// equal priority; on 11-08 the API main thread stalled for seconds while one ran. Through the real
+// submission -> detached worker path they now start one step lower on macOS. Gates are unchanged.
+test(
+  'on macOS an ordinary command runs niced below the API through the real worker',
+  { skip: process.platform !== 'darwin' },
+  async (t) => {
+    const { getPriority } = await import('node:os');
+    const expectedNice = Math.min(20, getPriority() + 10);
+    const { service, submit } = fixture(t);
+    const job = await submit('echo "nice=$(ps -o nice= -p $$ | tr -d " ")"', 'nice-probe');
+    service.admit(principal, job.jobId, 'priority-probe');
+    const run = service.start(principal, job.jobId, new ManagedRunner());
+    await run.admission;
+    await run.completion;
+    const result = service.get(principal, job.jobId);
+    assert.equal(result.state, 'succeeded');
+    assert.match(result.result.tailOutput, new RegExp(`nice=${expectedNice}\\b`));
+  },
+);

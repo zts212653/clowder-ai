@@ -32,6 +32,17 @@ describe('AGY Gemini legacy selector compatibility', () => {
     assert.equal(normalizeAgyGeminiModelSelector('gpt-oss-120b-medium'), 'gpt-oss-120b-medium');
   });
 
+  test('gemini35 keeps its 3.6 identity for High but preserves explicit Medium and Low', () => {
+    const first = resolveAgyGeminiDefaultModel('gemini35', 'gemini-3.8-flash-high');
+    assert.equal(first, 'Gemini 3.6 Flash (High)');
+    assert.equal(resolveAgyGeminiDefaultModel('gemini35', first), 'Gemini 3.6 Flash (High)');
+
+    assert.equal(resolveAgyGeminiDefaultModel('gemini35', 'gemini-3.8-flash-medium'), 'Gemini 3.8 Flash (Medium)');
+    assert.equal(resolveAgyGeminiDefaultModel('gemini35', 'Gemini 3.8 Flash (Medium)'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini35', 'gemini-3.8-flash-low'), 'Gemini 3.8 Flash (Low)');
+    assert.equal(resolveAgyGeminiDefaultModel('gemini35', 'Gemini 3.8 Flash (Low)'), undefined);
+  });
+
   test('repeated reads are stable', () => {
     for (let i = 0; i < 2; i++) {
       assert.equal(resolveAgyGeminiDefaultModel('gemini38', 'gemini-3.8-flash-low'), 'Gemini 3.8 Flash (Low)');

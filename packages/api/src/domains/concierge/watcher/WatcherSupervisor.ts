@@ -10,13 +10,14 @@ import { awaitStoreRead } from '../../cats/services/stores/ports/StoreReadOption
 import type { ILabelStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import type { AgentService } from '../../cats/services/types.js';
 import type { IConciergeConfigStore } from '../ConciergeConfigStore.js';
+import { watcherRetirementPending } from './retirement/watcher-retirement-state.js';
 import { saveWatcherState } from './watcher-checkpoint.js';
 import { effectiveWatcherState, readWatcherPreferences } from './watcher-controls.js';
 import { finalizeWatcherWake, finishIdleWatcherWake } from './watcher-finalization.js';
 import { runWatcherInvocation } from './watcher-invocation.js';
 import type { WatcherInvocationOwners } from './watcher-invocation-contract.js';
 import { reconcileWatcherRecovery } from './watcher-recovery.js';
-import { reserveWatcherRecovery } from './watcher-retry.js';
+import { reserveWatcherRecovery, watcherRecoveryFinalizationDue } from './watcher-retry.js';
 import { recordWatcherSourceFailure, watcherSourceFinished } from './watcher-source-result.js';
 
 interface Options extends WatcherInvocationOwners {
@@ -120,17 +121,22 @@ export class WatcherSupervisor {
               // Off means no new CLI, including a control-only recovery. Proven
               // startup failures/finalize_pending already settle without a provider.
               if (!effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled) {
-                if (!state.attempt) await finishIdleWatcherWake(this.deps, session, source);
+                if (!state.attempt && !watcherRetirementPending(session))
+                  await finishIdleWatcherWake(this.deps, session, source);
                 return;
               }
+              const retirement = watcherRetirementPending(session);
               const activation = `${preferences.config.activationRevision ?? 0}:${thread.watcher?.activationRevision ?? 0}`;
               const recoveryOnly =
+                retirement ||
+                watcherRecoveryFinalizationDue(state, this.deps.now?.() ?? Date.now()) ||
                 preferences.config.memberCatId !== session.catId ||
                 !effectiveWatcherState(preferences.config, thread, preferences.quietLabels).enabled ||
                 state.activationCut !== activation;
               const active = this.active.get(session.threadId);
-              if (active) active.controlOnly = recoveryOnly;
+              if (active) active.controlOnly = recoveryOnly && !retirement;
               if (
+                !retirement &&
                 !(await reserveWatcherRecovery(
                   this.deps,
                   session,
@@ -150,6 +156,8 @@ export class WatcherSupervisor {
                 recoveryOnly,
                 signal,
               });
+              if (retirement && (await this.deps.sessions.get(session.id))?.watcherRetirement?.phase === 'retired')
+                this.pending.add(session.threadId);
             },
             true,
           );
@@ -230,7 +238,7 @@ export class WatcherSupervisor {
       });
     let scan = parseWatcherSessionState(session.watcherState).afterSequence;
     for (let count = 0; count < 100 && !signal.aborted; count++) {
-      session = (await read(this.deps.sessions.get(session.id)))!;
+      session = (await read(this.deps.sessions.getByChainKey(chainKey)))!;
       if (!session) return;
       const state = parseWatcherSessionState(session.watcherState);
       if (state.attempt?.phase === 'finalize_pending') {
@@ -245,12 +253,16 @@ export class WatcherSupervisor {
           limit: 1,
         }),
       );
-      const source: TurnExecutionRecord | null | undefined = state.attempt
-        ? await read(this.deps.executions.get(state.attempt.sourceInvocationId))
-        : page.records[0];
+      const source: TurnExecutionRecord | null | undefined =
+        session.watcherRetirement && session.watcherRetirement.phase !== 'retired'
+          ? await read(this.deps.executions.get(session.watcherRetirement.sourceInvocationId))
+          : state.attempt
+            ? await read(this.deps.executions.get(state.attempt.sourceInvocationId))
+            : page.records[0];
       if (!source) return;
       if (
         !state.attempt &&
+        !watcherRetirementPending(session) &&
         (await watcherSourceFinished(this.deps.executions, member.config.id, source.invocationId))
       ) {
         if (
@@ -272,7 +284,11 @@ export class WatcherSupervisor {
         thread.watcher?.startedAfterSequence ?? 0,
       );
       const activationCut = `${current.config.activationRevision ?? 0}:${thread.watcher?.activationRevision ?? 0}`;
-      if (!state.attempt && (state.afterSequence < floor || state.activationCut !== activationCut)) {
+      if (
+        !state.attempt &&
+        !watcherRetirementPending(session) &&
+        (state.afterSequence < floor || state.activationCut !== activationCut)
+      ) {
         await saveWatcherState(this.deps.sessions, session.id, state, {
           afterSequence: Math.max(state.afterSequence, floor),
           activationCut,
@@ -285,17 +301,23 @@ export class WatcherSupervisor {
       }
       const effective = effectiveWatcherState(current.config, thread, current.quietLabels);
       if (!effective.enabled || source.executionKind !== 'ordinary') {
-        if (state.attempt) return;
+        if (state.attempt || watcherRetirementPending(session)) return;
         await saveWatcherState(this.deps.sessions, session.id, state, { afterSequence: source.settledSequence! });
         continue;
       }
       const runService = await requireService();
       try {
         const prior = state.attempt ? await read(this.deps.executions.get(state.attempt.invocationId)) : null;
+        const retirement = watcherRetirementPending(session);
         const recoveryOnly =
-          !!state.attempt && (state.activationCut !== activationCut || (prior !== null && prior.status !== 'running'));
+          retirement ||
+          (!!state.attempt &&
+            (watcherRecoveryFinalizationDue(state, this.deps.now?.() ?? Date.now()) ||
+              state.activationCut !== activationCut ||
+              (prior !== null && prior.status !== 'running')));
         if (
           state.attempt &&
+          !retirement &&
           !(await reserveWatcherRecovery(
             this.deps,
             session,
@@ -313,10 +335,16 @@ export class WatcherSupervisor {
           signal,
           recoveryOnly,
         });
+        if (retirement) {
+          const latest = await read(this.deps.sessions.getByChainKey(chainKey));
+          // A parked/exhausted control probe is not progress. Poll reconciliation owns the next due probe.
+          if (!latest || watcherRetirementPending(latest)) return;
+        }
       } catch (error) {
         this.deps.report(error, threadId);
-        const currentState = parseWatcherSessionState((await read(this.deps.sessions.get(session.id)))?.watcherState);
-        if (currentState.attempt) {
+        const latest = await read(this.deps.sessions.get(session.id));
+        const currentState = parseWatcherSessionState(latest?.watcherState);
+        if (currentState.attempt || (latest && watcherRetirementPending(latest))) {
           this.retryThreads.add(threadId);
           return;
         }

@@ -8,6 +8,7 @@ import {
 import { kernelPath, unfoldedJoin } from './lib/shell-directory.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { extractSubstitutions } from './lib/shell-text.mjs';
+import { programNamespaceStability } from './native-effect-copy-namespace.mjs';
 import { worktreeRemoveCandidate } from './native-effect-git-context.mjs';
 import { decideNativeEffect, deny } from './native-effect-policy.mjs';
 import { isShellStructure, segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
@@ -17,8 +18,8 @@ import { shellInvocation } from './native-effect-shell-tokenizer.mjs';
 import { classifyNativeTarget } from './native-effect-target-classifier.mjs';
 
 /** Known removals cannot lose their target through wrappers, selectors or nested shells. */
-export function worktreeRemovalDecision(segment, cwd, source, argvPreserved) {
-  const inspected = inspectSegment(segment, cwd, 0);
+export function worktreeRemovalDecision(segment, cwd, source, argvPreserved, builtinContext = false) {
+  const inspected = inspectSegment(segment, cwd, 0, segment, builtinContext);
   const decisions = inspected.candidates.map((candidate) =>
     candidate.unresolved
       ? deny({ ...candidate, source }, 'unresolved_worktree_removal')
@@ -31,11 +32,11 @@ export function worktreeRemovalDecision(segment, cwd, source, argvPreserved) {
   return argvPreserved && inspected.exact ? decisions[0] : null;
 }
 
-function inspectSegment(segment, cwd, depth, origin = segment) {
-  const reader = executedInvocations(segment, { cwd });
+function inspectSegment(segment, cwd, depth, origin = segment, builtinContext = false) {
+  const reader = executedInvocations(segment, { cwd, builtinContext });
   if (depth > 8) return { candidates: recognizedRemovals(reader).map(unresolvedRemoval), exact: false };
   const substitutions = extractSubstitutions(segment);
-  const candidates = substitutions.inner.flatMap((script) => scriptRemovals(script, cwd, depth + 1));
+  const candidates = substitutions.inner.flatMap((script) => scriptRemovals(script, cwd, depth + 1, builtinContext));
   const calls = reader.directInvocations;
   candidates.push(
     ...calls.flatMap((call) => inspectCall(call, reader, substitutions.inner.length > 0, cwd, depth, origin)),
@@ -74,15 +75,19 @@ function inspectCall(call, reader, hasSubstitutions, cwd, depth, origin) {
 }
 
 /** Each nested script gets its own shell path/variable walk, never the reader's outer cwd. */
-function scriptRemovals(script, cwd, depth) {
+function scriptRemovals(script, cwd, depth, builtinContext = false) {
   const parts = splitShellExecutionSegmentsWithSeparators(script);
-  const contexts = segmentContexts(parts, cwd);
+  const programContexts = programNamespaceStability(
+    parts.map((part) => ({ segment: part.text })),
+    builtinContext,
+  );
+  const contexts = segmentContexts(parts, cwd, process.env, programContexts);
   return parts.flatMap((part, index) => {
     if (isShellStructure(part.text)) return [];
     const segment = segmentCommandText(part.text);
     return contexts[index].flatMap(({ directory, bindings }) =>
       expandSegmentBindings(segment, bindings).flatMap(
-        ({ text }) => inspectSegment(text, directory, depth, segment).candidates,
+        ({ text }) => inspectSegment(text, directory, depth, segment, programContexts[index]).candidates,
       ),
     );
   });

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { completedMergedNoticeRelease, mergedNoticeKey, releasedNoticeKey } from './lib/worktree-merged-notices.mjs';
 import { validateOrigin } from './lib/worktree-origin.mjs';
-import { parsePrSource, readPrTruth, worktreePrBinding } from './lib/worktree-pr.mjs';
+import { parsePrSource, prBaseTrackingRef, readPrTruth, worktreePrBinding } from './lib/worktree-pr.mjs';
 import { isAncestor, lifecycleConfig, safeRealpath } from './lib/worktree-reaper-probes.mjs';
 import { automaticReleasePaused, reconcileAutomaticReleases } from './lib/worktree-release-transactions.mjs';
 import { retentionStatus } from './lib/worktree-retention.mjs';
@@ -86,7 +86,7 @@ export function retireMergedWorktree({ repo, path, head, sourceRef, threadId, us
         truth.state === 'MERGED' &&
         truth.sourceRef === ref &&
         truth.commits?.includes(head) &&
-        isAncestor(repo, truth.mergedAt, 'origin/main') !== true
+        isAncestor(repo, truth.mergedAt, prBaseTrackingRef(repo, truth)) !== true
       ) {
         execFileSync(
           'git',
@@ -101,7 +101,7 @@ export function retireMergedWorktree({ repo, path, head, sourceRef, threadId, us
             '--no-tags',
             '--recurse-submodules=no',
             'origin',
-            'main',
+            `+refs/heads/${truth.baseRef}:refs/remotes/origin/${truth.baseRef}`,
           ],
           {
             timeout: 30000,

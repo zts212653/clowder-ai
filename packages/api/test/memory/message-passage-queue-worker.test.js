@@ -47,6 +47,7 @@ async function fixture(t) {
     insert.run(`thread-${thread}`, `msg-${id}`, body, date);
     vectors.upsert(passageVectorKey(`thread-${thread}`, `msg-${id}`), new Float32Array(vector));
   }
+  new VectorStore(db, 4).initMeta({ modelId: 'queue-ipc', modelRev: '1', dim: 4 });
   let calls = 0;
   store.setEmbedDeps({
     mode: 'on',

@@ -98,6 +98,19 @@ export function prepareCodexManagedLayout(layout: CodexManagedAccount, projectRo
   }
   return { ...layout, prepared: true };
 }
+/**
+ * F320 KD-3 for an official API key: link only conversation state into its execution home.
+ * No OAuth file, config, instructions or hooks are shared, so the key cannot pick up another login
+ * and the owner's Codex config cannot force a ChatGPT-only login onto it.
+ */
+export function prepareCodexApiSharedConversationState(executionHome: string, stateRoot: string): void {
+  mkdirSync(executionHome, { recursive: true, mode: 0o700 });
+  for (const name of CODEX_SHARED_DIRECTORIES) {
+    const target = join(stateRoot, name);
+    mkdirSync(target, { recursive: true, mode: 0o700 });
+    ensureLink(target, join(executionHome, name));
+  }
+}
 /** Read-only admission validates source links, including a replaced config link. */
 export function validateCodexManagedLayout(layout: CodexManagedAccount): void {
   if (!layout.prepared) throw new Error('codex_account_not_prepared');

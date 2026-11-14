@@ -383,7 +383,15 @@ test('every declared subscriber receives the common message union and execution 
         throw new Error('unexpected frozen delivery');
       },
       invoke: async (_subscriber, _method, input) => {
-        assert.deepEqual(Object.keys(input).sort(), ['deliveryId', 'envelope', 'executionId', 'kind', 'threadId']);
+        assert.deepEqual(Object.keys(input).sort(), [
+          'deliveryId',
+          'envelope',
+          'executionId',
+          'kind',
+          'reason',
+          'threadId',
+        ]);
+        assert.equal(input.reason, 'subscription');
         calls.push(input);
         return { deliveryId: input.deliveryId };
       },

@@ -84,6 +84,31 @@ function validExpiredLeaseProjection(value) {
   );
 }
 
+function validStandardAlphaRetirementProjection(value, pointer) {
+  const s = value.outcome;
+  if (
+    !['legacy', 'v2'].includes(value.receiptFormat) ||
+    !['unverified', 'absent'].includes(s.commandGroupStatus) ||
+    (s.commandGroupStatus === 'absent' && value.sources?.command?.path !== `${pointer.completionPath}.command.json`) ||
+    s.cleanupStatus !== 'unknown' ||
+    s.otherResourcesStatus !== 'not_reverified' ||
+    value.dataCoordinatesStatus !== 'shared_alpha_not_reverified' ||
+    value.data?.length !== 0
+  )
+    return false;
+  if (value.ownerAbsent === true) {
+    return (
+      s.cleanupExitCode === null &&
+      s.priorCleanupStatus === 'unclaimed' &&
+      (value.receiptFormat !== 'legacy' || (s.businessExitCode === null && s.commandGroupStatus === 'unverified'))
+    );
+  }
+  if (value.ownerAbsent !== false) return false;
+  return value.receiptFormat === 'v2'
+    ? Number.isInteger(s.cleanupExitCode) && s.cleanupExitCode > 0 && s.priorCleanupStatus === 'failed'
+    : s.cleanupExitCode === null && s.businessExitCode === null && s.priorCleanupStatus === 'legacy_unseparated';
+}
+
 export function readPreviewSettlement(config) {
   if (recoveryPathExists(config.recordPath)) return null;
   if (!recoveryPathExists(pointerPath(config))) return null;
@@ -101,9 +126,12 @@ export function readPreviewSettlement(config) {
   const result = recoveryFile(pointer.resultPath);
   const value = result.value;
   const summary = value.outcome;
-  const retired = ['unclaimed-alpha-registration-retirement', 'unclaimed-preview-registration-retirement'].includes(
-    value.kind,
-  );
+  const unclaimedRetired = [
+    'unclaimed-alpha-registration-retirement',
+    'unclaimed-preview-registration-retirement',
+  ].includes(value.kind);
+  const standardAlphaRetired = value.kind === 'standard-alpha-registration-retirement';
+  const retired = unclaimedRetired || standardAlphaRetired;
   const code = (number) => Number.isInteger(number) && number >= 0 && number <= 255;
   if (
     result.sha256 !== pointer.sha256 ||
@@ -113,16 +141,18 @@ export function readPreviewSettlement(config) {
       'completed-preview-registration-settlement',
       'unclaimed-alpha-registration-retirement',
       'unclaimed-preview-registration-retirement',
+      'standard-alpha-registration-retirement',
       'expired-named-alpha-lease-settlement',
     ].includes(value.kind) ||
     value.sources?.record?.path !== config.recordPath ||
     value.sources?.completion?.path !== pointer.completionPath ||
-    (retired
+    (unclaimedRetired || (standardAlphaRetired && value.ownerAbsent === true)
       ? value.sources?.owner !== undefined || value.ownerAbsent !== true
       : value.sources?.owner?.path !== `${pointer.completionPath}.owner.json`) ||
     summary?.status !== (retired ? 'registration_retired' : 'stopped') ||
     (value.kind === 'expired-named-alpha-lease-settlement' && !validExpiredLeaseProjection(value)) ||
-    (retired && !validUnclaimedProjection(value, pointer)) ||
+    (unclaimedRetired && !validUnclaimedProjection(value, pointer)) ||
+    (standardAlphaRetired && !validStandardAlphaRetirementProjection(value, pointer)) ||
     summary.registered !== false ||
     summary.persistenceStatus !== 'not_reverified' ||
     summary.journalPath !== dirname(pointer.resultPath) ||

@@ -286,7 +286,7 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
     assert.strictEqual(res.statusCode, 400);
   });
 
-  it('T21: returns 200 and calls updateExtra for valid owner + interactive block', async () => {
+  it('T21: returns 200 and persists the answer for valid owner + interactive block', async () => {
     const store = new MessageStore();
     const msg = store.append(
       canonicalTestMessageInput({
@@ -305,13 +305,6 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
         },
       }),
     );
-    // Spy on updateExtra to verify persistence path is exercised
-    let updateExtraCalled = false;
-    const origUpdateExtra = store.updateExtra.bind(store);
-    store.updateExtra = (id, extra) => {
-      updateExtraCalled = true;
-      return origUpdateExtra(id, extra);
-    };
     const app = await createApp(store);
     const res = await app.inject({
       method: 'PATCH',
@@ -320,7 +313,9 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
     });
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(JSON.parse(res.body).status, 'ok');
-    assert.strictEqual(updateExtraCalled, true, 'updateExtra must be called for persistence');
+    const saved = store.getById(msg.id).extra.rich.blocks[0];
+    assert.strictEqual(saved.disabled, true);
+    assert.deepEqual(saved.selectedIds, ['o1']);
   });
 });
 

@@ -41,14 +41,16 @@ export async function alphaManagedFixture(t, options = {}) {
   process.env.CAT_CAFE_FULL_GATE_PRESSURE_FIXTURE = pressure;
   const service = new ManagedJobService(dataRoot);
   t.after(async () => {
-    for (const job of service.list()) service.cancel(principal, job.jobId);
+    for (const job of service.list()) service.cancel(job.definition.principal, job.jobId);
     for (let n = 0; n < 100; n++) {
       await service.reconcile();
       if (
         service
           .list()
           .every((job) =>
-            ['succeeded', 'failed', 'lost', 'cancelled', 'timed_out'].includes(service.get(principal, job.jobId).state),
+            ['succeeded', 'failed', 'lost', 'cancelled', 'timed_out'].includes(
+              service.get(job.definition.principal, job.jobId).state,
+            ),
           )
       )
         break;
@@ -188,6 +190,7 @@ export async function alphaManagedFixture(t, options = {}) {
     if (priorOwner === undefined) delete process.env.CAT_CAFE_MANAGED_JOB_ID;
     else process.env.CAT_CAFE_MANAGED_JOB_ID = priorOwner;
   }
+  const messages = new Map();
   const tasks = new Map(),
     delivered = [];
   const transportPid = join(parent, 'transport.pid');
@@ -205,14 +208,20 @@ export async function alphaManagedFixture(t, options = {}) {
     tasks: {
       getBySubject: (key) => tasks.get(key) ?? null,
       upsertBySubject: (draft) => {
-        const task = { ...draft, id: `task-${tasks.size + 1}` };
+        options.beforeRepairTask?.(draft);
+        const task = { ...draft, id: `task-${tasks.size + 1}`, createdAt: Date.now(), updatedAt: Date.now() };
         tasks.set(draft.subjectKey, task);
         return task;
       },
     },
+    messages: {
+      getByIdempotencyKey: (_user, _thread, key) => messages.get(key) ?? null,
+      getById: (id) => [...messages.values()].find((message) => message.id === id) ?? null,
+    },
+    queue: { getDurableEntry: () => null },
     isAvailable: () => true,
     getEngagementPolicy: () => undefined,
-    resolveCat: (value) => (value === principal.catId ? value : null),
+    resolveCat: (value) => ([principal.catId, options.guardianCatId].includes(value) ? value : null),
     inspectMain: async () => ({ targetSha, databasePath: input.databasePath, legacyLockPath: input.legacyLockPath }),
     ...(options.observeTransport
       ? {
@@ -223,15 +232,34 @@ export async function alphaManagedFixture(t, options = {}) {
         }
       : {}),
   });
-  const spec = template.createSpec(input.subscriptionId, {
-    trigger: { type: 'cron', expression: '*/5 * * * *' },
-    deliveryThreadId: principal.threadId,
-    params: { baselineSha, guardianCatId: principal.catId, executionCarrier: 'managed' },
-  });
+  const specFor = (guardianCatId) =>
+    template.createSpec(input.subscriptionId, {
+      trigger: { type: 'cron', expression: '*/5 * * * *' },
+      deliveryThreadId: principal.threadId,
+      params: {
+        baselineSha,
+        guardianCatId,
+        executionCarrier: 'managed',
+        ...(options.failureTriageCatId ? { failureTriageCatId: options.failureTriageCatId } : {}),
+      },
+    });
+  const spec = specFor(options.guardianCatId ?? principal.catId);
   assert.equal((await spec.admission.gate({ taskId: spec.id })).run, true);
-  const run = async (signal = new AbortController().signal) => {
+  const run = async (signal = new AbortController().signal, guardianCatId) => {
     try {
-      await spec.run.execute('alpha', 'alpha', { signal, deliver: async (message) => delivered.push(message) });
+      await (guardianCatId ? specFor(guardianCatId) : spec).run.execute('alpha', 'alpha', {
+        signal,
+        deliver: async (message) => {
+          const stored = {
+            ...message,
+            id: `message-${messages.size + 1}`,
+            timestamp: Date.now(),
+            mentions: [message.targetCatId],
+          };
+          messages.set(message.idempotencyKey, stored);
+          delivered.push(stored);
+        },
+      });
     } catch (error) {
       throw new Error(
         `${error.message}\n${JSON.stringify(service.get(principal, managed.jobId))}\n${service.tail(principal, managed.jobId)}`,

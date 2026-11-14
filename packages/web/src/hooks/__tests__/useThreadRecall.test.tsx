@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MEMORY_CHANGED } from '../memory-changed';
 import { recallResultHref, recallResultTitle } from '../recall-display';
 import { recallEventDisplayTitle } from '../recall-feed-model';
 import { useThreadRecall } from '../useRecallEvents';
@@ -273,6 +274,14 @@ describe('F321 scoped recall reads', () => {
     await act(async () => root.render(<Probe />));
     expect(historyReads).toBe(2);
     expect(useChatStore.getState().messages[0]?.isStreaming).toBe(true);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(container.textContent).toContain('F321 记忆界面');
+    expect(container.textContent).not.toContain('正在读取标题');
+    await act(async () => finishView(new Response('{}', { status: 503 })));
+    expect(container.textContent).toContain('F321 记忆界面');
+    await act(async () => window.dispatchEvent(new Event(MEMORY_CHANGED)));
+    expect(container.textContent).not.toContain('F321 记忆界面');
+    expect(container.textContent).toContain('正在读取标题');
   });
 
   it.each([200, 503])('does not loop on a missing streaming cue view (response %s)', async (status) => {
@@ -579,7 +588,7 @@ describe('F321 scoped recall reads', () => {
     }
     await act(async () => root.render(<ProfileSourceProbe />));
     expect(container.textContent).toBe(
-      sourceUnavailableReason === 'source_corrected' ? '画像 · 来源已更正' : '画像 · 来源已遗忘',
+      sourceUnavailableReason === 'source_corrected' ? '画像 · 已更正' : '画像 · 已忘掉',
     );
     expect(container.querySelector('span')?.getAttribute('data-revision')).toBe('original-revision');
     expect(container.querySelector('span')?.getAttribute('data-href')).toBe('');

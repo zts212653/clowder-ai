@@ -222,6 +222,7 @@ export function PluginManagerLiveContent({
 
   const refresh = useCallback(async () => {
     await loadList(query.current, true);
+    window.dispatchEvent(new Event('plugin-targets-changed'));
   }, [loadList]);
 
   const configure = usePluginConfigurationSave({
@@ -420,14 +421,11 @@ export function PluginManagerLiveContent({
           setError('插件缺少当前 lifecycle revision，无法卸载。');
           return;
         }
-        const dot = pluginId === 'official.chatgpt-dot';
-        const operation = plugin.artifact === 'quarantined' ? '移除隔离记录' : dot ? '移除 dot 协作支持' : '卸载';
+        const operation = plugin.artifact === 'quarantined' ? '移除隔离记录' : '卸载';
         void (async () => {
           const accepted = await confirm({
-            title: dot ? operation : `${operation}插件`,
-            message: dot
-              ? `确认${operation}？新的 dot 召唤将停止；已连接的 Pro、历史回复和已保存的图片保留。`
-              : `确认${operation} ${plugin.displayName}？`,
+            title: `${operation}插件`,
+            message: `确认${operation} ${plugin.displayName}？`,
             confirmLabel: operation,
             cancelLabel: '取消',
             variant: 'danger',

@@ -115,6 +115,7 @@ test('automatic native recovery backs off, caps launches across restart, and nev
   let now = Date.now();
   f.owners.now = () => now;
   const errors = [];
+  const recoveryOnly = [];
   const options = {
     ...f.owners,
     userId: 'watcher-owner',
@@ -123,6 +124,10 @@ test('automatic native recovery backs off, caps launches across restart, and nev
     capability: () => ({ supported: true }),
     service: () => f.service,
     report: (error) => errors.push(error),
+    run: async (owners, input) => {
+      recoveryOnly.push(input.recoveryOnly);
+      await runWatcherInvocation(owners, input);
+    },
   };
   let supervisor = new WatcherSupervisor(options);
   const poll = async () => {
@@ -144,17 +149,18 @@ test('automatic native recovery backs off, caps launches across restart, and nev
     assert.equal(f.launches(), 3);
     now += 120000;
     await poll();
-    assert.equal(f.launches(), 3, 'three failures park recovery without inventing a terminal native fact');
+    assert.equal(f.launches(), 4, 'three failures allow one bounded native-only settlement probe');
+    assert.deepEqual(recoveryOnly, [false, false, false, true], 'the fourth launch cannot start a model turn');
     await supervisor.stop();
     supervisor = new WatcherSupervisor(options);
     await supervisor.start();
     await poll();
-    assert.equal(f.launches(), 3, 'persisted limit survives supervisor reconstruction');
+    assert.equal(f.launches(), 4, 'persisted model and settlement-probe limits survive reconstruction');
     await configs.updateWatcherConfig('watcher-owner', 1, { enabled: false });
     await poll();
-    assert.equal(f.launches(), 3, 'an explicit stop does not start even a control-only CLI');
+    assert.equal(f.launches(), 4, 'an explicit stop does not start even a control-only CLI');
     for (let i = 0; i < 5; i++) await poll();
-    assert.equal(f.launches(), 3, 'disabled does not restart a failed control probe');
+    assert.equal(f.launches(), 4, 'disabled does not restart a failed control probe');
     await configs.updateWatcherConfig(
       'watcher-owner',
       2,
@@ -162,9 +168,10 @@ test('automatic native recovery backs off, caps launches across restart, and nev
       await f.executions.settledHead('watcher-owner'),
     );
     await poll();
-    assert.equal(f.launches(), 4, 'an explicit reopen permits one control-only check of the old native binding');
+    assert.equal(f.launches(), 5, 'an explicit reopen permits one control-only check of the old native binding');
     for (let i = 0; i < 5; i++) await poll();
-    assert.equal(f.launches(), 4);
+    assert.equal(f.launches(), 5);
+    assert.equal(recoveryOnly.at(-1), true);
     assert.equal((await f.executions.get(f.auth.invocationId)).status, 'running');
     assert.equal(parseWatcherSessionState((await f.sessions.get(f.session.id)).watcherState).afterSequence, 0);
     assert.ok(errors.every((error) => error instanceof Error));

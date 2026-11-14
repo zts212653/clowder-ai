@@ -26,12 +26,18 @@ export function createSharedPluginActionClient(input: {
         AbortSignal.timeout(30_000),
       ]);
       let rejectAbort: ((reason: Error) => void) | undefined;
+      let effect: 'not_started' | 'unknown' = 'not_started';
+      const failed = (message: string) =>
+        Object.assign(
+          new Error(`${message}; ${effect === 'not_started' ? 'action not started' : 'result may be unknown'}`),
+          { effect },
+        );
       const aborted = new Promise<never>((_resolve, reject) => {
         rejectAbort = reject;
       });
       const onAbort = () => {
         input.fence.close();
-        rejectAbort?.(new Error('Plugin action was cancelled; result may be unknown'));
+        rejectAbort?.(failed('Plugin action was cancelled'));
       };
       signal.addEventListener('abort', onAbort, { once: true });
       try {
@@ -39,6 +45,9 @@ export function createSharedPluginActionClient(input: {
         const execute = async () => {
           await input.assertCurrent();
           const source = await captureTypedWaitSource(input.record, input.options.sources);
+          // The action port may have effects once entered; never infer safety from its error status.
+          signal.throwIfAborted();
+          effect = 'unknown';
           return input.options.actions.call(input.token, method, args, {
             ...input.fence.identity,
             ...(source ? { source: Object.freeze(source) } : {}),
@@ -50,9 +59,9 @@ export function createSharedPluginActionClient(input: {
         };
         return await Promise.race([execute(), aborted]);
       } catch (error) {
-        if (signal.aborted) throw new Error('Plugin action was cancelled; result may be unknown');
+        if (signal.aborted) throw failed('Plugin action was cancelled');
         const status = error instanceof NativePluginActionError ? error.statusCode : 502;
-        throw new Error(`Plugin action failed (HTTP ${status}); result may be unknown`);
+        throw failed(`Plugin action failed (HTTP ${status})`);
       } finally {
         signal.removeEventListener('abort', onAbort);
       }

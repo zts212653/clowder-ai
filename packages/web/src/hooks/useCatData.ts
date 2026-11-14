@@ -34,6 +34,8 @@ export interface CatData {
   clientId: string;
   configurationSource?: 'native_tool' | 'managed_account';
   agentProvider?: string | null;
+  /** Non-secret Desktop launch binding; credential values are never returned. */
+  env?: Record<string, string>;
   /** Canonical member access mode resolved by the server config boundary. */
   carrier: CatCarrier;
   defaultModel: string;

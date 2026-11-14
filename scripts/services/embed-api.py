@@ -16,10 +16,12 @@ import platform
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import List
 
 import numpy as np
 import uvicorn
+from embedding_generation import read_deployment, verify_model_artifacts
 from embed_runtime_policy import (
     AdmissionError,
     EmbeddingAdmissionController,
@@ -69,6 +71,9 @@ _last_embed_ms: float | None = None
 _admission: EmbeddingAdmissionController | None = None
 _memory_envelope: MlxMemoryEnvelope | None = None
 _resource_exit_scheduled = False
+_generation_id = 'g0'
+_representation_recipe: dict | None = None
+_representation_fingerprint: str | None = None
 
 MAX_BATCH_SIZE = 64
 MAX_TEXT_LENGTH = 8192
@@ -124,6 +129,7 @@ def _process_max_rss_bytes() -> int:
 
 class EmbedRequest(BaseModel):
     input: str | List[str] = Field(..., description="Text or list of texts to embed")
+    representation_fingerprint: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     model: str = Field(
         default="", description="Model identifier (ignored, uses server model)"
     )
@@ -144,6 +150,9 @@ class EmbedResponse(BaseModel):
     data: List[dict]
     model: str
     usage: dict
+    generation_id: str = 'g0'
+    representation_fingerprint: str | None = None
+    dim: int
 
 
 # ─── Endpoints ────────────────────────────────────────────────────
@@ -155,6 +164,8 @@ async def create_embeddings(req: EmbedRequest, request: Request):
     global _request_count, _last_embed_ms
     if not model_loaded:
         raise HTTPException(503, detail="Model not loaded yet")
+    if req.representation_fingerprint != _representation_fingerprint:
+        raise HTTPException(409, detail='Embedding representation identity mismatch')
     if _admission is None:
         raise HTTPException(503, detail="Embedding admission policy not initialized")
 
@@ -235,6 +246,9 @@ async def create_embeddings(req: EmbedRequest, request: Request):
             "prompt_tokens": sum(len(t) for t in texts),
             "total_tokens": sum(len(t) for t in texts),
         },
+        generation_id=_generation_id,
+        representation_fingerprint=_representation_fingerprint,
+        dim=embed_dim,
     )
 
 
@@ -266,6 +280,8 @@ async def health():
         if _use_fastembed
         else ("mlx" if not _use_fallback else (_fallback_device or "unknown")),
         "dim": embed_dim,
+        "generation_id": _generation_id,
+        "representation_fingerprint": _representation_fingerprint,
         "request_count": _request_count,
         "last_request_ms": round(_last_embed_ms, 2)
         if _last_embed_ms is not None
@@ -307,7 +323,9 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
 
     # mlx-embeddings generate() may return an mlx array, or a BaseModelOutput
     # wrapper containing text_embeds / last_hidden_state (#586).
-    output = generate(mlx_model, mlx_tokenizer, texts)
+    output = generate(mlx_model, mlx_tokenizer, texts, **(
+        {"max_length": _representation_recipe["tokenLimit"]} if _representation_recipe else {}
+    ))
 
     # Unwrap BaseModelOutput if present (check value, not just attribute)
     if hasattr(output, "text_embeds") and output.text_embeds is not None:
@@ -325,7 +343,11 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
 
     # Pool 3D last_hidden_state (batch × seq × hidden) → 2D (batch × hidden)
     if raw.ndim == 3:
+        if _representation_recipe:
+            raise ValueError('Pinned representation requires last-token text_embeds')
         raw = raw.mean(axis=1)
+    if _representation_recipe and (raw.ndim != 2 or raw.shape[1] != _representation_recipe['nativeDim']):
+        raise ValueError('Pinned representation native dimension mismatch')
 
     # MRL truncation to target dim
     truncated = raw[:, :embed_dim]
@@ -361,6 +383,7 @@ def main():
     global mlx_model, mlx_tokenizer, model_name, embed_dim, model_loaded
     global _use_fallback, _st_model, _backend, _fallback_device
     global _admission, _memory_envelope
+    global _generation_id, _representation_recipe, _representation_fingerprint, MAX_MODEL_MEM_MB, MAX_TEXT_LENGTH
 
     parser = argparse.ArgumentParser(description="Clowder AI Embedding Server (MLX GPU)")
     parser.add_argument(
@@ -377,7 +400,22 @@ def main():
     parser.add_argument(
         "--dim", type=int, default=int(os.environ.get("EMBED_DIM", "768"))
     )
+    parser.add_argument('--generation', choices=['g0', 'g1'], default=os.environ.get('EMBED_GENERATION'))
+    parser.add_argument('--max-model-mem-mb', type=int)
     args = parser.parse_args()
+    deployment = read_deployment()
+    _generation_id = args.generation or deployment['activeId']
+    selected = deployment['generations'][_generation_id]
+    _representation_recipe = selected['recipe']
+    limit = args.max_model_mem_mb if args.max_model_mem_mb is not None else selected['runtime']['maxModelMemMb']
+    if not isinstance(limit, int) or limit <= 0 or selected['runtime']['cacheMb'] != 0:
+        parser.error('Generation requires a validated positive memory limit and cache0')
+    MAX_MODEL_MEM_MB = limit
+    if _representation_recipe:
+        if args.model != _representation_recipe['modelId']:
+            parser.error('Model does not match generation recipe')
+        args.dim = _representation_recipe['dim']
+        MAX_TEXT_LENGTH = _representation_recipe['textCharacterLimit']
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
@@ -406,7 +444,7 @@ def main():
 
     def _try_mlx() -> bool:
         """Try MLX-native load + test embedding. Returns True on success."""
-        global mlx_model, mlx_tokenizer, _backend, model_loaded, _memory_envelope
+        global mlx_model, mlx_tokenizer, _backend, model_loaded, _memory_envelope, _representation_fingerprint
         try:
             import mlx.core as mx
             from mlx_embeddings.utils import load as mlx_load
@@ -417,7 +455,14 @@ def main():
             )
             _memory_envelope.configure_before_model_load()
             log.info("Loading model via mlx-embeddings (MLX GPU)...")
-            mlx_model, mlx_tokenizer = mlx_load(model_name)
+            model_path = model_name
+            if _representation_recipe:
+                import mlx_embeddings
+                from huggingface_hub import snapshot_download
+                snapshot = Path(snapshot_download(repo_id=model_name, revision=_representation_recipe['modelRevision'], local_files_only=True))
+                _representation_fingerprint = verify_model_artifacts(_representation_recipe, snapshot, Path(mlx_embeddings.__file__).parent)
+                model_path = str(snapshot)
+            mlx_model, mlx_tokenizer = mlx_load(model_path)
             # Smoke test: actually run one embedding to catch tokenizer bugs
             log.info("Running MLX smoke test...")
             _encode_mlx(["test"])
@@ -571,6 +616,9 @@ def main():
             return False
 
     if not _try_mlx():
+        if _representation_recipe:
+            log.error('Pinned generation cannot change backend or fall back after identity failure')
+            sys.exit(1)
         if not _try_fastembed():
             if not _allow_sentence_transformers_fallback():
                 log.error(

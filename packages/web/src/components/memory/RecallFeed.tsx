@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ExternalLinkIcon } from '@/components/HubConfigIcons';
 import { groupRecallEvents, type RecallGroup, recallKind, recallReadCount } from '@/hooks/recall-feed-model';
 import { useThreadRecall } from '@/hooks/useRecallEvents';
 import { useChatStore } from '@/stores/chatStore';
@@ -159,9 +160,10 @@ export function RecallFeed() {
           </div>
           <Link
             href={`/memory${threadId ? `?from=${encodeURIComponent(threadId)}` : ''}`}
-            className="text-compact text-cafe-accent hover:underline"
+            className="inline-flex shrink-0 items-center gap-1 text-compact text-cafe-accent hover:underline"
           >
             在记忆页打开
+            <ExternalLinkIcon />
           </Link>
         </div>
       </header>

@@ -30,7 +30,21 @@ export type MemoryProcessJob =
     }
   | ({ kind: 'project-mentions'; dbPath: string; stagingPath: string } & MentionProjectionInput)
   | { kind: 'checkpoint'; dbPath: string }
-  | { kind: 'vector-repack'; dbPath: string }
+  | { kind: 'taste-recall-read'; dbPath: string }
+  | { kind: 'vector-repack'; dbPath: string; generationId?: import('./vector-generation-tables.js').VectorGenerationId }
+  | {
+      kind: 'vector-generation-reconcile';
+      dbPath: string;
+      generationId: import('./vector-generation-tables.js').VectorGenerationId;
+    }
+  | {
+      kind: 'vector-generation-read';
+      operation: 'coverage';
+      dbPath: string;
+      model: EmbedModelInfo;
+      allowBuilding?: boolean;
+    }
+  | { kind: 'vector-generation-read'; operation: 'pending'; dbPath: string; model: EmbedModelInfo; limit: number }
   | {
       kind: 'scan';
       scanner: 'cat-cafe' | 'generic';

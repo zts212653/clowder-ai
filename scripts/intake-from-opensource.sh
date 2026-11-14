@@ -293,31 +293,85 @@ evaluate_source_head_soak() {
 
   evaluation=$(PR_JSON="$pr_info" SOAK_END_AT="$soak_end_at" node -e '
 const pr = JSON.parse(process.env.PR_JSON || "{}");
-const headRefOid = String(pr.headRefOid || "");
-const endRaw = String(process.env.SOAK_END_AT || "");
-const end = endRaw ? Date.parse(endRaw) : Date.now();
+const headRefOid = String(pr.headRefOid || "").trim();
+const endRaw = String(process.env.SOAK_END_AT || "").trim();
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+// GitHub did not exist before 2008; Go zero-time (0001-01-01T00:00:00Z) and
+// Unix epoch placeholders (1970-01-01T00:00:00Z) are never real GitHub witnesses.
+const MIN_GITHUB_WITNESS_MS = Date.UTC(2008, 0, 1);
+const KNOWN_CHECK_STATUSES = new Set(["QUEUED", "IN_PROGRESS", "COMPLETED", "WAITING", "PENDING", "REQUESTED"]);
+const STARTED_CHECK_STATUSES = new Set(["IN_PROGRESS", "COMPLETED"]);
+const STATUS_CONTEXT_STATES = new Set(["EXPECTED", "ERROR", "FAILURE", "PENDING", "SUCCESS"]);
+const SUBMITTED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]);
+
+function parseWitnessTimestamp(value, maxMs) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!ISO_TIMESTAMP_RE.test(trimmed)) return null;
+  const timestamp = Date.parse(trimmed);
+  if (!Number.isFinite(timestamp) || timestamp < MIN_GITHUB_WITNESS_MS || timestamp > maxMs) return null;
+  return { at: trimmed, timestamp };
+}
+
+const endParsed = endRaw ? parseWitnessTimestamp(endRaw, Number.POSITIVE_INFINITY) : { timestamp: Date.now() };
+const end = endParsed ? endParsed.timestamp : Number.NaN;
 if (!headRefOid || !Number.isFinite(end)) {
   process.exit(2);
 }
 
+const normalizedHead = headRefOid.toLowerCase();
+
+function collectCheckWitnesses(check) {
+  if (!check || typeof check !== "object" || Array.isArray(check)) return [];
+
+  const typename = String(check.__typename || "").trim();
+  const status = String(check.status || "").trim().toUpperCase();
+  const state = String(check.state || "").trim().toUpperCase();
+  if (typename && typename !== "CheckRun" && typename !== "StatusContext") return [];
+
+  // `gh pr view --json statusCheckRollup` serializes StatusContext timestamps
+  // under `startedAt` (`__typename`, `context`, `startedAt`, `state`, `targetUrl`).
+  if (typename === "StatusContext" || (!typename && state && !status)) {
+    if (state && !STATUS_CONTEXT_STATES.has(state)) return [];
+    return [{ at: check.startedAt, kind: "check" }];
+  }
+
+  if (status && !KNOWN_CHECK_STATUSES.has(status)) return [];
+  const isUnstatedCheckFixture = !typename && !status && !state;
+  const candidates = [];
+  if (isUnstatedCheckFixture || STARTED_CHECK_STATUSES.has(status)) {
+    candidates.push({ at: check.startedAt, kind: "check" });
+  }
+  if (isUnstatedCheckFixture || status === "COMPLETED") {
+    candidates.push({ at: check.completedAt, kind: "check" });
+  }
+  return candidates;
+}
+
+function collectReviewWitnesses(review) {
+  if (!review || typeof review !== "object" || Array.isArray(review)) return [];
+  const reviewOid = String(review.commit?.oid || "").trim().toLowerCase();
+  if (!reviewOid || reviewOid !== normalizedHead) return [];
+  const state = String(review.state || "").trim().toUpperCase();
+  if (state && !SUBMITTED_REVIEW_STATES.has(state)) return [];
+  return [{ at: review.submittedAt, kind: "review" }];
+}
+
 // Commit author/committer dates are contributor-controlled and do not prove
 // when an exact candidate first existed on the PR. Use only GitHub-created
-// evidence that is bound to the current HEAD: a check on statusCheckRollup,
-// or a submitted review whose commit oid matches headRefOid.
+// evidence that is bound to the current HEAD: qualified statusCheckRollup
+// timestamps, or a submitted review whose commit oid matches headRefOid.
 const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
 const reviews = Array.isArray(pr.reviews) ? pr.reviews : [];
 const witnesses = [
-  ...checks.flatMap((check) => [
-    { at: check?.startedAt, kind: "check" },
-    { at: check?.createdAt, kind: "check" },
-    { at: check?.completedAt, kind: "check" },
-  ]),
-  ...reviews
-    .filter((review) => String(review?.commit?.oid || "") === headRefOid)
-    .map((review) => ({ at: review?.submittedAt, kind: "review" })),
+  ...checks.flatMap(collectCheckWitnesses),
+  ...reviews.flatMap(collectReviewWitnesses),
 ]
-  .map((witness) => ({ ...witness, timestamp: Date.parse(String(witness.at || "")) }))
-  .filter((witness) => Number.isFinite(witness.timestamp) && witness.timestamp <= end)
+  .map((witness) => {
+    const parsed = parseWitnessTimestamp(witness.at, end);
+    return parsed ? { at: parsed.at, kind: witness.kind, timestamp: parsed.timestamp } : null;
+  })
+  .filter(Boolean)
   .sort((a, b) => a.timestamp - b.timestamp);
 
 if (witnesses.length === 0) {
@@ -329,7 +383,7 @@ const firstWitness = witnesses[0];
 const start = firstWitness.timestamp;
 const fullDays = Math.floor((end - start) / 86400000);
 process.stdout.write(
-  `${String(firstWitness.at)}|${fullDays}|${fullDays >= 7 ? "PASS" : "MISSED"}|${firstWitness.kind}`,
+  `${firstWitness.at}|${fullDays}|${fullDays >= 7 ? "PASS" : "MISSED"}|${firstWitness.kind}`,
 );
 ' 2>/dev/null || true)
 

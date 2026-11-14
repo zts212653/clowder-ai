@@ -143,14 +143,29 @@ async function runMessageSearchJourney() {
     assert.equal(cat.meta.freshness, 'unknown');
     assert.equal(cat.meta.resultKind, 'sources');
     assert.equal(cat.meta.qualification, undefined);
-    assert.equal(cat.meta.timeWindow.limit, 32);
+    assert.equal(cat.meta.sort, 'relevance');
+    assert.equal(cat.meta.timeWindow, undefined);
     assert.deepEqual(cat.results[0].matchEvidence, { kind: 'literal', terms: [query] });
     const humanResponse = await fetch(`${address}/api/evidence/search?q=${query}&resultUnit=message`, {
       headers: { 'x-cat-cafe-user': 'owner' },
     });
     assert.equal(humanResponse.status, 200);
     const human = await humanResponse.json();
+    assert.equal(human.meta.sort, 'relevance');
     assert.deepEqual(human.results, cat.results, 'same readable candidates for the shared query contract');
+    const explicitRelevance = JSON.parse(
+      (await handleSearchEvidence({ query, resultUnit: 'message', messageSort: 'relevance' })).content[0].text,
+    );
+    assert.deepEqual(explicitRelevance.results, cat.results, 'omission keeps the existing relevance ranking');
+    const explicitTime = JSON.parse(
+      (await handleSearchEvidence({ query, resultUnit: 'message', messageSort: 'time' })).content[0].text,
+    );
+    assert.equal(explicitTime.meta.sort, 'time');
+    assert.equal(explicitTime.meta.timeWindow.limit, 32);
+    assert.deepEqual(
+      explicitTime.results.map((hit) => hit.messageId),
+      ids,
+    );
     const boundedCatResult = await handleSearchEvidence({
       query,
       resultUnit: 'message',
@@ -168,6 +183,7 @@ async function runMessageSearchJourney() {
     const boundedHuman = await boundedHumanResponse.json();
     assert.equal(boundedCat.results.length, 1);
     assert.equal(boundedCat.meta.hasMore, true);
+    assert.equal(boundedCat.meta.sort, 'relevance');
     assert.deepEqual(boundedHuman.results, boundedCat.results);
     assert.equal(boundedHuman.meta.hasMore, true);
     const current = JSON.parse(
@@ -212,6 +228,8 @@ async function runMessageSearchJourney() {
       ids,
     );
     assert.deepEqual(concierge.messageSearch.results, cat.results);
+    assert.equal(concierge.messageSearch.meta.sort, 'relevance');
+    assert.match(concierge.contextString, /排序：按相关/);
     const marker = formatConciergeHandleBinding(concierge.handles[0].label, concierge.handles[0].anchor);
     const actions = extractConciergeActions(`[跳过去 ${marker}]`, concierge.handles);
     assert.equal(actions.length, 1, 'the real query projection reaches the existing navigation action consumer');

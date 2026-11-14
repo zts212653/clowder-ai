@@ -46,18 +46,6 @@ const EXPECTED_PRODUCERS = [
     count: 1,
   },
   {
-    file: 'domains/ball-custody/managed-command-production-recovery.ts',
-    path: 'job recovery disposition notice (does not terminate execution)',
-    cancelable: 'unchanged',
-    count: 1,
-  },
-  {
-    file: 'domains/ball-custody/managed-command-wait-notification.ts',
-    path: 'wait recovery disposition notice (does not terminate execution)',
-    cancelable: 'unchanged',
-    count: 1,
-  },
-  {
     file: 'domains/ball-custody/RetiredManagedCommandTerminalRecovery.ts',
     path: 'terminal receipt',
     cancelable: false,

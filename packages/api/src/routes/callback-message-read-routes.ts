@@ -6,6 +6,7 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/services/agents/providers/image-paths.js';
 import { getMessageSpeakerName } from '../domains/cats/services/context/ContextAssembler.js';
 import { readDurableLocalReviewFact } from '../domains/cats/services/local-review-artifact.js';
+import { readApprovalDecisionReceipt } from '../domains/cats/services/stores/host-message-policy.js';
 import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -13,6 +14,7 @@ import type {
   ITurnExecutionStore,
   TurnExecutionRecord,
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import { isReadableSchedulerWork } from '../domains/cats/services/stores/readable-scheduler-work.js';
 import {
   canViewMessage,
   getTimelineOrderTime,
@@ -29,6 +31,7 @@ import { truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { projectCallbackMessageBody } from './callback-message-body.js';
 import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
+import { isReadableApprovalDecisionReceipt } from './callback-readable-approval-receipt.js';
 import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
@@ -73,10 +76,23 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
         return { error: 'Message not found' };
       }
 
-      // #699 P1 (gpt52 intake review): align get-message with isEligibleReplyParent —
-      // system/briefing are internal, non-routable content, never retrievable here (no info leak).
+      // A published, owner-bound approval fact is readable, while remaining non-quotable.
+      const admissionThread =
+        (readApprovalDecisionReceipt(message) ||
+          (message.from?.kind === 'system' && message.from.service === 'scheduler')) &&
+        message.userId === principal.userId &&
+        threadStore
+          ? await threadStore.get(message.threadId)
+          : undefined;
+      const isReadableApproval = isReadableApprovalDecisionReceipt(message, principal.userId, admissionThread);
+      const isReadableScheduler = isReadableSchedulerWork(message, principal.userId, admissionThread);
       const isReadableManagedHold = isAgentReadableManagedHoldMessage(message) && message.userId === principal.userId;
-      if (isInternalNonQuotableParent(message) && !isReadableManagedHold) {
+      if (
+        isInternalNonQuotableParent(message) &&
+        !isReadableManagedHold &&
+        !isReadableApproval &&
+        !isReadableScheduler
+      ) {
         reply.status(404);
         return { error: 'Message not found' };
       }
@@ -109,11 +125,9 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
         return { error: 'Message not found' };
       }
       // Align with thread-context: debug = cats see all (user viewer), play = cats see own (cat viewer)
-      let needsPlayFilter = false;
-      if (message.threadId && threadStore) {
-        const thread = await threadStore.get(message.threadId);
-        needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
-      }
+      const thread =
+        admissionThread ?? (message.threadId && threadStore ? await threadStore.get(message.threadId) : null);
+      const needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
       const viewer: Viewer = needsPlayFilter ? { type: 'cat', catId: principal.catId } : { type: 'user' };
       if (!isReadableManagedHold && !canViewMessage(message, viewer)) {
         reply.status(404);
@@ -243,9 +257,15 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
           .filter((m) => {
             if (m.id === messageId) return false;
             if (m.deletedAt) return false;
-            // #699 P1 (gpt52 intake review): exclude internal/non-routable (system/briefing) from context too
+            // Apply the same narrow read exception; system reply-parent eligibility stays unchanged.
             const isReadableManagedHoldNeighbor = isAgentReadableManagedHoldMessage(m) && m.userId === principalUserId;
-            if (isInternalNonQuotableParent(m) && !isReadableManagedHoldNeighbor) return false;
+            if (
+              isInternalNonQuotableParent(m) &&
+              !isReadableManagedHoldNeighbor &&
+              !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
+              !isReadableSchedulerWork(m, principalUserId, thread)
+            )
+              return false;
             if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;
             if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
             if (!isReadableManagedHoldNeighbor && !canViewMessage(m, viewer)) return false;

@@ -59,6 +59,27 @@ function fixture(count = 12) {
 const principal = { userId: 'owner', viewer: { type: 'cat', catId: 'codex61-sol' } };
 const input = { query: 'Mira 起名', sort: 'relevance', limit: 2 };
 
+test('an omitted sort delivers the relevance page through normal final admission, not the oldest window rows', async () => {
+  const f = fixture(40);
+  f.messages.get('message-0').timestamp = 9000;
+  const request = { query: input.query, limit: 2 };
+  const result = await new MessageSearchService(f.deps).search(request, principal);
+  assert.equal(request.sort, undefined, 'resolving the default does not mutate the caller request');
+  assert.deepEqual(
+    result.results.map((row) => row.messageId),
+    ['message-0', 'message-1'],
+  );
+  assert.equal(result.meta.sort, 'relevance');
+  assert.equal(result.meta.timeWindow, undefined);
+  assert.equal(result.meta.hasMore, true);
+  assert.equal(f.options[0].sort, 'relevance');
+  assert.equal(f.options[0].candidateOrder, 'relevance');
+  assert.ok(f.reads.length <= 6, 'omission uses the page and witness budget, including final reads');
+  assert.ok(f.reads.filter((id) => id === 'message-0').length >= 2, 'the returned original was finally re-admitted');
+  assert.equal(result.results[0].snippet.text, '新伙伴的称呼终于敲定了。');
+  assert.equal(f.calls(), 0);
+});
+
 test('ordinary search returns admitted literal and semantic sources without any generative judge', async () => {
   const f = fixture();
   const result = await new MessageSearchService(f.deps).search(input, principal);

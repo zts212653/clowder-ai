@@ -62,6 +62,7 @@ export interface ServiceLifecycleRouteOptions {
     service: ServiceManifest;
     operator: string;
     reason: 'already-running' | 'readiness';
+    configuredModel?: string;
   }) => void | Promise<void>;
   onServiceUnavailable?: (event: {
     service: ServiceManifest;
@@ -363,7 +364,7 @@ export async function registerServiceLifecycleRoutes(
     const hook = options.lifecycle?.onServiceReady;
     if (!hook) return;
     try {
-      await hook({ service, operator, reason });
+      await hook({ service, operator, reason, configuredModel: getEffectiveConfig(service)?.selectedModel });
     } catch (error) {
       app.log.warn({ err: error, serviceId: service.id, reason }, 'service ready hook failed');
     }

@@ -11,8 +11,14 @@ import type {
   PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import { pluginDescriptionVariants } from '@cat-cafe/shared';
+import {
+  isPluginDeliveryReceipt,
+  type PluginDeliveryReceipt,
+  type PluginMessageDelivery,
+} from '@clowder-ai/plugin-contract';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInventorySnapshot } from '../host-inventory/types.js';
+import type { PluginAddressedTargets } from './addressing/plugin-addressed-targets.js';
 import { connectorPermissionsProjection } from './connector-settings.js';
 import {
   type PluginManagerCatalogCandidate,
@@ -84,6 +90,8 @@ export interface PluginManagerConfigurationPort {
 }
 
 export interface PluginManagerServiceOptions {
+  readonly addressedTargets?: PluginAddressedTargets;
+  readonly delivery?: { deliver(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> };
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
   readonly installedPackages?: PluginManagerInstalledPackagesPort;
@@ -256,6 +264,17 @@ function quarantineAppliesTo(current: PluginManagerListItem | undefined, quarant
 export class PluginManagerService {
   constructor(private readonly options: PluginManagerServiceOptions) {}
 
+  /** Ordinary Queue calls this boundary with the immutable instance recipient. */
+  async deliverAddressed(instanceId: string, input: PluginMessageDelivery): Promise<PluginDeliveryReceipt> {
+    const target = (await this.options.addressedTargets?.list())?.find((t) => t.id === instanceId);
+    if (!target || !this.options.delivery) throw new Error('Addressed plugin is unavailable');
+    const receipt = await this.options.delivery.deliver(instanceId, input);
+    if (!isPluginDeliveryReceipt(receipt) || receipt.deliveryId !== input.deliveryId) {
+      throw new Error('Plugin delivery receipt mismatch');
+    }
+    return receipt;
+  }
+
   async list(): Promise<PluginManagerListResponse> {
     return (await this.project()).response;
   }
@@ -293,6 +312,13 @@ export class PluginManagerService {
     const projected = result.entries.find((candidate) => candidate.plugin.pluginId === pluginId);
     if (!projected) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
     const detail = projected.detail ?? detailFromListItem(projected.plugin);
+    const target = (await this.options.addressedTargets?.known())?.find((t) => t.id === detail.pluginInstanceId);
+    if (target)
+      detail.address = {
+        alias: target.alias,
+        revision: target.addressRevision,
+        ...(target.icon ? { icon: target.icon } : {}),
+      };
     const configurationFields = await this.options.configuration?.fields(pluginId);
     return {
       plugin:

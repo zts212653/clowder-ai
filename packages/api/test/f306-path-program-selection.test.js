@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { copyManagedGhCohort } from './helpers/managed-gh-cohort.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'f306-program-selection-')));
 const main = join(root, 'cat-cafe');
@@ -112,6 +113,7 @@ test('PATH retains wrapper selection and script interpreter identity', () => {
 });
 
 test('canonical repository gh wrapper needs exact code and ordinary node/delegate selection', () => {
+  copyManagedGhCohort(join(root, 'cat-cafe-runtime'));
   const wrapper = readFileSync(new URL('../../../scripts/guarded-bin/gh', import.meta.url));
   const gh = join(protectedBin, 'gh');
   const realGh = join(ordinaryBin, 'gh');

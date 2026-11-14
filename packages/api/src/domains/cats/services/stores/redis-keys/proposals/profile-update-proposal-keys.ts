@@ -24,8 +24,8 @@ export const ProfileUpdateProposalKeys = {
   userSettled: (userId: string) => `profile-update:settled:${userId}`,
 
   /**
-   * Idempotency cache for cat propose calls: dedup:profile-update:{userId}:{clientRequestId} → proposalId
-   * Short TTL (minutes), strictly per-user.
+   * Request binding: dedup:profile-update:{userId}:{clientRequestId} → proposalId.
+   * Empty reservations expire; committed/recovered proposals retain the binding without TTL.
    */
   dedup: (userId: string, clientRequestId: string) => `dedup:profile-update:${userId}:${clientRequestId}`,
 } as const;

@@ -75,7 +75,10 @@ function cat(id, nickname, available = true, extra = {}) {
   };
 }
 export async function scene(width = 1440, dark = false, classic = false, protectedMember = false, options = {}) {
-  const context = await browser.newContext({ viewport: { width, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width, height: 900 },
+    deviceScaleFactor: options.deviceScaleFactor ?? 1,
+  });
   const page = await context.newPage();
   if (options.clockTime !== undefined) await page.clock.install({ time: options.clockTime });
   const state = {

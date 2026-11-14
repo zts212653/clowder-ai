@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { readSessionContractSettings } from '../dist/domains/cats/services/agents/session-contract/session-contract-settings.js';
-import { DotConnectionRuntime } from '../dist/domains/cats/services/cloud-bridge/dot/DotConnectionRuntime.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { declaredAgentSessionProviders } from '../dist/domains/plugin/declared/declared-agent-session-providers.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../dist/domains/plugin/external-runtime/filesystem-package-locator.js';
@@ -45,15 +44,14 @@ async function recoveryHarness(t, provenance) {
     builtinRuntimes: new Map([
       [
         manifest.pluginId,
-        new DotConnectionRuntime(
-          () => ({
-            async status() {
-              connectionChecks += 1;
-              return { credentialActive: true, paired: true, subscription: 'active', replyAt: 1 };
-            },
-          }),
-          async () => true,
-        ),
+        // The Dot business runtime moved to its package. This fixture tests only
+        // Host recovery of an explicitly supplied historical builtin carrier.
+        {
+          async start() {
+            connectionChecks += 1;
+          },
+          async stop() {},
+        },
       ],
     ]),
   };
@@ -105,7 +103,7 @@ test('default Agent Session discovery preserves legacy bundled Dot intent across
       await runtime.shutdown();
     }
   }
-  assert.equal(h.connectionChecks(), 2, 'both restarts still require the real Dot readiness checks');
+  assert.equal(h.connectionChecks(), 2, 'both restarts invoke the explicitly supplied legacy carrier');
   assert.deepEqual(h.failures, []);
 });
 

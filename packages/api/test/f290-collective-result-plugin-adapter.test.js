@@ -28,6 +28,7 @@ const source =
   (data, options = {}) =>
   async () => ({
     matched: options.matched ?? true,
+    ...(options.disabled === undefined ? {} : { disabled: options.disabled }),
     status: options.status ?? 200,
     body: {
       data: {
@@ -83,4 +84,12 @@ test('only a genuinely absent plugin is optional; installed missing, partial, an
   await assert.rejects(partial.listCurrentReceipts('owner'), /incomplete/);
   const healthyEmpty = new F290CollectiveWorkResultPluginAdapter(source({ items: [] }));
   assert.deepEqual(await healthyEmpty.listCurrentReceipts('owner'), []);
+  const ownerDisabled = new F290CollectiveWorkResultPluginAdapter(
+    source({ items: [] }, { matched: true, disabled: true, status: 409 }),
+  );
+  assert.deepEqual(await ownerDisabled.listCurrentReceipts('owner'), []);
+  const activeUnhealthy = new F290CollectiveWorkResultPluginAdapter(
+    source({ items: [] }, { matched: true, status: 409 }),
+  );
+  await assert.rejects(activeUnhealthy.listCurrentReceipts('owner'), /unavailable/);
 });

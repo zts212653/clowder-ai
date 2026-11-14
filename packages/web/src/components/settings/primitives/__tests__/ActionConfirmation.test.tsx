@@ -115,6 +115,33 @@ describe('declared action confirmation (F202 W2-3 h1)', () => {
     expect(new Headers(mockApiFetch.mock.calls.at(-1)?.[1]?.headers).get('x-cat-cafe-owner-confirmed')).toBe('true');
   });
 
+  it('keeps all independent actions reachable while confirming destructive actions before each call', async () => {
+    answerEverything();
+    await render({
+      name: 'connection',
+      label: 'Connection',
+      actions: [
+        { id: 'status', label: 'Status', render: 'status' },
+        { id: 'begin', label: 'Prepare', render: 'button' },
+        { id: 'reconnect', label: 'Reconnect', render: 'button', confirm: 'Replace the current pairing?' },
+      ],
+    });
+    expect(calls).toEqual([]);
+    await click(byTestId('reader-action-reconnect'));
+    expect(container.textContent).toContain('Replace the current pairing?');
+    await click(dialogButton('取消'));
+    expect(calls).toEqual([]);
+    await click(byTestId('reader-action-reconnect'));
+    await click(dialogButton('确认'));
+    expect(sent('reconnect')).toHaveLength(1);
+    expect(new Headers(mockApiFetch.mock.calls.at(-1)?.[1]?.headers).get('x-cat-cafe-owner-confirmed')).toBe('true');
+    expect(byTestId('reader-action-begin')).not.toBeNull();
+    await click(byTestId('reader-action-reconnect'));
+    expect(container.textContent).toContain('Replace the current pairing?');
+    await click(dialogButton('取消'));
+    expect(sent('reconnect')).toHaveLength(1);
+  });
+
   it('asks before revoking a live authorization, and not before granting it', async () => {
     let armed = false;
     mockApiFetch.mockImplementation(async (url) => {

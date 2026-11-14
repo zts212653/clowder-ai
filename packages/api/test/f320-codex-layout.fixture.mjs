@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startLayoutModel } from './helpers/f320-layout-model.mjs';
 import { startLayoutHost, waitUntil } from './helpers/f320-layout-rpc.mjs';
 
 // Standalone native fixture: only temporary homes and an unauthenticated loopback provider.
-const root = await realpath(await mkdtemp('/tmp/f320-layout-'));
+const root = await realpath(await mkdtemp(join(tmpdir(), 'f320-layout-')));
 const binary = process.argv[2] ?? 'codex';
 const report = {
   sourceCommit: '687a119f0fcaace47e1f1abcc77cec6c813fd6da',

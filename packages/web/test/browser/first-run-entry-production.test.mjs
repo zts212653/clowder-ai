@@ -17,6 +17,7 @@ import { disabledWatcherRead } from './fixtures/f322-watcher-read.mjs';
 // in-memory guide threads are NOT installed/Redis/authentication acceptance.
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const repo = path.resolve(webRoot, '../..');
+const buildDirectory = process.env.CAT_CAFE_WEB_TEST_DIST_DIR ?? '.next';
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 const evidence = process.env.CAT_CAFE_ENTRY_EVIDENCE_DIR ?? path.join(repo, '.tmp', `first-entry-${Date.now()}`);
 const output = [],
@@ -34,7 +35,7 @@ async function freePort() {
 
 before(async () => {
   assert.equal(
-    (await readFile(path.join(webRoot, '.next/.build-commit'), 'utf8')).trim(),
+    (await readFile(path.join(webRoot, buildDirectory, '.build-commit'), 'utf8')).trim(),
     revision,
     'rebuild production UI from current HEAD first',
   );

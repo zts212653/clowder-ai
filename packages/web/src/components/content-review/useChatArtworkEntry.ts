@@ -74,7 +74,7 @@ export function useChatArtworkEntry(publication?: PublishedMessageCoordinate) {
     try {
       const { worktreeId, path } = entry;
       const file = await checked<FileData>(
-        await apiFetch(`/api/workspace/file?${new URLSearchParams({ worktreeId, path })}`),
+        await apiFetch(`/api/workspace/file?${new URLSearchParams({ worktreeId, path })}`, { cache: 'no-store' }),
       );
       if (ticket !== generation.current) return { status: 'blocked' };
       if (useChatStore.getState().currentThreadId !== hostThreadId) {
@@ -116,9 +116,14 @@ export function useChatArtworkEntry(publication?: PublishedMessageCoordinate) {
     } catch (failure) {
       if (ticket !== generation.current || !isCurrent() || useChatStore.getState().currentThreadId !== hostThreadId)
         return { status: 'blocked' };
-      const reason = failure instanceof Error ? failure.message : '暂时无法读取原作品。';
+      const reason =
+        failure instanceof ModificationHttpError && failure.status === 404
+          ? '原文件所在目录未连接或当前不可读取；已停止展示缓存预览。'
+          : failure instanceof Error
+            ? failure.message
+            : '暂时无法读取原作品。';
       setError(reason);
-      return failure instanceof ModificationHttpError && [401, 403].includes(failure.status)
+      return failure instanceof ModificationHttpError && [401, 403, 404].includes(failure.status)
         ? { status: 'blocked' }
         : { status: 'preview', reason: `无法批注：${reason}` };
     } finally {

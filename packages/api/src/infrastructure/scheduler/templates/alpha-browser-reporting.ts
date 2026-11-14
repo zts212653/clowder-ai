@@ -11,7 +11,29 @@ import { notifyAlphaRepair } from './alpha-repair-notification.js';
 const exec = promisify(execFile);
 const EXACT_OID = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 
-function notificationTarget(options: AlphaBrowserOptions, owner: string | null, guardian: string): string {
+export function resolveAlphaFailureTriageCat(options: AlphaBrowserOptions, value: unknown): string | null {
+  if (value === undefined) return null;
+  if (
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value.trim() !== value ||
+    options.resolveCat(value) !== value ||
+    !(options.isAvailable ?? isCatAvailable)(value)
+  )
+    throw new Error('Alpha failure triage cat must be a registered, available stable cat ID');
+  return value;
+}
+
+function notificationTarget(
+  options: AlphaBrowserOptions,
+  owner: string | null,
+  guardian: string,
+  triage: string | null,
+): string {
+  if (triage && owner === triage) {
+    resolveAlphaFailureTriageCat(options, triage);
+    return triage;
+  }
   const available = options.isAvailable ?? isCatAvailable;
   const policy = options.getEngagementPolicy ?? readEngagementPolicy;
   // Historical ownership is evidence, not consent to routine automated work.
@@ -34,15 +56,24 @@ function assertTaskScope(task: TaskItem, options: AlphaBrowserOptions, threadId:
   }
 }
 
-function repairDescription(draft: FailureDraft, guardian: string, previous: TaskItem | null): string {
+function repairDescription(
+  draft: FailureDraft,
+  guardian: string,
+  previous: TaskItem | null,
+  triage: string | null,
+): string {
   return [
     '修复责任：查明并修复根因，提交修复与复验证据；仅完成分诊不能关闭本任务。',
     `Revision: ${draft.testedHeadSha}`,
     `Execution: ${draft.jobId}:${draft.generation}`,
     `Units: ${draft.unitIds.join(', ')}`,
     `Owner source: ${draft.ownerSourceRef ?? 'unresolved'}`,
+    `Declared product owner: ${draft.ownerCatId ?? 'unresolved'}`,
+    ...(triage ? [`Repair owner: ${triage} (subscription failureTriageCatId)`] : []),
     `Ownership: ${draft.ownership}. A failing journey is evidence to investigate, not proof that its feature code is the root cause.`,
-    ...(!draft.ownerCatId ? [`归属待核：由订阅 guardian ${guardian} 负责查明修复去向。`] : []),
+    ...(!draft.ownerCatId
+      ? [`归属待核：由订阅${triage ? `值守猫 ${triage}` : ` guardian ${guardian}`} 负责查明修复去向。`]
+      : []),
     ...(draft.incidentKey
       ? [
           `Incident: ${draft.incidentKey}`,
@@ -62,6 +93,7 @@ async function repairTask(
   draft: FailureDraft,
   threadId: string,
   guardian: string,
+  triage: string | null,
 ): Promise<TaskItem> {
   let subjectKey = draft.incidentKey ?? draft.subjectKey;
   let previous: TaskItem | null = null;
@@ -84,9 +116,9 @@ async function repairTask(
           threadId,
           userId: options.ownerUserId,
           createdBy: 'system',
-          ownerCatId: createCatId(draft.ownerCatId ?? guardian),
+          ownerCatId: createCatId(triage ?? draft.ownerCatId ?? guardian),
           title: `[P1] Alpha repair ${draft.kind}: ${draft.testedHeadSha.slice(0, 10)}`,
-          why: repairDescription(draft, guardian, previous),
+          why: repairDescription(draft, guardian, previous, triage),
         },
         { expected: null },
       );
@@ -106,7 +138,9 @@ export async function reportAlphaFailures(
   guardian: string,
   ctx: ExecuteContext,
   failure: Record<string, unknown>,
+  failureTriageCatId?: unknown,
 ): Promise<string[]> {
+  const triage = resolveAlphaFailureTriageCat(options, failureTriageCatId);
   const source = async (path: string, headSha: string, blob: boolean): Promise<string> => {
     const validPath = blob
       ? /^packages\/web\/test\/browser\/[a-zA-Z0-9._/-]+\.mjs$/u
@@ -128,8 +162,9 @@ export async function reportAlphaFailures(
   });
   const refs: string[] = [];
   for (const draft of drafts) {
-    const task = await repairTask(options, draft, threadId, guardian);
-    const targetCatId = notificationTarget(options, task.ownerCatId, guardian);
+    if (triage) resolveAlphaFailureTriageCat(options, triage);
+    const task = await repairTask(options, draft, threadId, guardian, triage);
+    const targetCatId = notificationTarget(options, task.ownerCatId, guardian, triage);
     if (draft.incidentKey) {
       await notifyAlphaRepair(options, ctx, task, targetCatId);
       refs.push(`task:${task.id}`);

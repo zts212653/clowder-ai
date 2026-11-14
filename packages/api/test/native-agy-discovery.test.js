@@ -11,17 +11,19 @@ import { registerRuntimeCatalogRoute } from '../dist/routes/runtime-catalog-rout
 import { invalidateCliCommand } from '../dist/utils/cli-resolve.js';
 
 for (const installed of [true, false]) {
-  test(`AGY discovery checks the actual executable with installed=${installed}, not Gemini or the retired IDE`, (t) => {
+  test(`AGY discovery checks the actual executable with installed=${installed}, not Gemini or the retired IDE`, async (t) => {
     const root = mkdtempSync(join(tmpdir(), 'native-agy-discovery-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const command = join(root, 'agy');
     writeFileSync(command, '#!/bin/sh\nexit 97\n');
     chmodSync(command, 0o755);
     const calls = [];
-    const found = discoverNativeRuntimes(root, (name) => {
-      calls.push(name);
-      return installed && name === 'agy' ? command : null;
-    }).runtimes;
+    const found = (
+      await discoverNativeRuntimes(root, (name) => {
+        calls.push(name);
+        return installed && name === 'agy' ? command : null;
+      })
+    ).runtimes;
     const agy = found.find((item) => item.id === 'agy-native');
     assert.ok(agy, 'AGY must be discoverable independently of an installed Gemini CLI');
     assert.equal(agy.clientId, 'google');
@@ -39,7 +41,7 @@ for (const installed of [true, false]) {
   });
 }
 
-test('configured official ACP remains a Google binding with its exact startup and permissions', (t) => {
+test('configured official ACP remains a Google binding with its exact startup and permissions', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'native-agy-acp-'));
   const existing = catRegistry.getAllConfigs();
   t.after(() => {
@@ -51,14 +53,20 @@ test('configured official ACP remains a Google binding with its exact startup an
   writeFileSync(command, '#!/bin/sh\nexit 97\n');
   const acp = { command, startupArgs: ['--profile', 'argon-personal'], transport: 'stdio' };
   const agyProfile = { enabled: true, carrier: 'acp', profileId: 'argon-personal', autoApprove: false };
-  catRegistry.register('agy-acp-fixture', { id: 'agy-acp-fixture', clientId: 'google', agyProfile });
+  catRegistry.register(
+    'agy-acp-fixture',
+    { id: 'agy-acp-fixture', clientId: 'google', agyProfile },
+    { configurationTemplatePath: join(root, 'cat-template.json') },
+  );
   writeFileSync(
     join(root, 'cat-template.json'),
     JSON.stringify({
       breeds: [{ catId: 'agy-acp-fixture', variants: [{ catId: 'agy-acp-fixture', acp }] }],
     }),
   );
-  const found = discoverNativeRuntimes(root, () => null).runtimes.find((item) => item.id === 'acp:agy-acp-fixture');
+  const found = (await discoverNativeRuntimes(root, () => null)).runtimes.find(
+    (item) => item.id === 'acp:agy-acp-fixture',
+  );
   assert.equal(found?.clientId, 'google');
   assert.equal(found?.agyCarrier, 'acp');
   assert.equal(found?.installed, true);

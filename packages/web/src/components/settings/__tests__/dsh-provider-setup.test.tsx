@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DshProviderSetup } from '../members/DshProviderSetup';
 
+vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args) }));
 const host = document.createElement('div');
 const root = createRoot(host);
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -10,96 +11,76 @@ afterEach(async () => {
   await act(async () => root.render(null));
   vi.unstubAllGlobals();
 });
-
-it('reads only on request and prepares a complete route for the existing member save flow', async () => {
-  const prepared = vi.fn();
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-    if (path.includes('/dsh-setup/')) expect(init?.method).toBe('POST');
-    return {
-      ok: true,
-      json: async () =>
-        path.endsWith('inspect')
-          ? {
-              profiles: ['acp', 'desktop'],
-              sourceProfile: 'acp',
-              revision: 'a'.repeat(64),
-              active: { provider: 'deepseek-official', model: 'official', providers: [] },
-              source: { providers: [{ id: 'custom', models: [{ id: 'custom-model', label: 'Custom model' }] }] },
-            }
-          : {
-              id: 'receipt',
-              command: 'node',
-              startupArgs: ['dsh.js', '--profile', 'acp', '--patch', '/host/custom.yml'],
-            },
-    };
+it('automatically reads metadata, keeps explicit preferences and never prepares or tests on opening', async () => {
+  const select = vi.fn();
+  const fetch = vi.fn(async (path: string) => {
+    expect(path).toContain('/inspect');
+    return Response.json({
+      revision: 'r',
+      provider: 'official',
+      model: 'default',
+      providers: [
+        { id: 'official', credential: 'configured', models: [{ id: 'default', label: 'Default' }] },
+        { id: 'custom', credential: 'configured', models: [{ id: 'chosen', label: 'Chosen' }] },
+      ],
+    });
   });
   vi.stubGlobal('fetch', fetch);
-  await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
-  expect(fetch).not.toHaveBeenCalled();
-  const firstUseHint = [...host.querySelectorAll('p')].find((element) =>
-    element.textContent?.includes('首次使用自定义接口'),
-  );
-  expect(firstUseHint).toBeDefined();
-  expect(firstUseHint?.closest('details')).toBeNull();
-  await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
-  expect(host.textContent).toContain('deepseek-official');
-  await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '使用此配置')!.click());
-  expect(prepared).toHaveBeenCalledWith('node', ['dsh.js', '--profile', 'acp', '--patch', '/host/custom.yml']);
-  expect(host.textContent).toContain('请保存成员');
-  const setupCalls = fetch.mock.calls.filter(([path]) => path.includes('/dsh-setup/'));
-  expect(setupCalls).toHaveLength(2);
-  expect(JSON.parse(setupCalls[1]![1]!.body as string)).toMatchObject({ provider: 'custom', model: 'custom-model' });
-});
-it.each([
-  ['dsh_setup_changed', '配置已变化'],
-  ['dsh_config_manual', '无法安全自动复制'],
-])('preserves the draft and explains %s', async (error, message) => {
-  const prepared = vi.fn();
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: false, json: async () => ({ error, profiles: ['desktop'] }) })),
-  );
-  await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
-  await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
-  expect(host.textContent).toContain(message);
-  expect(prepared).not.toHaveBeenCalled();
-});
-it.each(['runtime', 'launch'])('does not apply a late preparation result after changing %s', async (change) => {
-  const prepared = vi.fn();
-  let resolvePreparation: ((value: Response) => void) | undefined;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (path: string) => {
-      if (path.endsWith('prepare'))
-        return new Promise<Response>((done) => {
-          resolvePreparation = done;
-        });
-      return new Response(
-        JSON.stringify({
-          profiles: ['acp'],
-          revision: 'a'.repeat(64),
-          active: { providers: [] },
-          source: { providers: [{ id: 'custom', models: [{ id: 'model', label: 'Model' }] }] },
-        }),
-      );
-    }),
-  );
-  await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
-  await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
-  await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '使用此配置')?.click());
   await act(async () =>
     root.render(
-      <DshProviderSetup
-        runtimeId={change === 'runtime' ? 'acp:another' : 'dsh'}
-        configurationKey={change === 'launch' ? 'edited-launch' : undefined}
-        onPrepared={prepared}
-        t={(zh) => zh}
-      />,
+      <DshProviderSetup runtimeId="dsh" selectedModel='["custom","chosen"]' onSelection={select} t={(zh) => zh} />,
     ),
   );
-  await act(async () =>
-    resolvePreparation?.(new Response(JSON.stringify({ id: 'old', command: 'old-dsh', startupArgs: [] }))),
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toContain('/inspect');
+  expect(host.textContent).toContain('Chosen');
+  expect(host.querySelector('details')).toBeNull();
+  expect(select).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain('验证并使用');
+  expect(host.textContent).not.toContain('客户端未上报');
+});
+it('ignores an old installation response after changing sources', async () => {
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_url, init: RequestInit) =>
+      JSON.parse(String(init.body)).runtimeId === 'old'
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(Response.json({ providers: [], revision: 'new' })),
+    ),
   );
-  expect(prepared).not.toHaveBeenCalled();
-  expect(host.textContent).not.toContain('请保存成员');
+  await act(async () => root.render(<DshProviderSetup runtimeId="old" onSelection={vi.fn()} t={(zh) => zh} />));
+  await act(async () => root.render(<DshProviderSetup runtimeId="new" onSelection={vi.fn()} t={(zh) => zh} />));
+  await act(async () =>
+    finish(
+      Response.json({
+        provider: 'old',
+        model: 'old',
+        providers: [{ id: 'old', credential: 'configured', models: [{ id: 'old', label: 'Old result' }] }],
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain('Old result');
+});
+it('keeps a saved model visible while loading and after a failed free read', async () => {
+  const reading = Promise.withResolvers<Response>();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => reading.promise),
+  );
+  await act(async () =>
+    root.render(
+      <DshProviderSetup runtimeId="dsh" selectedModel='["custom","chosen"]' onSelection={vi.fn()} t={(zh) => zh} />,
+    ),
+  );
+  const picker = host.querySelector('[role="combobox"]');
+  const selectedLabel = picker?.textContent;
+  expect(picker?.textContent).toContain('custom / chosen');
+  expect(picker?.closest('details')).toBeNull();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => reading.reject(new Error('dsh_setup_auth_refresh_required')));
+  expect(host.querySelector('[role="combobox"]')?.textContent).toBe(selectedLabel);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Desktop 登录需要更新');
 });

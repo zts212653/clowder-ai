@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test as nativeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +9,7 @@ import { registerFileMenuViewportJourneys } from './f309-file-menu-viewport.mjs'
 import { assertMenuClosed, assertPopupVisible, menuPanel, menuTrigger } from './f322-workspace-menu-observations.mjs';
 import { buildWorkspaceMenuPage, menuOrigin, routeWorkspaceMenuAssets } from './fixtures/f322-workspace-menu-build.mjs';
 
-const evidence = process.env.F322_MENU_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f322-workspace-menu';
+const evidence = process.env.F322_MENU_EVIDENCE_DIR ?? path.join(tmpdir(), 'cat-cafe-evidence/f322-workspace-menu');
 const menuCases = ['zh', 'en'].flatMap((language) => ['tabs', 'workspace', 'file'].map((menu) => ({ language, menu })));
 export function registerWorkspaceMenuTests(getSharedBrowser) {
   registerFileMenuViewportJourneys();

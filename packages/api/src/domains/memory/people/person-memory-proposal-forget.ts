@@ -10,8 +10,8 @@ import { HumanDispositionKeys } from '../../human-disposition/human-disposition-
 import { DeferredPersonMemoryReceiptKeys } from '../deferred-person-memory-redis-contract.js';
 import type {
   HardForgetPersonMemoryProposalInput,
+  PersonMemoryProposalForgetPreview,
   PersonMemoryProposalForgetResult,
-  StoredPersonMemoryCandidate,
 } from './PersonMemoryStore.js';
 import {
   loadDeferredReceiptSnapshotsForCandidates,
@@ -26,16 +26,14 @@ import {
 } from './person-memory-disposition-records.js';
 import { BEGIN_EXACT_PROPOSAL_FORGET_LUA, FINISH_HARD_FORGET_LUA } from './person-memory-forget-lua.js';
 import { PersonMemoryKeys } from './person-memory-keys.js';
-import { parseStoredCandidate } from './person-memory-records.js';
+import {
+  loadProposalForgetLineage,
+  proposalForgetRevision,
+  readProposalForgetCandidate,
+} from './person-memory-proposal-forget-scope.js';
 import { PersonMemoryRedisPlan } from './person-memory-redis-plan.js';
 
 const FORGET_FENCE_TTL_MS = 24 * 60 * 60 * 1_000;
-const MAX_LINEAGE_HOPS = 32;
-
-function candidatePersonId(candidate: StoredPersonMemoryCandidate): string | undefined {
-  return candidate.materializedPersonId ?? candidate.targetPersonId;
-}
-
 function receiptKey(input: HardForgetPersonMemoryProposalInput): string {
   return PersonMemoryKeys.proposalForgetReceipt(input.ownerUserId, input.proposalId, input.requestId);
 }
@@ -60,59 +58,6 @@ function deletionReceipt(
     purgedSurfaceCounts: counts,
     verdict,
   });
-}
-
-async function readCandidate(
-  redis: RedisClient,
-  ownerUserId: string,
-  candidateId: string,
-): Promise<PersonMemoryCandidateSnapshot | null> {
-  const raw = await redis.get(PersonMemoryKeys.candidate(ownerUserId, candidateId));
-  const candidate = parseStoredCandidate(raw);
-  return raw && candidate && candidate.ownerUserId === ownerUserId && candidate.candidateId === candidateId
-    ? { candidate, raw }
-    : null;
-}
-
-async function loadExactLineage(
-  redis: RedisClient,
-  ownerUserId: string,
-  exact: PersonMemoryCandidateSnapshot,
-): Promise<Map<string, PersonMemoryCandidateSnapshot> | 'person_bound' | 'conflict'> {
-  const reverse: PersonMemoryCandidateSnapshot[] = [];
-  const seen = new Set<string>();
-  let current: PersonMemoryCandidateSnapshot | null = exact;
-  while (current) {
-    if (seen.has(current.candidate.candidateId) || reverse.length >= MAX_LINEAGE_HOPS) return 'conflict';
-    if (candidatePersonId(current.candidate)) return 'person_bound';
-    seen.add(current.candidate.candidateId);
-    reverse.push(current);
-    current = current.candidate.replacesProposalId
-      ? await readCandidate(redis, ownerUserId, current.candidate.replacesProposalId)
-      : null;
-    if (reverse.at(-1)?.candidate.replacesProposalId && !current) return 'conflict';
-  }
-  const root = reverse.at(-1);
-  if (!root) return 'conflict';
-
-  const lineage = new Map<string, PersonMemoryCandidateSnapshot>();
-  current = root;
-  while (current) {
-    if (lineage.has(current.candidate.candidateId) || lineage.size >= MAX_LINEAGE_HOPS) return 'conflict';
-    if (candidatePersonId(current.candidate)) return 'person_bound';
-    lineage.set(current.candidate.candidateId, current);
-    const nextId = current.candidate.replacedByProposalId;
-    if (!nextId) break;
-    const next = await readCandidate(redis, ownerUserId, nextId);
-    if (!next || next.candidate.replacesProposalId !== current.candidate.candidateId) return 'conflict';
-    current = next;
-  }
-  if (!lineage.has(exact.candidate.candidateId)) return 'conflict';
-  const values = [...lineage.values()];
-  const ancestorsAreWithdrawn = values.slice(0, -1).every((snapshot) => snapshot.candidate.state === 'withdrawn');
-  const leafState = values.at(-1)?.candidate.state;
-  if (!ancestorsAreWithdrawn || (leafState !== 'rejected' && leafState !== 'withdrawn')) return 'conflict';
-  return lineage;
 }
 
 async function loadSuppression(
@@ -230,13 +175,37 @@ function parseFinishResult(finish: string): PersonMemoryProposalForgetResult {
   throw new Error(`unexpected F276 proposal forget result: ${finish}`);
 }
 
+/** Read-only qualification uses the same exact lineage and purge invariants as the writer. */
+export async function inspectPersonMemoryProposalForget(
+  redis: RedisClient,
+  ownerUserId: string,
+  proposalId: HardForgetPersonMemoryProposalInput['proposalId'],
+): Promise<PersonMemoryProposalForgetPreview> {
+  const exact = await readProposalForgetCandidate(redis, ownerUserId, proposalId);
+  if (!exact) return { outcome: 'absent' };
+  const lineage = await loadProposalForgetLineage(redis, ownerUserId, exact);
+  if (typeof lineage === 'string') return { outcome: lineage };
+  const plan = new PersonMemoryRedisPlan([]);
+  await planDispositionPurge(redis, plan, { ownerUserId, proposalId, requestId: '', requestedAt: 0 }, lineage);
+  await loadDeferredReceiptSnapshotsForCandidates(redis, ownerUserId, lineage);
+  for (const [id] of lineage) {
+    await loadSuppression(redis, ownerUserId, id);
+  }
+  return {
+    outcome: 'eligible',
+    count: lineage.size,
+    revision: proposalForgetRevision(lineage),
+    proposalIds: [...lineage.values()].map(({ candidate }) => candidate.candidateId),
+  };
+}
+
 export async function hardForgetPersonMemoryProposal(
   redis: RedisClient,
   input: HardForgetPersonMemoryProposalInput,
 ): Promise<PersonMemoryProposalForgetResult> {
   const prior = await existingReceipt(redis, input);
   if (prior) return { outcome: prior.verdict === 'purged' ? 'purged' : 'already_absent', receipt: prior };
-  const exact = await readCandidate(redis, input.ownerUserId, input.proposalId);
+  const exact = await readProposalForgetCandidate(redis, input.ownerUserId, input.proposalId);
   if (!exact) {
     const receipt = deletionReceipt(input, 'already_absent', {});
     await redis.set(receiptKey(input), JSON.stringify(receipt), 'NX');
@@ -245,9 +214,11 @@ export async function hardForgetPersonMemoryProposal(
       receipt: (await existingReceipt(redis, input)) ?? receipt,
     };
   }
-  const lineage = await loadExactLineage(redis, input.ownerUserId, exact);
+  const lineage = await loadProposalForgetLineage(redis, input.ownerUserId, exact);
   if (lineage === 'person_bound') return { outcome: 'person_bound' };
   if (lineage === 'conflict') return { outcome: 'conflict' };
+  if (input.expectedRevision && input.expectedRevision !== proposalForgetRevision(lineage))
+    return { outcome: 'stale_revision' };
   const root = [...lineage.values()][0];
   if (!root) return { outcome: 'conflict' };
   const fenceKey = PersonMemoryKeys.proposalForgetFence(input.ownerUserId, root.candidate.candidateId);
@@ -286,7 +257,9 @@ export async function hardForgetPersonMemoryProposal(
     plan.zrem(PersonMemoryKeys.settled(input.ownerUserId), candidateId);
     plan.del(candidateKey, 'string');
     plan.del(candidateOwnerKey, 'string');
-    plan.del(PersonMemoryKeys.candidatePerson(input.ownerUserId, candidateId), 'string');
+    const personBindingKey = PersonMemoryKeys.candidatePerson(input.ownerUserId, candidateId);
+    plan.expect(personBindingKey, '');
+    plan.del(personBindingKey, 'string');
     const suppression = await loadSuppression(redis, input.ownerUserId, candidateId);
     if (suppression) {
       plan.expect(PersonMemoryKeys.suppression(input.ownerUserId, candidateId), suppression.raw);
@@ -307,16 +280,24 @@ export async function hardForgetPersonMemoryProposal(
     deferredReceipts: deferredReceiptSnapshots.size,
     dispositionEntries: dispositionCount,
   });
-  return parseFinishResult(
-    String(
-      await redis.eval(
-        FINISH_HARD_FORGET_LUA,
-        plan.keys.length,
-        ...plan.keys,
-        input.requestId,
-        JSON.stringify(receipt),
-        plan.serialize(),
-      ),
+  const finish = String(
+    await redis.eval(
+      FINISH_HARD_FORGET_LUA,
+      plan.keys.length,
+      ...plan.keys,
+      input.requestId,
+      JSON.stringify(receipt),
+      plan.serialize(),
     ),
   );
+  // A refused atomic plan performed no purge. Release only this request's fence
+  // so a newly inspected/confirmed version need not wait for the crash lease.
+  if (finish === 'CONFLICT')
+    await redis.eval(
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+      1,
+      fenceKey,
+      input.requestId,
+    );
+  return parseFinishResult(finish);
 }

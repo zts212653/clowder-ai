@@ -27,6 +27,7 @@ export interface CreateTasteProposalInput {
   sourceMessageId?: string;
   scene: string;
   quote: string;
+  resolvedQuotes?: string[];
   takeaway?: string;
   tags: string[];
   dimension: TasteDimension;
@@ -67,6 +68,15 @@ export interface ITasteProposalStore extends ApprovalPublicationStore {
     id: string,
     approvedBy: string,
     expected?: TasteDecisionSnapshot,
+  ): TasteProposal | null | Promise<TasteProposal | null>;
+  /**
+   * Bind an explicit owner retry to an approving candidate. Atomically preserve whether the old
+   * claim predates content binding, so its exact published legacy bytes remain recoverable after restart.
+   */
+  recordApprovalProof(
+    id: string,
+    approvedBy: string,
+    expected: TasteDecisionSnapshot,
   ): TasteProposal | null | Promise<TasteProposal | null>;
   /** F317 isolated candidate; absence must fail closed when a durable Host fence is requested. */
   claimForApprovalFenced?(

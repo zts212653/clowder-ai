@@ -63,6 +63,10 @@ vi.mock('@/hooks/useCatData', async (original) => ({
   ...(await original<object>()),
   useCatData: () => ({ cats: [knownCat], getCatById, refresh: vi.fn() }),
 }));
+vi.mock('@/hooks/usePluginMentionTargets', () => ({
+  usePluginTargets: () => ({ targets: [], knownTargets: [{ id: 'pi_helper', alias: 'helper', icon: 'blocks' }] }),
+  usePluginMentionTargets: () => [],
+}));
 vi.mock('@/hooks/useConnectionStatus', () => ({
   useConnectionStatus: () => ({
     api: 'connected',
@@ -243,5 +247,157 @@ describe('ThreadChatSurface reply handoff eligibility transitions', () => {
     expect(container.querySelector('[data-message-id="source"]')?.textContent).toContain('visible source');
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(document.querySelector('[role="dialog"][aria-label="看猫 · 宪宪"]')).toBeNull();
+  });
+});
+
+describe('ThreadChatSurface plugin reply position', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    Object.assign(globalThis, { React, IS_REACT_ACT_ENVIRONMENT: true });
+    fixture.api.mockReset().mockResolvedValue(new Response('{}'));
+    useChatStore.setState({
+      currentThreadId: THREAD_ID,
+      messages: [],
+      threads: [],
+      isLoadingThreads: false,
+      catStatuses: {},
+      catInvocations: {},
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  async function render(messages: Message[]) {
+    fixture.messages = messages;
+    await act(async () => root.render(<ThreadChatSurface threadId={THREAD_ID} density="full" />));
+  }
+  function input(id = 'plugin-input'): Message {
+    return {
+      id,
+      type: 'user',
+      from: { kind: 'user', userId: 'owner' },
+      content: '@helper hi',
+      timestamp: Date.now(),
+      lifecycle: {
+        kind: 'input',
+        orderKey: id,
+        dispatchRefs: [
+          { targetId: 'pi_helper', phase: 'dispatched', statusMessageId: `receipt-${id}`, dispatchedAt: Date.now() },
+        ],
+      },
+    };
+  }
+  function receipt(source: Message, phase = 'sending'): Message {
+    return {
+      id: `receipt-${source.id}`,
+      type: 'system',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: '插件投递与接收状态。',
+      timestamp: Date.now() + 1,
+      extra: {
+        targetResponse: {
+          v: 1,
+          revision: 1,
+          inputMessageId: source.id,
+          targetId: 'pi_helper',
+          execution: { kind: 'plugin', id: `delivery-${source.id}` },
+          status: phase === 'sending' ? 'delivering' : phase === 'accepted' ? 'waiting' : 'unconfirmed',
+          startedAt: 1,
+          updatedAt: 1,
+        },
+        pluginAddressedReceipt: {
+          inputMessageId: source.id,
+          targetId: 'pi_helper',
+          accepted: phase === 'accepted',
+          phase,
+        } as never,
+      },
+    };
+  }
+  function reply(source: Message, instanceId = 'pi_helper', content = 'hello'): Message {
+    return {
+      id: `reply-${source.id}-${instanceId}`,
+      type: 'connector',
+      from: { kind: 'plugin', instanceId },
+      replyTo: source.id,
+      content,
+      timestamp: Date.now() + 2,
+      source: { connector: 'plugin:official.helper', label: 'helper', icon: 'blocks' },
+    };
+  }
+  it('shows the plugin avatar before acknowledgement, waits honestly, and hands over to the real reply', async () => {
+    await render([]);
+    const sent = input(),
+      ack = receipt(sent);
+    await render([sent, ack]);
+    const placeholder = container.querySelector('[data-reply-target="pi_helper"]');
+    expect(placeholder?.textContent).toContain('正在投递');
+    expect(placeholder?.querySelector('[data-reply-avatar]')).not.toBeNull();
+    expect(placeholder?.querySelector('.animate-pulse')).not.toBeNull();
+    const accepted = {
+      ...sent,
+      lifecycle: {
+        ...sent.lifecycle!,
+        dispatchRefs: sent.lifecycle!.dispatchRefs!.map((ref) => ({ ...ref, phase: 'settled' as const })),
+      },
+    };
+    await render([accepted, receipt(sent, 'accepted')]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')?.textContent).toContain('已接收，等待回复');
+    await render([accepted, receipt(sent, 'accepted'), reply(sent)]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    expect(container.textContent).toContain('hello');
+    expect(container.textContent).not.toContain('正在生成');
+  });
+  it('matches exact instance/input and lets an attachment take over before the acknowledgement', async () => {
+    await render([]);
+    const a = input('a'),
+      b = input('b'),
+      ra = receipt(a),
+      rb = receipt(b);
+    await render([a, b, ra, rb, reply(a, 'pi_other')]);
+    expect(container.querySelectorAll('[data-reply-target="pi_helper"]')).toHaveLength(2);
+    const image = {
+      ...reply(a, 'pi_helper', ''),
+      contentBlocks: [{ type: 'image', url: '/uploads/test.png' }],
+    } as Message;
+    await render([a, b, ra, rb, image]);
+    expect(container.querySelectorAll('[data-reply-target="pi_helper"]')).toHaveLength(1);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')?.getAttribute('data-message-id')).toBe(
+      'receipt-b',
+    );
+    await render([a, b, receipt(a, 'accepted'), receipt(b, 'accepted'), image]);
+    expect(container.querySelectorAll('[data-reply-target="pi_helper"]')).toHaveLength(1);
+  });
+  it('recovers durable waiting, keeps legacy receipts quiet, and ignores empty or hidden replies', async () => {
+    await render([]);
+    const sent = input(),
+      ack = receipt(sent);
+    ack.timestamp = 1;
+    const legacy = { ...ack, extra: { pluginAddressedReceipt: ack.extra!.pluginAddressedReceipt } };
+    await render([sent, legacy]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    await render([sent, ack]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
+    const fresh = receipt(sent);
+    await render([sent, fresh, reply(sent, 'pi_helper', '')]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
+    await render([
+      sent,
+      fresh,
+      { ...reply(sent), extra: { recall: { recalledAt: 1, version: 1, exposure: 'seen' } } } as Message,
+    ]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).not.toBeNull();
+    await render([sent, receipt(sent, 'unconfirmed')]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')?.textContent).toContain('投递结果未确认');
+    expect(container.querySelector('[data-reply-target="pi_helper"] .animate-pulse')).toBeNull();
+    await render([sent, receipt(sent, 'unconfirmed'), reply(sent)]);
+    expect(container.querySelector('[data-reply-target="pi_helper"]')).toBeNull();
+    expect(container.textContent).toContain('hello');
+    expect(container.textContent).not.toContain('请检查插件后重新发送');
   });
 });

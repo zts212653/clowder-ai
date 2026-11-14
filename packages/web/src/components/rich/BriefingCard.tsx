@@ -140,14 +140,14 @@ export function BriefingCard({
       >
         <CafeIcon name="search" className="w-4 h-4 shrink-0 text-[var(--semantic-info)]" />
         <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5">
-          <span className="text-[11px] text-cafe-secondary">上下文交接 ·</span>
+          <span className="text-label text-cafe-secondary">上下文交接 ·</span>
           <span className="text-sm font-medium">{receiver ? `给 ${receiver}` : '接收猫：未记录'}</span>
         </span>
         <span className="shrink-0 text-xs text-cafe-secondary">
           {expanded ? '收起' : '详情'} {expanded ? '⌃' : '⌄'}
         </span>
       </button>
-      <p className={`mt-2 text-[13px] leading-relaxed ${expanded ? '' : 'line-clamp-2 max-[440px]:line-clamp-3'}`}>
+      <p className={`mt-2 text-compact leading-relaxed ${expanded ? '' : 'line-clamp-2 max-[440px]:line-clamp-3'}`}>
         {expanded && excerpt ? excerpt : summary}
       </p>
       <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-cafe-secondary">
@@ -177,7 +177,7 @@ export function BriefingCard({
       {expanded && (
         <div id={detailsId} className="mt-3 border-t border-cafe-border pt-3 text-xs">
           <section aria-label={inputs !== undefined ? '输入与依据' : '交接与依据'} className="min-w-0">
-            <h3 className="mb-2 text-[11px] font-medium text-cafe-secondary">
+            <h3 className="mb-2 text-label font-medium text-cafe-secondary">
               {inputs !== undefined ? '输入与依据' : '交接与依据'}
             </h3>
             <dl className="space-y-2">
@@ -251,7 +251,7 @@ export function BriefingCard({
             )}
           </section>
           <section aria-label="诊断" className="mt-3 min-w-0 border-t border-cafe-border pt-3">
-            <h3 className="mb-2 flex justify-between text-[11px] text-cafe-secondary">
+            <h3 className="mb-2 flex justify-between text-label text-cafe-secondary">
               <span>诊断</span>
               <span>仅供核对</span>
             </h3>

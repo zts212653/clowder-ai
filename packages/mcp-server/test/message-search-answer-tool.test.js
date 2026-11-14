@@ -85,6 +85,10 @@ test('answer preparation does not retry a failed POST or enqueue a hidden second
   await handlePrepareMessageSearchAnswer({ query: '一行', operationId: 'same-operation' });
   assert.equal(calls.length, 1);
 });
+test('ordinary default changes do not alter the legacy answer retry identity when sort was omitted', async () => {
+  await handlePrepareMessageSearchAnswer({ query: 'piano', operationId: 'saved-legacy' });
+  assert.equal(JSON.parse(calls[0].init.body).messageSort, 'time');
+});
 test('chosen sources cross the declared write boundary without caller-supplied publisher authority', async () => {
   const write = evidenceTools.find((tool) => tool.name === 'cat_cafe_prepare_message_search_answer');
   const selections = [

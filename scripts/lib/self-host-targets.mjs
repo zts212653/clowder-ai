@@ -1,6 +1,6 @@
 import { commandName } from '../native-effect-shell-tokenizer.mjs';
 import { packageManagerInvocation } from './package-manager-invocation.mjs';
-import { stoppedDeploymentsIn } from './self-host-deployments.mjs';
+import { nonStoppingHelp, stoppedDeploymentsIn } from './self-host-deployments.mjs';
 import { executedInvocations, executionChainInvocations } from './shell-invocation.mjs';
 
 /**
@@ -88,6 +88,7 @@ function killerOperands(invocation) {
 }
 
 function isServiceStop(invocation) {
+  if (nonStoppingHelp(invocation)) return false;
   if (packageManagerInvocation(invocation.name, invocation.operands).script === 'preview:process') {
     const index = invocation.operands.indexOf('preview:process');
     return ['start', 'stop'].includes(invocation.operands[index + 1]);
@@ -230,8 +231,8 @@ function resolveStopTargets(pipelines, observations) {
  */
 export function analyseCommands(raw, cwd, observations = {}) {
   raw = String(raw ?? '');
-  const observed = executedInvocations(raw, { cwd });
-  const chained = executionChainInvocations(raw, { cwd });
+  const observed = executedInvocations(raw, { cwd, builtinContext: true });
+  const chained = executionChainInvocations(raw, { cwd, builtinContext: true });
   observed.pipelines.push(...chained.pipelines);
   const quiet = { stopClass: false, unresolved: false, pids: [], ports: [], deployments: [], text: raw };
   const deployments = stoppedDeploymentsIn(observed.pipelines.flat(), cwd);
@@ -245,7 +246,7 @@ export function analyseCommands(raw, cwd, observations = {}) {
 }
 
 export function hasPatternKiller(raw, cwd) {
-  return executedInvocations(raw, { cwd })
+  return executedInvocations(raw, { cwd, builtinContext: true })
     .pipelines.flat()
     .some(({ name }) => PATTERN_KILLERS.has(name));
 }

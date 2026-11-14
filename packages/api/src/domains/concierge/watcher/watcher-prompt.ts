@@ -1,5 +1,6 @@
 import { catRegistry, type WatcherSessionState } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../utils/token-counter.js';
+import { compareCursors, cursorFor, parseCursor } from '../../cats/services/stores/cursor.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { awaitStoreRead } from '../../cats/services/stores/ports/StoreReadOptions.js';
 
@@ -52,18 +53,28 @@ export async function watcherRawWindow(
         : value;
     },
   });
+  // getByThreadAfter orders by publication, not response start / UI timeline time.
+  // Resolve legacy hashes through that same owner; an unknown position cannot sign a raw cursor.
+  const publicationCursor = async (message: StoredMessage): Promise<string> => {
+    const cursor =
+      message.visibilitySeq !== undefined
+        ? cursorFor(message)
+        : await messages.canonicalizeCursor?.(message.id, threadId);
+    if (!cursor || parseCursor(cursor)?.version !== 2) throw new Error('watcher_publication_order_unavailable');
+    return cursor;
+  };
   const rows: StoredMessage[] = [];
   const response = throughMessageId ? await messages.getById(throughMessageId) : null;
   if (response && (response.threadId !== threadId || response.userId !== userId))
     throw new Error('watcher_source_scope_mismatch');
   const previous = state.consumedThrough ? await messages.getById(state.consumedThrough) : null;
+  const responseCursor = response ? await publicationCursor(response) : undefined;
   const lateReply =
     response &&
+    responseCursor &&
     previous &&
     response.id !== previous.id &&
-    ((response.timelineOrderAt ?? response.timestamp) < (previous.timelineOrderAt ?? previous.timestamp) ||
-      ((response.timelineOrderAt ?? response.timestamp) === (previous.timelineOrderAt ?? previous.timestamp) &&
-        response.id.localeCompare(previous.id) < 0));
+    compareCursors(responseCursor, await publicationCursor(previous)) < 0;
   const resumeCursor =
     state.backfillAfter ??
     (lateReply && state.consumedThrough
@@ -90,7 +101,12 @@ export async function watcherRawWindow(
   let complete = true;
   let blockedMessageId: string | undefined;
   for (const message of rows.slice(0, 40)) {
-    if ((message.timelineOrderAt ?? message.timestamp) > throughAt) break;
+    if (
+      responseCursor
+        ? compareCursors(await publicationCursor(message), responseCursor) > 0
+        : (message.timelineOrderAt ?? message.timestamp) > throughAt
+    )
+      break;
     if (
       message.extra?.turnExecution?.executionKind === 'watcher' ||
       (message.id !== throughMessageId &&

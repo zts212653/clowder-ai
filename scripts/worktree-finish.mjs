@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { requireNoDurableConsumers } from './lib/worktree-consumers.mjs';
 import { directReleaseReceipt, removeFinishedWorktree } from './lib/worktree-direct-release.mjs';
 import { requireVisibleWorktreeIndex } from './lib/worktree-light.mjs';
-import { parsePrSource, readPrTruth } from './lib/worktree-pr.mjs';
+import { parsePrSource, prBaseTrackingRef, readPrTruth } from './lib/worktree-pr.mjs';
 import { quarantineRoot, readQuarantineRecords } from './lib/worktree-quarantine.mjs';
 import { isProtected, LIFECYCLE_POLICIES, parseWorktreePorcelain } from './lib/worktree-reaper-core.mjs';
 import {
@@ -127,8 +127,8 @@ function requireCleanTarget(path) {
 function requireMergedContent(entry, opts) {
   if (opts.prTruth) {
     if (!opts.prTruth.commits.includes(entry.head)) fail('PR does not contain the exact checkout HEAD');
-    if (isAncestor(opts.repo, opts.mergedAt, 'origin/main') !== true)
-      fail('PR merge commit must be in origin/main history; fetch before finishing');
+    if (isAncestor(opts.repo, opts.mergedAt, opts.prBaseTrackingRef) !== true)
+      fail(`PR merge commit must be in ${opts.prBaseTrackingRef} history; fetch the actual PR base before finishing`);
     return;
   }
   if (entry.lifecycle.policy !== 'merged') {
@@ -200,6 +200,7 @@ function resolveMergedPr(opts) {
       fail('merged PR truth unavailable or invalid');
     opts.prTruth = truth;
     opts.mergedAt = truth.mergedAt;
+    opts.prBaseTrackingRef = prBaseTrackingRef(opts.repo, truth);
   }
 }
 

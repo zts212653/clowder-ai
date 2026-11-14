@@ -1,8 +1,12 @@
+import 'fake-indexeddb/auto';
 import type { ContextAttachment } from '@cat-cafe/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { acknowledgeComposerDraftConsumption } from '@/components/composer-draft-consumption';
+import {
+  acknowledgeComposerDraftConsumption,
+  recoverMountedComposerDraft,
+} from '@/components/composer-draft-consumption';
 import { writeOwnerComposerDraft } from '@/components/durable-composer-draft-helpers';
 import { syncContextAttachmentDraftToStorage, threadContextAttachmentDrafts } from '@/components/thread-drafts';
 import { useDurableComposerDraft } from '@/components/useDurableComposerDraft';
@@ -11,7 +15,15 @@ import {
   workspaceFileQuoteAttachment,
 } from '@/components/workspace/workspace-file-quote';
 import { useChatStore } from '@/stores/chatStore';
+import {
+  findSendAttempt,
+  observeCanceledSendAttempts,
+  putSendAttempt,
+  useSendAttemptStore,
+} from '@/stores/send-attempt-store';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { deleteSendAttempt, loadSendAttempts, saveSendAttempt } from '@/utils/send-attempt-db';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 const THREAD = 'draft-page-exit';
@@ -109,6 +121,125 @@ async function render() {
   await settle();
   expect(container.querySelector('[data-testid="quotes"]')?.textContent).toBe('1');
 }
+
+it('recovers an event-only recall through the mounted draft owner without erasing newly typed text', async () => {
+  vi.useRealTimers();
+  observeApiSessionOwner('recall-owner');
+  useSendAttemptStore.setState({ attempts: [] });
+  await render();
+  const attempt = {
+    id: 'event-only-recall',
+    ownerUserId: 'recall-owner',
+    threadId: THREAD,
+    content: '撤回原文',
+    files: [],
+    timestamp: 1,
+    status: 'accepted' as const,
+    serverMessageId: 'recall-source',
+    composerDraftRevision: 68,
+  };
+  await saveSendAttempt(attempt);
+  putSendAttempt(attempt);
+  act(() => typeNewInput('原聊天草稿 + 新输入'));
+  const newReply = { id: 'new-reply', content: 'new reply', senderCatId: null, threadId: THREAD };
+  useChatStore.getState().setReplyTo(newReply);
+  owner = { text: '原聊天草稿\n\n撤回原文', contentBlocks: [{ type: 'context_attachment', attachment: quote }] };
+  revision = 70;
+  vi.mocked(apiFetch).mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        draft: {
+          ...owner,
+          version: 1,
+          ownerUserId: 'recall-owner',
+          threadId: THREAD,
+          revision,
+          updatedAt: 1,
+          replyTo: 'old-reply',
+        },
+        revision,
+      }),
+    ),
+  );
+  await act(async () => observeCanceledSendAttempts(THREAD, ['recall-source'], 'recalled'));
+  await settle();
+  expect(container.querySelector('textarea')?.value).toContain('撤回原文');
+  expect(container.querySelector('textarea')?.value).toContain('+ 新输入');
+  expect(container.querySelector('[data-testid="quotes"]')?.textContent).toBe('1');
+  expect(useChatStore.getState().replyToMessage?.id).toBe('new-reply');
+  expect(findSendAttempt(attempt.ownerUserId, THREAD, attempt.id)).toBeUndefined();
+  expect(await loadSendAttempts(attempt.ownerUserId, THREAD)).toEqual([]);
+  expect(writes.every((write) => write.method !== 'POST')).toBe(true);
+  const recovered = container.querySelector('textarea')?.value;
+  await act(async () =>
+    useChatStore.getState().setPendingChatInsert({
+      threadId: THREAD,
+      text: '原聊天草稿\n\n撤回原文',
+      serverRevision: 70,
+      authoritative: true,
+      clientSnapshot: { text: '原聊天草稿', contextAttachments: [] },
+    }),
+  );
+  expect(container.querySelector('textarea')?.value).toBe(recovered);
+  await act(async () => observeCanceledSendAttempts(THREAD, ['recall-source'], 'recalled'));
+  expect(container.querySelector('textarea')?.value).toBe(recovered);
+  await deleteSendAttempt(attempt);
+});
+
+it('acknowledges an HTTP-restored recall revision without merging it a second time', async () => {
+  observeApiSessionOwner('recall-owner');
+  await render();
+  await act(async () =>
+    useChatStore.getState().setPendingChatInsert({
+      threadId: THREAD,
+      text: 'HTTP restored recall',
+      serverRevision: 70,
+      authoritative: true,
+    }),
+  );
+  await act(async () =>
+    expect(
+      await recoverMountedComposerDraft({
+        version: 1,
+        ownerUserId: 'recall-owner',
+        threadId: THREAD,
+        revision: 70,
+        text: 'HTTP restored recall',
+        updatedAt: 1,
+      }),
+    ).toBe(true),
+  );
+  expect(container.querySelector('textarea')?.value).toBe('HTTP restored recall');
+});
+
+it.each([
+  'account',
+  'unmount',
+])('waits for initial hydration and abandons recall recovery after %s changes', async (change) => {
+  observeApiSessionOwner('recall-owner');
+  let resolve!: (response: Response) => void;
+  vi.mocked(apiFetch).mockImplementationOnce(
+    () =>
+      new Promise<Response>((finish) => {
+        resolve = finish;
+      }),
+  );
+  await act(async () => root.render(<Harness />));
+  const recovery = recoverMountedComposerDraft({
+    version: 1,
+    ownerUserId: 'recall-owner',
+    threadId: THREAD,
+    revision: 70,
+    text: 'recall after hydration',
+    updatedAt: 1,
+  });
+  if (change === 'account') observeApiSessionOwner('other-owner');
+  else await act(async () => root.render(<div />));
+  await act(async () => resolve(new Response(JSON.stringify({ draft: null, revision: 69 }))));
+  expect(await recovery).toBe(false);
+  if (change === 'unmount') expect(container.querySelector('textarea')).toBeNull();
+  else expect(container.querySelector('textarea')?.value).not.toContain('recall after hydration');
+});
 
 it('flushes file-side deletion on page exit without waiting for the typing debounce', async () => {
   await render();

@@ -90,7 +90,7 @@ export function AccountConnectionFields({
                 isAnthropicKey
                   ? 'https://api.anthropic.com'
                   : isGoogleKey
-                    ? 'https://generativelanguage.googleapis.com'
+                    ? 'https://aiplatform.googleapis.com'
                     : 'https://api.openai.com/v1'
               }
               className={formInputClass}

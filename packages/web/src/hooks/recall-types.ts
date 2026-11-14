@@ -9,6 +9,8 @@ import type {
 export type MemoryCueStatus = 'presented_unreported' | 'drilled' | 'applied' | 'dismissed' | 'invalidated';
 
 export interface RecallResultItem {
+  memoryHref?: string | null;
+  messageHref?: string | null;
   sourceUnavailableReason?: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
   title: string;
   titleStatus?: 'loading' | 'unavailable';
@@ -59,6 +61,8 @@ export interface RecallEvent {
 }
 
 export interface RecallSourceView {
+  memoryHref?: string | null;
+  messageHref?: string | null;
   sourceUnavailableReason?: RecallResultItem['sourceUnavailableReason'];
   anchor: string;
   invocationId?: string;

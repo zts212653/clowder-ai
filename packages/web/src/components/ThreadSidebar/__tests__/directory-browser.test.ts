@@ -26,6 +26,7 @@ function jsonFail(status = 500, error = 'fail') {
 
 const HOME = '/home/user';
 const englishDirectoryCopy = {
+  ...defaultDirectoryBrowserCopy,
   configuredPathUnavailable: 'That folder is unavailable. Showing your home folder.',
   browseFailed: 'Unable to browse this folder',
   connectFailed: 'Unable to connect to the server',

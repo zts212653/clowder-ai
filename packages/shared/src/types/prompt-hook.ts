@@ -313,6 +313,8 @@ export interface AssemblerInput {
   mentionRoutingItems: readonly string[];
   /** A private declaration/action discrepancy, distinct from unrouted mentions. */
   voidHoldFeedback?: boolean;
+  /** Last reply waited for the owner without a line-start mention, so it never reached his mailbox. */
+  ownerAskFeedback?: boolean;
   promptTags: readonly string[];
   routingPolicyParts: string | null;
   sopStageHint: SopStageInput | null;

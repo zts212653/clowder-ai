@@ -27,6 +27,20 @@ export function moduleActivation(value: unknown): unknown {
   return {
     actions: moduleActions(source.actions),
     ...Object.fromEntries(
+      ['deliver', 'handle']
+        .filter((key) => typeof source[key] === 'function')
+        .map((key) => [
+          key,
+          (...args: unknown[]) => Reflect.apply(source[key] as (...input: unknown[]) => unknown, source, args),
+        ]),
+    ),
+    ...(source.webhook &&
+    typeof source.webhook === 'object' &&
+    'handle' in source.webhook &&
+    typeof source.webhook.handle === 'function'
+      ? { webhook: { handle: source.webhook.handle.bind(source.webhook) } }
+      : {}),
+    ...Object.fromEntries(
       ['stop', 'preStop', 'configRefresh', 'dispose']
         .filter((key) => typeof source[key] === 'function')
         .map((key) => {

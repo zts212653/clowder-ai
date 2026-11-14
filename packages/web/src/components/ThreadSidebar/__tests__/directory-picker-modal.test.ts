@@ -377,6 +377,63 @@ describe('DirectoryPickerModal', () => {
     ).toHaveLength(1);
   });
 
+  it('keeps runtime browsable without selecting it or restoring a late project selection', async () => {
+    const parent = '/projects';
+    const runtime = `${parent}/runtime`;
+    const delayed = `${parent}/ordinary`;
+    const listing = (current: string, entries: unknown[] = [], projectRestriction?: string) =>
+      jsonOk({ current, homePath: '/home/test', entries, projectRestriction });
+    let finishOrdinary: (() => void) | undefined;
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url === '/api/projects/cwd') return jsonOk({ path: parent });
+      if (url === '/api/backlog/items') return jsonOk({ items: [] });
+      const path = new URL(url, 'http://localhost').searchParams.get('path');
+      if (path === parent) {
+        return listing(parent, [
+          { name: 'runtime', path: runtime, isDirectory: true },
+          { name: 'ordinary', path: delayed, isDirectory: true },
+        ]);
+      }
+      if (path === delayed) {
+        return new Promise((resolve) => {
+          finishOrdinary = () => resolve(listing(delayed));
+        });
+      }
+      if (path === runtime)
+        return listing(
+          runtime,
+          [{ name: 'runtime-only-child', path: `${runtime}/runtime-only-child` }],
+          'runtime_read_only',
+        );
+      return jsonFail();
+    });
+    const { onSelect } = render();
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((item) => item.textContent?.includes(label))!;
+    await flush();
+    act(() => button('浏览文件夹').click());
+    await flush();
+    expect(button('创建对话').disabled).toBe(false);
+    act(() => button('ordinary').click());
+    expect(button('创建对话').disabled).toBe(true);
+    const pathInput = container.querySelector<HTMLInputElement>('input[placeholder="Enter path..."]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(pathInput, runtime);
+      pathInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Go to path"]')!.click());
+    await flush();
+    expect(container.textContent).toContain('runtime-only-child');
+    expect(container.textContent).toContain('只读');
+    expect(container.querySelector('[title="新建文件夹"]')).toBeNull();
+    expect(button('创建对话').disabled).toBe(true);
+
+    await act(async () => finishOrdinary?.());
+    expect(container.textContent).toContain('runtime-only-child');
+    expect(button('创建对话').disabled).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it('clears the selected directory while browsing the virtual 此电脑 root', async () => {
     const winCwd = 'D:\\Projects';
     mockApiFetch.mockImplementation((path: string) => {

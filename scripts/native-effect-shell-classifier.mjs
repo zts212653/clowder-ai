@@ -45,13 +45,13 @@ export const SHELL_EFFECT_PRIORITY = new Map([
   ['auth_mutation', 9],
 ]);
 
-export function classifyShellSegment(raw) {
+export function classifyShellSegment(raw, { builtinContext = true } = {}) {
   const command = stripHarmlessRedirections(stripShellComments(raw));
   if (redisEffect(command) === 'service_mutation') return 'service_mutation';
   if (isUnsafeDateOperation(command)) return 'service_mutation';
   const httpEffect = classifyHttpOperation(command);
   if (httpEffect) return httpEffect;
-  const execution = executedInvocations(command);
+  const execution = executedInvocations(command, { builtinContext });
   const invocations = execution.pipelines.flat();
   const authEffect = codexAuthenticationEffect(invocations);
   if (authEffect === 'auth_mutation') return authEffect;
@@ -69,7 +69,13 @@ export function classifyShellSegment(raw) {
   if (isWriteOperation(command)) return 'write';
   if (invocations.some(({ name, operands }) => name === 'find' && findExecutedCommands(operands).length))
     return 'unknown';
-  if (execution.complete && (authEffect === 'read' || isReadOperation(command))) return 'read';
+  if (
+    execution.complete &&
+    (authEffect === 'read' ||
+      (invocations.length > 0 && invocations.every((call) => call.lookupOnly)) ||
+      isReadOperation(command))
+  )
+    return 'read';
   return 'unknown';
 }
 
@@ -98,7 +104,7 @@ export function destructiveInvocationEffect({ name, operands = [] } = {}) {
 
 const DATA_PROGRAMS = new Set(
   `base64 bat cat column curl cut diff echo envsubst fmt fold gh grep head jq less md5 md5sum more nl od
-   paste pbcopy printf pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
+   paste pbcopy printf pgrep ps lsof pv redis-cli rev rg sed shasum sort sqlite3 tac tail tee tr uniq wc wl-copy xclip xxd`
     .trim()
     .split(/\s+/),
 );
@@ -173,7 +179,7 @@ function provenGitData(call) {
 
 function provenDataCall(call) {
   if (call.unprovedCodeEvidence?.length) return false;
-  return call.delegated || namedDataCall(call) || provenGitData(call);
+  return call.lookupOnly || call.delegated || namedDataCall(call) || provenGitData(call);
 }
 
 /** Evidence that may still be executed; classified data roles never become shell source. */
@@ -268,7 +274,7 @@ function isLocalObservation(raw) {
   if (['du', 'sleep'].includes(executable)) return true;
   if (executable === 'shasum') return !tokens.slice(1).some((token) => ['-c', '--check', '--status'].includes(token));
   if (isLivenessProbe({ name: executable, operands: tokens.slice(1) })) return true;
-  if (['ps', '/bin/ps', '/usr/bin/ps', 'lsof', '/usr/bin/lsof', '/usr/sbin/lsof'].includes(executable)) return true;
+  if (/^(?:\/(?:usr\/)?s?bin\/)?(?:ps|pgrep|lsof)$/.test(executable)) return true;
   if (['test', '/bin/test', '/usr/bin/test'].includes(executable)) return tokens.length > 1;
   return ['[', '/bin/[', '/usr/bin/['].includes(executable) && tokens.at(-1) === ']';
 }

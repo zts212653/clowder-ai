@@ -29,6 +29,21 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
+  it('preserves plugin input acceptance without inventing an invocation, and drops malformed receipts', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const pluginAddressedReceipt = { targetId: 'pi_dot', inputMessageId: 'input-1', accepted: true };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ pluginAddressedReceipt }))?.pluginAddressedReceipt,
+      pluginAddressedReceipt,
+    );
+    assert.equal(
+      safeParseExtra(JSON.stringify({ pluginAddressedReceipt: { ...pluginAddressedReceipt, accepted: 'yes' } }))
+        ?.pluginAddressedReceipt,
+      undefined,
+    );
+  });
   it('preserves the buffered publication receipt through Redis hydration without inferring one on legacy messages', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

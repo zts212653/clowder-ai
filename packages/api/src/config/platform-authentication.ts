@@ -10,6 +10,12 @@ import { assertProviderCredentialDestination } from './provider-credential-polic
 import { PROVIDER_BASE_URLS, parseProviderBaseUrl } from './provider-endpoint.js';
 
 const CLIENTS = new Set<string>(['openai', 'anthropic', 'google']);
+// A Google platform key means Vertex AI on Google Cloud billing, not AI Studio (operator 2026-11-10).
+const PLATFORM_BASE_URLS: Readonly<Record<PlatformApiKeyClient, string>> = {
+  openai: PROVIDER_BASE_URLS.openai,
+  anthropic: PROVIDER_BASE_URLS.anthropic,
+  google: 'https://aiplatform.googleapis.com',
+};
 const HEADERS: Readonly<Record<PlatformApiKeyClient, ReadonlySet<string>>> = {
   openai: new Set(['authorization']),
   anthropic: new Set(['authorization', 'x-api-key']),
@@ -32,8 +38,8 @@ export function platformAccountProjectRoot(start = fileURLToPath(new URL('../../
 }
 
 export function platformAccountBaseUrl(profile: RuntimeProviderProfile, client: PlatformApiKeyClient): URL {
-  let value = profile.baseUrl?.trim() || PROVIDER_BASE_URLS[client];
-  const official = new URL(PROVIDER_BASE_URLS[client]);
+  let value = profile.baseUrl?.trim() || PLATFORM_BASE_URLS[client];
+  const official = new URL(PLATFORM_BASE_URLS[client]);
   // Only the known official hostname may omit a scheme. Do not guess a gateway's protocol.
   if (value === official.hostname || value.startsWith(`${official.hostname}/`)) value = `https://${value}`;
   const url = parseProviderBaseUrl(value);

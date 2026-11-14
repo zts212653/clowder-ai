@@ -9,10 +9,13 @@ function confirmedOverlap(evidence, from, to) {
       !interval.evidenceId ||
       !Number.isFinite(interval.startedAt) ||
       !Number.isFinite(interval.endedAt) ||
-      interval.endedAt < interval.startedAt ||
-      interval.endedAt > to
+      interval.endedAt < interval.startedAt
     )
       return 0;
+    // Full-wake markers authorize parent recovery but carry no sleep duration.
+    // Their timestamp must not invalidate an earlier completed sleep interval.
+    if (interval.endedAt === interval.startedAt) continue;
+    if (interval.endedAt > to) return 0;
     const start = Math.max(from, interval.startedAt);
     const end = Math.min(to, interval.endedAt);
     if (end > start) intervals.push([start, end]);

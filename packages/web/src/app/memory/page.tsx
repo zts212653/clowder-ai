@@ -1,4 +1,5 @@
 import { MemoryEntry } from '@/components/memory/page/MemoryEntry';
+import { readMemorySourceTarget } from '@/components/memory/page/memory-source-target';
 import { readProfileSourceTarget } from '@/components/memory/page/profile-source-target';
 
 export default function MemoryPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
@@ -13,6 +14,7 @@ export default function MemoryPage({ searchParams }: { searchParams: Record<stri
       tab={tab}
       from={from}
       profileSource={readProfileSourceTarget(searchParams)}
+      memorySource={readMemorySourceTarget(searchParams)}
       initialQuery={query}
       initialType={type === 'memory' || type === 'documents' || type === 'conversations' ? type : 'all'}
       initialDepth={searchParams.depth === 'raw' ? 'raw' : 'summary'}

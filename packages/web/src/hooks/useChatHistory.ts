@@ -3,6 +3,7 @@
 import {
   type CliDiagnostics,
   mergeCodexStartupRecovery,
+  preserveInteractiveBlockStates,
   type ReplyPreview,
   timelineMessageKind,
 } from '@cat-cafe/shared';
@@ -26,8 +27,10 @@ import {
   findEarliestMessageByCursor,
   getMessageTimelineCursorTime,
   getMessageTimelineOrderTime,
+  isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { withSendAttempts } from '@/stores/send-attempt-projection';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -55,6 +58,7 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
+import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
 import {
   findCrossPostTargetMessageId,
   peekPendingCrossPostScroll,
@@ -103,6 +107,7 @@ import {
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
+import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -148,10 +153,7 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export interface ChatUserScrollGesture {
-  scrollTo(top: number): boolean;
-  end(): void;
-}
+export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -269,7 +271,8 @@ function tryRestoreSavedScrollState(el: HTMLElement, saved: SavedScrollState): b
   const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
   const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
   el.scrollTop = targetTop;
-  const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
+  // A measured short page is already at bottom even when it cannot scroll.
+  const canSettle = saved.anchor === 'bottom' ? el.clientHeight > 0 : maxTop >= saved.top;
   return canSettle && Math.abs(el.scrollTop - targetTop) <= 1;
 }
 
@@ -284,7 +287,8 @@ function captureRestoreWritePosition(el: HTMLElement, messages: ChatMessageData[
 
 function readingSettlementStillMatches(el: HTMLElement, position: SavedScrollState): boolean {
   if (el.scrollTop !== position.top) return false;
-  if (position.anchor === 'bottom') return el.scrollTop === Math.max(0, el.scrollHeight - el.clientHeight);
+  if (position.anchor === 'bottom')
+    return el.clientHeight > 0 && el.scrollTop === Math.max(0, el.scrollHeight - el.clientHeight);
   if (!position.messageAnchor) return true;
   return matchesMessageScrollAnchor(el, position.messageAnchor);
 }
@@ -420,7 +424,7 @@ function mergeRichPayload(
     seen.add(block.id);
     blocks.push(block);
   }
-  return { v: 1 as const, blocks };
+  return { v: 1 as const, blocks: preserveInteractiveBlockStates(blocks, fallback?.blocks ?? []) };
 }
 
 type RequiredMessageExtraFields = {
@@ -448,6 +452,14 @@ function mergeMessageExtra(
   // side only fills a missing field. `rich` merges structurally; startupRecovery
   // chooses its own monotonic version independently of body preference.
   const fields: RequiredMessageExtraFields = {
+    pluginAddressedReceipt: pick('pluginAddressedReceipt'),
+    targetResponse:
+      preferred?.targetResponse && fallback?.targetResponse
+        ? preferred.targetResponse.revision >= fallback.targetResponse.revision
+          ? preferred.targetResponse
+          : fallback.targetResponse
+        : pick('targetResponse'),
+    targetResponseResult: pick('targetResponseResult'),
     // No fallback inheritance: this layout belongs to the selected full body.
     outputLayout: preferred?.outputLayout,
     liveCompanion: pick('liveCompanion'),
@@ -769,6 +781,23 @@ export function mergeReplaceHydrationMessages(
 }
 
 /**
+ * Whether a replace read left older pages loaded below the page's own boundary. Only local records
+ * count: what the page returned itself, sparse recovered rows older than its window included, is
+ * not a page the reader paged down to.
+ */
+function keepsOlderPagesLoaded(
+  merged: readonly ChatMessageData[],
+  pageMessages: readonly ChatMessageData[],
+  pageCursor: string,
+): boolean {
+  const pageIds = new Set(pageMessages.map((message) => message.id));
+  return merged.some(
+    (message) =>
+      !pageIds.has(message.id) && !message.id.startsWith('draft-') && isBeforeHistoryPageCursor(message, pageCursor),
+  );
+}
+
+/**
  * Hook for managing chat history: fetching, pagination, scroll handling.
  * Extracted from ChatContainer to reduce component size.
  *
@@ -814,9 +843,16 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sendAttempts = useSendAttempts(threadId, rawMessages, pendingQueue ?? []);
   const presentedMessages = useMemo(
-    () => withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
-    [rawMessages, pendingQueue, threadId],
+    () =>
+      withSendAttempts(
+        withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
+        sendAttempts,
+        threadId,
+        pendingQueue,
+      ),
+    [rawMessages, pendingQueue, threadId, sendAttempts],
   );
   const messages = useViewportMessageTimeline(threadId, presentedMessages);
 
@@ -1539,6 +1575,7 @@ export function useChatHistory(threadId: string) {
           .map(
             (m: {
               id: string;
+              clientMessageId?: string;
               type: string;
               from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
@@ -1595,6 +1632,7 @@ export function useChatHistory(threadId: string) {
                           ? 'assistant'
                           : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
                 ...(m.from ? { from: m.from } : {}),
+                ...(m.clientMessageId ? { clientMessageId: m.clientMessageId } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
@@ -1672,9 +1710,14 @@ export function useChatHistory(threadId: string) {
           // 响应覆盖而不是合并。
           hydrateThread(fetchForThread, mergedMsgs, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          // The page boundary follows what stays loaded: a read that unloaded the older pages (a
+          // recovery round, an IndexedDB copy) restarts it at this page, while older pages the merge
+          // kept still own the deeper boundary the reader already paged down to.
           if (
             typeof data.historyPageCursor === 'string' &&
-            (cursor || !targetProjection?.messages.length || !historyPageCursorByThread.has(fetchForThread))
+            (cursor ||
+              !historyPageCursorByThread.has(fetchForThread) ||
+              !keepsOlderPagesLoaded(mergedMsgs, historyMsgs, data.historyPageCursor))
           ) {
             historyPageCursorByThread.set(fetchForThread, data.historyPageCursor);
           }
@@ -1711,6 +1754,9 @@ export function useChatHistory(threadId: string) {
       } catch (err) {
         // AbortError is expected during thread switch — ignore silently
         if (isAbortError(err)) return false;
+        // Preserve the bounded transport failure until the navigation owner can
+        // decide whether its still-current refresh may issue one more read.
+        if (err instanceof Error && err.name === 'TimeoutError') return 'timeout' as const;
         return false;
       } finally {
         // Do not let stale/aborted request clear loading state for a newer thread request.
@@ -1731,9 +1777,18 @@ export function useChatHistory(threadId: string) {
   );
 
   const fetchHistory = useCallback(
-    async (cursor?: string, options?: { replace?: boolean; freshnessToken?: number; afterCurrentGet?: boolean }) => {
+    async (
+      cursor?: string,
+      options?: {
+        replace?: boolean;
+        freshnessToken?: number;
+        afterCurrentGet?: boolean;
+        retryTimeoutWhile?: () => boolean;
+      },
+    ) => {
       const freshnessKey = typeof options?.freshnessToken === 'number' ? `:fresh:${options.freshnessToken}` : '';
       const requestKey = `messages:${cursor ?? 'latest'}:${options?.replace ? 'replace' : 'prepend'}${freshnessKey}`;
+      let timeoutRetried = false;
       while (true) {
         const result = await historyAdmission.runRequest({
           threadId,
@@ -1744,7 +1799,12 @@ export function useChatHistory(threadId: string) {
           // this thread, instead of being turned away by this surface's `loadingRef` (contract 3.2).
           startWhenIdle: options?.afterCurrentGet === true,
         });
-        if (result.status === 'completed') return result.value;
+        if (result.status === 'completed') {
+          if (result.value !== 'timeout') return result.value;
+          if (timeoutRetried || !options?.retryTimeoutWhile?.()) return false;
+          timeoutRetried = true;
+          continue;
+        }
 
         // The shared request originated from a consumer that unmounted. Its
         // controller and stale guards belong to that departed surface, so the
@@ -1783,7 +1843,16 @@ export function useChatHistory(threadId: string) {
         };
         // History can be shared with another reader. Retire this navigation's
         // wait immediately without cancelling that shared fetch or its hydration.
-        void fetchHistory(undefined, { replace: true }).then(finish, () => finish(false));
+        void fetchHistory(undefined, {
+          replace: true,
+          afterCurrentGet: true,
+          retryTimeoutWhile: () =>
+            readingRefreshRef.current === operation &&
+            generation === restoreGenerationRef.current &&
+            threadIdRef.current === threadId &&
+            useChatStore.getState().currentThreadId === threadId &&
+            !signal?.aborted,
+        }).then(finish, () => finish(false));
       });
       const owned = readingRefreshRef.current;
       return bindReadingAbort(receipt, signal, () => {
@@ -2961,6 +3030,11 @@ export function useChatHistory(threadId: string) {
       },
     };
   }, [threadId, markScrollIntent, cancelPendingRestore, clearUserScrollIntent]);
+
+  useLayoutEffect(() => {
+    const viewport = scrollContainerRef.current;
+    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
+  }, [beginUserScroll]);
 
   return {
     captureReadingPosition,

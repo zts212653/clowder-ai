@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
+import { copyManagedGhCohort } from './helpers/managed-gh-cohort.js';
 import { assertGuardedOrUnproved } from './helpers/native-effect-policy-assertions.js';
 import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
 
@@ -187,6 +188,7 @@ test('comparison reads require the observed system program and unchanged earlier
 
 // Same exact repository wrapper and dependencies, using its mandated absolute spelling.
 test('absolute pinned gh wrapper retains the PR/API read contract', () => {
+  copyManagedGhCohort(runtime);
   const gh = join(guardedBin, 'gh');
   const delegate = join(ordinary, 'gh');
   const wrapper = readFileSync(new URL('../../../scripts/guarded-bin/gh', import.meta.url));
@@ -239,6 +241,7 @@ test('absolute pinned gh wrapper retains the PR/API read contract', () => {
 });
 
 test('gh read proof distinguishes inherited lookup from inline selection in all cwd roles', async (t) => {
+  copyManagedGhCohort(runtime);
   const gh = join(guardedBin, 'gh');
   const delegate = join(ordinary, 'gh');
   const evilBin = join(ordinary, 'evilbin');

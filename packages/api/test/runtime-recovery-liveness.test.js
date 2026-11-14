@@ -3,7 +3,11 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { ActionSuccessorDispatchRecovery } from '../dist/domains/ball-custody/ActionSuccessorDispatchRecovery.js';
 import { ActionSuccessorRecoverySweep } from '../dist/domains/ball-custody/ActionSuccessorRecoverySweep.js';
-import { ManagedCommandWakeRecoverySweep } from '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import {
+  buildAdmissionFactIdempotencyKey,
+  ManagedCommandWakeRecoverySweep,
+} from '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ManagedJobService } from '../dist/domains/managed-job/ManagedJobService.js';
 import { isolateManagedJobData } from './helpers/isolated-managed-job-data.js';
 
@@ -26,14 +30,46 @@ test('recovery cycles coalesce census through completion and recover after a rej
   jobs.cancel(principal, job.jobId);
   for (const kind of ['returns', 'dispatches', 'managed']) {
     let scans = 0;
+    let enter;
+    const entered = new Promise((resolve) => {
+      enter = resolve;
+    });
     let release;
     const pause = new Promise((resolve) => {
       release = resolve;
     });
     const scan = async () => {
       scans++;
+      enter();
       await pause;
       return [];
+    };
+    const history = new MessageStore();
+    let historyReads = 0;
+    let historyWrites = 0;
+    const task = {
+      id: 'hold-ball-liveness',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: 60_000 },
+      deliveryThreadId: principal.threadId,
+      createdBy: 'hold-ball:codex',
+      createdAt: new Date(1000).toISOString(),
+      enabled: true,
+      params: {
+        triggerUserId: principal.userId,
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          createdBy: 'hold-ball:codex',
+          managedCommand: {
+            state: 'command_running',
+            command: 'true',
+            startedAt: 1000,
+            admissionFact: 'original admission',
+            admissionFactAppended: false,
+          },
+        },
+      },
     };
     const sweep =
       kind === 'returns'
@@ -42,30 +78,62 @@ test('recovery cycles coalesce census through completion and recover after a rej
           ? new ActionSuccessorDispatchRecovery({ leaseStore: { listPendingDispatches: scan } })
           : new ManagedCommandWakeRecoverySweep({
               dynamicTaskStore: {
-                getById: () => undefined,
+                getById: (id) => (id === task.id ? task : undefined),
                 getAll: () => {
                   scans++;
-                  return [];
+                  return [task];
+                },
+                updateParamsIfCurrent(id, expected, params) {
+                  if (id !== task.id || task.params !== expected) return false;
+                  task.params = params;
+                  return true;
                 },
               },
+              messageStore: {
+                async getByIdempotencyKey(...args) {
+                  historyReads++;
+                  enter();
+                  await pause;
+                  return history.getByIdempotencyKey(...args);
+                },
+                async append(message) {
+                  historyWrites++;
+                  return history.append(message);
+                },
+              },
+              socketManager: { broadcastToRoom() {} },
             });
-    if (kind === 'managed') {
-      // Hold the first asynchronous part of the entire cycle, before durable-job reconciliation.
-      Object.assign(sweep, {
-        recoverAdmissionFacts: async () => {
-          await pause;
-          return { scanned: 0, recovered: 0, pending: 0 };
-        },
-      });
-    }
     const calls = Array.from({ length: 30 }, () => sweep.runOnce());
-    await setImmediate();
-    assert.equal(scans, 1, `${kind}: one census while 30 timer firings overlap`);
-    release();
-    const values = await Promise.all(calls);
-    assert(values.every((value) => value === values[0]));
+    try {
+      // The production cycle must reach its real storage port before the barrier is released.
+      await entered;
+      calls.push(sweep.runOnce());
+      assert(
+        calls.every((call) => call === calls[0]),
+        `${kind}: overlapping callers share the same promise`,
+      );
+      assert.equal(scans, 1, `${kind}: one census while 30 timer firings overlap`);
+      release();
+      const values = await Promise.all(calls);
+      assert(values.every((value) => value === values[0]));
+      if (kind === 'managed') {
+        assert.equal(historyReads, 1);
+        assert.equal(historyWrites, 1);
+        assert.equal(task.params.holdLifecycle.managedCommand.admissionFactAppended, true);
+        const fact = await history.getByIdempotencyKey(
+          principal.userId,
+          principal.threadId,
+          buildAdmissionFactIdempotencyKey(task.id),
+        );
+        assert.equal(fact.content, 'original admission');
+      }
+    } finally {
+      release();
+      await Promise.allSettled(calls);
+    }
     await sweep.runOnce();
     assert.equal(scans, 2, `${kind}: next cycle is fresh`);
+    if (kind === 'managed') assert.equal(historyWrites, 1, 'the next cycle does not repeat the admission fact');
   }
   let attempts = 0;
   const sweep = new ActionSuccessorRecoverySweep({

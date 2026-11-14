@@ -38,6 +38,7 @@ AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\ClowderAI
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\dist
@@ -59,6 +60,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinese_simplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [CustomMessages]
+SetupExistingInstallation=This upgrade updates the existing directory in place: %1. To choose another location, uninstall Clowder AI in Windows Settings, then reinstall. Configuration and history in your personal folder are retained.
 SetupBeforePreparing=Running initial installation checks…
 SetupPreparingHint=When the checks pass, Setup will show file installation progress.
 SetupLoadIdentity=Loading the installation identity check…
@@ -70,6 +72,7 @@ SetupReplacePayload=Checking and removing previous program files…
 SetupHelperFailed=Unable to load an installation helper. See the Setup log.
 SetupIdentityFailed=Unable to preserve the target installation identity. See setup log.
 SetupShutdownFailed=Unable to stop the target installation safely.
+chinese_simplified.SetupExistingInstallation=本次升级将原位更新现有程序目录：%1。如需更换安装位置，请先在 Windows 设置中卸载 Clowder AI，再重新安装。个人目录中的配置与历史数据会保留。
 chinese_simplified.SetupBeforePreparing=正在执行安装前检查…
 chinese_simplified.SetupPreparingHint=检查通过后将进入安装，并显示文件安装进度。
 chinese_simplified.SetupLoadIdentity=正在加载安装实例身份检查…
@@ -282,6 +285,7 @@ Type: filesandordirs; Name: "{app}\scripts\node_modules"
 ; PrepareToInstall kills ONLY processes whose executable path is under {app} —
 ; no risk of killing the user's own node/redis instances running elsewhere.
 [Code]
+#include "install-directory.iss"
 #include "runtime-failure.iss"
 procedure ExtractionOutput(const S: String; const Error, FirstLine: Boolean);
 var

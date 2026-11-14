@@ -86,13 +86,16 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
     const env = deps.finalEnvironment
       ? { ...deps.finalEnvironment }
       : normalizeEnv(options.env, childCwd, options.inheritParentEnv);
-    const launch =
+    const windowsPlan =
       process.platform === 'win32'
-        ? { ...(deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(options.command, options.args), env }
-        : buildUnixSupervisedSpawnPlan(options.command, options.args, {
-            env,
-            killGraceMs: 500,
-          });
+        ? (deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(options.command, options.args)
+        : undefined;
+    const launch = windowsPlan
+      ? { ...windowsPlan, env: { ...env, ...windowsPlan.env } }
+      : buildUnixSupervisedSpawnPlan(options.command, options.args, {
+          env,
+          killGraceMs: 500,
+        });
     const shell =
       'shell' in launch && (typeof launch.shell === 'string' || typeof launch.shell === 'boolean')
         ? launch.shell

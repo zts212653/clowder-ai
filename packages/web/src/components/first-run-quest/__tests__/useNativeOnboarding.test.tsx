@@ -90,6 +90,13 @@ it('creates both colliding ACP profiles and restores each exact draft after redi
   await act(async () => setup.reload());
   expect(setup.draft!.partners.map((p) => p.form.catId)).toEqual(ids);
   expect(setup.draft!.partners[0].form.nickname).toBe('profile one');
+  await act(async () =>
+    setup.draft!.partners.forEach((partner) =>
+      setup.patchPartner(partner.id, {
+        selected: true,
+      }),
+    ),
+  );
   await act(async () => setup.start());
   const writes = vi
     .mocked(apiFetch)
@@ -400,4 +407,38 @@ it('recommends a newly installed tool on refresh but preserves an explicit desel
   await act(async () => setup.patchPartner('codex', { selected: false }));
   await act(async () => setup.reload());
   expect(setup.draft?.partners.find((p) => p.id === 'codex')?.selected).toBe(false);
+});
+
+it('restores the verified Desktop private HOME and route after rediscovery of the original installation', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!;
+  const desktop = {
+    ...runtimes[2],
+    clientId: 'acp' as const,
+    dshDesktop: true,
+    acp: { command: 'dsh', startupArgs: ['--profile', 'acp'], transport: 'stdio' as const },
+  };
+  vi.mocked(apiFetch).mockImplementation(async (path, init) =>
+    String(path).split('?')[0] === '/api/cats/native-runtimes'
+      ? response({ runtimes: [desktop] })
+      : original(path, init),
+  );
+  await act(async () => root.render(<Harness mode="members" />));
+  const partner = setup.draft!.partners[0];
+  const form = {
+    ...partner.form,
+    env: { DSH_HOME: '/host/private' },
+    acpStartupArgs: '--profile acp --patch /host/member.yml',
+    defaultModel: '["custom","model"]',
+  };
+  const prepared = {
+    ...desktop,
+    env: form.env,
+    acp: { ...desktop.acp, startupArgs: ['--profile', 'acp', '--patch', '/host/member.yml'] },
+  };
+  await act(async () => setup.patchPartner(partner.id, { form, runtime: prepared, selected: true }));
+  await act(async () => setup.reload());
+  expect(setup.draft!.partners[0].form.env).toEqual(form.env);
+  expect(setup.draft!.partners[0].form.defaultModel).toBe(form.defaultModel);
+  expect(setup.draft!.partners[0].runtime.env).toEqual(form.env);
+  expect(setup.draft!.partners[0].selected).toBe(true);
 });

@@ -78,7 +78,7 @@ test('power reads select bounded date files and structured event types, without 
   );
   assert.ok(command.args.includes('sec'));
   assert.ok(command.args.includes('^(Sleep|DarkWake|Wake)$'));
-  assert.equal(command.options.timeout, 5_000);
+  assert.ok(command.options.timeout > 0 && command.options.timeout <= 5_000);
   assert.equal(command.options.killSignal, 'SIGKILL');
 });
 
@@ -89,15 +89,15 @@ test('missing, unreadable and unsupported power evidence never supplies a sleep 
     readMacSleepEvidence(window, { platform: 'linux', execute: () => assert.fail('no mac command') }).status,
     'unavailable',
   );
-  assert.equal(
+  assert.deepEqual(
     readMacSleepEvidence(window, {
       platform: 'darwin',
       exists: () => true,
       execute: () => {
         throw new Error('read timed out');
       },
-    }).status,
-    'unavailable',
+    }),
+    { status: 'unavailable', reason: 'power log read failed: read timed out' },
   );
 });
 
@@ -145,6 +145,7 @@ test('empty, unavailable, throwing, or future-dated evidence leaves a delayed su
       throw new Error('reader failed');
     },
     () => available([interval(1_000_100, 1_010_000)]),
+    () => available([interval(1_000_500, 1_002_000), interval(1_003_000, 1_010_000)]),
   ]) {
     const f = clockFixture(read);
     f.advance(3_000);

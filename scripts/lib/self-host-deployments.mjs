@@ -1,6 +1,32 @@
 import { resolve } from 'node:path';
-
+import { packageManagerInvocation } from './package-manager-invocation.mjs';
 import { optionValue, unquote } from './shell-invocation.mjs';
+
+/** Consume option values before recognizing an owned CLI's help flag. */
+export function nonStoppingHelp({ name, operands = [] }) {
+  if (name === 'launchctl') return operands[0] === 'help';
+  const script = packageManagerInvocation(name, operands).script;
+  const owned = ['runtime:start', 'runtime:stop', 'runtime:restart', 'runtime:sync', 'preview:process'];
+  const index = owned.includes(script) ? operands.indexOf(script) : -1;
+  const preview = script === 'preview:process';
+  const action = preview ? operands[index + 1] : (script?.split(':')[1] ?? operands[0]);
+  const args =
+    index >= 0 ? operands.slice(index + (preview ? 2 : 1)) : name === 'runtime-worktree.sh' ? operands.slice(1) : [];
+  // runtime-worktree consumes pnpm's first forwarding separator on start/restart.
+  if (!preview && ['start', 'restart'].includes(action) && args[0] === '--') args.shift();
+  const values = preview
+    ? new Set(['--port', '--cwd', '--lifetime-seconds'])
+    : new Set(['--dir', '--branch', '--remote', '--expected-target-sha']);
+  for (let at = 0; at < args.length; at += 1) {
+    if (args[at] === '--') return false;
+    if (values.has(args[at])) {
+      at += 1;
+      continue;
+    }
+    if (['-h', '--help'].includes(args[at])) return true;
+  }
+  return false;
+}
 
 /**
  * F300 -- which deployment a command line stops, when it says so by name.
@@ -75,7 +101,9 @@ function runnerScript(operands) {
  * already happened, and refusing it would block the very chain this feature
  * added.
  */
-function deploymentOf({ name, operands }, cwd) {
+function deploymentOf(invocation, cwd) {
+  if (nonStoppingHelp(invocation)) return undefined;
+  const { name, operands } = invocation;
   if (name === 'daemon-state.mjs') {
     const subcommand = operands.find((token) => !token.startsWith('-'));
     if (subcommand !== 'stop') return undefined;

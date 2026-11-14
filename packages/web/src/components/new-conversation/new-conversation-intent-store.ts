@@ -52,6 +52,8 @@ interface PendingSave {
 let dbPromise: Promise<IDBPDatabase<NewConversationIntentDB>> | null = null;
 const ownerOperations = new Map<string, Promise<unknown>>();
 const pendingSaves = new Map<string, PendingSave>();
+/** What this tab last wrote per owner; composer keystrokes repeat it because text is not stored here. */
+const committedSaves = new Map<string, PersistedNewConversationIntent>();
 const saveStateListeners = new Map<string, Set<() => void>>();
 
 /**
@@ -232,6 +234,7 @@ async function runAttempt(attempt: PendingSave): Promise<void> {
         contextAttachments: [...attempt.value.contextAttachments],
         updatedAt: attempt.value.updatedAt,
       });
+      committedSaves.set(ownerUserId, attempt.value);
     });
     attempt.phase = 'settled';
     if (pendingSaves.get(ownerUserId) === attempt && attempt.status === 'saving') {
@@ -263,6 +266,8 @@ function startSave(value: PersistedNewConversationIntent, force: boolean): Promi
   const ownerUserId = normalized.ownerUserId;
   const existing = pendingSaves.get(ownerUserId);
   if (!force && existing && !existing.clearing && sameSnapshot(existing.value, normalized)) return existing.promise;
+  const committed = committedSaves.get(ownerUserId);
+  if (!force && !existing && committed && sameSnapshot(committed, normalized)) return Promise.resolve();
   if (existing && (existing.phase === 'reading' || existing.phase === 'queued')) {
     existing.status = 'cancelled';
     existing.controller.abort();
@@ -332,6 +337,8 @@ export async function saveNewConversationIntent(value: PersistedNewConversationI
 }
 
 export async function clearNewConversationIntent(ownerUserId: string): Promise<void> {
+  // Saves issued from here on must rewrite the row this clear removes.
+  committedSaves.delete(ownerUserId);
   const existing = pendingSaves.get(ownerUserId);
   if (existing) {
     existing.clearing = true;
@@ -344,6 +351,8 @@ export async function clearNewConversationIntent(ownerUserId: string): Promise<v
   await enqueueOwnerOperation(ownerUserId, async () => {
     try {
       await (await database()).delete(STORE, ownerUserId);
+      // A write already running when the clear began lands first and records itself.
+      committedSaves.delete(ownerUserId);
     } catch (error) {
       if (existing && pendingSaves.get(ownerUserId) === existing) {
         existing.clearing = false;
@@ -411,6 +420,7 @@ export function _resetNewConversationIntentDbForTests(): void {
     attempt.controller.abort();
   });
   pendingSaves.clear();
+  committedSaves.clear();
   saveStateListeners.clear();
   const current = dbPromise;
   dbPromise = null;

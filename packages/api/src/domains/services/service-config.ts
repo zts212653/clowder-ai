@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readServiceConfigFile, resolveServiceConfigPath } from '../../../runtime/services/service-config-core.mjs';
+import { readEmbeddingDeployment } from '../memory/embedding-generation-config.js';
 import type { ServiceConfig } from './service-manifest.js';
 
 function resolveConfigPath(): string {
@@ -88,6 +89,11 @@ function save(data: ServiceConfigMap): void {
 
 export function getServiceConfig(id: string): ServiceConfig | undefined {
   const all = load();
+  if (id === 'embedding-model') {
+    const deployment = readEmbeddingDeployment();
+    const recipe = deployment.generations[deployment.activeId].recipe;
+    if (recipe) return { ...all[id], selectedModel: recipe.modelId } as ServiceConfig;
+  }
   return all[id];
 }
 

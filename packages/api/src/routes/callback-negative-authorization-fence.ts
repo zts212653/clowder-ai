@@ -10,7 +10,7 @@ import {
   tryComputeDispatchCanonicalActionKey,
 } from '../domains/approval-hub/stores/ports/IDispatchProposalStore.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
-import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import { resolveMessageTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 
@@ -19,6 +19,7 @@ import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/o
  * The result is only used to decide whether to deny the whole carrier.
  */
 function resolveCanonicalCarrierTargets(input: {
+  plugins?: readonly { id: string; alias: string }[];
   content: string;
   isCrossThread: boolean;
   senderCatId: CatId;
@@ -27,11 +28,15 @@ function resolveCanonicalCarrierTargets(input: {
   suppressRouting: boolean;
 }): string[] {
   const storedContent = extractRichFromText(input.content).cleanText;
-  const contentAnalysis = analyzeA2AMentions(storedContent, input.isCrossThread ? undefined : input.senderCatId);
+  const contentAnalysis = analyzeA2AMentions(
+    storedContent,
+    input.isCrossThread ? undefined : input.senderCatId,
+    input.plugins,
+  );
   const contentTargets = input.actionCarrier ? [] : contentAnalysis.mentions;
   const validExplicitTargets: string[] = [];
   for (const target of input.explicitTargetCats ?? []) {
-    const resolved = resolveCatTarget(target);
+    const resolved = resolveMessageTarget(target, input.actionCarrier ? [] : input.plugins);
     if ('ok' in resolved) validExplicitTargets.push(resolved.ok);
   }
   const mergedTargets = new Set<string>([...contentTargets, ...validExplicitTargets]);
@@ -112,6 +117,7 @@ export type NegativeAuthorizationFenceResult =
     };
 
 export interface NegativeAuthorizationFenceInput {
+  plugins?: readonly { id: string; alias: string }[];
   content: string;
   isCrossThread: boolean;
   effectClass?: string;
@@ -194,6 +200,7 @@ export async function preflightNegativeAuthorizationFence(
   input: NegativeAuthorizationFenceInput,
 ): Promise<NegativeAuthorizationFenceResult | undefined> {
   const canonicalCarrierTargets = resolveCanonicalCarrierTargets({
+    plugins: input.plugins,
     content: input.content,
     isCrossThread: input.isCrossThread,
     senderCatId: input.senderCatId,

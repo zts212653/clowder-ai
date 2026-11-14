@@ -1,10 +1,11 @@
+import { createCatId } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from '../ChatMessage';
-import { SHELL_PRESENTATION_STORAGE_KEY } from '../shell/shell-presentation';
+import { SHELL_PRESENTATION_STORAGE_KEY, ShellPresentationContext } from '../shell/shell-presentation';
 
 describe('ChatMessage render isolation', () => {
   let container: HTMLDivElement;
@@ -117,6 +118,52 @@ describe('ChatMessage render isolation', () => {
 
     const warning = container.querySelector<HTMLElement>('[data-testid="routing-warning"]');
     expect(warning?.textContent).toContain('@missing-cat 不存在');
+  });
+
+  it('uses the v2 reply note for an unsent handoff and keeps the classic warning', () => {
+    const message: ChatMessageData = {
+      id: 'failed-handoff',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'gemini' },
+      catId: 'gemini',
+      origin: 'stream',
+      content: '设计方案\n\n@opus 请接棒',
+      timestamp: 1,
+      lifecycle: {
+        kind: 'response',
+        status: 'failed',
+        orderKey: '1',
+        invocationId: 'failed-invocation',
+        targetId: 'gemini',
+        inputEntryIds: [],
+        inputMessageIds: [],
+        startedAt: 1,
+        completedAt: 2,
+      },
+      extra: { routingWarnings: [{ kind: 'handoff_blocked_by_failed_turn', targetCats: [createCatId('opus')] }] },
+    };
+
+    const render = (presentation: 'v2' | 'classic') =>
+      act(() =>
+        root.render(
+          <ShellPresentationContext.Provider value={presentation}>
+            <ChatMessage message={message} threadId="thread-render" getCatById={() => undefined} />
+          </ShellPresentationContext.Provider>,
+        ),
+      );
+
+    render('v2');
+    const notice = container.querySelector<HTMLElement>('[data-testid="failed-handoff-notice"]');
+    expect(notice?.textContent).toContain('正文未交接给 @opus');
+    expect(notice?.textContent).toContain('可引用回复');
+    expect(container.querySelector('[data-testid="routing-warning"]')).toBeNull();
+    expect(container.textContent).toContain('设计方案');
+
+    render('classic');
+    const warning = container.querySelector<HTMLElement>('[data-testid="routing-warning"]');
+    expect(warning?.textContent).toContain('正文中的接棒请求未发送给 @opus');
+    expect(warning?.textContent).toContain('引用这条回复');
+    expect(container.querySelector('[data-testid="failed-handoff-notice"]')).toBeNull();
   });
 
   it('does not invent a Thinking state before real reasoning or streamed content exists', () => {

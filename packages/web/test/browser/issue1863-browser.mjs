@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
+const undoShortcut = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+const redoShortcut = process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+y';
+
 const evidence = path.join(os.tmpdir(), 'cat-cafe-evidence', 'issue1863-gap');
 await fs.mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({
@@ -45,7 +48,13 @@ console.log(
   })),
 );
 
-const report = { platform: process.platform, browser: await browser.version(), cases: [], geometry: [] };
+const report = {
+  platform: process.platform,
+  shortcuts: { undoShortcut, redoShortcut },
+  browser: await browser.version(),
+  cases: [],
+  geometry: [],
+};
 const marks = () =>
   page
     .locator('[data-link-href]')
@@ -102,12 +111,12 @@ assert.deepEqual(
 );
 await page.screenshot({ path: path.join(evidence, '02-space.png'), fullPage: true });
 await textarea.locator('xpath=../..').screenshot({ path: path.join(evidence, '02-composer-space.png') });
-await page.keyboard.press('Control+z');
+await page.keyboard.press(undoShortcut);
 assert.deepEqual(
   (await marks()).map((m) => m.text),
   [`${url}这是链接`],
 );
-await page.keyboard.press('Control+y');
+await page.keyboard.press(redoShortcut);
 assert.deepEqual(
   (await marks()).map((m) => m.text),
   [url],
@@ -168,6 +177,7 @@ assert.deepEqual(
   [`${url}这是说明`],
 );
 report.cases.push('Chromium native composition via CDP (not physical Windows IME candidate UI)');
+await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
 
 for (const source of [
   'https://example.com/中文?q=甲，乙',

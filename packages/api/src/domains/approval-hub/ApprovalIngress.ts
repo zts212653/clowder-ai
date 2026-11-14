@@ -3,6 +3,7 @@ import { approvalProducerMeta, validateApprovalEnvelope, validateApprovalOriginR
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { isSystemUserMessage } from '../cats/services/stores/visibility.js';
+import { ApprovalOriginValidationError } from './ApprovalOriginValidationError.js';
 import { approvalCardIdempotencyKey, buildApprovalCardBlock } from './buildApprovalCardBlock.js';
 import type { ApprovalPublicationStore } from './ports/ApprovalPublicationStore.js';
 
@@ -209,16 +210,23 @@ export class ApprovalIngress {
     }
   }
 
-  private async validateOrigin(draft: ApprovalPublishDraft): Promise<void> {
-    validateApprovalOriginRef(draft.originRef);
+  /** Revalidate a server-bound origin before recovering a durable request; no publication or authority is created. */
+  async validateOrigin(draft: Pick<ApprovalPublishDraft, 'producerId' | 'originRef' | 'ownerUserId'>): Promise<void> {
+    try {
+      validateApprovalOriginRef(draft.originRef);
+    } catch (error) {
+      throw new ApprovalOriginValidationError(errorMessage(error), { cause: error });
+    }
     const policy = approvalProducerMeta(draft.producerId).sourcePolicy;
     if (policy === 'message-required' && draft.originRef.kind !== 'message') {
-      throw new Error(`Approval producer ${draft.producerId} requires a message origin`);
+      throw new ApprovalOriginValidationError(`Approval producer ${draft.producerId} requires a message origin`);
     }
     if (draft.originRef.kind === 'event') return;
     const origin = await this.deps.messageStore.getById(draft.originRef.messageId);
-    if (!origin || origin.deletedAt || origin._tombstone) throw new Error('Approval origin message not found');
-    if (origin.threadId !== draft.originRef.threadId) throw new Error('Approval origin message thread mismatch');
+    if (!origin || origin.deletedAt || origin._tombstone)
+      throw new ApprovalOriginValidationError('Approval origin message not found');
+    if (origin.threadId !== draft.originRef.threadId)
+      throw new ApprovalOriginValidationError('Approval origin message thread mismatch');
     // Cross-tenant isolation here is a CONJUNCTION of two parts, and neither part
     // is sufficient on its own (@codex-luna's review, rounds 2-4):
     //
@@ -271,7 +279,7 @@ export class ApprovalIngress {
     // this the system" is how the two drift apart.
     const systemOriginExempt = approvalProducerMeta(draft.producerId).systemOriginExemption === 'server_attested';
     if (origin.userId !== draft.ownerUserId && !(systemOriginExempt && isSystemUserMessage(origin))) {
-      throw new Error('Approval origin message owner mismatch');
+      throw new ApprovalOriginValidationError('Approval origin message owner mismatch');
     }
   }
 

@@ -6,7 +6,6 @@ import { getCachedCats } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 import { ChatApprovalDecisionReceipt } from './approval-receipt/ChatApprovalDecisionReceipt';
 import { isChatApprovalReceipt } from './approval-receipt/receipt-source';
-import { CloudDotReceipt } from './CloudDotReceipt';
 import { CloudReplyStatus } from './CloudReplyStatus';
 import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
@@ -91,11 +90,7 @@ function CloudOutboundAudit({ message, receipt }: { message: ChatMessageType; re
 export function SystemNoticeBar({ message, footer, threadId, timelineMessages }: SystemNoticeBarProps) {
   const receipt = message.source?.meta?.cloudBridgeOutboundReceipt;
   const outboundReceipt = isCloudBridgeOutboundReceiptV1(receipt) ? receipt : undefined;
-  const logical = useCloudReply(
-    outboundReceipt?.targetCatId === 'gpt-dot' ? undefined : outboundReceipt,
-    threadId,
-    timelineMessages,
-  );
+  const logical = useCloudReply(outboundReceipt, threadId, timelineMessages);
   const source = message.source;
   if (!source) return null;
   if (isChatApprovalReceipt(message))
@@ -132,11 +127,7 @@ export function SystemNoticeBar({ message, footer, threadId, timelineMessages }:
               ) : (
                 <MarkdownContent content={message.content} />
               )}
-              {outboundReceipt?.targetCatId === 'gpt-dot' ? (
-                <CloudDotReceipt eventId={outboundReceipt.hostMessageId} />
-              ) : (
-                outboundReceipt && <CloudOutboundAudit message={message} receipt={outboundReceipt} />
-              )}
+              {outboundReceipt && <CloudOutboundAudit message={message} receipt={outboundReceipt} />}
             </div>
           </div>
         </div>

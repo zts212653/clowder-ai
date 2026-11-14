@@ -222,6 +222,44 @@ test('original waiting hold retains its failure reason when the optional status 
   assert.equal(f.deliveries.length, 0);
 });
 
+test('a fresh HTTP hold can continue after expiry while the original waiting receipt stays readable', async (t) => {
+  const f = await fixture(t, true);
+  const first = await f.hold(NOW + DELAY + 600);
+  assert.equal(first.statusCode, 200);
+  const firstId = first.json().taskId;
+  const original = (await f.messages.getByThread(f.thread.id, 10, 'sla-owner'))[0];
+  f.runner.start();
+  t.mock.timers.setTime(NOW + 120_000);
+  t.mock.timers.tick(DELAY);
+  await setImmediate();
+
+  const followUp = await f.hold(Date.now() + DELAY + 1_200);
+  assert.equal(followUp.statusCode, 200);
+  const followUpId = followUp.json().taskId;
+  assert.notEqual(followUpId, firstId);
+  t.mock.timers.tick(DELAY);
+  await setImmediate();
+  assert.equal(f.deliveries.length, 1, 'the rejected status receipt is not required to continue');
+  assert.equal(f.deliveries[0].targetCatId, 'codex');
+  assert.equal(f.store.getById(followUpId).params.holdLifecycle.status, 'fired');
+  const status = await f.app.inject({
+    method: 'GET',
+    url: `/api/callbacks/hold-ball/${firstId}/status`,
+    headers: { 'x-cat-cafe-user': 'sla-owner' },
+  });
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.json().status, 'retired_expired');
+  assert.equal(status.json().lifecycle.dispositionReason, 'sla_elapsed');
+  const history = await f.messages.getByThread(f.thread.id, 10, 'sla-owner');
+  const same = history.find((message) => message.id === original.id);
+  assert.equal(same.content, original.content);
+  assert.equal(same.source.meta.taskId, firstId);
+  assert.equal(same.source.meta.phase, 'waiting');
+  t.mock.timers.tick(60_000);
+  await setImmediate();
+  assert.equal(f.deliveries.length, 1, 'only the new hold wakes, exactly once');
+});
+
 for (const mode of [
   'recovery expiry',
   'missed expiry',

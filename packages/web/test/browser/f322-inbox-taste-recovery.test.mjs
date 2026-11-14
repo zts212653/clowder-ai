@@ -44,7 +44,8 @@ for (const language of ['zh', 'en'])
     test(`F322 original taste recovery Chat to Inbox ${language} ${width}`, { timeout: 240000 }, async (t) => {
       const evidence = path.join(root, 'taste-recovery', `${language}-${width}`);
       await mkdir(evidence, { recursive: true });
-      const f = await createInboxInformationFixture(language),
+      const legacyTaste = width === 390;
+      const f = await createInboxInformationFixture(language, { legacyTaste }),
         source = f.approvalSources;
       const record = source.records.find((r) => r.kind === 'F221' && r.verb === 'approve');
       let environment, server, browser, page;
@@ -135,6 +136,13 @@ for (const language of ['zh', 'en'])
       await page.goto(`${base}/thread/${record.thread.id}?shell=v2`);
       const chat = page.locator(`[data-rich-block-id="${record.block.id}"]`);
       await chat.getByTestId('approve-btn').waitFor();
+      if (legacyTaste) {
+        assert.ok(!record.block.bodyMarkdown.includes('AFTER_LEGACY_PREVIEW'));
+        assert.ok((await chat.innerText()).includes('AFTER_LEGACY_PREVIEW'));
+        assert.match(await chat.innerText(), language === 'en' ? /private home repository/ : /私有家仓/);
+      }
+      await freeze(page, chat);
+      await page.screenshot({ path: path.join(evidence, 'chat-before-approval.png'), fullPage: true });
       const draft = page.locator('[data-testid="chat-input-composer-row"] textarea'),
         draftText = 'Preserved original taste recovery draft';
       await draft.fill(draftText);
@@ -152,6 +160,7 @@ for (const language of ['zh', 'en'])
       const panel = page.getByTestId('mailbox-panel'),
         card = panel.getByTestId(`approval-item-${record.proposalId}`);
       await card.getByRole('button', { name: resume, exact: true }).waitFor();
+      if (legacyTaste) assert.ok((await card.innerText()).includes('AFTER_LEGACY_PREVIEW'));
       assert.equal(await card.getByTestId('reject-btn').count(), 0);
       assert.equal(await card.getByTestId('mailbox-item-ignore').count(), 1);
       const row = f.reads.at(-1).items.find((i) => i.approval?.proposalId === record.proposalId);
@@ -192,6 +201,9 @@ for (const language of ['zh', 'en'])
       assert.equal(effects.deliveries.length, 0);
       assert.ok(effects.entities.every((e) => e === null));
       assert.equal(decisions.length, 2);
+      assert.match(interrupted.decisionDigest, /^[0-9a-f]{64}$/);
+      assert.ok(decisions.every((decision) => JSON.parse(decision.body).decisionDigest === interrupted.decisionDigest));
+      assert.equal(source.taste.get(record.proposalId).decisionDigest, interrupted.decisionDigest);
       await page.getByTestId('mailbox-close').click();
       assert.equal(await draft.inputValue(), draftText);
       await page.reload();
@@ -216,6 +228,7 @@ for (const language of ['zh', 'en'])
           {
             language,
             width,
+            legacyTaste,
             responses,
             decisions,
             interrupted,

@@ -59,6 +59,7 @@ export interface HubCatEditorFormState {
   acpCommand: string;
   acpAgentProvider?: string | null;
   acpStartupArgs: string;
+  env?: Record<string, string>;
   acpMaxLiveProcesses: string;
   acpIdleTtlMinutes: string;
   executionApproval?: 'auto' | 'ask_user';
@@ -326,7 +327,7 @@ export function builtinAccountIdForClient(client: ClientId): string | null {
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
   // F161: Generic ACP is a transport, not tied to any provider family.
   // Any account (oauth or api_key, any client family) can supply credentials to the ACP carrier.
-  if (client === 'acp') return profiles;
+  if (client === 'acp') return profiles.filter((profile) => !profile.agy);
   const effective = resolveBuiltinClientFamily(client);
   if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
@@ -424,6 +425,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     agyHomeRoot: cat?.agyProfile?.homeRoot ?? '',
     agyTrustedWorkspaces: cat?.agyProfile?.trustedWorkspaces?.join('\n') ?? '',
     acpTransport: (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',
+    env: cat?.env,
     acpAgentProvider: cat?.agentProvider !== undefined ? cat.agentProvider : acpConfig?.agentProvider,
     acpCommand: acpConfig?.command ?? defaultAcpCommandForClient(clientId),
     acpStartupArgs:

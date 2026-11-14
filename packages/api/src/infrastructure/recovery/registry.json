@@ -65,6 +65,23 @@
       "sites": ["packages/api/src/domains/auto-dream/CatLifeSettingsService.ts#buildProjectionDef.trigger:cron"]
     },
     {
+      "id": "exempt:domains/browser/BrowserProcess.ts",
+      "owner": "packages/api/src/domains/browser/BrowserProcess.ts",
+      "state": "exempt",
+      "reason": "F333: watchdog for the live shared-browser child; it only kills a child whose heartbeats stopped. Nothing durable is recovered or replayed; the next request forks a fresh child.",
+      "sites": ["packages/api/src/domains/browser/BrowserProcess.ts#BrowserProcess.watch.watchdog"]
+    },
+    {
+      "id": "exempt:domains/browser/browser-process-entry.ts",
+      "owner": "packages/api/src/domains/browser/browser-process-entry.ts",
+      "state": "exempt",
+      "reason": "F333: inside the shared-browser child, a liveness heartbeat to the API watchdog and an idle reap of in-memory sessions and tabs. Process-lifetime state only; no durable work is recovered or replayed.",
+      "sites": [
+        "packages/api/src/domains/browser/browser-process-entry.ts#start.setInterval",
+        "packages/api/src/domains/browser/browser-process-entry.ts#start.setInterval[2]"
+      ]
+    },
+    {
       "id": "exempt:domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts",
       "owner": "packages/api/src/domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts",
       "state": "exempt",

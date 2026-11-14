@@ -91,7 +91,7 @@ it('rejects an identity-mismatched response and reports a classified failure wit
   await render(first);
   expect(view.data).toBeNull();
   expect(view.error).toBe('unavailable');
-  fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: { code: 'rate_limited' } }) });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limited' } }), { status: 429 }));
   await act(async () => view.refresh());
   expect(view.data).toBeNull();
   expect(view.error).toBe('rate_limited');
@@ -106,7 +106,7 @@ it('keeps the classic local Changes endpoint for a non-PR target', async () => {
 });
 
 it('never presents A failure with B identity even before the new target passive effect runs', async () => {
-  fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: { code: 'rate_limited' } }) });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limited' } }), { status: 429 }));
   await render(first);
   expect(view.error).toBe('rate_limited');
   committedErrors = [];

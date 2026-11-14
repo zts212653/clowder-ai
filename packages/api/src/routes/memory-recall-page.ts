@@ -56,7 +56,7 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
     consumer_cat_id: cue.consumerCatId,
   });
   return {
-    partial: !view.title || view.titleStatus === 'unavailable',
+    partial: !view.sourceUnavailableReason && (!view.title || view.titleStatus === 'unavailable'),
     event: {
       id: row.key,
       catId: cue.consumerCatId === 'legacy-unbound' ? undefined : cue.consumerCatId,
@@ -76,6 +76,8 @@ async function readCueRow(row: RecallTimelineRow, context: ProjectionContext) {
           anchor: cue.sourceAnchor,
           sourceType: cue.resolverFamily,
           href: view.href,
+          memoryHref: view.memoryHref,
+          messageHref: view.messageHref,
           ...(view.profileMemoryId ? { profileMemoryId: view.profileMemoryId } : {}),
           sourceUnavailableReason: view.sourceUnavailableReason,
         },
@@ -98,7 +100,7 @@ async function readSearchRow(row: RecallTimelineRow, context: ProjectionContext)
     );
     for (const [anchor, view] of batch) {
       views.set(anchor, view);
-      if (!view.title || view.titleStatus === 'unavailable') partial = true;
+      if (!view.sourceUnavailableReason && (!view.title || view.titleStatus === 'unavailable')) partial = true;
     }
   }
   return { partial, event: projectRecallPageEvent(event, views) };

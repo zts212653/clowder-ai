@@ -9,7 +9,7 @@
  *   inline try/catch/loop boilerplate (cloud R4 P1: file-size)
  *
  * The hook subprocess (`f236-anchor-posttool.mjs`) writes eval events to
- * `/tmp/cat-cafe-anchor-eval-{invocationId}.jsonl` with Track-2 compatible
+ * the platform temporary directory with Track-2 compatible
  * fields. Two kinds of entries:
  * - **preview** (default): anchored output returned to cat → recordAnchorPreviewEvent()
  * - **drill** (kind='drill'): bounded Read pass-through after a locator → recordAnchorDrillEvent() + recordAnchorFullDrill()
@@ -19,6 +19,8 @@
  */
 
 import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   type AnchorDrillEventInput,
   type AnchorPreviewEventInput,
@@ -67,7 +69,7 @@ export function evalEntriesToPreviewEvents(entries: unknown[]): AnchorPreviewEve
     // Skip drill entries (handled by evalEntriesToDrillEvents)
     if (entry.kind === 'drill') continue;
 
-    // Required: tool must be a valid AnchorPreviewTool (defense-in-depth for untrusted /tmp input)
+    // Required: tool must be a valid AnchorPreviewTool (untrusted eval file input)
     if (typeof entry.tool !== 'string' || !VALID_PREVIEW_TOOLS.has(entry.tool)) continue;
 
     // Required: itemIds must be array
@@ -133,7 +135,7 @@ export function evalEntriesToDrillEvents(entries: unknown[]): AnchorDrillEventIn
  */
 export function resolveEvalJsonlPath(invocationId: string | undefined): string | null {
   if (!invocationId) return null;
-  return `/tmp/cat-cafe-anchor-eval-${invocationId}.jsonl`;
+  return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-eval-${invocationId}.jsonl`);
 }
 
 /**
@@ -145,7 +147,7 @@ export function resolveEvalJsonlPath(invocationId: string | undefined): string |
  */
 export function resolveModeFilePath(invocationId: string | undefined): string | null {
   if (!invocationId) return null;
-  return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+  return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-mode-${invocationId}`);
 }
 
 /**
@@ -156,7 +158,7 @@ export function resolveModeFilePath(invocationId: string | undefined): string | 
  */
 export function resolveStateFilePath(invocationId: string | undefined): string | null {
   if (!invocationId) return null;
-  return `/tmp/cat-cafe-anchor-filestate-${invocationId}.json`;
+  return join(process.platform === 'win32' ? tmpdir() : '/tmp', `cat-cafe-anchor-filestate-${invocationId}.json`);
 }
 
 // ─── Lifecycle helpers (carrier file-size extraction, cloud R4 P1) ──────────

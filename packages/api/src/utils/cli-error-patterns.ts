@@ -199,8 +199,12 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   },
   {
     code: 'network_error',
+    // Includes Go net/http *url.Error transport EOF (witnessed in AGY Native startup
+    // archives a62b4b95 & 2654c868: `Get "https://www.googleapis.com/oauth2/v2/userinfo": EOF`).
+    // Scoped to `<HTTP method> "http(s)://...": [unexpected ]EOF` per LL-059 so carrier stdio
+    // `stream_disconnected` and non-HTTP generic EOF strings remain unaffected.
     regex:
-      /(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|fetch failed|connect ECONN|getaddrinfo|error sending request for url)/i,
+      /(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|fetch failed|connect ECONN|getaddrinfo|error sending request for url|\b(?:Get|Post|Head|Put|Delete|Patch)\s+"https?:\/\/[^"\r\n]+":\s*(?:unexpected\s+)?EOF\b)/i,
   },
   {
     code: 'stream_disconnected',

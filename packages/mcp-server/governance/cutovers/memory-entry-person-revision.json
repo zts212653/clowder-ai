@@ -1,0 +1,70 @@
+{
+  "resource": { "kind": "family", "resourceFamily": "person-memory" },
+  "retiredNames": [
+    "cat_cafe_correct_person_claim",
+    "cat_cafe_retire_person_claim",
+    "cat_cafe_amend_person_interaction"
+  ],
+  "canonicalNames": ["cat_cafe_revise_person_memory"],
+  "expectedProfiles": { "cat_cafe_revise_person_memory": ["full"] },
+  "rollbackRevision": "90bfaf255a5052ffece295a96878d216b4e0a67c",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
+        "packages/mcp-server/src/tools/person-memory-revision-tool.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tool-registration-contract.ts",
+        "packages/mcp-server/src/canonical-server-tools.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "No active prompt names the three correction wrappers; the canonical tool description teaches the replacement actions.",
+      "absenceEvidence": [
+        "cat_cafe_correct_person_claim",
+        "cat_cafe_retire_person_claim",
+        "cat_cafe_amend_person_interaction"
+      ]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "No skill names these wrappers; F332 records the accepted non-destructive correction boundary.",
+      "absenceEvidence": [
+        "cat_cafe_correct_person_claim",
+        "cat_cafe_retire_person_claim",
+        "cat_cafe_amend_person_interaction"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/memory-entry-contracts.test.js",
+        "packages/mcp-server/test/person-memory-lifecycle-tools.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No eval calls the retired wrappers. Existing person-memory lifecycle tests continue exercising the unchanged API contracts.",
+      "absenceEvidence": [
+        "cat_cafe_correct_person_claim",
+        "cat_cafe_retire_person_claim",
+        "cat_cafe_amend_person_interaction"
+      ]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "No telemetry consumer names these wrappers. The original callback routes and request-id prefixes remain unchanged.",
+      "absenceEvidence": [
+        "cat_cafe_correct_person_claim",
+        "cat_cafe_retire_person_claim",
+        "cat_cafe_amend_person_interaction"
+      ]
+    }
+  }
+}

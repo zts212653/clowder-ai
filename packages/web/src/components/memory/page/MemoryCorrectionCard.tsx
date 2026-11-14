@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useApprovalHost, useGuardedWrite, useWriteBlocked } from '@/components/ApprovalHost';
 import { resolveShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
+import { notifyMemoryChanged } from '@/hooks/memory-changed';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { memoryCorrectionCopy } from './memory-correction.shell-copy';
@@ -21,6 +22,7 @@ export function MemoryCorrectionCard({
   endpoint,
   matchesReceipt,
   reread,
+  onDecided,
   children,
   heading,
   beforeWrite,
@@ -33,6 +35,7 @@ export function MemoryCorrectionCard({
   endpoint: string;
   matchesReceipt: (body: unknown, proposalId: string, decision: MemoryCorrectionDecision) => boolean;
   reread: () => void;
+  onDecided?: () => void;
   children: ReactNode;
   heading?: ReactNode;
   beforeWrite?: (decision: MemoryCorrectionDecision) => Promise<boolean>;
@@ -90,7 +93,8 @@ export function MemoryCorrectionCard({
       const { response, body } = written.value;
       if (!mounted.current) return;
       if (response.ok && matchesReceipt(body, proposal.proposalId, decision)) {
-        reread();
+        notifyMemoryChanged();
+        (onDecided ?? reread)();
         return;
       }
       const uncertain = response.ok || response.status >= 500;

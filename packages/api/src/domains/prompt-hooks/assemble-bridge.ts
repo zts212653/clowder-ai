@@ -157,7 +157,7 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
   const shouldA2A = context.mode !== 'parallel' && context.a2aEnabled === true && !context.nativeL0Injected;
   const routingItems: string[] =
     context.mentionRoutingFeedback?.items
-      ?.filter((item) => item.reason !== 'void_hold')
+      ?.filter((item) => item.reason !== 'void_hold' && item.reason !== 'owner_ask_unaddressed')
       .slice(0, 2)
       .map((it) => `@${it.targetCatId}`) ?? [];
 
@@ -191,6 +191,8 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
     teammates: resolveTeammates(context.teammates),
     mentionRoutingItems: routingItems,
     voidHoldFeedback: context.mentionRoutingFeedback?.items.some((item) => item.reason === 'void_hold') ?? false,
+    ownerAskFeedback:
+      context.mentionRoutingFeedback?.items.some((item) => item.reason === 'owner_ask_unaddressed') ?? false,
     promptTags: context.promptTags ? [...context.promptTags] : [],
     routingPolicyParts: formatRoutingPolicy(context.routingPolicy),
     sopStageHint: context.sopStageHint

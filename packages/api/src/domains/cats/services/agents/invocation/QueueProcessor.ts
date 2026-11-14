@@ -141,7 +141,7 @@ import {
   type ExecutionOwnerMatch,
 } from './InvocationTracker.js';
 import { projectLifecycleAppendAction } from './lifecycle-append-projection.js';
-import { emitLifecycleMessageUpdated } from './lifecycle-message-update.js';
+import { emitLifecycleMessageUpdated, emitStoredMessageUpdated } from './lifecycle-message-update.js';
 import {
   appendLifecycleResponseWithReadBack,
   LifecycleResponseAdmissionUnknownError,
@@ -154,6 +154,7 @@ import {
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
 import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
+import { persistStreamedInteractiveBlock } from './persist-streamed-interactive-block.js';
 import { queueEntryId } from './queue-ledger/QueueLedger.js';
 import {
   type ContinuationOutcome,
@@ -672,6 +673,8 @@ interface QueueAdmissionAttempt {
 }
 
 export class QueueProcessor {
+  /** Composed after Plugin Manager startup; plugins never enter member execution. */
+  addressedDelivery?: import('../../../../plugin/manager/addressing/addressed-plugin-queue-delivery.js').AddressedPluginQueueDelivery;
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
    *  F118 D4: startedAt supports bounded zombie detection.
@@ -2969,6 +2972,8 @@ export class QueueProcessor {
     const failedIds: string[] = [];
     const deliveredMessages: Array<{
       id: string;
+      visibility?: StoredMessage['visibility'];
+      whisperTo?: readonly string[];
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
       catId: string | null;
@@ -3013,6 +3018,9 @@ export class QueueProcessor {
         const projectedExtra = result.extra ?? {};
         deliveredMessages.push({
           id: result.id,
+          ...(result.from?.kind === 'user' && result.clientMessageId
+            ? { clientMessageId: result.clientMessageId }
+            : {}),
           ...(result.from ? { from: result.from } : {}),
           content: result.content,
           ...(result.lifecycle ? { lifecycle: result.lifecycle } : {}),
@@ -3022,6 +3030,8 @@ export class QueueProcessor {
           mentions: result.mentions,
           userId: result.userId,
           contentBlocks: result.contentBlocks,
+          ...(result.visibility ? { visibility: result.visibility } : {}),
+          ...(result.whisperTo ? { whisperTo: result.whisperTo } : {}),
           ...(Object.keys(projectedExtra).length > 0 ? { extra: projectedExtra as Record<string, unknown> } : {}),
           ...(result.origin ? { origin: result.origin } : {}),
           ...(result.replyTo ? { replyTo: result.replyTo } : {}),
@@ -4561,7 +4571,11 @@ export class QueueProcessor {
           ? 'no_available_target'
           : 'invalid_explicit_target';
       const failedTargets = [...queueEntryTargetCats(claimed)];
-      const wakeTargetLabel = failedTargets.length > 0 ? failedTargets.join('、') : '处理成员';
+      const knownPlugins = (await this.addressedDelivery?.options.targets.known()) ?? [];
+      const wakeTargetLabel =
+        failedTargets.length > 0
+          ? failedTargets.map((id) => knownPlugins.find((p) => p.id === id)?.alias ?? id).join('、')
+          : '处理成员';
       const content = claimed.execution.liveSessionId
         ? '语音交流未投递：成员或语音窗口当前不可用。'
         : reason === 'no_available_target'
@@ -4760,6 +4774,73 @@ export class QueueProcessor {
     routingOwnerRetryTarget?: string,
   ): Promise<QueueExecutionResult> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
+    const selectedTargets = executionTargetCats ?? queueEntryTargetCats(entry);
+    const pluginTargets = this.addressedDelivery
+      ? (
+          await Promise.all(
+            selectedTargets.map(async (id) => ((await this.addressedDelivery!.handles(id)) ? id : undefined)),
+          )
+        ).filter((id): id is string => id !== undefined)
+      : [];
+    if (pluginTargets.length > 0) {
+      const entries = [entry, ...exactBatchEntries];
+      try {
+        for (const source of entries) {
+          for (const target of pluginTargets) {
+            if (source.targets.includes(target)) {
+              const receipt = await this.addressedDelivery!.deliver(source, target, (message) => {
+                emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), message);
+              });
+              emitStoredMessageUpdated(socketManager, queueEntryOwnerId(source), receipt);
+              if (source.payload.messageId) {
+                const settledSource = await messageStore.getById(source.payload.messageId);
+                if (settledSource) {
+                  this.callerDispatchObservations.registerPersistedSource(settledSource, [target]);
+                  this.emitLifecycleMessageUpdated(queueEntryOwnerId(source), settledSource);
+                }
+                await this.markDeliveredAndEmit(
+                  queueEntryOwnerId(source),
+                  source.threadId,
+                  [source.payload.messageId],
+                  receipt.timestamp,
+                  new Set([source.payload.messageId]),
+                );
+              }
+            }
+          }
+        }
+        // A mixed source keeps its member recipients in the ordinary Queue. They
+        // start on the next drain, through precisely the existing member path.
+        await queue.restoreClaimedEntries(
+          entry.threadId,
+          entries.map((e) => e.id),
+        );
+        await emitQueueUpdated(
+          socketManager,
+          queueEntryOwnerId(entry),
+          entry.threadId,
+          queue.list(entry.threadId, queueEntryOwnerId(entry)),
+          'completed',
+        );
+        return {
+          status: 'succeeded',
+          attemptedQueueEntryIds: entries.map((e) => e.id),
+          terminalInvocationIdByCatId: {},
+        };
+      } catch (error) {
+        await queue.restoreClaimedEntries(
+          entry.threadId,
+          entries.map((e) => e.id),
+        );
+        log.error({ error, entryId: entry.id }, 'Addressed plugin delivery failed');
+        return {
+          status: 'failed',
+          primarySettlementIncomplete: true,
+          attemptedQueueEntryIds: entries.map((e) => e.id),
+          terminalInvocationIdByCatId: {},
+        };
+      }
+    }
     const threadId = entry.threadId;
     const userId = queueEntryOwnerId(entry);
     const intent = entry.execution.intent;
@@ -6516,6 +6597,11 @@ export class QueueProcessor {
         // History owns one response lifecycle for every admitted dispatch.
         // Action-successor custody may still accept/reject the terminal commit,
         // but it must not create a second, terminal-only presentation protocol.
+        await persistStreamedInteractiveBlock(
+          messageStore,
+          visibleMessage,
+          typeof msg.catId === 'string' ? lifecycleResponseMessageIdByCat.get(msg.catId) : undefined,
+        );
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.

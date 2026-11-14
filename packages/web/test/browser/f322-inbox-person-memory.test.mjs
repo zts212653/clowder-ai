@@ -35,9 +35,8 @@ async function postThrough(page, record, verb, responses, press) {
       new URL(r.url()).pathname === `/api/person-memory-proposals/${record.proposalId}/${verb}` &&
       r.request().method() === 'POST',
   );
-  await press();
-  const response = await pending,
-    body = await response.json();
+  const [response] = await Promise.all([pending, press()]);
+  const body = await response.json();
   responses.push({
     entrance: record.entrance,
     proposalId: record.proposalId,
@@ -52,6 +51,15 @@ async function postThrough(page, record, verb, responses, press) {
 async function enabled(button) {
   await button.waitFor();
   await button.page().waitForFunction((element) => !element.disabled, await button.elementHandle());
+}
+async function openPendingMailbox(page) {
+  await page.getByTestId('mailbox-button').click();
+  const back = page.getByTestId('mailbox-handled-back');
+  if (await back.isVisible()) await back.click();
+}
+async function expandHistoryOriginal(row) {
+  await row.getByTestId('decision-result-label').click();
+  await row.getByTestId('handled-technical-details').locator('summary').click();
 }
 async function approve(page, card, record, responses) {
   const button = card.getByTestId('person-memory-approve-selected');
@@ -218,9 +226,10 @@ for (const language of ['zh', 'en'])
       await enabled(card.getByTestId('person-memory-undo'));
       assert.match(await card.locator('h3').innerText(), /Lin Chat approve/);
       await freeze(page, card, path.join(evidence, 'Chat-written.png'));
-      await page.getByTestId('mailbox-button').click();
+      await openPendingMailbox(page);
+      await page.getByTestId('mailbox-history').click();
       const coldWritten = page.locator(
-        `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', selected.proposalId])}']`,
+        `[data-testid="mailbox-history-row"][data-proposal-id="${selected.proposalId}"]`,
       );
       await coldWritten.getByTestId('decision-result-label').waitFor();
       assert.match(
@@ -228,7 +237,7 @@ for (const language of ['zh', 'en'])
         language === 'en' ? /Written to memory.*Lin Chat approve/ : /已写入.*Lin Chat approve/,
       );
       await freeze(page, coldWritten, path.join(evidence, 'Inbox-cold-materialized-collapsed.png'));
-      await coldWritten.locator('button[aria-expanded="false"]').click();
+      await expandHistoryOriginal(coldWritten);
       await coldWritten.getByTestId('approval-receipt-original').waitFor();
       assert.match(
         await coldWritten.getByTestId('approval-receipt-original').innerText(),
@@ -241,6 +250,9 @@ for (const language of ['zh', 'en'])
       );
       await freeze(page, coldWritten, path.join(evidence, 'Inbox-cold-materialized-original.png'));
       await page.getByTestId('mailbox-close').click();
+      if (!(await card.getByTestId('person-memory-undo').isVisible()))
+        await card.getByTestId('decision-result-label').click();
+      await enabled(card.getByTestId('person-memory-undo'));
       await postThrough(page, selected, 'undo', responses, () => card.getByTestId('person-memory-undo').click());
       await card
         .getByTestId('decision-result-label')
@@ -270,7 +282,7 @@ for (const language of ['zh', 'en'])
         page.locator(`[data-rich-block-id="${rejected.block.id}"]`),
         path.join(evidence, 'Chat-rejected.png'),
       );
-      await page.getByTestId('mailbox-button').click();
+      await openPendingMailbox(page);
       const panel = page.getByTestId('mailbox-panel');
       for (const record of inboxRecords) {
         const current = panel.getByTestId(`approval-item-${record.proposalId}`);
@@ -423,13 +435,12 @@ for (const language of ['zh', 'en'])
         replacementChat.getByTestId('decision-result-details'),
         path.join(evidence, 'replacement-Chat-cold-expanded.png'),
       );
-      await page.getByTestId('mailbox-button').click();
+      await openPendingMailbox(page);
       await panel.getByTestId('approval-item-inbox-native-approve').waitFor();
+      await panel.getByTestId('mailbox-history').click();
       for (const record of source.records) {
         assert.equal(await panel.getByTestId(`approval-item-${record.proposalId}`).count(), 0);
-        const receipt = panel.locator(
-          `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', record.proposalId])}']`,
-        );
+        const receipt = panel.locator(`[data-testid="mailbox-history-row"][data-proposal-id="${record.proposalId}"]`);
         await receipt.getByTestId('decision-result-label').waitFor();
         assert.match(
           await receipt.getByTestId('decision-result-label').innerText(),
@@ -454,7 +465,7 @@ for (const language of ['zh', 'en'])
           await receipt.getByTestId('decision-result-dot').getAttribute('data-status'),
           record.verb === 'approve' ? 'withdrawn' : record.entrance === 'Chat' ? 'approved' : 'rejected',
         );
-        await receipt.locator('button[aria-expanded="false"]').click();
+        await expandHistoryOriginal(receipt);
         await receipt.getByTestId('approval-receipt-original').waitFor();
         assert.match(await receipt.getByTestId('approval-receipt-original').innerText(), /Hangzhou|杭州/);
         assert.equal(
@@ -470,14 +481,14 @@ for (const language of ['zh', 'en'])
         await freeze(page, receipt, path.join(evidence, `${record.proposalId}-cold-original.png`));
       }
       const replacementInbox = panel.locator(
-        `[data-testid="mailbox-settled-result"][data-decision-key='${JSON.stringify(['F276', replacement.original.proposalId])}']`,
+        `[data-testid="mailbox-history-row"][data-proposal-id="${replacement.original.proposalId}"]`,
       );
       await replacementInbox.getByTestId('decision-result-label').waitFor();
       assert.ok((await replacementInbox.getByTestId('decision-result-label').innerText()).includes(closed));
       const inboxDot = await replacementInbox.getByTestId('decision-result-dot').boundingBox();
       assert.equal(inboxDot?.width, 8);
       assert.equal(inboxDot?.height, 8);
-      await replacementInbox.locator('button[aria-expanded="false"]').click();
+      await expandHistoryOriginal(replacementInbox);
       await replacementInbox.getByTestId('approval-receipt-original').waitFor();
       assert.equal(await replacementInbox.locator('output').count(), 0); // The canonical header is the sole result statement.
       assert.ok(!(await replacementInbox.innerText()).includes(withdrawn));
@@ -487,6 +498,8 @@ for (const language of ['zh', 'en'])
         0,
       );
       await freeze(page, replacementInbox, path.join(evidence, 'replacement-Inbox-cold-expanded.png'));
+      await page.getByTestId('mailbox-handled-back').click();
+      await panel.getByTestId(`approval-item-${replacement.successor.proposalId}`).waitFor();
       const pendingPerson = fixture.reads.at(-1).items.filter((item) => item.approval?.sourceFeatureId === 'F276');
       assert.deepEqual(
         pendingPerson.map((item) => item.approval.proposalId),

@@ -97,6 +97,46 @@ const messages: ChatMessageData[] = [
   },
 ];
 
+// The live host can have a receipt or reply label much wider than the human's text.
+// Keep the real receipt renderer: a bare short ChatMessage misses this sizing relationship.
+const hostMessages: ChatMessageData[] = messages.map((message) => {
+  if (message.id === 'h-short')
+    return {
+      ...message,
+      content: '会关注这个？',
+      lifecycle: {
+        kind: 'input',
+        orderKey: String(T0),
+        dispatchRefs: [
+          {
+            targetId: 'codex',
+            phase: 'settled',
+            statusMessageId: 'c-2',
+            dispatchedAt: T0,
+            inputRead: { status: 'read', at: T0 },
+          },
+        ],
+      },
+    };
+  if (message.id === 'c-2')
+    return {
+      ...message,
+      lifecycle: {
+        kind: 'response',
+        orderKey: String(T0 - minute),
+        invocationId: 'host-receipt',
+        targetId: 'codex',
+        inputEntryIds: [],
+        inputMessageIds: ['earlier-input', 'h-short'],
+        status: 'completed',
+        startedAt: T0 - minute,
+        completedAt: T0 + minute,
+      },
+    };
+  if (message.id === 'h-run-a') return { ...message, replyTo: 'h-run-b' };
+  return message;
+});
+
 function params(base: 'light' | 'dark', overrides?: (p: TunerState) => void): TunerState {
   const next = structuredClone(base === 'light' ? INIT_LIGHT : INIT_DARK);
   overrides?.(next);
@@ -144,7 +184,9 @@ window.__human = {
 
 function Thread() {
   const { getCatById } = useCatData();
-  const width = Number(new URLSearchParams(window.location.search).get('w') ?? '720');
+  const query = new URLSearchParams(window.location.search);
+  const width = Number(query.get('w') ?? '720');
+  const shownMessages = query.has('host-layout') ? hostMessages : messages;
   return (
     <div
       data-testid="column"
@@ -152,12 +194,12 @@ function Thread() {
       data-chat-container
       style={{ width, padding: '16px 20px', background: 'var(--shell-work)', color: 'var(--cafe-text)' }}
     >
-      {messages.map((message) => (
+      {shownMessages.map((message) => (
         <MessageActions key={message.id} message={message} threadId="thread-human">
           <ChatMessage
             message={message}
             threadId="thread-human"
-            timelineMessages={messages}
+            timelineMessages={shownMessages}
             getCatById={getCatById}
             onEditCoCreator={() => undefined}
           />

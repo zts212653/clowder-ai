@@ -19,7 +19,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { migrateStoredProjectPath, validateNewProjectPath } from '../utils/persistent-project-path.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { suggestProposalGroup } from './proposal-group-placement.js';
 import { normalizeProposedMessage } from './proposal-initial-message.js';
@@ -46,7 +46,7 @@ const proposeThreadCallbackSchema = z.object({
   // F277: explicit placement role. `unknown` is projection-only and intentionally rejected.
   declaredWorkMode: z.enum(['subtask', 'parallel', 'investigation', 'standalone']).optional(),
   // F128: explicit project ownership for the child thread. Validated against allowed roots
-  // (resolvePersistentProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
+  // (validateNewProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
   // supplied-but-invalid → 400 (fail loud, never silently fall back to default).
   projectPath: z.string().min(1).max(500).optional(),
   parentThreadId: z.string().min(1).optional(),
@@ -223,12 +223,12 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       revisedProposal?.projectPath ??
       parentThread.projectPath; // omitted → inherit effective parent thread
     if (explicitProjectPath !== undefined) {
-      const validatedProjectPath = await resolvePersistentProjectPath(explicitProjectPath);
-      if (!validatedProjectPath) {
+      const validatedProjectPath = await validateNewProjectPath(explicitProjectPath);
+      if (!validatedProjectPath.ok) {
         reply.status(400);
-        return { error: 'Invalid projectPath: must be an existing directory under allowed roots' };
+        return { error: validatedProjectPath.error };
       }
-      resolvedProjectPath = validatedProjectPath; // supplied & valid → canonical real path
+      resolvedProjectPath = validatedProjectPath.path;
     } else if (resolvedProjectPath && resolvedProjectPath !== 'default') {
       const inheritedProjectPath = await migrateStoredProjectPath(resolvedProjectPath);
       if (!inheritedProjectPath) {

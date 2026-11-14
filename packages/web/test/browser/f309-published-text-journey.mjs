@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { collapseV2Workspace } from './f307-workspace-open.mjs';
@@ -48,7 +49,7 @@ export function registerPublishedTextJourneys(suite) {
       { timeout: 120_000 },
       async () => {
         await mkdir(EVIDENCE, { recursive: true });
-        const data = await mkdtemp('/tmp/f309-published-text-');
+        const data = await mkdtemp(path.join(tmpdir(), 'f309-published-text-'));
         const owner = await startRealDocumentOwner(path.join(data, 'owner'));
         let session;
         const sent = [],

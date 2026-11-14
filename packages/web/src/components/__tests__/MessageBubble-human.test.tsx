@@ -76,11 +76,13 @@ describe('MessageBubble human presentation', () => {
     );
     expect(bubble.contains(container.querySelector('[data-testid="body"]'))).toBe(true);
     const column = wrapper.firstElementChild as HTMLElement;
-    expect(Array.from(column.children).map((el) => el.getAttribute('data-testid'))).toEqual([
-      'header',
-      'message-bubble',
-      'footer',
-    ]);
+    expect(
+      Array.from(
+        column.querySelectorAll('[data-testid="header"], [data-testid="message-bubble"], [data-testid="footer"]'),
+      ).map((el) => el.getAttribute('data-testid')),
+    ).toEqual(['header', 'message-bubble', 'footer']);
+    expect(bubble.contains(column.querySelector('[data-testid="header"]'))).toBe(false);
+    expect(bubble.contains(column.querySelector('[data-testid="footer"]'))).toBe(false);
   });
 
   it("is one whole 12px block: all four corners the same, the text left-aligned, the fill and text colour the caller's", () => {

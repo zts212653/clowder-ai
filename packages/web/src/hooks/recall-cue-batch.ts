@@ -7,6 +7,7 @@ export interface CueRead {
   token: string;
 }
 interface CueEntry {
+  pushSurface?: string;
   source?: 'push' | 'pull';
   matterRead?: MatterReadSummary;
   cueId: string;
@@ -78,6 +79,7 @@ export async function readCueBatch(
         resolverFamily: cue.resolverFamily,
         timestamp: cue.presentedAt,
         source: cue.source ?? 'push',
+        pushSurface: cue.pushSurface,
         ...(cue.matterRead ? { matterRead: cue.matterRead } : {}),
         cueStatus: cue.status,
         results: [{ title: '', anchor: cue.sourceAnchor, sourceType: cue.resolverFamily }],

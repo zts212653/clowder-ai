@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const origin = process.env.F311_SOLUTION_ORIGIN ?? 'http://127.0.0.1:5183';
-const evidence = process.env.F311_SOLUTION_EVIDENCE ?? '/tmp/cat-cafe-evidence/f311-solution';
+const evidence = process.env.F311_SOLUTION_EVIDENCE ?? join(tmpdir(), 'cat-cafe-evidence/f311-solution');
 const url = `${origin}/thread/thread-f311-workspace-contract?solutionGate=1&evolutionProgram=evolution-program%3A31103110311031103110311031103110&evolutionView=judgment`;
 await mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({ headless: true });

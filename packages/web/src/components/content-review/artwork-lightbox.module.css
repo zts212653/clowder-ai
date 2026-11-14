@@ -15,6 +15,9 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 12px;
+  background: var(--cafe-surface);
+  --chat-background-role: cafe;
+  color: var(--cafe-text);
 }
 .owner > * {
   flex: 1;
@@ -42,6 +45,7 @@
   flex-direction: column;
   background: var(--cafe-surface);
   --chat-background-role: cafe;
+  color: var(--cafe-text);
   border-radius: 12px;
   overflow: hidden;
 }

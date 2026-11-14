@@ -32,7 +32,7 @@ test('concierge uses the common message projection with multiple per-thread hand
     results,
     meta: {
       scope: 'global',
-      sort: 'time',
+      sort: 'relevance',
       partial: true,
       freshness: 'unknown',
       sourceCoverage: 'unknown',
@@ -51,7 +51,7 @@ test('concierge uses the common message projection with multiple per-thread hand
       return response;
     },
   });
-  assert.deepEqual(input, { query: 'piano', sort: 'time', mode: 'hybrid', limit: 5 });
+  assert.deepEqual(input, { query: 'piano', sort: 'relevance', mode: 'hybrid', limit: 5 });
   assert.deepEqual(
     context.handles.map((h) => h.anchor.messageId),
     ['early', 'later'],
@@ -64,6 +64,7 @@ test('concierge uses the common message projection with multiple per-thread hand
   assert.equal(actions[0].payload.threadId, 'original');
   assert.equal(actions[0].payload.messageId, 'early');
   assert.match(context.contextString, /全局/);
+  assert.match(context.contextString, /排序：按相关/);
   assert.match(context.contextString, /Alpha Connector · Acceptance source/);
   assert.match(context.contextString, /延迟暂无法确认/);
   assert.match(context.contextString, /词法/);
@@ -116,6 +117,7 @@ test('ordinary concierge sources preserve match evidence and actual time-window 
   assert.match(context.contextString, /供你阅读判断的原文/);
   assert.match(context.contextString, /命中词：Cedar、取名/);
   assert.match(context.contextString, /只核完 12 条来源，未读满 32 条/);
+  assert.match(context.contextString, /排序：按时间/);
   assert.doesNotMatch(context.contextString, /候选尚未核对出结论/);
 });
 

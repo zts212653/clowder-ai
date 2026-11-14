@@ -28,6 +28,8 @@ export const GEMINI35_LEGACY_DEFAULT_MODELS = new Set([
   'gemini-3.5-flash',
   'Gemini 3.5 Flash (High)',
   'gemini-3.8-flash',
+  'gemini-3.8-flash-high',
+  'Gemini 3.6 Flash (High)',
   'Gemini 3.8 Flash (High)',
 ]);
 export const GEMINI35_LEGACY_NAMES = new Set(['暹罗猫 Gemini 3.5 Flash', '暹罗猫 Gemini 3.8 Flash']);

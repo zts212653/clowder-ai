@@ -1,136 +1,169 @@
 #!/usr/bin/env node
 
-// Detects hotfix patterns in commit messages AND PR titles.
 // Used by quality-gate (AC-E4) and merge-gate (AC-E1/E2).
-//
-// Usage:
-//   node scripts/check-hotfix-pattern.mjs                    # scan commits only
-//   PR_NUMBER=1463 node scripts/check-hotfix-pattern.mjs     # also scan PR title
-//   node scripts/check-hotfix-pattern.mjs --apply-label 1463 # detect + add label
-//
-// Exit codes: 0 = no hotfix, 2 = hotfix detected.
-// Structured output: last line is JSON { hotfix: bool, autoLabel: bool }.
+// Local: node scripts/check-hotfix-pattern.mjs [--base REF] [--head REF]
+// PR: PR_NUMBER=1463 node scripts/check-hotfix-pattern.mjs [1463]
+// Write: node scripts/check-hotfix-pattern.mjs --apply-label 1463
+// HOTFIX_BASE / HOTFIX_HEAD also select local revisions. With a PR they must
+// resolve to that PR's exact base/head. PR selection always overrides cwd HEAD.
+// Exit 0 = no hotfix, 2 = detected, 1 = failed/unknown (no analysis JSON).
+// Successful analysis JSON is the last stdout line; label failures include labelError.
 
-import { execSync } from 'node:child_process';
+import { parseOptions, resolveTarget, run, verifyLabelTarget } from './lib/hotfix-target.mjs';
 
 const HOTFIX_KEYWORDS = [
-  /\bfix:/i,
-  /\bhotfix:/i,
+  /^(?:fix|hotfix)(?:\([^()\r\n]+\))?!?:/i,
   /\bquick\s*fix\b/i,
   /\bminimal\s*fix\b/i,
   /\bband[- ]?aid\b/i,
   /\btemp(orary)?\s*(fix|patch|workaround|solution|hack)\b/i,
   /\bworkaround\b/i,
 ];
-
 const MAX_SINGLE_FILE_LINES = 50;
+const isCode = (path) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(path);
+const matchesHotfix = (text) => HOTFIX_KEYWORDS.some((re) => re.test(text));
 
-function run(cmd) {
-  try {
-    return execSync(cmd, { encoding: 'utf-8' }).trim();
-  } catch {
-    return '';
+function analyzeDiff(scope) {
+  const records = run('git', ['diff', '--numstat', '-z', scope.mergeBase, scope.head, '--']).split('\0');
+  let codeFileCount = 0;
+  let totalAdditions = 0;
+  let binaryCode = false;
+  for (let i = 0; i < records.length - 1; i++) {
+    const record = records[i];
+    const firstTab = record.indexOf('\t');
+    const secondTab = record.indexOf('\t', firstTab + 1);
+    if (secondTab < 0) throw new Error('Invalid git numstat record');
+    const additions = record.slice(0, firstTab);
+    let path = record.slice(secondTab + 1);
+    if (!path) {
+      // -z encodes renamed/copied paths as two additional NUL fields.
+      i++;
+      path = records[++i];
+      if (!path) throw new Error('Invalid git rename record');
+    }
+    if (!isCode(path)) continue;
+    codeFileCount++;
+    if (additions === '-') {
+      binaryCode = true;
+      continue;
+    }
+    if (!/^\d+$/.test(additions) || !Number.isSafeInteger(Number(additions)))
+      throw new Error('Invalid git addition count');
+    totalAdditions += Number(additions);
   }
+  return { codeFileCount, totalAdditions, binaryCode };
 }
 
-function matchesHotfix(text) {
-  return HOTFIX_KEYWORDS.some((re) => re.test(text));
-}
-
-// --- Scan commit messages ---
-const base = process.env.HOTFIX_BASE || 'origin/main';
-const commits = run(`git log ${base}..HEAD --format="%s"`);
-const commitLines = commits ? commits.split('\n') : [];
-const hotfixCommits = commitLines.filter(matchesHotfix);
-
-// --- Scan PR title (if PR_NUMBER or --apply-label provided) ---
-const applyLabelIdx = process.argv.indexOf('--apply-label');
-const prNumber = applyLabelIdx >= 0 ? process.argv[applyLabelIdx + 1] : process.env.PR_NUMBER;
-let prTitleMatch = false;
-if (prNumber) {
-  const prTitle = run(`gh pr view ${prNumber} --json title --jq '.title'`);
-  if (prTitle && matchesHotfix(prTitle)) {
-    prTitleMatch = true;
-  }
-}
-
-const isHotfix = hotfixCommits.length > 0 || prTitleMatch;
-
-// --- Diff analysis for auto-label eligibility ---
-const diffFiles = run(`git diff --name-only ${base}..HEAD`);
-const fileList = diffFiles ? diffFiles.split('\n').filter(Boolean) : [];
-const codeFiles = fileList.filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(f));
-
-let totalAdditions = 0;
-const numstat = run(`git diff ${base}..HEAD --numstat`);
-if (numstat) {
-  for (const line of numstat.split('\n')) {
-    const [additions, , filePath] = line.split('\t');
-    if (filePath && /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filePath)) {
-      totalAdditions += Number.parseInt(additions, 10) || 0;
+function main() {
+  const options = parseOptions(process.argv.slice(2), process.env);
+  const target = resolveTarget(options);
+  const { scope, snapshot } = target;
+  const commits = run('git', ['log', `${scope.base}..${scope.head}`, '--format=%s']).trim();
+  const commitLines = commits ? commits.split('\n') : [];
+  const hotfixCommits = commitLines.filter(matchesHotfix);
+  const prTitleMatch = snapshot ? matchesHotfix(snapshot.title) : false;
+  const isHotfix = hotfixCommits.length > 0 || prTitleMatch;
+  const { codeFileCount, totalAdditions, binaryCode } = analyzeDiff(scope);
+  const autoLabel = isHotfix && codeFileCount === 1 && totalAdditions <= MAX_SINGLE_FILE_LINES && !binaryCode;
+  let labelApplied = null;
+  let labelError = null;
+  if (options.applyLabel && autoLabel) {
+    verifyLabelTarget(target);
+    try {
+      run('gh', ['pr', 'edit', scope.prNumber, '--repo', scope.repository, '--add-label', 'hotfix']);
+      labelApplied = true;
+    } catch (error) {
+      labelApplied = false;
+      labelError = String(error.stderr || error.message).trim();
     }
   }
-}
 
-const isSingleFile = codeFiles.length === 1;
-const isSmallChange = totalAdditions <= MAX_SINGLE_FILE_LINES;
-const autoLabel = isHotfix && isSingleFile && isSmallChange;
-
-// --- Output ---
-console.log('--- Hotfix Pattern Analysis (F177 Phase E) ---');
-console.log(`Hotfix keywords detected: ${isHotfix ? 'YES' : 'no'}`);
-if (prTitleMatch) console.log('  PR title matches hotfix pattern');
-if (hotfixCommits.length > 0) {
-  console.log('  Matching commits:');
-  for (const c of hotfixCommits) console.log(`    - ${c}`);
-}
-console.log(`Code files changed: ${codeFiles.length}`);
-console.log(`Total additions: ${totalAdditions}`);
-console.log(`Auto-label eligible (single file ≤${MAX_SINGLE_FILE_LINES} lines + keyword): ${autoLabel ? 'YES' : 'no'}`);
-
-if (isHotfix) {
-  console.log('\n⚠️  HOTFIX DETECTED — governance rules apply:');
-  console.log('  1. Cross-cat review required (no self-merge)');
-  console.log(
-    '  2. Author self-checks quality-gate as usual; cross-cat review carries the risk (no second quality-gate run)',
-  );
-  console.log('  3. 2-week upgrade review cron will be registered on merge');
-}
-
-// --- Apply label (only when auto-label eligible: single file ≤50 lines + keyword) ---
-let labelApplied = null;
-let labelError = null;
-if (applyLabelIdx >= 0 && prNumber && autoLabel) {
-  try {
-    execSync(`gh pr edit ${prNumber} --add-label hotfix`, { encoding: 'utf-8', stdio: 'pipe' });
-    console.log('✅ hotfix label auto-added (single file ≤50 lines + keyword)');
-    labelApplied = true;
-  } catch (e) {
-    labelApplied = false;
-    labelError = (e.stderr || e.message).trim();
-    console.error(`❌ Failed to add hotfix label to PR #${prNumber}: ${labelError}`);
-  }
-} else if (applyLabelIdx >= 0 && prNumber && isHotfix && !autoLabel) {
-  console.log('ℹ️  Hotfix detected but NOT auto-labeling (multi-file or >50 lines). Cat/reviewer decides.');
-}
-
-if (process.env.F153_TELEMETRY === '1') {
-  console.log(
-    JSON.stringify({
-      metric: 'hotfix_pattern',
+  report(
+    options,
+    {
+      scope,
       isHotfix,
-      hotfixCommitCount: hotfixCommits.length,
-      prTitleMatch,
-      codeFileCount: codeFiles.length,
-      totalAdditions,
       autoLabel,
       labelApplied,
       labelError,
+      codeFileCount,
+      totalAdditions,
+      commitCount: commitLines.length,
+    },
+    hotfixCommits,
+    prTitleMatch,
+  );
+  process.exitCode = labelError ? 1 : isHotfix ? 2 : 0;
+}
+
+function report(options, result, hotfixCommits, prTitleMatch) {
+  const { scope, isHotfix, autoLabel, labelApplied, labelError, codeFileCount, totalAdditions, commitCount } = result;
+  console.log('--- Hotfix Pattern Analysis (F177 Phase E) ---');
+  console.log(
+    `Scope: ${scope.kind === 'pr' ? `${scope.repository} PR #${scope.prNumber}` : 'local'} ${scope.base}..${scope.head}`,
+  );
+  console.log(`Commits analyzed: ${commitCount}`);
+  console.log(`Hotfix keywords detected: ${isHotfix ? 'YES' : 'no'}`);
+  if (prTitleMatch) console.log('  PR title matches hotfix pattern');
+  if (hotfixCommits.length) {
+    console.log('  Matching commits:');
+    for (const commit of hotfixCommits) console.log(`    - ${commit}`);
+  }
+  console.log(`Code files changed: ${codeFileCount}`);
+  console.log(`Total additions: ${totalAdditions}`);
+  console.log(
+    `Auto-label eligible (single file ≤${MAX_SINGLE_FILE_LINES} lines + keyword): ${autoLabel ? 'YES' : 'no'}`,
+  );
+  if (isHotfix) {
+    console.log('\n⚠️  HOTFIX DETECTED — governance rules apply:');
+    console.log('  1. Cross-cat review required (no self-merge)');
+    console.log(
+      '  2. Author self-checks quality-gate as usual; cross-cat review carries the risk (no second quality-gate run)',
+    );
+    console.log('  3. 2-week upgrade review cron will be registered on merge');
+  }
+  if (labelApplied) console.log('✅ hotfix label auto-added (single file ≤50 lines + keyword)');
+  if (labelError) console.error(`❌ Failed to add hotfix label to PR #${scope.prNumber}: ${labelError}`);
+  if (options.applyLabel && isHotfix && !autoLabel) {
+    console.log(
+      'ℹ️  Hotfix detected but NOT auto-labeling (multi-file, >50 lines or unknown line count). Cat/reviewer decides.',
+    );
+  }
+  if (process.env.F153_TELEMETRY === '1') {
+    console.log(
+      JSON.stringify({
+        metric: 'hotfix_pattern',
+        isHotfix,
+        hotfixCommitCount: hotfixCommits.length,
+        prTitleMatch,
+        codeFileCount,
+        totalAdditions,
+        autoLabel,
+        labelApplied,
+        labelError,
+      }),
+    );
+  }
+  console.log(
+    JSON.stringify({
+      hotfix: isHotfix,
+      autoLabel,
+      labelApplied,
+      labelError,
+      scope,
+      commitCount,
+      codeFileCount,
+      totalAdditions,
     }),
   );
 }
 
-// --- Structured output (machine-readable, MUST be last stdout line) ---
-console.log(JSON.stringify({ hotfix: isHotfix, autoLabel, labelApplied, labelError }));
-
-process.exit(isHotfix ? 2 : 0);
+try {
+  main();
+} catch (error) {
+  // merge-gate intentionally tolerates exit 2 and parses the last stdout line.
+  // An unavailable analysis must therefore emit NO success-shaped JSON at all.
+  console.error(`❌ Hotfix analysis failed: ${String(error.stderr || error.message).trim()}`);
+  console.error('HOTFIX_ANALYSIS_UNAVAILABLE');
+  process.exitCode = 1;
+}

@@ -1,4 +1,5 @@
 /** Candidate orchestration shared by document, message, graph and Matter adapters. */
+import { ReadStopError } from './read-stop-diagnostics.js';
 export const KNOWLEDGE_DISCOVERY_VERSION = 'knowledge-discovery-v1';
 
 export interface DiscoveryReadRequest {
@@ -67,7 +68,7 @@ type OwnedDiscoveryOptions<Candidate, Item> = KnowledgeDiscoveryOptions<Candidat
 export function checkDiscoveryLifetime(options: { signal?: AbortSignal; deadlineAt?: number; check?(): void }): void {
   options.signal?.throwIfAborted();
   if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
-    throw new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError');
+    throw new ReadStopError('deadline_exceeded', 'Knowledge discovery deadline exceeded');
   options.check?.();
 }
 
@@ -92,7 +93,7 @@ async function withinDiscoveryLifetime<T>(
             timer = setTimeout(expire, remaining);
             return;
           }
-          const reason = new DOMException('Knowledge discovery deadline exceeded', 'TimeoutError');
+          const reason = new ReadStopError('deadline_exceeded', 'Knowledge discovery deadline exceeded');
           options.cancel(reason);
           reject(reason);
         };
@@ -206,7 +207,7 @@ export async function discoverKnowledge<Candidate, Item>(
     controller.abort(error);
     throw error;
   } finally {
-    controller.abort(new DOMException('Knowledge discovery finished', 'AbortError'));
+    controller.abort(new ReadStopError('read_closed', 'Knowledge discovery finished'));
     options.signal?.removeEventListener('abort', inheritAbort);
   }
 }

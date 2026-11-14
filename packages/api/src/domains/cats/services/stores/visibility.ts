@@ -252,10 +252,9 @@ export function canQuoteInPublicReply(parent: StoredMessage): boolean {
 
 /**
  * #699 P1 (gpt52 intake review, cat-cafe#2111): system / briefing messages are
- * internal, non-routable content that must never be quoted as a reply parent or
- * returned via get-message. Single source of truth shared by isEligibleReplyParent,
- * POST /api/messages replyTo validation, and the get-message route — so no path can
- * forget the exclusion (the "fetch + gate" invariant in this file's header).
+ * internal, non-routable content that must never be quoted as a reply parent.
+ * Exact reads separately admit owner-bound typed Host receipts; that does not
+ * change isEligibleReplyParent or POST /api/messages replyTo validation.
  */
 export function isInternalNonQuotableParent(
   msg: Pick<StoredMessage, 'from' | 'userId' | 'catId' | 'source' | 'sourceParseFailure' | 'origin'>,

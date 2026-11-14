@@ -1,7 +1,7 @@
 'use client';
 
 import type { ProfileItem } from './hub-accounts.types';
-import { builtinClientLabel } from './hub-accounts.view';
+import { builtinClientLabel, googleCloudLabel } from './hub-accounts.view';
 import { SettingsBadge, SettingsDeleteButton, SettingsRow } from './settings/primitives';
 import { useConfirm } from './useConfirm';
 
@@ -15,7 +15,7 @@ interface HubAccountItemProps {
 function summaryMeta(profile: ProfileItem): string {
   const parts: string[] = [];
   if (profile.authType === 'oauth') {
-    const label = profile.clientId ? builtinClientLabel(profile.clientId) : null;
+    const label = googleCloudLabel(profile) ?? (profile.clientId ? builtinClientLabel(profile.clientId) : null);
     if (label) parts.push(label);
   } else {
     const host = profile.baseUrl?.replace(/^https?:\/\//, '').replace(/\/+$/, '') || null;

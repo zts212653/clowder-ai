@@ -9,7 +9,6 @@ import {
   prepareDshSecretPatch,
   verifyDshSecretPatch,
 } from '../dist/domains/cats/services/agents/providers/dsh-secret-patch.js';
-import { discoverDshRuntime } from '../dist/routes/native-dsh-discovery.js';
 import { probeRuntimeCatalog } from '../dist/routes/runtime-catalog-probe.js';
 
 test('DSH launch pins the selected route before initialize without editing the native profile', async () => {
@@ -103,12 +102,12 @@ test('cached Node DSH entrypoints receive the route while generic ACP commands s
   }
 });
 
-test('auto-discovered DSH arguments feed the execution route overlay', async () => {
+test('an existing manual DSH launch feeds the execution route overlay', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-image-autoadd-'));
   try {
     const command = join(root, process.platform === 'win32' ? 'dsh.cmd' : 'dsh');
     await writeFile(command, '// fixture; no child process is started');
-    const discovered = discoverDshRuntime({ resolveCommand: () => command, dshHome: root });
+    const discovered = { acp: { command, startupArgs: ['--profile', 'acp'] } };
     assert.deepEqual(discovered.acp.startupArgs, ['--profile', 'acp']);
     const vision = '["deepseek-official","deepseek-flash"]';
     const args = await prepareDshSecretPatch(discovered.acp.command, discovered.acp.startupArgs, root, vision);
@@ -179,7 +178,7 @@ test('DSH factory reuses an unchanged route and replaces the pool when the selec
   try {
     const command = join(root, process.platform === 'win32' ? 'dsh.cmd' : 'dsh');
     await writeFile(command, '// fixture; no child process is started');
-    const discovered = discoverDshRuntime({ resolveCommand: () => command, dshHome: root });
+    const discovered = { acp: { command, startupArgs: ['--profile', 'acp'] } };
     assert.ok(discovered.acp);
     const base = {
       projectRoot: root,

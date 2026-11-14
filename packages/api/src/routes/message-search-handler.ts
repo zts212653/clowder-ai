@@ -1,4 +1,4 @@
-import type { MessageSearchInput } from '@cat-cafe/shared';
+import { DEFAULT_MESSAGE_SEARCH_SORT, type MessageSearchInput } from '@cat-cafe/shared';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
@@ -43,7 +43,7 @@ export function toMessageSearchInput(query: z.infer<typeof messageSearchQuerySch
   return {
     query: query.q,
     threadId: query.threadId,
-    sort: query.messageSort ?? 'time',
+    sort: query.messageSort ?? DEFAULT_MESSAGE_SEARCH_SORT,
     mode: query.mode ?? 'hybrid',
     limit: query.limit ?? 20,
     ...(query.dateFrom ? { dateFrom: query.dateFrom } : {}),

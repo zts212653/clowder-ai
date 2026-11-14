@@ -52,6 +52,7 @@ import {
   acpConstructionJson,
   acpLaunchConstructionSource,
 } from './configuration/acp-construction-source.js';
+import { prepareDshTurnPatch, verifyDshTurnPatch } from './dsh/dsh-turn-patch.js';
 import { skipAcpProfile } from './lifecycle/acp-registration-failure.js';
 import { pendingAcpPoolRetirement, trackAcpPoolRetirement } from './pool/acp-pool-retirement-registry.js';
 import {
@@ -422,6 +423,10 @@ export async function createAcpServiceForConfig(
     bootstrap.projectRoot,
     spawn.sessionModel,
   );
+  const secretPatch = bootstrap.args !== originalArgs ? bootstrap.args.at(-1) : undefined;
+  const secretArgs = bootstrap.args;
+  bootstrap.args = await prepareDshTurnPatch(bootstrap.command, secretArgs, bootstrap.projectRoot, spawn.sessionModel);
+  const turnPatch = bootstrap.args !== secretArgs ? bootstrap.args.at(-1) : undefined;
   const nativeKimi =
     config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
       ? inspectKimiNativeLaunch({
@@ -435,7 +440,7 @@ export async function createAcpServiceForConfig(
   // Audit and execution consume one fresh plan, rather than separate cache generations.
   invalidateCliCommand(bootstrap.command);
   const selectedCommand = resolveCliCommandOrBare(bootstrap.command);
-  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell'> =
+  const selected: Pick<WindowsSpawnPlan, 'command' | 'args' | 'shell' | 'env'> =
     process.platform === 'win32'
       ? resolveWindowsSpawnPlan(selectedCommand, bootstrap.args, { refresh: true })
       : { command: selectedCommand, args: [...bootstrap.args] };
@@ -459,12 +464,15 @@ export async function createAcpServiceForConfig(
     acpConfig.bootstrapRoot !== undefined,
     preparedSpawn,
   );
-  if (bootstrap.args !== originalArgs) {
-    const patch = bootstrap.args.at(-1);
-    if (!patch) throw new Error('secret_dsh_patch_unavailable');
+  if (secretPatch || turnPatch) {
     const verifyCwd = verified.verifyCwd;
     verified.verifyCwd = (...args) => {
-      if (!verifyDshSecretPatch(patch)) throw new Error('secret_dsh_patch_changed');
+      if (secretPatch && !verifyDshSecretPatch(secretPatch)) throw new Error('secret_dsh_patch_changed');
+      if (turnPatch && !verifyDshTurnPatch(turnPatch, bootstrap.command, secretArgs)) {
+        throw new Error(
+          'dsh_turn_admission_changed: DSH Desktop version, launch binding or managed bridge patch changed; refresh this member before retrying.',
+        );
+      }
       return verifyCwd(...args);
     };
   }
@@ -485,6 +493,7 @@ export async function createAcpServiceForConfig(
               memberEnvironment: config.env,
             }),
             ...spawn.fixedEnv,
+            ...selected.env,
           },
     onChanged(changed) {
       input.log.warn(
@@ -523,6 +532,7 @@ export async function createAcpServiceForConfig(
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
   const service = new AcpAgentService({
+    ...(turnPatch ? { dshTurnInput: true } : {}),
     ...(nativeDsh ? { nativeDsh } : {}),
     ...(nativeKimi ? { nativeKimi } : {}),
     ...(spawn.antigravity ? { antigravity: spawn.antigravity, agentBusyRetryDelaysMs: [] } : {}),

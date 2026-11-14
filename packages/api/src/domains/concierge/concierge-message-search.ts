@@ -1,4 +1,4 @@
-import type { MessageSearchInput, MessageSearchResponse } from '@cat-cafe/shared';
+import { DEFAULT_MESSAGE_SEARCH_SORT, type MessageSearchInput, type MessageSearchResponse } from '@cat-cafe/shared';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { IEvidenceStore } from '../memory/interfaces.js';
@@ -33,7 +33,7 @@ export async function buildConciergeMessageSearchContext(
 ): Promise<ConciergeSearchContextResult> {
   let response: MessageSearchResponse;
   try {
-    response = await search({ query, sort: 'time', mode: 'hybrid', limit: maxResults });
+    response = await search({ query, sort: DEFAULT_MESSAGE_SEARCH_SORT, mode: 'hybrid', limit: maxResults });
   } catch {
     return { handles: [], handleCount: 0, contextString: '\n消息检索暂不可用；不能据此断言没有相关消息。\n' };
   }
@@ -62,7 +62,8 @@ export async function buildConciergeMessageSearchContext(
       );
     }
   }
-  lines.push(`范围：${response.meta.scope === 'thread' ? '当前对话' : '全局可读对话'}；排序：按时间。`);
+  const sortLabel = { time: '按时间', relevance: '按相关', selected: '按选材顺序' }[response.meta.sort];
+  lines.push(`范围：${response.meta.scope === 'thread' ? '当前对话' : '全局可读对话'}；排序：${sortLabel}。`);
   const qualification = response.meta.qualification;
   if (qualification?.status === 'partial')
     lines.push(`${qualification.unassessed + qualification.indeterminate} 条候选尚未核对出结论，不能将其当作不相关。`);

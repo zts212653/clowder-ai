@@ -101,6 +101,7 @@ async function open({
   color = COCOA,
   scale = 1,
   consumers = false,
+  hostLayout = false,
 } = {}) {
   const context = await browser.newContext({
     viewport: { width: viewportWidth, height: 1300 },
@@ -145,6 +146,15 @@ async function open({
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ cats }) });
     if (url.pathname === '/api/config/cat-order')
       return handler.fulfill({ contentType: 'application/json', body: JSON.stringify({ catOrder: [] }) });
+    if (
+      hostLayout &&
+      request.method() === 'GET' &&
+      url.pathname === '/api/threads/thread-human/messages/c-2/generation-messages'
+    )
+      return handler.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ messageIds: [], hasAppendedInputs: true, complete: true }),
+      });
     if (request.method() === 'GET' && url.pathname === '/api/config/process-talk')
       return handler.fulfill({
         contentType: 'application/json',
@@ -163,7 +173,9 @@ async function open({
     });
   });
   const configAnswered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/config');
-  await page.goto(`${origin}/?w=${width}${consumers ? '&consumers=1' : ''}`, { waitUntil: 'networkidle' });
+  await page.goto(`${origin}/?w=${width}${consumers ? '&consumers=1' : ''}${hostLayout ? '&host-layout=1' : ''}`, {
+    waitUntil: 'networkidle',
+  });
   await configAnswered;
   if (consumers) {
     await page.waitForSelector('[data-consumer="owner-card"]');
@@ -439,6 +451,60 @@ test('the copy-id action stays reachable through the hover toolbar and its More 
     `left of the block, not over it: ${JSON.stringify({ toolbar: box, bubble: before })}`,
   );
   await context.close();
+});
+
+test('human actions stay beside the bubble when the host receipt or reply label is wider', async () => {
+  for (const width of [720, 400]) {
+    const { page, context, errors, unexpected } = await open({
+      width,
+      viewportWidth: width === 720 ? 1000 : 480,
+      hostLayout: true,
+    });
+    try {
+      const receipt = page.locator('[data-message-id="h-short"] [data-testid="message-dispatch-avatars"]');
+      await receipt.getByText(/收到，并进了已结束的这一轮/).waitFor();
+      for (const id of ['h-short', 'h-run-a']) {
+        const row = page.locator(`[data-message-id="${id}"]`);
+        const bubble = row.locator('[data-testid="message-bubble"]');
+        const auxiliary = id === 'h-short' ? receipt : row.locator('[data-testid="human-message-header"]');
+        const before = await bubble.boundingBox();
+        const auxiliaryBox = await auxiliary.boundingBox();
+        assert.ok(auxiliaryBox.width > before.width + 40, `${id}: the real auxiliary content is wider than the text`);
+        await bubble.hover();
+        const plane = page.locator(`[data-message-actions-owner="${id}"]`);
+        await page.waitForFunction((messageId) => {
+          const node = document.querySelector(`[data-message-actions-owner="${messageId}"]`);
+          return node && getComputedStyle(node).opacity === '1' && getComputedStyle(node).visibility === 'visible';
+        }, id);
+        const toolbar = await plane
+          .locator('[role="toolbar"], [data-testid="message-actions-compact-trigger"]')
+          .boundingBox();
+        const gap = before.x - toolbar.x - toolbar.width;
+        measurements.push({
+          case: 'host-action-anchor',
+          width,
+          id,
+          bubble: before,
+          auxiliary: auxiliaryBox,
+          toolbar,
+          gap,
+        });
+        await shot(page, `v2-host-action-${id}-${width}.png`);
+        assert.ok(gap >= 0 && gap <= 12, `${id}/${width}: actions must stay beside the bubble; gap=${gap}`);
+        const overlapsAuxiliary =
+          toolbar.x < auxiliaryBox.x + auxiliaryBox.width &&
+          toolbar.x + toolbar.width > auxiliaryBox.x &&
+          toolbar.y < auxiliaryBox.y + auxiliaryBox.height &&
+          toolbar.y + toolbar.height > auxiliaryBox.y;
+        assert.equal(overlapsAuxiliary, false, `${id}/${width}: actions do not cover the receipt or reply label`);
+        assert.deepEqual(await bubble.boundingBox(), before, 'hovering does not move the bubble');
+      }
+      assert.deepEqual(unexpected, []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
 });
 
 test('the colour follows the config through the F056 roles, and no colour set means cocoa, never a neutral', async () => {

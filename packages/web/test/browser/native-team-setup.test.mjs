@@ -145,10 +145,10 @@ test('manual creation remains available from the automatic configuration path', 
       catalogReads++;
       return route.fulfill({ json: { libraries: [] } });
     });
-    const catalogRead = state.page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === '/api/agent-providers' && response.request().method() === 'GET',
-    );
+    // Response headers can arrive before the editor reader is aborted; completion proves it survived.
+    const catalogRead = state.page.waitForEvent('requestfinished', {
+      predicate: (request) => new URL(request.url()).pathname === '/api/agent-providers' && request.method() === 'GET',
+    });
     await state.page.getByRole('button', { name: '手动创建单个伙伴', exact: true }).click();
     await state.panel.waitFor({ state: 'hidden' });
     await state.page.waitForURL((url) => url.searchParams.get('manual') === '1');

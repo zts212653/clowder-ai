@@ -6,6 +6,8 @@ import { ChatInput } from '@/components/ChatInput';
 import { ChatMessage } from '@/components/ChatMessage';
 import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
 import { scopedQueue } from '@/components/execution-row/thread-queue';
+import { MessageSearchOverlay } from '@/components/message-search/MessageSearchOverlay';
+import { useMessageSearchHost } from '@/components/message-search/useMessageSearchHost';
 import { writeShellLanguage } from '@/components/shell/shell-language';
 import { useShellPresentation, writeShellPresentation } from '@/components/shell/shell-presentation';
 import { ThemeApplier } from '@/components/ThemeApplier';
@@ -25,6 +27,7 @@ import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
+import { observeCanceledSendAttempts } from '@/stores/send-attempt-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useThemeStore } from '@/stores/themeStore';
@@ -91,12 +94,23 @@ function ChatProof() {
     messages: conversationMessages,
     queue,
   });
+  const navigateToNoop = useCallback(() => undefined, []);
+  const messageSearch = useMessageSearchHost({
+    threadId: CURRENT_THREAD,
+    pushThreadRoute: navigateToNoop,
+    available: surface,
+    searchAvailable: surface && presentation === 'v2',
+  });
   const registerConversationReading = useCallback(
     (port: ChatReadingPort) => {
-      conversationViewReading.setReadingPort(port);
-      return () => conversationViewReading.setReadingPort(null);
+      if (presentation === 'v2') conversationViewReading.setReadingPort(port);
+      const releaseSearch = surface ? messageSearch.registerReadingPort(port) : () => {};
+      return () => {
+        if (presentation === 'v2') conversationViewReading.setReadingPort(null);
+        releaseSearch();
+      };
     },
-    [conversationViewReading.setReadingPort],
+    [conversationViewReading.setReadingPort, messageSearch.registerReadingPort, presentation],
   );
   const ready = useSidebarProjectionStore((state) => state.hasCanonicalSnapshot);
   useEffect(() => {
@@ -143,15 +157,19 @@ function ChatProof() {
           conversationViewQueue={queue}
         />
         {surface ? (
-          <ThreadChatRuntimeProvider routeThreadId={CURRENT_THREAD}>
-            <ThreadChatSurface
-              threadId={CURRENT_THREAD}
-              density="full"
-              conversationViewController={conversationViewController}
-              conversationViewQueue={queue}
-              onReadingPort={registerConversationReading}
-            />
-          </ThreadChatRuntimeProvider>
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <MessageSearchOverlay threadId={CURRENT_THREAD} host={messageSearch} available={surface} />
+            <ThreadChatRuntimeProvider routeThreadId={CURRENT_THREAD}>
+              <ThreadChatSurface
+                threadId={CURRENT_THREAD}
+                density="full"
+                conversationViewController={conversationViewController}
+                conversationViewQueue={queue}
+                onReadingPort={registerConversationReading}
+                onNavigateMessage={messageSearch.jumpInThread}
+              />
+            </ThreadChatRuntimeProvider>
+          </div>
         ) : (
           <>
             <div
@@ -209,6 +227,8 @@ declare global {
       selectedThread: () => string;
       currentProject: () => string;
       incoming: (threadId: string, message: ChatMessageData) => void;
+      queue: (threadId: string, entries: import('../../../src/stores/chat-types').QueueEntry[]) => void;
+      recall: (threadId: string, messageId: string) => Promise<void>;
     };
   }
 }
@@ -220,6 +240,11 @@ window.__f322Chat = {
   selectedThread: () => useChatStore.getState().currentThreadId,
   currentProject: () => useChatStore.getState().currentProjectPath,
   incoming: (threadId, message) => useChatStore.getState().addMessageToThread(threadId, message),
+  queue: (threadId, entries) => useChatStore.getState().setQueue(threadId, entries),
+  recall: async (threadId, messageId) => {
+    await observeCanceledSendAttempts(threadId, [messageId], 'recalled');
+    useChatStore.getState().removeThreadMessage(threadId, messageId);
+  },
 };
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing chat proof root');

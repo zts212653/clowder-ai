@@ -141,6 +141,17 @@ export function usePendingComposerDraftInsert({
     let active = true;
     const apply = () => {
       if (!active || useChatStore.getState().pendingChatInsert !== pendingChatInsert) return;
+      // Socket recovery may already have handed this recall revision to the
+      // mounted owner before the initiating tab receives its HTTP response.
+      if (
+        pendingChatInsert.authoritative &&
+        hydratedRef.current &&
+        pendingChatInsert.serverRevision !== undefined &&
+        pendingChatInsert.serverRevision <= revisionRef.current
+      ) {
+        setPendingChatInsert(null);
+        return;
+      }
       hydrationGenerationRef.current += 1;
       const refs = {
         hydrationGenerationRef,

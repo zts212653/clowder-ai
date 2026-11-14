@@ -110,6 +110,74 @@ describe('apiFetch bounded completion', () => {
     expect(await settledOutcome(result)).toMatchObject({ kind: 'rejected', error: { name: 'TimeoutError' } });
   });
 
+  it('lets a plugin panel POST receive its result after the ordinary 30s deadline', async () => {
+    globalThis.fetch = vi.fn((url: string) =>
+      url.includes('/api/session')
+        ? Promise.resolve(new Response('{}', { status: 200 }))
+        : new Promise<Response>((resolve) => {
+            setTimeout(
+              () =>
+                resolve(
+                  new Response('{"state":"published"}', {
+                    headers: { 'content-type': 'application/json' },
+                  }),
+                ),
+              33_000,
+            );
+          }),
+    ) as typeof fetch;
+    const { requestPluginHttp } = await import('../../components/plugins/plugin-panel-http');
+    const result = observe(
+      requestPluginHttp(
+        { pluginId: 'dev.fixture', instanceId: 'fixture', generation: 'activation' },
+        { method: 'POST', path: 'feedback', body: { op: 'submit' } },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(await settledOutcome(result)).toMatchObject({ kind: 'pending' });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await result).toMatchObject({ kind: 'resolved', value: { status: 200, body: { state: 'published' } } });
+  });
+
+  it('lets the panel server deadline finish first while still bounding a stalled connection', async () => {
+    let requestSignal: AbortSignal | null | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/api/session')) return Promise.resolve(new Response('{}', { status: 200 }));
+      requestSignal = init?.signal;
+      return new Promise<Response>(() => undefined);
+    }) as typeof fetch;
+    const { requestPluginHttp } = await import('../../components/plugins/plugin-panel-http');
+    const result = observe(
+      requestPluginHttp(
+        { pluginId: 'dev.fixture', instanceId: 'fixture', generation: 'activation' },
+        { method: 'POST', path: 'feedback', body: { op: 'submit' } },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(180_001);
+    expect(await settledOutcome(result)).toMatchObject({ kind: 'pending' });
+    expect(requestSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await result).toMatchObject({ kind: 'rejected', error: { name: 'TimeoutError' } });
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it.each(['GET', 'HEAD'])('keeps a panel %s resource read bounded by the ordinary deadline', async (method) => {
+    globalThis.fetch = vi.fn((url: string) =>
+      url.includes('/api/session')
+        ? Promise.resolve(new Response('{}', { status: 200 }))
+        : new Promise<Response>(() => undefined),
+    ) as typeof fetch;
+    const { requestPluginHttp } = await import('../../components/plugins/plugin-panel-http');
+    const result = observe(
+      requestPluginHttp(
+        { pluginId: 'dev.fixture', instanceId: 'fixture', generation: 'activation' },
+        { method, path: 'panel' },
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(await result).toMatchObject({ kind: 'rejected', error: { name: 'TimeoutError' } });
+  });
+
   it('lets one caller abort while concurrent callers keep sharing the same session bootstrap', async () => {
     const session = deferred<Response>();
     const mockFetch = vi.fn((url: string) => {

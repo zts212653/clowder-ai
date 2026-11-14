@@ -497,12 +497,20 @@ export interface EmbedConfig {
   embedDim: number;
   maxModelMemMb: number;
   embedTimeoutMs: number;
+  generationId?: import('./vector-generation-tables.js').VectorGenerationId;
+  representationFingerprint?: string;
+  embedModelRev?: string;
+  embedUrl?: string;
+  queryInstruction?: string;
 }
 
 export interface EmbedModelInfo {
   modelId: string;
   modelRev: string;
   dim: number;
+  generationId?: import('./vector-generation-tables.js').VectorGenerationId;
+  representationFingerprint?: string;
+  queryInstruction?: string;
 }
 
 export interface IEmbeddingService {
@@ -512,6 +520,8 @@ export interface IEmbeddingService {
   reprobeIfNeeded(signal?: AbortSignal): Promise<void>;
   getModelInfo(): EmbedModelInfo;
   dispose(): void;
+  /** Lifecycle may retain the loaded G0 endpoint for non-index consumers. */
+  pinLoadedEndpoint?(): void;
 }
 
 const VALID_EMBED_MODES = new Set(['off', 'shadow', 'on']);

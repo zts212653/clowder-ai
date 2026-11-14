@@ -107,7 +107,7 @@ test('Alpha status still rejects foreign principals and unrelated subscriptions'
     await assert.rejects(foreign({ action: 'inspect', jobId: f.job.jobId }), /managed_job_not_found/);
   }
   const unrelated = createAlphaManagedControl({ ...options, subscriptionId: 'another-subscription' });
-  await assert.rejects(unrelated({ action: 'inspect', jobId: f.job.jobId }), /unrelated job/);
+  await assert.rejects(unrelated({ action: 'inspect', jobId: f.job.jobId }), /managed_job_not_found/);
   f.unchanged();
 });
 

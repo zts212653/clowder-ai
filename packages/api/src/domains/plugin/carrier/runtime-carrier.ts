@@ -21,6 +21,7 @@ import {
   removeDeclaredStaticResources,
   restoreDeclaredSkillPolicy,
 } from '../declared/declared-static-resources.js';
+import { inspectPluginMcpSchema } from '../declared/mcp-schema-admission.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
 import { NativePluginActions } from '../declared/native-plugin-actions.js';
 import type { SharedMcpFactory } from '../declared/shared-mcp-factory.js';
@@ -59,13 +60,27 @@ export interface PluginRuntimeCarrier {
   /** Derived from the admitted package alone. Carrier selection has no other input. */
   claims(admission: PluginRuntimeAdmission): boolean;
   /** In-process carriers join Host contribution admission before publishing runtime health. */
-  start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown>;
+  start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   readStream?(
     pluginInstanceId: string,
     reference: string,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<Uint8Array>;
+  /** Fixed Host-owned message delivery boundary; addressed calls and subscriptions share it. */
+  deliver?(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt>;
+  /** Fixed Host-owned external request boundary; the access token selects the instance before this call. */
+  handle?(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown>;
+  /** Fixed Host-owned webhook boundary; contribution ids select declared routes. */
+  handleWebhook?(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
   stopAll(reason: string): Promise<void>;
   configRefresh?(pluginInstanceId: string): Promise<void>;
   /** Carriers that survive a Host restart report how many sessions they recovered. */
@@ -83,8 +98,8 @@ export interface PluginRuntimeCarrier {
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   readonly ui = new DeclaredPluginUi();
-  readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
-  readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
+  readonly nativeActions: NativePluginActions;
+  readonly #nativeMcpLaunches: NativeMcpLaunches;
   readonly #carriers: PluginRuntimeCarrier[] = [];
   readonly #runtimeContributions: DeclaredRuntimeContributions;
 
@@ -97,7 +112,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     runtimeContributions?: DeclaredRuntimeContributionHost,
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
     private readonly projectOutputs?: PluginProjectOutputs,
+    private readonly afterStart?: (instanceId: string) => void,
+    private readonly beforeStart?: (instanceId: string) => void,
   ) {
+    this.nativeActions = new NativePluginActions((id) => this.#admission(id));
+    this.#nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
     this.#runtimeContributions = new DeclaredRuntimeContributions(
       runtimeContributions ?? {
         packages: resources?.packages ?? unsupportedPackageLocator,
@@ -122,10 +141,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const admission = await this.#admission(pluginInstanceId);
     const carrier = this.#selectAdmission(admission);
     const previousSkillPolicy = await captureDeclaredSkillPolicy(admission.packageRecord.pluginId, this.resources);
+    this.beforeStart?.(pluginInstanceId);
     let admitted: Promise<void> | undefined;
     const admitContributions = () =>
       (admitted ??= (async () => {
-        this.nativeActions.activate(admission, generation, (method, input) =>
+        await this.nativeActions.activate(admission, generation, (method, input) =>
           this.invoke(pluginInstanceId, method, input),
         );
         const launches = await activateDeclaredStaticResources(
@@ -144,20 +164,37 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
             attempt: (instanceId, method, params) => this.attemptInvoke(instanceId, method, params),
             exposes: (instanceId, method) => this.exposesAction(instanceId, method),
           },
+          (instanceId, contributionId, request) => this.handleWebhook(instanceId, contributionId, request),
         );
         const shared = await this.#sharedFactories(admission, carrier);
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
       })());
     try {
-      const result = await carrier.start(pluginInstanceId, admitContributions);
+      const result = await carrier.start(pluginInstanceId, admitContributions, async () => {
+        if (this.nativeActions.generation(pluginInstanceId) !== generation) return;
+        // The generation fence invalidates captured views immediately. Keep the MCP
+        // slot so a failed same-plugin instance cannot silently elect another source.
+        this.nativeActions.deactivate(pluginInstanceId);
+        try {
+          this.ui.deactivate(pluginInstanceId);
+        } finally {
+          await this.#runtimeContributions.deactivate(pluginInstanceId);
+        }
+      });
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
       // stop/stopAll invalidate this admission even after carrier readiness.
-      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
+      if (this.nativeActions.generation(pluginInstanceId) === generation) {
+        this.ui.activate(admission);
+        this.afterStart?.(pluginInstanceId);
+      }
       return result;
     } catch (error) {
-      if (!admitted) throw error;
+      if (!admitted) {
+        await this.beforeStop?.(pluginInstanceId, 'start_failed');
+        throw error;
+      }
       await this.#rollbackStartedRuntime(error, carrier, admission, previousSkillPolicy);
     }
   }
@@ -256,8 +293,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       if (contribution.type !== 'mcp' || !contribution.sharedFactory) continue;
       try {
         const factory = await carrier.resolveMcpFactory?.(admission.instance.pluginInstanceId, contribution.id);
-        if (factory) factories.set(contribution.id, factory);
-        else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
+        if (factory) {
+          const issue = await inspectPluginMcpSchema(factory);
+          if (issue) unavailable.set(contribution.id, issue);
+          else factories.set(contribution.id, factory);
+        } else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
       } catch {
         // Keep the original stdio path usable, without exposing package exceptions/secrets.
         unavailable.set(contribution.id, 'shared_factory_load_failed');
@@ -266,7 +306,9 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     for (const [contributionId, reason] of unavailable)
       createModuleLogger('plugin-native-mcp').warn(
         { instanceId: admission.instance.pluginInstanceId, contributionId, reason },
-        'Shared MCP unavailable; using original stdio',
+        reason === 'tool_schema_invalid'
+          ? 'Plugin MCP schema is invalid; this contribution is unavailable'
+          : 'Shared MCP unavailable; using original stdio',
       );
     return { factories, unavailable };
   }
@@ -286,7 +328,10 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         `${pluginInstanceId} received invalid Host delivery input`,
       );
     }
-    const result = await this.invoke(pluginInstanceId, method, input);
+    const carrier = await this.#select(pluginInstanceId);
+    const result = carrier.deliver
+      ? await carrier.deliver(pluginInstanceId, input)
+      : await this.invoke(pluginInstanceId, method, input);
     if (!isPluginDeliveryReceipt(result) || result.deliveryId !== input.deliveryId) {
       throw new ExternalPluginRuntimeError(
         'PROTOCOL_VIOLATION',
@@ -294,6 +339,26 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       );
     }
     return result;
+  }
+
+  async handle(pluginInstanceId: string, request: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const carrier = await this.#select(pluginInstanceId);
+    if (!carrier.handle) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginInstanceId} has no active request handler`);
+    }
+    return carrier.handle(pluginInstanceId, request);
+  }
+
+  async handleWebhook(
+    pluginInstanceId: string,
+    contributionId: string,
+    request: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    const carrier = await this.#select(pluginInstanceId);
+    if (!carrier.handleWebhook) {
+      throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginInstanceId} has no fixed webhook surface`);
+    }
+    return carrier.handleWebhook(pluginInstanceId, contributionId, request);
   }
 
   async invoke(pluginInstanceId: string, method: string, params: unknown): Promise<unknown> {
@@ -414,6 +479,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     this.nativeActions.deactivate(admission.instance.pluginInstanceId);
     const rollbackErrors: unknown[] = [];
     try {
+      await this.beforeStop?.(admission.instance.pluginInstanceId, 'start_failed');
       await carrier.stop(admission.instance.pluginInstanceId, 'start_failed');
     } catch (error) {
       rollbackErrors.push(error);

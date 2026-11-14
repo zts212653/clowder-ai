@@ -7,6 +7,7 @@
 
 import { PROFILE_UPDATE_TARGET_LAYERS } from '@cat-cafe/shared';
 import { CURRENT_CAPSULE_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
+import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -76,7 +77,7 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
         if (!corpus) {
           profilePointerMissing.add(1, { 'profile.layer': layer });
           reply.status(404);
-          return { error: `no_${layer}`, uri };
+          return { error: `no_${layer}`, uri, emptyRevision: profileRevisionOf('') };
         }
         if (expectedRevision && corpus.revision !== expectedRevision) {
           return reply.status(409).send({ error: 'profile_revision_changed' });
@@ -108,7 +109,11 @@ export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: Ca
     if (!primer) {
       profilePointerMissing.add(1, { 'profile.layer': 'primer' });
       reply.status(404);
-      return { error: 'no_primer', uri: deps.repository.currentRelationshipUri() };
+      return {
+        error: 'no_primer',
+        uri: deps.repository.currentRelationshipUri(),
+        emptyRevision: profileRevisionOf(''),
+      };
     }
 
     if (expectedRevision && primer.revision !== expectedRevision) {

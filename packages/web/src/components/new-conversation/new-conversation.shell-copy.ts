@@ -39,6 +39,8 @@ export const newConversationCopy = defineShellCopy(
       lobby: '大厅（无项目）',
       browse: '浏览文件夹或输入路径',
       useFolder: '使用这个文件夹',
+      projectSelectionRequired: '请另选项目，或明确选择大厅后再发送。',
+      noProjectSelected: '未选择项目',
       preferredCats: '首选猫',
       preferredCatsCount: (count: number) => `首选猫 · ${count}`,
       preferredCatsMenu: '选择首选猫',
@@ -67,6 +69,10 @@ export const newConversationCopy = defineShellCopy(
       retryPage: '重新连接',
       artworkAlt: 'Café 里的伙伴们正在等你回来',
       directoryBrowser: {
+        projectRestrictions: {
+          runtime_read_only: '运行目录仅供只读浏览。绑定项目或创建文件夹时，请选择其他目录，以免影响重启或更新。',
+          configuration_unknown: '仍可浏览此目录。运行目录或工作区配置异常，暂时无法选择项目或创建文件夹。',
+        },
         configuredPathUnavailable: '配置路径不可用，已切换到主目录',
         browseFailed: '无法浏览这个文件夹',
         connectFailed: '无法连接到服务器',
@@ -129,6 +135,8 @@ export const newConversationCopy = defineShellCopy(
       lobby: 'Lobby (no project)',
       browse: 'Browse folders or enter a path',
       useFolder: 'Use this folder',
+      projectSelectionRequired: 'Select another project or choose the lobby before sending.',
+      noProjectSelected: 'No project selected',
       preferredCats: 'Preferred cats',
       preferredCatsCount: (count: number) => `Preferred cats · ${count}`,
       preferredCatsMenu: 'Choose preferred cats',
@@ -164,6 +172,12 @@ export const newConversationCopy = defineShellCopy(
       retryPage: 'Reconnect',
       artworkAlt: 'Your teammates are waiting for you in the Café',
       directoryBrowser: {
+        projectRestrictions: {
+          runtime_read_only:
+            'The runtime folder is read-only here. Choose another folder for the project or to create a folder. Runtime changes can disrupt restarts or updates.',
+          configuration_unknown:
+            'You can browse this folder. Project selection and folder creation are unavailable because the runtime or workspace folder configuration is invalid.',
+        },
         configuredPathUnavailable: 'That folder is unavailable. Showing your home folder.',
         browseFailed: 'Unable to browse this folder',
         connectFailed: 'Unable to connect to the server',

@@ -1,6 +1,6 @@
 ---
 name: plain-language
-tips_exempt: "2026-11-07 renewal: 校准猫的 HTML 载体路由，复用已有作品保存与版本卡；不新增 Hub 操作或选载体审批，人的入口仍是普通表达委托与现有 HTML 作品指南。"
+tips_exempt: "Renewed 2026-11-10: clarify standard terminology and first-use explanations within existing communication and HTML delivery guidance. This teaches cat wording, not a new human workflow; ordinary requests and existing work-version controls remain the entry."
 description: >
   把跨上下文的工作进度、提问和复杂结果讲到人能理解，并选择合适的说明形式。
   Use when: 工作中途向未跟进的人汇报或提问、用户说看不懂/黑话多，或需在文字/图解/HTML/口播/视频/原型之间选择表达。
@@ -37,7 +37,9 @@ triggers:
 已知的偏好、熟悉程度和输出要求直接用；只有缺失信息会改变交付时才澄清，不另做一轮采访。
 
 按用户看得到的对象称呼这件事，例如“猫的执行记录页面”，而不是“Task1252 item5”。
-必要术语首次出现时解释它在这里的意思，随后保持叫法稳定；编号、提交号和路径放到可回查的出处。
+必要术语用领域里的标准叫法，业内通用英文直接用英文，不硬译成中文：首次出现先说术语，再用一句话解释它在这里的意思，需要时可以打一个比喻；之后一直用这个术语，不用自造的说法或比喻顶替（You 11-05 定的“标准术语直出”）。
+家里反复踩过：把 Prefill 叫成“读题”、把 KV cache 叫成“读题笔记”、给方法自造“往旁边借”这类四字口号。
+叫法再稳定，自造的那一套对听的人也是要先学的黑话。编号、提交号和路径放到可回查的出处。
 不能为了通俗把“已合入”“已加载”“已验证”“你现在可用”说成同一件事。优先说实际结果，
 证据细节供回查，剩余缺口、影响和必要权限仍须在正文讲清。
 

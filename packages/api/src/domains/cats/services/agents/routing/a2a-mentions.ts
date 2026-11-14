@@ -23,6 +23,7 @@ import {
   TOKEN_BOUNDARY_RE,
 } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getCatRoutingHandles } from './cat-routing-handles.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
 /** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
@@ -56,24 +57,19 @@ export interface InlineActionMention {
  *
  * Line-start @mention = always actionable. No keyword gate.
  */
-export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[] {
-  return analyzeA2AMentions(text, currentCatId).mentions;
+type PluginMention = { readonly id: string; readonly alias: string };
+export function parseA2AMentions(text: string, currentCatId?: CatId, plugins: readonly PluginMention[] = []): CatId[] {
+  return analyzeA2AMentions(text, currentCatId, plugins).mentions;
 }
 
-export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMentionAnalysis {
-  // F32-a: read from catRegistry (.cat-cafe/cat-catalog.json)
-  const allConfigs = catRegistry.getAllConfigs();
-
+export function analyzeA2AMentions(
+  text: string,
+  currentCatId?: CatId,
+  plugins: readonly PluginMention[] = [],
+): A2AMentionAnalysis {
   // F182 KD-10: include ALL cats (including disabled) so patterns participate in matching;
   // availability is checked at match-time via resolveCatTarget, not here.
-  const handles: MentionPatternEntry[] = [];
-  for (const [id, config] of Object.entries(allConfigs)) {
-    if (currentCatId && id === currentCatId) continue; // Filter self (skip when cross-thread)
-    for (const pattern of config.mentionPatterns) {
-      handles.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
-    }
-  }
-
+  const handles = getCatRoutingHandles(plugins).filter(({ catId }) => catId !== currentCatId);
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
@@ -82,7 +78,7 @@ export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMenti
     if (seen.has(catId)) continue;
     seen.add(catId);
     // F182 KD-10: resolver check at match-time (not at pattern-build time)
-    const resolved = resolveCatTarget(catId);
+    const resolved = plugins.some((plugin) => plugin.id === catId) ? { ok: catId } : resolveCatTarget(catId);
     if ('error' in resolved) routing_warnings.push(resolved.error);
     else found.push(catId);
   }

@@ -3,6 +3,13 @@ import { saveWatcherState, type WatcherCheckpointOwners } from './watcher-checkp
 
 const MAX_RECOVERY_ATTEMPTS = 3;
 
+/** Exhausting model recovery still owes one bounded native-only settlement probe after backoff. */
+export function watcherRecoveryFinalizationDue(state: WatcherSessionState, now: number): boolean {
+  return (
+    (state.attempt?.recoveryAttempts ?? 0) >= MAX_RECOVERY_ATTEMPTS && (state.attempt?.recoveryRetryAt ?? 0) <= now
+  );
+}
+
 /** Reserve on the original Session before launch, so a crash cannot reset this wake's recovery budget. */
 export async function reserveWatcherRecovery(
   owners: Pick<WatcherCheckpointOwners, 'sessions'>,

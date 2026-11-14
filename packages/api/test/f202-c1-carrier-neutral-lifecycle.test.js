@@ -300,3 +300,36 @@ test('a bundled runtime claims the package it declares — the router never name
   await carrier.start('instance-0');
   assert.deepEqual(started, ['instance-0']);
 });
+
+test('runtime readiness is announced only after a successful uncanceled carrier start', async () => {
+  for (const outcome of ['ready', 'failed', 'stopped']) {
+    const reached = Promise.withResolvers();
+    const released = Promise.withResolvers();
+    const ready = [];
+    const router = new PluginRuntimeCarrierRouter(
+      inventoryOf(manifest()),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (instanceId) => ready.push(instanceId),
+    );
+    router.register({
+      ...recordingCarrier('fixture', () => true, []),
+      async start() {
+        reached.resolve();
+        await released.promise;
+        if (outcome === 'failed') throw new Error('start_failed');
+      },
+    });
+    const starting = router.start('instance-0');
+    await reached.promise;
+    assert.deepEqual(ready, [], 'registration during start is not runtime-ready');
+    if (outcome === 'stopped') await router.stop('instance-0');
+    released.resolve();
+    if (outcome === 'failed') await assert.rejects(starting, /start_failed/);
+    else if (outcome === 'stopped') await assert.rejects(starting, /activation changed/i);
+    else await starting;
+    assert.deepEqual(ready, outcome === 'ready' ? ['instance-0'] : []);
+  }
+});

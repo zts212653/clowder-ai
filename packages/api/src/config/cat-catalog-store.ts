@@ -99,6 +99,61 @@ function migrateLegacyGeminiConsumerCarrier(
   return dirty;
 }
 
+const RETIRED_DOT_CAT_ID = 'gpt-dot';
+const RETIRED_DOT_FALLBACK_MENTION = '@gpt-dot';
+
+/**
+ * F202 cutover: the old Host-owned Dot setup persisted a real cloud member in the runtime catalog.
+ * Removing the writer is not enough: that byte would continue competing with gpt-pro for the
+ * chatgpt cloud provider and keep the legacy @dot address occupied forever. Preserve the member's
+ * presentation for historical messages, but make the stored identity unavailable and non-cloud.
+ */
+function retireLegacyDotRuntimeIdentity(catalog: CatCafeConfig): boolean {
+  let dirty = false;
+  let retiredLegacyIdentity = false;
+  for (const breed of catalog.breeds as unknown as Record<string, unknown>[]) {
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    for (const variant of variants) {
+      if (resolveVariantCatId(breed, variant) !== RETIRED_DOT_CAT_ID) continue;
+      const mentions = readStringArray(variant.mentionPatterns);
+      const isLegacyExecutableShape =
+        variant.clientId === 'openai' &&
+        variant.provider === 'openai-chatgpt-pro' &&
+        (variant.carrier === undefined || variant.carrier === 'app_server') &&
+        mentions.some((mention) => normalizeMentionAlias(mention) === normalizeMentionAlias('@dot'));
+      if (!isLegacyExecutableShape) continue;
+      retiredLegacyIdentity = true;
+      for (const executableField of ['provider', 'carrier', 'transport', 'cli', 'acp'] as const) {
+        if (executableField in variant) {
+          delete variant[executableField];
+          dirty = true;
+        }
+      }
+      if (variant.mcpSupport !== false) {
+        variant.mcpSupport = false;
+        dirty = true;
+      }
+      const survivingMentions = mentions.filter(
+        (mention) => normalizeMentionAlias(mention) !== normalizeMentionAlias('@dot'),
+      );
+      const retiredMentions = survivingMentions.length > 0 ? survivingMentions : [RETIRED_DOT_FALLBACK_MENTION];
+      if (JSON.stringify(variant.mentionPatterns) !== JSON.stringify(retiredMentions)) {
+        variant.mentionPatterns = retiredMentions;
+        dirty = true;
+      }
+    }
+  }
+  if (retiredLegacyIdentity && catalog.version === 2) {
+    const roster = catalog.roster as unknown as Record<string, Record<string, unknown> | undefined>;
+    const member = roster[RETIRED_DOT_CAT_ID];
+    if (member && (member.available !== false || member.lead !== false)) {
+      roster[RETIRED_DOT_CAT_ID] = { ...member, available: false, lead: false };
+      dirty = true;
+    }
+  }
+  return dirty;
+}
+
 /**
  * clowder-ai#340: One-time catalog variant migration — rewrites file on disk then never runs again.
  *   1. old `provider` (clientId value) → `clientId` (P5 field rename)
@@ -120,6 +175,8 @@ function migrateCatalogVariants(
 ): { catalog: CatCafeConfig; dirty: boolean } {
   let dirty = false;
   const next = structuredClone(catalog) as CatCafeConfig;
+
+  if (retireLegacyDotRuntimeIdentity(next)) dirty = true;
 
   // Step 4 prep: union the catalog's own breed ids with any external ones (template)
   // so legacy variants are dropped even when the catalog itself hasn't grown the new breed yet.

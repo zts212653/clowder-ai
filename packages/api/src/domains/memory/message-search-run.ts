@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { MessageSearchInput, MessageSearchResponse, MessageSearchResult } from '@cat-cafe/shared';
+import {
+  DEFAULT_MESSAGE_SEARCH_SORT,
+  type MessageSearchInput,
+  type MessageSearchResponse,
+  type MessageSearchResult,
+} from '@cat-cafe/shared';
 import type { Thread } from '../cats/services/stores/ports/ThreadStore.js';
 import { KnowledgeResolver } from './KnowledgeResolver.js';
 import type { MessageSearchPrincipal } from './MessageSearchService.js';
@@ -51,6 +56,8 @@ export async function runMessageSearch(
   context: MessageSearchExecutionContext,
   ops: SearchOperations,
 ): Promise<MessageSearchResponse> {
+  // Resolve before discovery so admission budget, ordering and metadata agree for direct callers too.
+  input = { ...input, sort: input.sort ?? DEFAULT_MESSAGE_SEARCH_SORT };
   const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + 15_000);
   context = { ...context, deadlineAt };
   const workCutoff = deadlineAt - 2000;
@@ -90,7 +97,7 @@ export async function runMessageSearch(
                   candidateAudit: diagnostics.candidateEvidence?.request,
                   visibleThreadIds: [...threads.keys()],
                   threadId: input.threadId,
-                  sort: input.sort ?? 'time',
+                  sort: input.sort,
                   mode: input.mode ?? 'hybrid',
                   candidateOrder: 'relevance',
                   excludeSource: principal.source,
@@ -182,7 +189,7 @@ export async function runMessageSearch(
         ...messageSearchMeta(input, execution, results.length, limit),
         resultKind: 'sources',
         hasMore: stoppedEarly || results.length > limit,
-        ...((input.sort ?? 'time') === 'time'
+        ...(input.sort === 'time'
           ? {
               timeWindow: {
                 limit: MESSAGE_SEARCH_TIME_WINDOW,

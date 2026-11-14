@@ -195,11 +195,43 @@ test('foreign private person and source revision drift expose unavailable metada
     assert.equal(response.json().readStatus, 'partial');
     assert.equal(response.body.includes('秘密名字'), false);
     assert.equal(response.json().records.length, 2);
+    const results = response
+      .json()
+      .records.map(
+        (row: { event: { results: Array<{ sourceType: string; sourceUnavailableReason?: string }> } }) =>
+          row.event.results[0],
+      );
+    assert.equal(
+      results.find((item: { sourceType: string }) => item.sourceType === 'person_entity').sourceUnavailableReason,
+      undefined,
+    );
+    assert.equal(
+      results.find((item: { sourceType: string }) => item.sourceType === 'taste').sourceUnavailableReason,
+      'source_corrected',
+    );
     assert.ok(
       response
         .json()
         .records.every((row: { event: { results: Array<{ href: unknown }> } }) => row.event.results[0].href === null),
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('an explicitly corrected delivered memory is a complete readable terminal row', async () => {
+  const f = await recallFixture((readers) => {
+    readers.cueSourceReader = {
+      read: async () => ({ status: 'not_available', invalidationReason: 'source_corrected' }),
+    };
+  });
+  try {
+    f.invocation('parent');
+    f.episodes.append(cue(f.now, 'corrected'));
+    const response = await f.get();
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().readStatus, 'ready');
+    assert.equal(response.json().records[0].event.results[0].sourceUnavailableReason, 'source_corrected');
   } finally {
     await f.close();
   }

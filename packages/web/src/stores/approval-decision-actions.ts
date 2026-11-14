@@ -21,6 +21,7 @@ import {
   type EntityResolutionSuccessBody,
   resolveEndpoint,
   stablePersonMemoryDecisionId,
+  tasteApprovalRequest,
   withoutDecision,
 } from './approval-decision-http';
 import type { DecisionStoreSlice, SliceUpdate } from './approval-decision-types';
@@ -28,7 +29,7 @@ import { readDomainWriteEffect } from './approval-domain-effect';
 import { createPersonMemoryDecisionActions, type PersonMemoryDecisionActions } from './approval-person-memory-actions';
 
 export interface ApprovalDecisionActions extends PersonMemoryDecisionActions {
-  approveProposal: (proposalId: string) => Promise<void>;
+  approveProposal: (proposalId: string, displayedDigest?: string) => Promise<void>;
   /** Resolves true when the rejection was accepted. */
   rejectProposal: (proposalId: string, feedback?: HumanDispositionFeedbackInput) => Promise<boolean>;
   resolveEntityConflict: (proposalId: string, resolution: EntityConflictResolutionRequest) => Promise<void>;
@@ -43,13 +44,16 @@ export function createApprovalDecisionActions(
   return {
     ...createPersonMemoryDecisionActions(set, get),
 
-    approveProposal: async (proposalId: string) => {
+    approveProposal: async (proposalId: string, displayedDigest?: string) => {
       const item = findItem(proposalId);
       if (item && isScheduleDriftBlocked(item, get().scheduleDriftBlocked)) return;
       const attempt = beginDecisionAttempt(set, proposalId, 'approve', item);
       set((s) => ({ deciding: { ...s.deciding, [proposalId]: 'approving' as const } }));
       try {
-        const res = await apiFetch(resolveEndpoint(item?.sourceFeatureId, proposalId, 'approve'), { method: 'POST' });
+        const res = await apiFetch(resolveEndpoint(item?.sourceFeatureId, proposalId, 'approve'), {
+          method: 'POST',
+          ...tasteApprovalRequest(item?.sourceFeatureId, displayedDigest),
+        });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
           attempt.received(res, data);

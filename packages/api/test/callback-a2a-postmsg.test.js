@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { adaptInvocationQueue, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
@@ -128,6 +129,35 @@ describe('post_message A2A mention invocation', () => {
     });
     return app;
   }
+
+  test('line-start stable cat ID admits one durable wake under a nickname-only catalog', async () => {
+    const app = await createApp();
+    const original = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, id === 'opus' ? { ...config, mentionPatterns: ['@宪宪'] } : config);
+      }
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 't1');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { content: '交付已完成。\n@opus\n请接棒。' },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      const { messageId, routed } = res.json();
+      assert.deepEqual(routed, ['opus']);
+      const wakes = await invocationQueue.listAllDurable('t1');
+      assert.equal(wakes.length, 1);
+      assert.equal(wakes[0].payload.messageId, messageId);
+      assert.deepEqual(wakes[0].targets, ['opus']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+      await app.close();
+    }
+  });
 
   // P1-1 regression: no @ → no invocation
   test('post-message without @ does NOT trigger invocation', async () => {

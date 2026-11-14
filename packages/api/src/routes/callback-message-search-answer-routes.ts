@@ -66,7 +66,8 @@ export function registerCallbackMessageSearchAnswerRoutes(
         deps.service!.prepare(
           {
             operationId: parsed.data.operationId,
-            input: toMessageSearchInput(parsed.data),
+            // Saved answer retries hash these original arguments; ordinary recall's new default must not alter them.
+            input: toMessageSearchInput({ ...parsed.data, messageSort: parsed.data.messageSort ?? 'time' }),
             targetThreadId: scope.threadId,
             ...(cloud ? { acceptedUseRef: sourceId } : {}),
             ...(parsed.data.selections ? { selections: parsed.data.selections } : {}),

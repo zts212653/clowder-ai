@@ -1,0 +1,58 @@
+import { defineShellCopy } from '../shell/shell-copy';
+
+export const quickPhrasesCopy = defineShellCopy(
+  {
+    zh: {
+      title: '快捷用语',
+      search: '搜索快捷用语',
+      empty: '还没有快捷用语。在输入框写好文字后，点击快捷用语即可保存。',
+      noResults: '没有匹配的快捷用语。',
+      loading: '正在加载快捷用语…',
+      readFailed: '加载失败，请重试。',
+      writeFailed: '操作未完成，请重试。',
+      storageFull: '快捷用语空间已满。请先删除不再使用的用语。',
+      tooLong: '这段文字超过了快捷用语的长度上限。',
+      save: '是否保存成快捷用语',
+      saved: '已保存快捷用语',
+      remove: '删除快捷用语',
+      confirmRemove: '确认删除这条快捷用语？',
+      removed: '已删除快捷用语',
+      yes: '是',
+      no: '否',
+      retry: '重试',
+      previous: '上一页',
+      next: '下一页',
+      page: (current: number, total: number) => `第 ${current} / ${total} 页`,
+    },
+    en: {
+      title: 'Quick phrases',
+      search: 'Search quick phrases',
+      empty: 'No saved phrases yet. Write something in the composer and open Quick phrases to save it.',
+      noResults: 'No matching quick phrases.',
+      loading: 'Loading quick phrases…',
+      readFailed: 'Could not load quick phrases. Try again.',
+      writeFailed: 'The operation did not finish. Try again.',
+      storageFull: 'Quick phrase storage is full. Delete a phrase you no longer use.',
+      tooLong: 'This draft is too long to save as a quick phrase.',
+      save: 'Save as a quick phrase?',
+      saved: 'Quick phrase saved',
+      remove: 'Delete quick phrase',
+      confirmRemove: 'Delete this quick phrase?',
+      removed: 'Quick phrase deleted',
+      yes: 'Yes',
+      no: 'No',
+      retry: 'Retry',
+      previous: 'Previous page',
+      next: 'Next page',
+      page: (current: number, total: number) => `Page ${current} of ${total}`,
+    },
+  },
+  {
+    samples: {
+      page: [
+        [1, 2],
+        [2, 3],
+      ],
+    },
+  },
+);

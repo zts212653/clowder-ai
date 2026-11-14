@@ -4,7 +4,7 @@ related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F266, F
 topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
-updated: 2026-10-25
+updated: 2026-11-11
 tips_exempt: 本批活 run 审批回执自动追加，不增加用户操作或配置；原审批入口与闲置猫下轮可见保持不变。
 ---
 
@@ -16,14 +16,16 @@ Architecture cell: `approval-index`
 Map delta: update required（Phase I）— 保留 feature adapter + query aggregation；`approval-index` 新增统一 producer ingress、单一注册表与来源双锚契约，不新增第二套 canonical proposal store。
 Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点，或由新 producer 完全绕过 Hub。底座必须同时守住“所有猫发起的 operator gate 可见”和“每条审批可精确追溯”。
 
-### Proposed delta — M3 批次命令与恢复（2026-09-17，未接实施）
+### M3 原卡按组显示（2026-11-11，按474减法交付）
 
-- **Map delta: proposed** — 在既有 read-through projection/publication ingress 之外，拟增加 F246 所有的 batch issuer、不可变 membership manifest/finalize barrier、TTL=0 command/recovery projection 与唯一 executor/reconciler；[approval-index](../architecture/ownership/cells/approval-index.md) 同步显式区分现状与候选。
-- **Batch ingress 线协议** — `begin` 接完整有序 member descriptors（1–32，itemId/target/payloadDigest），由服务端验证并计算 count/digest、签发 ref/revision；`append` 以该 ref/revision + segmentIndex 填固定四项位置并核实际输入摘要；显式 `finalize` 只在所有声明位置有确定准备结果时封板/发布。缺段不能发布，最后一段不隐式封板。完整 schema 与 four-vs-six 负例见 M3 §4.1/负例14；`cat_cafe_remember` 本身只接完整 1–4 项，不声明分段能力。
-- 新记录只持服务端签发的批次身份、ref/digest/count、成员版本、命令选择与执行 custody。生命周期为 `registered → claimed(attemptRef, fencingGeneration, leaseUntil) → reconciling → terminal`；续约/接管走同一 canonical CAS。lease 到期不删记录，启动与到期恢复先回原 child resolution/attempt/effect proof，再决定 join、回填或执行缺失项。
-- 各 feature 继续独占 child resolution、内容、版本、权限和 effect proof；新 operation key 不能替相同 child revision 建第二 executor。原 owner attempt CAS/fence 必须与 effect commit 去重闭合；Hub 不建第二 proposal/memory 数据库，不以 response waiter 代替持久命令。
-- **B1 接球门** — F246 owner 须明确接受这份 implementation custody，核定自身存储/CAS 与各 producer 接缝后才进入实现/激活。本文只登记候选，不替 Sol 或其他猫接实现、不改变现有 producer writer epoch/cutover，也不扩大 M3 首批 corpus + Taste 目标。
-- B1 交付必须含服务端签发/封板与一张批次卡、选中行快照、唯一领取/续约/到期/启动恢复、稳定 operation/key 查询以及原 owner proof-first 对账。验收至少覆盖缺段/迟到/伪造 ref、双 worker、旧 lease 晚提交、effect 后断连与不同 key 同 child；细则和负例 10–15 由 M3 候选持有。本节不伪造已通过 AC。
+现行来源：You `[thread-id]#private-source-id`，及489回退补充。
+原Task608仍由Sol6.1持有（ownerRevision 1）；原Task58由Astra持薄入口及集成。
+本段替代11-10对九月恢复合同的扩大解释，旧正文留在Git历史。
+
+- 同一次`cat_cafe_remember`接1–4项，经原提交入口得到原提案或直接结果；用现有消息的`meta.memoryGroup`归组，刷新重读同组。
+- UI按原引用找到原卡，把内容、权限、所见版本和逐行批/拒交回原控制器；“修改建议”沿原对话草稿与重提，直接结果按原语义显示。
+- #6937重型批次实现停用；清单、分段、发布状态机、持久command/lease协调、unknown对账和逐项效果证明均不作为当前前置。以后补恢复先有真实失败证据。
+- 正式环境加载归原Task58的g7等待（API与Web包含`ec4c8e03`）；旧八工具仍保留，W4与完整替代的撤旧条件不变，F332整体不关闭。
 
 ### 决议结果回写原线程（2026-10-24）
 

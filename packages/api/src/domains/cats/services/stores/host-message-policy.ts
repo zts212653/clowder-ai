@@ -1,4 +1,5 @@
 import {
+  type ApprovalDecisionReceiptV1,
   approvalDecisionReceiptV1Schema,
   contentModificationFollowUpCarrierV1Schema,
   contentModificationPublicationCarrierV1Schema,
@@ -19,6 +20,20 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
+/** Parse only the approval publisher's typed Host carrier, without granting read or reply authority. */
+export function readApprovalDecisionReceipt(message: HostMessageCandidate): ApprovalDecisionReceiptV1 | undefined {
+  const source = record(message.source);
+  if (
+    message.catId !== null ||
+    message.from?.kind !== 'system' ||
+    message.from.service !== 'approval-hub' ||
+    source?.connector !== 'approval-hub'
+  )
+    return undefined;
+  const parsed = approvalDecisionReceiptV1Schema.safeParse(record(source.meta)?.approvalDecisionReceipt);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** Resolve the typed Host identity for records that intentionally enter authorized Cat cognition. */
 export function catConsumableHostSpeaker(message: HostMessageCandidate): string | undefined {
   if (message.catId !== null) return undefined;
@@ -31,13 +46,7 @@ export function catConsumableHostSpeaker(message: HostMessageCandidate): string 
     return 'Host 作品修改回执';
   }
   const source = record(message.source);
-  if (
-    message.from?.kind === 'system' &&
-    message.from.service === 'approval-hub' &&
-    source?.connector === 'approval-hub' &&
-    approvalDecisionReceiptV1Schema.safeParse(record(source.meta)?.approvalDecisionReceipt).success
-  )
-    return 'Host 审批结果回执';
+  if (readApprovalDecisionReceipt(message)) return 'Host 审批结果回执';
   if (
     source?.connector === 'content-review' &&
     source.label === 'Host 文档写回完成：原任务核证续办' &&

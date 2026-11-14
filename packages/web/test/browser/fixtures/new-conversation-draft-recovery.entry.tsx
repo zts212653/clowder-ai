@@ -24,7 +24,8 @@ const draftStorageProbe = {
   async startOlderSave(owner: string) {
     const value = await loadNewConversationIntent(owner);
     if (!value) throw new Error('Missing initial intent');
-    this.olderSave = saveNewConversationIntent(value);
+    // Change something stored: the store skips re-saving a draft it already wrote.
+    this.olderSave = saveNewConversationIntent({ ...value, intent: { ...value.intent, title: 'older save' } });
     void this.olderSave.catch(() => undefined);
   },
   clear: clearNewConversationIntent,

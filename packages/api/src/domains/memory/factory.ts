@@ -52,6 +52,7 @@ export interface MemoryServices {
   materializationService?: IMaterializationService;
   embeddingLifecycle: MemoryEmbeddingLifecycle;
   embeddingService?: IEmbeddingService;
+  legacyEmbeddingService?: IEmbeddingService;
   vectorStore?: VectorStore;
   passageVectorStore?: PassageVectorStore;
   /** F-4: Global knowledge index builder (Skills + MEMORY.md) */
@@ -208,14 +209,13 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     publishedDocuments,
   );
   const embeddingLifecycle = new MemoryEmbeddingLifecycle(store, indexBuilder, embedConfig, {
+    requireLegacyConsumer: true,
     getDependentStores: () =>
-      [...stores.values()].filter(
-        (candidate): candidate is SqliteEvidenceStore => candidate instanceof SqliteEvidenceStore,
-      ),
+      [...stores].flatMap(([id, candidate]) => {
+        const status = catalog.get(id)?.status;
+        return candidate instanceof SqliteEvidenceStore && (!status || status === 'active') ? [candidate] : [];
+      }),
   });
-  if (embedConfig.embedMode !== 'off') {
-    await embeddingLifecycle.activate(embedConfig.embedMode);
-  }
 
   const markerQueue = new MarkerQueue(markersDir);
   const materializationService = new MaterializationService(markerQueue, docsRoot, indexBuilder);
@@ -297,6 +297,8 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     now,
   });
 
+  if (embedConfig.embedMode !== 'off') await embeddingLifecycle.activate(embedConfig.embedMode);
+
   const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore, catalog, stores });
 
   // F227: typed Event Memory store (magic-word truth source, LL-048 fail-loud).
@@ -317,6 +319,9 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     embeddingLifecycle,
     get embeddingService(): IEmbeddingService | undefined {
       return embeddingLifecycle.getService();
+    },
+    get legacyEmbeddingService(): IEmbeddingService | undefined {
+      return embeddingLifecycle.getLegacyConsumerService();
     },
     get vectorStore(): VectorStore | undefined {
       return embeddingLifecycle.getVectorStore();

@@ -34,7 +34,7 @@ export function MemoryMatterActions({
           disabled={action.busy}
           onClick={() => setConfirm('forget')}
         >
-          忘记这件事
+          忘掉这件事
         </button>
       </div>
       {confirm && (
@@ -52,7 +52,7 @@ export function MemoryMatterActions({
               action.submit({ operation: confirm, matterId: matter.matterId, expectedRevision: matter.revision })
             }
           >
-            确认{confirm === 'forget' ? '忘记' : '不再使用'}
+            确认{confirm === 'forget' ? '忘掉' : '不再使用'}
           </button>
           <button type="button" className="shell-focusable text-cafe-muted" onClick={() => setConfirm(null)}>
             取消

@@ -1,7 +1,10 @@
 /** Shared pure format boundary for read-only account snapshots and explicit legacy migration. */
+
+import { isAbsolute } from 'node:path';
 import type { AccountConfig, CredentialEntry } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { codexManagedAccountSchema } from './codex-account-schema.js';
+import { googleCloudAccountSchema } from './google-cloud-account.js';
 
 export class AccountStoreVerdictError extends Error {}
 
@@ -22,6 +25,22 @@ const quotaItems = z.array(
     })
     .passthrough(),
 );
+export const accountQuotaObservationSchema = z.object({
+  owner: z.object({ accountRef: z.string(), userId: z.string(), workspaceId: z.string() }).optional(),
+  observedAt: z.number(),
+  status: z.enum(['ok', 'unavailable', 'unsupported']),
+  source: z.literal('codex_official_readonly'),
+  items: quotaItems,
+  error: z.string().optional(),
+  credentialVersion: z.string().optional(),
+  failure: z
+    .object({
+      kind: z.enum(['renewal_required', 'signin_required', 'service_unreachable']),
+      officialDetail: z.string().max(500).optional(),
+    })
+    .optional(),
+  lastSuccess: z.object({ observedAt: z.number(), items: quotaItems }).optional(),
+});
 const accountSchema = z
   .object({
     authType: z.enum(['oauth', 'api_key']),
@@ -32,28 +51,16 @@ const accountSchema = z
     modelAliases: stringRecord.optional(),
     envVars: stringRecord.optional(),
     codex: codexManagedAccountSchema.optional(),
+    agy: z
+      .object({ storage: z.literal('cli_file'), credentialHome: z.string().refine(isAbsolute) })
+      .strict()
+      .optional(),
     claude: z
       .object({ kind: z.literal('long_lived_token') })
       .strict()
       .optional(),
-    quota: z
-      .object({
-        owner: z.object({ accountRef: z.string(), userId: z.string(), workspaceId: z.string() }).optional(),
-        observedAt: z.number(),
-        status: z.enum(['ok', 'unavailable', 'unsupported']),
-        source: z.literal('codex_official_readonly'),
-        items: quotaItems,
-        error: z.string().optional(),
-        credentialVersion: z.string().optional(),
-        failure: z
-          .object({
-            kind: z.enum(['renewal_required', 'signin_required', 'service_unreachable']),
-            officialDetail: z.string().max(500).optional(),
-          })
-          .optional(),
-        lastSuccess: z.object({ observedAt: z.number(), items: quotaItems }).optional(),
-      })
-      .optional(),
+    googleCloud: googleCloudAccountSchema.optional(),
+    quota: accountQuotaObservationSchema.optional(),
   })
   .passthrough();
 const credentialSchema = z
@@ -82,6 +89,17 @@ export function parseStoredAccount(value: unknown, source: string): AccountConfi
   const raw = objectMap(value, source);
   const parsed = accountSchema.safeParse({ ...raw, authType: normalizeLegacyAuthType(raw.authType) });
   if (!parsed.success) malformedAccountStore(source);
+  if (
+    parsed.data.agy &&
+    (parsed.data.authType !== 'oauth' ||
+      parsed.data.clientId !== 'google' ||
+      parsed.data.codex ||
+      parsed.data.claude ||
+      parsed.data.googleCloud ||
+      parsed.data.baseUrl ||
+      parsed.data.envVars)
+  )
+    malformedAccountStore(source);
   if (
     parsed.data.claude &&
     (parsed.data.authType !== 'oauth' ||
@@ -124,6 +142,7 @@ export function canonicalizeAccount(account: AccountConfig) {
     ...(Object.keys(aliases).length ? { modelAliases: aliases } : {}),
     ...(Object.keys(account.envVars ?? {}).length ? { envVars: account.envVars } : {}),
     ...(account.codex ? { codex: account.codex } : {}),
+    ...(account.agy ? { agy: account.agy } : {}),
     ...(account.claude ? { claude: account.claude } : {}),
     ...(account.quota ? { quota: account.quota } : {}),
   };

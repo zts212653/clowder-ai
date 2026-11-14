@@ -175,6 +175,13 @@ export type MessagePublicationOrigin = Pick<
 
 export interface ChatMessage {
   id: string;
+  /** Owner-private browser correlation; not a canonical History id or model-read receipt. */
+  clientMessageId?: string;
+  /** View-only local attempt. Never written to chatStore.messages or offline History snapshots. */
+  sendAttempt?: Pick<
+    import('@/utils/send-attempt-db').SendAttempt,
+    'id' | 'status' | 'error' | 'persistenceError' | 'retryable'
+  >;
   /** View-only Queue projection; never persisted as a second History record. */
   queuedEntryId?: string;
   /** RFC #1356 canonical sender identity for persisted messages. */
@@ -212,6 +219,15 @@ export interface ChatMessage {
   /** F22+F52+F098-C1: Rich blocks + cross-thread origin + explicit targets */
   extra?: {
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
+    /** Host receipt: input acceptance only, never a model response. */
+    targetResponse?: import('@cat-cafe/shared').TargetResponseRecord;
+    targetResponseResult?: import('@cat-cafe/shared').TargetResponseResult;
+    pluginAddressedReceipt?: {
+      inputMessageId: string;
+      targetId: string;
+      accepted: boolean;
+      phase?: 'sending' | 'accepted' | 'unconfirmed';
+    };
     runtimeInteractionCard?: {
       version: 1;
       interactionId: string;
@@ -716,6 +732,7 @@ export type CatStatusType =
 /** F39: Queue entry from backend InvocationQueue */
 export interface QueueEntry {
   id: string;
+  clientMessageId?: string;
   threadId: string;
   userId: string;
   content: string;

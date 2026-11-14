@@ -79,6 +79,9 @@ describe('MCP message search mode', () => {
     assert.equal(call.url.searchParams.has('resultUnit'), false, 'document requests cannot become message reads');
     await handleSearchEvidence({ query: 'piano', resultUnit: 'message' });
     assert.equal(call.url.searchParams.get('mode'), 'hybrid');
+    assert.equal(call.url.searchParams.get('messageSort'), 'relevance');
+    assert.match(searchEvidenceInputSchema.messageSort.description, /relevance \(default\)/);
+    assert.match(evidenceTools[0].description, /messageSort=relevance \(default\)/);
     for (const mode of ['lexical', 'semantic', 'hybrid']) {
       assert.equal(schema.safeParse({ query: 'piano', mode }).success, true);
       await handleSearchEvidence({ query: 'piano', mode });

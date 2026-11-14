@@ -17,6 +17,7 @@ import { resolvePencilCommand } from '../../config/capabilities/capability-orche
 import { sanitizeCapabilityForResponse } from '../../config/capabilities/capability-redaction.js';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { buildSkillMountTargets } from '../../utils/skill-mount.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../browser/shared-browser-descriptor.js';
 
 /**
  * Resolve Clowder AI skills source from module location (stable), not selected project path.
@@ -296,6 +297,8 @@ export async function buildBoardMcpServer(
         args = resolved.args;
       }
     }
+    // F333: shows the pinned fallback launch; cats on the shared transport reach the API route instead.
+    if (!command && server.resolver === SHARED_BROWSER_RESOLVER) ({ command, args } = sharedBrowserStdioServer());
     if (command) boardServer.command = command;
     if (Array.isArray(args)) boardServer.args = [...args];
     if (server.url) boardServer.url = server.url;

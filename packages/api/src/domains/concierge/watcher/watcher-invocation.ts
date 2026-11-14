@@ -6,6 +6,8 @@ import { createRequestGenerationRecorder } from '../../cats/services/agents/invo
 import { watcherBudgetFailure, watcherBudgetRecovery } from './context/watcher-budget-progress.js';
 import { WATCHER_TURN_RESERVE_TOKENS } from './context/watcher-context-budget.js';
 import { watcherWindow } from './context/watcher-window.js';
+import { runWatcherRetirement } from './retirement/watcher-retirement-run.js';
+import { ensureWatcherRetirement, watcherRetirementPending } from './retirement/watcher-retirement-state.js';
 import {
   loadWatcherInvocationSession,
   watcherInvocationAuthority,
@@ -52,6 +54,11 @@ export async function runWatcherInvocation(
 async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvocationInput): Promise<void> {
   const { source } = input;
   const current = await loadWatcherInvocationSession(owners.sessions, input.session.id, source, input.signal);
+  if (current.watcherRetirement?.phase === 'retired') return;
+  if (watcherRetirementPending(current)) {
+    await runWatcherRetirement(owners, input, current);
+    return;
+  }
   const state = parseWatcherSessionState(current.watcherState);
   if (await settleWatcherStartupFailure(owners, current, source)) return;
   if (state.attempt?.phase === 'finalize_pending') {
@@ -186,8 +193,11 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
       ),
     );
     const schemaHash = createHash('sha256').update(JSON.stringify(actualSchemas)).digest('hex');
-    if (run.state.toolSchemaHash && run.state.toolSchemaHash !== schemaHash)
+    if (run.state.toolSchemaHash && run.state.toolSchemaHash !== schemaHash) {
+      run.session = await ensureWatcherRetirement(owners, (await owners.sessions.get(run.session.id))!);
+      run.state = parseWatcherSessionState(run.session.watcherState);
       throw new Error('watcher_native_tool_surface_changed');
+    }
     if (!run.state.toolSchemaHash)
       run.state = await saveWatcherState(owners.sessions, run.session.id, run.state, { toolSchemaHash: schemaHash });
     const { workspace, binding, callbackEnv } = await watcherProviderLaunch(
@@ -277,7 +287,9 @@ async function invokeWatcher(owners: WatcherInvocationOwners, input: WatcherInvo
       );
       if (message.type === 'error') throw new Error(message.error ?? message.content ?? 'watcher_provider_failed');
     }
-    if (!run.committed) throw new Error('watcher_checkpoint_not_committed');
+    // A native-only probe can prove an old failure terminal without producing a checkpoint.
+    if (!run.committed && !(input.recoveryOnly && run.recoveredIdle && !run.state.attempt))
+      throw new Error('watcher_checkpoint_not_committed');
   } catch (error) {
     throw await failWatcherAttempt(owners, run, auth.invocationId, error, signal);
   } finally {

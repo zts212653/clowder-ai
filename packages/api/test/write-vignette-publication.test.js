@@ -7,6 +7,7 @@ import { SessionMutex } from '../dist/domains/cats/services/agents/invocation/Se
 import { approveTasteProposal } from '../dist/domains/taste/services/approveTasteProposal.js';
 import { createVignetteWriter, deriveSlug } from '../dist/domains/taste/services/writeVignette.js';
 import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
+import { publicTasteApprovalEvidence } from './helpers/taste-source-fixture.js';
 import {
   advanceRemote,
   createRemoteFixture,
@@ -61,6 +62,7 @@ describe('F221 public Taste publication terminal', () => {
 
     const result = await approveTasteProposal(proposal.id, 'user-1', {
       store,
+      ...publicTasteApprovalEvidence(proposal),
       lock: new SessionMutex(),
       lockKey: () => 'taste-publication-test',
       writeVignette: createVignetteWriter(fixture.runtime),
@@ -92,6 +94,7 @@ describe('F221 public Taste publication terminal', () => {
     });
     const deps = {
       store,
+      ...publicTasteApprovalEvidence(proposal),
       lock: new SessionMutex(),
       lockKey: () => 'taste-publication-indeterminate-test',
       writeVignette: writer,
@@ -123,6 +126,7 @@ describe('F221 public Taste publication terminal', () => {
     const baseCount = Number(git(fixture.root, ['--git-dir', fixture.origin, 'rev-list', '--count', 'main']));
     const deps = {
       store,
+      ...publicTasteApprovalEvidence(proposal),
       lock: new SessionMutex(),
       lockKey: () => 'taste-publication-timeout-test',
       writeVignette: createVignetteWriter(fixture.runtime, {
@@ -196,6 +200,7 @@ describe('F221 public Taste publication terminal', () => {
     const proposal = await createStoredProposal(store);
     const deps = {
       store,
+      ...publicTasteApprovalEvidence(proposal),
       lock: new SessionMutex(),
       lockKey: () => 'taste-publication-test',
       writeVignette: createVignetteWriter(fixture.runtime),
@@ -213,6 +218,25 @@ describe('F221 public Taste publication terminal', () => {
       Number(git(fixture.root, ['--git-dir', fixture.origin, 'rev-list', '--count', 'main'])),
       baseCount + 1,
     );
+  });
+
+  it('recovers the exact pre-digest publication with the in-memory owner store too', async () => {
+    const store = new InMemoryTasteProposalStore();
+    const proposal = await createStoredProposal(store);
+    const writer = createVignetteWriter(fixture.runtime);
+    await writer(store.claimForApproval(proposal.id, 'user-1'));
+    const before = remoteHead(fixture);
+    const result = await approveTasteProposal(proposal.id, 'user-1', {
+      store,
+      ...publicTasteApprovalEvidence(proposal),
+      lock: new SessionMutex(),
+      lockKey: () => 'legacy-taste-memory',
+      writeVignette: writer,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.recovered, true);
+    assert.equal(result.proposal.legacyPublicationRecovery, true);
+    assert.equal(remoteHead(fixture), before);
   });
 
   it('rebases the projection on a verified remote race instead of overwriting the winner', async () => {

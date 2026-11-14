@@ -38,6 +38,7 @@ import {
 type OpenCodeMcpEntry = ReturnType<typeof toOpenCodeMcpEntry> | ReturnType<typeof toOpenCodeRemoteMcpEntry>;
 
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../browser/shared-browser-descriptor.js';
 
 const log = createModuleLogger('opencode-mcp-injection');
 
@@ -107,6 +108,9 @@ export function buildOpenCodeMcpSync(
           }
         } else if (s.resolver === 'pencil') {
           // Pencil needs async resolution — handled in writeOpenCodeRuntimeConfig
+        } else if (s.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: OpenCode never materializes shared HTTP; the pinned --isolated launch is its fallback.
+          mcp[s.name] = toOpenCodeMcpEntry(sharedBrowserStdioServer());
         } else if (s.command) {
           const workingDir = resolveMcpWorkingDir(s.workingDir, configSourceRoot);
           mcp[s.name] = toOpenCodeMcpEntry({

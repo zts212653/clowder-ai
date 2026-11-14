@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { openAlphaBrowserSubscription } from '../../../scripts/lib/alpha-browser-subscription.mjs';
 import { readDurableGateRecovery } from '../dist/domains/ball-custody/durable-managed-gate-recovery.js';
@@ -28,6 +29,58 @@ async function running(t, options = {}) {
   await until(() => existsSync(f.marker), 'private unit actually started');
   return { ...f, work, controller };
 }
+
+test(
+  'a successor guardian consumes the historical exit70 RED and delivers its repair without replay',
+  { timeout: 35000 },
+  async (t) => {
+    let rejectDelivery = true;
+    const f = await alphaManagedFixture(t, {
+      guardianCatId: 'codex61-sol',
+      failureTriageCatId: 'codex61-sol',
+      sources(root) {
+        return {
+          'failed.mjs': `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(join(root, 'executions.log'))},'once\\n'); process.exit(1);`,
+        };
+      },
+      beforeRepairTask() {
+        if (rejectDelivery) throw new Error('private repair write unavailable');
+      },
+    });
+    await assert.rejects(f.run(new AbortController().signal, f.principal.catId), /private repair write unavailable/);
+    const original = f.service.get(f.principal, f.managed.jobId);
+    assert.equal(original.state, 'failed');
+    assert.equal(original.cleanupProven, true);
+    assert.equal(f.tasks.size, 0);
+    // Seed the captured historical publication shape in this private ledger only.
+    // Real S3 execution, cleanup and the failed result remain untouched.
+    const db = new DatabaseSync(join(f.dataRoot, 'managed-jobs/supervisor.sqlite'));
+    db.prepare("UPDATE managed_jobs SET record_json=json_set(record_json,'$.result.exitCode',70) WHERE job_id=?").run(
+      f.managed.jobId,
+    );
+    db.close();
+    rejectDelivery = false;
+    await f.run();
+    const store = openAlphaBrowserSubscription(f.input);
+    try {
+      assert.equal(store.pending(), undefined);
+      assert.equal(store.list()[0].terminalStatus, 'failed');
+      assert.equal(store.list()[0].managedJobId, f.managed.jobId);
+    } finally {
+      store.close();
+    }
+    assert.equal(f.service.list().length, 1);
+    assert.equal(f.service.get(f.principal, f.managed.jobId).result.exitCode, 70);
+    assert.deepEqual(f.service.resolve(f.managed.jobId).definition.principal, f.principal);
+    assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
+    assert.equal(f.tasks.size, 1);
+    const repair = [...f.tasks.values()][0];
+    assert.equal(repair.ownerCatId, 'codex61-sol');
+    assert.doesNotMatch(repair.why, /Managed execution:/);
+    assert.equal(f.delivered.length, 1);
+    assert.equal(f.delivered[0].targetCatId, 'codex61-sol');
+  },
+);
 
 test(
   'transport loss reconnects the same live managed owner without replaying its unit',
@@ -90,5 +143,56 @@ for (const stop of ['cancelled', 'timed_out']) {
     assert.equal(readDurableGateRecovery(f.descriptor).resumeCount, 0);
     assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
     assert.equal(f.tasks.size, 1);
+  });
+}
+
+// These two original reconnect journeys require the private Alpha execution fixture.
+{
+  const owner = { userId: 'owner', threadId: 'alpha-thread', catId: 'codex-astra' };
+  const next = { ...owner, catId: 'codex61-sol' };
+
+  test(
+    'a queued real Alpha starts once under its original owner after guardian handoff',
+    { timeout: 30000 },
+    async (t) => {
+      const f = await alphaManagedFixture(t, { guardianCatId: next.catId });
+      await f.run();
+      assert.equal(f.service.list().length, 1);
+      assert.equal(f.service.get(f.principal, f.managed.jobId).state, 'succeeded');
+      assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
+      assert.deepEqual(f.service.resolve(f.managed.jobId).definition.principal, f.principal);
+    },
+  );
+
+  test('a new guardian reattaches the same live Alpha after its old transport exits', { timeout: 35000 }, async (t) => {
+    const f = await alphaManagedFixture(t, {
+      guardianCatId: next.catId,
+      observeTransport: true,
+      sources(root) {
+        return {
+          'waiting.test.mjs': `import test from 'node:test'; import {appendFileSync,existsSync} from 'node:fs'; import {setTimeout} from 'node:timers/promises'; test('waiting', async()=>{appendFileSync(${JSON.stringify(join(root, 'executions.log'))},'once\\n'); while(!existsSync(${JSON.stringify(join(root, 'release'))})) await setTimeout(20);});`,
+        };
+      },
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    t.after(() => clearTimeout(timer));
+    const first = f.run(controller.signal, f.principal.catId).then(
+      () => null,
+      (e) => e,
+    );
+    await until(() => existsSync(f.marker), 'original command started');
+    const before = f.service.get(f.principal, f.managed.jobId);
+    process.kill(Number(readFileSync(f.transportPid, 'utf8')), 'SIGTERM');
+    assert.match((await first)?.message ?? '', /without a clean result/);
+    const resumed = f.run(controller.signal);
+    writeFileSync(join(f.parent, 'release'), 'release');
+    await resumed;
+    const after = f.service.get(f.principal, f.managed.jobId);
+    assert.equal(f.service.list().length, 1);
+    assert.equal(after.attemptToken, before.attemptToken);
+    assert.deepEqual(after.ownerIdentity, before.ownerIdentity);
+    assert.equal(after.cleanupProven, true);
+    assert.equal(readFileSync(f.marker, 'utf8'), 'once\n');
   });
 }

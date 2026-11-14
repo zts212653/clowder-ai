@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { projectThreadWorks } from '@cat-cafe/shared';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
@@ -19,7 +21,7 @@ import { registerComposerFocusJourneys } from './f322-composer-focus.journey.mjs
 import { registerToolsEntryJourneys } from './f322-tools-entry.journey.mjs';
 
 let suite;
-const evidenceDir = process.env.F322_HOME_EVIDENCE_DIR ?? '/tmp/f322-b-workspace-v3-native';
+const evidenceDir = process.env.F322_HOME_EVIDENCE_DIR ?? join(tmpdir(), 'f322-b-workspace-v3-native');
 before(async () => {
   await mkdir(evidenceDir, { recursive: true });
   suite = await startF309OrdinaryWorkspaceJourney();

@@ -744,6 +744,23 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.deepEqual(hydrated?.extra?.localReviewVerdict, localReviewVerdict);
   });
 
+  it('rehydrates plugin input acceptance through a new store without inventing a response', async () => {
+    const pluginAddressedReceipt = { inputMessageId: 'input', targetId: 'pi_dot', accepted: true };
+    const stored = await store.append({
+      userId: 'system',
+      threadId: 'thread-plugin-receipt',
+      from: { kind: 'system', service: 'plugin_delivery' },
+      content: '插件已接收消息。',
+      mentions: [],
+      timestamp: Date.now(),
+      extra: { pluginAddressedReceipt },
+    });
+    const restored = new RedisMessageStore(redis);
+    const hydrated = await restored.getById(stored.id);
+    assert.deepEqual(hydrated.extra.pluginAddressedReceipt, pluginAddressedReceipt);
+    assert.equal(hydrated.lifecycle?.kind === 'response', false);
+  });
+
   it('F317 keeps the historical Live identity and actual author through real Redis reads', async () => {
     const identity = {
       v: 1,

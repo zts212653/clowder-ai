@@ -142,7 +142,13 @@ export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAncho
   return `external-runtime:${runtime}:${userId}`;
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action' | 'void_hold';
+export type MentionRoutingSuppressionReason =
+  | 'no_action'
+  | 'cross_paragraph'
+  | 'inline_action'
+  | 'void_hold'
+  /** The reply waited for the owner without a line-start mention, so it never reached his mailbox. */
+  | 'owner_ask_unaddressed';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {

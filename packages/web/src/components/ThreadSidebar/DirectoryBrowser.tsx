@@ -19,6 +19,8 @@ export function DirectoryBrowser({
   initialPath,
   activeProjectPath,
   onCurrentPathChange,
+  onSelectablePathChange,
+  onProjectRestricted,
   onNavigationStart,
   allowCreateDirectory = true,
   onVirtualLocationChange,
@@ -45,11 +47,21 @@ export function DirectoryBrowser({
   const isWindowsServer = browseResult?.isWindows ?? false;
   const { view, drives, drivesState, showThisPcEntry, showDrivesView, showDirectoryView, retryLoadDrives } =
     useDrivesLoader(isWindowsServer);
+  const currentDirectory =
+    browseResult &&
+    view === 'directory' &&
+    !isLoading &&
+    !error &&
+    pathInput === browseResult.current &&
+    !browseResult.projectRestriction
+      ? browseResult.current
+      : undefined;
 
   const fetchDirectory = useCallback(
     async (path?: string, fallbackOnUnavailable = false) => {
       const navigationVersion = ++navigationVersionRef.current;
       onNavigationStart?.();
+      setCreatingDir(false);
       setIsLoading(true);
       setError(null);
       showDirectoryView();
@@ -75,6 +87,8 @@ export function DirectoryBrowser({
         setBrowseResult(data);
         setPathInput(data.current);
         onCurrentPathChange?.(data.current);
+        if (data.projectRestriction) onProjectRestricted?.();
+        else onSelectablePathChange?.(data.current);
       } catch {
         if (navigationVersion !== navigationVersionRef.current) return;
         setError(copyRef.current.connectFailed);
@@ -82,7 +96,7 @@ export function DirectoryBrowser({
         if (navigationVersion === navigationVersionRef.current) setIsLoading(false);
       }
     },
-    [onCurrentPathChange, onNavigationStart, showDirectoryView],
+    [onCurrentPathChange, onNavigationStart, onProjectRestricted, onSelectablePathChange, showDirectoryView],
   );
 
   // Initial load — try initialPath, fallback to homedir on 403/404 (with visible info)
@@ -124,14 +138,14 @@ export function DirectoryBrowser({
   }, []);
 
   const handleCreateDir = useCallback(async () => {
-    if (!newDirName.trim() || !browseResult) return;
+    if (!newDirName.trim() || !currentDirectory) return;
     const navigationVersion = navigationVersionRef.current;
     setMkdirError(null);
     try {
       const res = await apiFetch('/api/projects/mkdir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentPath: browseResult.current, name: newDirName.trim() }),
+        body: JSON.stringify({ parentPath: currentDirectory, name: newDirName.trim() }),
       });
       if (navigationVersion !== navigationVersionRef.current) return;
       if (!res.ok) {
@@ -149,7 +163,7 @@ export function DirectoryBrowser({
       if (navigationVersion !== navigationVersionRef.current) return;
       setMkdirError(copyRef.current.connectFailed);
     }
-  }, [newDirName, browseResult, fetchDirectory]);
+  }, [newDirName, currentDirectory, fetchDirectory]);
 
   const segments = browseResult ? pathToSegments(browseResult.current, browseResult.homePath) : [];
 
@@ -161,7 +175,7 @@ export function DirectoryBrowser({
         view={view}
         onEnterDrivesView={enterDrivesView}
         onNavigateTo={fetchDirectory}
-        onStartCreateDir={allowCreateDirectory ? handleStartCreateDir : undefined}
+        onStartCreateDir={allowCreateDirectory && currentDirectory ? handleStartCreateDir : undefined}
         thisPcLabel={copy.thisPc}
         newFolderTitle={copy.newFolderTitle}
         newFolderLabel={copy.newFolder}
@@ -179,7 +193,7 @@ export function DirectoryBrowser({
         )}
 
         {/* Inline new folder input */}
-        {creatingDir && (
+        {creatingDir && currentDirectory && (
           <DirectoryCreateFolderRow
             name={newDirName}
             error={mkdirError}
@@ -229,6 +243,12 @@ export function DirectoryBrowser({
           <div className="px-3 py-1.5 mb-1">
             <p className="text-xs text-conn-red-text">{error}</p>
           </div>
+        )}
+
+        {view === 'directory' && !isLoading && !error && browseResult?.projectRestriction && (
+          <p role="status" className="px-3 py-1.5 text-xs text-cafe-secondary">
+            {copy.projectRestrictions[browseResult.projectRestriction]}
+          </p>
         )}
 
         {view === 'directory' && !isLoading && browseResult && browseResult.entries.length === 0 && (
@@ -281,6 +301,7 @@ export function DirectoryBrowser({
             onChange={(e) => {
               navigationVersionRef.current += 1;
               setIsLoading(false);
+              setCreatingDir(false);
               onNavigationStart?.();
               setPathInput(e.target.value);
             }}
@@ -321,10 +342,10 @@ export function DirectoryBrowser({
               </span>
             )
           )}
-          {view === 'directory' && browseResult && onSelectCurrent && (
+          {currentDirectory && onSelectCurrent && (
             <button
               type="button"
-              onClick={() => onSelectCurrent(browseResult.current)}
+              onClick={() => onSelectCurrent(currentDirectory)}
               className="rounded-lg bg-cafe-accent px-4 py-2 text-xs font-medium text-[var(--cafe-surface)] transition-colors hover:bg-cafe-interactive"
             >
               {selectCurrentLabel}

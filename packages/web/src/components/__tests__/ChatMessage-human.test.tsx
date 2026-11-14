@@ -171,7 +171,7 @@ describe('ChatMessage: your own message', () => {
       expect(time('b')?.className.split(/\s+/)).toContain('text-xs');
       expect(time('b')?.style.color).toBe('var(--shell-muted)');
       // Under the bubble, not in the header above it.
-      expect(time('b')?.previousElementSibling).toBe(bubble('b'));
+      expect(bubble('b').compareDocumentPosition(time('b')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('shows the time when a cat reply ends the run, and when it is the only message', () => {

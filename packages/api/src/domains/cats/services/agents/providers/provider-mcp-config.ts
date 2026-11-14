@@ -37,6 +37,7 @@ import {
 } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { SHARED_BROWSER_RESOLVER, sharedBrowserStdioServer } from '../../../../browser/shared-browser-descriptor.js';
 
 const log = createModuleLogger('provider-mcp-config');
 
@@ -121,6 +122,9 @@ export async function captureProviderMcpConfig(input: {
         } else if (s.resolver === 'pencil') {
           const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
           if (pencil) mcpServers[s.name] = { command: pencil.command, args: pencil.args };
+        } else if (s.resolver === SHARED_BROWSER_RESOLVER) {
+          // F333: pinned stdio; materializeNativeMcpHttp below nominates it to the shared HTTP route.
+          mcpServers[s.name] = sharedBrowserStdioServer();
         } else if (s.transport === 'streamableHttp' && s.url) {
           const entry: Record<string, unknown> = { type: 'http', url: s.url };
           if (s.headers && Object.keys(s.headers).length > 0)

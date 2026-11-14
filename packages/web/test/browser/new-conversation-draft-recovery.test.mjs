@@ -150,6 +150,22 @@ test('unsent image drafts remain recoverable when file reading never finishes', 
       db.close();
       return record?.files.length === 0;
     });
+    // Each keystroke used to mount the in-flow save notice for a frame and shake the page below it.
+    await page.evaluate(() => {
+      window.saveNoticeMounts = 0;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="new-conversation-save-state"]')) window.saveNoticeMounts += 1;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    await page.getByTestId('new-conversation-title').pressSequentially('季度研究计划', { delay: 40 });
+    await page.locator('textarea').pressSequentially('typing keeps the page still', { delay: 40 });
+    await page.getByTestId('new-conversation-title').fill('');
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(
+      await page.evaluate(() => window.saveNoticeMounts),
+      0,
+      'Routine autosaves while typing must not mount the save notice',
+    );
     await page.locator('textarea').fill('keep the caption');
     await page.evaluate(() => {
       const original = File.prototype.arrayBuffer;

@@ -41,6 +41,8 @@ test(
           launchPolicy: { oauthTransport: 'builtin' },
           nativeAuthentication,
           customBaseUrl: undefined,
+          customProvider: false,
+          apiSharedConversations: false,
           customProviderArgs: [],
           authMode: 'oauth',
         },

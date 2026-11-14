@@ -97,6 +97,13 @@ beforeEach(() => {
   root = createRoot(host);
   apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
     if (init?.method === 'POST') return response({ error: 'mutation_unavailable' }, 503);
+    if (path.startsWith('/api/memory/events/') && path.includes('/source?'))
+      return response({
+        status: 'ready',
+        sources: [
+          { label: '事件原对话', occurredAt: 100, canOpen: true, threadId: 'thread-owner', messageId: 'message-owner' },
+        ],
+      });
     if (path.includes('/source?') || path.endsWith('/source'))
       return response({ status: 'not_recorded', sources: [], title: null, canOpen: false });
     const reads: Record<string, unknown> = {
@@ -195,10 +202,10 @@ it.each([
 it('reads and corrects an event independently of the human-brake grouping and retains its source identity', async () => {
   await act(async () => root.render(<MemoryTaste />));
   await click('事件');
-  await click('数学之美');
-  await click('修改事件');
+  await click('先把目标想清楚，再删掉不需要的复杂度。');
+  await click('编辑');
   await act(async () => setText('事件内容', '先看清目标，再去掉不需要的复杂度。'));
-  await click('保存事件');
+  await click('保存');
   const call = apiFetch.mock.calls.find(([, init]) => init?.method === 'POST');
   expect(call?.[0]).toBe('/api/memory/events/event-a/actions');
   const body = JSON.parse(call?.[1].body);

@@ -1,5 +1,6 @@
 /**
- * F102 Phase B: Route DI — callback-memory-routes accepts IEvidenceStore/IMarkerQueue/IReflectionService
+ * F102 Phase B: Route DI — callback-memory-routes accepts IEvidenceStore/IReflectionService
+ * (IMarkerQueue left with the retain-memory route, 2026-11-09 memory entry subtraction)
  * Tests the new SQLite-backed path for callback memory routes.
  */
 
@@ -38,41 +39,6 @@ describe('callback-memory-routes DI (IEvidenceStore path)', () => {
       }),
     };
   }
-
-  it('retain-memory submits to IMarkerQueue when provided', async () => {
-    const submitted = [];
-    const mockMarkerQueue = {
-      submit: async (marker) => {
-        submitted.push(marker);
-        return { ...marker, id: 'mk-1', createdAt: new Date().toISOString() };
-      },
-      list: async () => [],
-      transition: async () => {},
-    };
-
-    app = Fastify();
-    registerAuthHook(app, createMockRegistry());
-    await registerFn(app, {
-      markerQueue: mockMarkerQueue,
-    });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
-      payload: {
-        content: 'Lesson: always check Redis port',
-        tags: 'kind:lesson',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.status, 'ok');
-    assert.equal(submitted.length, 1);
-    assert.equal(submitted[0].content, 'Lesson: always check Redis port');
-  });
 
   it('search-evidence delegates to IEvidenceStore and returns mapped EvidenceResult shape', async () => {
     let searchQuery;
@@ -197,44 +163,5 @@ describe('callback-memory-routes DI (IEvidenceStore path)', () => {
     assert.equal(reflectQuery, 'What patterns do we use?');
     // P1-2: DI path must include dispositionMode for schema consistency
     assert.ok('dispositionMode' in body, 'DI reflect must include dispositionMode');
-  });
-
-  it('retain-memory DI path preserves tracing metadata from invocation record', async () => {
-    const submitted = [];
-    const mockMarkerQueue = {
-      submit: async (marker) => {
-        submitted.push(marker);
-        return { ...marker, id: 'mk-2', createdAt: new Date().toISOString() };
-      },
-      list: async () => [],
-      transition: async () => {},
-    };
-
-    app = Fastify();
-    registerAuthHook(app, createMockRegistry());
-    await registerFn(app, {
-      markerQueue: mockMarkerQueue,
-    });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
-      payload: {
-        content: 'Important architectural decision',
-        metadata: { custom: 'value' },
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(submitted.length, 1);
-    // P2: DI path must include tracing info (at minimum source with invocation context)
-    const marker = submitted[0];
-    assert.ok(marker.source.includes('callback'), 'source must indicate callback origin');
-    assert.ok(
-      marker.source.includes('inv-1') || marker.source.includes('opus'),
-      'source must contain invocation or cat tracing info',
-    );
   });
 });

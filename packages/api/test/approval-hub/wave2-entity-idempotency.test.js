@@ -2,24 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-
-function createSucceedingIngress() {
-  return {
-    publish: async (draft, store) => {
-      const envelope = {
-        canonicalProposalId: draft.canonicalProposalId,
-        sourceFeatureId: draft.producerId,
-        ownerUserId: draft.ownerUserId,
-        requesterCatId: draft.requesterCatId,
-        originRef: draft.originRef,
-        approvalCardRef: { threadId: draft.cardThreadId, messageId: 'msg-card-ok' },
-        createdAt: draft.createdAt,
-      };
-      await store.commitEnvelope(draft.canonicalProposalId, envelope);
-      return envelope;
-    },
-  };
-}
+import { createTestApprovalIngress } from './helpers.js';
 
 // ── R4 P1-1: F260 clientRequestId dedup — no proxy identity ───────────────
 //
@@ -79,7 +62,7 @@ describe('P1-1 R4: F260 explicit clientRequestId — no proxy retry identity', (
       registry: mockRegistry,
       entityProposalStore: store,
       socketManager: mockSocket(),
-      approvalIngress: createSucceedingIngress(),
+      approvalIngress: createTestApprovalIngress(),
     });
     await app.ready();
 
@@ -96,6 +79,7 @@ describe('P1-1 R4: F260 explicit clientRequestId — no proxy retry identity', (
     const store = new InMemoryEntityProposalStore();
     let callCount = 0;
     const ingress = {
+      ...createTestApprovalIngress(),
       publish: async (draft, s) => {
         callCount++;
         if (callCount === 1) {
@@ -104,7 +88,7 @@ describe('P1-1 R4: F260 explicit clientRequestId — no proxy retry identity', (
           const { ApprovalCardCommittedError } = await import('../../dist/domains/approval-hub/ApprovalIngress.js');
           throw new ApprovalCardCommittedError(new Error('commit unavailable'), 'msg-card-1');
         }
-        return createSucceedingIngress().publish(draft, s);
+        return createTestApprovalIngress().publish(draft, s);
       },
     };
     await app.register(callbackProposeEntityRoutes, {

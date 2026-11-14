@@ -100,6 +100,30 @@ const FORWARDED_HEADER_NAMES = [
 
 /** Credentials must never ride in the URL. */
 const QUERY_CREDENTIAL_PARAMS = ['token', 'access_token', 'authorization', 'api_key'] as const;
+const LOOPBACK_ADDRESSES = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
+/**
+ * The local-only boundary every shared Host MCP door keeps: no proxy-forwarded request, and for
+ * shared transport no browser Origin and no non-loopback peer (also used by F333 /api/browser-mcp).
+ */
+export function sharedRequestBoundaryRejection(
+  req: Pick<IncomingMessage, 'headers' | 'socket' | 'url'>,
+  options: { shared: boolean },
+):
+  | { status: 403; error: 'forwarded_headers_rejected' | 'shared_loopback_only' | 'query_credentials_rejected' }
+  | undefined {
+  for (const name of FORWARDED_HEADER_NAMES)
+    if (req.headers[name] !== undefined) return { status: 403, error: 'forwarded_headers_rejected' };
+  if (
+    options.shared &&
+    (req.headers.origin !== undefined || !LOOPBACK_ADDRESSES.includes(req.socket.remoteAddress ?? ''))
+  )
+    return { status: 403, error: 'shared_loopback_only' };
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  for (const key of QUERY_CREDENTIAL_PARAMS)
+    if (url.searchParams.has(key)) return { status: 403, error: 'query_credentials_rejected' };
+  return undefined;
+}
 
 function readHeader(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
@@ -151,32 +175,16 @@ export function createMemberGatewayHandler(
       return;
     }
 
-    for (const name of FORWARDED_HEADER_NAMES) {
-      if (req.headers[name] !== undefined) {
-        sendJson(res, 403, { error: 'forwarded_headers_rejected' });
-        return;
-      }
-    }
-
     const url = new URL(req.url ?? '/', 'http://localhost');
     const shared = url.searchParams.get('shared') === '1';
-    if (
-      shared &&
-      (req.headers.origin !== undefined ||
-        !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? ''))
-    ) {
-      sendJson(res, 403, { error: 'shared_loopback_only' });
+    const rejection = sharedRequestBoundaryRejection(req, { shared });
+    if (rejection) {
+      sendJson(res, rejection.status, { error: rejection.error });
       return;
     }
     if (Number(req.headers['content-length'] ?? 0) > 1024 * 1024) {
       sendJson(res, 413, { error: 'request_too_large' });
       return;
-    }
-    for (const key of QUERY_CREDENTIAL_PARAMS) {
-      if (url.searchParams.has(key)) {
-        sendJson(res, 403, { error: 'query_credentials_rejected' });
-        return;
-      }
     }
 
     const invocationId = readHeader(req, INVOCATION_HEADER);

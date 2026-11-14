@@ -31,6 +31,7 @@ import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 export async function startFinalAccountPreview({
   withOverrides = false,
   withClaude = false,
+  withAgy = false,
   routingSnapshot,
   withServicePreview = false,
   withStartupRecovery = false,
@@ -54,6 +55,8 @@ export async function startFinalAccountPreview({
   if (withStartupRecovery) mkdirSync(join(root, 'disposable-runtime'));
   delete process.env.CODEX_HOME;
   delete process.env.CODEX_SQLITE_HOME;
+  if (withAgy)
+    for (const key of Object.keys(process.env)) if (/^(AGY_|GEMINI_|GOOGLE_)/.test(key)) delete process.env[key];
   mkdirSync(join(root, '.cat-cafe'));
   if (withStartupRecovery)
     writeFileSync(join(root, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
@@ -93,6 +96,38 @@ export async function startFinalAccountPreview({
       version: 2,
       ...(withOverrides ? { selectedAccountRefs: { openai: 'codex' } } : {}),
       breeds: [
+        ...(withAgy
+          ? [
+              {
+                id: 'siamese',
+                catId: 'gemini38',
+                name: '暹罗猫',
+                displayName: '暹罗猫',
+                avatar: '/avatars/gemini.png',
+                color: { primary: '#123456', secondary: '#abcdef' },
+                mentionPatterns: ['@gemini38'],
+                roleDescription: 'fixture',
+                defaultVariantId: 'gemini38-default',
+                variants: [
+                  {
+                    ...variant('gemini38'),
+                    clientId: 'google',
+                    defaultModel: 'gemini-4-argon-high',
+                    accountRef: 'gemini',
+                    cli: { command: 'agy', outputFormat: 'stream-json' },
+                    agyProfile: {
+                      enabled: true,
+                      carrier: 'native',
+                      profileId: 'gemini38',
+                      model: 'gemini-4-argon-high',
+                      autoApprove: true,
+                      trustedWorkspaces: [],
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
         ...(withClaude
           ? [
               {
@@ -135,6 +170,17 @@ export async function startFinalAccountPreview({
         },
       ],
       roster: {
+        ...(withAgy
+          ? {
+              gemini38: {
+                family: 'siamese',
+                roles: ['assistant'],
+                lead: false,
+                available: true,
+                evaluation: 'fixture',
+              },
+            }
+          : {}),
         ...(withClaude
           ? Object.fromEntries(
               ['opus', 'sonnet'].map((id) => [

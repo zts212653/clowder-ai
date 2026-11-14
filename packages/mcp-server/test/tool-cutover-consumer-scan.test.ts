@@ -76,6 +76,57 @@ test('fixed-root scan keeps every literal visible while classifying only exact s
   }
 });
 
+test('fixed-root scan matches complete tool identifiers without consuming longer names', async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), 'f286-cutover-identifier-boundary-'));
+  try {
+    await fixtureFile(
+      repoRoot,
+      'packages/mcp-server/src/person-memory.ts',
+      [
+        "const kept = 'cat_cafe_example_person_proposal';",
+        "const retired = 'cat_cafe_example_person';",
+        "const qualifiedDash = 'mcp__cat-cafe-collab__cat_cafe_example_person';",
+        "const qualifiedSnake = 'mcp__cat_cafe_memory__cat_cafe_example_person';",
+        "const qualifiedPlugin = 'mcp__plugin__official_x__y__cat_cafe_example_person';",
+        "const prefixed = 'prefix_cat_cafe_example_person';",
+        "const suffixed = 'cat_cafe_example_person_v2';",
+        "const mixed = ['cat_cafe_example_person_proposal', 'cat_cafe_example_person'];",
+      ].join('\n'),
+    );
+
+    const [scan] = await scanRetiredNames(repoRoot, ['cat_cafe_example_person']);
+    assert.deepEqual(scan?.matches, [
+      {
+        root: 'packages/mcp-server/src',
+        path: 'packages/mcp-server/src/person-memory.ts',
+        line: 2,
+      },
+      {
+        root: 'packages/mcp-server/src',
+        path: 'packages/mcp-server/src/person-memory.ts',
+        line: 3,
+      },
+      {
+        root: 'packages/mcp-server/src',
+        path: 'packages/mcp-server/src/person-memory.ts',
+        line: 4,
+      },
+      {
+        root: 'packages/mcp-server/src',
+        path: 'packages/mcp-server/src/person-memory.ts',
+        line: 5,
+      },
+      {
+        root: 'packages/mcp-server/src',
+        path: 'packages/mcp-server/src/person-memory.ts',
+        line: 8,
+      },
+    ]);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('the seven F167 retirement assertions remain visible and pass only with manifest-bound evidence', async () => {
   const repoRoot = await mkdtemp(join(tmpdir(), 'f286-cutover-f167-'));
   const fixtureConsumers = [

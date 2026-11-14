@@ -7,6 +7,8 @@ export interface PluginOwnerOperationContext {
   readonly operationKey: string;
   readonly actionId: string;
   readonly requestId: string;
+  /** Opaque browser-session issuance binding captured by the Host route. */
+  readonly sessionBindingId?: string;
   /** Host-authenticated confirmation marker for the exact declared action. */
   readonly confirmed?: boolean;
   readonly signal: AbortSignal;
@@ -29,6 +31,7 @@ export interface OwnerOperationRequest {
   readonly actionId: string;
   readonly userId: string;
   readonly requestId: string;
+  readonly sessionBindingId?: string;
   /** Preserve a single owner-read's Task selection through the existing module carrier. */
   readonly taskReadScope?: { readonly taskId: string };
   readonly signal: AbortSignal;
@@ -128,6 +131,7 @@ export async function consumeOwnerOperationInvocation<T>(
     operationKey: issued.request.operationKey,
     actionId: issued.request.actionId,
     requestId: issued.request.requestId,
+    ...(issued.request.sessionBindingId === undefined ? {} : { sessionBindingId: issued.request.sessionBindingId }),
     confirmed: issued.request.confirmed === true,
     signal,
     assertWriteCurrent,

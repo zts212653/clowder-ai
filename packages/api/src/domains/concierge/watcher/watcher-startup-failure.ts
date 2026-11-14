@@ -8,6 +8,7 @@ export async function settleWatcherStartupFailure(
   owners: FinalizationOwners,
   session: SessionRecord,
   source: TurnExecutionRecord,
+  failureReason = 'watcher_provider_startup_failed',
 ): Promise<boolean> {
   if (session.cliSessionId || session.nativeSessionBinding) return false;
   const state = parseWatcherSessionState(session.watcherState);
@@ -30,7 +31,7 @@ export async function settleWatcherStartupFailure(
   const terminal = await owners.executions.transitionTerminal(execution.invocationId, {
     status: execution.status === 'running' ? 'failed' : execution.status,
     endedAt: execution.endedAt ?? Date.now(),
-    terminalReason: execution.terminalReason ?? 'watcher_provider_startup_failed',
+    terminalReason: execution.terminalReason ?? failureReason,
     ...(execution.providerTeardownAt !== undefined ? { providerTeardownAt: execution.providerTeardownAt } : {}),
   });
   if (!terminal.record || terminal.record.status === 'running')

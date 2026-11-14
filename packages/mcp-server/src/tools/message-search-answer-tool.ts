@@ -16,7 +16,8 @@ export async function handlePrepareMessageSearchAnswer(input: PrepareSearchAnswe
   return callbackPost(
     '/api/callbacks/search-evidence/answer',
     {
-      ...messageSearchParams({ ...input, mode: input.retrievalMode }),
+      // Preserve the historical identity of saved retries; this operation does not run ordinary recall.
+      ...messageSearchParams({ ...input, mode: input.retrievalMode, messageSort: input.messageSort ?? 'time' }),
       operationId: input.operationId,
       ...(input.destinationThreadId ? { destinationThreadId: input.destinationThreadId } : {}),
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),

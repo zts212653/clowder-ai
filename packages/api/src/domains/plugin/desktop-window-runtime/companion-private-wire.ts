@@ -82,6 +82,7 @@ export const hostF221Preview = z
             sourceMessageId: z.string(),
             scene: z.string().max(16000),
             quote: z.string().max(16000),
+            resolvedQuotes: z.string().max(32000),
             takeaway: z.string().max(16000),
             tags: z.string().max(16000),
             dimension: z.string(),
