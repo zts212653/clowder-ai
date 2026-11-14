@@ -73,10 +73,13 @@ for (const state of ['sending', 'failed', 'unknown']) {
       await page.locator('textarea').press('Enter');
       const status = page.locator(`[data-send-status="${state}"]`);
       await status.waitFor();
-      assert.equal(await status.count(), 1);
+      // The same row can already be checking its unknown receipt by this turn.
+      // Assert persistent visibility independently from that transient status.
+      const visibleAttempt = page.getByTestId('send-attempt-status');
+      assert.equal(await visibleAttempt.count(), 1);
       assert.equal(await page.locator('textarea').inputValue(), '');
       assert.equal(
-        await status.evaluate(
+        await visibleAttempt.evaluate(
           (node) => node.closest('[data-conversation-input-evidence], [data-conversation-execution]') === null,
         ),
         true,
@@ -95,6 +98,9 @@ test('real composer paints a bubble before POST returns and hands off in place t
   let held;
   const text = '先保留这条补充消息，不必再发一次。';
   try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(json({ status: 'accepted', userMessage: { id: 'accepted-1973', timestamp: 100 } })),
+    );
     await page.route('**/api/messages', async (route) => {
       if (route.request().method() !== 'POST') return route.fallback();
       held = route;
@@ -153,6 +159,13 @@ test('known refusal retains its bubble and retries the identical payload with th
   const requests = [];
   const text = '这条明确被拒收的消息应当可以重试。';
   try {
+    await page.route('**/message-attempts/*', (route) =>
+      route.fulfill(
+        requests.length > 1
+          ? json({ status: 'accepted', userMessage: { id: 'retried-1973', timestamp: 100 } })
+          : json({ status: 'unknown' }),
+      ),
+    );
     await page.route('**/api/messages', (route) => {
       if (route.request().method() !== 'POST') return route.fallback();
       requests.push(route.request().postDataJSON());
